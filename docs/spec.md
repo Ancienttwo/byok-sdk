@@ -1712,8 +1712,8 @@ activity as described below.
 
 ### Bounded approval lifecycle authority
 
-Approval observations do not enter `ActivityTail` and do not reinterpret
-`AgentEvent.needs_approval`. The protocol has no monotonic order key shared by
+Approval observations do not enter `ActivityTail`; no `AgentEvent` carries an
+approval. The protocol has no monotonic order key shared by
 `task.progress`, `task.await_approval`, and `task.approval_resolved`, so cloud
 must not fabricate a cross-stream total order. Instead, the approval store
 assigns a monotonic per-task `revision` in arrival order and preserves the
@@ -3407,14 +3407,17 @@ is the explicit local support declaration. Omission means unsupported. Its
 approval-decision list and `structuredQuestions` flag are snapshotted with the
 rest of the runtime descriptor.
 
-This local seam is distinct from the existing remote `needs_approval` /
-`resolveApproval(boolean)` contract. It does not add a daemon control command,
+This local seam is distinct from the remote task approval contract, where a
+session that declares `approvalInteractive: true` calls
+`approvalChannel.request(summary)` and the daemon's approval registry resolves
+it from a wire or local decision (`docs/protocol.md` §5.1). It does not add a daemon control command,
 wire payload, remote authorization, UI, persistent grant, or Host reconnect
 protocol. Claude and Codex wire this seam only when their local adapter is constructed
 with `nativeInteractions` Host callbacks. With that option absent, neither
 advertises native interaction support, and the session runs YOLO (ADR-037). Pi
-remains unsupported. The existing `approvalInteractive` declarations stay
-authoritative for the remote task path. Local capability metadata does not
+remains unsupported. The `approvalInteractive` declarations stay
+authoritative for the remote task path: every bundled adapter declares `false`
+and is never handed the approval channel. Local capability metadata does not
 assert that every task exposes every tool or will ask an interactive question.
 
 Each request carries an SDK `requestId`, a fresh process-lifetime `generation`,

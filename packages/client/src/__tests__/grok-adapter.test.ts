@@ -194,7 +194,6 @@ describe('GrokAdapter sessions', () => {
     await expect(s.steer('x')).rejects.toBeInstanceOf(SteerUnsupportedError);
     await expect(s.followUp({ instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'm' } }))
       .rejects.toThrow('takes no dispatch selection');
-    await expect(s.resolveApproval(true)).rejects.toThrow('no interactive approval');
   });
 
   it('interrupts through session/cancel and ends the turn with the cancelled answer', async () => {

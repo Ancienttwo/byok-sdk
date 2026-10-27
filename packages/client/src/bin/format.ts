@@ -33,8 +33,6 @@ export function formatAgentEvent(event: AgentEvent): string {
       return `tool_result: ${event.tool}`;
     case 'artifact':
       return `artifact: ${event.name} (${event.contentType})`;
-    case 'needs_approval':
-      return `needs_approval: ${quote(event.summary)}`;
     case 'turn_end':
       return 'turn_end';
     case 'error':

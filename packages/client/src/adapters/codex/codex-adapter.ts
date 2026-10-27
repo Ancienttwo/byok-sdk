@@ -611,11 +611,6 @@ class CodexSession implements Session {
     const usage = this.projection?.takePendingUsage(this.stream);
     if (usage) this.queue.push(usage);
   }
-  async resolveApproval(): Promise<void> {
-    throw new PolicyUnsupportedError(
-      'Codex has no interactive approval product lane',
-    );
-  }
 }
 function subscriptionModel(
   selection: RuntimeTaskInput['dispatchSelection'],

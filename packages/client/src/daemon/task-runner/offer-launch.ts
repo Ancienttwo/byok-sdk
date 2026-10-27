@@ -18,7 +18,6 @@ import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
 import type { PreparedExecutionObservation, ActiveTask, OfferPhaseContext } from './support';
 import { isKnownRuntimeId, offeredInstruction, errorMessage } from './support';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
-import { DEFAULT_APPROVAL_TIMEOUT_MS, NoPendingApprovalError } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
 import { activateOffer, type OfferActivationInput } from './offer-activation';
@@ -374,27 +373,9 @@ export async function startOfferRuntime(
     env,
     ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
     ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
-    approvalChannel: {
-      taskId,
-      storeDir: this['deps'].storeDir,
-      productId: this['deps'].productId,
-      timeoutMs: this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS,
-      resolve: async (approved, reason) => {
-        const currentActive = this['tasks'].get(taskId);
-        const pendingId = currentActive?.pendingApprovalId;
-        if (!pendingId) {
-          throw new NoPendingApprovalError(taskId);
-        }
-        // 'wire': this closure is invoked ONLY by an adapter's own
-        // `session.resolveApproval()` on a custom adapter, which is called from
-        // `handleApprove`/`handleReject` below — i.e. a server-sent wire
-        // `task.approve`/`task.reject`. The server already knows this
-        // decision (it sent it); `task.approval_resolved` must never be
-        // sent back for it — see `ApprovalOrigin`'s own doc comment
-        // (`approvals.ts`) and `sendApprovalResolved`'s gate below.
-        this['deps'].approvalRegistry.resolve(pendingId, approved ? 'approve' : 'reject', reason, 'wire');
-      },
-    },
+    ...(pick.descriptor.capabilities.approvalInteractive
+      ? { approvalChannel: { request: (summary: string) => this.requestApproval(taskId, summary) } }
+      : {}),
   };
   let session: Session;
   try {

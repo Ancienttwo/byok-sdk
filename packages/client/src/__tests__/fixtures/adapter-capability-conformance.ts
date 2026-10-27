@@ -116,12 +116,6 @@ export function runAdapterCapabilityConformance(qualification: AdapterCapability
     });
 
 
-    it.each([true, false])('rejects legacy approval resolution (%s) without claiming recovery', async (approved) => {
-      const session = await fixture.start();
-      await collectAdapterTurn(session);
-      await expect(session.resolveApproval(approved)).rejects.toThrow(/interactive approval/i);
-    });
-
     it('disposes an active process idempotently', async () => {
       const session = await fixture.start({ running: true });
       await session.close();

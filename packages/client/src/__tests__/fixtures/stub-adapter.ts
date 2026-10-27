@@ -16,14 +16,15 @@ import {
 } from '../../types';
 import { AsyncQueue } from '../../util/async-queue';
 
-/** In-memory Session double: tests push AgentEvents and record interrupt/steer/close/resolveApproval calls. */
+/** In-memory Session double: tests push AgentEvents, request approvals and record interrupt/steer/close calls. */
 export class StubSession implements Session {
   readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
   interruptCalled = false;
   closeCalled = false;
   readonly steerCalls: string[] = [];
   readonly followUpCalls: RuntimeTaskInput[] = [];
-  readonly resolveApprovalCalls: Array<{ approved: boolean; reason?: string }> = [];
+  /** Every approval outcome {@link requestApproval} received, in order. */
+  readonly approvalResults: Array<{ approved: boolean; reason?: string }> = [];
   /**
    * Test hook: when set, the NEXT `steer()` call throws this instead of
    * recording the call, then clears itself so subsequent calls succeed
@@ -52,7 +53,10 @@ export class StubSession implements Session {
   private steerGate: Promise<void> | undefined;
   private terminalFailure: Error | undefined;
 
-  constructor(public readonly sessionRef: string) {}
+  constructor(
+    public readonly sessionRef: string,
+    private readonly approvalChannel?: RuntimeOperationStartInput['approvalChannel'],
+  ) {}
 
   /**
    * Test hook (finding P2/Fix 2b-2c): pause a *successful* `steer()` call
@@ -134,9 +138,17 @@ export class StubSession implements Session {
     this.queue.end();
   }
 
-  /** Records the resolution; the test drives what "resuming" looks like by calling `emit()` afterward — `TaskRunner.pump()` is already waiting on `events`, so pushed events flow through exactly like normal progress. */
-  async resolveApproval(approved: boolean, reason?: string): Promise<void> {
-    this.resolveApprovalCalls.push(reason === undefined ? { approved } : { approved, reason });
+  /**
+   * Test helper: ask for approval the way an `approvalInteractive` adapter
+   * does, through the channel TaskRunner handed this session, and record the
+   * outcome. The test drives what "resuming" looks like by calling `emit()`
+   * afterward.
+   */
+  requestApproval(summary: string): Promise<void> {
+    if (this.approvalChannel === undefined) throw new Error('no approval channel was handed to this session');
+    return this.approvalChannel.request(summary).then(({ approved, reason }) => {
+      this.approvalResults.push(reason === undefined ? { approved } : { approved, reason });
+    });
   }
 
   evidence(): SessionEvidence {
@@ -283,7 +295,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       if (this.startError) throw this.startError;
       if (this.startGate) await this.startGate;
       this.sessionCounter += 1;
-      const preparedSession = new StubSession(`stub-session-${this.sessionCounter}`);
+      const preparedSession = new StubSession(`stub-session-${this.sessionCounter}`, startInput.approvalChannel);
       this.sessions.push(preparedSession);
       return preparedSession;
     }
@@ -305,7 +317,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     if (this.startError) throw this.startError;
     if (this.startGate) await this.startGate;
     this.sessionCounter += 1;
-    const session = new StubSession(startInput.manifest.sessionRef ?? `stub-session-${this.sessionCounter}`);
+    const session = new StubSession(startInput.manifest.sessionRef ?? `stub-session-${this.sessionCounter}`, startInput.approvalChannel);
     this.sessions.push(session);
     return session;
   }
