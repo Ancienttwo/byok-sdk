@@ -12,7 +12,7 @@ import {
   WIRE_V3_TO_V4_TYPES,
   decodeEnvelope,
   migrateWireV3Envelope,
-  wireV4TypeOf,
+  wireV4FormOf,
   type WireV4MigrationRefusal,
 } from '@byok-sdk/protocol';
 import { parseApprovalObservations } from './approval-timeline';
@@ -46,10 +46,19 @@ function storedOfferReceipt(body: string): { readonly type: string; readonly pay
   return typeof type === 'string' ? { type, payload } : undefined;
 }
 
+/** JSON with object keys sorted, so two payloads compare by content, not key order. */
+function sortedJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(sortedJson).join(',')}]`;
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  const entries = Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined);
+  return `{${entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([key, item]) => `${JSON.stringify(key)}:${sortedJson(item)}`).join(',')}}`;
+}
+
 /**
  * Migrates one stored receipt of a {@link WireV4ReceiptKind}. An offer receipt
- * is `{ deviceId, type, payload }` without a wire version: it keeps its bytes
- * when v4 keeps its type unchanged. A terminal receipt is a v3 envelope and is
+ * is `{ deviceId, type, payload }` without a wire version: it takes its v4 type
+ * and payload ({@link wireV4FormOf}), and is refused when v4 would drop or
+ * change any of its content. A terminal receipt is a v3 envelope and is
  * re-encoded under v4.
  */
 export function migrateWireV3Receipt(kind: WireV4ReceiptKind, body: string): WireV4ReceiptMigration {
@@ -67,14 +76,14 @@ export function migrateWireV3Receipt(kind: WireV4ReceiptKind, body: string): Wir
   }
   const stored = storedOfferReceipt(body);
   if (stored === undefined) return { outcome: 'refused', refusal: 'not_wire_v3' };
-  const v4Type = wireV4TypeOf(stored.type);
-  if (v4Type === undefined) return { outcome: 'refused', refusal: 'type_without_v4_form', type: stored.type };
-  const parsed = MESSAGE_PAYLOAD_SCHEMAS[v4Type].safeParse(stored.payload);
-  if (!parsed.success || JSON.stringify(parsed.data) !== JSON.stringify(stored.payload)) {
+  const v4 = wireV4FormOf(stored.type, stored.payload);
+  if (v4 === undefined) return { outcome: 'refused', refusal: 'type_without_v4_form', type: stored.type };
+  const parsed = MESSAGE_PAYLOAD_SCHEMAS[v4.type].safeParse(v4.payload);
+  if (!parsed.success || sortedJson(parsed.data) !== sortedJson(v4.payload)) {
     return { outcome: 'refused', refusal: 'invalid_under_v4', type: stored.type };
   }
-  if (v4Type === stored.type) return { outcome: 'unchanged' };
-  return { outcome: 'migrated', body: JSON.stringify({ ...(JSON.parse(body) as object), type: v4Type }) };
+  if (v4.type === stored.type && v4.payload === stored.payload) return { outcome: 'unchanged' };
+  return { outcome: 'migrated', body: JSON.stringify({ ...(JSON.parse(body) as object), type: v4.type, payload: parsed.data }) };
 }
 
 /** What a store runner changed. */
