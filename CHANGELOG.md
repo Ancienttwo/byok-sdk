@@ -13,6 +13,11 @@
   `CREATE TABLE` and no longer adds it to an older `daemon.db`. A journal
   written before #826 is refused at open with `JournalUnavailableError`, and
   left unchanged.
+- **Breaking (cloud-do; #1036)** — every Durable Object table declares all its
+  columns in `CREATE TABLE`; `ensureSchema()` no longer adds columns to older
+  storage or seeds legacy run membership. `CloudState.pendingBackfills`,
+  `CloudState.applyBackfill` and `RunRow.membershipPending` are removed. No
+  cloud-do Durable Object is deployed; clear any local development state.
 - **Breaking (examples; #1036)** — bot-collaboration drops
   `promoteReplyReceipts`. State that still needed it is collaboration state
   version 1 or 2, which `stateOf` already refuses.
