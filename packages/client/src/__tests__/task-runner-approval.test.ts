@@ -189,7 +189,7 @@ describe('TaskRunner.requestApproval', () => {
 
     const awaitApprovalEnvelope = sent.find((e) => e.type === 'task.await_approval');
     expect(awaitApprovalEnvelope).toBeDefined();
-    if (awaitApprovalEnvelope?.type !== 'task.await_approval') throw new Error('unreachable');
+    if (awaitApprovalEnvelope?.type !== 'task.await_approval' || awaitApprovalEnvelope.payload.sealed !== undefined) throw new Error('unreachable');
     expect(awaitApprovalEnvelope.payload.summary).toBe('Bash: echo hi');
     expect(awaitApprovalEnvelope.task_id).toBe(taskId);
 

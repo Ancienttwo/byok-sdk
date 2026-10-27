@@ -424,7 +424,7 @@ function reference(built: Lane, overrides: Partial<InputPreparationOfferBinding>
 
 function declineReason(sent: readonly Envelope[]): string {
   const declined = sent.find((envelope) => envelope.type === 'task.decline');
-  if (declined === undefined || declined.type !== 'task.decline') throw new Error('no task.decline was sent');
+  if (declined === undefined || declined.type !== 'task.decline' || declined.payload.sealed !== undefined) throw new Error('no task.decline was sent');
   return declined.payload.reason;
 }
 
@@ -593,7 +593,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
 
     const completed = sent.find((envelope) => envelope.type === 'task.complete');
-    if (completed?.type !== 'task.complete') throw new Error('no task.complete');
+    if (completed?.type !== 'task.complete' || completed.payload.sealed !== undefined) throw new Error('no task.complete');
     expect(completed.payload.document).toEqual(document);
     expect(start.preparation.terminalProjection).toEqual(selector);
     // No message egress: nothing was published on the Agent message lane.
@@ -883,7 +883,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
     const completed = sent.find((envelope) => envelope.type === 'task.complete');
-    if (completed?.type !== 'task.complete') throw new Error('no task.complete');
+    if (completed?.type !== 'task.complete' || completed.payload.sealed !== undefined) throw new Error('no task.complete');
     expect(completed.payload.preparedObservation).toEqual({
       requestDigest: REQUEST_DIGEST,
       initialPromptTokens: 1_200,
@@ -905,7 +905,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
     const failed = sent.find((envelope) => envelope.type === 'task.fail');
-    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    if (failed?.type !== 'task.fail' || failed.payload.sealed !== undefined) throw new Error('no task.fail');
     expect(failed.payload.reason.startsWith(`${PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX}:`)).toBe(true);
     expect(failed.payload.retryable).toBe(false);
     expect(failed.payload.preparedObservation).toEqual({
@@ -945,7 +945,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
     const failed = sent.find((envelope) => envelope.type === 'task.fail');
-    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    if (failed?.type !== 'task.fail' || failed.payload.sealed !== undefined) throw new Error('no task.fail');
     expect(failed.payload.reason.startsWith(`${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}:`)).toBe(true);
     expect(failed.payload.retryable).toBe(false);
     expect(failed.payload.preparedObservation).toBeUndefined();
@@ -967,7 +967,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
     const failed = sent.find((envelope) => envelope.type === 'task.fail');
-    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    if (failed?.type !== 'task.fail' || failed.payload.sealed !== undefined) throw new Error('no task.fail');
     expect(failed.payload.reason.startsWith(`${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}:`)).toBe(true);
     expect(failed.payload.reason).toContain('provider call 1 ');
     expect(failed.payload.preparedObservation).toBeUndefined();
@@ -987,7 +987,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
     const failed = sent.find((envelope) => envelope.type === 'task.fail');
-    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    if (failed?.type !== 'task.fail' || failed.payload.sealed !== undefined) throw new Error('no task.fail');
     expect(failed.payload.reason.startsWith(`${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}:`)).toBe(true);
     expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
   });
@@ -1996,7 +1996,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     session.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some(envelope => envelope.type === 'task.fail')).toBe(true));
     const failed = sent.find(envelope => envelope.type === 'task.fail');
-    if (failed?.type !== 'task.fail') throw new Error('expected task.fail');
+    if (failed?.type !== 'task.fail' || failed.payload.sealed !== undefined) throw new Error('expected task.fail');
     expect(failed.payload.reason.startsWith(RESULT_NOT_SUBMITTED_REASON_PREFIX)).toBe(true);
     expect(failed.payload.retryable).toBe(false);
     expect(sent.some(envelope => envelope.type === 'task.complete')).toBe(false);
@@ -2020,7 +2020,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
     const failed = sent.find((envelope) => envelope.type === 'task.fail');
-    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    if (failed?.type !== 'task.fail' || failed.payload.sealed !== undefined) throw new Error('no task.fail');
     expect(failed.payload.reason.startsWith(`${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}:`)).toBe(true);
     expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
   });
@@ -2028,7 +2028,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
 
 function declineReasonOrNone(sent: readonly Envelope[]): string | undefined {
   const declined = sent.find(e => e.type === 'task.decline');
-  return declined?.type === 'task.decline' ? declined.payload.reason : undefined;
+  return declined?.type === 'task.decline' && declined.payload.sealed === undefined ? declined.payload.reason : undefined;
 }
 
 

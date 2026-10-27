@@ -158,7 +158,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
     return runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'operator' }, { taskId, seq: 2 }));
   };
   const terminals = () => sent.filter(event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type));
-  const events = () => sent.flatMap(event => event.type === 'task.progress' ? event.payload.events : []);
+  const events = () => sent.flatMap(event => event.type === 'task.progress' && event.payload.sealed === undefined ? event.payload.events : []);
   const trace = async () => (await fs.readFile(traceFile, 'utf8')).trim().split('\n');
   const assertTreeReaped = async () => {
     const pids = JSON.parse(await fs.readFile(tree, 'utf8')) as Record<string, number>;
@@ -358,7 +358,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
       // Long-poll delivery, native spawn and the progress batch flush can exceed
       // the 2s default under load.
       await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
-        && event.payload.events.some(event => event.type === 'tool_use'), 5_000);
+        && event.payload.sealed === undefined && event.payload.events.some(event => event.type === 'tool_use'), 5_000);
       c.synchronizeInterruptClock();
       server.send(createEnvelope('task.cancel', { reason: 'Host stop' }, { taskId: 'host-task', seq: server.nextSeq() }));
       const terminal = await server.waitFor(event => event.type === 'task.cancelled' && event.task_id === 'host-task');

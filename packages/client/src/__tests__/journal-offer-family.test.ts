@@ -54,8 +54,9 @@ interface OfferCase {
  *   `offer_capability_missing` before any adapter is picked.
  * - Each sealed variant (#654) seals only the task output here, so its
  *   instruction stays plaintext; this daemon does not advertise
- *   `sealed-payload-v1`, so the advertised-flag check declines it with the
- *   closed code `sealed_key_unavailable`.
+ *   `sealed-payload-v1`, so the advertised-flag check declines it through
+ *   the sealed decline path (the closed code `sealed_key_unavailable` only
+ *   to a server that accepts it).
  */
 const offerCases: readonly OfferCase[] = [
   // B2: task.offer_for_agent carried no sessionRef and was declined for its missing toolset -> a resume offer, declined by the advertised-flag check (toolset-selection) before the toolset lookup
@@ -65,6 +66,7 @@ const offerCases: readonly OfferCase[] = [
   {
     // The one offer that carries no instruction: the request is already inside
     // the frozen envelope the referenced record retained.
+    // B2: declined `preparation_lane_unconfigured` -> declined `offer_capability_missing` (agent-input-preparation-v9 is not advertised); the journal contract asserted here is unchanged
     name: 'prepared',
     payload: {
       runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -73,6 +75,7 @@ const offerCases: readonly OfferCase[] = [
     },
     declined: true,
   },
+  // B2: sealed offers were declined in handleSealedOffer -> declined by the advertised-flag check (sealed-payload-v1 is not advertised), which takes the same declineSealedOffer path; the journal contract asserted here is unchanged
   { name: 'sealed resume', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, sealing: SEALING }, declined: true },
   { name: 'sealed resume+egress', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },
   { name: 'sealed fresh', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },

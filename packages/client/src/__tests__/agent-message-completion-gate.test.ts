@@ -789,7 +789,7 @@ describe('required Agent message completion gate', () => {
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
     const failure = sent.find((envelope) => envelope.type === 'task.fail');
-    if (failure?.type !== 'task.fail') throw new Error('missing task fail');
+    if (failure?.type !== 'task.fail' || failure.payload.sealed !== undefined) throw new Error('missing task fail');
     expect(failure.payload.retryable).toBe(false);
     expect(failure.payload.reason).toContain('no reply text');
     expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(false);
@@ -825,7 +825,7 @@ describe('required Agent message completion gate', () => {
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
     const failure = sent.find((envelope) => envelope.type === 'task.fail');
-    if (failure?.type !== 'task.fail') throw new Error('missing task fail');
+    if (failure?.type !== 'task.fail' || failure.payload.sealed !== undefined) throw new Error('missing task fail');
     expect(failure.payload.retryable).toBe(false);
     expect(failure.payload.reason).toMatch(/failed to deliver/);
     expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(false);
@@ -895,7 +895,7 @@ describe('required Agent message completion gate', () => {
     }, { taskId, seq: 2 }));
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
     const complete = sent.find((envelope) => envelope.type === 'task.complete');
-    if (complete?.type !== 'task.complete') throw new Error('missing task complete');
+    if (complete?.type !== 'task.complete' || complete.payload.sealed !== undefined) throw new Error('missing task complete');
     expect(complete.payload.summary).toBe('narrationthe answer');
   });
 
