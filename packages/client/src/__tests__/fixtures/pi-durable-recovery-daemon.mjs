@@ -10,7 +10,7 @@ if (enrollment.record) await credentials.replace(enrollment.record);
 const daemon = createDaemon({
   localAgentRelease:{version:'0.0.0-durable-recovery-test'},productName:'Durable recovery',productId:config.productId,serverUrl:config.serverUrl,
   storage:{scratchRoot:config.scratchRoot},storeDir:config.storeDir, runtimeAllowlist:['pi'],durablePi:true,
-  agentHome:{hostStorageRoot:config.homeRoot},
+  agentHome:{hostStorageRoot:config.homeRoot},agentEgress:{policy:config.egressPolicy},
   piByokLauncher:{command:process.execPath,args:[config.launcherEntry],profileDbPath:config.profilePath,sessionDir:config.sessionDir},
 }, { deviceCredentials: credentials });
 if (!enrollment.record) await daemon.pair('pairing-code');
