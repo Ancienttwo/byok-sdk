@@ -19,7 +19,8 @@ export function terminalInferenceUsagePayload(this: TaskRunner, active: ActiveTa
   const runtimeId = active.adapter.descriptor.id;
   if (!isKnownRuntimeId(runtimeId)) return {};
   if (release === undefined || active.lastUsage === undefined) return {};
-  if (active.lastUsage.inputTokens === undefined && active.lastUsage.outputTokens === undefined) return {};
+  const { model } = active.lastUsage;
+  if (active.lastUsage.inputTokens === undefined && active.lastUsage.outputTokens === undefined && model === undefined) return {};
 
   const nowMs = Date.now();
   const durationMs = terminalUsageNumber(nowMs - active.startedAtMs, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS);
@@ -33,6 +34,7 @@ export function terminalInferenceUsagePayload(this: TaskRunner, active: ActiveTa
       reportedAt: new Date(nowMs).toISOString(),
       ...(promptTokens === undefined ? {} : { promptTokens }),
       ...(completionTokens === undefined ? {} : { completionTokens }),
+      ...(model === undefined ? {} : { model }),
       ...(durationMs === undefined ? {} : { durationMs }),
     },
   };

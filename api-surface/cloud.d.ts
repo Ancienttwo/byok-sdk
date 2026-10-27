@@ -89,6 +89,7 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
             estimate: "estimate";
             provider: "provider";
         }>>;
+        model: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>], "type">, z.ZodObject<{
         type: z.ZodString;
     }, z.core.$loose>]>>;
@@ -182,6 +183,7 @@ export declare const TimelineEventSchema: z.ZodObject<{
             estimate: "estimate";
             provider: "provider";
         }>>;
+        model: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>], "type">, z.ZodObject<{
         type: z.ZodString;
     }, z.core.$loose>]>;

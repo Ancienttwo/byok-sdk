@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
-import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS } from './constants';
+import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from './constants';
 import { BlobRefSchema } from './blob';
 import {
   SEALED_DECLINE_CODES,
@@ -1069,7 +1069,6 @@ export const TERMINAL_INFERENCE_USAGE_MAX_TOKENS = 1_000_000_000;
 /** Maximum device-observed elapsed duration retained in one terminal observation (seven days). */
 export const TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS = 604_800_000;
 export const TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH = 160;
-export const TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH = 160;
 export const TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH = 128;
 
 const TerminalInferenceUsageNumberSchema = z

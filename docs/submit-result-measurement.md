@@ -452,8 +452,10 @@ The terminal records the SDK status (`task.complete`, `task.fail`, or
 `replyDelivery` and `replyDisposition` are defined in
 [Record reply delivery](#record-reply-delivery).
 `usage` holds the `usage` events as the runtime reported them (`inputTokens`,
-`outputTokens`, `reasoningTokens`, `totalTokens`, `contextTokens`, `contextWindow`).
-Do not sum or estimate token counts.
+`outputTokens`, `reasoningTokens`, `totalTokens`, `contextTokens`, `contextWindow`,
+and `model`, the model the provider served when the runtime reported one).
+Do not sum or estimate token counts, and do not fill `model` from the cell's
+requested model identifier.
 Use `null` for
 unavailable observations, not false/zero. Keep the known synthetic target for
 comparison, but sanitize diagnostic artifacts before sharing. Do not include

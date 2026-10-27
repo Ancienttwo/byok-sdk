@@ -2648,6 +2648,11 @@ elapsed time, or `reportedAt`. Missing is unknown, not zero. When reported,
 device elapsed time and `reportedAt` are local observations, never provider
 invoice data.
 
+`model` is the last observation's `usage.model` (§11.3), the model the
+provider served as the runtime reported it. A last observation that reports a
+model but no token counts still yields the block, with `model` and no counts;
+one that reports neither omits it.
+
 Hosted storage records the canonical first terminal exactly as it does every
 other terminal fact. Its typed result read model projects this object from the
 winning receipt unchanged; a later terminal cannot replace it. No raw-receipt
@@ -3241,7 +3246,7 @@ runtime id.
 A new `AgentEvent` variant (`agent-event.ts`):
 
 ```
-{ type: 'usage', inputTokens?, cachedInputTokens?, outputTokens?, reasoningTokens?, totalTokens? }
+{ type: 'usage', inputTokens?, cachedInputTokens?, outputTokens?, reasoningTokens?, totalTokens?, model? }
 ```
 
 Every field optional (non-negative integers) — runtimes report different
@@ -3258,6 +3263,17 @@ Per-runtime fill (empirical, `packages/client/src/adapters/*/events.ts`):
 | `outputTokens` | `message.usage.output` | `result.usage.output_tokens` | `turn.completed.usage.output_tokens` |
 | `reasoningTokens` | `message.usage.reasoning` | never (claude's own usage shape has no reasoning-token field) | `turn.completed.usage.reasoning_output_tokens` |
 | `totalTokens` | `message.usage.totalTokens` (Pi's own figure, not synthesized) | never (not synthesized) | never (not synthesized) |
+
+`model` (1 to 160 characters) is the model the provider served for that
+observation, exactly as the runtime reported it; it is never the requested
+model id or `dispatchSelection`. A name over 160 characters is dropped whole,
+never truncated. Pi sets it from pi-ai's `AssistantMessage.responseModel`,
+which pi-ai fills only for the providers that report a served model; pi-ai's
+`model` is the requested id and is not read. Claude sets it on the turn's
+`usage` event when every root-agent `assistant` frame of the turn
+(`parent_tool_use_id: null`) named the same `message.model`; subagent frames
+and the frames Claude names `<synthetic>` are not counted, and a second model
+or a root frame without one leaves it absent. Codex never sets it.
 
 **pi reports usage per provider call.** The pi adapter emits one `usage`
 event for each assistant `message_end`, that is, for each provider call. Each

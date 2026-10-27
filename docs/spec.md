@@ -1479,6 +1479,10 @@ with `inputTokens = input + cacheRead + cacheWrite`, because Pi's own `input`
 already excludes both cache figures — so Pi's block carries the last call's
 figures, as telemetry like the others. A Pi run that reported no usage still
 omits the block rather than fabricating one from device facts.
+The block's `model` is the last observation's served model (`usage.model`:
+Pi's `responseModel`, Claude's single root-agent `message.model` for the turn;
+Codex reports none). A last observation with a model and no token counts still
+yields the block.
 The protocol enforces safe non-negative bounded numbers and a canonical UTC
 device timestamp. Cloud records first-terminal-wins as usual and projects the
 same typed object from the winning receipt without parsing raw receipt bytes

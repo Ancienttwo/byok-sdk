@@ -1,6 +1,7 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { AgentEvent as DurableEvent } from '@earendil-works/pi-durable';
 import type { McpEventIdentities } from '../../mcp/event-identity';
+import { servedModelName } from '../served-model';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
 const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -37,8 +38,10 @@ export function projectDurableEvent(event: DurableEvent): AgentEvent[] {
     const usage = object(message.usage);
     const input = usage.input, cacheRead = usage.cacheRead, cacheWrite = usage.cacheWrite;
     const sum = count(input) && count(cacheRead) && count(cacheWrite) ? input + cacheRead + cacheWrite : undefined;
+    const model = servedModelName(message.responseModel);
     return [{ type: 'usage', ...(sum !== undefined && count(sum) ? { inputTokens: sum } : {}),
-      ...(count(cacheRead) ? { cachedInputTokens: cacheRead } : {}), ...(count(usage.output) ? { outputTokens: usage.output } : {}), ...(count(usage.totalTokens) ? { totalTokens: usage.totalTokens } : {}) }];
+      ...(count(cacheRead) ? { cachedInputTokens: cacheRead } : {}), ...(count(usage.output) ? { outputTokens: usage.output } : {}), ...(count(usage.totalTokens) ? { totalTokens: usage.totalTokens } : {}),
+      ...(model === undefined ? {} : { model }) }];
   }
   return [];
 }

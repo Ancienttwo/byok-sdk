@@ -731,7 +731,7 @@ export async function trackOffer(runner: TaskRunner, operation: Promise<void>): 
 export function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {
   if (event.contextSource === undefined || event.inputTokens !== undefined ||
       event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
-      event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
+      event.reasoningTokens !== undefined || event.totalTokens !== undefined || event.model !== undefined) {
     active.lastUsage = event;
   }
 }
