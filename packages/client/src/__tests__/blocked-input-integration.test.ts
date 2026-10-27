@@ -50,7 +50,7 @@ async function withHarness(
   const daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-blocked-input-test' }, productName: 'blocked input test', productId: PRODUCT_ID,
-    serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
+    serverUrl: http.baseUrl, storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: daemonPolicy },
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   try {

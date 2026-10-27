@@ -556,7 +556,9 @@ function runProbeOrTurnFlow() {
     const artifactPath = process.env.FAKE_CLAUDE_ARTIFACT_PATH;
     let mcpResultText;
 
-    if (incomingText === 'salesko:find-leads') {
+    // The daemon prepends Agent guidance to the task instruction; the
+    // instruction is the prompt's last paragraph.
+    if (incomingText.split('\n\n').at(-1) === 'salesko:find-leads') {
       const toolInput = { company: 'Acme', limit: 2 };
       await sendAssistant({
         type: 'assistant',

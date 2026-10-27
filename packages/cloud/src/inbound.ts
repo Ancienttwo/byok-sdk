@@ -630,13 +630,17 @@ async function applyInboundGate(
       || await frozenOfferSealing(stores, deviceId, envelope.task_id, binding.attempt.agentRef) !== undefined) {
       return refuse('agent_message_draft_invalid');
     }
-    await stores.agentMessageDraft.apply({ ...parsed.data, taskId: envelope.task_id, deviceId,
+    const applied = await stores.agentMessageDraft.apply({ ...parsed.data, taskId: envelope.task_id, deviceId,
       maxBytes: binding.frozen.requirement.maxBytes, now });
     // A terminal or publish may commit while this ephemeral write is in flight.
     // Recheck after apply so that lifecycle deletion cannot leave a late row.
     if (await stores.receipts.get(terminalReceiptKey(envelope.task_id)) !== undefined
       || await stores.tasks.readTaskAgentMessage({ taskId: envelope.task_id, deviceId }) !== undefined) {
       await stores.agentMessageDraft.delete(envelope.task_id);
+    } else if (applied === 'applied' && parsed.data.text.length > 0 && binding.attempt.ownerDeviceId !== undefined) {
+      // Ownership read before the apply: a claim that commits after this draft
+      // landed must not make the draft count as post-claim output.
+      await stores.tasks.recordFirstOutput({ taskId: envelope.task_id, deviceId });
     }
     return completeInboundEnvelope(stores, deviceId, envelope.id, parsed.data.agentRef);
   }
@@ -942,9 +946,7 @@ function approvalTimelineAppendInput(
         event: {
           type: 'approval_requested',
           summary: envelope.payload.summary,
-          ...(envelope.payload.approvalId === undefined
-            ? {}
-            : { approvalId: envelope.payload.approvalId }),
+          approvalId: envelope.payload.approvalId,
         },
       };
     case 'task.await_approval_sealed':

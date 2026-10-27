@@ -78,9 +78,7 @@ const { serve } = await import(honoNodeServerSpecifier);
 const productId = `byok-ipc-smoke-${process.pid}`;
 const workDir = await fs.realpath(await fs.mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-ipc-smoke-')));
 const storeDir = path.join(workDir, 'store');
-const workspaceRoot = path.join(workDir, 'workspace');
 const configPath = path.join(workDir, 'config.json');
-await fs.mkdir(workspaceRoot, { recursive: true });
 
 // Default long-poll hold (~50s) on purpose: the daemon stops by aborting its
 // in-flight `GET /byok/events` (`LongPollClient.stop()` aborts the loop's
@@ -272,7 +270,7 @@ try {
 
   await fs.writeFile(
     configPath,
-    JSON.stringify({ productName: 'IPC Smoke', productId, serverUrl, workspaceRoot, storeDir }, null, 2),
+    JSON.stringify({ productName: 'IPC Smoke', productId, serverUrl, storeDir }, null, 2),
     'utf8',
   );
 

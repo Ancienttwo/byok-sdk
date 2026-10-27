@@ -30,7 +30,7 @@ import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Record<string, unknown> });
@@ -97,7 +97,7 @@ describe('the journal bound of an inbound envelope record (#654)', () => {
   it('keeps maxRecordBytes for a terminal record', async () => {
     const journal = new SqliteLocalTaskJournal({ storeDir: await tmp() });
     try {
-      const offer = encodeEnvelope(envelopeOf('task.offer_sealed', 'sealed-task', 1));
+      const offer = encodeEnvelope(envelopeOf('task.offer_for_agent_sealed', 'sealed-task', 1));
       await journal.appendEnvelope({
         identity: IDENTITY, envelopeId: randomUUID(), taskId: 'sealed-task', seq: 1, bytes: offer, bytesHash: journalHash(offer),
         receivedAt: '2026-10-24T00:00:00.000Z', opensTask: true,
@@ -119,7 +119,7 @@ describe('a sealed envelope at the inline maximum, on a daemon with the default 
     daemon = createDaemonWithAdapters({
       storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed journal test', productId: 'sealed-journal-test',
-      serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
+      serverUrl: server.url, storeDir,
     }, [new StubRuntimeAdapter('pi')]);
     const device = await daemon.pair('pair-code');
     await daemon.start();
@@ -128,7 +128,7 @@ describe('a sealed envelope at the inline maximum, on a daemon with the default 
 
   it('journals a sealed offer, declines it, and moves the cursor', async () => {
     const { storeDir, device, server } = await start();
-    const offer = envelopeOf('task.offer_sealed', 'sealed-large-offer', server.nextSeq());
+    const offer = envelopeOf('task.offer_for_agent_sealed', 'sealed-large-offer', server.nextSeq());
     server.send(offer);
 
     const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'sealed-large-offer', EVENTUAL_STATE_BUDGET_MS);

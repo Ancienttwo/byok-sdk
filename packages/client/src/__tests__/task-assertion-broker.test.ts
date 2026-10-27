@@ -114,7 +114,6 @@ describe('task assertion broker: task_assertion.issue', () => {
   }
 
   async function pairedAndStarted(productId: string, config: Partial<DaemonConfig> = {}): Promise<Started> {
-    const workspaceRoot = await tmpDir(`byok-task-assert-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-task-assert-${productId}-store-`);
     const hostStorageRoot = await tmpDir(`byok-task-assert-${productId}-home-`);
     // `requiresMcpToolsetToolObservation = false`: these fixture commands never
@@ -126,7 +125,6 @@ describe('task assertion broker: task_assertion.issue', () => {
       productName: 'Acme',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot },
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
@@ -191,7 +189,6 @@ describe('task assertion broker: task_assertion.issue', () => {
     config: Partial<DaemonConfig> = {},
     waitForRead = true,
   ): Promise<Started> {
-    const workspaceRoot = await tmpDir(`byok-task-assert-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-task-assert-${productId}-store-`);
     const hostStorageRoot = await tmpDir(`byok-task-assert-${productId}-home-`);
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
@@ -200,7 +197,6 @@ describe('task assertion broker: task_assertion.issue', () => {
       productName: 'Acme',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot },
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },

@@ -1,7 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createByokServer, type ByokServer } from '../index';
-import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer } from './test-support';
+import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer, TEST_AGENT_DISPATCH } from './test-support';
 
 const PRODUCT_ID = 'acme';
 const AGENT_REF = { agentId: 'reader-agent', profileRevision: 'profile-r1' } as const;
@@ -25,19 +25,6 @@ describe('reference-server memory-reader dispatch (#317)', () => {
     byok = instance;
     return { byok: instance, baseUrl: started.baseUrl };
   }
-
-  it('refuses homeAccess without an AgentRef', async () => {
-    const started = await start();
-    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
-      productId: PRODUCT_ID,
-      capabilities: ['agent-home-contract', 'agent-home-readers'],
-    });
-    await expect(started.byok.dispatch({
-      deviceId: daemon.deviceId,
-      instruction: 'legacy reader',
-      homeAccess: 'memory-reader',
-    })).rejects.toThrow(/homeAccess requires an explicit AgentRef/);
-  });
 
   it('refuses a reader dispatch to a device without agent-home-readers before creating the task', async () => {
     const started = await start();

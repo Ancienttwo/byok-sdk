@@ -70,7 +70,7 @@ const { token, key } = ledger.issueKey({
 ```
 
 - `runtimes` accepts only `pi`, `claude` and `codex` (`packages/protocol/src/messages.ts:52`).
-- Routine and memory scopes need an `agentRef`. A spec with those scopes and no
+- Dispatch, routine and memory scopes need an `agentRef`. A spec with those scopes and no
   `agentRef` is refused (`src/model.ts:96`, `src/model.ts:118`). Hermes scheduled work
   moves to `byok_routine_*` (§6), so a Hermes key binds an `agentRef` (plan H2).
 - Leave out `memory.write`. Beta v1 has no memory-write tool (`README.md:69-71`).

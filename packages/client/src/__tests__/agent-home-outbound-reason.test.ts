@@ -8,7 +8,6 @@ import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
@@ -85,13 +84,11 @@ async function readerRunner(adapter: StubRuntimeAdapter): Promise<{
   const sent: Envelope[] = [];
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await temporary('byok-outbound-reason-workspace-'),
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-outbound-reason',
     send: (envelope) => sent.push(envelope),
     blobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir),
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'outbound-reason',

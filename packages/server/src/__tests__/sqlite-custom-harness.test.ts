@@ -10,12 +10,14 @@ import { createEnvelope, type TaskClaimPayload } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
 import { createSqliteEmbeddedStores, type SqliteEmbeddedStoreOptions } from '../stores/sqlite';
+import { TEST_AGENT_DISPATCH, TEST_AGENT_REF } from './test-support';
 
 const tenant = tenantId('custom-harness');
 const deviceId = 'custom-device';
 const harnessId = 'acme-harness';
 const capabilities = { steer: true };
-const payload = { instruction: 'run custom adapter' } as const;
+const payload = { ...TEST_AGENT_DISPATCH, instruction: 'run custom adapter' } as const;
+const agentRef = TEST_AGENT_REF;
 
 describe('SQLite custom-harness claim authority', () => {
   const roots: string[] = [];
@@ -58,13 +60,13 @@ describe('SQLite custom-harness claim authority', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-      await runtime.bound.devices.recordCapabilities({ capabilities: ['custom-harness'],
+      await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract', 'custom-harness'],
         harnesses: [{ id: harnessId, capabilities }, { id: 'other', capabilities }] });
-      const offer = await runtime.cloud.enqueueOffer(tenant, deviceId, {
+      const offer = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, {
         payload: { ...payload, ...(selection === 'explicit' ? { harnessId } : {}) },
       });
       const taskId = offer.taskId;
-      const claim = createEnvelope('task.claim', { deviceId, harnessId, capabilities }, { taskId });
+      const claim = createEnvelope('task.claim', { deviceId, agentRef, harnessId, capabilities }, { taskId });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, claim).then((result) => result.outcome)).toBe('accepted');
       const expected = { ownerDeviceId: deviceId, claimedHarnessId: harnessId,
         claimedRuntimeCapabilities: capabilities, status: 'claimed' };
@@ -77,24 +79,24 @@ describe('SQLite custom-harness claim authority', () => {
       expect(await handleInboundEnvelope(runtime.bound, deviceId, claim).then((result) => result.outcome)).toBe('accepted');
       for (const changed of [{}, { harnessId: 'other' }, { runtime: 'pi' }] satisfies Omit<TaskClaimPayload, 'deviceId'>[]) {
         expect(await handleInboundEnvelope(runtime.bound, deviceId,
-          createEnvelope('task.claim', { deviceId, ...changed }, { taskId })).then((result) => result.outcome)).toBe('rejected');
+          createEnvelope('task.claim', { deviceId, agentRef, ...changed }, { taskId })).then((result) => result.outcome)).toBe('rejected');
       }
       // Mutable inventory is not authority for this already-claimed execution.
       await runtime.bound.devices.recordCapabilities({ capabilities: [], harnesses: [] });
       for (const identity of [{}, { harnessId: 'other' }]) {
         for (const terminal of [
-          createEnvelope('task.complete', { summary: 'wrong', sessionRef: 's', ...identity }, { taskId }),
-          createEnvelope('task.fail', { reason: 'wrong', retryable: false, ...identity }, { taskId }),
-          createEnvelope('task.cancelled', { ...identity }, { taskId }),
+          createEnvelope('task.complete', { agentRef, summary: 'wrong', sessionRef: 's', ...identity }, { taskId }),
+          createEnvelope('task.fail', { agentRef, reason: 'wrong', retryable: false, ...identity }, { taskId }),
+          createEnvelope('task.cancelled', { agentRef, ...identity }, { taskId }),
         ]) expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal).then((result) => result.outcome)).toBe('rejected');
       }
       expect(await runtime.cloud.readTerminalReceipt(tenant, taskId)).toBeUndefined();
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject(expected);
       const terminal = status === 'complete'
-        ? createEnvelope('task.complete', { summary: 'done', sessionRef: 's', harnessId }, { taskId })
+        ? createEnvelope('task.complete', { agentRef, summary: 'done', sessionRef: 's', harnessId }, { taskId })
         : status === 'failed'
-          ? createEnvelope('task.fail', { reason: 'fixture-failure', retryable: false, harnessId }, { taskId })
-          : createEnvelope('task.cancelled', { harnessId }, { taskId });
+          ? createEnvelope('task.fail', { agentRef, reason: 'fixture-failure', retryable: false, harnessId }, { taskId })
+          : createEnvelope('task.cancelled', { agentRef, harnessId }, { taskId });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal).then((result) => result.outcome)).toBe('accepted');
       await runtime.stores.close();
       runtime = open();
@@ -109,18 +111,19 @@ describe('SQLite custom-harness claim authority', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-      const { taskId } = await runtime.cloud.enqueueOffer(tenant, deviceId, { payload });
+      await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract'] });
+      const { taskId } = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { payload });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', {
-        deviceId, ...(runtimeId === undefined ? {} : { runtime: runtimeId }),
+        deviceId, agentRef, ...(runtimeId === undefined ? {} : { runtime: runtimeId }),
       }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       await runtime.stores.close(); runtime = open();
       const attempt = await runtime.bound.tasks.get(taskId);
       expect(attempt?.claimedRuntime).toBe(runtimeId);
       expect(attempt?.claimedHarnessId).toBeUndefined();
       expect(await handleInboundEnvelope(runtime.bound, deviceId,
-        createEnvelope('task.complete', { summary: 'wrong', sessionRef: 's', harnessId }, { taskId })).then((result) => result.outcome)).toBe('rejected');
+        createEnvelope('task.complete', { agentRef, summary: 'wrong', sessionRef: 's', harnessId }, { taskId })).then((result) => result.outcome)).toBe('rejected');
       expect(await handleInboundEnvelope(runtime.bound, deviceId,
-        createEnvelope('task.complete', { summary: 'done', sessionRef: 's' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+        createEnvelope('task.complete', { agentRef, summary: 'done', sessionRef: 's' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
     } finally { await runtime.stores.close(); }
   });
 
@@ -144,8 +147,8 @@ describe('SQLite custom-harness claim authority', () => {
     let runtime = open();
     await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
       devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-    await runtime.bound.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: [{ id: harnessId, capabilities }] });
-    const { taskId } = await runtime.cloud.enqueueOffer(tenant, deviceId, { payload: { ...payload, harnessId } });
+    await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract', 'custom-harness'], harnesses: [{ id: harnessId, capabilities }] });
+    const { taskId } = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { payload: { ...payload, harnessId } });
     for (const status of ['claimed', 'complete'] as const) {
       const id = `builtin-${status}`;
       await runtime.stores.cloud.tasks.open(tenant, { taskId: id, deviceId });
@@ -172,7 +175,7 @@ describe('SQLite custom-harness claim authority', () => {
         expect(attempt?.claimedHarnessId).toBeUndefined();
       }
       expect(await handleInboundEnvelope(runtime.bound, deviceId,
-        createEnvelope('task.claim', { deviceId, harnessId }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+        createEnvelope('task.claim', { deviceId, agentRef, harnessId }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       await runtime.stores.close(); runtime = open();
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject({ claimedHarnessId: harnessId });
       await runtime.stores.close();

@@ -8,6 +8,7 @@ import {
   stopServer,
   type FakeLongPollDaemon,
   type FakeLongPollDaemonOptions,
+  TEST_AGENT_DISPATCH,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -40,10 +41,10 @@ describe('logical MCP toolset dispatch', () => {
     return connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID, ...opts });
   }
 
-  it('sends the distinct fail-closed offer type and persists only logical ids', async () => {
+  it('sends requiredToolsets on the Agent offer and persists only logical ids', async () => {
     const started = await start();
     const daemon = await connect(started, {
-      capabilities: ['toolset-selection'],
+      capabilities: ['agent-home-contract', 'toolset-selection'],
       configuredToolsets: ['crm.readonly', 'salesko'],
       runtimes: [
         {
@@ -53,39 +54,41 @@ describe('logical MCP toolset dispatch', () => {
       ],
     });
 
-    await started.byok.dispatch({ deviceId: daemon.deviceId,
+    await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
       instruction: 'find qualified leads',
       runtime: 'claude',
       requiredToolsets: ['salesko'],
     });
     const offer = await nextEnvelope(daemon);
 
-    expect(offer.type).toBe('task.offer_with_toolsets');
-    if (offer.type !== 'task.offer_with_toolsets') throw new Error('unreachable');
+    expect(offer.type).toBe('task.offer_for_agent');
+    if (offer.type !== 'task.offer_for_agent') throw new Error('unreachable');
     expect(offer.payload.requiredToolsets).toEqual(['salesko']);
     expect(JSON.stringify(offer)).not.toMatch(/command|args|secret/i);
   });
 
   it('queues declared toolsets without using an advertised inventory as admission authority', async () => {
     const started = await start();
-    const daemon = await connect(started, { capabilities: ['toolset-selection'] });
+    const daemon = await connect(started, { capabilities: ['agent-home-contract', 'toolset-selection'] });
     const handle = await started.byok.dispatch({
+      ...TEST_AGENT_DISPATCH,
       deviceId: daemon.deviceId,
       instruction: 'validate local tools when claimed',
       requiredToolsets: ['salesko'],
     });
     expect(await nextEnvelope(daemon)).toMatchObject({
-      type: 'task.offer_with_toolsets', payload: { requiredToolsets: ['salesko'] },
+      type: 'task.offer_for_agent', payload: { requiredToolsets: ['salesko'] },
     });
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');
   });
 
   it('rejects before task creation when the device did not advertise toolset-selection', async () => {
     const started = await start();
-    const daemon = await connect(started, { capabilities: [] });
+    const daemon = await connect(started, { capabilities: ['agent-home-contract'] });
 
     await expect(
       started.byok.dispatch({
+        ...TEST_AGENT_DISPATCH,
         deviceId: daemon.deviceId,
         instruction: 'must use Salesko',
         requiredToolsets: ['salesko'],
@@ -96,13 +99,13 @@ describe('logical MCP toolset dispatch', () => {
 
   it('runtime-validates malformed and duplicate ids before task creation', async () => {
     const started = await start();
-    const daemon = await connect(started, { capabilities: ['toolset-selection'] });
+    const daemon = await connect(started, { capabilities: ['agent-home-contract', 'toolset-selection'] });
 
     await expect(
-      started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x', requiredToolsets: ['Salesko'] as never }),
+      started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x', requiredToolsets: ['Salesko'] as never }),
     ).rejects.toThrow();
     await expect(
-      started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x', requiredToolsets: ['salesko', 'salesko'] }),
+      started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x', requiredToolsets: ['salesko', 'salesko'] }),
     ).rejects.toThrow();
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
   });

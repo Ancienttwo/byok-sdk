@@ -41,11 +41,9 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
 /**
  * Protocol features this cloud build accepts from a long-poll daemon.
  *
- * This response is the ONLY advertisement a long-poll daemon ever sees — there
- * is no WS `conn.ack` on this transport — and the daemon hard-gates outgoing
- * messages on it (`TaskRunner.sendApprovalResolved` in
- * `packages/client/src/daemon/task-runner.ts`;
- * `AgentEgressController.retryableReliableRecords` in
+ * This response is the ONLY advertisement a long-poll daemon ever sees, and
+ * the daemon hard-gates outgoing messages on it
+ * (`AgentEgressController.retryableReliableRecords` in
  * `packages/client/src/daemon/agent-egress-controller.ts`). An entry
  * missing here is therefore not cosmetic: it silently disables an inbound wire
  * path the kernel already implements.
@@ -55,9 +53,8 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
  * server advertised wholesale). Excluded on purpose, each for a reason:
  *
  * - server-to-daemon message types the daemon never gates on — `steer`,
- *   `interactive-approval`, `approval-targeting`, `toolset-selection`;
+ *   `toolset-selection`;
  * - device-side flags the kernel reads off `conn.hello` instead —
- *   `strict-agent-only` (`assertLegacyAdmission` in `cloud.ts`),
  *   `terminal-projection-selection` (a device-advertised `WIRE_ADDITIONS`
  *   gate, read through `requiredReceiverCapabilities` in `cloud.ts`),
  *   `agent-home-readers` (the Agent offer enqueue gates in `cloud.ts`);
@@ -69,18 +66,15 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
  *   `provider-profile-binding`.
  *
  * `task.complete.document` needs no entry: wire v3 folded the former
- * `result-document` flag into the baseline, so every v3 peer may send it.
+ * `result-document` flag into the baseline, so every peer may send it.
+ * `task.approval_resolved` needs none either: wire v4 folded the former
+ * `approval_resolved` flag into the baseline.
  *
  * Exact-list drift guard: `packages/cloud/src/__tests__/protocol-capabilities.test.ts`.
  */
 export const CLOUD_PROTOCOL_CAPABILITIES = [
   'custom-harness',
   MAILBOX_READ_AHEAD_CAPABILITY,
-  // The kernel's inbound handles `task.approval_resolved` on its plain and
-  // approval-timeline paths (`applyLifecycle`, `approvalTimelineAppendInput`).
-  // Without this flag `TaskRunner.sendApprovalResolved` returns early and a
-  // locally-resolved approval is never reported on the wire at all.
-  'approval_resolved',
   'agent-message-draft',
   'agent-home-contract',
   'agent-home-projection',

@@ -1,3 +1,4 @@
+import type { RuntimeTaskInput } from '../../types';
 import { testExecutionScratch } from './execution-scratch';
 // Test-only native capture fixture adapted from pi-prepared-launcher.test.ts.
 // No production authority: receipt remains ready=false/test_fixture. HTTP only loopback.
@@ -7,7 +8,6 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { TaskOfferPayload } from '@byok-sdk/protocol';
 import { validateInputPreparationLimits, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_VERSION,
   type InputPreparationRequestV1, type InputPreparationReceiptV1, type InputPreparationCompiledPromptSnapshotV1,
   type InputPreparationModelV1 } from '../../input-preparation';
@@ -274,10 +274,10 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
 /** Direct native boundary probe. It never pins/claims a non-ready receipt. */
 export async function startPrepared(prepared: Prepared, overrides: { taskId: string; preparation?: RuntimePreparedLaunchV1 }): Promise<Session> {
   const adapter = new PiAdapter();
-  const offer: TaskOfferPayload = {
+  const offer: RuntimeTaskInput = {
     taskId: overrides.taskId,
     instruction: 'unused on the prepared lane',
-  } as unknown as TaskOfferPayload;
+  } as unknown as RuntimeTaskInput;
   const result = await adapter.prepare({
     offer,
     descriptor: adapter.descriptor,

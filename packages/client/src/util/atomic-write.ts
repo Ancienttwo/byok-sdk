@@ -33,9 +33,8 @@ export interface AtomicWriteOptions {
  * two concurrent `atomicWriteFile` calls targeting the same directory would
  * let one call's temp file clobber another's mid-write, defeating the whole
  * point of writing to a private path first. Combined with `process.pid` so
- * two processes sharing a directory don't collide either. Mirrors
- * `session-workspace-store.ts`'s own `tmpSeq` — this helper generalizes
- * that store's pattern for reuse by `store.ts`/`cursor-store.ts`.
+ * two processes sharing a directory don't collide either. Used by
+ * `store.ts`/`cursor-store.ts`.
  */
 let tmpSeq = 0;
 
@@ -59,8 +58,8 @@ let tmpSeq = 0;
  *    concurrent writers deterministically — the last rename to land wins,
  *    silently, with no lost-update detection. Callers that need that on
  *    top of atomicity (e.g. an in-memory map persisted across many
- *    concurrent callers) still need their own serialization, the way
- *    `session-workspace-store.ts`'s own per-instance queue does.
+ *    concurrent callers) still need their own serialization, such as a
+ *    per-instance queue.
  * 3. **Mode preserved across a replace.** POSIX rename replaces the target
  *    path's directory entry wholesale — the resulting file's mode is the
  *    temp file's mode, not whatever the previously-existing target's mode
@@ -96,9 +95,8 @@ let tmpSeq = 0;
  *
  * The caller is responsible for ensuring the parent directory of `filePath`
  * already exists (e.g. via `fs.mkdir(dir, { recursive: true })`) — this
- * helper does not create it, mirroring `DeviceStore`/`CursorStore`/
- * `SessionWorkspaceStore`, which all do that themselves with their own
- * directory mode.
+ * helper does not create it, mirroring `DeviceStore`/`CursorStore`, which
+ * both do that themselves with their own directory mode.
  */
 export async function atomicWriteFile(
   filePath: string,

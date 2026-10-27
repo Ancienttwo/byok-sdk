@@ -21,7 +21,6 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentReliableSpool } from '../daemon/agent-egress-spool';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import {
   AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS,
   TaskRunner,
@@ -412,7 +411,6 @@ describe('SDK-owned Agent home contract', () => {
   it('passes the sealed canonical Agent home to the runtime adapter and persists terminal evidence', async () => {
     const hostStorageRoot = await makeRoot();
     const storeDir = await makeRoot();
-    const workspaceRoot = await makeRoot();
     const adapter = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
@@ -431,13 +429,11 @@ describe('SDK-owned Agent home contract', () => {
     };
     const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot,
       agentHome,
       agentSessionHandoffs: handoffs,
       deviceId: 'device-1',
       send: (envelope) => sent.push(envelope),
       blobClient,
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',
@@ -473,7 +469,6 @@ describe('SDK-owned Agent home contract', () => {
     const sent: Envelope[] = [];
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       // #317: concurrent sessions in ONE canonical home are memory-reader
@@ -485,7 +480,6 @@ describe('SDK-owned Agent home contract', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',
@@ -560,7 +554,6 @@ describe('SDK-owned Agent home contract', () => {
     });
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: handoffs,
       deviceId: 'device-1',
@@ -569,7 +562,6 @@ describe('SDK-owned Agent home contract', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',
@@ -612,7 +604,6 @@ describe('SDK-owned Agent home contract', () => {
     });
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: handoffs,
       deviceId: 'device-1',
@@ -621,7 +612,6 @@ describe('SDK-owned Agent home contract', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',
@@ -673,7 +663,6 @@ describe('SDK-owned Agent home contract', () => {
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot: await makeRoot(),
       agentHome,
       agentSessionHandoffs: handoffs,
       deviceId: 'device-1',
@@ -682,7 +671,6 @@ describe('SDK-owned Agent home contract', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',
@@ -724,7 +712,6 @@ describe('SDK-owned Agent home contract', () => {
     const agentRef = ref('agent-permanent-prestart-failure', 'profile-1');
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot: await makeRoot(),
       agentHome,
       agentSessionHandoffs: handoffs,
       deviceId: 'device-1',
@@ -733,7 +720,6 @@ describe('SDK-owned Agent home contract', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',
@@ -768,7 +754,6 @@ describe('SDK-owned Agent home contract', () => {
     const agentRef = ref('agent-permanent-active-failure', 'profile-1');
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot: await makeRoot(),
       agentHome,
       agentSessionHandoffs: handoffs,
       deviceId: 'device-1',
@@ -777,7 +762,6 @@ describe('SDK-owned Agent home contract', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',
@@ -803,7 +787,6 @@ describe('SDK-owned Agent home contract', () => {
   it('declines profile-revision and cross-Agent resume before projection or adapter start', async () => {
     const hostStorageRoot = await makeRoot();
     const storeDir = await makeRoot();
-    const workspaceRoot = await makeRoot();
     let projectionCalls = 0;
     const manager = new AgentHomeManager({
       hostStorageRoot,
@@ -825,7 +808,6 @@ describe('SDK-owned Agent home contract', () => {
     const sent: Envelope[] = [];
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot,
       agentHome: manager,
       agentSessionHandoffs: handoffs,
       deviceId: 'device-1',
@@ -834,7 +816,6 @@ describe('SDK-owned Agent home contract', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',
@@ -875,7 +856,6 @@ describe('SDK-owned Agent home contract', () => {
     const agentRef = ref('agent-release-conflict', 'profile-1');
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot: await makeRoot(),
       agentHome: manager,
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-1',
@@ -884,7 +864,6 @@ describe('SDK-owned Agent home contract', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',

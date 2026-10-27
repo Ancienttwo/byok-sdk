@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hermesProviderModel, parseHermesProviderLauncherRequest, runHermesProviderLauncher } from '../hermes-provider-launcher';
-import { parseModelProviderProfile, exactProviderProfileBinding } from '../provider-profile';
+import { parseModelProviderProfile } from '../provider-profile';
+import { exactProviderProfileBinding } from '../provider-profile-binding';
 import { SqliteProviderProfileStore } from '../sqlite-profile-store';
 
 const profile = parseModelProviderProfile({ created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z', adapter: 'openai_compatible', auth_mode: 'bearer', base_url: 'https://example.test/v1', capabilities: [], display_name: 'Fake', enabled: true, kind: 'model', model: 'fake-model', profile_ref: 'custom', provider_kind: 'custom' });

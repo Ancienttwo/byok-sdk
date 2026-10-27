@@ -12,7 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
+import type { RuntimeTaskInput } from '../../../types';
 import { GrokAdapter } from '../grok-adapter';
 import { observeRuntimeDetection } from '../../../runtime-detection';
 import type { Session } from '../../../types';
@@ -62,7 +63,7 @@ async function ctx(): Promise<PreparedOperationResources & { log: string }> {
 function facts(log: string): Array<Record<string, any>> {
   return readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 }
-async function open(a: GrokAdapter, offer: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
+async function open(a: GrokAdapter, offer: RuntimeTaskInput, resources: PreparedOperationResources): Promise<Session> {
   const session = await startPreparedOperation(a, offer, resources);
   sessions.push(session);
   return session;

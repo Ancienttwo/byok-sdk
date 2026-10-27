@@ -16,7 +16,7 @@ export interface RetentionSnapshot {
 export function unmeasuredRetentionSnapshot(): RetentionSnapshot {
   return { measuredAt: null, usedBytes: 0, freeBytes: null, lastSweep: null,
     classes: [...EXPIRING_CLASS_IDS, ...PROTECTED_CLASS_IDS].map(classId => ({ classId,
-      protected: PROTECTED_CLASS_IDS.includes(classId as typeof PROTECTED_CLASS_IDS[number]), measured: false, bytes: 0, entries: 0, oldestAgeMs: null })) };
+      protected: PROTECTED_CLASS_IDS.includes(classId as typeof PROTECTED_CLASS_IDS[number]), measured: false, truncated: false, bytes: 0, entries: 0, oldestAgeMs: null })) };
 }
 export interface RetentionSweeperOptions {
   readonly config: ResolvedStorageConfig;

@@ -25,7 +25,7 @@ import {
   replaceSecretRequest,
 } from './fixtures/provisioning-requests';
 import { InMemoryProviderProfileStore, type ProviderProfileStore } from './profile-store';
-import { exactProviderProfileBinding } from './provider-profile';
+import { exactProviderProfileBinding } from './provider-profile-binding';
 import {
   applySealedProviderProvisioning,
   readSealedProvisioningResult,

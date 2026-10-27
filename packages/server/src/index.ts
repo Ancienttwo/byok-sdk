@@ -42,7 +42,6 @@ import {
   AgentRefSchema,
   DispatchSelectionSchema,
   RequiredToolsetsSchema,
-  STRICT_AGENT_ONLY_CAPABILITY,
   TASK_STATES,
   TerminalProjectionSelectionSchema,
   AgentHomeAccessSchema,
@@ -58,7 +57,7 @@ import {
 import { TaskEventRelay } from './relay';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
-import { createTaskHandle } from './task-handle';
+import { approvePendingApproval, createTaskHandle, rejectPendingApproval } from './task-handle';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -70,7 +69,6 @@ import type {
   CreateByokServerOptions,
   DispatchInput,
   HubStats,
-  LegacyDispatchInput,
   MachineInfo,
   TaskHandle,
   TaskResult,
@@ -88,7 +86,6 @@ export type {
   CreateByokServerOptions,
   DispatchInput,
   HubStats,
-  LegacyDispatchInput,
   MachineInfo,
   ServerTaskEvent,
   TaskHandle,
@@ -126,6 +123,9 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
+// One-shot wire v3 -> v4 receipt migration (#925), operator-invoked. Shipped in
+// 0.31.x only; the next minor removes it.
+export { migrateSqliteToWireV4, preflightSqliteWireV4Migration } from './stores/sqlite/wire-v4-receipt-migration';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 
@@ -232,6 +232,14 @@ export interface ByokServer {
     messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
     /** Request cancellation through the kernel without a process-owned TaskHandle. */
     cancel(taskId: string, reason?: string): Promise<void>;
+    /**
+     * Approve the task's pending approval without a process-owned TaskHandle,
+     * such as a task `executions.submit` created. The same decision and
+     * refusals as {@link TaskHandle.approve}.
+     */
+    approve(taskId: string, opts?: { approvalId?: string }): Promise<void>;
+    /** Reject the task's pending approval; the same decision and refusals as {@link TaskHandle.reject}. */
+    reject(taskId: string, reason?: string, opts?: { approvalId?: string }): Promise<void>;
     /**
      * One bounded page, keyset-paged by task id. Paged rather than "all of
      * them" because the underlying store is: an unbounded `list()` would have
@@ -439,73 +447,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     return attempt === undefined ? undefined : (await projectTask(attempt)).state;
   }
 
-  /**
-   * M4 Phase 3 hardening: the daemon resolved a pending approval entirely
-   * locally and never sent `task.approval_resolved`, but its next
-   * progress/artifact message proves, after the fact, that it did. Recorded on
-   * the same timeline as any other resolution so the read model resumes, and
-   * announced as `task.approval_resolved_implicit` so an embedder can tell the
-   * inferred path from the reported one.
-   *
-   * Runs off the relay's request path, not on it: it needs a store read, and
-   * the kernel's observer contract is synchronous and inline. A failure here
-   * changes nothing durable — the next message re-runs the same check.
-   */
-  relay.onTaskActivity = (
-    taskId: string,
-    pendingRequestSourceEnvelopeId: string | undefined,
-    activitySourceEnvelopeId: string,
-    activityAt: string,
-  ): void => {
-    void (async () => {
-      // The relay captured this request identity when it observed the native
-      // `task.await_approval`. An activity that committed before that request
-      // is therefore never retroactively allowed to resolve it after an async
-      // timeline read observes the newer pending slot.
-      if (pendingRequestSourceEnvelopeId === undefined) return;
-      const pending = await readPending(taskId);
-      if (
-        pending === undefined ||
-        pending.sourceEnvelopeId !== pendingRequestSourceEnvelopeId
-      ) {
-        return;
-      }
-      const attempt = await cloud.readTaskAttempt(tenant, taskId);
-      if (attempt === undefined) return;
-      const sourceEnvelopeId = await composition.crypto.sha256(
-        new TextEncoder().encode(
-          JSON.stringify({
-            domain: 'byok:implicit-approval',
-            tenant,
-            taskId,
-            deviceId: attempt.deviceId,
-            ownerDeviceId: attempt.ownerDeviceId,
-            agentRef: attempt.agentRef,
-            requestSourceEnvelopeId: pending.sourceEnvelopeId,
-            requestRevision: pending.revision,
-            activitySourceEnvelopeId,
-          }),
-        ),
-      );
-      const resolved = await composition.cloud.approvals.resolvePending(tenant, {
-        taskId,
-        sourceEnvelopeId,
-        expectedSourceEnvelopeId: pending.sourceEnvelopeId,
-        expectedRevision: pending.revision,
-        event: {
-          type: 'approval_resolved',
-          ...(pending.approvalId === undefined ? {} : { approvalId: pending.approvalId }),
-          decision: 'approve',
-          resolvedBy: 'host',
-          at: activityAt,
-        },
-      });
-      if (resolved.status === 'applied' || resolved.status === 'replayed') {
-        relay.emitImplicitApprovalResolved(taskId, activityAt);
-      }
-    })().catch(() => undefined);
-  };
-
   async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {
     return (await composition.cloud.devices.get(tenant, deviceId))?.capabilities;
   }
@@ -538,8 +479,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   async function dispatchInternal(
     input: DispatchInput,
   ): Promise<TaskHandle> {
-    const sessionRef = 'sessionRef' in input ? input.sessionRef : undefined;
-    const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
+    const sessionRef = input.sessionRef;
+    // v4 has no runtime-only offer: every dispatch names its Agent.
+    const agentRef = AgentRefSchema.parse(input.agentRef);
     const egressPolicy =
       input.egressPolicy === undefined ? undefined : AgentEgressPolicySchema.parse(input.egressPolicy);
     const messageEgress =
@@ -552,13 +494,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       throw new Error('agentMessageContext requires messageEgress');
     }
     const homeAccess = input.homeAccess === undefined ? undefined : AgentHomeAccessSchema.parse(input.homeAccess);
-    if (homeAccess !== undefined && agentRef === undefined) {
-      throw new Error('homeAccess requires an explicit AgentRef; legacy task dispatch has no Agent home');
-    }
     const agentMemory = input.agentMemory === undefined ? undefined : AgentMemorySelectionSchema.parse(input.agentMemory);
-    if (agentMemory !== undefined && agentRef === undefined) {
-      throw new Error('agentMemory requires an explicit AgentRef; legacy task dispatch has no Agent memory');
-    }
     refuseReaderMemoryWrite(agentMemory, homeAccess);
     const agentMessageContext =
       messageEgress === undefined ? undefined : AgentMessageServerContextSchema.parse(input.agentMessageContext);
@@ -567,9 +503,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     const requiredToolsets =
       input.requiredToolsets === undefined ? undefined : RequiredToolsetsSchema.parse(input.requiredToolsets);
 
-    if (egressPolicy !== undefined && agentRef === undefined) {
-      throw new Error('Agent egress policy requires an explicit AgentRef; legacy task dispatch cannot consume it');
-    }
     if (messageEgress !== undefined && egressPolicy === undefined) {
       throw new Error('Agent message egress requires the typed Agent egress offer path');
     }
@@ -579,21 +512,17 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       throw new Error('dispatch requires an explicit deviceId (non-empty string)');
     }
 
-    // Agent resume is resume-only (#484): a fresh Agent execution has the single
-    // authority executions.submit. Refused before any capability read, so the
-    // caller gets this error whatever the target device advertises.
-    let agentResume: { agentRef: AgentRef; sessionRef: string } | undefined;
-    if (agentRef !== undefined && egressPolicy === undefined) {
-      if (sessionRef === undefined || sessionRef.length === 0) {
-        throw new Error(
-          'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
-        );
-      }
-      agentResume = { agentRef, sessionRef };
+    // Agent dispatch is resume-only (#484): a fresh Agent execution has the
+    // single authority executions.submit. Refused before any capability read,
+    // so the caller gets this error whatever the target device advertises.
+    if (egressPolicy === undefined && (sessionRef === undefined || sessionRef.length === 0)) {
+      throw new Error(
+        'Agent resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
+      );
     }
 
     // The gates the kernel does not run, in the pre-fold order. Everything
-    // below the kernel DOES run (strict-agent-only, agent-home-contract, the
+    // below the kernel DOES run (agent-home-contract, the
     // egress/message/terminal-projection capabilities) is left to it rather
     // than duplicated here, so there is one place each admission is decided.
     const capabilities = await deviceCapabilities(deviceId);
@@ -618,12 +547,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         `dispatch runtime ${input.runtime} does not match dispatchSelection.runtimeId ${dispatchSelection.runtimeId}`,
       );
     }
-    if (agentRef === undefined && capabilities?.includes(STRICT_AGENT_ONLY_CAPABILITY) === true) {
-      throw new Error(
-        `device ${deviceId} advertises strict-agent-only; legacy task dispatch is refused before enqueue`,
-      );
-    }
-
     const runtime = dispatchSelection?.runtimeId ?? input.runtime;
     const common = {
       ...(input.harnessId === undefined ? {} : { harnessId: input.harnessId }),
@@ -640,12 +563,12 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     let enqueued: EnqueuedOffer;
     try {
       enqueued = await (async () => {
-        if (agentRef !== undefined && egressPolicy !== undefined) {
-          if (sessionRef === undefined) {
-            throw new Error(
-              'Agent egress resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
-            );
-          }
+        if (sessionRef === undefined) {
+          throw new Error(
+            'Agent egress resume dispatch requires an exact sessionRef; use executions.submit for fresh execution',
+          );
+        }
+        if (egressPolicy !== undefined) {
           return cloud.enqueueAgentEgressOffer(tenant, deviceId, {
             taskId,
             payload: {
@@ -662,29 +585,17 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
             ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
           });
         }
-        if (agentResume !== undefined) {
-          return cloud.enqueueAgentOffer(tenant, deviceId, {
-            taskId,
-            payload: {
-              ...common,
-              agentRef: agentResume.agentRef,
-              sessionRef: agentResume.sessionRef,
-              ...(terminalProjection === undefined ? {} : { terminalProjection }),
-              ...(homeAccess === undefined ? {} : { homeAccess }),
-              ...(agentMemory === undefined ? {} : { agentMemory }),
-              ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
-            },
-          });
-        }
-        if (requiredToolsets !== undefined) {
-          return cloud.enqueueToolsetOffer(tenant, deviceId, {
-            taskId,
-            payload: { ...common, ...(sessionRef === undefined ? {} : { sessionRef }), requiredToolsets },
-          });
-        }
-        return cloud.enqueueOffer(tenant, deviceId, {
+        return cloud.enqueueAgentOffer(tenant, deviceId, {
           taskId,
-          payload: { ...common, ...(sessionRef === undefined ? {} : { sessionRef }) },
+          payload: {
+            ...common,
+            agentRef,
+            sessionRef,
+            ...(terminalProjection === undefined ? {} : { terminalProjection }),
+            ...(homeAccess === undefined ? {} : { homeAccess }),
+            ...(agentMemory === undefined ? {} : { agentMemory }),
+            ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+          },
         });
       })();
     } catch (error) {
@@ -878,6 +789,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
           relay.noteHostTransition(taskId, 'Cancelled', attempt.cancellation.requestedAt);
         }
       },
+      approve(taskId, opts) { return approvePendingApproval({ tenant, cloud, relay }, taskId, opts); },
+      reject(taskId, reason, opts) { return rejectPendingApproval({ tenant, cloud, relay }, taskId, reason, opts); },
       async get(taskId: string): Promise<TaskSnapshot | undefined> {
         const attempt = await cloud.readTaskAttempt(tenant, taskId);
         return attempt === undefined ? undefined : projectTask(attempt);

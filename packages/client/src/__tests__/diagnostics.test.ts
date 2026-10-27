@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -49,7 +50,7 @@ function config(storeDir: string): DaemonConfig {
     productName: 'Acme',
     productId: 'acme-product',
     serverUrl: 'https://example.invalid/byok',
-    workspaceRoot: path.join(storeDir, 'workspace'),
+    agentHome: testAgentHomeConfig(),
     storeDir,
   };
 }
@@ -145,15 +146,6 @@ describe('diagnostics collector', () => {
     const live = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected() });
     expect(live.lifecycle).toEqual({ status: 'known', source: 'live', lifecycle: { phase: 'running', connection: 'open' } });
     expect(live.checks.find((check) => check.id === 'lifecycle')?.status).toBe('pass');
-  });
-
-  it('reports a strict Agent daemon without workspaceRoot as not-configured, not missing (#319)', async () => {
-    const dir = await tempDir();
-    const { workspaceRoot: _unused, ...rest } = config(dir);
-    const snapshot = await collectDiagnostics({ ...rest, strictAgentOnly: true }, dir, { adapters: [], connectControl: unreachable });
-
-    expect(snapshot.workspace).toEqual({ status: 'not-configured' });
-    expect(snapshot.checks.find((check) => check.id === 'workspace')?.status).toBe('pass');
   });
 
   it('reports a corrupt health file without changing its bytes', async () => {

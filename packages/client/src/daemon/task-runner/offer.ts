@@ -3,7 +3,6 @@
 import type { ExecutionScratch } from '../retention/scratch';
 import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home';
-import type { GitWorkspaceLease } from '../git-workspace';
 import type { OfferPhaseContext } from './support';
 import { offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
@@ -15,7 +14,6 @@ import { sealOfferManifest, claimOffer, startOfferRuntime } from './offer-launch
 export interface OfferHeld {
   owner: 'offer' | 'startup' | 'active';
   agentBinding?: AgentHomeExecutionBinding;
-  gitLease?: GitWorkspaceLease;
 }
 export type OfferRequest = NonNullable<ReturnType<typeof readOfferRequest>>;
 export type OfferLimits = NonNullable<ReturnType<TaskRunner['admitOfferLimits']>>;
@@ -28,11 +26,10 @@ export async function handleOffer(
   this: TaskRunner,
   taskId: string,
   payload: AcceptedOfferPayload,
-  strictAgentOffer: boolean,
 ): Promise<void> {
   // Finding P2, Fix 2c (redelivered offer for an already-active/finished
   // task): checked first, ahead of everything below — a redelivered
-  // `task.offer` for a taskId this device already claimed/started, or
+  // offer for a taskId this device already claimed/started, or
   // already finished, can never be "the first time" for it, so there is
   // nothing left to decide. Without this, the stalled-cursor long-poll
   // re-pull (see `ConnectionManager.dedupWatermark`) redelivering this
@@ -43,7 +40,7 @@ export async function handleOffer(
     return;
   }
 
-  const request = readOfferRequest.call(this, taskId, payload, strictAgentOffer);
+  const request = readOfferRequest.call(this, taskId, payload);
   if (request === undefined) return;
   const {
     agentRef, decline, sessionRef, homeAccess, readerAttempt, homeBusyCode, preparation, agentMemory,
@@ -147,7 +144,7 @@ export async function handleOffer(
     taskId, decline, admissionWithdrawn, admissionSignal: blobAbort.signal, releaseReservation, reserveHome,
   };
   try {
-    if (this['admitOffer'](phase, strictAgentOffer) === undefined) return;
+    if (this['admitOffer'](phase) === undefined) return;
 
     if (agentRef !== undefined) {
       if (await this['reserveOfferHome'](phase, agentRef, readerAttempt, sessionRef, homeAccess) === undefined) return;
@@ -173,32 +170,30 @@ export async function handleOffer(
       agentRef, readerAttempt, sessionRef, homeAccess, homeBusyCode, pick, messageRequirement, terminalProjection,
     });
     if (workspace === undefined) return;
-    const { agentBinding, gitLease } = held;
-    const { known, gitExisting, plainWorkspaceNeedsResolve, appliedAgentHomeProjection, readerMemoryBaseline } = workspace;
-    let { workspaceDir, gitWorkspaceId, gitBaseline } = workspace;
+    const { agentBinding } = held;
+    const { workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline } = workspace;
 
     const sealed = await sealOfferManifest.call(this, phase, {
-      agentBinding, gitLease, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
-      mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, known, workspaceDir, gitWorkspaceId,
-      gitBaseline, blobAbort, preparationLane, terminalProjection,
+      agentBinding, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
+      mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, workspaceDir, blobAbort,
+      preparationLane, terminalProjection,
     });
     if (sealed === undefined) return;
     const { runtimeLaunch, manifest, preparedLaunch, preparedObservation } = sealed;
 
     const claimed = await claimOffer.call(this, phase, {
-      agentBinding, gitLease, agentRef, sessionRef, pick, known, gitExisting, plainWorkspaceNeedsResolve, manifest, preparedLaunch,
-      blobAbort, payload, workspaceDir, gitWorkspaceId, gitBaseline, taskMcpServers,
+      agentBinding, agentRef, pick, manifest, preparedLaunch, blobAbort, payload, taskMcpServers,
     });
     if (claimed === undefined) return;
     const { resolvedInstruction } = claimed;
-    ({ workspaceDir, gitWorkspaceId, gitBaseline, taskMcpServers } = claimed);
+    ({ taskMcpServers } = claimed);
 
     await startOfferRuntime.call(this, phase, held, {
-      agentBinding, gitLease, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
-      preparedLaunch, runtimeLaunch, resolvedInstruction, gitWorkspaceId, taskMcpServers, blobAbort, startupDeadline,
+      agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
+      preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline,
     }, {
-      agentBinding, gitLease, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
-      workspaceDir, gitWorkspaceId, gitBaseline, blobAbort, payload, messageRequirement, terminalProjection,
+      agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
+      workspaceDir, blobAbort, payload, messageRequirement, terminalProjection,
     });
   } finally {
     clearTimeout(startupTimer);
@@ -224,7 +219,6 @@ export async function handleOffer(
         this['revokeAgentMemoryContext'](taskId);
         this['deleteHostToolsetContexts'](taskId);
         await held.agentBinding?.lease.release().catch(() => {});
-        held.gitLease?.release();
         await this['releasePreparationPin'](taskId);
       }
       // An active task's Session owns the runtime launch. The projection
@@ -247,24 +241,22 @@ export async function handleOffer(
   }
 }
 
-function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOfferPayload, strictAgentOffer: boolean) {
+function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOfferPayload) {
   let agentRef: AgentRef | undefined;
-  if (strictAgentOffer) {
-    try {
-      agentRef = offeredAgentRef(payload);
-    } catch (error) {
-      this['decline'](taskId, `invalid AgentRef: ${errorMessage(error)}`, false);
-      return;
-    }
-    if (agentRef === undefined || this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
-      this['decline'](
-        taskId,
-        'Agent offer requires the SDK-owned agent-home-contract layout and handoff store',
-        false,
-        agentRef,
-      );
-      return;
-    }
+  try {
+    agentRef = offeredAgentRef(payload);
+  } catch (error) {
+    this['decline'](taskId, `invalid AgentRef: ${errorMessage(error)}`, false);
+    return;
+  }
+  if (agentRef === undefined || this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
+    this['decline'](
+      taskId,
+      'Agent offer requires the SDK-owned agent-home-contract layout and handoff store',
+      false,
+      agentRef,
+    );
+    return;
   }
   const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']): void => {
     this['decline'](taskId, reason, retryable, agentRef, code);

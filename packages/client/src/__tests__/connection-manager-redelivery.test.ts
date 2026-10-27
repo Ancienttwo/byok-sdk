@@ -1,3 +1,4 @@
+import { freshTestAgentRef } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -49,9 +50,8 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     const cursorStore = new CursorStore(storeDir);
 
     const received: Envelope[] = [];
-    // Counts only `task.offer` calls — `onEnvelope` also fires for `conn.ack`
-    // (F2: it's just never cursor-tracked), which would otherwise throw off
-    // this test's "exactly once, then again on redelivery" expectations.
+    // Counts only offer calls, for this test's "exactly once, then again on
+    // redelivery" expectations.
     let offerCallCount = 0;
     let shouldThrow = true;
 
@@ -64,7 +64,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       auth,
       cursorStore,
       onEnvelope: async (envelope) => {
-        if (envelope.type !== 'task.offer') return;
+        if (envelope.type !== 'task.offer_for_agent') return;
         offerCallCount += 1;
         if (shouldThrow) {
           shouldThrow = false; // throws exactly once
@@ -78,15 +78,15 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     await waitForOpen(connection);
 
     const taskId = 'task-flaky-handler';
-    // `server.nextSeq()` (not a hardcoded literal): `conn.ack` already
-    // consumed seq 1 during the handshake above, so this must be strictly
-    // higher — a colliding/lower seq here would trip the (correct) F2 dedupe
-    // check before `onEnvelope` is ever reached, which is a different
-    // finding than the one this test is isolating.
+    // `server.nextSeq()` (not a hardcoded literal): the seq must be strictly
+    // higher than any the server already used — a colliding/lower seq here
+    // would trip the (correct) F2 dedupe check before `onEnvelope` is ever
+    // reached, which is a different finding than the one this test is
+    // isolating.
     const offerSeq = server.nextSeq();
     const offer = createEnvelope(
-      'task.offer',
-      { instruction: 'x' },
+      'task.offer_for_agent',
+      { agentRef: freshTestAgentRef(),  instruction: 'x' },
       { taskId, seq: offerSeq },
     );
     server.send(offer);
@@ -109,7 +109,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     server.send(offer);
 
     await vi.waitFor(() => expect(offerCallCount).toBe(2));
-    expect(received.map((e) => e.type)).toEqual(['task.offer']);
+    expect(received.map((e) => e.type)).toEqual(['task.offer_for_agent']);
 
     // Now that the handler succeeded, the cursor advances and persists.
     await vi.waitFor(async () => {
@@ -128,7 +128,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
       productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
       onEnvelope: async (envelope) => {
-        if (envelope.type !== 'task.offer') return;
+        if (envelope.type !== 'task.offer_for_agent') return;
         const n = Number(envelope.task_id);
         const count = (attempts.get(n) ?? 0) + 1;
         attempts.set(n, count);
@@ -137,7 +137,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     });
     await connection.start();
     await waitForOpen(connection);
-    const offers = [1, 2, 3].map(n => createEnvelope('task.offer', {
+    const offers = [1, 2, 3].map(n => createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
       instruction: 'finite backlog',
     }, { taskId: String(n), seq: server.nextSeq() }));
     offers.forEach(offer => server.send(offer));
@@ -163,10 +163,10 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     const effect = vi.fn();
     connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
       productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
-      onEnvelope: async e => { if (e.type === 'task.offer') effect(); },
+      onEnvelope: async e => { if (e.type === 'task.offer_for_agent') effect(); },
     });
     await connection.start(); await waitForOpen(connection);
-    const offer = createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'a', seq: server.nextSeq() });
+    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'a', seq: server.nextSeq() });
     server.send(offer);
     await vi.waitFor(() => expect(effect).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(cursorStore.save).toHaveBeenCalledWith(server.url, record.deviceId, offer.seq));
@@ -176,7 +176,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     expect(effect).toHaveBeenCalledTimes(1);
   });
 
-  it('tracks agent.egress.ack and agent.content.read while excluding conn.ack, then retries a failed content read', async () => {
+  it('tracks agent.egress.ack and agent.content.read, then retries a failed content read', async () => {
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-cm-content-cursor-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
@@ -202,7 +202,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     await connection.start();
     await waitForOpen(connection);
 
-    // The handshake's conn.ack has a seq but must never be cursor-tracked.
+    // The handshake moves no cursor.
     await expect(cursorStore.load(server.url, record.deviceId)).resolves.toBeUndefined();
 
     const ackSeq = server.nextSeq();

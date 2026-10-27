@@ -28,7 +28,6 @@ import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runToolsetsReloadCommand } from './commands/toolsets';
 import { runTeamCreateCommand, runTeamJoinCommand, runTeamListCommand, runTeamOpenCommand, runTeamWatchCommand } from './commands/team';
 import { runUnpairCommand } from './commands/unpair';
-import { runWorkspacesCommand } from './commands/workspaces';
 import { runVersionCommand } from './version';
 
 /**
@@ -109,7 +108,6 @@ function usage(): never {
       '  byok-agent team relay <workspace> --bindings <private-absolute.json> --codex-bin <absolute> --max-notifications <1..100> --config <path>',
       '  byok-agent team watch <workspace> --config <path>',
       '  byok-agent team open <workspace> --tmux-bin <absolute> [--session <name>] --config <path>',
-      '  byok-agent workspaces [--show-paths] [--config <path>]',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
       '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
       '  byok-agent approve <approvalId> [--config <path>]',
@@ -286,11 +284,6 @@ async function main(): Promise<void> {
       return runTeamOpenCommand({ config, configPath, workspaceId, tmuxBin, sessionName: argValue(rest, '--session') });
     }
     usage();
-  }
-
-  if (command === 'workspaces') {
-    const config = loadConfig(configPathFrom(rest));
-    return runWorkspacesCommand(config, { showPaths: hasFlag(rest, '--show-paths') });
   }
 
   if (command === 'unpair') {

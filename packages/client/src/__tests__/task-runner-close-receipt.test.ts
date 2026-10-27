@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -5,7 +6,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -29,21 +29,20 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
   const sent: Envelope[] = [];
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: path.join(directory, 'workspace'),
+    ...testAgentHomeDeps(),
     deviceId: 'close-receipt-device',
     send: envelope => { sent.push(envelope); },
     blobClient: {
       resolveInstruction: async () => { throw new Error('unused'); },
       uploadArtifact: async () => { throw new Error('unused'); },
     },
-    sessionWorkspaces: new SessionWorkspaceStore(path.join(directory, 'store')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: directory,
     productId: 'close-receipt-product',
     ...overrides,
   });
   const taskId = 'close-receipt-task';
-  await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'run' }, { taskId, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run' }, { taskId, seq: 1 }));
   const session = adapter.sessions[0]!;
   const terminals = () => sent.filter(event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type));
   return { runner, session, taskId, terminals };

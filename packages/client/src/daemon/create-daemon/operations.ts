@@ -1,4 +1,3 @@
-import { createEnvelope } from '@byok-sdk/protocol';
 import type { DaemonEventListener, Unsubscribe, DaemonTaskInfo } from '../observer';
 import type { McpToolsetConfig, McpToolsetReloadReceipt, McpToolsetObservation } from '../../types';
 import type { DaemonScope } from './scope';
@@ -9,25 +8,18 @@ import type { DaemonScope } from './scope';
  * M3-2a: local approve/reject — see the `Daemon` interface's own doc
  * comments on {@link Daemon.approve}/{@link Daemon.reject} for the full
  * rationale (honest-but-currently-unexercised; every bundled adapter's
- * `resolveApproval` throws unconditionally today). Constructs the exact
- * envelope shape a server-sent `task.approve`/`task.reject` would be and
- * feeds it straight to `runner.handleEnvelope` — `TaskRunner`'s only public
- * entry point — rather than reaching into its private `handleApprove`/
- * `handleReject`. `seq: 0` is an inert local sentinel: this call never
- * passes through `ConnectionManager`, so nothing ever reads it as a real
- * redelivery cursor value, and `TaskRunner` itself only ever reads
- * `task_id`/`payload` off an approve/reject envelope, never `seq`.
+ * `resolveApproval` throws unconditionally today).
  */
-export async function approve(daemonScope: DaemonScope, taskId: string): Promise<void> {
+export async function approve(daemonScope: DaemonScope, taskId: string, opts: { approvalId: string }): Promise<void> {
   const { daemonState } = daemonScope;
   if (!daemonState.runner) throw new Error('daemon is not started; call start() first');
-  await daemonState.runner.handleEnvelope(createEnvelope('task.approve', {}, { taskId, seq: 0 }));
+  await daemonState.runner.resolveApprovalLocally(taskId, opts.approvalId, 'approve');
 }
 
-export async function reject(daemonScope: DaemonScope, taskId: string, reason?: string): Promise<void> {
+export async function reject(daemonScope: DaemonScope, taskId: string, opts: { approvalId: string; reason?: string }): Promise<void> {
   const { daemonState } = daemonScope;
   if (!daemonState.runner) throw new Error('daemon is not started; call start() first');
-  await daemonState.runner.handleEnvelope(createEnvelope('task.reject', { reason }, { taskId, seq: 0 }));
+  await daemonState.runner.resolveApprovalLocally(taskId, opts.approvalId, 'reject', opts.reason);
 }
 
 export function subscribe(daemonScope: DaemonScope, listener: DaemonEventListener): Unsubscribe {

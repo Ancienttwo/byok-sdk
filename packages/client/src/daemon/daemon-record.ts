@@ -1,6 +1,5 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
-import { GIT_ERROR_CATEGORIES } from './git-workspace';
 import { MAX_TRACKED_TASKS, type AssertionLane, type DaemonEvent } from './observer';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentStatus, type ServiceEnvironmentRecord, type ServiceEnvironmentUnavailableCode } from '../lifecycle/service-environment';
 import type { RuntimeObservation } from '../runtime-detection';
@@ -50,17 +49,6 @@ export type DaemonRecord =
   | { kind: 'shutdown-requested'; ts: string; reasonBytes: number }
   | { kind: 'shutdown-complete'; ts: string; reasonBytes: number; undeliveredOutboxCount?: number }
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reasonBytes?: number }
-  | {
-      kind: 'git-workspace';
-      ts: string;
-      taskId: string;
-      workspaceId: string;
-      phase: string;
-      headChanged?: boolean;
-      commitsSinceBaseline?: number;
-      dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number };
-      errorCategory?: string;
-    }
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reasonBytes: number }
   /** Already content-free: counts and closed codes (`execution-record.ts`). */
   | Extract<DaemonEvent, { kind: 'execution-record' }>
@@ -119,7 +107,6 @@ const KIND_SET: Record<DaemonRecordKind, true> = {
   'shutdown-requested': true,
   'shutdown-complete': true,
   'stale-approval-decision': true,
-  'git-workspace': true,
   'runtime-disposal-failed': true,
   'execution-record': true,
   'agent-memory-intent-integrity': true,
@@ -142,15 +129,6 @@ export interface DaemonRecordProjector {
   /** Closes every open turn (`closedBy: 'stop'`) — call once the daemon has stopped. */
   flush(ts: string): DaemonRecord[];
 }
-
-/**
- * Git failures are recorded only from this closed set, projected from
- * `GIT_ERROR_CATEGORIES` (`git-workspace.ts`), never as raw Git errors.
- *
- * @internal Exported for the drift-guard test only (never re-exported from
- * `index.ts`).
- */
-export const STABLE_GIT_ERROR_CATEGORIES = new Set<string>(GIT_ERROR_CATEGORIES);
 
 function bytes(text: string): number {
   return Buffer.byteLength(text, 'utf8');
@@ -337,22 +315,6 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
         taskId: event.taskId,
         decision: event.decision,
         ...(event.reason === undefined ? {} : { reasonBytes: bytes(event.reason) }),
-      };
-    case 'git-workspace':
-      // Paths, commit ids, filenames, messages and raw Git output never cross
-      // into the event; the error category is kept only from the closed set.
-      return {
-        kind: 'git-workspace',
-        ts,
-        taskId: event.taskId,
-        workspaceId: event.workspaceId,
-        phase: event.phase,
-        ...(event.headChanged === undefined ? {} : { headChanged: event.headChanged }),
-        ...(event.commitsSinceBaseline === undefined ? {} : { commitsSinceBaseline: event.commitsSinceBaseline }),
-        ...(event.dirty === undefined ? {} : { dirty: event.dirty }),
-        ...(event.errorCategory !== undefined && STABLE_GIT_ERROR_CATEGORIES.has(event.errorCategory)
-          ? { errorCategory: event.errorCategory }
-          : {}),
       };
     case 'runtime-disposal-failed':
       return {

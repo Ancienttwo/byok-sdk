@@ -36,7 +36,7 @@ const reported = new Set<string>();
 async function pair(serverUrl: string, code: string, root: string): Promise<void> {
   daemon = createDaemonWithAdapters({ productId: 'hosted-collaboration-worker', productName: 'Hosted collaboration Worker',
     localAgentRelease: { version: '0.0.0-test' }, machineId: async () => createHash('sha256').update(root).digest('hex'), serverUrl,
-    workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'sdk'),
+    storeDir: path.join(root, 'sdk'),
     // The H persona hook, as the H tests install it: the device applies a task-free projection and advertises it.
     agentHome: { hostStorageRoot: path.join(root, 'homes'), projection: createAgentHomeProjectionConsumer(async ({ projection, writeHomeFile }) => {
       await writeHomeFile('AGENTS.md', String((projection as { persona?: unknown }).persona ?? ''));

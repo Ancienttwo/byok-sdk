@@ -1,4 +1,4 @@
-import { runMaintenanceAt } from './test-support';
+import { announceHello, runMaintenanceAt, TEST_AGENT_DISPATCH, TEST_AGENT_REF, TEST_SESSION_REF } from './test-support';
 import type { Server as HttpServer } from 'node:http';
 import { serve } from '@hono/node-server';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -107,7 +107,7 @@ async function claimAndStartOverLongPoll(
     daemon,
     createEnvelope(
       'task.claim',
-      { deviceId: daemon.deviceId, runtime, capabilities: capabilities as never },
+      { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, runtime, capabilities: capabilities as never },
       { taskId: handle.taskId },
     ),
   );
@@ -158,11 +158,11 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       expect.objectContaining({ deviceId: daemon.deviceId, connected: true }),
     ]);
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'first offer' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'first offer' });
 
     expect(daemon.cursor()).toBe(0);
     const page = await daemon.next();
-    expect(page.map((envelope) => envelope.type)).toEqual(['task.offer']);
+    expect(page.map((envelope) => envelope.type)).toEqual(['task.offer_for_agent']);
     expect(page[0]?.task_id).toBe(handle.taskId);
     expect(daemon.cursor()).toBeGreaterThan(0);
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');
@@ -176,7 +176,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'do the thing' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'do the thing' });
     await daemon.next();
     await claimAndStartOverLongPoll(started.byok, daemon, handle);
 
@@ -184,7 +184,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       daemon,
       createEnvelope(
         'task.complete',
-        { summary: 'all done', sessionRef: 'session-abc', document: { ok: true, items: [1, 2, 3] } },
+        { agentRef: TEST_AGENT_REF, summary: 'all done', sessionRef: 'session-abc', document: { ok: true, items: [1, 2, 3] } },
         { taskId: handle.taskId },
       ),
     );
@@ -225,13 +225,13 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'race the terminal' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'race the terminal' });
     await daemon.next();
     await claimAndStartOverLongPoll(started.byok, daemon, handle);
 
     const first = await sendOne(
       daemon,
-      createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId: handle.taskId }),
     );
     expect(first).toMatchObject({ status: 200, body: { accepted: 1 } });
     const recorded = (await started.byok.tasks.get(handle.taskId))?.result;
@@ -243,7 +243,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     // (§9 stale-terminal rule). "Ignored", not "refused", is the pin.
     const second = await sendOne(
       daemon,
-      createEnvelope('task.complete', { summary: 'second', sessionRef: 'session-second' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'second', sessionRef: 'session-second' }, { taskId: handle.taskId }),
     );
     expect(second).toMatchObject({ status: 200, body: { accepted: 1 } });
 
@@ -261,7 +261,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'cancel me' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'cancel me' });
     await daemon.next();
     await claimAndStartOverLongPoll(started.byok, daemon, handle);
 
@@ -272,7 +272,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       daemon,
       createEnvelope(
         'task.complete',
-        { summary: 'finished anyway', sessionRef: 'session-late', document: { applied: true } },
+        { agentRef: TEST_AGENT_REF, summary: 'finished anyway', sessionRef: 'session-late', document: { applied: true } },
         { taskId: handle.taskId },
       ),
     );
@@ -284,7 +284,9 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect(result.summary).toBeUndefined();
     expect(result.document).toBeUndefined();
     expect((await started.byok.tasks.get(handle.taskId))?.result).toEqual(result);
-    expect((await started.byok.tasks.get(handle.taskId))?.sessionRef).toBeUndefined();
+    // The task keeps the session it was dispatched to resume; the late
+    // terminal's sessionRef is not adopted.
+    expect((await started.byok.tasks.get(handle.taskId))?.sessionRef).toBe(TEST_SESSION_REF);
 
     // The cancellation notification is still redelivered through the
     // terminal state (N1/F4) — the device is told to stop local work.
@@ -299,7 +301,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'two approvals' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'two approvals' });
     await daemon.next();
     await claimAndStartOverLongPoll(started.byok, daemon, handle);
 
@@ -359,7 +361,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     });
     expect((await started.byok.machines.list())[0]?.runtimes).toEqual([{ id: 'pi' }, { id: 'claude' }]);
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'steer me' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'steer me' });
     await daemon.next();
     // The CLAIM reports claude (`steer: false`) — that is the authority.
     await claimAndStartOverLongPoll(started.byok, daemon, handle, 'claude', CLAUDE_RUNTIME_INFO.capabilities);
@@ -416,7 +418,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
 
     const handles: TaskHandle[] = [];
     for (let index = 0; index < 3; index++) {
-      handles.push(await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: `replay-${String(index)}` }));
+      handles.push(await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: `replay-${String(index)}` }));
     }
 
     const readPage = async (cursor: number): Promise<{ status: number; taskIds: string[]; cursor: number }> => {
@@ -442,7 +444,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect(await daemon.next()).toEqual([]);
 
     // A row appended after the ack is still pending and still owed.
-    const afterAck = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'after-ack' });
+    const afterAck = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'after-ack' });
 
     // Going BACK below the ack watermark returns ONLY what is still pending —
     // the acked rows are gone from the delivery set, not replayed — and does
@@ -467,7 +469,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect(swept).toMatchObject({ status: 'ok', expired: 1 });
 
     // A row that arrives after the sweep is inside the retained window.
-    const afterSweep = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'after-sweep' });
+    const afterSweep = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'after-sweep' });
 
     const gapRes = await daemon.replay(0);
     expect(gapRes.status).toBe(409);
@@ -498,7 +500,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     });
     expect(stranger.deviceId).not.toBe(owner.deviceId);
 
-    const handle = await started.byok.dispatch({ deviceId: owner.deviceId, instruction: 'dedup and ownership' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: owner.deviceId, instruction: 'dedup and ownership' });
     await owner.next();
     await claimAndStartOverLongPoll(started.byok, owner, handle);
 
@@ -531,7 +533,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     const snapshotBefore = await started.byok.tasks.get(handle.taskId);
     const foreign = await sendOne(
       stranger,
-      createEnvelope('task.complete', { summary: 'not mine', sessionRef: 'session-stranger' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'not mine', sessionRef: 'session-stranger' }, { taskId: handle.taskId }),
     );
     expect(foreign).toMatchObject({ status: 200, body: { accepted: 0, rejected: 1 } });
     expect(await started.byok.tasks.get(handle.taskId)).toEqual(snapshotBefore);
@@ -576,9 +578,10 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     expect(await daemon.next()).toEqual([]);
     expect(daemon.cursor()).toBe(0);
 
-    // A legacy (non-Agent) dispatch to the same device still works, so the
-    // refusal above was the capability gate and not a dead device.
-    const ok = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'plain work' });
+    // Once the same device announces agent-home-contract, the same dispatch
+    // works, so the refusal above was the capability gate and not a dead device.
+    await announceHello(daemon, { productId: PRODUCT_ID });
+    const ok = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'plain work' });
     expect((await daemon.next()).map((envelope) => envelope.task_id)).toEqual([ok.taskId]);
   });
 
@@ -595,12 +598,12 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
     expect((await started.byok.stats()).rateLimitEvents).toBe(0);
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'rate limited' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'rate limited' });
     await daemon.next(); // `GET /byok/events` is not on the inbound bucket at all.
 
     const admitted = await sendOne(
       daemon,
-      createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }),
+      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }),
     );
     expect(admitted).toMatchObject({ status: 200, body: { accepted: 1 } });
     expect((await started.byok.stats()).rateLimitEvents).toBe(0);

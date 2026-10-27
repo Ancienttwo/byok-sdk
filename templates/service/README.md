@@ -41,11 +41,12 @@ multiple-agents-under-one-daemon model, but that identity is not populated yet.
 Today the supported way to run **N agents on one computer is N independent
 daemons** — one service instance per agent, each with its own isolated config:
 
-- **distinct `storeDir`** — device keypair, JWT, cursor, and session-workspace
-  state live here; sharing it would collide two agents' device identities.
+- **distinct `storeDir`** — device keypair, JWT, cursor, and journal state
+  live here; sharing it would collide two agents' device identities.
   (Defaults to a per-`productId` dir, so distinct `productId`s already separate;
   set `storeDir` explicitly to run two agents of the *same* product.)
-- **distinct `workspaceRoot`** — so each agent's task workspaces stay separate.
+- **distinct `agentHome.hostStorageRoot`** (an absolute path) — so each
+  agent's Agent homes stay separate.
 - **distinct service `name`** — so `install`/`uninstall`/`status` target the
   right instance (e.g. `acme-agent-1`, `acme-agent-2`).
 - a distinct `deviceName` is recommended so the SaaS dashboard can tell them
@@ -56,10 +57,10 @@ Example — two agents of one product on one Mac:
 ```jsonc
 // agent-1.json
 { "productId": "acme", "deviceName": "mac-mini-1", "serverUrl": "https://saas.example",
-  "storeDir": "~/.acme/agent-1", "workspaceRoot": "~/acme-work/agent-1" }
+  "storeDir": "~/.acme/agent-1", "agentHome": { "hostStorageRoot": "/Users/alice/acme-home/agent-1" } }
 // agent-2.json — same product, fully isolated state
 { "productId": "acme", "deviceName": "mac-mini-2", "serverUrl": "https://saas.example",
-  "storeDir": "~/.acme/agent-2", "workspaceRoot": "~/acme-work/agent-2" }
+  "storeDir": "~/.acme/agent-2", "agentHome": { "hostStorageRoot": "/Users/alice/acme-home/agent-2" } }
 ```
 
 ```sh

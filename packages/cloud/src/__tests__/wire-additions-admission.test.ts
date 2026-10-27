@@ -6,12 +6,12 @@ import { ZodError } from 'zod';
 import { AgentExecutionInputSchema, SealedAgentExecutionInputSchema } from '../agent-execution';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
-import { PRODUCT_ID, TENANT_A, createHarness, offerPayload, type CloudHarness } from './support/harness';
+import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 /**
  * #386: hosted admission reads `WIRE_ADDITIONS`, the table the protocol compat
- * suite checks as live v3 configuration gates. For every server-to-daemon line of
- * the active v3 protocol corpus, a device missing any one flag the table requires is
+ * suite checks as live v4 configuration gates. For every server-to-daemon line of
+ * the active v4 protocol corpus, a device missing any one flag the table requires is
  * refused before task or mailbox state, and a device with every flag is not
  * refused for a capability.
  *
@@ -30,13 +30,14 @@ type Enqueue = (harness: CloudHarness, deviceId: string, payload: never) => Prom
  * refused.
  */
 async function steerSealedRunningTask(harness: CloudHarness, deviceId: string, payload: never): Promise<unknown> {
-  const offer = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { taskId: 'steer-target', payload: offerPayload('steer me') });
+  await grantAgentHome(harness, TENANT_A, deviceId);
+  const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { taskId: 'steer-target', payload: offerPayload('steer me') });
   const stores = tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A, productId: PRODUCT_ID, deviceId },
     { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
   for (const envelope of [
-    createEnvelope('task.claim', { deviceId, runtime: 'pi', capabilities: { steer: true } }, { taskId: offer.taskId }),
+    createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, runtime: 'pi', capabilities: { steer: true } }, { taskId: offer.taskId }),
     createEnvelope('task.started', {}, { taskId: offer.taskId }),
   ]) {
     expect((await handleInboundEnvelope(stores, deviceId, envelope)).outcome).toBe('accepted');
@@ -60,8 +61,6 @@ const submitFresh: Enqueue = (h, d, payload: { messageEgress?: unknown }) =>
   });
 
 const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
-  'task.offer': (h, d, payload) => h.cloud.enqueueOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'task.offer_with_toolsets': (h, d, payload) => h.cloud.enqueueToolsetOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'task.offer_for_agent': (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'task.offer_for_agent_with_egress': (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
   [FRESH]: submitFresh,
@@ -73,8 +72,6 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
   'e2ee.key_package.available': (h, d, payload) => h.cloud.enqueueScopeKeyPackageNotice(TENANT_A, d, payload),
   // #654: each sealed type has its own hosted entry.
-  'task.offer_sealed': (h, d, payload) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'task.offer_with_toolsets_sealed': (h, d, payload) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'task.offer_for_agent_sealed': (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'task.offer_for_agent_with_egress_sealed': (h, d, payload) => h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
   [FRESH_SEALED]: (h, d, payload: { messageEgress?: unknown }) =>
@@ -87,7 +84,7 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'task.steer_sealed': steerSealedRunningTask,
 };
 
-const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url));
+const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url));
 const gatedLines = readFileSync(corpusPath, 'utf8')
   .split('\n')
   .filter((line) => line.length > 0)

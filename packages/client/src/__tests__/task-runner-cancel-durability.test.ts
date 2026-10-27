@@ -7,7 +7,6 @@ import { AgentHomeBusyError, AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS, TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
@@ -50,14 +49,14 @@ async function fixture(overrides: Partial<TaskRunnerDeps> = {}) {
   const awaitTerminalCommit = vi.fn(async () => { committing.resolve(); await committed.promise; });
   const runner = new TaskRunner({
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-    adapters: [adapter], workspaceRoot: path.join(root, 'workspace'),
+    adapters: [adapter],
     agentHome, agentSessionHandoffs: handoffs, deviceId: 'cancel-device',
     send: envelope => {
       sent.push(envelope);
       if (['task.complete', 'task.fail', 'task.cancelled'].includes(envelope.type)) terminalSent.resolve();
     },
     blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
-    sessionWorkspaces: new SessionWorkspaceStore(root), approvalRegistry: new ApprovalRegistry(),
+    approvalRegistry: new ApprovalRegistry(),
     storeDir: root, productId: 'cancel-product', tenantId: 'cancel-tenant',
     awaitTerminalCommit, ...overrides,
   });

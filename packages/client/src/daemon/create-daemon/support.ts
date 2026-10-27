@@ -1,6 +1,6 @@
 import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy } from '@byok-sdk/protocol';
 import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal';
-import { encodeEnvelope, isTaskOfferType, TERMINAL_PROJECTION_SELECTION_CAPABILITY, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, STRICT_AGENT_ONLY_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
+import { encodeEnvelope, isTaskOfferType, TERMINAL_PROJECTION_SELECTION_CAPABILITY, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
 import type { RuntimeAdapter } from '../../types';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
 import { type RuntimeObservation, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection';
@@ -129,25 +129,10 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runt
  * not a static spread of every known flag. `steer` reflects whether any
  * configured adapter can express it; `blob-upload` is unconditional now
  * that the blob client (protocol §7) genuinely implements it.
- *
- * C2 (cross-model review, P2): `approval-targeting` is unconditional too,
- * for the same reason `blob-upload` is — this daemon has included
- * `approvalId` on `task.await_approval`/`task.approve`/`task.reject`
- * unconditionally since M5 (see `TaskRunner.dispatchApproval`/
- * `handleApprove`/`handleReject`, `task-runner.ts`), so there is no
- * adapter-specific gate to check the way `steer` has. The old reference
- * server read this flag to mark `targeted`; nothing reads it now, and the
- * server's `task.approval_resolved` event always reports `targeted: false`
- * (`packages/server/src/relay.ts`) — see `CAPABILITY_FLAGS`'s own doc comment
- * (`@byok-sdk/protocol`'s `version.ts`)
- * for why this flag is purely informational/observability, not a functional
- * gate, and therefore safe to advertise unconditionally the moment a daemon
- * genuinely does what it claims (as this one already does).
  */
 export function computeCapabilities(
   adapters: RuntimeAdapter[],
   agentHomeConfigured = false,
-  strictAgentOnly = false,
   agentHomeProjectionConfigured = false,
   agentEgressConfigured = false,
   contentReadPolicies?: Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>>,
@@ -159,7 +144,6 @@ export function computeCapabilities(
   const flags: CapabilityFlag[] = [];
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   flags.push('blob-upload');
-  flags.push('approval-targeting');
   flags.push(TERMINAL_PROJECTION_SELECTION_CAPABILITY);
   const selectionAdapters = adapters.filter((adapter) =>
     ALL_RUNTIME_IDS.includes(adapter.descriptor.id as RuntimeId),
@@ -188,7 +172,6 @@ export function computeCapabilities(
       AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY,
     );
   }
-  if (strictAgentOnly) flags.push(STRICT_AGENT_ONLY_CAPABILITY);
   if (agentHomeProjectionConfigured) flags.push(AGENT_HOME_PROJECTION_CAPABILITY);
   // Advertised only by a daemon whose `inputPreparation` section is present
   // AND whose native closure verified, because that pair is exactly what makes

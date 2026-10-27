@@ -124,7 +124,6 @@ describe('Agent memory helper P1 regressions', () => {
         productName: 'Agent memory Linux helper regression guard',
         productId: 'agent-memory-linux-helper-regression-guard',
         serverUrl: 'http://localhost:1',
-        workspaceRoot: path.join(process.cwd(), '.tmp-agent-memory-linux-helper-workspace'),
         agentHome: { hostStorageRoot: path.join(process.cwd(), '.tmp-agent-memory-linux-helper-home') },
         agentMemory: {},
         ...{ agentMemoryFilesystem: { helperBin: '/opt/byok-agent-memory-fs' } },

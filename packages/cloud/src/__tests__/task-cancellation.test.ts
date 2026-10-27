@@ -6,8 +6,10 @@ import { tenantStoresFor } from '../tenant-stores';
 import {
   TENANT_A,
   TENANT_B,
+  TEST_AGENT_REF,
   createHarness,
   decodeEventsPage,
+  grantAgentHome,
   offerPayload,
   type CloudHarness,
   type DecodedEventsPage,
@@ -34,7 +36,8 @@ describe('host task cancellation', () => {
   it('cancels before lease and never redelivers the original offer to an offline device', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('must never start'),
     });
 
@@ -58,7 +61,8 @@ describe('host task cancellation', () => {
   it('marks leased work cancel_requested and durably delivers the existing task.cancel command', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('already running'),
     });
     const delivered = await poll(harness, device);
@@ -71,7 +75,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
@@ -90,7 +94,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.cancelled', { reason: 'stop runtime' }, { taskId: offer.taskId }),
+      createEnvelope('task.cancelled', { reason: 'stop runtime', agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
     await expect(harness.cloud.readTaskAttempt(TENANT_A, offer.taskId)).resolves.toMatchObject({
       status: 'cancelled',
@@ -105,7 +109,8 @@ describe('host task cancellation', () => {
   it('keeps a success accepted before a late host cancellation as the terminal outcome', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('already succeeded'),
     });
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
@@ -123,7 +128,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
@@ -135,7 +140,7 @@ describe('host task cancellation', () => {
       device.deviceId,
       createEnvelope(
         'task.complete',
-        { summary: 'success won', sessionRef: 'successful-session' },
+        { summary: 'success won', sessionRef: 'successful-session', agentRef: TEST_AGENT_REF },
         { taskId: offer.taskId },
       ),
     ).then((result) => result.outcome);
@@ -157,13 +162,14 @@ describe('host task cancellation', () => {
       deviceId: device.deviceId,
       afterSeq: 0,
     });
-    expect(mailbox.messages.map((row) => decodeEnvelope(row.body).type)).toEqual(['task.offer']);
+    expect(mailbox.messages.map((row) => decodeEnvelope(row.body).type)).toEqual(['task.offer_for_agent']);
   });
 
   it('keeps accepted cancellation ahead of a racing success receipt and creates no review side effect', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('race success'),
     });
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
@@ -174,7 +180,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
     const cancellation = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'cancel wins');
 
@@ -183,7 +189,7 @@ describe('host task cancellation', () => {
       device.deviceId,
       createEnvelope(
         'task.complete',
-        { summary: 'late success', sessionRef: 'late-session' },
+        { summary: 'late success', sessionRef: 'late-session', agentRef: TEST_AGENT_REF },
         { taskId: offer.taskId },
       ),
     ).then((result) => result.outcome);
@@ -201,7 +207,8 @@ describe('host task cancellation', () => {
   it('does not project a racing success when cancellation lands between its read and status CAS', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('interleaved success'),
     });
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
@@ -218,7 +225,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
 
     let releaseStatusMutation!: () => void;
@@ -249,7 +256,7 @@ describe('host task cancellation', () => {
       device.deviceId,
       createEnvelope(
         'task.complete',
-        { summary: 'late success', sessionRef: 'late-session' },
+        { summary: 'late success', sessionRef: 'late-session', agentRef: TEST_AGENT_REF },
         { taskId: offer.taskId },
       ),
     ).then((result) => result.outcome);
@@ -276,7 +283,8 @@ describe('host task cancellation', () => {
   it('is idempotent and retains the first cancellation reason and one cancel delivery', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
 
@@ -289,7 +297,7 @@ describe('host task cancellation', () => {
       afterSeq: 0,
     });
     expect(mailbox.messages.map((row) => decodeEnvelope(row.body).type)).toEqual([
-      'task.offer',
+      'task.offer_for_agent',
       'task.cancel',
     ]);
   });
@@ -297,7 +305,8 @@ describe('host task cancellation', () => {
   it('coalesces truly concurrent duplicate cancellations into one tombstone and one delivery', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('cancel concurrently'),
     });
     const reasons = Array.from({ length: 32 }, (_, index) => `concurrent-reason-${index}`);
@@ -320,7 +329,7 @@ describe('host task cancellation', () => {
       afterSeq: 0,
     });
     expect(mailbox.messages.map((row) => decodeEnvelope(row.body).type)).toEqual([
-      'task.offer',
+      'task.offer_for_agent',
       'task.cancel',
     ]);
   });
@@ -328,7 +337,8 @@ describe('host task cancellation', () => {
   it('fails closed for unknown and cross-tenant task ids without changing the real task', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
 

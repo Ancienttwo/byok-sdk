@@ -1,4 +1,5 @@
 import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
+import type { RuntimeTaskInput } from '../../types';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { startDurablePi } from '../pi-durable/session';
 import { serializePiHostConfig } from './runtime-host-binding';
@@ -12,7 +13,6 @@ import { promisify } from 'node:util';
 import type {
   AgentEvent,
   ProviderProfileBinding,
-  TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
@@ -279,9 +279,9 @@ export class PiAdapter implements RuntimeAdapter {
     // Inline factories are owned by the SDK entry; no runtime extension path resolution here.
     // Session/workspace continuity:
     // `task.sessionRef` is only ever non-empty here when `task-runner.ts`
-    // has (a) found a recorded workspace for this exact sessionRef in its
-    // `SessionWorkspaceStore` and (b) spawned this adapter with
-    // `ctx.workspaceDir` set to that SAME directory — see task-runner.ts's
+    // has (a) matched this exact sessionRef in the Agent home's
+    // `AgentSessionHandoffStore` and (b) spawned this adapter with
+    // `ctx.workspaceDir` set to that SAME recorded cwd — see task-runner.ts's
     // `handleOffer`. That matters because pi's real `--session <id>` resume
     // is scoped to the cwd/project a session was created under: resuming
     // from a *different* cwd prompts an interactive "Session found in
@@ -292,7 +292,7 @@ export class PiAdapter implements RuntimeAdapter {
     // task). An absent `sessionRef` always means "start fresh" — pi mints
     // its own session id, which this adapter reads back via `get_state`
     // below and reports as `Session.sessionRef` so a *future* follow-up can
-    // resume it. `TaskOfferPayload.workspaceHint` remains unimplemented (no
+    // resume it. `workspaceHint` remains unimplemented (no
     // caller populates `DispatchInput` with it yet, and its intended
     // semantics — e.g. does it override or merely suggest a workspace
     // relative to the sessionRef mapping? — are still undesigned; see
@@ -304,7 +304,7 @@ export class PiAdapter implements RuntimeAdapter {
     // lost/unknown authoritative sessionRef fails closed instead of silently
     // starting a new history under the requested id.
     const selection = input.offer.dispatchSelection;
-    const pinnedSelection: TaskOfferPayload['dispatchSelection'] = selection === undefined
+    const pinnedSelection: RuntimeTaskInput['dispatchSelection'] = selection === undefined
       ? undefined
       : selection.lane === 'byok-profile'
         ? Object.freeze({
@@ -313,8 +313,8 @@ export class PiAdapter implements RuntimeAdapter {
               ...selection.providerProfile,
               requiredCapabilities: Object.freeze([...selection.providerProfile.requiredCapabilities]),
             }),
-          }) as unknown as TaskOfferPayload['dispatchSelection']
-        : Object.freeze({ ...selection }) as TaskOfferPayload['dispatchSelection'];
+          }) as unknown as RuntimeTaskInput['dispatchSelection']
+        : Object.freeze({ ...selection }) as RuntimeTaskInput['dispatchSelection'];
     let launcherArgs: string[] | undefined;
     if (pinnedSelection !== undefined) {
       if ((pinnedSelection.lane !== 'byok' && pinnedSelection.lane !== 'byok-profile') || pinnedSelection.runtimeId !== 'pi') {
@@ -645,7 +645,7 @@ interface PreparedPiLaunchInput {
   readonly preparation: RuntimePreparedLaunchV1;
   readonly manifest: RuntimeOperationManifest;
   readonly manifestCwd: string;
-  readonly manifestSelection: TaskOfferPayload['dispatchSelection'];
+  readonly manifestSelection: RuntimeTaskInput['dispatchSelection'];
   readonly env: NodeJS.ProcessEnv;
   /**
    * The credential-custody launcher this operation must be parented by, and
@@ -977,8 +977,8 @@ async function validateProviderProfileBindingWithLauncher(
  * the manifest froze rather than a set.
  */
 function sameDispatchSelection(
-  left: TaskOfferPayload['dispatchSelection'],
-  right: TaskOfferPayload['dispatchSelection'],
+  left: RuntimeTaskInput['dispatchSelection'],
+  right: RuntimeTaskInput['dispatchSelection'],
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
   if (left.lane === 'byok-profile' || right.lane === 'byok-profile') {
@@ -1013,7 +1013,7 @@ function sameDispatchSelection(
  * `crypto.randomUUID()` whenever `get_state` failed, timed out, or omitted
  * `sessionId` — minting an id pi itself never knew about, which could never
  * actually be resumed and silently looked like a legitimate, resumable
- * session to every caller (`TaskRunner`'s `SessionWorkspaceStore`, a future
+ * session to every caller (`TaskRunner`'s `AgentSessionHandoffStore`, a future
  * follow-up's `task.offer.sessionRef`, etc). Fail closed instead: if pi
  * doesn't hand back an authoritative session id, `start()` itself fails
  * with the real underlying error (stderr context is already folded in when
@@ -1068,7 +1068,7 @@ class PiSession implements Session {
   constructor(
     public readonly sessionRef: string,
     private readonly rpc: PiRpcClient,
-    private readonly selection: TaskOfferPayload['dispatchSelection'],
+    private readonly selection: RuntimeTaskInput['dispatchSelection'],
     /** Task-scoped isolated MCP extension configuration, removed in close(). */
     private readonly scratch: ExecutionScratch,
     private readonly hostContextWindow?: number,
@@ -1164,7 +1164,7 @@ class PiSession implements Session {
     await this.rpc.send({ type: 'steer', message: text });
   }
 
-  async followUp(task: TaskOfferPayload): Promise<void> {
+  async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('pi adapter only supports string instructions in M0 (no blob-ref fetch yet)');
     }

@@ -3,7 +3,8 @@ import { readSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
-import { assertExactProviderProfileBinding, ProviderProfileRefSchema, ProviderModelCapabilitySchema, type ModelProviderProfile, type ExactProviderProfileBinding } from './provider-profile';
+import { ProviderProfileRefSchema, ProviderModelCapabilitySchema, type ModelProviderProfile } from './provider-profile';
+import { assertExactProviderProfileBinding, type ExactProviderProfileBinding } from './provider-profile-binding';
 import { assertProviderCustodyIdle, readProviderCustodySnapshot, projectKeysPiInheritedEnvironment } from './pi-provider-launcher-core';
 import { assertSharedSecretValue, type SecretStore } from './secret-store';
 

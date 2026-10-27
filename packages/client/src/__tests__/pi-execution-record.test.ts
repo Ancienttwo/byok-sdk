@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { spawn as realSpawn, type SpawnOptions } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -11,7 +12,6 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from '../adapters/pi/rpc-client';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { ExecutionRecord } from '../daemon/execution-record';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -57,20 +57,19 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
   const published = new Promise<void>(resolve => { recorded = resolve; });
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }), spawnFn })],
-    workspaceRoot: path.join(directory, 'workspace'),
+    ...testAgentHomeDeps(),
     deviceId: 'pi-record-device',
     send: envelope => { sent.push(envelope); },
     blobClient: {
       resolveInstruction: async () => { throw new Error('unused'); },
       uploadArtifact: async () => { throw new Error('unused'); },
     },
-    sessionWorkspaces: new SessionWorkspaceStore(path.join(directory, 'store')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: directory,
     productId: 'pi-record-product',
     onExecutionRecord: record => { records.push(record); recorded(); },
   });
-  await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'say hi', runtime: 'pi' }, { taskId: TASK_ID, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'say hi', runtime: 'pi' }, { taskId: TASK_ID, seq: 1 }));
   // The runner publishes the record after Session.close() and lets the task go right after it.
   await published;
   await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));

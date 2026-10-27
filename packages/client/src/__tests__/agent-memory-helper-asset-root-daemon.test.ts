@@ -40,7 +40,7 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
     let deviceId: string;
     const completions: AgentMemoryIntentCompletion[] = [];
     daemon = createDaemonWithAdapters({
-      strictAgentOnly: true, productId: 'relocated-memory', productName: 'Relocated memory', serverUrl: server.url,
+      productId: 'relocated-memory', productName: 'Relocated memory', serverUrl: server.url,
       storeDir: path.join(root, 'store'), localAgentRelease: { version: '0.0.0-test' }, storage: { scratchRoot: testScratchRoot() },
       sdkHelperHost: { mode: 'self-executable', executable: process.execPath, entry },
       agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentMemoryHelperAssetRoot: assetRoot,

@@ -196,9 +196,8 @@ export interface WithheldOfferTask extends Omit<RecoverableTask, 'envelopeBytes'
 /**
  * What recovery decided about a task. `interrupted` is the honest default for
  * a daemon restart: local runtime sessions do not survive the process, so the
- * task is recorded as interrupted rather than pretended back into life — the
- * same semantics `GitWorkspaceStore.reconcile()` already applies to a lease
- * whose owner is gone. Nothing here deletes anything; a row that has been
+ * task is recorded as interrupted rather than pretended back into life.
+ * Nothing here deletes anything; a row that has been
  * through recovery carries a marker, and §12.7.2.1 forbids auto-deleting
  * those.
  */

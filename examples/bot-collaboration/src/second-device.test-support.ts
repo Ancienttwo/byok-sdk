@@ -9,7 +9,7 @@ import { createBotPersonaProjection } from './persona';
 export async function enrollSecondDevice(serverUrl: string, code: string, root: string, policy: AgentEgressPolicy) {
   const adapter = new BotStubAdapter();
   const config = { productId: 'k8b-test', productName: 'K8b second device', localAgentRelease: { version: '0.0.0-test' },
-    machineId: async () => createHash('sha256').update(root).digest('hex'), serverUrl, workspaceRoot: join(root, 'workspace'), storeDir: join(root, 'sdk'),
+    machineId: async () => createHash('sha256').update(root).digest('hex'), serverUrl, storeDir: join(root, 'sdk'),
     agentHome: { hostStorageRoot: join(root, 'homes'), projection: createBotPersonaProjection() },
     agentEgress: { policy } };
   const credentials = new InMemoryDeviceCredentialStore();

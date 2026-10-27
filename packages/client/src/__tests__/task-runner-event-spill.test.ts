@@ -1,13 +1,10 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type AgentEvent, type BlobRef, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -20,10 +17,6 @@ import { testIngressBudget } from './fixtures/activity-ingress';
  * a task that spills is not a task that flooded. See
  * `event-spill.test.ts` for the policy's own unit-level invariants.
  */
-
-async function tmpDir(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
-}
 
 interface RecordedUpload {
   content: string;
@@ -65,13 +58,12 @@ async function makeRunner(
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-taskrunner-spill-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
     },
     blobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-taskrunner-spill-store-')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
@@ -103,7 +95,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-spill', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-spill', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -162,7 +154,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-unstored', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-unstored', seq: 1 }),
     );
     const session = adapter.sessions[0];
     session!.emit({ type: 'tool_use', tool: 'write_file', input: OUTPUT_300_KIB });
@@ -221,7 +213,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-locator', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-locator', seq: 1 }),
     );
     const session = adapter.sessions[0];
     session!.emit({ type: 'tool_result', tool: 'bash', toolCallId: 'call-locator', output: OUTPUT_300_KIB });
@@ -252,7 +244,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     const runner = await makeRunner(adapter, sent, client, { maxInlineEventBytes: 64 * 1024 });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-small', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-small', seq: 1 }),
     );
     const session = adapter.sessions[0];
     const event: AgentEvent = { type: 'tool_result', tool: 'bash', toolCallId: 'c1', output: { stdout: 'ok' } };

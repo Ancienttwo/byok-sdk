@@ -2,7 +2,8 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { parsePiProviderLauncherOptions, startPiProvider } from '../../../../keys/src/pi-provider-launcher-core';
-import { parseModelProviderProfile, assertExactProviderProfileBinding } from '../../../../keys/src/provider-profile';
+import { parseModelProviderProfile } from '../../../../keys/src/provider-profile';
+import { assertExactProviderProfileBinding } from '../../../../keys/src/provider-profile-binding';
 import { InMemoryProviderProfileStore } from '../../../../keys/src/profile-store';
 import { InMemorySecretStore, modelProviderSecretName } from '../../../../keys/src/secret-store';
 // Deliberately only in launcher memory; not daemon config/env/argv or on-disk execution state.

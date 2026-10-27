@@ -12,9 +12,9 @@ import {
   type ProviderAuthMode,
   type ProviderModelCapability,
   type ProviderProfileRef,
-  exactProviderProfileBinding,
   parseModelProviderProfile,
 } from './provider-profile';
+import { exactProviderProfileBinding } from './provider-profile-binding';
 import {
   type ModelProviderSecretName,
   type SecretStore,

@@ -45,7 +45,7 @@ async function run(outcome: unknown) {
   const daemon: Daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-result-smoke' }, productName: 'Result smoke', productId: 'result-smoke',
-    serverUrl: server.url, workspaceRoot: path.join(root, 'work'), storeDir: path.join(root, 'store'),
+    serverUrl: server.url, storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') },
   }, [new CodexAdapter({ resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }) })], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   cleanup.push(() => daemon.stop());

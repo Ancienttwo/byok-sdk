@@ -43,6 +43,8 @@ const compat = z.object({
   supportsStrictMode: z.boolean().optional(),
   requiresReasoningContentOnAssistantMessages: z.boolean().optional(),
   forceAdaptiveThinking: z.boolean().optional(),
+  sendSessionAffinityHeaders: z.boolean().optional(),
+  allowEmptySignature: z.boolean().optional(),
 }).strict();
 
 export type PiCompatKey = keyof z.infer<typeof compat>;
@@ -51,9 +53,10 @@ export type PiCompatKey = keyof z.infer<typeof compat>;
 export const PI_COMPAT_KEYS_BY_API: Readonly<Record<PiModelApi, readonly PiCompatKey[]>> = {
   'openai-completions': ['supportsStore', 'supportsDeveloperRole', 'supportsReasoningEffort', 'supportsUsageInStreaming',
     'maxTokensField', 'thinkingFormat', 'zaiToolStream', 'supportsLongCacheRetention', 'supportsStrictMode',
-    'requiresReasoningContentOnAssistantMessages'],
+    'requiresReasoningContentOnAssistantMessages', 'sendSessionAffinityHeaders'],
   'openai-responses': ['supportsDeveloperRole', 'supportsLongCacheRetention', 'supportsStrictMode'],
-  'anthropic-messages': ['supportsLongCacheRetention', 'forceAdaptiveThinking'],
+  'anthropic-messages': ['supportsLongCacheRetention', 'forceAdaptiveThinking', 'sendSessionAffinityHeaders',
+    'allowEmptySignature'],
 };
 
 /**

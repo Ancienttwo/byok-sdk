@@ -1,10 +1,12 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { startRealServer, type RealServerHandle } from './fixtures/real-server';
+import { dispatchResumedAgentTask, startRealServer, type RealServerHandle } from './fixtures/real-server';
 import { waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 
 let daemon: Daemon | undefined;
@@ -21,7 +23,8 @@ it('default daemon/cloud limits deliver two 40 KiB tool results in separate acce
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settle-real-')); dirs.push(dir);
   const adapter = new StubRuntimeAdapter();
   daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
-    productId: 'test-product', serverUrl: server.url, workspaceRoot: path.join(dir, 'workspace'), storeDir: path.join(dir, 'store') }, [adapter],
+    productId: 'test-product', serverUrl: server.url, storeDir: path.join(dir, 'store'),
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } }, [adapter],
     { longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
   await fs.mkdir(path.join(dir, 'workspace'));
   const record = await daemon.pair((await server.createPairingCode()).code);
@@ -40,12 +43,13 @@ it('default daemon/cloud limits deliver two 40 KiB tool results in separate acce
     }
     return response;
   });
-  await server.byok.dispatch({ deviceId: record.deviceId, instruction: 'two large results' });
-  await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-  adapter.sessions[0]!.emit({ type: 'tool_result', tool: 'read', output: 'a'.repeat(40 * 1024) });
-  adapter.sessions[0]!.emit({ type: 'tool_result', tool: 'read', output: 'b'.repeat(40 * 1024) });
-  adapter.sessions[0]!.emit({ type: 'turn_end' });
-  await vi.waitFor(() => expect(daemon!.tasks().some((task) => task.state === 'Complete')).toBe(true));
+  // A resumed Agent task without an egress policy: its activity is batched,
+  // not coalesced to the latest value as an egress task's is.
+  const { handle, session } = await dispatchResumedAgentTask(server, adapter, { deviceId: record.deviceId, instruction: 'two large results' });
+  session.emit({ type: 'tool_result', tool: 'read', output: 'a'.repeat(40 * 1024) });
+  session.emit({ type: 'tool_result', tool: 'read', output: 'b'.repeat(40 * 1024) });
+  session.emit({ type: 'turn_end' });
+  await vi.waitFor(() => expect(daemon!.tasks().some((task) => task.taskId === handle.taskId && task.state === 'Complete')).toBe(true));
   expect(accepted).toHaveLength(2);
   expect(accepted.every((batch) => batch.rejected === 0 && Buffer.byteLength(JSON.stringify(batch.events)) <= 65536)).toBe(true);
   expect(daemon.status().outbound.rejected).toBe(0);

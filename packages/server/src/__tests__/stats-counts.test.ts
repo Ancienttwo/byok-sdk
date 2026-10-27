@@ -16,6 +16,8 @@ import {
   startServer,
   stopServer,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 /**
@@ -102,7 +104,7 @@ async function runToTerminal(
   daemon: FakeLongPollDaemon,
   outcome: 'complete' | 'fail' | 'cancel',
 ): Promise<string> {
-  const handle = await byok.dispatch({ deviceId: daemon.deviceId, instruction: `to ${outcome}` });
+  const handle = await byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: `to ${outcome}` });
   await nextEnvelope(daemon);
   await claimAndStart(byok, daemon, handle);
   if (outcome === 'cancel') {
@@ -111,8 +113,8 @@ async function runToTerminal(
   } else {
     const terminal =
       outcome === 'complete'
-        ? createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess' }, { taskId: handle.taskId })
-        : createEnvelope('task.fail', { reason: 'broke', retryable: false }, { taskId: handle.taskId });
+        ? createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess' }, { taskId: handle.taskId })
+        : createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'broke', retryable: false }, { taskId: handle.taskId });
     expect(await sendOne(daemon, terminal)).toMatchObject({ status: 200, body: { accepted: 1 } });
   }
   return handle.taskId;
@@ -120,14 +122,14 @@ async function runToTerminal(
 
 /** One task in each live state: Offered, Running, AwaitApproval. */
 async function leaveLiveTasks(byok: ByokServer, daemon: FakeLongPollDaemon): Promise<void> {
-  const running = await byok.dispatch({ deviceId: daemon.deviceId, instruction: 'keep running' });
+  const running = await byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'keep running' });
   await nextEnvelope(daemon);
   await claimAndStart(byok, daemon, running);
-  const paused = await byok.dispatch({ deviceId: daemon.deviceId, instruction: 'needs approval' });
+  const paused = await byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs approval' });
   await nextEnvelope(daemon);
   await claimAndStart(byok, daemon, paused);
   await moveToAwaitApproval(byok, daemon, paused);
-  await byok.dispatch({ deviceId: daemon.deviceId, instruction: 'never claimed' });
+  await byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'never claimed' });
   await nextEnvelope(daemon);
 }
 
@@ -190,9 +192,9 @@ describe('store-aggregated stats()', () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
     await leaveLiveTasks(started.byok, daemon);
-    const claimed = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'claimed only' });
+    const claimed = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'claimed only' });
     await nextEnvelope(daemon);
-    const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: claimed.taskId });
+    const claim = createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: claimed.taskId });
     expect(await sendOne(daemon, claim))
       .toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: claim.id, outcome: 'accepted' }] } });
     const complete = await runToTerminal(started.byok, daemon, 'complete');
@@ -200,10 +202,10 @@ describe('store-aggregated stats()', () => {
     expect(await started.byok.tasks.get(complete)).toMatchObject({ state: 'Complete' });
     await runToTerminal(started.byok, daemon, 'fail');
     const ownedCancel = await runToTerminal(started.byok, daemon, 'cancel');
-    const lateComplete = createEnvelope('task.complete', { summary: 'late', sessionRef: 'late' }, { taskId: ownedCancel });
+    const lateComplete = createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'late', sessionRef: 'late' }, { taskId: ownedCancel });
     expect(await sendOne(daemon, lateComplete))
       .toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: lateComplete.id, outcome: 'accepted' }] } });
-    const unowned = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'cancel before claim' });
+    const unowned = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'cancel before claim' });
     await nextEnvelope(daemon);
     await unowned.cancel('stop');
     await nextEnvelope(daemon);
@@ -238,11 +240,11 @@ describe('store-aggregated stats()', () => {
   it('can omit a task settling between reads, without subtracting or counting it twice', async () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'race' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'race' });
     await nextEnvelope(daemon);
     await claimAndStart(started.byok, daemon, handle);
     kernelCalls.afterCount = async () => {
-      const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
+      const complete = createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
       expect(await sendOne(daemon, complete)).toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: complete.id, outcome: 'accepted' }] } });
     };
     const counts = (await started.byok.stats()).taskCountsByState;
@@ -263,11 +265,11 @@ describe('store-aggregated stats()', () => {
   it('counts a walked task once when it settles during approval reads', async () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'race' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'race' });
     await nextEnvelope(daemon);
     await claimAndStart(started.byok, daemon, handle);
     kernelCalls.beforeApproval = async () => {
-      const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
+      const complete = createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
       expect(await sendOne(daemon, complete)).toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: complete.id, outcome: 'accepted' }] } });
     };
     const counts = (await started.byok.stats()).taskCountsByState;
@@ -312,13 +314,13 @@ describe('store-aggregated stats()', () => {
     const storage = { kind: 'sqlite' as const, path: join(root, 'server.sqlite') };
     const first = await start(storage);
     const daemon = await connectFakeDaemonLongPoll(first.baseUrl, first.byok, { productId: PRODUCT_ID });
-    const handle = await first.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'resume', sessionRef: 'requested-session' });
+    const handle = await first.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'resume', sessionRef: 'requested-session' });
     await nextEnvelope(daemon);
     expect(await first.byok.tasks.get(handle.taskId)).toMatchObject({ createdAt: openedAt, sessionRef: 'requested-session' });
 
     vi.setSystemTime(new Date('2026-10-13T00:00:02.000Z'));
     await claimAndStart(first.byok, daemon, handle);
-    expect(await sendOne(daemon, createEnvelope('task.fail', { reason: 'failed', retryable: false }, { taskId: handle.taskId })))
+    expect(await sendOne(daemon, createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'failed', retryable: false }, { taskId: handle.taskId })))
       .toMatchObject({ status: 200, body: { accepted: 1 } });
     expect(await first.byok.tasks.get(handle.taskId)).toMatchObject({ state: 'Failed', createdAt: openedAt, sessionRef: 'requested-session' });
 

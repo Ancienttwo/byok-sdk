@@ -1,0 +1,3007 @@
+{
+  "description": "Vendor, catalog model, thinking level and the vendor base URL rule (D6). Each vector applies `change` to `draft` (or creates the draft when both are null) and expects the new draft, its view and its submission. The policy only shortens the vendor list.",
+  "catalog": {
+    "groq": {
+      "openai-completions": {
+        "llama-3.3-70b-versatile": {
+          "config": {
+            "contextWindow": 131072,
+            "maxTokens": 32768,
+            "reasoning": false,
+            "compat": {
+              "supportsStrictMode": true
+            }
+          },
+          "input": [
+            "text"
+          ]
+        },
+        "openai/gpt-oss-120b": {
+          "config": {
+            "contextWindow": 131072,
+            "maxTokens": 65536,
+            "reasoning": true,
+            "thinkingLevelMap": {
+              "off": null,
+              "minimal": null,
+              "low": "low",
+              "medium": "medium",
+              "high": "high",
+              "xhigh": null,
+              "max": null
+            },
+            "compat": {
+              "supportsStrictMode": true
+            }
+          },
+          "input": [
+            "text"
+          ]
+        },
+        "qwen/qwen3.6-27b": {
+          "config": {
+            "contextWindow": 131072,
+            "maxTokens": 16384,
+            "reasoning": true,
+            "thinkingLevelMap": {
+              "off": "none",
+              "minimal": null,
+              "low": null,
+              "medium": null,
+              "high": "default",
+              "xhigh": null,
+              "max": null
+            },
+            "compat": {
+              "supportsStrictMode": true
+            },
+            "inputLimits": {
+              "images": {
+                "resize": {
+                  "maxWidth": 2000,
+                  "maxHeight": 2000,
+                  "maxBytes": 4718592,
+                  "jpegQuality": 80
+                }
+              }
+            }
+          },
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        "blocked-example": {
+          "unrepresentable": [
+            "compat.sendSessionAffinityHeaders"
+          ]
+        }
+      }
+    }
+  },
+  "stored": null,
+  "policy": {
+    "vendors": [
+      "groq",
+      "custom"
+    ]
+  },
+  "vectors": [
+    {
+      "name": "new draft",
+      "draft": null,
+      "change": null,
+      "expect": {
+        "draft": {
+          "profile_ref": "",
+          "display_name": "",
+          "provider_kind": null,
+          "adapter": null,
+          "auth_mode": null,
+          "base_url": "",
+          "model": "",
+          "model_api": null,
+          "model_source": null,
+          "pi_model": null,
+          "thinking_level": null,
+          "capabilities": [],
+          "secret": "none"
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "",
+              "choices": null,
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "",
+              "choices": null,
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "adapter",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                },
+                {
+                  "value": "anthropic",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": false,
+              "required": false,
+              "value": "",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": false,
+              "required": false,
+              "value": "",
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": false,
+              "required": false,
+              "value": "none",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": null,
+          "catalog_applies": false,
+          "secret_configured": false,
+          "valid": false
+        },
+        "submission": {
+          "ok": false,
+          "errors": {
+            "profile_ref": {
+              "code": "required"
+            },
+            "display_name": {
+              "code": "required"
+            },
+            "provider_kind": {
+              "code": "required"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "profile ref",
+      "draft": {
+        "profile_ref": "",
+        "display_name": "",
+        "provider_kind": null,
+        "adapter": null,
+        "auth_mode": null,
+        "base_url": "",
+        "model": "",
+        "model_api": null,
+        "model_source": null,
+        "pi_model": null,
+        "thinking_level": null,
+        "capabilities": [],
+        "secret": "none"
+      },
+      "change": {
+        "field": "profile_ref",
+        "value": "main"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "",
+          "provider_kind": null,
+          "adapter": null,
+          "auth_mode": null,
+          "base_url": "",
+          "model": "",
+          "model_api": null,
+          "model_source": null,
+          "pi_model": null,
+          "thinking_level": null,
+          "capabilities": [],
+          "secret": "none"
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "",
+              "choices": null,
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "adapter",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                },
+                {
+                  "value": "anthropic",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": false,
+              "required": false,
+              "value": "",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": false,
+              "required": false,
+              "value": "",
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": false,
+              "required": false,
+              "value": "none",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": null,
+          "catalog_applies": false,
+          "secret_configured": false,
+          "valid": false
+        },
+        "submission": {
+          "ok": false,
+          "errors": {
+            "display_name": {
+              "code": "required"
+            },
+            "provider_kind": {
+              "code": "required"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "display name",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "",
+        "provider_kind": null,
+        "adapter": null,
+        "auth_mode": null,
+        "base_url": "",
+        "model": "",
+        "model_api": null,
+        "model_source": null,
+        "pi_model": null,
+        "thinking_level": null,
+        "capabilities": [],
+        "secret": "none"
+      },
+      "change": {
+        "field": "display_name",
+        "value": "Main"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": null,
+          "adapter": null,
+          "auth_mode": null,
+          "base_url": "",
+          "model": "",
+          "model_api": null,
+          "model_source": null,
+          "pi_model": null,
+          "thinking_level": null,
+          "capabilities": [],
+          "secret": "none"
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "adapter",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                },
+                {
+                  "value": "anthropic",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": false,
+              "required": false,
+              "value": "",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": false,
+              "required": false,
+              "value": "",
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": false,
+              "required": false,
+              "value": "none",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": null,
+          "catalog_applies": false,
+          "secret_configured": false,
+          "valid": false
+        },
+        "submission": {
+          "ok": false,
+          "errors": {
+            "provider_kind": {
+              "code": "required"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "vendor fills adapter, auth mode and base URL",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": null,
+        "adapter": null,
+        "auth_mode": null,
+        "base_url": "",
+        "model": "",
+        "model_api": null,
+        "model_source": null,
+        "pi_model": null,
+        "thinking_level": null,
+        "capabilities": [],
+        "secret": "none"
+      },
+      "change": {
+        "field": "provider_kind",
+        "value": "groq"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://api.groq.com/openai/v1",
+          "model": "",
+          "model_api": null,
+          "model_source": null,
+          "pi_model": null,
+          "thinking_level": null,
+          "capabilities": [],
+          "secret": "none"
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://api.groq.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "",
+              "choices": [
+                {
+                  "model": "blocked-example",
+                  "api": "openai-completions",
+                  "status": "unrepresentable",
+                  "unrepresentable": [
+                    "compat.sendSessionAffinityHeaders"
+                  ],
+                  "value": "blocked-example",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "llama-3.3-70b-versatile",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": false,
+                  "thinking_levels": [
+                    "off"
+                  ],
+                  "value": "llama-3.3-70b-versatile",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "openai/gpt-oss-120b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "value": "openai/gpt-oss-120b",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "qwen/qwen3.6-27b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text",
+                    "image"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "off",
+                    "high"
+                  ],
+                  "value": "qwen/qwen3.6-27b",
+                  "label": null,
+                  "source": "catalog"
+                }
+              ],
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "none",
+              "choices": null,
+              "error": {
+                "code": "secret_required"
+              }
+            }
+          ],
+          "model_source": null,
+          "catalog_applies": true,
+          "secret_configured": false,
+          "valid": false
+        },
+        "submission": {
+          "ok": false,
+          "errors": {
+            "model": {
+              "code": "required"
+            },
+            "secret": {
+              "code": "secret_required"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "catalog model takes Pi's default level",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "",
+        "model_api": null,
+        "model_source": null,
+        "pi_model": null,
+        "thinking_level": null,
+        "capabilities": [],
+        "secret": "none"
+      },
+      "change": {
+        "field": "model",
+        "value": "openai/gpt-oss-120b"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://api.groq.com/openai/v1",
+          "model": "openai/gpt-oss-120b",
+          "model_api": "openai-completions",
+          "model_source": "catalog",
+          "pi_model": null,
+          "thinking_level": "medium",
+          "capabilities": [],
+          "secret": "none"
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://api.groq.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "openai/gpt-oss-120b",
+              "choices": [
+                {
+                  "model": "blocked-example",
+                  "api": "openai-completions",
+                  "status": "unrepresentable",
+                  "unrepresentable": [
+                    "compat.sendSessionAffinityHeaders"
+                  ],
+                  "value": "blocked-example",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "llama-3.3-70b-versatile",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": false,
+                  "thinking_levels": [
+                    "off"
+                  ],
+                  "value": "llama-3.3-70b-versatile",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "openai/gpt-oss-120b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "value": "openai/gpt-oss-120b",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "qwen/qwen3.6-27b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text",
+                    "image"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "off",
+                    "high"
+                  ],
+                  "value": "qwen/qwen3.6-27b",
+                  "label": null,
+                  "source": "catalog"
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": "medium",
+              "choices": [
+                {
+                  "value": "low",
+                  "label": null
+                },
+                {
+                  "value": "medium",
+                  "label": null
+                },
+                {
+                  "value": "high",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "none",
+              "choices": null,
+              "error": {
+                "code": "secret_required"
+              }
+            }
+          ],
+          "model_source": "catalog",
+          "catalog_applies": true,
+          "secret_configured": false,
+          "valid": false
+        },
+        "submission": {
+          "ok": false,
+          "errors": {
+            "secret": {
+              "code": "secret_required"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "new key makes the draft valid",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "openai/gpt-oss-120b",
+        "model_api": "openai-completions",
+        "model_source": "catalog",
+        "pi_model": null,
+        "thinking_level": "medium",
+        "capabilities": [],
+        "secret": "none"
+      },
+      "change": {
+        "field": "secret",
+        "value": {
+          "replace": "example-key"
+        }
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://api.groq.com/openai/v1",
+          "model": "openai/gpt-oss-120b",
+          "model_api": "openai-completions",
+          "model_source": "catalog",
+          "pi_model": null,
+          "thinking_level": "medium",
+          "capabilities": [],
+          "secret": {
+            "replace": "example-key"
+          }
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://api.groq.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "openai/gpt-oss-120b",
+              "choices": [
+                {
+                  "model": "blocked-example",
+                  "api": "openai-completions",
+                  "status": "unrepresentable",
+                  "unrepresentable": [
+                    "compat.sendSessionAffinityHeaders"
+                  ],
+                  "value": "blocked-example",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "llama-3.3-70b-versatile",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": false,
+                  "thinking_levels": [
+                    "off"
+                  ],
+                  "value": "llama-3.3-70b-versatile",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "openai/gpt-oss-120b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "value": "openai/gpt-oss-120b",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "qwen/qwen3.6-27b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text",
+                    "image"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "off",
+                    "high"
+                  ],
+                  "value": "qwen/qwen3.6-27b",
+                  "label": null,
+                  "source": "catalog"
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": "medium",
+              "choices": [
+                {
+                  "value": "low",
+                  "label": null
+                },
+                {
+                  "value": "medium",
+                  "label": null
+                },
+                {
+                  "value": "high",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "replace",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": "catalog",
+          "catalog_applies": true,
+          "secret_configured": false,
+          "valid": true
+        },
+        "submission": {
+          "ok": true,
+          "profile": {
+            "kind": "model",
+            "profile_ref": "main",
+            "display_name": "Main",
+            "provider_kind": "groq",
+            "adapter": "openai_compatible",
+            "auth_mode": "bearer",
+            "base_url": "https://api.groq.com/openai/v1",
+            "model": "openai/gpt-oss-120b",
+            "capabilities": [],
+            "pi_model": {
+              "contextWindow": 131072,
+              "maxTokens": 65536,
+              "reasoning": true,
+              "thinkingLevelMap": {
+                "off": null,
+                "minimal": null,
+                "low": "low",
+                "medium": "medium",
+                "high": "high",
+                "xhigh": null,
+                "max": null
+              },
+              "compat": {
+                "supportsStrictMode": true
+              },
+              "thinkingLevel": "medium"
+            }
+          },
+          "secret": {
+            "replace": "example-key"
+          }
+        }
+      }
+    },
+    {
+      "name": "model without the default level needs an explicit level",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "openai/gpt-oss-120b",
+        "model_api": "openai-completions",
+        "model_source": "catalog",
+        "pi_model": null,
+        "thinking_level": "medium",
+        "capabilities": [],
+        "secret": {
+          "replace": "example-key"
+        }
+      },
+      "change": {
+        "field": "model",
+        "value": "qwen/qwen3.6-27b"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://api.groq.com/openai/v1",
+          "model": "qwen/qwen3.6-27b",
+          "model_api": "openai-completions",
+          "model_source": "catalog",
+          "pi_model": null,
+          "thinking_level": null,
+          "capabilities": [],
+          "secret": {
+            "replace": "example-key"
+          }
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://api.groq.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "qwen/qwen3.6-27b",
+              "choices": [
+                {
+                  "model": "blocked-example",
+                  "api": "openai-completions",
+                  "status": "unrepresentable",
+                  "unrepresentable": [
+                    "compat.sendSessionAffinityHeaders"
+                  ],
+                  "value": "blocked-example",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "llama-3.3-70b-versatile",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": false,
+                  "thinking_levels": [
+                    "off"
+                  ],
+                  "value": "llama-3.3-70b-versatile",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "openai/gpt-oss-120b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "value": "openai/gpt-oss-120b",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "qwen/qwen3.6-27b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text",
+                    "image"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "off",
+                    "high"
+                  ],
+                  "value": "qwen/qwen3.6-27b",
+                  "label": null,
+                  "source": "catalog"
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": [
+                {
+                  "value": "off",
+                  "label": null
+                },
+                {
+                  "value": "high",
+                  "label": null
+                }
+              ],
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "replace",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": "catalog",
+          "catalog_applies": true,
+          "secret_configured": false,
+          "valid": false
+        },
+        "submission": {
+          "ok": false,
+          "errors": {
+            "thinking_level": {
+              "code": "required"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "explicit supported level",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "qwen/qwen3.6-27b",
+        "model_api": "openai-completions",
+        "model_source": "catalog",
+        "pi_model": null,
+        "thinking_level": null,
+        "capabilities": [],
+        "secret": {
+          "replace": "example-key"
+        }
+      },
+      "change": {
+        "field": "thinking_level",
+        "value": "high"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://api.groq.com/openai/v1",
+          "model": "qwen/qwen3.6-27b",
+          "model_api": "openai-completions",
+          "model_source": "catalog",
+          "pi_model": null,
+          "thinking_level": "high",
+          "capabilities": [],
+          "secret": {
+            "replace": "example-key"
+          }
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://api.groq.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "qwen/qwen3.6-27b",
+              "choices": [
+                {
+                  "model": "blocked-example",
+                  "api": "openai-completions",
+                  "status": "unrepresentable",
+                  "unrepresentable": [
+                    "compat.sendSessionAffinityHeaders"
+                  ],
+                  "value": "blocked-example",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "llama-3.3-70b-versatile",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": false,
+                  "thinking_levels": [
+                    "off"
+                  ],
+                  "value": "llama-3.3-70b-versatile",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "openai/gpt-oss-120b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "value": "openai/gpt-oss-120b",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "qwen/qwen3.6-27b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text",
+                    "image"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "off",
+                    "high"
+                  ],
+                  "value": "qwen/qwen3.6-27b",
+                  "label": null,
+                  "source": "catalog"
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": "high",
+              "choices": [
+                {
+                  "value": "off",
+                  "label": null
+                },
+                {
+                  "value": "high",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "replace",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": "catalog",
+          "catalog_applies": true,
+          "secret_configured": false,
+          "valid": true
+        },
+        "submission": {
+          "ok": true,
+          "profile": {
+            "kind": "model",
+            "profile_ref": "main",
+            "display_name": "Main",
+            "provider_kind": "groq",
+            "adapter": "openai_compatible",
+            "auth_mode": "bearer",
+            "base_url": "https://api.groq.com/openai/v1",
+            "model": "qwen/qwen3.6-27b",
+            "capabilities": [
+              "image-input"
+            ],
+            "pi_model": {
+              "contextWindow": 131072,
+              "maxTokens": 16384,
+              "reasoning": true,
+              "thinkingLevelMap": {
+                "off": "none",
+                "minimal": null,
+                "low": null,
+                "medium": null,
+                "high": "default",
+                "xhigh": null,
+                "max": null
+              },
+              "compat": {
+                "supportsStrictMode": true
+              },
+              "inputLimits": {
+                "images": {
+                  "resize": {
+                    "maxWidth": 2000,
+                    "maxHeight": 2000,
+                    "maxBytes": 4718592,
+                    "jpegQuality": 80
+                  }
+                }
+              },
+              "thinkingLevel": "high"
+            }
+          },
+          "secret": {
+            "replace": "example-key"
+          }
+        }
+      }
+    },
+    {
+      "name": "equivalent base URL keeps the catalog entry",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "qwen/qwen3.6-27b",
+        "model_api": "openai-completions",
+        "model_source": "catalog",
+        "pi_model": null,
+        "thinking_level": "high",
+        "capabilities": [],
+        "secret": {
+          "replace": "example-key"
+        }
+      },
+      "change": {
+        "field": "base_url",
+        "value": "https://API.groq.com/openai/v1/"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://API.groq.com/openai/v1/",
+          "model": "qwen/qwen3.6-27b",
+          "model_api": "openai-completions",
+          "model_source": "catalog",
+          "pi_model": null,
+          "thinking_level": "high",
+          "capabilities": [],
+          "secret": {
+            "replace": "example-key"
+          }
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://API.groq.com/openai/v1/",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "qwen/qwen3.6-27b",
+              "choices": [
+                {
+                  "model": "blocked-example",
+                  "api": "openai-completions",
+                  "status": "unrepresentable",
+                  "unrepresentable": [
+                    "compat.sendSessionAffinityHeaders"
+                  ],
+                  "value": "blocked-example",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "llama-3.3-70b-versatile",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": false,
+                  "thinking_levels": [
+                    "off"
+                  ],
+                  "value": "llama-3.3-70b-versatile",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "openai/gpt-oss-120b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "value": "openai/gpt-oss-120b",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "qwen/qwen3.6-27b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text",
+                    "image"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "off",
+                    "high"
+                  ],
+                  "value": "qwen/qwen3.6-27b",
+                  "label": null,
+                  "source": "catalog"
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": "high",
+              "choices": [
+                {
+                  "value": "off",
+                  "label": null
+                },
+                {
+                  "value": "high",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "replace",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": "catalog",
+          "catalog_applies": true,
+          "secret_configured": false,
+          "valid": true
+        },
+        "submission": {
+          "ok": true,
+          "profile": {
+            "kind": "model",
+            "profile_ref": "main",
+            "display_name": "Main",
+            "provider_kind": "groq",
+            "adapter": "openai_compatible",
+            "auth_mode": "bearer",
+            "base_url": "https://API.groq.com/openai/v1/",
+            "model": "qwen/qwen3.6-27b",
+            "capabilities": [
+              "image-input"
+            ],
+            "pi_model": {
+              "contextWindow": 131072,
+              "maxTokens": 16384,
+              "reasoning": true,
+              "thinkingLevelMap": {
+                "off": "none",
+                "minimal": null,
+                "low": null,
+                "medium": null,
+                "high": "default",
+                "xhigh": null,
+                "max": null
+              },
+              "compat": {
+                "supportsStrictMode": true
+              },
+              "inputLimits": {
+                "images": {
+                  "resize": {
+                    "maxWidth": 2000,
+                    "maxHeight": 2000,
+                    "maxBytes": 4718592,
+                    "jpegQuality": 80
+                  }
+                }
+              },
+              "thinkingLevel": "high"
+            }
+          },
+          "secret": {
+            "replace": "example-key"
+          }
+        }
+      }
+    },
+    {
+      "name": "another endpoint drops the catalog entry to manual",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://API.groq.com/openai/v1/",
+        "model": "qwen/qwen3.6-27b",
+        "model_api": "openai-completions",
+        "model_source": "catalog",
+        "pi_model": null,
+        "thinking_level": "high",
+        "capabilities": [],
+        "secret": {
+          "replace": "example-key"
+        }
+      },
+      "change": {
+        "field": "base_url",
+        "value": "https://gateway.example.com/openai/v1"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://gateway.example.com/openai/v1",
+          "model": "qwen/qwen3.6-27b",
+          "model_api": null,
+          "model_source": "manual",
+          "pi_model": null,
+          "thinking_level": null,
+          "capabilities": [],
+          "secret": {
+            "replace": "example-key"
+          }
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://gateway.example.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "qwen/qwen3.6-27b",
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": null,
+              "error": {
+                "code": "pi_model_required"
+              }
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": true,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "replace",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": "manual",
+          "catalog_applies": false,
+          "secret_configured": false,
+          "valid": false
+        },
+        "submission": {
+          "ok": false,
+          "errors": {
+            "pi_model": {
+              "code": "pi_model_required"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "manual pi_model",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://gateway.example.com/openai/v1",
+        "model": "qwen/qwen3.6-27b",
+        "model_api": null,
+        "model_source": "manual",
+        "pi_model": null,
+        "thinking_level": null,
+        "capabilities": [],
+        "secret": {
+          "replace": "example-key"
+        }
+      },
+      "change": {
+        "field": "pi_model",
+        "value": {
+          "contextWindow": 131072,
+          "maxTokens": 16384,
+          "reasoning": true,
+          "compat": {
+            "supportsStrictMode": true
+          }
+        }
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://gateway.example.com/openai/v1",
+          "model": "qwen/qwen3.6-27b",
+          "model_api": null,
+          "model_source": "manual",
+          "pi_model": {
+            "contextWindow": 131072,
+            "maxTokens": 16384,
+            "reasoning": true,
+            "compat": {
+              "supportsStrictMode": true
+            }
+          },
+          "thinking_level": "medium",
+          "capabilities": [],
+          "secret": {
+            "replace": "example-key"
+          }
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://gateway.example.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "qwen/qwen3.6-27b",
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": true,
+              "required": true,
+              "value": {
+                "contextWindow": 131072,
+                "maxTokens": 16384,
+                "reasoning": true,
+                "compat": {
+                  "supportsStrictMode": true
+                }
+              },
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": "medium",
+              "choices": [
+                {
+                  "value": "off",
+                  "label": null
+                },
+                {
+                  "value": "minimal",
+                  "label": null
+                },
+                {
+                  "value": "low",
+                  "label": null
+                },
+                {
+                  "value": "medium",
+                  "label": null
+                },
+                {
+                  "value": "high",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": true,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "replace",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": "manual",
+          "catalog_applies": false,
+          "secret_configured": false,
+          "valid": true
+        },
+        "submission": {
+          "ok": true,
+          "profile": {
+            "kind": "model",
+            "profile_ref": "main",
+            "display_name": "Main",
+            "provider_kind": "groq",
+            "adapter": "openai_compatible",
+            "auth_mode": "bearer",
+            "base_url": "https://gateway.example.com/openai/v1",
+            "model": "qwen/qwen3.6-27b",
+            "capabilities": [],
+            "pi_model": {
+              "contextWindow": 131072,
+              "maxTokens": 16384,
+              "reasoning": true,
+              "compat": {
+                "supportsStrictMode": true
+              },
+              "thinkingLevel": "medium"
+            }
+          },
+          "secret": {
+            "replace": "example-key"
+          }
+        }
+      }
+    },
+    {
+      "name": "unrepresentable entry is manual",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "openai/gpt-oss-120b",
+        "model_api": "openai-completions",
+        "model_source": "catalog",
+        "pi_model": null,
+        "thinking_level": "medium",
+        "capabilities": [],
+        "secret": {
+          "replace": "example-key"
+        }
+      },
+      "change": {
+        "field": "model",
+        "value": "blocked-example"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://api.groq.com/openai/v1",
+          "model": "blocked-example",
+          "model_api": null,
+          "model_source": "manual",
+          "pi_model": null,
+          "thinking_level": null,
+          "capabilities": [],
+          "secret": {
+            "replace": "example-key"
+          }
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://api.groq.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "blocked-example",
+              "choices": [
+                {
+                  "model": "blocked-example",
+                  "api": "openai-completions",
+                  "status": "unrepresentable",
+                  "unrepresentable": [
+                    "compat.sendSessionAffinityHeaders"
+                  ],
+                  "value": "blocked-example",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "llama-3.3-70b-versatile",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": false,
+                  "thinking_levels": [
+                    "off"
+                  ],
+                  "value": "llama-3.3-70b-versatile",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "openai/gpt-oss-120b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "value": "openai/gpt-oss-120b",
+                  "label": null,
+                  "source": "catalog"
+                },
+                {
+                  "model": "qwen/qwen3.6-27b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text",
+                    "image"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "off",
+                    "high"
+                  ],
+                  "value": "qwen/qwen3.6-27b",
+                  "label": null,
+                  "source": "catalog"
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": null,
+              "error": {
+                "code": "pi_model_required"
+              }
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": true,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "replace",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": "manual",
+          "catalog_applies": true,
+          "secret_configured": false,
+          "valid": false
+        },
+        "submission": {
+          "ok": false,
+          "errors": {
+            "pi_model": {
+              "code": "pi_model_required"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "vendor change resets the model",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "openai/gpt-oss-120b",
+        "model_api": "openai-completions",
+        "model_source": "catalog",
+        "pi_model": null,
+        "thinking_level": "medium",
+        "capabilities": [],
+        "secret": {
+          "replace": "example-key"
+        }
+      },
+      "change": {
+        "field": "provider_kind",
+        "value": "custom"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "custom",
+          "adapter": null,
+          "auth_mode": null,
+          "base_url": "",
+          "model": "",
+          "model_api": null,
+          "model_source": null,
+          "pi_model": null,
+          "thinking_level": null,
+          "capabilities": [],
+          "secret": {
+            "replace": "example-key"
+          }
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "custom",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                },
+                {
+                  "value": "anthropic",
+                  "label": null
+                }
+              ],
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": null,
+              "choices": [],
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "",
+              "choices": null,
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "",
+              "choices": [],
+              "error": {
+                "code": "required"
+              }
+            },
+            {
+              "field": "pi_model",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": false,
+              "required": false,
+              "value": null,
+              "choices": [],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": false,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": false,
+              "required": false,
+              "value": "replace",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": null,
+          "catalog_applies": false,
+          "secret_configured": false,
+          "valid": false
+        },
+        "submission": {
+          "ok": false,
+          "errors": {
+            "adapter": {
+              "code": "required"
+            },
+            "auth_mode": {
+              "code": "required"
+            },
+            "base_url": {
+              "code": "required"
+            },
+            "model": {
+              "code": "required"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

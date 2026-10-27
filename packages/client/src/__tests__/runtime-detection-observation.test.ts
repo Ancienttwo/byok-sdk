@@ -229,7 +229,7 @@ it('carries failure outcomes through runtimes/status and doctor JSON/text withou
   const dir = await directory();
   const config: DaemonConfig = {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Probe', productId: 'probe-product',
-    serverUrl: 'http://example.invalid', workspaceRoot: dir, storeDir: dir,
+    serverUrl: 'http://example.invalid', storeDir: dir,
   };
   const adapters = kinds.map((kind) => new StubRuntimeAdapter(kind, { kind }));
   const connectControl = async () => ({ ok: false as const, reason: 'offline' });

@@ -370,6 +370,143 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       });
     });
 
+    /**
+     * The phase instants are write-once (#980). The clock moves between every
+     * step, so an instant that a later step rewrote would read differently.
+     */
+    it('stamps each phase instant at its own transition and never again', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores } = handle;
+        const tick = () => handle.advanceTime(1_000);
+        const taskId = 'task-phases';
+        const message = { taskId, deviceId: 'device-1', messageId: '10000000-0000-4000-8000-000000000980', payloadBody: '{"m":1}' };
+
+        const offered = await stores.tasks.open(TENANT_A, { taskId, deviceId: 'device-1' });
+        const offeredAt = handle.now();
+        expect(offered).toMatchObject({ offeredAt, updatedAt: offeredAt });
+        for (const field of ['claimedAt', 'firstOutputAt', 'terminalAt']) expect(offered).not.toHaveProperty(field);
+
+        await tick();
+        await stores.tasks.open(TENANT_A, { taskId, deviceId: 'device-1' });
+        await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-2' });
+        expect(await stores.tasks.get(TENANT_A, taskId)).not.toHaveProperty('claimedAt');
+
+        await tick();
+        const claimed = await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-1', runtime: 'pi' });
+        const claimedAt = handle.now();
+        expect(claimed).toMatchObject({ offeredAt, claimedAt, updatedAt: claimedAt });
+
+        await tick();
+        await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-1', runtime: 'pi' });
+        await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-2', runtime: 'pi' });
+        await stores.tasks.recordStatus(TENANT_A, { taskId, status: 'running' });
+        expect(await stores.tasks.get(TENANT_A, taskId)).toMatchObject({ offeredAt, claimedAt });
+        expect(await stores.tasks.get(TENANT_A, taskId)).not.toHaveProperty('firstOutputAt');
+
+        await tick();
+        await expect(stores.tasks.reserveAgentMessage(TENANT_A, message)).resolves.toBe('reserved');
+        const firstOutputAt = handle.now();
+        await tick();
+        await expect(stores.tasks.reserveAgentMessage(TENANT_A, message)).resolves.toBe('pending');
+        await stores.tasks.recordStatus(TENANT_A, { taskId, status: 'running' });
+        expect(await stores.tasks.get(TENANT_A, taskId)).toMatchObject({ firstOutputAt });
+        expect(await stores.tasks.get(TENANT_A, taskId)).not.toHaveProperty('terminalAt');
+
+        await tick();
+        await stores.tasks.recordStatus(TENANT_A, { taskId, status: 'complete' });
+        const terminalAt = handle.now();
+        await tick();
+        await stores.tasks.recordStatus(TENANT_A, { taskId, status: 'complete' });
+        await stores.tasks.recordStatus(TENANT_A, { taskId, status: 'failed' });
+        const phases = { offeredAt, claimedAt, firstOutputAt, terminalAt };
+        expect(await stores.tasks.get(TENANT_A, taskId)).toMatchObject({ ...phases, status: 'complete' });
+        expect(await stores.tasks.getMany(TENANT_A, [taskId])).toMatchObject([phases]);
+        expect((await stores.tasks.list(TENANT_A, { limit: 10 })).attempts).toMatchObject([phases]);
+      });
+    });
+
+    it('stamps an Agent offer, and no output before the claim', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores } = handle;
+        const taskId = 'task-agent-phases';
+        const agentRef = { agentId: 'agent-1', profileRevision: 'rev-1' };
+        const reserved = await stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: 'device-1', agentRef });
+        const offeredAt = handle.now();
+        expect(reserved.attempt).toMatchObject({ offeredAt, updatedAt: offeredAt });
+        await handle.advanceTime(1_000);
+        expect((await stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: 'device-1', agentRef })).attempt)
+          .toMatchObject({ offeredAt });
+        await expect(stores.tasks.reserveAgentMessage(TENANT_A, {
+          taskId, deviceId: 'device-1', messageId: '10000000-0000-4000-8000-000000000981', payloadBody: '{"m":1}',
+        })).resolves.toBe('reserved');
+        expect(await stores.tasks.get(TENANT_A, taskId)).not.toHaveProperty('firstOutputAt');
+      });
+    });
+
+    it('records the first draft output once, only for the claiming device after the claim', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores } = handle;
+        const taskId = 'task-draft-output';
+        const output = { taskId, deviceId: 'device-1' };
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).toBeUndefined();
+        expect(await stores.tasks.get(TENANT_A, taskId)).toBeUndefined();
+
+        await stores.tasks.open(TENANT_A, output);
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).not.toHaveProperty('firstOutputAt');
+        await stores.tasks.claim(TENANT_A, output);
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, { taskId, deviceId: 'device-2' })).not.toHaveProperty('firstOutputAt');
+        expect(await stores.tasks.recordFirstOutput(TENANT_B, output)).toBeUndefined();
+
+        await handle.advanceTime(1_000);
+        const firstOutputAt = handle.now();
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).toMatchObject({ firstOutputAt });
+        await handle.advanceTime(1_000);
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).toMatchObject({ firstOutputAt });
+        await expect(stores.tasks.reserveAgentMessage(TENANT_A, {
+          ...output, messageId: '10000000-0000-4000-8000-000000000982', payloadBody: '{"m":1}',
+        })).resolves.toBe('reserved');
+        expect(await stores.tasks.get(TENANT_A, taskId)).toMatchObject({ firstOutputAt });
+      });
+    });
+
+    it.each(['complete', 'failed', 'cancelled'] as const)('records no draft output once a claimed attempt is %s', async (status) => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const output = { taskId: `task-late-draft-${status}`, deviceId: 'device-1' };
+        await stores.tasks.open(TENANT_A, output);
+        await stores.tasks.claim(TENANT_A, output);
+        await stores.tasks.recordStatus(TENANT_A, { taskId: output.taskId, status });
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).toMatchObject({ status });
+        expect(await stores.tasks.get(TENANT_A, output.taskId)).not.toHaveProperty('firstOutputAt');
+      });
+    });
+
+    it('stamps terminalAt when cancellation ends an unclaimed attempt, and at the terminal of a claimed one', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores } = handle;
+        const cancel = (taskId: string) => stores.cancellations.request(TENANT_A, {
+          taskId, proposedMessageId: `cancel-${taskId}`,
+          materialize: async () => ({ body: 'cancel', bodyHash: contentHash(`sha256:${'a'.repeat(64)}`), byteSize: 6n }),
+        });
+        await stores.tasks.open(TENANT_A, { taskId: 'unclaimed', deviceId: 'device-1' });
+        await stores.tasks.open(TENANT_A, { taskId: 'claimed', deviceId: 'device-1' });
+        await stores.tasks.claim(TENANT_A, { taskId: 'claimed', deviceId: 'device-1' });
+
+        await handle.advanceTime(1_000);
+        expect((await cancel('unclaimed'))?.attempt).toMatchObject({ status: 'cancelled', terminalAt: handle.now() });
+        expect((await cancel('claimed'))?.attempt).not.toHaveProperty('terminalAt');
+        const cancelledAt = handle.now();
+
+        await handle.advanceTime(1_000);
+        await cancel('unclaimed');
+        await stores.tasks.recordStatus(TENANT_A, { taskId: 'unclaimed', status: 'cancelled' });
+        expect(await stores.tasks.get(TENANT_A, 'unclaimed')).toMatchObject({ terminalAt: cancelledAt });
+        await stores.tasks.recordStatus(TENANT_A, { taskId: 'claimed', status: 'complete' });
+        expect(await stores.tasks.get(TENANT_A, 'claimed')).not.toHaveProperty('terminalAt');
+        await stores.tasks.recordStatus(TENANT_A, { taskId: 'claimed', status: 'cancelled' });
+        expect(await stores.tasks.get(TENANT_A, 'claimed')).toMatchObject({ status: 'cancelled', terminalAt: handle.now() });
+      });
+    });
+
     it('records no snapshot for a claim that carried none: absent, not defaulted', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.tasks.open(TENANT_A, { taskId: 'task-1', deviceId: 'device-1' });

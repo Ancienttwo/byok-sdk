@@ -103,13 +103,10 @@ not enforce any of them at the mechanism level today.
 
 **Workspace scoping**
 
-- [ ] **What lives under `workspaceRoot`, and what else can the daemon's OS
-      user read?** Confinement is cwd-by-convention; scoping must come from
-      the OS identity and filesystem layout you give the daemon, not from
-      `ctx.workspaceDir`.
-- [ ] **Do you enable `gitWorkspace: { mode: 'local-checkpoints' }`?** It is
-      a code-progress and recovery layer, explicitly "guidance, not sandbox
-      enforcement" (*Local Git checkpoint workspaces*).
+- [ ] **What lives under `agentHome.hostStorageRoot`, and what else can the
+      daemon's OS user read?** Confinement is cwd-by-convention; scoping must
+      come from the OS identity and filesystem layout you give the daemon,
+      not from `ctx.workspaceDir`.
 
 **Approval and blast radius**
 

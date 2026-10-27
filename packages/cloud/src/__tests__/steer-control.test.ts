@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import type { ContentHash, TenantId } from '@byok-sdk/core';
+import { sealContent, type SealedContent } from '@byok-sdk/core/sealed-payload';
 import {
   PROTOCOL_VERSION,
   createEnvelope,
@@ -40,14 +41,44 @@ import { tenantStoresFor } from '../tenant-stores';
 import {
   PRODUCT_ID,
   TENANT_A,
+  TEST_AGENT_REF,
   createHarness,
   decodeEventsPage,
+  grantAgentHome,
   offerPayload,
   type CloudHarness,
   type DecodedEventsPage,
   type PairedDevice,
 } from './support/harness';
-import { BY_REFERENCE_TEXT_LENGTH, inlineMember, referenceMember, sealInput, uploadCiphertext } from './support/sealed';
+import { BY_REFERENCE_TEXT_LENGTH, SEALING, inlineMember, referenceMember, uploadCiphertext } from './support/sealed';
+
+const SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+/**
+ * The sealed text of steer `steerId`, sealed now. `sealInput` binds no Agent;
+ * a steer binds the Agent of its task's offer, {@link TEST_AGENT_REF}.
+ */
+function sealSteer(deviceId: string, taskId: string, steerId: string, text: string): Promise<SealedContent> {
+  return sealContent({
+    scopeKey: SCOPE_KEY,
+    scope: { id: SEALING.scopeId, epoch: SEALING.epoch },
+    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+    sender: 'A'.repeat(43),
+    category: 'task-input',
+    binding: {
+      tenantId: TENANT_A,
+      family: 'task.steer',
+      direction: 'server-to-daemon',
+      identity: { taskId, steerId },
+      deviceId,
+      agentRef: { ...TEST_AGENT_REF },
+      categories: [...SEALING.categories],
+      notAfter: null,
+    },
+    plaintext: { text },
+    maxContentLength: 2 * 1024 * 1024,
+  });
+}
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: PRODUCT_ID, deviceId } as const;
@@ -77,10 +108,11 @@ interface OfferedTask {
 
 /** An offer this device has actually been handed, so `seq` is a usable cursor. */
 async function offered(harness: CloudHarness, device: PairedDevice): Promise<OfferedTask> {
-  const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+  await grantAgentHome(harness, TENANT_A, device.deviceId);
+  const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
     payload: offerPayload('steer me'),
   });
-  expect((await poll(harness, device, 0)).events.map((event) => event.type)).toEqual(['task.offer']);
+  expect((await poll(harness, device, 0)).events.map((event) => event.type)).toEqual(['task.offer_for_agent']);
   return { taskId: offer.taskId, seq: offer.seq };
 }
 
@@ -103,6 +135,7 @@ async function claim(
         'task.claim',
         {
           deviceId: device.deviceId,
+          agentRef: TEST_AGENT_REF,
           ...(report.runtime === undefined ? {} : { runtime: report.runtime }),
           ...(report.capabilities === undefined ? {} : { capabilities: report.capabilities }),
         },
@@ -146,7 +179,7 @@ async function helloAdvertisingSteer(harness: CloudHarness, device: PairedDevice
       device.deviceId,
       createEnvelope('conn.hello', {
         protocolVersions: [PROTOCOL_VERSION],
-        capabilities: ['steer'],
+        capabilities: ['steer', 'agent-home-contract'],
         deviceId: device.deviceId,
         productId: PRODUCT_ID,
         runtimes: [{ id: 'pi', capabilities: { steer: true } }],
@@ -184,7 +217,7 @@ describe('steerTask (GAP-2)', () => {
   });
 
   it('steerSealedTask delivers task.steer_sealed only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
-    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8');
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8');
     const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer_sealed')!.payload;
     const harness = createHarness();
@@ -212,7 +245,7 @@ describe('steerTask (GAP-2)', () => {
   });
 
   it('steerSealedTask refuses a sealed steer by ciphertextRef to a blob that is not committed, and writes no mailbox row (#654)', async () => {
-    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8');
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8');
     const byReference = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer_sealed' && 'ciphertextRef' in line.payload.sealed)!.payload;
     const harness = createHarness();
@@ -229,9 +262,7 @@ describe('steerTask (GAP-2)', () => {
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
-    const seal = (steerId: string, text: string) => sealInput({
-      tenant: TENANT_A, deviceId: device.deviceId, type: 'task.steer_sealed', identity: { taskId: task.taskId, steerId }, plaintext: { text },
-    });
+    const seal = (steerId: string, text: string) => sealSteer(device.deviceId, task.taskId, steerId, text);
     const steerId = randomUUID();
     const first = await seal(steerId, 'go left');
     const again = await seal(steerId, 'go left');
@@ -259,13 +290,7 @@ describe('steerTask (GAP-2)', () => {
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
     const steerId = randomUUID();
-    const content = await sealInput({
-      tenant: TENANT_A,
-      deviceId: device.deviceId,
-      type: 'task.steer_sealed',
-      identity: { taskId: task.taskId, steerId },
-      plaintext: { text: 'x'.repeat(BY_REFERENCE_TEXT_LENGTH) },
-    });
+    const content = await sealSteer(device.deviceId, task.taskId, steerId, 'x'.repeat(BY_REFERENCE_TEXT_LENGTH));
     const ref = await uploadCiphertext(harness, device, content.ciphertext);
 
     await harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: referenceMember(content, ref) });
@@ -282,9 +307,7 @@ describe('steerTask (GAP-2)', () => {
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
     const steerId = randomUUID();
     const byReference = async (text: string) => {
-      const content = await sealInput({
-        tenant: TENANT_A, deviceId: device.deviceId, type: 'task.steer_sealed', identity: { taskId: task.taskId, steerId }, plaintext: { text },
-      });
+      const content = await sealSteer(device.deviceId, task.taskId, steerId, text);
       return referenceMember(content, await uploadCiphertext(harness, device, content.ciphertext));
     };
     const refCount = async (sealed: { ciphertextRef: { contentHash: string } }) =>
@@ -342,7 +365,7 @@ describe('steerTask (GAP-2)', () => {
     });
 
     // The connection layer really is offering a `true` to fall back to...
-    expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual(['steer']);
+    expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual(['steer', 'agent-home-contract']);
     // ...and the claim still decides.
     const error = await steerRejection(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' }));
     expect(error.code).toBe('steer_unsupported_runtime');
@@ -399,7 +422,7 @@ describe('steerTask (GAP-2)', () => {
         device.deviceId,
         createEnvelope(
           'task.complete',
-          { summary: 'done', sessionRef: 'session-1' },
+          { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'session-1' },
           { taskId: task.taskId },
         ),
       ).then((result) => result.outcome),

@@ -9,7 +9,6 @@ import type {
 } from '@byok-sdk/protocol';
 import type {
   RuntimeAdapter,
-  GitWorkspaceConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetObservation,
@@ -40,8 +39,6 @@ import {
 import { deterministicJitterMs } from './deterministic-jitter';
 import { type OperationalHealthSnapshot } from './operational-health';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
-import { GitWorkspaceManager } from './git-workspace';
-import { GitWorkspaceStore } from './git-workspace-store';
 import { type DeviceEnrollment } from './store';
 import { type DeviceMemberStatus } from './e2ee-key-package-notice';
 import { type LocalTaskJournal } from './journal/journal';
@@ -126,13 +123,6 @@ export interface DaemonConfig {
    */
   machineId?: () => Promise<string | undefined>;
   /**
-   * Parent directory of each legacy offer's `workspaceRoot/<taskId>`
-   * workspace, and of Git workspace mode. Required unless `strictAgentOnly`
-   * is true: a strict Agent daemon refuses every legacy offer and runs each
-   * Agent offer in its SDK-owned home, so it never reads this path.
-   */
-  workspaceRoot?: string;
-  /**
    * Strict Agent execution boundary. The host selects one absolute branded
    * storage root; the SDK alone composes `agents/<agentId>`, initializes the
    * durable home, and binds it as runtime cwd. `projection` may write opaque,
@@ -158,11 +148,6 @@ export interface DaemonConfig {
    * must also call `runSdkReservedHelperCommand()` before its own CLI parser.
    */
   sdkHelperHost?: SdkHelperHostConfig;
-  /**
-   * Refuse legacy task offers locally. This is an additive capability only
-   * after the SDK-owned Agent home has passed construction-time preflight.
-   */
-  strictAgentOnly?: boolean;
   /**
    * How many `homeAccess: 'memory-reader'` Attempts this daemon lets run
    * CONCURRENTLY in one canonical Agent home, across every lane and every
@@ -190,12 +175,6 @@ export interface DaemonConfig {
    * policy/reliable protocol surface.
    */
   agentEgress?: AgentEgressConfig;
-  /**
-   * Disabled by default. Enables local-only Git checkpoint repositories for
-   * legacy task workspaces. Mutually exclusive with `agentHome`: strict Agent
-   * execution has one canonical workspace authority.
-   */
-  gitWorkspace?: GitWorkspaceConfig;
   /**
    * Restricts which runtimes this daemon will ever use — enforced in two
    * places that must stay consistent: `createDaemon` (this file) builds its
@@ -656,7 +635,8 @@ export interface Daemon {
   /**
    * M3-2a: locally resolve a task currently paused on `needs_approval` —
    * drives the exact same code path a server-sent `task.approve` does
-   * (`TaskRunner.handleApprove`), invoked directly instead of over the wire.
+   * (`TaskRunner.handleApprove`), invoked directly instead of over the wire,
+   * then reports the decision to the server as `task.approval_resolved`.
    * Honest-but-currently-unexercised: none of the three bundled adapters
    * (pi/claude/codex) ever actually pauses for approval — each one's
    * `resolveApproval` throws unconditionally (see `toRuntimeInfoCapabilities`'s
@@ -665,11 +645,13 @@ export interface Daemon {
    * exactly as an honest, doing-nothing-magic implementation should. Ready
    * for the day a runtime adapter implements real interactive approval, with
    * no further changes needed here. A no-op (resolves immediately) for a
-   * `taskId` this daemon doesn't currently have active.
+   * `taskId` this daemon doesn't currently have active. `approvalId` names
+   * the pending approval, as a wire v4 decision does; a different id is a
+   * stale decision and changes nothing.
    */
-  approve(taskId: string): Promise<void>;
+  approve(taskId: string, opts: { approvalId: string }): Promise<void>;
   /** M3-2a: same as {@link approve} but rejects — see that method's doc comment. */
-  reject(taskId: string, reason?: string): Promise<void>;
+  reject(taskId: string, opts: { approvalId: string; reason?: string }): Promise<void>;
 }
 
 /** Custom adapter composition. Available custom descriptors are published through
@@ -697,15 +679,6 @@ export interface DaemonOverrides {
     retryDelayMs?: number;
     /** Minimum delay before the next long-poll request after an empty (no-events) response — avoids busy-looping against a server that responds instantly. Default 250ms. */
     idleDelayMs?: number;
-  };
-  /**
-   * Test/product injection seam for the local Git workspace boundary. The
-   * supplied manager/store are used only when `config.gitWorkspace` is enabled;
-   * an absent Git config therefore cannot accidentally activate either object.
-   */
-  gitWorkspace?: {
-    manager?: GitWorkspaceManager;
-    store?: GitWorkspaceStore;
   };
   /**
    * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
@@ -777,17 +750,15 @@ export function buildDaemonWithAdapters(
 
   const memberStatus = (): DeviceMemberStatus => daemonState.deviceMember ?? (daemonState.memberResuming ? 'resuming' : 'none');
   const {
-    logMember, operationalHealth, ownedProcessLedger, cursorStore, sessionWorkspaces, agentHomeManager,
-    agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress, gitWorkspaceManager,
-    gitWorkspaceStore,
-  } = composeDaemonWorkspaces({ storeDir, config, egressPolicy, overrides });
+    logMember, operationalHealth, ownedProcessLedger, cursorStore, agentHomeManager,
+    agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress,
+  } = composeDaemonWorkspaces({ storeDir, config, egressPolicy });
 
   const retentionRegistry = createRetentionRegistry({
     storeDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,
     journal: () => daemonState.journal, identity: () => daemonState.retentionIdentity, preparation: () => daemonState.inputPreparationService,
     ...(agentHomeManager === undefined ? {} : { home: agentHomeManager }),
     ...(agentSessionHandoffs === undefined ? {} : { handoffs: agentSessionHandoffs }),
-    ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
     ...(config.piByokLauncher?.sessionDir === undefined ? {} : { piSessionDir: config.piByokLauncher.sessionDir }),
   });
   const retentionSweeper = new RetentionSweeper({
@@ -915,9 +886,9 @@ export function buildDaemonWithAdapters(
     egressBatcherOptions, presenceCadence, deviceAssertionAudiences, deviceAssertionTtlMs, storeDir,
     storageConfig, retentionClock, scratchRoot, storagePressure, inputPreparationLimits,
     preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf, memberStatus,
-    logMember, operationalHealth, ownedProcessLedger, cursorStore, sessionWorkspaces,
+    logMember, operationalHealth, ownedProcessLedger, cursorStore,
     agentHomeManager, agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress,
-    gitWorkspaceManager, gitWorkspaceStore, retentionRegistry, retentionSweeper, terminalCommits,
+    retentionRegistry, retentionSweeper, terminalCommits,
     outbound, observer, approvalRegistry, capabilityDiscoveryTimeoutMs, pendingLateMutationBarriers,
     buildAuthManager, daemonState,
     get controlMethods() { return controlMethods; },

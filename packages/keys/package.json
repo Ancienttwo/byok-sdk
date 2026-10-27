@@ -32,6 +32,10 @@
       "types": "./dist/pi-catalog.d.ts",
       "import": "./dist/pi-catalog.js"
     },
+    "./model-route": {
+      "types": "./dist/model-route.d.ts",
+      "import": "./dist/model-route.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

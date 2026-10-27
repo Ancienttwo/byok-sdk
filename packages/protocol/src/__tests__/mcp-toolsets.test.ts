@@ -4,38 +4,38 @@ import {
   ConfiguredToolsetsSchema,
   ConnHelloPayloadSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
-  TaskOfferPayloadSchema,
-  TaskOfferWithToolsetsPayloadSchema,
   ToolsetIdSchema,
   createEnvelope,
 } from '../index';
 
-describe('task.offer_with_toolsets additive control message', () => {
-  it('carries only logical ids and validates as a distinct server-to-daemon message', () => {
+const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' };
+
+describe('requiredToolsets on an Agent offer', () => {
+  it('carries only logical ids on the server-to-daemon offer', () => {
     const envelope = createEnvelope(
-      'task.offer_with_toolsets',
+      'task.offer_for_agent',
       {
         instruction: 'find qualified leads',
+        agentRef: AGENT_REF,
         runtime: 'claude',
         requiredToolsets: ['salesko', 'crm.readonly'],
       },
       { taskId: 'task-toolsets-1', seq: 1 },
     );
 
-    expect(envelope.type).toBe('task.offer_with_toolsets');
+    expect(envelope.type).toBe('task.offer_for_agent');
     expect(envelope.payload.requiredToolsets).toEqual(['salesko', 'crm.readonly']);
     expect(JSON.stringify(envelope)).not.toMatch(/command|args|env|header|secret/i);
   });
 
   it('rejects duplicate, malformed, empty, and oversized logical id sets', () => {
-    const base = { instruction: 'x' };
-    expect(TaskOfferWithToolsetsPayloadSchema.safeParse({ ...base, requiredToolsets: [] }).success).toBe(false);
+    const schema = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent'];
+    const base = { instruction: 'x', agentRef: AGENT_REF };
+    expect(schema.safeParse({ ...base, requiredToolsets: [] }).success).toBe(false);
+    expect(schema.safeParse({ ...base, requiredToolsets: ['salesko', 'salesko'] }).success).toBe(false);
+    expect(schema.safeParse({ ...base, requiredToolsets: ['Salesko'] }).success).toBe(false);
     expect(
-      TaskOfferWithToolsetsPayloadSchema.safeParse({ ...base, requiredToolsets: ['salesko', 'salesko'] }).success,
-    ).toBe(false);
-    expect(TaskOfferWithToolsetsPayloadSchema.safeParse({ ...base, requiredToolsets: ['Salesko'] }).success).toBe(false);
-    expect(
-      TaskOfferWithToolsetsPayloadSchema.safeParse({
+      schema.safeParse({
         ...base,
         requiredToolsets: Array.from({ length: 17 }, (_, index) => `toolset-${index}`),
       }).success,
@@ -43,20 +43,13 @@ describe('task.offer_with_toolsets additive control message', () => {
   });
 
   it('is strict control data and cannot carry a remote MCP executable definition', () => {
-    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer_with_toolsets'].safeParse({
+    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent'].safeParse({
       instruction: 'x',
+      agentRef: AGENT_REF,
       requiredToolsets: ['salesko'],
       mcpServers: { salesko: { command: '/tmp/untrusted' } },
     });
     expect(result.success).toBe(false);
-  });
-
-  it('does not widen legacy task.offer with a silently stripped toolset field', () => {
-    const parsed = TaskOfferPayloadSchema.parse({
-      instruction: 'x',
-      requiredToolsets: ['salesko'],
-    });
-    expect('requiredToolsets' in parsed).toBe(false);
   });
 
   it('pins the bounded lowercase id vocabulary', () => {

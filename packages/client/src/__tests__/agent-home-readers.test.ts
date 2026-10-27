@@ -21,7 +21,6 @@ import {
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -76,7 +75,6 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
       productName: 'Readers',
       productId: `readers-${path.basename(storeDir)}`,
       serverUrl: server.url,
-      workspaceRoot: await temp('byok-readers-workspace-'),
       storeDir,
       agentHome: { hostStorageRoot },
       ...overrides,
@@ -665,7 +663,6 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [durable],
-      workspaceRoot: await temp('byok-readers-durable-workspace-'),
       agentHome,
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-1',
@@ -674,7 +671,6 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',
@@ -704,7 +700,6 @@ describe('reader admission after a published reader terminal (#476)', () => {
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [pi],
-      workspaceRoot: await temp('byok-readers-finishing-workspace-'),
       agentHome,
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-1',
@@ -713,7 +708,6 @@ describe('reader admission after a published reader terminal (#476)', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-1',

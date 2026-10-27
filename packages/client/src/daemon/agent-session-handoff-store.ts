@@ -306,9 +306,8 @@ async function evidenceDirectory(homeInput: string): Promise<string> {
 /**
  * Durable, fail-closed session evidence stored inside the canonical Agent
  * home. Each session gets one hash-addressed append-only JSONL ledger under
- * `.byok/runtime-sessions/`; session text never becomes a pathname. Unlike
- * the legacy SessionWorkspaceStore, corrupt bytes are never interpreted as a
- * missing mapping. Reader sessions keep their ledger in the home too, not in
+ * `.byok/runtime-sessions/`; session text never becomes a pathname. Corrupt
+ * bytes are never interpreted as a missing mapping. Reader sessions keep their ledger in the home too, not in
  * their run directory, so a resume can find the run directory by sessionRef.
  */
 export class AgentSessionHandoffStore {

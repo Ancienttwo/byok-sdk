@@ -1,10 +1,11 @@
+import type { RuntimeTaskInput } from '../types';
 import { fileURLToPath } from 'node:url';
 import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/process-client';
 import { SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
@@ -39,11 +40,11 @@ async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOp
   return { workspaceDir, env };
 }
 
-async function startAdapter(adapter: ClaudeAdapter, task: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
+async function startAdapter(adapter: ClaudeAdapter, task: RuntimeTaskInput, resources: PreparedOperationResources): Promise<Session> {
   return startPreparedOperation(adapter, task, resources);
 }
 
-const baseTask: TaskOfferPayload = {
+const baseTask: RuntimeTaskInput = {
   instruction: 'say hi',
 };
 
@@ -182,7 +183,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('a task.offer carrying a known sessionRef resumes via the real --resume flag, matching session_id', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_SESSION_ID: 'resume-me-123' });
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
+    const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'resume-me-123' };
     const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
     expect(session.sessionRef).toBe('resume-me-123');
@@ -195,7 +196,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       FAKE_CLAUDE_SESSION_ID: 'resume-me-123', // what the --resume-target validation checks against (so the resume itself "succeeds")
       FAKE_CLAUDE_REPORTED_SESSION_ID: 'some-other-session', // but system/init reports a DIFFERENT id
     });
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
+    const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'resume-me-123' };
     let failure: unknown;
     try {
       await startAdapter(adapter, task, ctx);
@@ -211,7 +212,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const adapter = fakeClaudeAdapter();
     // FAKE_CLAUDE_SESSION_ID defaults to 'fake-claude-session-1' — this ref never matches it.
     const ctx = await makeCtx();
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'some-other-unknown-id' };
     await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/No conversation found with session ID/);
   });
 
@@ -294,7 +295,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
   it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
     const adapter = fakeClaudeAdapter();
-    const task: TaskOfferPayload = {
+    const task: RuntimeTaskInput = {
       ...baseTask,
       instruction: { blobRef: { blobId: 'b1', contentHash: `sha256:${'0'.repeat(64)}`, size: 10, contentType: 'text/plain' } },
     };
@@ -452,7 +453,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   });
 
   it('marks claude exiting before system/init on a --resume of a missing session runtime_exited (#869)', async () => {
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'some-other-unknown-id' };
     await expect(startAdapter(fakeClaudeAdapter(), task, await makeCtx())).rejects.toMatchObject({
       phase: 'start', category: 'infrastructure', message: expect.stringMatching(/No conversation found/), failure: { class: 'runtime_exited' },
     });

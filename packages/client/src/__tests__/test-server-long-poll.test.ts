@@ -1,3 +1,4 @@
+import { freshTestAgentRef } from './fixtures/test-agent';
 import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
@@ -33,7 +34,7 @@ describe('TestServer scripted long-poll redelivery', () => {
   }
 
   it('retains a queued retry across read-ahead until the client rewinds to its durable cursor', async () => {
-    const retry = createEnvelope('task.offer', {
+    const retry = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
       instruction: 'retry after failed handling',
     }, { taskId: 'retry', seq: 2 });
     server.pushLongPollEvent(retry);

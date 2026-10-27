@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { readdirSync, readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
@@ -201,17 +202,16 @@ describe('requestDeviceAssertion', () => {
     storeDir: string;
     productId: string;
   }> {
-    const workspaceRoot = await tmpDir(`byok-assert-client-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-assert-client-${productId}-store-`);
     const config: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       ...(deviceAssertion === undefined ? {} : { deviceAssertion }),
     };
-    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
+    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     daemons.push(built);
     await built.pair('pairing-code');
     await built.start();
@@ -319,7 +319,6 @@ describe('requestTaskAssertion', () => {
     contextToken: string;
     adapter: StubRuntimeAdapter;
   }> {
-    const workspaceRoot = await tmpDir(`byok-task-client-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-task-client-${productId}-store-`);
     const hostStorageRoot = await tmpDir(`byok-task-client-${productId}-home-`);
     const adapter = new StubRuntimeAdapter(
@@ -333,13 +332,12 @@ describe('requestTaskAssertion', () => {
       productName: 'Acme',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot },
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
       mcpToolsets: { [TOOLSET]: { mcpServers: { [SERVER_NAME]: { command: '/opt/salesko/read' } } } },
     };
-    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
+    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
     daemons.push(built);
     await built.pair('pairing-code');
     await built.start();

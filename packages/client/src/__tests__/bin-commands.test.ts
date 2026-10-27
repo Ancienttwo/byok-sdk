@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -53,7 +54,7 @@ function baseConfig(storeDir: string, overrides: Partial<DaemonConfig> = {}): Da
     productName: 'Acme',
     productId: 'acme-product',
     serverUrl: 'http://example.invalid',
-    workspaceRoot: '/ws',
+    agentHome: testAgentHomeConfig(),
     storeDir,
     ...overrides,
   };

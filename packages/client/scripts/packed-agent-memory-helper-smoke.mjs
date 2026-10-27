@@ -79,7 +79,7 @@ if (process.platform === 'darwin') {
     changed[16384] ^= 1;
     writeFileSync(bin, changed);
     await assert.rejects(open(), /deployment digest mismatch/);
-    const daemonConfig = { strictAgentOnly: true, productName: 'Packed helper', productId: 'packed-helper', serverUrl: 'http://localhost:1', storeDir: path.join(scratch, 'store'), agentHome: { hostStorageRoot: scratch }, localAgentRelease: { version: '0.0.0-test' }, agentMemoryIntents: { fetch: async () => { throw new Error('must not fetch'); }, complete: async () => { throw new Error('must not complete'); } } };
+    const daemonConfig = { productName: 'Packed helper', productId: 'packed-helper', serverUrl: 'http://localhost:1', storeDir: path.join(scratch, 'store'), agentHome: { hostStorageRoot: scratch }, localAgentRelease: { version: '0.0.0-test' }, agentMemoryIntents: { fetch: async () => { throw new Error('must not fetch'); }, complete: async () => { throw new Error('must not complete'); } } };
     assert.throws(() => sdk.createDaemonWithAdapters(daemonConfig, []), /deployment digest mismatch/);
     const forgedManifest = structuredClone(manifest);
     forgedManifest.entries[`darwin-${process.arch}`].digest = agentMemoryHelperDigest(changed, process.arch);

@@ -1,3 +1,5 @@
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { testAgentHomeConfig } from './fixtures/test-agent';
 /**
  * #869: a Host reads a failed task's runtime failure class from
  * `tasks.get(taskId).result.failure` on the real embedded server, never from
@@ -17,7 +19,7 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
 import { testScratchRoot } from './fixtures/execution-scratch';
-import { startRealServer, type RealServerHandle } from './fixtures/real-server';
+import { startRealServer, submitAgentTask, type RealServerHandle } from './fixtures/real-server';
 
 const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 const RESETS_AT_SECONDS = 1_792_832_400;
@@ -75,16 +77,17 @@ async function failedTask(runtime: keyof typeof ADAPTERS, options: { oldServer?:
   daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' },
     productName: 'Failure class test', productId, serverUrl: server.url,
-    workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
+    storeDir: path.join(root, 'store'),
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   }, [ADAPTERS[runtime]()], { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
   const record = await daemon.pair((await server.createPairingCode()).code);
   await daemon.start();
   await vi.waitFor(async () => {
     expect((await server.byok.machines.list()).find((machine) => machine.deviceId === record.deviceId)?.connected).toBe(true);
   });
-  const handle = await server.byok.dispatch({ deviceId: record.deviceId, instruction: 'say hi' });
+  const taskId = await submitAgentTask(server, { taskId: `task-failure-class-${runtime}`, deviceId: record.deviceId, instruction: 'say hi', runtime });
   return vi.waitFor(async () => {
-    const snapshot = await server.byok.tasks.get(handle.taskId);
+    const snapshot = await server.byok.tasks.get(taskId);
     expect(snapshot?.state).toBe('Failed');
     return snapshot!.result!;
   }, { timeout: 15_000 });

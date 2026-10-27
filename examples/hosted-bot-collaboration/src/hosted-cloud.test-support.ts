@@ -63,7 +63,7 @@ export async function openHostedCloud() {
     if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
     const adapter = new BotStubAdapter();
     const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'Hosted collaboration', localAgentRelease: { version: '0.0.0-test' },
-      serverUrl: `http://127.0.0.1:${address.port}`, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'sdk'),
+      serverUrl: `http://127.0.0.1:${address.port}`, storeDir: path.join(root, 'sdk'),
       // The Host's persona hook (#793 S13): it writes the Bot persona of a home projection, so the device applies a task-free
       // projection and advertises `agent-home-projection`.
       agentHome: { hostStorageRoot: path.join(root, 'homes'), projection: createAgentHomeProjectionConsumer(async ({ projection, writeHomeFile }) => {

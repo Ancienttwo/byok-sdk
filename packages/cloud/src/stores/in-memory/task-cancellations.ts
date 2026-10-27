@@ -65,6 +65,7 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
               requestedAt,
               ...(input.reason === undefined ? {} : { reason: input.reason }),
             },
+            ...(existing.ownerDeviceId === undefined ? { terminalAt: requestedAt } : {}),
             updatedAt: requestedAt,
           }
         : existing;

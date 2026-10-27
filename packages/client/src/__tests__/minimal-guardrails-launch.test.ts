@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -16,6 +17,7 @@ import { observationOf } from './fixtures/mcp-observation';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 
 /**
  * Minimal guardrails: no PermissionPolicy reaches a runtime. Each bundled
@@ -222,7 +224,7 @@ describe('daemon admission', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot: await tempDir('byok-minimal-guardrails-workspace-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tempDir('byok-minimal-guardrails-store-'),
       },
       [adapter],
@@ -230,7 +232,7 @@ describe('daemon admission', () => {
     await daemon.pair('pairing-code');
     await daemon.start();
 
-    const offer = createEnvelope('task.offer', { instruction: 'no policy' }, { taskId: 'task-no-policy', seq: server.nextSeq() });
+    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'no policy' }, { taskId: 'task-no-policy', seq: server.nextSeq() });
     expect('policy' in offer.payload).toBe(false);
     server.send(offer);
 
@@ -238,7 +240,7 @@ describe('daemon admission', () => {
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'task-no-policy');
     expect(server.received.some((envelope) => envelope.type === 'task.decline')).toBe(false);
     expect(adapter.startCalls).toHaveLength(1);
-    expect(adapter.startCalls[0]?.task.instruction).toBe('no policy');
+    expect(adapter.startCalls[0]?.task.instruction).toBe(prependAgentMemoryGuidance('no policy'));
     expect(adapter.startCalls[0]?.task).not.toHaveProperty('policy');
   });
 });

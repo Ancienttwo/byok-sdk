@@ -19,14 +19,14 @@ import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, type ByokCloudObserver, type InboundCommitted } from '../inbound';
 import type { InboundRateLimiter } from '../stores/ports';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
-import { TENANT_A, createHarness, offerPayload, type CloudHarness } from './support/harness';
+import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: 'test-product', deviceId } as const;
 }
 
 function claim(taskId: string, deviceId: string): Envelope {
-  return createEnvelope('task.claim', { deviceId }, { taskId });
+  return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId });
 }
 
 function recorder(): { readonly seen: InboundCommitted[]; readonly observer: ByokCloudObserver } {
@@ -53,13 +53,14 @@ describe('observer.onInboundCommitted', () => {
   it('fires exactly once per committed envelope, with that envelope and tenant', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     const stores = storesFor(harness, device.deviceId);
     const { seen, observer } = recorder();
 
-    const first = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const first = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('one'),
     });
-    const second = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const second = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('two'),
     });
     const claimFirst = claim(first.taskId, device.deviceId);
@@ -81,9 +82,10 @@ describe('observer.onInboundCommitted', () => {
   it('stays silent for a duplicate, which committed nothing the first delivery had not', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     const stores = storesFor(harness, device.deviceId);
     const { seen, observer } = recorder();
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
     const envelope = claim(taskId, device.deviceId);
@@ -141,6 +143,7 @@ describe('observer.onInboundCommitted', () => {
   it('swallows a throwing observer and leaves the outcome untouched', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     const stores = storesFor(harness, device.deviceId);
     let calls = 0;
     const thrower: ByokCloudObserver = {
@@ -149,7 +152,7 @@ describe('observer.onInboundCommitted', () => {
         throw new Error('observer blew up');
       },
     };
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
 
@@ -172,10 +175,11 @@ describe('observer.onInboundCommitted', () => {
     const { seen, observer } = recorder();
     const harness = createHarness({ observer });
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     const offers = [];
     for (const instruction of ['one', 'two', 'three']) {
       offers.push(
-        await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+        await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
           payload: offerPayload(instruction),
         }),
       );
@@ -205,7 +209,8 @@ describe('observer.onInboundCommitted', () => {
       const harness =
         observed === undefined ? createHarness() : createHarness({ observer: observed });
       const device = await harness.pairDevice(TENANT_A);
-      const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+      await grantAgentHome(harness, TENANT_A, device.deviceId);
+      const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
         payload: offerPayload(),
       });
       // One envelope that commits and one the gate refuses, so the comparison
@@ -231,8 +236,9 @@ describe('observer.onInboundCommitted', () => {
   it('is absent by default: nothing observes and nothing changes', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     const stores = storesFor(harness, device.deviceId);
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
 
@@ -247,12 +253,14 @@ describe('observer.onInboundCommitted', () => {
     const other = tenantId('tenant-observer-b');
     const deviceA = await harness.pairDevice(TENANT_A);
     const deviceB = await harness.pairDevice(other);
+    await grantAgentHome(harness, TENANT_A, deviceA.deviceId);
+    await grantAgentHome(harness, other, deviceB.deviceId);
     const { seen, observer } = recorder();
 
-    const offerA = await harness.cloud.enqueueOffer(TENANT_A, deviceA.deviceId, {
+    const offerA = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceA.deviceId, {
       payload: offerPayload('a'),
     });
-    const offerB = await harness.cloud.enqueueOffer(other, deviceB.deviceId, {
+    const offerB = await harness.cloud.enqueueAgentOffer(other, deviceB.deviceId, {
       payload: offerPayload('b'),
     });
 

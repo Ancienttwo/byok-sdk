@@ -8,7 +8,9 @@ import { BetaLedger, BetaError, DEFAULT_QUOTA, MAX_INSTRUCTION_BYTES, WINDOW_MS,
 
 const cleanup: Array<() => void> = [];
 afterEach(() => { for (const close of cleanup.splice(0).reverse()) close(); });
-const spec: KeySpec = { label: 'local test Bot', scopes: ['tasks.dispatch', 'tasks.read', 'tasks.cancel', 'artifacts.read'], deviceIds: ['dev-a', 'dev-b'], runtimes: ['pi'] };
+const spec: KeySpec = { label: 'local test Bot', scopes: ['tasks.dispatch', 'tasks.read', 'tasks.cancel', 'artifacts.read'], deviceIds: ['dev-a', 'dev-b'], runtimes: ['pi'],
+  agentRef: { agentId: 'main', profileRevision: '1' } };
+const { agentRef: _agentRef, ...agentless } = spec;
 const args: TaskArguments = { runtime: 'pi', instruction: 'test instruction' };
 function fixture(options: LedgerOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), 'b2-')); const path = join(root, 'ledger.sqlite');
@@ -82,7 +84,7 @@ describe('key custody, caller authority and durable identity', () => {
   it('rejects unknown grants and requires AgentRef for memory and routine scopes', () => {
     const f = fixture();
     code(() => f.ledger.issueKey({ ...spec, scopes: ['*'] } as unknown as KeySpec), 'invalid_input');
-    code(() => f.ledger.issueKey({ ...spec, scopes: ['routines.write'] }), 'invalid_input');
+    code(() => f.ledger.issueKey({ ...agentless, scopes: ['routines.write'] }), 'invalid_input');
     code(() => f.ledger.issueKey({ ...spec, quota: { runningTasks: 0 } }), 'invalid_input');
     const reader = f.ledger.issueKey({ ...spec, scopes: ['tasks.read'] });
     const caller = f.ledger.authenticate(`Bearer ${reader.token}`);
@@ -90,6 +92,16 @@ describe('key custody, caller authority and durable identity', () => {
     code(() => f.ledger.reserveTask(f.caller, { ...args, runtime: 'codex' }, 'dev-a'), 'forbidden');
     code(() => f.ledger.reserveTask(f.caller, args, 'foreign-device'), 'forbidden');
     expect(f.ledger.quota(f.caller).runningTasks).toBe(0);
+  });
+
+  it('requires AgentRef for tasks.dispatch at issue time, and not for the task read scopes', () => {
+    const f = fixture();
+    code(() => f.ledger.issueKey(agentless), 'invalid_input');
+    code(() => f.ledger.issueKey({ ...agentless, scopes: ['tasks.dispatch'] }), 'invalid_input');
+    const reader = f.ledger.issueKey({ ...agentless, scopes: ['tasks.read', 'tasks.cancel', 'artifacts.read'] });
+    expect(reader.key.agentRef).toBeUndefined();
+    const reservation = f.ledger.reserveTask(f.caller, args, 'dev-a');
+    expect(reservation.binding.agentRef).toEqual(spec.agentRef);
   });
 
   it('keeps immutable bindings and exact explicit identities across reopen', () => {
