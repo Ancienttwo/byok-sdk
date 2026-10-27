@@ -81,14 +81,16 @@ export function resolveStorageConfig(storeDir: string, input: StorageConfig = {}
   if (ttlMs['home-temp'] < 3_600_000) throw new LocalStorageConfigError('retention.ttlMs.home-temp');
   // Journal idempotency must outlive the cloud's maximum unacknowledged window.
   if (ttlMs['confirmed-journal'] <= 7 * 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.confirmed-journal');
-  const configuredRoots = input.skillPackDataDirs ?? [storeDir];
-  if (!Array.isArray(configuredRoots) || configuredRoots.some(root => typeof root !== 'string' || !path.isAbsolute(root))) throw new LocalStorageConfigError('skillPackDataDirs');
-  const roots = configuredRoots.map(foldNameAliases);
+  // A public entry: fold the store once here; both defaults derive from it.
+  const store = foldNameAliases(storeDir);
+  const configuredRoots = input.skillPackDataDirs;
+  if (configuredRoots != null && (!Array.isArray(configuredRoots) || configuredRoots.some(root => typeof root !== 'string' || !path.isAbsolute(root)))) throw new LocalStorageConfigError('skillPackDataDirs');
+  const roots = configuredRoots == null ? [store] : configuredRoots.map(foldNameAliases);
   const sweepIntervalMs = integer(retention.sweepIntervalMs ?? 900_000, 'retention.sweepIntervalMs');
   const pressureSweepIntervalMs = integer(retention.pressureSweepIntervalMs ?? 300_000, 'retention.pressureSweepIntervalMs');
   if (sweepIntervalMs > 2_147_483_647 || pressureSweepIntervalMs > sweepIntervalMs) throw new LocalStorageConfigError('retention.intervals');
   return Object.freeze({
-    scratchRoot: validateScratchRoot(input.scratchRoot === undefined ? defaultScratchRoot(storeDir) : foldNameAliases(validateScratchRoot(input.scratchRoot))),
+    scratchRoot: validateScratchRoot(input.scratchRoot === undefined ? defaultScratchRoot(store) : foldNameAliases(validateScratchRoot(input.scratchRoot))),
     budget: input.budget === undefined ? undefined : resolveStorageBudget(input.budget),
     skillPackDataDirs: Object.freeze([...roots]),
     sweepIntervalMs,

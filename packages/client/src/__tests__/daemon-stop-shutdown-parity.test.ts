@@ -1,5 +1,6 @@
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs, realpathSync } from 'node:fs';
 import net from 'node:net';
@@ -483,6 +484,7 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     expect(foldNameAliases(path.join(alias, 'later'))).toBe(path.join(store, 'later'));
     expect(resolveStorageConfig(alias, { scratchRoot: path.join(alias, 's'), skillPackDataDirs: [alias] }))
       .toMatchObject({ scratchRoot: path.join(store, 's'), skillPackDataDirs: [store] });
+    expect(resolveStorageConfig(alias)).toMatchObject({ scratchRoot: defaultScratchRoot(store), skillPackDataDirs: [store] });
     // Every identity derived from the store uses the folded spelling.
     expect(DeviceStore.resolveDir('acme-fold', alias)).toBe(store);
     expect(controlEndpointPath('acme-fold', DeviceStore.resolveDir('acme-fold', alias))).toBe(controlEndpointPath('acme-fold', store));
@@ -506,6 +508,19 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     } finally {
       await fs.rm(link, { force: true });
     }
+  });
+
+  it.skipIf(process.platform !== 'win32')('folds the 8.3 short-name form of a store path', async (ctx) => {
+    const canonical = realpathSync.native(await tmpDir('byok-short-name-store-'));
+    // cmd's %~sI expansion prints the 8.3 form; it repeats the long name where none exists.
+    const listed = spawnSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${canonical}") do @echo %~sI"`],
+      { encoding: 'utf8', windowsVerbatimArguments: true });
+    expect(listed.status).toBe(0);
+    const short = listed.stdout.trim();
+    ctx.skip(short === canonical, 'this volume does not generate 8.3 short names');
+    expect(short).not.toBe(canonical);
+    expect(foldNameAliases(short)).toBe(canonical);
+    expect(DeviceStore.resolveDir('acme-short-name', short)).toBe(canonical);
   });
 
   it.skipIf(process.platform !== 'win32')('never folds a store path through a junction', async () => {

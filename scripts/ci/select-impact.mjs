@@ -515,11 +515,13 @@ export function selectImpact(paths, context = {}) {
       families.add('agent-memory-helper'); families.add('agent-memory-helper-non-darwin'); continue;
     }
     // #1030: the shared vitest globalSetup. A change reruns every consumer's
-    // suite, and the Windows client job runs its Windows temp-root branch.
-    // run-targeted.mjs runs its own test for either path.
+    // suite and each family with a windows-latest vitest leg, the only legs that
+    // run its win32 branch. run-targeted.mjs runs its own test for either path.
     if (path === 'scripts/vitest/tmp-root.mjs') {
       for (const dir of vitestTmpRootConsumers) dirs.add(dir);
-      families.add('windows-client'); continue;
+      for (const id of ['adapter-lifecycle-smoke', 'agent-memory-helper', 'hermes-real-windows', 'ipc-smoke', 'npm-release-pack',
+        'packageability-smoke', 'windows-client']) families.add(id);
+      continue;
     }
     if (path === 'scripts/vitest/tmp-root.test.mjs') { scripts = true; continue; }
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }

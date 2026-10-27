@@ -9,12 +9,16 @@
   recovery terminal was never sent. `DeviceStore.resolveDir` now folds
   `storeDir` into its on-disk spelling for the daemon and every CLI. The daemon
   folds `piByokLauncher.sessionDir`, `storage.scratchRoot` and
-  `storage.skillPackDataDirs` the same way. Links are never followed, and the
-  root identity check is unchanged. Upgrade note for a store configured
-  through an alias: the Windows control pipe name and the Agent-home owner
-  identity change, so restart the daemon after upgrading. A lease marker that
-  a crashed older daemon left in an Agent home now reports
-  `AgentHomeBusyError` until the marker file is deleted; there is no migration.
+  `storage.skillPackDataDirs` the same way. A symbolic link, or a junction to a
+  drive-letter path, is never followed. Volume mount points, subst drives and
+  mapped network drives look like plain directories to lstat, so they are
+  resolved once at construction. The root identity check is unchanged.
+  Upgrade note for a store configured through an alias: the Windows control
+  pipe name and the Agent-home owner identity change, so restart the daemon
+  after upgrading. A letter-case alias on macOS likewise changes the owner
+  identity and the hash of a long-path control socket. A lease marker that a
+  crashed older daemon left in an Agent home now reports `AgentHomeBusyError`
+  until the marker file is deleted; there is no migration.
 - **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
   envelope is rejected; there is no v3 reader and no negotiation. Drain,
   migrate stored receipts, then upgrade server and client together; see
