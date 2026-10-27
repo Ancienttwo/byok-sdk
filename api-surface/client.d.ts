@@ -2800,7 +2800,7 @@ export declare class AgentSessionHandoffMismatchError extends AgentSessionHandof
 export declare class AgentSessionHandoffStore {
     private readonly queues;
     get(expected: AgentSessionHandoffMatch): Promise<AgentSessionHandoff | undefined>;
-    /** Append-only readback for audit/recovery; every historical terminal remains visible. */
+    /** Append-only readback for audit/recovery; every terminal within the ledger's retention window remains visible. */
     history(expected: AgentSessionHandoffMatch): Promise<readonly AgentSessionHandoff[]>;
     /** Exact identity check used before a strict Agent resume is admitted. */
     requireMatch(expected: AgentSessionHandoffMatch): Promise<AgentSessionHandoff>;
@@ -7618,6 +7618,7 @@ export declare function resolveStorageConfig(storeDir: string, input?: StorageCo
         "home-temp": number;
         "input-preparation": number;
         "reader-run": number;
+        "session-ledger": number;
         "skill-pack-old": number;
     }>;
 }>;
@@ -7648,7 +7649,7 @@ export declare class StoragePressure {
     assertAckCriticalAllowed(): void;
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
-export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old'];
+export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger'];
 export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'terminal-evidence', 'agent-content', 'byok-authority', 'agent-home-lease', 'retired-namespace', 'pi-session-dir', 'skill-pack-current', 'store-authority'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
