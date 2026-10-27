@@ -29,6 +29,7 @@ import { AgentMessageOutbox } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from '../task-runner';
+import type { OfferAdmissionTiming } from './offer-admission-timing';
 
 /**
  * The offer union `task-runner.ts` declares. It stays unexported there because
@@ -296,6 +297,7 @@ export interface OfferPhaseContext {
   readonly admissionSignal: AbortSignal;
   readonly releaseReservation: () => void;
   readonly reserveHome: (reservationKey: string) => void;
+  readonly admission: OfferAdmissionTiming;
 }
 
 /** The front-phase values that `prepareOfferRuntime` reads. */
@@ -731,7 +733,7 @@ export async function trackOffer(runner: TaskRunner, operation: Promise<void>): 
 export function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {
   if (event.contextSource === undefined || event.inputTokens !== undefined ||
       event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
-      event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
+      event.reasoningTokens !== undefined || event.totalTokens !== undefined || event.model !== undefined) {
     active.lastUsage = event;
   }
 }

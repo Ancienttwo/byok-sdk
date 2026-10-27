@@ -133,6 +133,15 @@
 //                                          between, as reported downstream
 //                                          in #501. `result.result` carries
 //                                          the text once.
+//   FAKE_CLAUDE_ROOT_FRAMES=1           -> every assistant frame carries
+//                                          `parent_tool_use_id: null`, as
+//                                          claude 2.1.302 marks the root
+//                                          agent's frames.
+//   FAKE_CLAUDE_EXTRA_ASSISTANT=<json array> -> before the final message,
+//                                          one content-free assistant frame
+//                                          per entry, with its `model` and
+//                                          `parent_tool_use_id` (a subagent
+//                                          frame when that is a string).
 //   FAKE_CLAUDE_PARTIAL_MESSAGES=1      -> with `--include-partial-messages`
 //                                          in argv, its frames, in the order captured
 //                                          from claude 2.1.302: one
@@ -460,7 +469,8 @@ function runProbeOrTurnFlow() {
   }
 
   let streamedMessage;
-  async function sendAssistant(frame) {
+  async function sendAssistant(rawFrame) {
+    const frame = process.env.FAKE_CLAUDE_ROOT_FRAMES === '1' ? { ...rawFrame, parent_tool_use_id: null } : rawFrame;
     // Real claude streams these frames only under the flag; a dropped flag must fail a test.
     if (process.env.FAKE_CLAUDE_PARTIAL_MESSAGES !== '1' || !argv.includes('--include-partial-messages')) return send(frame);
     const message = frame.message;
@@ -642,6 +652,10 @@ function runProbeOrTurnFlow() {
         session_id: reportedSessionId, total_cost_usd: 0, usage: {}, result: text, api_error_status: failure.status ?? null, permission_denials: [],
       });
       return;
+    }
+
+    for (const [index, extra] of JSON.parse(process.env.FAKE_CLAUDE_EXTRA_ASSISTANT ?? '[]').entries()) {
+      send({ type: 'assistant', message: { model: extra.model, id: `msg_${turn}x${index}`, role: 'assistant', content: [] }, parent_tool_use_id: extra.parent_tool_use_id, session_id: reportedSessionId });
     }
 
     const finalText = `reply-${turn}:${mcpResultText ?? incomingText}`;

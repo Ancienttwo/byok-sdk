@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from '../constants';
 import {
   AgentEventOrUnknownSchema,
   AgentEventSchema,
@@ -223,6 +224,14 @@ describe('usage AgentEvent variant', () => {
     const result = AgentEventSchema.safeParse(event);
     expect(result.success).toBe(true);
     if (result.success) expect(result.data).toEqual(event);
+  });
+
+  it('carries the model the provider served, bounded like the terminal usage model (#1014)', () => {
+    const served = { type: 'usage', inputTokens: 10, model: 'claude-sonnet-5-5' };
+    expect(AgentEventSchema.parse(served)).toEqual(served);
+    expect(AgentEventSchema.parse({ type: 'usage', model: 'm'.repeat(TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH) })).toMatchObject({ type: 'usage' });
+    expect(AgentEventSchema.safeParse({ type: 'usage', model: '' }).success).toBe(false);
+    expect(AgentEventSchema.safeParse({ type: 'usage', model: 'm'.repeat(TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH + 1) }).success).toBe(false);
   });
 
   it('rejects a negative token count', () => {

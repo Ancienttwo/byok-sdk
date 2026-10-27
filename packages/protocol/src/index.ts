@@ -359,6 +359,8 @@ export {
   TaskSteerPayloadSchema,
   TaskSteerSealedPayloadSchema,
   TaskClaimPayloadSchema,
+  OfferAdmissionTimingsSchema,
+  OFFER_ADMISSION_MAX_DURATION_MS,
   TaskStartedPayloadSchema,
   TaskDeclinePayloadSchema,
   TaskProgressPayloadSchema,
@@ -382,7 +384,6 @@ export {
   TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
   TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH,
-  TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH,
   TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH,
 } from './messages';
 export type {
@@ -423,6 +424,7 @@ export type {
   TaskCancelPayload,
   TaskSteerPayload,
   TaskClaimPayload,
+  OfferAdmissionTimings,
   TaskStartedPayload,
   TaskDeclinePayload,
   TaskProgressPayload,

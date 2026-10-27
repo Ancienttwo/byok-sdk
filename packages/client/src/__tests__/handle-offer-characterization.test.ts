@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope, type OfferAdmissionTimings } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
@@ -158,7 +158,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     await runner.handleEnvelope(agentOffer(taskId, 1));
 
     expect(declines(sent, taskId).map((entry) => entry.payload)).toEqual([{
-      reason: 'runtime detection failed: detect fixture failure', retryable: true, agentRef: AGENT,
+      reason: 'runtime detection failed: detect fixture failure', retryable: true, agentRef: AGENT, admission: { totalMs: expect.any(Number) },
     }]);
     expect(claimed(sent, taskId)).toBe(0);
     expect(adapter.startCalls).toHaveLength(0);
@@ -181,7 +181,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     await runner.handleEnvelope(agentOffer(taskId, 1));
 
     expect(declines(sent, taskId).map((entry) => entry.payload)).toEqual([{
-      reason: 'runtime preparation failed: prepare fixture failure', retryable: true, agentRef: AGENT,
+      reason: 'runtime preparation failed: prepare fixture failure', retryable: true, agentRef: AGENT, admission: { totalMs: expect.any(Number) },
     }]);
     expect(claimed(sent, taskId)).toBe(0);
     expect(adapter.startCalls).toHaveLength(0);
@@ -204,7 +204,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
 
     expect(acquire).toHaveBeenCalledTimes(1);
     expect(declines(sent, taskId).map((entry) => entry.payload)).toEqual([{
-      reason: 'Agent home initialization failed: init fixture failure', retryable: false, agentRef: AGENT,
+      reason: 'Agent home initialization failed: init fixture failure', retryable: false, agentRef: AGENT, admission: { totalMs: expect.any(Number) },
     }]);
     expect(claimed(sent, taskId)).toBe(0);
     expect(adapter.startCalls).toHaveLength(0);
@@ -237,7 +237,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
 
       expect(acquire).toHaveBeenCalledTimes(1);
       expect(declines(sent, taskId).map((entry) => entry.payload)).toEqual([{
-        reason: 'Agent message outbox initialization failed: outbox fixture failure', retryable: true, agentRef: AGENT,
+        reason: 'Agent message outbox initialization failed: outbox fixture failure', retryable: true, agentRef: AGENT, admission: { totalMs: expect.any(Number), messageHelperPreflightMs: expect.any(Number) },
       }]);
       expect(claimed(sent, taskId)).toBe(0);
       expect(adapter.startCalls).toHaveLength(0);
@@ -366,6 +366,25 @@ describe('same-home admission after a published terminal (#476)', () => {
     await completeAdmitted(runner, adapter, sent, 'second');
   });
 
+  it('the parked offer claims with its Agent home wait; the first, unparked, claims without one (#1014)', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const commit = gate();
+    const { runner, agentHome, sent } = await agentRunner(adapter, {
+      awaitTerminalCommit: (taskId) => (taskId === 'first' ? commit.promise : Promise.resolve()),
+    });
+    await runner.handleEnvelope(agentOffer('first', 1));
+    await publishFirstTerminal(adapter, sent, agentHome);
+
+    openOnNextCount(agentHome, commit.open);
+    await runner.handleEnvelope(agentOffer('second', 2));
+
+    const admission = (taskId: string) => (sent.find((entry) => entry.type === 'task.claim' && entry.task_id === taskId)!.payload as { admission?: OfferAdmissionTimings }).admission;
+    expect(admission('first')).toEqual({ totalMs: expect.any(Number) });
+    expect(admission('second')).toEqual({ totalMs: expect.any(Number), agentHomeWaitMs: expect.any(Number) });
+    expect(admission('second')!.totalMs).toBeGreaterThanOrEqual(admission('second')!.agentHomeWaitMs!);
+    await completeAdmitted(runner, adapter, sent, 'second');
+  });
+
   it('waits for a finishing Attempt held in Session.close(), then admits the same-home offer', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const { runner, agentHome, sent } = await agentRunner(adapter);
@@ -405,7 +424,7 @@ describe('same-home admission after a published terminal (#476)', () => {
     await offer;
 
     expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
-      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy' },
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy', admission: { totalMs: expect.any(Number), agentHomeWaitMs: expect.any(Number) } },
     ]);
     expect(claimed(sent, 'second')).toBe(0);
     expect(adapter.startCalls).toHaveLength(1);
@@ -439,7 +458,7 @@ describe('same-home admission after a published terminal (#476)', () => {
       await offer;
 
       expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
-        { reason: 'cancelled before claim', retryable: false, agentRef: AGENT },
+        { reason: 'cancelled before claim', retryable: false, agentRef: AGENT, admission: { totalMs: expect.any(Number), agentHomeWaitMs: expect.any(Number) } },
       ]);
       expect(claimed(sent, 'second')).toBe(0);
       expect(adapter.startCalls).toHaveLength(1);
@@ -453,7 +472,7 @@ describe('same-home admission after a published terminal (#476)', () => {
       await offer;
 
       expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
-        { reason: 'daemon is shutting down', retryable: true, agentRef: AGENT },
+        { reason: 'daemon is shutting down', retryable: true, agentRef: AGENT, admission: { totalMs: expect.any(Number), agentHomeWaitMs: expect.any(Number) } },
       ]);
       expect(adapter.startCalls).toHaveLength(1);
       let shutDown = false;
@@ -472,7 +491,7 @@ describe('same-home admission after a published terminal (#476)', () => {
       await offer;
 
       expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
-        { reason: 'runtime startup deadline exceeded', retryable: true, agentRef: AGENT },
+        { reason: 'runtime startup deadline exceeded', retryable: true, agentRef: AGENT, admission: { totalMs: expect.any(Number), agentHomeWaitMs: expect.any(Number) } },
       ]);
       expect(claimed(sent, 'second')).toBe(0);
       expect(adapter.startCalls).toHaveLength(1);
@@ -495,7 +514,7 @@ describe('same-home admission after a published terminal (#476)', () => {
     await vi.waitFor(() => expect(counted).toHaveBeenCalled());
     // Declined on the same synchronous path as the count, while `first`'s close is still held.
     expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
-      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy' },
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy', admission: { totalMs: expect.any(Number) } },
     ]);
     await offer;
     expect(claimed(sent, 'second')).toBe(0);
@@ -513,7 +532,7 @@ describe('same-home admission after a published terminal (#476)', () => {
     await runner.handleEnvelope(agentOffer('second', 2));
 
     expect(declines(sent, 'second').map((entry) => entry.payload)).toEqual([
-      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy' },
+      { reason: BUSY_WRITER, retryable: true, agentRef: AGENT, code: 'agent_home_writer_busy', admission: { totalMs: expect.any(Number) } },
     ]);
     expect(claimed(sent, 'second')).toBe(0);
     expect(adapter.startCalls).toHaveLength(1);
