@@ -100,3 +100,9 @@ bun _ops/1034-repro/repro.ts
 最终 closure：client 1,833,448 / 2,304,426 B；byok-agent 1,778,082 / 2,232,941 B。`api-surface/entries.json` 仅同步同三个 opaque import 的新行号（245、5109、5167）；预算、规则、依赖、公开声明没有变更。build、typecheck、API surface、version authority 均 exit 0。
 
 此改动解决本 PR 的 client 主构建体积阻塞。其他包的发布注释策略和统一重测仍属于 M；本稿不声明全局 M 已完成。最终提交的 workspace tests 与远端 CI 由本轮 PR 验证记录给出。
+
+## Startup and vanished pending-target correction
+
+Startup safety enumeration is complete and outside the periodic inspection/time quota; actual SDK residue removal remains bounded and fail closed. This replaces the fixed-share enumeration that could permanently reject a restart containing only 1,024 normally released executions. Runtime TTL history therefore adds O(N) startup I/O. A disappeared pending daemon-temp target releases its pending state without inventing reclaimed bytes; other errors and identity replacement remain failures.
+
+The new test-only commit 0ce6203a6 failed both scenarios before production changes. On 929cd9174, root build/typecheck/version checks and all 52 tests in the new regression file plus retention/oversized suites pass. Existing test assertions are unchanged. Independent read-only implementation/test review passed; the startup complexity exception is documented in spec. Client and byok-agent closures each add exactly 369 B, signed by coordinator wB:p4 under #1008 authority, without extra headroom. This correction does not resolve the separate reader-run 250 ms reference-scan progress risk.
