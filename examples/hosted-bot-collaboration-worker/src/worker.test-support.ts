@@ -371,10 +371,15 @@ export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}) {
     /** The command record ids of the scope. A terminal's outcome commits under its task id. */
     commands: async () => (await substrate.pool.query<{ key: string }>(
       `SELECT key FROM "${h}".command WHERE scope = $1 ORDER BY key`, [storedKey(home)])).rows.map(row => JSON.parse(row.key) as string),
-    /** The envelope types of the SDK mailbox rows that name `task`. One offer is one row, however many submits resolved. */
-    mailbox: async (task: string) => (await substrate.pool.query<{ type: string }>(
-      `SELECT body::jsonb->>'type' AS type FROM "${substrate.sdkSchema}".outbox WHERE tenant_id = $1 AND position($2 in body) > 0 ORDER BY seq`,
-      [home, task])).rows.map(row => row.type),
+    /**
+     * The SDK mailbox rows that name `task`: each envelope type, and for an offer its session mode and whether it
+     * carries an egress policy. One offer is one row, however many submits resolved.
+     */
+    mailbox: async (task: string) => (await substrate.pool.query<{ type: string; session: string | null; egress: boolean }>(
+      `SELECT body::jsonb->>'type' AS type, body::jsonb->'payload'->'session'->>'mode' AS session,
+        (body::jsonb->'payload'->'egressPolicy') IS NOT NULL AS egress
+       FROM "${substrate.sdkSchema}".outbox WHERE tenant_id = $1 AND position($2 in body) > 0 ORDER BY seq`,
+      [home, task])).rows.map(row => row.type === 'task.offer' ? { type: row.type, session: row.session, egress: row.egress } : { type: row.type }),
     /** The SDK attempt status of `task`, the durable fact that a device terminal committed. */
     taskStatus: async (task: string) => (await substrate.pool.query<{ status: string }>(
       `SELECT status FROM "${substrate.sdkSchema}".task WHERE tenant_id = $1 AND task_id = $2`, [home, task])).rows[0]?.status,

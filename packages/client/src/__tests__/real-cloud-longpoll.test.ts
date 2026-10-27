@@ -102,9 +102,8 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     expect(envelope.type).toBe('task.complete');
     expect(envelope.task_id).toBe(offer.taskId);
     expect(envelope.v).toBe(PROTOCOL_VERSION);
-    if (envelope.type === 'task.complete' && envelope.payload.sealed === undefined) {
-      expect(envelope.payload.summary).toBe('working over long-poll');
-    }
+    if (envelope.type !== 'task.complete' || envelope.payload.sealed !== undefined) throw new Error(`expected plaintext task.complete, got ${envelope.type}`);
+    expect(envelope.payload.summary).toBe('working over long-poll');
 
     expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
   }, 15000);

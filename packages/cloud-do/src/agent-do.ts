@@ -206,10 +206,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       const cached = contexts.get(id);
       if (cached) return cached;
       const read = harness.conversation(id as ConversationId, BACKGROUND_CONTEXT).then(async conversation =>
-        conversation ? (await conversation.context(BACKGROUND_CONTEXT)).entries : []).catch(error => {
-          if (runtime.cloud.readRun(id)?.membershipPending === 1) return [];
-          throw error;
-        });
+        conversation ? (await conversation.context(BACKGROUND_CONTEXT)).entries : []);
       contexts.set(id,read);
       return read;
     };

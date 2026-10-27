@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DAEMON_TO_SERVER_TYPES, EnvelopeSchema, MESSAGE_TYPES, SERVER_TO_DAEMON_TYPES } from '../index';
+import { DAEMON_TO_SERVER_TYPES, EnvelopeSchema, MESSAGE_TYPES, SERVER_TO_DAEMON_TYPES, isSealableMessageType } from '../index';
 
 /** The wire v4 message types (#925 stage 2 design, Q1), grouped by direction. */
 const V4_TYPES = {
@@ -29,5 +29,14 @@ describe('wire v4 message types', () => {
   it('has one task-opening offer, and no sealed twin type', () => {
     expect(MESSAGE_TYPES.filter((type) => type.startsWith('task.offer'))).toEqual(['task.offer']);
     expect(MESSAGE_TYPES.filter((type) => type.endsWith('_sealed'))).toEqual([]);
+  });
+});
+
+describe('isSealableMessageType', () => {
+  it('is true for task.offer and false for unknown lookalikes and inherited object keys', () => {
+    expect(isSealableMessageType('task.offer')).toBe(true);
+    for (const type of ['task.offer_sealed', 'task.offer_unknown', 'toString', '__proto__', 'constructor', 'hasOwnProperty', '']) {
+      expect(isSealableMessageType(type), type).toBe(false);
+    }
   });
 });

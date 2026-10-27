@@ -116,7 +116,7 @@ export class GoalBtwHost {
       nonempty(input.taskId, 'reserved taskId'); nonempty(input.payload.instruction, 'reserved instruction');
       const contract = value.kind === 'goal' ? GOAL_RESULT_CONTRACT : BTW_RESULT_CONTRACT;
       const { instruction: _text, terminalProjection: projection, session, ...selection } = input.payload;
-      if (session.mode !== 'fresh') throw new Error('Reserved execution is not a fresh session');
+      if (session?.mode !== 'fresh') throw new Error('Reserved execution is not a fresh session');
       if (selection.runtime === undefined) throw new Error('Select an explicit runtime and egress policy');
       const target = { deviceId: input.deviceId, ...selection, runtime: selection.runtime };
       validateTarget(target);

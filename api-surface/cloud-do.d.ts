@@ -124,7 +124,6 @@ export interface RunRow extends ExecutionRow {
     admittedSeqs: string | null;
     settlementAck: number | null;
     revision: number | null;
-    membershipPending: number | null;
 }
 export interface TranscriptCursor {
     horizon: number;
@@ -243,7 +242,6 @@ export declare class CloudState {
     constructor(storage: DurableObjectStorage);
     private rows;
     ensureSchema(): void;
-    private migrate;
     readInboxItem(seq: number): InboxRow | undefined;
     run(conversationId: number): RunRow | undefined;
     unsettledRuns(): RunRow[];
@@ -252,8 +250,6 @@ export declare class CloudState {
     private stamp;
     claimedSeqs(id: number): number[];
     markInputDurable(id: number, seqs: readonly number[]): void;
-    pendingBackfills(before?: number): RunRow[];
-    applyBackfill(id: number, seqs: readonly number[]): void;
     unackedRuns(): RunRow[];
     ackSettlement(id: number, guard: CloudOperationGuard, now?: number): boolean;
     /** Read-only preflight also works before this DO has initialized its schema. */

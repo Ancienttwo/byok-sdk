@@ -20,7 +20,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   } = input;
   const offered = runtimeTaskInput(payload);
   const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
-  const requiresAgentMemoryMcp = preparation === undefined && agentRef !== undefined && ordinaryMemoryMcp;
+  const requiresAgentMemoryMcp = preparation === undefined && ordinaryMemoryMcp;
   let pick: PickResult;
   try {
     pick = await this['pickAdapter'](
@@ -59,7 +59,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   // what the runtime path sees. One computation, both phases.
   const env = { ...buildRuntimeEnv({ ambient: process.env }), ...scratch.env };
   const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
-  if (resolvedMcp?.ok && agentRef !== undefined && this['deps'].prepareHostTaskContext) {
+  if (resolvedMcp?.ok && this['deps'].prepareHostTaskContext) {
     await this['deps'].prepareHostTaskContext(taskId, blobAbort.signal);
     if (admissionWithdrawn()) return undefined;
   }
@@ -100,7 +100,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       return undefined;
     }
   }
-  if (requiresAgentMemoryMcp && agentRef !== undefined && ordinaryMemoryMode !== 'none') {
+  if (requiresAgentMemoryMcp && ordinaryMemoryMode !== 'none') {
     try {
       // A `read` task, which includes every reader, is sealed `read` and its helper lists only `memory_recall`.
       taskMcpServers = this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, ordinaryMemoryMode, this['deps'].agentMemoryMcpBin!, 'granted');

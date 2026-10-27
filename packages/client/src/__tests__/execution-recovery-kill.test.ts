@@ -913,7 +913,8 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     expect(pending?.truth_state).toBe('pending');
     const recorded = decodeEnvelope(String(pending?.bytes));
     expect(recorded.type).toBe('task.complete');
-    if (recorded.type === 'task.complete' && recorded.payload.sealed === undefined) expect(recorded.payload.document).toEqual({ score: 3, verdict: 'fail' });
+    if (recorded.type !== 'task.complete' || recorded.payload.sealed !== undefined) throw new Error(`expected plaintext task.complete, got ${recorded.type}`);
+    expect(recorded.payload.document).toEqual({ score: 3, verdict: 'fail' });
 
     await startDaemon({ agentHome: true });
     await waitForAttempt(cloud, offer.taskId, 'complete');

@@ -35,8 +35,6 @@ export class CloudStateDO extends DurableObject {
         case 'run': return this.cloud.run(input.id!);
         case 'unacked': return this.cloud.unackedRuns();
         case 'ack': return this.cloud.ackSettlement(input.id!,guard,input.now);
-        case 'pending': return this.cloud.pendingBackfills();
-        case 'backfill': this.cloud.applyBackfill(input.id!,input.seqs!);return this.cloud.claimedSeqs(input.id!);
         case 'transcript': return this.cloud.planTranscript(input.cursor,input.limit??20);
         case 'plan-claim': {
           const plan=this.cloud.planTranscript(input.cursor,input.limit??20);

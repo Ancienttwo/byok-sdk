@@ -16,9 +16,7 @@ export async function cloudRunHistory(runtime: SessionRuntime, harness: Harness)
   for (const run of runtime.cloud.completedRuns()) {
     const conversation = await harness.conversation(run.conversationId as Conversation['id'], BACKGROUND_CONTEXT);
     if (!conversation) continue;
-    let view;
-    try { view = await conversation.context(BACKGROUND_CONTEXT); }
-    catch (error) { if (run.membershipPending === 1) continue; throw error; }
+    const view = await conversation.context(BACKGROUND_CONTEXT);
     const input = run.trigger === 'wake'
       ? view.entries.find(entry => entry.kind === 'byok.run-input')?.data
       : view.entries.find(entry => entry.kind === 'pi.user')?.model?.find(message => message.role === 'user')?.content;

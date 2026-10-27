@@ -102,15 +102,6 @@ describe('Agent egress goes to the Host as is', () => {
     expect(controller.reliableRecords()).toEqual([]);
   });
 
-  it('does not reclassify a legacy task that has no AgentRef into the Agent egress lane', () => {
-    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY });
-    const events = [{ type: 'progress', text: 'legacy task reason and progress remain unchanged' }] as const;
-    expect(controller.projectLatestValue({
-      taskId: 'legacy-task',
-      events,
-    })).toEqual(events);
-  });
-
   it('rejects a malformed policy instead of selecting a default', () => {
     expect(() => resolveAgentEgressPolicy({
       ...DEFAULT_AGENT_EGRESS_POLICY,
