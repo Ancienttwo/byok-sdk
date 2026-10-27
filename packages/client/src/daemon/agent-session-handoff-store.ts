@@ -159,6 +159,18 @@ function assertNonEmptyString(value: unknown, label: string): asserts value is s
   }
 }
 
+function parseSessionEntries(raw: string): AgentSessionHandoff[] {
+  try {
+    const lines = raw.split('\n').filter((line) => line.length > 0);
+    return lines.map((line) => parseEntry(JSON.parse(line) as unknown));
+  } catch (error) {
+    if (error instanceof AgentSessionHandoffStoreError) throw error;
+    throw new AgentSessionHandoffCorruptError(
+      `Agent session handoff is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 function parseEntry(value: unknown): AgentSessionHandoff {
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.agentRef)) {
     throw new AgentSessionHandoffCorruptError('Agent session handoff has an unknown or invalid shape');
@@ -557,8 +569,9 @@ export class AgentSessionHandoffStore {
    */
   private async loadSessionLedger(filePath: string): Promise<AgentSessionHandoff | undefined> {
     let first: unknown;
+    let raw: string;
     try {
-      const raw = await fs.readFile(filePath, 'utf8');
+      raw = await fs.readFile(filePath, 'utf8');
       const line = raw.split('\n').find((candidate) => candidate.length > 0);
       if (line === undefined) return undefined;
       first = JSON.parse(line) as unknown;
@@ -568,7 +581,7 @@ export class AgentSessionHandoffStore {
       );
     }
     if (isRecord(first) && first.kind === 'task-terminal') return undefined;
-    return this.load(filePath);
+    return parseSessionEntries(raw).at(-1);
   }
 
   private async loadAll(filePath: string): Promise<AgentSessionHandoff[]> {
@@ -581,15 +594,7 @@ export class AgentSessionHandoffStore {
         `could not read Agent session handoff: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    try {
-      const lines = raw.split('\n').filter((line) => line.length > 0);
-      return lines.map((line) => parseEntry(JSON.parse(line) as unknown));
-    } catch (error) {
-      if (error instanceof AgentSessionHandoffStoreError) throw error;
-      throw new AgentSessionHandoffCorruptError(
-        `Agent session handoff is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    return parseSessionEntries(raw);
   }
 
   private async loadTaskTerminal(filePath: string): Promise<AgentTaskTerminalEvidence | undefined> {

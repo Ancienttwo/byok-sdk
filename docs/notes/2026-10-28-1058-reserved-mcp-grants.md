@@ -54,3 +54,6 @@ PR #1066 首轮 CI run `40578376946` 在 scope selection 拒绝新增 `packages/
 | `bin:byok-agent` | 1791069 |
 
 entry facts 和 README 表从该组合构建再生，未手工保留 opaque import 旧行号。签字证据：`_ops/issue-lanes/1066-1067-budget-signoff.md`。
+
+
+恢复 main `4159f13a1` 后重新构建：本候选 client = 1846447 B，byok-agent = 1791089 B，均只叠加 #1071 已代签的 20 B；adapters/testing 保持前表值。该组合不增加已签增量之外的余量，README/facts 再次从构建生成。
