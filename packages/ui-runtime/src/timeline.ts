@@ -313,12 +313,6 @@ function projectItems(events: readonly TimelineEvent[]): readonly TimelineItem[]
       case 'turn_end':
         items.push(Object.freeze({ kind: 'boundary', eventKeys: Object.freeze([key]), orderKey: order }));
         break;
-      case 'needs_approval':
-        items.push(Object.freeze({
-          kind: 'unknown', eventKeys: Object.freeze([key]), orderKey: order,
-          eventType: event.type, classification: 'unsupported-known-event',
-        }));
-        break;
       default: {
         // A newer protocol package can classify a variant as known even when
         // this older UI runtime has no semantic projection for it. Preserve

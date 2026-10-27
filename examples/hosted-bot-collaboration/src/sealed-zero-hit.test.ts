@@ -124,7 +124,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('the sealed zero-hit run on the hosted SDK (#
       }
       await vi.waitFor(() => expect(session.steers).toEqual([steer]), BUDGET);
 
-      session.emit({ type: 'needs_approval', summary: `Approve ${text}` });
+      void session.start.approvalChannel!.request(`Approve ${text}`);
       const approvalId = await vi.waitFor(async () => {
         const entry = (await cloud.readApprovalTimeline(tenant, taskId))?.entries.find((observed) => observed.event.type === 'approval_requested');
         expect(entry).toBeDefined();

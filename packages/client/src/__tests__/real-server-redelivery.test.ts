@@ -76,9 +76,9 @@ describe('redelivery across a real receive outage (finding F2, real @byok-sdk/se
     });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
 
-    session.emit({ type: 'needs_approval', summary: 'about to do the risky thing' });
+    void session.requestApproval('about to do the risky thing');
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
-    expect(session.resolveApprovalCalls).toHaveLength(0); // not yet — nothing has approved it
+    expect(session.approvalResults).toHaveLength(0); // not yet — nothing has approved it
 
     // Take the RECEIVE half of the transport down: every `GET /byok/events`
     // fails at the network layer (the daemon's own long-poll retry loop keeps
@@ -108,14 +108,14 @@ describe('redelivery across a real receive outage (finding F2, real @byok-sdk/se
     // action"), but the `task.approve` envelope has nowhere to go right now
     // and must sit un-acked in the device's mailbox until a poll succeeds.
     await handle.approve();
-    expect(session.resolveApprovalCalls).toHaveLength(0); // still nothing — it cannot have arrived
+    expect(session.approvalResults).toHaveLength(0); // still nothing — it cannot have arrived
 
     // Receiving resumes; the daemon's own retry loop picks the poll back up.
     receiveDown = false;
 
     // Proof the queued task.approve actually reached the SAME still-alive
     // session (not a fresh one) and resumed it.
-    await vi.waitFor(() => expect(session.resolveApprovalCalls).toEqual([{ approved: true }]), { timeout: 5000 });
+    await vi.waitFor(() => expect(session.approvalResults).toEqual([{ approved: true }]), { timeout: 5000 });
 
     session.emit({ type: 'progress', text: 'finishing up' });
     session.emit({ type: 'turn_end' });

@@ -420,6 +420,8 @@ export function selectImpact(paths, context = {}) {
       || path === 'examples/basic/task-events-route.ts' || path === 'examples/basic/task-events-route.test.ts') {
       dirs.add('examples/basic'); continue;
     }
+    // The example page; page-runtimes.test.ts checks its DOM.
+    if (path === 'examples/basic/public/index.html') { dirs.add('examples/basic'); continue; }
     // The usage notes of the clarification and goal/btw examples.
     if (path === 'examples/basic/clarification-usage.md' || path === 'examples/basic/goal-btw-usage.md') { dirs.add('examples/basic'); continue; }
     // The Salesko recovery integration fixture runs the client daemon; no CI job runs scripts/integration.

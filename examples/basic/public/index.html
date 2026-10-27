@@ -92,7 +92,6 @@
       case 'tool_use': return `tool_use ${e.tool} ${JSON.stringify(e.input ?? {})}`;
       case 'tool_result': return `tool_result ${e.tool} ${JSON.stringify(e.output ?? {})}`;
       case 'artifact': return `artifact ${e.name} (${e.contentType})`;
-      case 'needs_approval': return `needs_approval: ${e.summary}`;
       case 'turn_end': return 'turn_end';
       case 'error': return `error: ${e.message}`;
       default: return JSON.stringify(e);

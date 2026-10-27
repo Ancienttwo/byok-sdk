@@ -578,7 +578,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.decline` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `code?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
-| `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId` (required — §5.3) | Runtime raised `needs_approval` |
+| `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId` (required — §5.3) | A session or the control socket requested approval (§5) |
 | `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2) | Runtime reached `turn_end` |
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends `Cancelled` (server- or daemon-initiated) |
@@ -2102,7 +2102,8 @@ skip never wrongly catches them.
 
 The full round trip from a runtime pausing for human input to it resuming:
 
-1. The runtime adapter surfaces a normalized `needs_approval` `AgentEvent`.
+1. The session calls `approvalChannel.request(summary)` (§5.1) and waits, or a
+   custom adapter's helper calls the control socket's `approvals.request`.
 2. The daemon registers the approval under its own `approvalId` and sends
    `task.await_approval { summary, approvalId }`. Server: `Running → AwaitApproval`.
 3. The server-embedding SaaS surfaces the summary to a human (or automated
@@ -2111,29 +2112,43 @@ The full round trip from a runtime pausing for human input to it resuming:
    `AwaitApproval → Failed`); `task.approve` / `task.reject`, each naming the
    pending `approvalId`, go out as best-effort notifications
    ([§4](#4-cancelapprovereject-wire-semantics-m1-gap-3)).
-5. Daemon reacts: on approve, resumes the runtime session and normal
-   `task.progress` traffic continues; on reject, stops the session and sends
-   `task.fail`.
+5. Daemon reacts: it resolves the named approval in its registry, which
+   hands the decision to the waiting requester. On approve the session
+   resumes its runtime and normal `task.progress` traffic continues; on
+   reject the daemon stops the session and sends `task.fail`.
 
 An approval can also resolve on the device without a wire decision; the
 daemon then reports it with `task.approval_resolved` (§5.2). Nothing else
 resolves a pending approval: task activity while the task awaits approval is
 applied but leaves the approval pending (§3).
 
-### 5.1 Shared approval seam; bundled runtimes reject confirm
+### 5.1 One entry point, one resolution point; bundled runtimes never ask
 
-**The entire approval round trip above — `needs_approval`,
-`task.await_approval`, `task.approve`/`task.reject`, `task.approval_resolved`
-and `Session.resolveApproval` — is part of the v4 wire.** It is retained for
-third-party adapters and the shared daemon approval controls. None of the
-bundled adapters emits `needs_approval`: ordinary sessions run YOLO
-([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)).
-`Session.resolveApproval` rejects for these adapters. v2 removed the
-`PermissionMode` enum with the offer `policy`.
+`task.await_approval`, `task.approve`/`task.reject` and
+`task.approval_resolved` are the approval messages of the v4 wire; no
+`AgentEvent` requests or carries an approval. On the device an approval has
+one entry point and one resolution point:
 
-Per-runtime routing uses `RuntimeInfo.capabilities.approvalInteractive`; all
-bundled adapters currently report `approvalInteractive: false`. There is no
-connection-level approval capability flag.
+- **Entry:** `TaskRunner.requestApproval`. The daemon hands it, bound to the
+  task, as `RuntimeOperationStartInput.approvalChannel.request(summary)` to an
+  adapter that declares `approvalInteractive: true`, and only to such an
+  adapter. The session awaits `{ approved, reason? }` and resumes or stops
+  its own runtime. The control socket's `approvals.request` reaches the same
+  method for a custom adapter's out-of-process helper.
+- **Resolution:** the daemon's approval registry. A wire `task.approve`/
+  `task.reject`, a local `Daemon.approve`/`reject`, the CLI's
+  `approvals.resolve`, the fail-closed timeout, task finish and registry
+  eviction each resolve the named approval there, and the first resolution
+  wins.
+
+None of the bundled adapters requests approval: ordinary sessions run YOLO
+([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)), and each
+declares `approvalInteractive: false`, so none is handed the channel. v2
+removed the `PermissionMode` enum with the offer `policy`.
+
+`RuntimeInfo.capabilities.approvalInteractive` reports whether a runtime's
+sessions request approval. There is no connection-level approval capability
+flag.
 
 ### 5.2 `task.approval_resolved` — local-resolution report
 
@@ -2141,8 +2156,9 @@ The approval flow has two resolution paths: the wire `task.approve`/
 `task.reject` (server-authoritative, §4) and a resolution on the device
 itself (device-owner-authoritative). **`task.approval_resolved` (D→S) reports
 the second.** The daemon sends it for every approval it resolves locally —
-the control socket's `approvals.resolve` RPC, a fail-closed `requestApproval`
-timeout, or a fail-closed finish/registry-eviction rejection
+`Daemon.approve`/`reject`, the control socket's `approvals.resolve` RPC, a
+fail-closed `requestApproval` timeout, or a fail-closed finish/registry-eviction
+rejection
 (`packages/client/src/daemon/task-runner.ts`'s `sendApprovalResolved`) —
 and *never* for a resolution that arrived over the wire (`task.approve`/
 `task.reject`): the server already knows its own decision, so it is never
@@ -2176,8 +2192,8 @@ local resolution happens can still land on the server FIRST and move the
 record before `task.approval_resolved` arrives. When that happens, the report
 names an approval that is no longer pending and resolves nothing, and the
 daemon independently treats the crossing `task.approve`/`task.reject` as a
-stale, audit-only no-op (`NoPendingApprovalError`, or an `approvalId` that is
-no longer its pending one — §5.3). Both sides treat the loser as a stale
+stale, audit-only no-op (an `approvalId` that is no longer its pending one —
+§5.3). Both sides treat the loser as a stale
 no-op; neither crashes or double-applies anything. The window is
 network-latency-sized (however long `task.approval_resolved` takes to reach
 the server), and the only possible divergence is the kind §4 already accepts:
@@ -2206,9 +2222,8 @@ decision naming no pending approval is stale and resolves nothing.
 - **Daemon** (`TaskRunner.handleApprove`/`handleReject`, `task-runner.ts`):
   an incoming `task.approve`/`task.reject` whose `approvalId` does not match
   this task's currently dispatched `ActiveTask.pendingApprovalId` is a stale,
-  audit-only no-op — logged via the same `onStaleApprovalDecision` hook
-  `NoPendingApprovalError` uses, never resolving anything and never tearing
-  the task down. The daemon-side check is the AUTHORITATIVE gate — see the
+  audit-only no-op — logged via the `onStaleApprovalDecision` hook, never
+  resolving anything and never tearing the task down. The daemon-side check is the AUTHORITATIVE gate — see the
   residual race below for why.
 - **Server** (`packages/cloud/src/approval-control.ts`; the embedded server
   projects the same fold as `TaskSnapshot.pendingApprovalId` in
@@ -2562,8 +2577,8 @@ explicitly selecting `result-document`. Delivery of that one required message is
 daemon's obligation, not the model's: when the runtime never publishes
 through the SDK-owned tool, the daemon sends on the message lane the
 assistant text after the last tool interaction (falling back to the whole
-run's text) — the `progress` text emitted after the last `tool_use`,
-`tool_result` or `needs_approval` event, concatenated and trimmed, so
+run's text) — the `progress` text emitted after the last `tool_use` or
+`tool_result` event, concatenated and trimmed, so
 intermediate narration about work still to be done never reaches the user;
 when that run is empty (the turn ends on a tool call with no closing text)
 the whole run's concatenated text — the same prose `summary` carries — is
@@ -2815,7 +2830,7 @@ The daemon, not the model, is responsible for delivering that message: if the
 runtime's turn ends without a publish through the SDK-owned tool, the daemon
 authors the one immutable draft from the assistant text after the last tool
 interaction (falling back to the whole run's text) — the `progress` text
-emitted after the last `tool_use`, `tool_result` or `needs_approval` event,
+emitted after the last `tool_use` or `tool_result` event,
 concatenated and trimmed, or, when that run is empty, the whole run's text
 (the prose the task's `summary` carries), never tool calls, tool results or
 thinking — and sends it on this lane; an empty trimmed body fails the task
@@ -3251,8 +3266,8 @@ real binary observations from fixture proofs and still-unverified behavior.
 | `approvalInteractive` | no | no | no |
 | `usage` fields filled | provider cost counters plus estimated context occupancy/window | provider input/cache/output and modelUsage window | cumulative cost deltas plus last occupancy/window |
 
-All bundled runtimes declare `approvalInteractive: false`; a future adapter
-must advertise its own real support without changing the shared wire.
+All bundled runtimes declare `approvalInteractive: false`: they never request
+approval and are never handed the approval channel (§5.1).
 
 **Connection-level `steer` capability = logical OR across every configured
 adapter's own `capabilities().steer`.** `conn.hello.capabilities` (the
@@ -3360,8 +3375,8 @@ matrix and the connection-level `steer` OR (§11.2, last paragraph) are both
 derived from — see `create-daemon.ts`'s `detectRuntimes`/
 `toRuntimeInfoCapabilities`, which is now a pure passthrough of the adapter's
 own declaration and synthesizes no value of its own. `approvalInteractive` is
-therefore per-adapter truth: `false` for all bundled adapters after removal
-of Claude's private confirm path (§11.2).
+therefore per-adapter truth — whether that adapter's sessions call
+`approvalChannel.request` — and `false` for all bundled adapters (§11.2).
 
 `RuntimeInfo.capabilities` here is CONNECTION-level discovery data: it
 answers "what could this device run", for a client picking where to dispatch.

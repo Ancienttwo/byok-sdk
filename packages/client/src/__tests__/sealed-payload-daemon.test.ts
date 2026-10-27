@@ -615,7 +615,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
     const session = (taskIndex: number) => adapter.sessions[taskIndex]!;
 
-    session(0).emit({ type: 'needs_approval', summary: 'secret approval summary' });
+    void session(0).requestApproval('secret approval summary');
     const approval = await server.waitFor((envelope) => wireForm(envelope) === 'task.await_approval_sealed', BUDGET_MS);
     expect(approval.payload).toMatchObject({ approvalId: expect.any(String) });
     expect(await openOutput(member, approval, deviceId)).toEqual({ summary: 'secret approval summary' });
@@ -715,8 +715,8 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       // Its sealed frame is over the inline maximum, so the Host never sees it.
-      adapter.sessions[0]!.emit({ type: 'needs_approval', summary: `approve ${'a'.repeat(300 * 1024)}` });
-      await vi.waitFor(() => expect(adapter.sessions[0]!.resolveApprovalCalls).toEqual([{ approved: false, reason: expect.any(String) }]), BUDGET_MS);
+      void adapter.sessions[0]!.requestApproval(`approve ${'a'.repeat(300 * 1024)}`);
+      await vi.waitFor(() => expect(adapter.sessions[0]!.approvalResults).toEqual([{ approved: false, reason: expect.any(String) }]), BUDGET_MS);
     } finally {
       diagnostic.mockRestore();
     }
@@ -734,8 +734,8 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     await makeStale(member, device, cursor);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      adapter.sessions[0]!.emit({ type: 'needs_approval', summary: 'secret approval summary' });
-      await vi.waitFor(() => expect(adapter.sessions[0]!.resolveApprovalCalls).toEqual([{ approved: false, reason: expect.any(String) }]), BUDGET_MS);
+      void adapter.sessions[0]!.requestApproval('secret approval summary');
+      await vi.waitFor(() => expect(adapter.sessions[0]!.approvalResults).toEqual([{ approved: false, reason: expect.any(String) }]), BUDGET_MS);
     } finally {
       diagnostic.mockRestore();
     }
@@ -1272,8 +1272,8 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     const release = server.holdBlobUploads();
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      adapter.sessions[0]!.emit({ type: 'needs_approval', summary: `approve ${'a'.repeat(300 * 1024)}` });
-      await vi.waitFor(() => expect(adapter.sessions[0]!.resolveApprovalCalls).toEqual([{ approved: false, reason: expect.any(String) }]), BUDGET_MS);
+      void adapter.sessions[0]!.requestApproval(`approve ${'a'.repeat(300 * 1024)}`);
+      await vi.waitFor(() => expect(adapter.sessions[0]!.approvalResults).toEqual([{ approved: false, reason: expect.any(String) }]), BUDGET_MS);
     } finally {
       diagnostic.mockRestore();
       release();

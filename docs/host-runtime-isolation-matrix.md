@@ -111,9 +111,9 @@ not enforce any of them at the mechanism level today.
 **Approval and blast radius**
 
 - [ ] **Does your task require an interactive approval round-trip?** Bundled
-      adapters run YOLO and emit no `needs_approval`. A local Host can opt in to
-      Claude or Codex native interactions; the shared remote approval seam
-      requires a custom adapter that implements it.
+      adapters run YOLO and never request approval. A local Host can opt in to
+      Claude or Codex native interactions; the remote approval channel
+      requires a custom adapter that declares `approvalInteractive: true`.
 - [ ] **Who can approve?** Both a wire `task.approve` from the SaaS and a
       local `approvals.resolve` resolve the same registry, first resolution
       wins, with a narrowed-but-nonzero race (*3. Approval path*).

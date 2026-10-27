@@ -547,14 +547,6 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(events.some((e) => e.type === 'artifact')).toBe(false);
   });
 
-  it('resolveApproval() throws a descriptive not-supported error rather than silently no-op\'ing for every Claude session', async () => {
-    const adapter = fakeClaudeAdapter();
-    const ctx = await makeCtx();
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await expect(session.resolveApproval(true)).rejects.toThrow(/does not support interactive approval/);
-  });
-
   it('steer() throws a typed SteerUnsupportedError (mid-turn stdin writes were empirically found to queue, not redirect)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();

@@ -630,13 +630,6 @@ describe('Codex persistent app-server adapter', () => {
     await s.close();
     await s.close();
   });
-  it('approval resume rejects rather than pretending an interactive product lane', async () => {
-    const s = await open();
-    await turn(s);
-    await expect(s.resolveApproval(true)).rejects.toThrow(
-      'interactive approval',
-    );
-  });
   it('passes reserved MCP servers in the thread config, never in argv or the process env', async () => {
     const captured: string[][] = [];
     const envs: NodeJS.ProcessEnv[] = [];

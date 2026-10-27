@@ -8,7 +8,7 @@ describe('bin/tasks-view: deriveTasksFromRecords', () => {
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', runtime: 'pi' },
       { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't1' },
       { kind: 'started', ts: '2026-01-01T00:00:02.000Z', taskId: 't1' },
-      { kind: 'turn', ts: '2026-01-01T00:00:03.000Z', taskId: 't1', turn: 1, closedBy: 'terminal', progressEvents: 1, textBytes: 7, toolUses: 0, toolResults: 0, artifacts: 0, approvals: 0, errors: 0 },
+      { kind: 'turn', ts: '2026-01-01T00:00:03.000Z', taskId: 't1', turn: 1, closedBy: 'terminal', progressEvents: 1, textBytes: 7, toolUses: 0, toolResults: 0, artifacts: 0, errors: 0 },
       { kind: 'completed', ts: '2026-01-01T00:00:04.000Z', taskId: 't1', summaryBytes: 4, sessionRef: 'sess-1' },
     ];
 
