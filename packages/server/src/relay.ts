@@ -161,7 +161,8 @@ export class TaskEventRelay implements ByokCloudObserver {
     const state = this.#open(taskId);
     if (state.phase === 'dispatched') return;
     state.phase = 'dispatched';
-    state.queue.push({ kind: 'state', state: 'Offered', at });
+    const offered = state.queue.push({ kind: 'state', state: 'Offered', at });
+    if (offered !== undefined) state.current = [offered];
     this.emitServerEvent({ kind: 'task.created', taskId, at });
     for (const deliver of state.early.splice(0)) deliver();
   }

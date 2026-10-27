@@ -497,6 +497,20 @@ describe('TaskEventRelay dispatch phases', () => {
     relay.stop();
   });
 
+  it('starts a dispatched feed at Offered with from: state after drop-oldest discarded it', async () => {
+    const relay = new TaskEventRelay({ taskEventBufferLimit: 2 });
+    relay.provision('offered');
+    relay.noteDispatched('offered', '2026-10-27T00:00:00.000Z');
+    relay.onInboundCommitted({
+      tenantId: tenantId(PRODUCT_ID), deviceId: 'device-a', outcome: 'accepted',
+      envelope: createEnvelope('task.progress', progress(1, 'a', 'b', 'c'), { taskId: 'offered' }),
+    });
+    const reader = readTaskEvents({ relay, readState: async () => stateRead('Offered') }, 'offered', { from: 'state' })[Symbol.asyncIterator]();
+    expect((await reader.next()).value?.event).toEqual({ kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' });
+    await reader.return!();
+    relay.stop();
+  });
+
   it('holds a Host transition made while a dispatch is in flight until Offered', async () => {
     const relay = new TaskEventRelay({});
     relay.provision('cancelled-early');
