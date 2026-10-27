@@ -22,7 +22,7 @@ const sha = (value: string) => `sha256:${createHash('sha256').update(value).dige
 const intents = process.platform === 'darwin';
 
 it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMemoryHelperBuild())('uses the copied root for daemon volume probe, intent and task MCP with real helper I/O', async () => {
-  const t0 = performance.now(); const tick = (label: string) => console.log(`[1023-timing] ${label} +${Math.round(performance.now() - t0)}ms`);
+  const t0 = performance.now(); const tick = (label: string) => process.stderr.write(`[1023-timing] ${label} +${Math.round(performance.now() - t0)}ms\n`);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-assets-daemon-'));
   const assetRoot = path.join(root, 'assets');
   const server = await TestServer.start();
@@ -72,10 +72,10 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
       tick('hello+probe-done');
       server.pushLongPollEvent(notice);
       tick('pushed');
-      await vi.waitFor(() => expect(completions).toHaveLength(1), { timeout: 8000 });
+      await vi.waitFor(() => expect(completions).toHaveLength(1), { timeout: 5000 });
       tick('completion-seen');
       expect(completions[0]!.outcome).toBe('applied');
-      await vi.waitFor(async () => expect(await new CursorStore(path.join(root, 'store')).load(server.url, deviceId)).toBe(notice.seq), { timeout: 8000 });
+      await vi.waitFor(async () => expect(await new CursorStore(path.join(root, 'store')).load(server.url, deviceId)).toBe(notice.seq), { timeout: 5000 });
       tick('cursor-seen');
     } else {
       // No B: no volume probe and no capability.
@@ -99,10 +99,12 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
     expect(open.mock.calls.length).toBeGreaterThanOrEqual(intents ? 3 : 1);
     for (const [input] of open.mock.calls) expect(input).toMatchObject({ assetRoot, helperBin });
   } finally {
+    tick('finally-start');
     await client.close();
     await daemon?.stop();
     await server.close();
     open.mockRestore();
     await fs.rm(root, { recursive: true, force: true });
+    tick('finally-done');
   }
 });
