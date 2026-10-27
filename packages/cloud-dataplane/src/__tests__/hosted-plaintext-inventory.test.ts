@@ -14,8 +14,9 @@
  *
  * The hits must equal `EXPECTED_PLAINTEXT`, and the inventory table in
  * `docs/security.md` must list the same set. A new column that stores content
- * fails this test until both lists name it. When #654 seals a category, its
- * rows leave both lists and the scan stays as it is.
+ * fails this test until both lists name it. The run seals nothing. Where a
+ * sealed task's ciphertext lands is checked by
+ * `examples/hosted-bot-collaboration/src/sealed-zero-hit.test.ts` (#654 E6).
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';

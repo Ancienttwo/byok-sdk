@@ -15,6 +15,7 @@ import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassA
 import type { ScratchRoot } from './scratch';
 import { PASS_INSPECTIONS } from './runtime-accounting';
 import { RuntimeCleanup } from './runtime-cleanup';
+import { isAgentSessionLedgerName, pruneSessionLedgers } from './session-ledgers';
 import { existingDirectory, measureTree, removeOwnedPath } from './usage';
 
 interface ProducerOptions {
@@ -160,7 +161,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     const result = await service.collectExpired(budget.now.getTime(), budget.remaining());
     for (let index = 0; index < result.artifactsRemoved + result.recordsRemoved; index++) budget.removed(index === 0 ? result.bytesReclaimed : 0);
   }
-  async function sweepHome(id: 'reader-run' | 'agent-result' | 'home-temp', budget: SweepBudget): Promise<void> {
+  async function sweepHome(id: 'reader-run' | 'agent-result' | 'home-temp' | 'session-ledger', budget: SweepBudget): Promise<void> {
     const manager = options.home;
     if (manager === undefined) return;
     const root = path.join(manager.layout.hostRootInput(), 'agents');
@@ -183,6 +184,13 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
           const results = path.join(home, AGENT_RESULT_DIRECTORY);
           await pruneAgentResults({ resultsRoot: results, entries: entries('agent-result', results, homeBudget),
             nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['agent-result'],
+            remove: async file => { if (!homeBudget.available()) return false; await remove(home, file, budget); return true; },
+          });
+        } else if (id === 'session-ledger') {
+          // Every ledger append holds an execution lease, so the idle-home lease rules out a concurrent writer.
+          const ledgers = path.join(home, '.byok', 'runtime-sessions');
+          await pruneSessionLedgers({ directory: ledgers, entries: entries('session-ledger', ledgers, homeBudget),
+            nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['session-ledger'],
             remove: async file => { if (!homeBudget.available()) return false; await remove(home, file, budget); return true; },
           });
         } else {
@@ -227,7 +235,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     'exec-sdk': sweepExecSdk, 'exec-runtime': sweepRuntime, 'daemon-temp': sweepDaemon, 'durable-replica': sweepReplicas,
     'confirmed-journal': sweepJournal, 'input-preparation': sweepPreparation, 'skill-pack-old': sweepSkills,
     'reader-run': budget => sweepHome('reader-run', budget), 'agent-result': budget => sweepHome('agent-result', budget),
-    'home-temp': budget => sweepHome('home-temp', budget),
+    'home-temp': budget => sweepHome('home-temp', budget), 'session-ledger': budget => sweepHome('session-ledger', budget),
   };
 
   let measurement: Promise<Map<RetentionClassId, ClassUsage>> | undefined;
@@ -288,6 +296,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         const name = path.basename(file);
         if (stat.isFile() && relative === `.byok/results/${name}` && (AGENT_RESULT_RECORD_NAME.test(name) || AGENT_RESULT_TEMP_NAME.test(name))) return 'agent-result';
         if (relative === '.byok/agent-home.lease') return 'agent-home-lease';
+        if (stat.isFile() && relative === `.byok/runtime-sessions/${name}` && isAgentSessionLedgerName(name)) return 'session-ledger';
         if (relative.startsWith('.byok/runtime-sessions/') && path.basename(file).includes('-task-')) return 'terminal-evidence';
         if (HOME_TEMP.test(path.basename(file)) && !relative.startsWith('.byok/runtime-sessions/')) return 'home-temp';
         return relative.startsWith('.byok/') ? 'byok-authority' : 'agent-content';
@@ -335,7 +344,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   const measure = async (id: RetentionClassId): Promise<ClassUsage> => (await (measurement ??= collectUsage())).get(id)!;
   function authority(id: RetentionClassId): ClassAuthority {
     const expiring = EXPIRING_CLASS_IDS.includes(id as ExpiringClassId);
-    const homeScoped = ['reader-run','agent-result','home-temp','agent-content','byok-authority','agent-home-lease','terminal-evidence'].includes(id);
+    const homeScoped = ['reader-run','agent-result','home-temp','session-ledger','agent-content','byok-authority','agent-home-lease','terminal-evidence'].includes(id);
     const replicaScoped = id === 'durable-replica' || id === 'durable-replica-live';
     const skillScoped = id === 'skill-pack-old' || id === 'skill-pack-current';
     const roots = id === 'exec-sdk' || id === 'exec-runtime' ? [execRoot]

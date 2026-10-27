@@ -1211,8 +1211,14 @@ Host stores only ciphertext for these categories. The design is
 [docs/plans/2026-10-22-654-hosted-wire-e2ee.md](plans/2026-10-22-654-hosted-wire-e2ee.md).
 `@byok-sdk/core/sealed-payload` seals and opens the bytes.
 `packages/protocol/src/sealed-payload.ts` and `sealed-split-table.ts` hold the
-wire rules. This section states the wire rules only. The Host stores, the
-daemon and the read interfaces come in later slices.
+wire rules. This section states the wire rules.
+The Host keeps each sealed member as it gets it and returns it from its read
+interfaces. What a sealed task still shows the Host, and what sealing does not
+protect, is in [security.md, Sealed tasks](security.md#sealed-tasks).
+`SEALED_PAYLOAD_CATEGORIES` also names `agent-message` and
+`memory-projection`, but they are reserved values: `TaskSealingSchema` accepts
+only `task-input` and `task-output` (`SEALED_PAYLOAD_V1_CATEGORIES`), so v1
+seals no Agent message and no memory projection.
 
 **Sealed branches.** Sealed is a branch of a message type's payload, not a
 message type. Each sealable type's payload schema is the union of a
@@ -1948,6 +1954,39 @@ not recorded is absent: attempts stored before these fields are not backfilled, 
 a reader reports no duration that needs a missing instant. The wire is
 unchanged.
 
+**Admission timings (#1014).** The one `task.claim` or `task.decline` that
+the daemon's task runner sends for an offer carries `admission`
+(`OfferAdmissionTimings`, strict): how long the device took, in whole
+milliseconds of its monotonic clock, from receiving the `task.offer` to
+sending that message. Opening a sealed offer counts. A sealed task's decline
+carries it too, in plaintext, including a decline for a sealed offer that
+could not be opened, the offer gate self-check decline, and the closed
+`sealed_key_unavailable` decline sent when the output cannot be sealed. A
+decline sent outside the task runner carries none: the refusal of an
+over-bound offer by the inbound journal, and a decline sent while recovering
+after a restart.
+
+```ts
+interface OfferAdmissionTimings {
+  totalMs: number;                    // required
+  agentHomeWaitMs?: number;           // waiting for a finishing Attempt in the same Agent home
+  messageHelperPreflightMs?: number;  // the Agent message helper preflight
+  resultHelperPreflightMs?: number;   // the Agent result helper preflight
+  toolsetProbeMs?: number;            // the MCP toolset tools/list probes, together
+  runtimeLaunchMs?: number;           // resolving the runtime launch
+}
+```
+
+A phase is present only when it ran, whether it succeeded or failed. Each
+value is rounded down, so the phases never sum past `totalMs`; the rest of
+`totalMs` (runtime detection, `prepare()`, the workspace, `beforeClaim`) is
+the difference. Every value is a non-negative integer of at most seven days
+(`OFFER_ADMISSION_MAX_DURATION_MS`); a device whose total is past that cap
+sends no `admission`. These are device durations, never instants: they share
+no clock with the `claimedAt` above, so the gap between `offeredAt` and
+`claimedAt` minus `totalMs` is roughly transport and queueing, not an exact
+value.
+
 ### 3.2 Declined vs. Failed (M1 gap #5)
 
 `task.decline` lets a daemon fail-closed a pre-claim offer (no compatible
@@ -1978,6 +2017,10 @@ it in the canonical envelope.
 
 Landed additive minor: `task.decline.code` (#471) was an optional v2 field,
 registered as strip-safe in `WIRE_ADDITIONS`. It is part of the v3 baseline.
+
+Both decline branches accept `admission` (§3.1, which says which declines
+carry it). It is plaintext on a sealed decline: only `reason` moves into the
+ciphertext.
 
 ### 3.3 Cancelled is its own message, not `task.fail(reason:'cancelled')` (M1 gap #6)
 
@@ -2648,6 +2691,11 @@ elapsed time, or `reportedAt`. Missing is unknown, not zero. When reported,
 device elapsed time and `reportedAt` are local observations, never provider
 invoice data.
 
+`model` is the last observation's `usage.model` (§11.3), the model the
+provider served as the runtime reported it. A last observation that reports a
+model but no token counts still yields the block, with `model` and no counts;
+one that reports neither omits it.
+
 Hosted storage records the canonical first terminal exactly as it does every
 other terminal fact. Its typed result read model projects this object from the
 winning receipt unchanged; a later terminal cannot replace it. No raw-receipt
@@ -3241,7 +3289,7 @@ runtime id.
 A new `AgentEvent` variant (`agent-event.ts`):
 
 ```
-{ type: 'usage', inputTokens?, cachedInputTokens?, outputTokens?, reasoningTokens?, totalTokens? }
+{ type: 'usage', inputTokens?, cachedInputTokens?, outputTokens?, reasoningTokens?, totalTokens?, model? }
 ```
 
 Every field optional (non-negative integers) — runtimes report different
@@ -3258,6 +3306,17 @@ Per-runtime fill (empirical, `packages/client/src/adapters/*/events.ts`):
 | `outputTokens` | `message.usage.output` | `result.usage.output_tokens` | `turn.completed.usage.output_tokens` |
 | `reasoningTokens` | `message.usage.reasoning` | never (claude's own usage shape has no reasoning-token field) | `turn.completed.usage.reasoning_output_tokens` |
 | `totalTokens` | `message.usage.totalTokens` (Pi's own figure, not synthesized) | never (not synthesized) | never (not synthesized) |
+
+`model` (1 to 160 characters) is the model the provider served for that
+observation, exactly as the runtime reported it; it is never the requested
+model id or `dispatchSelection`. A name over 160 characters is dropped whole,
+never truncated. Pi sets it from pi-ai's `AssistantMessage.responseModel`,
+which pi-ai fills only for the providers that report a served model; pi-ai's
+`model` is the requested id and is not read. Claude sets it on the turn's
+`usage` event when every root-agent `assistant` frame of the turn
+(`parent_tool_use_id: null`) named the same `message.model`; subagent frames
+and the frames Claude names `<synthetic>` are not counted, and a second model
+or a root frame without one leaves it absent. Codex never sets it.
 
 **pi reports usage per provider call.** The pi adapter emits one `usage`
 event for each assistant `message_end`, that is, for each provider call. Each

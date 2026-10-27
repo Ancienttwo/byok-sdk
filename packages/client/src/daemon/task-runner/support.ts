@@ -29,6 +29,7 @@ import { AgentMessageOutbox } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from '../task-runner';
+import type { OfferAdmissionTiming } from './offer-admission-timing';
 
 /**
  * The offer union `task-runner.ts` declares. It stays unexported there because
@@ -107,9 +108,9 @@ export interface ActiveTask {
   /** One consumer; teardown drains its final usage within the existing interrupt deadline. */
   eventPump?: Promise<void>;
   workspaceDir: string;
-  agentBinding?: AgentHomeExecutionBinding;
-  agentRef?: AgentRef;
-  agentHandoff?: {
+  agentBinding: AgentHomeExecutionBinding;
+  agentRef: AgentRef;
+  agentHandoff: {
     sessionRef: string;
     runtimeId: string;
     /** Canonical Agent home; the handoff ledger lives under it. */
@@ -296,13 +297,14 @@ export interface OfferPhaseContext {
   readonly admissionSignal: AbortSignal;
   readonly releaseReservation: () => void;
   readonly reserveHome: (reservationKey: string) => void;
+  readonly admission: OfferAdmissionTiming;
 }
 
 /** The front-phase values that `prepareOfferRuntime` reads. */
 export interface OfferRuntimeInput {
   readonly acquireScratch: () => Promise<ExecutionScratch>;
   readonly payload: AcceptedOfferPayload;
-  readonly agentRef: AgentRef | undefined;
+  readonly agentRef: AgentRef;
   readonly preparation: InputPreparationOfferBinding | undefined;
   readonly preparedMemorySelected: boolean;
   /** The memory mode of an ordinary Agent offer; the prepared lane does not read it. */
@@ -731,7 +733,7 @@ export async function trackOffer(runner: TaskRunner, operation: Promise<void>): 
 export function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {
   if (event.contextSource === undefined || event.inputTokens !== undefined ||
       event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
-      event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
+      event.reasoningTokens !== undefined || event.totalTokens !== undefined || event.model !== undefined) {
     active.lastUsage = event;
   }
 }

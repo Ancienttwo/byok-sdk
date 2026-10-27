@@ -209,8 +209,13 @@ describe('TaskRunner execution record', () => {
 
 describe('TaskRunner execution record invariance', () => {
   /** Every outbound envelope minus its random id and clock: what the server, and so K4, can see. */
+  // Like `id` and `ts`, the admission durations (#1014) are this run's measurement; which phases ran is compared.
   function wire(sent: readonly Envelope[]): string[] {
-    return sent.map(envelope => JSON.stringify({ type: envelope.type, task_id: envelope.task_id, session_ref: envelope.session_ref, payload: envelope.payload }));
+    return sent.map(envelope => {
+      const payload = envelope.payload as { admission?: Record<string, number> };
+      const admission = payload.admission === undefined ? undefined : Object.keys(payload.admission);
+      return JSON.stringify({ type: envelope.type, task_id: envelope.task_id, session_ref: envelope.session_ref, payload: { ...payload, ...(admission === undefined ? {} : { admission }) } });
+    });
   }
 
   const variants: Array<[string, RunnerOptions, (session: StubSession) => void]> = [

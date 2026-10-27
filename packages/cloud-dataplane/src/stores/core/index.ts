@@ -18,7 +18,8 @@ import { R2ObjectMaintenanceStore, type R2ObjectMaintenanceOptions } from '../r2
  * either a sleep or a flake.
  */
 import type { Clock, CoreStores } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
+import { assertByokPool } from '../../pool-brand';
 import { PostgresPresenceStore } from './presence';
 import { PostgresBoardStore } from './board';
 import { PostgresMailboxStore } from './mailbox';
@@ -37,7 +38,7 @@ export { PostgresSkillPackStore } from './skill-pack';
 
 export interface PostgresCoreStoreOptions {
   readonly objectStorage: R2ObjectMaintenanceOptions;
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   /**
    * The clock every TTL and timestamp in this composition reads. Injected, not
    * the database's `now()`: expiry has to be assertable under a test clock, and
@@ -48,6 +49,7 @@ export interface PostgresCoreStoreOptions {
 
 export function createPostgresCoreStores(options: PostgresCoreStoreOptions): CoreStores {
   const { pool, clock } = options;
+  assertByokPool(pool, 'createPostgresCoreStores');
   return {
     mailbox: new PostgresMailboxStore(pool, clock),
     board: new PostgresBoardStore(pool, clock),

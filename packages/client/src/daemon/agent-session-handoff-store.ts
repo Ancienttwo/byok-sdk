@@ -265,6 +265,12 @@ function assertCwdForAccess(home: string, cwd: string, homeAccess: 'memory-reade
   }
 }
 
+function missingHandoff(sessionRef: string): AgentSessionHandoffMismatchError {
+  return new AgentSessionHandoffMismatchError(
+    `Agent session handoff ${sessionRef} does not exist on this device: it was never recorded here, or retention removed it`,
+  );
+}
+
 function sessionFileName(runtimeId: string, sessionRef: string): string {
   const digest = createHash('sha256').update(sessionRef, 'utf8').digest('hex');
   const runtime = runtimeId.replace(/[^a-z0-9._-]/giu, '_').slice(0, 64) || 'runtime';
@@ -318,7 +324,7 @@ export class AgentSessionHandoffStore {
     return this.enqueue(filePath, () => this.load(filePath));
   }
 
-  /** Append-only readback for audit/recovery; every historical terminal remains visible. */
+  /** Append-only readback for audit/recovery; every terminal within the ledger's retention window remains visible. */
   async history(expected: AgentSessionHandoffMatch): Promise<readonly AgentSessionHandoff[]> {
     const filePath = await this.filePath(expected);
     return this.enqueue(filePath, async () => {
@@ -337,7 +343,8 @@ export class AgentSessionHandoffStore {
   /** Exact identity check used before a strict Agent resume is admitted. */
   async requireMatch(expected: AgentSessionHandoffMatch): Promise<AgentSessionHandoff> {
     const entry = await this.get(expected);
-    if (entry === undefined || !sameMatch(entry, expected)) {
+    if (entry === undefined) throw missingHandoff(expected.sessionRef);
+    if (!sameMatch(entry, expected)) {
       throw new AgentSessionHandoffMismatchError(
         `Agent session handoff ${expected.sessionRef} does not match AgentRef/profileRevision/runtime/cwd/homeAccess exactly`,
       );
@@ -354,7 +361,8 @@ export class AgentSessionHandoffStore {
     expected: Omit<AgentSessionHandoffMatch, 'home' | 'cwd' | 'homeAccess'> & { readonly home: string },
   ): Promise<string> {
     const entry = await this.get({ ...expected, cwd: expected.home, homeAccess: 'memory-reader' });
-    if (entry === undefined || entry.homeAccess !== 'memory-reader') {
+    if (entry === undefined) throw missingHandoff(expected.sessionRef);
+    if (entry.homeAccess !== 'memory-reader') {
       throw new AgentSessionHandoffMismatchError(
         `Agent session handoff ${expected.sessionRef} is not a memory-reader session`,
       );

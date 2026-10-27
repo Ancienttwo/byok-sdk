@@ -1,5 +1,6 @@
 // Evidence records of docs/submit-result-measurement.md "Evidence format and
 // reporting", and the redaction applied before any file is written.
+import type { OfferAdmissionTimings } from '@byok-sdk/protocol';
 import type { CallPredicate, Category, Submission, ToolLabel } from './evidence';
 
 export interface TrialTerminal {
@@ -24,6 +25,8 @@ export interface TrialRecord {
   readonly taskId: string;
   readonly offeredAt: string;
   readonly claimedAt: string | null;
+  /** The device's admission timings as the claim carried them (#1014). */
+  readonly admission: OfferAdmissionTimings | null;
   /** Actual runtime start (`task.started`), else the claim time. */
   readonly startedAt: string;
   readonly finishedAt: string | null;
@@ -52,6 +55,8 @@ export interface NotStartedRow {
   readonly stage: 'submit' | 'decline' | 'unclaimed' | 'terminal_before_claim';
   readonly reason: string | null;
   readonly code: string | null;
+  /** The decline's admission timings (#1014); `null` at every other stage. */
+  readonly admission: OfferAdmissionTimings | null;
   readonly at: string;
 }
 

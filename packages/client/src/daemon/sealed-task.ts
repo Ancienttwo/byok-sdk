@@ -418,7 +418,7 @@ export class SealedTasks {
       case 'task.cancelled':
         return createEnvelope('task.cancelled', omit(payload, ['reason']) as never, { taskId });
       case 'task.decline':
-        return createEnvelope('task.decline', { reason: code, code, retryable: false, ...pick(payload, ['agentRef']) } as never, { taskId });
+        return createEnvelope('task.decline', { reason: code, code, retryable: false, ...pick(payload, ['agentRef', 'admission']) } as never, { taskId });
       default:
         console.error(`[byok/client] ${envelope.type} for sealed task ${taskId} not sent: no sealing key`);
         return undefined;

@@ -9,7 +9,7 @@ import { createByokCloud, createHmacTokenSigner, createWebCrypto, fullCapability
 import { createEnvelope, type TaskClaimPayload } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
-import { createSqliteEmbeddedStores, type SqliteEmbeddedStoreOptions } from '../stores/sqlite';
+import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { TEST_AGENT_REF, TEST_SESSION_REF } from './test-support';
 
 const tenant = tenantId('custom-harness');
@@ -29,8 +29,8 @@ describe('SQLite custom-harness claim authority', () => {
     const path = join(root, 'server.sqlite');
     const clock = createMutableClock();
     const crypto = createWebCrypto();
-    const open = (migration?: SqliteEmbeddedStoreOptions['migration']) => {
-      const embedded = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+    const open = () => {
+      const embedded = createSqliteEmbeddedStores({ path }, { clock, crypto });
       const stores = { ...embedded, mailboxWake: createInProcessMailboxWake() };
       // Quota is process memory here; issue the entitlement on every open, as the
       // embedded server does, so limited mailbox appends are admitted (#411).
@@ -127,99 +127,7 @@ describe('SQLite custom-harness claim authority', () => {
     } finally { await runtime.stores.close(); }
   });
 
-  function downgradeToV3(path: string): void {
-    const legacy = new DatabaseSync(path);
-    try {
-      legacy.exec("DROP TABLE wake; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '3' WHERE key = 'schema_version'");
-    } finally { legacy.close(); }
-  }
-
-  function expectUnchangedV3(path: string): void {
-    const db = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('3');
-      expect(db.prepare('PRAGMA table_info(task_attempt)').all().map(column => column.name)).not.toContain('claimed_harness_id');
-    } finally { db.close(); }
-  }
-
-  it('explicitly adopts v3 unclaimed offers and identified built-in history without inventing identities', async () => {
-    const { open, path } = fixture();
-    let runtime = open();
-    await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-      devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-    await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract', 'custom-harness'], harnesses: [{ id: harnessId, capabilities }] });
-    const { taskId } = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { payload: { ...payload, harnessId } });
-    for (const status of ['claimed', 'complete'] as const) {
-      const id = `builtin-${status}`;
-      await runtime.stores.cloud.tasks.open(tenant, { taskId: id, deviceId });
-      await runtime.stores.cloud.tasks.claim(tenant, { taskId: id, deviceId, runtime: 'pi' });
-      if (status === 'complete') await runtime.stores.cloud.tasks.recordStatus(tenant, { taskId: id, status });
-    }
-    const offer = await runtime.cloud.readTaskOffer(tenant, taskId);
-    await runtime.stores.close();
-    downgradeToV3(path);
-    expect(() => open()).toThrow('v3-to-v5');
-    expectUnchangedV3(path);
-    // Old selectors must fail explicitly rather than silently upgrading past v3.
-    for (const migration of ['v1-to-v4', 'v2-to-v4', 'v3-to-v4']) {
-      expect(() => open(migration as SqliteEmbeddedStoreOptions['migration'])).toThrow('Target-v4 migration selectors are no longer supported');
-      expectUnchangedV3(path);
-    }
-    runtime = open('v3-to-v5');
-    try {
-      expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toEqual(offer);
-      expect((await runtime.bound.tasks.get(taskId))?.claimedHarnessId).toBeUndefined();
-      for (const status of ['claimed', 'complete'] as const) {
-        const attempt = await runtime.bound.tasks.get(`builtin-${status}`);
-        expect(attempt).toMatchObject({ status, ownerDeviceId: deviceId, claimedRuntime: 'pi' });
-        expect(attempt?.claimedHarnessId).toBeUndefined();
-      }
-      expect(await handleInboundEnvelope(runtime.bound, deviceId,
-        createEnvelope('task.claim', { deviceId, agentRef, harnessId }, { taskId })).then((result) => result.outcome)).toBe('accepted');
-      await runtime.stores.close(); runtime = open();
-      expect(await runtime.bound.tasks.get(taskId)).toMatchObject({ claimedHarnessId: harnessId });
-      await runtime.stores.close();
-      const db = new DatabaseSync(path, { readOnly: true });
-      try {
-        expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('5');
-      } finally { db.close(); }
-    } finally { await runtime.stores.close(); }
-  });
-
-  it.each(['claimed', 'complete'] as const)('rejects ambiguous v3 %s identity without changing history or schema', async (status) => {
-    const { open, path } = fixture();
-    const runtime = open();
-    await runtime.stores.cloud.tasks.open(tenant, { taskId: 'ambiguous', deviceId });
-    await runtime.stores.cloud.tasks.claim(tenant, { taskId: 'ambiguous', deviceId, harnessId });
-    if (status === 'complete') await runtime.stores.cloud.tasks.recordStatus(tenant, { taskId: 'ambiguous', status });
-    await runtime.stores.close();
-    downgradeToV3(path);
-    expect(() => open('v3-to-v5')).toThrow('historical harness identities are unavailable');
-    expectUnchangedV3(path);
-    const db = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(db.prepare('SELECT owner_device_id, claimed_runtime, status FROM task_attempt').get())
-        .toMatchObject({ owner_device_id: deviceId, claimed_runtime: null, status });
-    } finally { db.close(); }
-  });
-
-  it('rolls back the new column when version advancement fails and retries cleanly', async () => {
-    const { open, path } = fixture();
-    await open().stores.close();
-    downgradeToV3(path);
-    const db = new DatabaseSync(path);
-    db.exec("CREATE TRIGGER fail_version BEFORE UPDATE ON byok_sqlite_meta BEGIN SELECT RAISE(ABORT, 'injected version failure'); END");
-    db.close();
-    expect(() => open('v3-to-v5')).toThrow('injected version failure');
-    expectUnchangedV3(path);
-    const repair = new DatabaseSync(path);
-    repair.exec('DROP TRIGGER fail_version');
-    repair.close();
-    await open('v3-to-v5').stores.close();
-    await open().stores.close();
-  });
-
-  it('refuses a v5 file missing its claim authority without recreating the column', async () => {
+  it('refuses a v6 file missing its claim authority without recreating the column', async () => {
     const { open, path } = fixture();
     await open().stores.close();
     const db = new DatabaseSync(path);

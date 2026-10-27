@@ -95,7 +95,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
       const intents = await h!.routineIntents();
       return intents[0]?.submission === 'delivered' ? intents : undefined;
     });
-    expect(await h.mailbox(intent!.task)).toEqual(['task.offer']);
+    expect(await h.mailbox(intent!.task)).toEqual([{ type: 'task.offer', session: 'fresh', egress: true }]);
     await h.device.waitForStart(intent!.task);
   }, ROUTINE_TEST_MS);
 
@@ -115,7 +115,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
     expect((await h.occurrences()).filter(occurrence => occurrence.plannedAt === slot)).toHaveLength(1);
     expect(fired(h)).toBe(1);
     expect(await h.routineIntents()).toHaveLength(1);
-    expect(await h.mailbox(intent!.task)).toEqual(['task.offer']);
+    expect(await h.mailbox(intent!.task)).toEqual([{ type: 'task.offer', session: 'fresh', egress: true }]);
     expect(h.worker.lines('[h-clock] alarm pass').filter(line => / 2\/2 /u.test(line)).length).toBeGreaterThanOrEqual(2);
   }, ROUTINE_TEST_MS);
 
@@ -130,7 +130,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
     await worker.kill();
     // The fire committed and the SDK holds the offer; the Host never wrote the delivery.
     expect((await h.occurrences()).filter(occurrence => occurrence.plannedAt === slot)).toHaveLength(1);
-    expect(await h.mailbox(intent!.task)).toEqual(['task.offer']);
+    expect(await h.mailbox(intent!.task)).toEqual([{ type: 'task.offer', session: 'fresh', egress: true }]);
     expect((await h.routineIntents())[0]).toMatchObject({ tries: 1, conclusion: null });
     expect((await h.routineIntents())[0]?.submission).not.toBe('delivered');
     worker = await h.restart({ fault: 'drop-notify' });
@@ -138,7 +138,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
     expect(alarmReports(worker).some(report => report.submit.tried > 0)).toBe(true);
     expect((await h.occurrences()).filter(occurrence => occurrence.plannedAt === slot)).toHaveLength(1);
     expect(await h.routineIntents()).toHaveLength(1);
-    expect(await h.mailbox(intent!.task)).toEqual(['task.offer']);
+    expect(await h.mailbox(intent!.task)).toEqual([{ type: 'task.offer', session: 'fresh', egress: true }]);
     await h.device.waitForStart(intent!.task);
     expect(h.device.started.filter(entry => entry.taskId === intent!.task)).toHaveLength(1);
   }, ROUTINE_TEST_MS);

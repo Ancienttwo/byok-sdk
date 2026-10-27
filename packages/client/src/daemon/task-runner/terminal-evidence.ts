@@ -19,7 +19,8 @@ export function terminalInferenceUsagePayload(this: TaskRunner, active: ActiveTa
   const runtimeId = active.adapter.descriptor.id;
   if (!isKnownRuntimeId(runtimeId)) return {};
   if (release === undefined || active.lastUsage === undefined) return {};
-  if (active.lastUsage.inputTokens === undefined && active.lastUsage.outputTokens === undefined) return {};
+  const { model } = active.lastUsage;
+  if (active.lastUsage.inputTokens === undefined && active.lastUsage.outputTokens === undefined && model === undefined) return {};
 
   const nowMs = Date.now();
   const durationMs = terminalUsageNumber(nowMs - active.startedAtMs, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS);
@@ -33,6 +34,7 @@ export function terminalInferenceUsagePayload(this: TaskRunner, active: ActiveTa
       reportedAt: new Date(nowMs).toISOString(),
       ...(promptTokens === undefined ? {} : { promptTokens }),
       ...(completionTokens === undefined ? {} : { completionTokens }),
+      ...(model === undefined ? {} : { model }),
       ...(durationMs === undefined ? {} : { durationMs }),
     },
   };
@@ -94,7 +96,7 @@ export async function resolveStagedResult(
     return { deliver: false };
   }
   if (record.contract !== selection.contract || record.tenantId !== this['deps'].tenantId
-    || active.agentRef === undefined || record.agentRef.agentId !== active.agentRef.agentId
+    || record.agentRef.agentId !== active.agentRef.agentId
     || record.agentRef.profileRevision !== active.agentRef.profileRevision) {
     if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
     await this['fail'](active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result does not belong to this task's contract and Agent`, false);
@@ -118,9 +120,6 @@ export async function persistAgentTerminalEvidence(
   active.terminalCause = cause;
   active.terminalReason = reason;
   await this['measureReaderMemoryChange'](active);
-  if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) {
-    return true;
-  }
   const agentRef = active.agentRef;
   const handoff = active.agentHandoff;
   const result = await this['retryAgentTerminalEvidence'](() =>
@@ -150,13 +149,11 @@ export async function persistAgentTerminalEvidence(
 
 export async function measureReaderMemoryChange(this: TaskRunner, active: ActiveTask): Promise<void> {
   if (active.readerMemoryBaseline === undefined || active.agentHomeMemoryChange !== undefined) return;
-  const binding = active.agentBinding;
-  if (binding === undefined) return;
-  const after = await digestAgentHomeMemory(binding.resolution.canonicalHome);
+  const after = await digestAgentHomeMemory(active.agentBinding.resolution.canonicalHome);
   active.agentHomeMemoryChange ??= compareAgentHomeMemory(
     active.readerMemoryBaseline.digest,
     after,
-    binding.lease.writerOverlapped(),
+    active.agentBinding.lease.writerOverlapped(),
   );
 }
 

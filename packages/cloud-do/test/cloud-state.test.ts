@@ -86,46 +86,6 @@ describe('cloud 4e state contracts in actual workerd SQLite',()=>{
     await rpc(name,'settle',{id:1,outcome:'interrupted'});
     expect(await rpc(name,'claimed',{id:1})).toEqual([c.row.seq]);
   });
-  it('seeds legacy links once and keeps all unknown clocks and revisions null',async()=>{
-    const name='legacy-seed';const linked=await enqueue(name,'linked');const queued=await enqueue(name,'queued');
-    await startClaim(name,1,linked.row.seq);await rpc(name,'start',{id:2});await rpc(name,'start',{id:3,trigger:'submit'});
-    await sql(name,"DROP TABLE cloud_run_turns; ALTER TABLE cloud_executions DROP COLUMN membershipPending; UPDATE cloud_executions SET revision=NULL,settlementAck=NULL; UPDATE cloud_inbox SET revision=NULL");
-    const first=await rpc<{turns:unknown[];runs:RunRow[];events:CloudEventRow[]}>(name,'ensure');
-    expect(first.turns).toEqual([{runId:1,seq:linked.row.seq,claimEvent:null,releaseEvent:null}]);
-    expect(first.runs.map(row=>[row.conversationId,row.membershipPending,row.revision,row.settlementAck])).toEqual([[1,1,null,null],[2,1,null,null],[3,null,null,null]]);
-    expect((await transcript(name,undefined,20)).items.map(row=>row.seq)).toEqual([queued.row.seq]);
-    expect(await rpc(name,'ensure')).toEqual(first);
-    await rpc(name,'backfill',{id:2,seqs:[]});await rpc(name,'backfill',{id:1,seqs:[linked.row.seq,queued.row.seq]});
-    const done=await rpc(name,'ensure');expect(await rpc(name,'pending')).toEqual([]);expect(await rpc(name,'ensure')).toEqual(done);
-  });
-  it('backfills purged history newest first and commits progress with membership',async()=>{
-    const name='legacy-progress';for(const id of [1,2,3]) await rpc(name,'start',{id});
-    await sql(name,'DROP TABLE cloud_run_turns; ALTER TABLE cloud_executions DROP COLUMN membershipPending');
-    expect((await rpc<RunRow[]>(name,'pending')).map(row=>row.conversationId)).toEqual([3,2,1]);
-    await rpc(name,'backfill',{id:3,seqs:[50]});
-    await sql(name,"CREATE TRIGGER fail_backfill BEFORE UPDATE OF membershipPending ON cloud_executions WHEN NEW.conversationId=2 AND NEW.membershipPending=0 BEGIN SELECT RAISE(ABORT,'backfill failure'); END");
-    await expect(rpc(name,'backfill',{id:2,seqs:[40]})).rejects.toThrow();
-    expect(await rpc(name,'claimed',{id:2})).toEqual([]);
-    expect((await rpc<RunRow[]>(name,'pending')).map(row=>row.conversationId)).toEqual([2,1]);
-    await mf.dispose();mf=runtime();await mf.ready;
-    await sql(name,'DROP TRIGGER fail_backfill');await rpc(name,'backfill',{id:2,seqs:[40,50]});await rpc(name,'backfill',{id:1,seqs:[30,40,50]});
-    expect(await sql(name,'SELECT * FROM cloud_run_turns ORDER BY runId,seq')).toEqual([
-      {runId:1,seq:30,claimEvent:null,releaseEvent:null},{runId:2,seq:40,claimEvent:null,releaseEvent:null},{runId:3,seq:50,claimEvent:null,releaseEvent:null},
-    ]);
-    const done=await rpc(name,'ensure');await rpc(name,'backfill',{id:1,seqs:[99]});expect(await rpc(name,'ensure')).toEqual(done);
-    const page=await transcript(name,undefined,20);expect(page.runs.flatMap(row=>row.turns).every(turn=>turn.runId===null&&turn.state===null&&turn.revision===null)).toBe(true);
-  });
-  it('keeps legacy requeue expiry purge history without inventing a current owner',async()=>{
-    const name='legacy-release-purge';const {row}=await enqueue(name,'one',{expiresAt:now+10});
-    await startClaim(name,1,row.seq);await rpc(name,'settle',{id:1,outcome:'interrupted'});
-    await rpc(name,'expire',{now:now+10});await rpc(name,'retention',{now:now+10+7*INBOX_DAY});
-    await sql(name,'DROP TABLE cloud_run_turns; ALTER TABLE cloud_executions DROP COLUMN membershipPending; UPDATE cloud_executions SET settlementAck=NULL,revision=NULL');
-    await rpc(name,'backfill',{id:1,seqs:[row.seq]});
-    const page=await transcript(name,undefined,20);
-    expect(page.items).toEqual([]);expect(page.runs[0]!.turns).toEqual([{seq:row.seq,runId:null,state:null,errorCode:null,revision:null,text:null}]);
-    expect(await rpc(name,'unacked')).toEqual([]);
-    expect(await rpc(name,'ack',{id:1})).toBe(false);
-  });
   it('stamps fresh rows and clears durable input only for its current run',async()=>{
     const name='durable-revision';const {row}=await enqueue(name,'one',{text:'retained'});
     const accepted=(await rpc<CloudEventRow[]>(name,'events'))[0]!;expect(row.revision).toBe(accepted.seq);

@@ -90,26 +90,26 @@ export class InvocationLedger {
         deadlineAt INTEGER NOT NULL, abortRequested INTEGER NOT NULL DEFAULT 0,
         resultJson TEXT, errorCode TEXT,
         mode TEXT NOT NULL DEFAULT 'inline' CHECK (mode IN ('inline','job')),
-        segmentStartedAt INTEGER, nextSegmentAt INTEGER, jobStateJson TEXT, progressJson TEXT
+        segmentStartedAt INTEGER, nextSegmentAt INTEGER, jobStateJson TEXT, progressJson TEXT,
+        settledAt INTEGER, settledEventSeq INTEGER,
+        deliveredState TEXT NOT NULL DEFAULT 'undelivered', taskId INTEGER, resultEntryId INTEGER
       );
       CREATE INDEX IF NOT EXISTS cloud_invocations_pending ON cloud_invocations(state,seq);
       CREATE TABLE IF NOT EXISTS cloud_executions (
         conversationId INTEGER PRIMARY KEY, deadlineAt INTEGER NOT NULL,
         steps INTEGER NOT NULL DEFAULT 0, tools INTEGER NOT NULL DEFAULT 0,
-        fatalCode TEXT, aborted INTEGER NOT NULL DEFAULT 0
+        fatalCode TEXT, aborted INTEGER NOT NULL DEFAULT 0,
+        inputTokens INTEGER NOT NULL DEFAULT 0, outputTokens INTEGER NOT NULL DEFAULT 0,
+        credits INTEGER NOT NULL DEFAULT 0, sentRequests INTEGER NOT NULL DEFAULT 0,
+        trigger TEXT NOT NULL DEFAULT 'submit', requestId TEXT, submissionId INTEGER,
+        state TEXT NOT NULL DEFAULT 'interrupted', errorCode TEXT, startedAt INTEGER, settledAt INTEGER,
+        reservation TEXT NOT NULL DEFAULT 'none', eligibilityJson TEXT,
+        admissionDigest TEXT, admittedSeqs TEXT, settlementAck INTEGER, revision INTEGER
       );
       CREATE TABLE IF NOT EXISTS cloud_counted_tools (
         conversationId INTEGER NOT NULL, taskId TEXT NOT NULL,
         PRIMARY KEY(conversationId,taskId)
       )`);
-      const columns = new Set(this.storage.sql.exec<{ name: string }>('PRAGMA table_info(cloud_invocations)').toArray().map(row => row.name));
-      for (const name of ['settledAt', 'settledEventSeq']) {
-        if (!columns.has(name)) this.storage.sql.exec(`ALTER TABLE cloud_invocations ADD COLUMN ${name} INTEGER`);
-      }
-      const executionColumns = new Set(this.storage.sql.exec<{ name: string }>('PRAGMA table_info(cloud_executions)').toArray().map(row => row.name));
-      for (const name of ['inputTokens', 'outputTokens', 'credits', 'sentRequests']) {
-        if (!executionColumns.has(name)) this.storage.sql.exec(`ALTER TABLE cloud_executions ADD COLUMN ${name} INTEGER NOT NULL DEFAULT 0`);
-      }
     });
   }
 

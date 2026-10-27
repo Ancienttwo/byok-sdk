@@ -20,7 +20,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   } = input;
   const offered = runtimeTaskInput(payload);
   const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
-  const requiresAgentMemoryMcp = preparation === undefined && agentRef !== undefined && ordinaryMemoryMcp;
+  const requiresAgentMemoryMcp = preparation === undefined && ordinaryMemoryMcp;
   let pick: PickResult;
   try {
     pick = await this['pickAdapter'](
@@ -59,7 +59,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   // what the runtime path sees. One computation, both phases.
   const env = { ...buildRuntimeEnv({ ambient: process.env }), ...scratch.env };
   const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
-  if (resolvedMcp?.ok && agentRef !== undefined && this['deps'].prepareHostTaskContext) {
+  if (resolvedMcp?.ok && this['deps'].prepareHostTaskContext) {
     await this['deps'].prepareHostTaskContext(taskId, blobAbort.signal);
     if (admissionWithdrawn()) return undefined;
   }
@@ -84,7 +84,8 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     && pick.descriptor.requiresMcpToolsetToolObservation === true;
   if (preparation === undefined && messageRequirement !== undefined && this['deps'].agentMessageMcpPreflight !== undefined) {
     try {
-      await this['deps'].agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv);
+      const preflight = this['deps'].agentMessageMcpPreflight;
+      await phase.admission.time('messageHelperPreflightMs', () => preflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv));
     } catch (error) {
       decline(`required Agent message helper preflight failed: ${outboundErrorMessage(error)}`, false);
       return undefined;
@@ -92,13 +93,14 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   }
   if (preparation === undefined && terminalProjection?.mode === 'result-document' && this['deps'].agentResultMcpPreflight !== undefined) {
     try {
-      await this['deps'].agentResultMcpPreflight(taskMcpServers![AGENT_RESULT_MCP_SERVER_NAME]!, mcpEnv);
+      const preflight = this['deps'].agentResultMcpPreflight;
+      await phase.admission.time('resultHelperPreflightMs', () => preflight(taskMcpServers![AGENT_RESULT_MCP_SERVER_NAME]!, mcpEnv));
     } catch (error) {
       decline(`required Agent result helper preflight failed: ${outboundErrorMessage(error)}`, false);
       return undefined;
     }
   }
-  if (requiresAgentMemoryMcp && agentRef !== undefined && ordinaryMemoryMode !== 'none') {
+  if (requiresAgentMemoryMcp && ordinaryMemoryMode !== 'none') {
     try {
       // A `read` task, which includes every reader, is sealed `read` and its helper lists only `memory_recall`.
       taskMcpServers = this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, ordinaryMemoryMode, this['deps'].agentMemoryMcpBin!, 'granted');
@@ -132,7 +134,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   if (needsToolsetObservation) {
     const probe = this['deps'].mcpToolsetToolsProbe ?? probeMcpServer;
     const entries = Object.entries(resolvedMcp!.servers);
-    const settled = await Promise.allSettled(entries.map(async ([serverName, server]) => {
+    const settled = await phase.admission.time('toolsetProbeMs', () => Promise.allSettled(entries.map(async ([serverName, server]) => {
       const observation = await probe(serverName, server, {
         label: `MCP toolset server "${serverName}"`,
         timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
@@ -147,7 +149,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
         throw new Error('observed a server that belongs to no projected toolset');
       }
       return bindMcpToolsetServerObservation(observation, toolsetId);
-    }));
+    })));
     const observed: Record<string, McpToolsetServerObservation> = {};
     let failure: { serverName: string; error: unknown } | undefined;
     for (let index = 0; index < entries.length; index += 1) {

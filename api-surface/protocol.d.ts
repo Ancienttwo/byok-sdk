@@ -306,6 +306,7 @@ export declare const AgentEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         estimate: "estimate";
         provider: "provider";
     }>>;
+    model: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>], "type">;
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
 /**
@@ -448,6 +449,7 @@ export declare const AgentEventOrUnknownSchema: z.ZodUnion<readonly [z.ZodDiscri
         estimate: "estimate";
         provider: "provider";
     }>>;
+    model: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>], "type">, z.ZodObject<{
     type: z.ZodString;
 }, z.core.$loose>]>;
@@ -1852,6 +1854,8 @@ export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 /** The frozen wire runtime ids. Any other adapter id is a custom harness (`harnessId`). */
 export declare const RUNTIME_IDS: readonly ["pi", "claude", "codex"];
+/** Maximum length of a served model name. */
+export declare const TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH = 160;
 // ==== @byok-sdk/protocol dist/e2ee-member.d.ts ====
 /**
  * Member keys, the member chain and scope key packages as the Host stores
@@ -2893,8 +2897,8 @@ export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_DE
 export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, ResultIssue, ResultDocumentFailureReason, ResultSchemaCheck, ResultOutcomeCheck, } from './result-schema';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
+export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -4949,6 +4953,23 @@ export declare const TaskCancelPayloadSchema: z.ZodObject<{
     reason: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export type TaskCancelPayload = z.infer<typeof TaskCancelPayloadSchema>;
+/** Maximum offer admission duration, and of each phase in it (seven days). */
+export declare const OFFER_ADMISSION_MAX_DURATION_MS = 604800000;
+/**
+ * #1014: how long this device spent admitting an offer, in milliseconds of its
+ * monotonic clock, from receiving the offer to sending the claim or decline
+ * that ends admission. A phase is present only when it ran; the time no phase
+ * names is `totalMs` minus their sum.
+ */
+export declare const OfferAdmissionTimingsSchema: z.ZodObject<{
+    totalMs: z.ZodNumber;
+    agentHomeWaitMs: z.ZodOptional<z.ZodNumber>;
+    messageHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+    resultHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+    toolsetProbeMs: z.ZodOptional<z.ZodNumber>;
+    runtimeLaunchMs: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strict>;
+export type OfferAdmissionTimings = z.infer<typeof OfferAdmissionTimingsSchema>;
 /**
  * daemon -> server: claim an offered task (idempotent CAS on the server
  * side). `taskId` used to be duplicated here; it is now carried only by the
@@ -5005,6 +5026,14 @@ export declare const TaskClaimPayloadSchema: z.ZodObject<{
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
+    admission: z.ZodOptional<z.ZodObject<{
+        totalMs: z.ZodNumber;
+        agentHomeWaitMs: z.ZodOptional<z.ZodNumber>;
+        messageHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+        resultHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+        toolsetProbeMs: z.ZodOptional<z.ZodNumber>;
+        runtimeLaunchMs: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
 /**
@@ -5098,7 +5127,6 @@ export declare const TERMINAL_INFERENCE_USAGE_MAX_TOKENS = 1000000000;
 /** Maximum device-observed elapsed duration retained in one terminal observation (seven days). */
 export declare const TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS = 604800000;
 export declare const TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH = 160;
-export declare const TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH = 160;
 export declare const TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH = 128;
 /**
  * A bounded, non-billing observation associated with one terminal runtime
@@ -5482,6 +5510,14 @@ export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>>;
+    admission: z.ZodOptional<z.ZodObject<{
+        totalMs: z.ZodNumber;
+        agentHomeWaitMs: z.ZodOptional<z.ZodNumber>;
+        messageHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+        resultHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+        toolsetProbeMs: z.ZodOptional<z.ZodNumber>;
+        runtimeLaunchMs: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>>;
     code: z.ZodOptional<z.ZodEnum<{
         agent_home_reader_busy: "agent_home_reader_busy";
         agent_home_writer_busy: "agent_home_writer_busy";
@@ -5732,12 +5768,28 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
         sealed_open_failed: "sealed_open_failed";
         sealing_policy_mismatch: "sealing_policy_mismatch";
     }>>;
+    admission: z.ZodOptional<z.ZodObject<{
+        totalMs: z.ZodNumber;
+        agentHomeWaitMs: z.ZodOptional<z.ZodNumber>;
+        messageHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+        resultHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+        toolsetProbeMs: z.ZodOptional<z.ZodNumber>;
+        runtimeLaunchMs: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>>;
 }, z.core.$strip>, z.ZodObject<{
     sealing: z.ZodOptional<z.ZodNever>;
     retryable: z.ZodOptional<z.ZodBoolean>;
     agentRef: z.ZodOptional<z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
+    }, z.core.$strict>>;
+    admission: z.ZodOptional<z.ZodObject<{
+        totalMs: z.ZodNumber;
+        agentHomeWaitMs: z.ZodOptional<z.ZodNumber>;
+        messageHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+        resultHelperPreflightMs: z.ZodOptional<z.ZodNumber>;
+        toolsetProbeMs: z.ZodOptional<z.ZodNumber>;
+        runtimeLaunchMs: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strict>>;
     code: z.ZodOptional<z.ZodEnum<{
         agent_home_reader_busy: "agent_home_reader_busy";
@@ -5856,6 +5908,7 @@ export declare const TaskProgressPayloadSchema: z.ZodUnion<readonly [z.ZodObject
             estimate: "estimate";
             provider: "provider";
         }>>;
+        model: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>], "type">, z.ZodObject<{
         type: z.ZodString;
     }, z.core.$loose>]>>;

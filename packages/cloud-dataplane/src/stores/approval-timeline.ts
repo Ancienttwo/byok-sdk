@@ -15,7 +15,8 @@ import {
   type ApprovalTimelineTail,
 } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { Pool, PoolClient } from 'pg';
+import type { PoolClient } from 'pg';
+import type { ByokPool } from '../pool';
 
 interface TailRow {
   readonly tenant_id: string;
@@ -58,7 +59,7 @@ async function readLocked(
 
 export class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
   constructor(
-    private readonly pool: Pool,
+    private readonly pool: ByokPool,
     private readonly clock: Clock,
   ) {}
 

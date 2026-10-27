@@ -34,6 +34,7 @@ import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions
 import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './events';
 import { ClaudeFailureEvidence } from './failure-evidence';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
+import { servedModelName } from '../served-model';
 
 
 const execFileAsync = promisify(execFile);
@@ -543,10 +544,34 @@ function callsUnresolvedMcpTool(message: ClaudeStreamMessage, correlation: ToolU
     && correlation.mcpIdentities?.has(block.name) !== true);
 }
 
+/** The one model served to the root agent (`parent_tool_use_id: null`) this turn; `<synthetic>` frames are Claude's own. */
+class ClaudeServedModel {
+  private readonly models = new Set<string>();
+  private unknown = false;
+
+  observe(msg: ClaudeStreamMessage): void {
+    if (msg.type !== 'assistant' || msg.parent_tool_use_id !== null) return;
+    const reported = (msg.message as { model?: unknown } | undefined)?.model;
+    if (reported === '<synthetic>') return;
+    const model = servedModelName(reported);
+    if (model === undefined) this.unknown = true;
+    else this.models.add(model);
+  }
+
+  takeTurnModel(): string | undefined {
+    const [only, ...rest] = this.models;
+    const model = this.unknown || rest.length > 0 ? undefined : only;
+    this.models.clear();
+    this.unknown = false;
+    return model;
+  }
+}
+
 class ClaudeSession implements Session {
   declare readonly interactions?: NativeInteractionChannel;
   private readonly correlation: ToolUseCorrelation;
   private readonly assistantMessages = new AssistantMessageTracker();
+  private readonly servedModel = new ClaudeServedModel();
   private readonly failureEvidence = new ClaudeFailureEvidence();
   private closeAttempt: Promise<void> | undefined;
   /** Filled once from Claude's own `mcp_status` answer (`./mcp-identity.ts`). */
@@ -570,6 +595,7 @@ class ClaudeSession implements Session {
     const client = this.client;
     const correlation = this.correlation;
     const assistantMessages = this.assistantMessages;
+    const servedModel = this.servedModel;
     const failureEvidence = this.failureEvidence;
     const workspaceDir = this.workspaceDir;
     const control = this.control;
@@ -658,13 +684,17 @@ class ClaudeSession implements Session {
                 for (const [name, identity] of claudeMcpEventIdentities(await control.mcpStatus(), toolsetServers)) mcpIdentities.set(name, identity);
               }
               const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir });
-              if (value.type === 'result' && control.contextWindow !== null) {
-                const usage = mapped.events.find(event => event.type === 'usage');
-                if (usage?.type === 'usage') {
-                  usage.contextWindow = control.contextWindow;
-                  usage.contextSource = 'provider';
-                } else {
-                  mapped.events.unshift({ type: 'usage', contextWindow: control.contextWindow, contextSource: 'provider' });
+              servedModel.observe(value);
+              if (value.type === 'result') {
+                const model = servedModel.takeTurnModel();
+                if (control.contextWindow !== null || model !== undefined) {
+                  const observed = {
+                    ...(control.contextWindow === null ? {} : { contextWindow: control.contextWindow, contextSource: 'provider' as const }),
+                    ...(model === undefined ? {} : { model }),
+                  };
+                  const usage = mapped.events.find(event => event.type === 'usage');
+                  if (usage?.type === 'usage') Object.assign(usage, observed);
+                  else mapped.events.unshift({ type: 'usage', ...observed });
                 }
               }
               assistantMessages.observe(value, mapped.events);

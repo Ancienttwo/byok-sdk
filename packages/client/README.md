@@ -793,22 +793,12 @@ enumerable data properties only; accessors, Proxies, symbol keys and non-plain
 prototypes are refused as `invalid_options` / `invalid_request`, and `body`
 must be an exact `Uint8Array`), and only that copy is checked and signed, so the
 operation checked against the allowlist is the operation signed. `readDeviceEnrollment*`
-and `retireInputPreparation` read their `productId`/`storeDir` and `mode`/`confirmed`
-the same way and reject anything else with a `TypeError` that has no cause.
+read their `productId`/`storeDir` the same way and reject anything else with a `TypeError` that has no cause.
 An operation outside `operations` is refused before the key is read; each
 signature re-reads the enrollment and refuses (`enrollment_changed`) if tenant,
 device or proof key no longer equal `identity`. Failures are
 `DeviceProofSignerError` closed codes. The signer also satisfies
 `TruthMemoryClient`'s `signer` option.
-
-The v8 input-preparation retirement is also a library call, so a branded host
-CLI or installer can own it: `retireInputPreparation({ productId, storeDir },
-{ mode: 'preview' })` inspects and writes nothing; `{ mode: 'execute',
-confirmed: true }` moves the old namespace aside with a manifest and refuses,
-typed and with zero writes, while the daemon answers, the owner lease is held,
-or any row is pinned, current/mixed/unknown-version or unparseable, or a path
-is a symlink. `byok-agent retire-input-preparation [--yes]` renders the same
-function.
 
 ```ts
 createDaemon({

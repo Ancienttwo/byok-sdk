@@ -95,6 +95,7 @@ import { terminalInferenceUsagePayload, preparedObservationPayload, agentTermina
 import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin } from './task-runner/finish';
 import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump';
 import { handleOffer } from './task-runner/offer';
+import { OfferAdmissionTiming } from './task-runner/offer-admission-timing';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -1120,15 +1121,17 @@ export class TaskRunner {
 
   async handleEnvelope(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
-      case 'task.offer':
+      case 'task.offer': {
+        const admission = new OfferAdmissionTiming();
         // The receiver half of the gates: checked on the wire payload, before
         // a sealed offer is opened. #654: a sealed offer that cannot be opened
         // is declined, not dropped, so the task does not wait for a timeout.
-        if (this.declineOfferMissingCapabilities(envelope)) return;
+        if (this.declineOfferMissingCapabilities(envelope, admission)) return;
         await trackOffer(this, envelope.payload.sealing === undefined
-          ? this.handleOffer(envelope.task_id, envelope.payload)
-          : this.handleSealedOffer(envelope));
+          ? this.handleOffer(envelope.task_id, envelope.payload, admission)
+          : this.handleSealedOffer(envelope, admission));
         return;
+      }
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
@@ -1168,8 +1171,8 @@ export class TaskRunner {
     }
   }
 
-  private handleOffer(taskId: string, payload: AcceptedOfferPayload): Promise<void> {
-    return handleOffer.call(this, taskId, payload);
+  private handleOffer(taskId: string, payload: AcceptedOfferPayload, admission: OfferAdmissionTiming): Promise<void> {
+    return handleOffer.call(this, taskId, payload, admission);
   }
 
   private admitOffer(phase: OfferPhaseContext): true | undefined {
@@ -1299,7 +1302,7 @@ export class TaskRunner {
   private withHostToolsetContext(
     servers: Readonly<Record<string, McpStdioServerConfig>>,
     taskId: string,
-    agentRef: AgentRef | undefined,
+    agentRef: AgentRef,
     toolsetIdByServer: ReadonlyMap<string, string>,
   ): Readonly<Record<string, McpStdioServerConfig>> {
     return withHostToolsetContext.call(this, servers, taskId, agentRef, toolsetIdByServer);
@@ -1750,12 +1753,12 @@ export class TaskRunner {
    * {@link handleOffer}. A server without `sealed-payload-v1` gets a plaintext
    * decline before the open: the task's output could not be sent to it.
    */
-  private handleSealedOffer(envelope: Envelope): Promise<void> {
-    return handleSealedOffer.call(this, envelope);
+  private handleSealedOffer(envelope: Envelope, admission: OfferAdmissionTiming): Promise<void> {
+    return handleSealedOffer.call(this, envelope, admission);
   }
 
-  private declineOfferMissingCapabilities(envelope: Extract<Envelope, { type: 'task.offer' }>): boolean {
-    return declineOfferMissingCapabilities.call(this, envelope);
+  private declineOfferMissingCapabilities(envelope: Extract<Envelope, { type: 'task.offer' }>, admission: OfferAdmissionTiming): boolean {
+    return declineOfferMissingCapabilities.call(this, envelope, admission);
   }
 
   private failurePayload(failure: TaskFailure): { failure?: TaskFailure } {
@@ -1774,15 +1777,19 @@ export class TaskRunner {
    * `code` (#654 decisions 12c and 12d). The code is a value gate on that
    * flag, so without it the decline has a plaintext reason and no code.
    */
-  private declineSealedOffer(taskId: string, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
-    return declineSealedOffer.call(this, taskId, agentRef, code);
+  private declineSealedOffer(taskId: string, admission: OfferAdmissionTiming, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
+    return declineSealedOffer.call(this, taskId, admission, agentRef, code);
   }
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
-  private decline(taskId: string, reason: string, retryable: boolean, agentRef?: AgentRef, code?: TaskDeclinePayload['code']): void {
+  private decline(taskId: string, admission: OfferAdmissionTiming, reason: string, retryable: boolean, agentRef?: AgentRef, code?: TaskDeclinePayload['code']): void {
+    const timings = admission.snapshot();
     this.deps.send(createEnvelope(
       'task.decline',
-      { reason, retryable, ...(agentRef === undefined ? {} : { agentRef }), ...(code === undefined ? {} : { code }) },
+      {
+        reason, retryable, ...(agentRef === undefined ? {} : { agentRef }), ...(code === undefined ? {} : { code }),
+        ...(timings === undefined ? {} : { admission: timings }),
+      },
       { taskId },
     ));
   }

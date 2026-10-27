@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Fix (client; #1030)** — a daemon whose store is configured through a
+  Windows name alias (an 8.3 short name such as `C:\Users\RUNNER~1\…`, or a
+  letter-case variant) restarts again. The second start exited with
+  `retention_root_identity_invalid` once `<storeDir>\tmp\exec` existed, so the
+  recovery terminal was never sent. `DeviceStore.resolveDir` now folds
+  `storeDir` into its on-disk spelling for the daemon and every CLI. The daemon
+  folds `piByokLauncher.sessionDir`, `storage.scratchRoot` and
+  `storage.skillPackDataDirs` the same way. A symbolic link, or a junction to a
+  drive-letter path, is never followed. Volume mount points, subst drives and
+  mapped network drives look like plain directories to lstat, so they are
+  resolved once at construction. The root identity check is unchanged.
+  Upgrade note for a store configured through an alias: the Windows control
+  pipe name and the Agent-home owner identity change, so restart the daemon
+  after upgrading. A letter-case alias on macOS likewise changes the owner
+  identity and the hash of a long-path control socket. A lease marker that a
+  crashed older daemon left in an Agent home now reports `AgentHomeBusyError`
+  until the marker file is deleted; there is no migration.
 - **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
   envelope is rejected; there is no v3 reader and no negotiation. Drain the
   v3 deployment, stop it, then start the v4 server side and daemons together

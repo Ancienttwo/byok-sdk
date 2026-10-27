@@ -145,6 +145,22 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     ]);
   });
 
+  it.each([
+    { label: 'one model on every root frame', extra: [], model: 'fake-model' },
+    { label: 'a subagent frame on another model', extra: [{ model: 'subagent-model', parent_tool_use_id: 'toolu_fake_1' }], model: 'fake-model' },
+    { label: 'a frame claude synthesized', extra: [{ model: '<synthetic>', parent_tool_use_id: null }], model: 'fake-model' },
+    { label: 'a second root model', extra: [{ model: 'other-model', parent_tool_use_id: null }], model: undefined },
+    { label: 'a root frame without a model', extra: [{ parent_tool_use_id: null }], model: undefined },
+  ])('reports the served model on the turn usage only when the root agent saw exactly one: $label (#1014)', async ({ extra, model }) => {
+    const adapter = fakeClaudeAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_ROOT_FRAMES: '1', FAKE_CLAUDE_EXTRA_ASSISTANT: JSON.stringify(extra) });
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+
+    const usage = (await takeTurn(session)).filter((event) => event.type === 'usage');
+    expect(usage).toEqual([{ type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20, ...(model === undefined ? {} : { model }) }]);
+  });
+
   it('passes the subscription selection model to Claude without provider credentials', async () => {
     const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
     const adapter = new ClaudeAdapter({

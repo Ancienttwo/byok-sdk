@@ -36,6 +36,20 @@ describe('real Pi 1.0 durable engine', () => {
     expect(input.calls()).toBe(1); expect(completed).toBe(1);
     expect(events.filter((event: any) => event.type === 'usage')).toEqual([{ type: 'usage', inputTokens: 3, cachedInputTokens: 2, outputTokens: 1, totalTokens: 4 }]);
   });
+  it('projects the model pi-ai recorded as served, not the requested id (#1014)', async () => {
+    const input = await fixture();
+    const model: Model<'openai-completions'> = { id: 'probe/alias', name: 'probe', api: 'openai-completions', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096, maxTokens: 64 };
+    const chunk = (body: object) => `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: 'probe/served-2026-10-01', ...body })}\n\n`;
+    const sse = chunk({ choices: [{ index: 0, delta: { role: 'assistant', content: 'finished' }, finish_reason: null }] })
+      + chunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }) + 'data: [DONE]\n\n';
+    const respond: typeof fetch = async () => new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+    const stream: typeof streamSimple = (m, context, options) => streamSimple(m, context, { ...options, fetch: respond });
+    const models = createModels(); models.setProvider(createProvider({ id: 'openrouter', auth: { apiKey: { name: 'synthetic', resolve: async () => ({ auth: { apiKey: 'synthetic' } }) } }, models: [model], api: { stream, streamSimple: stream } }));
+    const events: unknown[] = [];
+    const engine = await openDurableEngine({ ...input, models, model: { provider: 'openrouter', modelId: model.id }, resume: false, beforeTool: async () => {}, events: async batch => { events.push(...batch.flatMap(projectDurableEvent)); }, completed: async () => {} });
+    try { await engine.run(); } finally { await engine.close(); }
+    expect(events.filter((event: any) => event.type === 'usage')).toMatchObject([{ type: 'usage', model: 'probe/served-2026-10-01' }]);
+  });
   it('fresh execution discards a real stale pending tool checkpoint BEFORE any old model request can resume', async () => {
     const input = await fixture(); const receipt = path.join(path.dirname(input.file), 'old-calls');
     const child = spawn(process.execPath, [path.resolve(import.meta.dirname, 'fixtures/pi-durable-pending.mjs'), input.file, receipt], { stdio: ['ignore','pipe','pipe'] });

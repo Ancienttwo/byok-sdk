@@ -1,6 +1,6 @@
 export const EXPIRING_CLASS_IDS = [
   'exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation',
-  'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old',
+  'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger',
 ] as const;
 export const PROTECTED_CLASS_IDS = [
   'journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'terminal-evidence',

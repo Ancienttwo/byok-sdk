@@ -542,7 +542,7 @@ projection below is not a release gate.
 ## Embedded SQLite device and receipt authority
 
 The explicit SQLite composition persists device enrollment, capabilities and
-request receipts alongside six coordination interfaces. Pairing, authenticated
+request receipts and bounded approval timelines alongside six coordination interfaces. Pairing, authenticated
 lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
 codes remain process-local; no runtime or TaskHandle is reconstructed. Embedded
@@ -561,25 +561,24 @@ before open because their WAL paths cannot share recovery authority.
 `close()` is the only server shutdown API; the synchronous `stop()` is removed.
 The upgrade must stop all older owners and external SQLite connections before
 starting this owner, with no parallel sibling-lock path. Schema and wire formats
-were unchanged by the owner-lock refactor; see the schema adoption below and the server README for migration.
+were unchanged by the owner-lock refactor; see the schema version policy below and the server README.
 
-Schema v5 retains nullable claimed harness identity in the ownership CAS and
-adds the server-local wake table. Stop every writer and take a consistent backup
-before explicit adoption. `v1-to-v5` / `v2-to-v5` reject any task, message,
-agent-admission or advanced cursor history: old in-memory receipt facts cannot be
-fabricated. Eligible v1 adds an empty device directory; v2 retains devices.
-`v3-to-v5` preserves receipts, unclaimed offers and identified built-in claims,
-but rejects every owned row without a claimed runtime, including terminal rows:
-lost custom-harness identity cannot be distinguished from legacy identity-free
-built-in claims. No actual adapter identity is inferred from an offer or mutable
-inventory. Those older rows get a null harness identity. `v4-to-v5` only adds
-wake authority and its indexes; existing device, receipt, mailbox and task rows
-are untouched. A pre-v5 file already containing wake authority is rejected.
-Tables and version advance atomically; failure preserves the old database.
-Never delete history to pass these checks. Target-v4 selectors are deleted and
-replaced with target-v5 selectors, without compatibility aliases. Callers must
-update one-shot migration configuration. Old builds refuse schema 5; rollback
-requires restoring the backup taken before adoption.
+Schema v6 adds a durable approval timeline. Only newly created databases and
+existing v6 files are supported; versions 1–5 and unknown versions fail closed
+without adoption. There is no migration selector. Preserve an old database and
+explicitly choose a new state path and enrollment; never rewrite version markers
+or delete history to bypass the fence. Required approval columns and composite
+primary key are checked on open; missing authority is an error, not an empty tail.
+
+SQLite persists the existing `ApprovalTimelineStore` authority with the same
+capacity and absolute expiry (defaults: 50 observations, ten minutes). Requests,
+resolutions, source IDs, revisions and dropped count survive reopen. Reopen and
+exact replay do not renew TTL. Snapshots, statistics, host decisions and the
+`tasks.events` state seed read this same authority, without startup reconstruction
+or device resend. Expired tails remain absent; this is not indefinite pending
+approval retention or a durable audit log. Host resolve compares the observed
+source/revision and appends its decision within the same SQLite transaction.
+
 Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
 retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
@@ -1234,26 +1233,10 @@ on every remote completion, by not advertising the input-preparation capability
 (so the cloud refuses to enqueue onto it), and by carrying no prepared-offer
 lane (so a prepared `task.offer` that reaches it is declined, naming the
 missing flag). Nothing is migrated, read
-forward or deleted automatically. **Operator step:** stop the daemon, run
-`byok-agent retire-input-preparation` (or, from a host installer or branded
-host CLI, the library `retireInputPreparation({ productId, storeDir }, { mode:
-'preview' })`; the CLI only renders that one implementation) to list the namespace (record counts per
-record schema version, pinned records, artifact files and unparseable lines;
-it writes nothing), then `byok-agent retire-input-preparation --yes` (`{
-mode: 'execute', confirmed: true }`), and
-start the daemon again. `--yes` refuses, typed and with zero writes, while the
-daemon control socket is reachable or the store owner lease is held, and when
-any record line does not parse, sits at the current or an unknown record
-schema version, or when any record holds a live pin (its last line in the log,
-keyed by `recordId` exactly as replay folds it, carries a pin). Otherwise it moves the whole
-`<storeDir>/input-preparation/` directory, unchanged, into
-`<storeDir>/input-preparation-retired/<timestamp>-v<versions>/` beside a
-`manifest.json` (counts per version, sha256 and size of `records.jsonl` and of
-every artifact file). The log is read structurally for its `recordId`, `version`
-and `pin` fields only, never replayed; nothing is deleted or converted, and Agent home
-and Agent memory are not touched. An absent or empty namespace is a no-op. The
-lane comes back empty under the current record schema version, and the
-retired records stay available for audit.
+forward or deleted automatically. **Operator step:** stop the daemon, move
+the whole `<storeDir>/input-preparation/` directory aside (it holds only records
+this build refuses; keep it if it is needed for audit), and start the daemon
+again. The lane comes back empty under the current record schema version.
 
 `ready` answers exactly one question: CAN THIS PREPARATION BE CONSUMED. It is
 not Host budget admission. The device performs no budget arithmetic anywhere on
@@ -1315,9 +1298,7 @@ prepared Executions, required message dispositions and old mailbox entries befor
 upgrading cloud and device together. Recreate preparations using the Host-owned
 systemPrompt, official identity and explicit memory selection. The capability is
 `agent-input-preparation-v8`; wire and record versions both advance to 8, with no dual token/read. Older records
-are refused; the bounded operator action that retires them is
-`byok-agent retire-input-preparation --yes` (library `retireInputPreparation`),
-run against the stopped daemon
+are refused; the operator moves the old namespace aside with the daemon stopped,
 after the drain (see the operator step above). The fourteen admission comparisons retain their roles; the compiler,
 envelope and identity values being compared change. A skipped drain needs explicit
 operator handling of the old entries; upgrading alone does not repair them.
@@ -1329,7 +1310,7 @@ operator handling of the old entries; upgrading alone does not repair them.
 The local record is version 10. The prepared tool binding and surface digests
 are version 3 and the Pi MCP fingerprint is version 2, so a record prepared
 before this change declines with `preparation_tool_binding_digest_mismatch`.
-Apply the same drain, paired upgrade and `retire-input-preparation` steps as for
+Apply the same drain, paired upgrade and operator steps as for
 the v8 cut, then recreate the preparations.
 
 The evidence has four parts, and each is read off a recorded fact rather than
@@ -1459,6 +1440,22 @@ failure, a refused or changed start receipt and a protocol violation are `unknow
 Its start failures are typed and not retryable: a worker that ends on its own
 before its start receipt is `runtime_exited`, any other is `unknown`.
 
+### Offer admission timings
+
+The one `task.claim` or `task.decline` that the task runner sends for an
+offer carries `admission`; a sealed task's decline carries it in plaintext,
+including the sealed-open, gate self-check and `sealed_key_unavailable`
+declines, and a decline sent outside the task runner (the inbound journal's
+over-bound refusal, restart recovery) carries none. It holds device
+monotonic-clock durations in whole milliseconds, from the `task.offer`
+dispatch to that message, with a required `totalMs` and a key for each timed
+phase that ran (`agentHomeWaitMs`, `messageHelperPreflightMs`,
+`resultHelperPreflightMs`, `toolsetProbeMs`, `runtimeLaunchMs`). The daemon
+observer's `claimed` and `failed` (`preClaim`) events carry the same object.
+It is telemetry for admission calibration, not task state: `TaskAttempt` does
+not store it and `TerminalResult` does not project it; a decline's timings are
+read from the typed decline envelope.
+
 ### Terminal inference usage observation
 
 The three terminal messages may carry one bounded `TerminalInferenceUsage`
@@ -1479,6 +1476,10 @@ with `inputTokens = input + cacheRead + cacheWrite`, because Pi's own `input`
 already excludes both cache figures — so Pi's block carries the last call's
 figures, as telemetry like the others. A Pi run that reported no usage still
 omits the block rather than fabricating one from device facts.
+The block's `model` is the last observation's served model (`usage.model`:
+Pi's `responseModel`, Claude's single root-agent `message.model` for the turn;
+Codex reports none). A last observation with a model and no token counts still
+yields the block.
 The protocol enforces safe non-negative bounded numbers and a canonical UTC
 device timestamp. Cloud records first-terminal-wins as usual and projects the
 same typed object from the winning receipt without parsing raw receipt bytes
@@ -1534,6 +1535,35 @@ the semantic terminal once, but retains its active entry and Agent home
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
 publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
+
+## Hosted sealed payload (#654)
+
+A hosted Host can run a task whose task input, task output or both are sealed
+end to end. The categories are frozen on the offer as `sealing`
+([protocol §2.5](./protocol.md#25-sealed-payload-v1-654-gated-addition)). A web client member
+seals the input before it calls `submitSealedAgentExecution` or
+`steerSealedTask`. The device opens it, runs the task and seals the output.
+The Host stores and returns the sealed members and the plaintext metadata
+next to them. It holds no scope key in plaintext, so it cannot open them.
+
+- A missing key, a member that does not open and a policy mismatch are
+  refused. Nothing falls back to plaintext. A device that cannot open a sealed
+  offer declines it with one of the four sealed decline codes.
+- v1 seals only `task-input` and `task-output`. Agent messages, memory
+  projections, input preparation and drafts stay plaintext. A sealed task
+  streams no draft.
+- `@byok-sdk/server` has no sealed dispatch: it refuses `sealing` and
+  `sealed` with `coordination_input_invalid`. A sealed task must not go to
+  `@byok-sdk/cloud-do`, which reads task content in plaintext.
+- The Host's truth route stores a `task.terminal` record as the product
+  writes it and does not check sealing. A product that records a sealed
+  task's terminal there must write sealed content only.
+- [security.md, Sealed tasks](./security.md#sealed-tasks) lists what a sealed
+  task still shows the Host (for example the artifact name, the changed memory
+  file paths and the model in `usage`) and what sealing does not protect.
+  `examples/hosted-bot-collaboration/src/sealed-zero-hit.test.ts` measures it:
+  a sealed task's content has zero hits in every store, object, log line and
+  observer call that the run writes.
 
 ## Hosted task cancellation authority
 
@@ -2170,7 +2200,18 @@ Agent dispatch requires an explicit device and its durable authenticated
 `agent-home-contract` declaration before task creation or mailbox enqueue.
 Claim, decline, and every terminal message echo exact AgentRef. Resume requires
 exact agentId, profileRevision, sessionRef, runtime and canonical cwd; mismatch
-fails closed. Within one daemon process, a canonical Agent home runs at most
+fails closed. A session's ledger is kept at least until its last append
+(each Attempt's start and terminal) is `storage.retention.ttlMs['session-ledger']`
+old (default 30 days). A writer session stays resumable while its ledger
+exists; a reader session also needs its run directory, which reader-run
+retention removes after 7 days (below). Once the home is idle, retention
+removes an expired ledger. After that, a resume of that session is a
+non-retryable decline that says the handoff does not exist on this device,
+`agent.content.read` with that sessionRef is denied as `identity-mismatch`,
+and `Daemon.publishReliableAgentEgress` for that session fails with the same
+does-not-exist error. With `ttlMs['session-ledger']: 0`, every sweep of an
+idle home removes all of its session ledgers, so none of those sessions can
+be resumed. Within one daemon process, a canonical Agent home runs at most
 one writer Attempt and at most `maxConcurrentReaderAttemptsPerAgentHome`
 reader Attempts (default four), counted apart, across every lane and every
 session. An Agent offer without `homeAccess` is the writer and runs in the
@@ -2196,7 +2237,8 @@ is a non-retryable decline, and a missing run directory is a non-retryable
 decline that names the session. Run directories stay after the terminal;
 unified startup/periodic retention, under the same base home lease, removes
 the oldest beyond 32 per home and those older than 7 days, never an active one, and keeps one that a reader
-handoff updated within 7 days. The SDK does not make memory read-only: each
+handoff updated within 7 days. The session ledgers themselves expire under
+the `session-ledger` class above; `-task-` terminal evidence stays. The SDK does not make memory read-only: each
 reader terminal carries `agentHomeMemoryChange` (`unchanged`,
 `reader-attributed`, `unattributed` when a writer overlapped, or `unmeasured`)
 with the changed paths. A task-free projection still needs the base lease, so
@@ -2618,7 +2660,7 @@ The authority for each datum is explicit:
 | --- | --- | --- |
 | Fresh `sessionRef` | The runtime session actually started by the selected adapter | Runtime mints it after fresh `start()`; no server/client preseed |
 | Session handoff | SDK-owned canonical Agent-home `.byok/runtime-sessions/` | SDK records exact AgentRef/profile/runtime/cwd/session and fsyncs it before exposing the session |
-| Resume `sessionRef` | Existing exact handoff | A resume offer (`session.mode: 'resume'`) is exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed |
+| Resume `sessionRef` | Existing exact handoff | A resume offer (`session.mode: 'resume'`) is exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed, including a ledger retention removed after `ttlMs['session-ledger']` |
 | Egress policy and fresh capability | Host-selected typed policy plus durable device declaration | Cloud/server admit only the exact declared capability; presence is not authority |
 | Reliable egress identity | The handoff read by the public publisher | Publisher proves exact AgentRef/task/runtime/cwd/session handoff before durable append/send; cloud receipt and ack do not mint a session |
 
@@ -2742,7 +2784,8 @@ logs, or a second file authority.
 member (#654 E2d-1, [protocol §2.6](./protocol.md)). The member keys, `pv` and
 the member state are three more entries of the same OS credential provider,
 cleared at a re-pair and at unpair. A daemon with an injected enrollment
-backend refuses an E2EE pairing.
+backend refuses an E2EE pairing. What a hosted sealed task protects is in
+[Hosted sealed payload](#hosted-sealed-payload-654).
 Copy the complete command from the Host's pairing page. A string used once
 without `--e2ee` is burned: start a new registration at the Host and do not
 retry it (protocol §2.6, device enrollment).
@@ -2949,8 +2992,7 @@ An explicitly selected harness must match the immutable offer receipt. Old peers
 without the capability are refused; no identity is inferred from display names
 or provider/model fields. Business scheduling and device choice stay with the
 host. Deploy migration `0021_custom_harness_identity.sql` for PostgreSQL before
-this server code; embedded SQLite requires schema v5 and its explicit adoption
-rules above.
+this server code; embedded SQLite requires schema v6 under the new-database policy above.
 
 ### Terminal boundary acceptance follow-up (#163 / #167)
 
@@ -3522,7 +3564,9 @@ wire contracts do not change.
 
 Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution. They must await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. On Unix, the root must belong to the current process user before any permission change. Unix socket validation reserves 16 bytes for the runtime socket name and one terminating NUL. The root limit is 61 UTF-8 bytes on macOS and 65 on Linux.
 
-Without `storage.scratchRoot`, derive the default from the canonical store identity (#493). Resolve the deepest existing ancestor of `storeDir` to its real path, then append any missing path components. If `<canonicalStoreDir>/tmp` exceeds the platform limit, use `/private/tmp/byok-scratch-<hash>` on macOS or `/tmp/byok-scratch-<hash>` on Linux. The hash is the first 16 lowercase hexadecimal characters of SHA-256 over the UTF-8 canonical store path. All aliases of that store select the same fixed root. Otherwise, keep the lexical `path.join(path.resolve(storeDir), 'tmp')` and validate it. If that alias exceeds the limit, construction fails. Windows keeps the lexical path without a Unix socket limit.
+Each configured filesystem path is folded into its on-disk spelling once, at the boundary that owns it, and every consumer uses the folded value (#1030). `DeviceStore.resolveDir` folds `storeDir` for the daemon and every CLI, so the control socket or pipe name, the control token, the Agent-home owner identity, helper `BYOK_STORE_DIR` and every retention root derive from one spelling. The daemon config resolution folds `piByokLauncher.sessionDir` for both the Pi launcher and retention, and storage config resolution folds an explicit `storage.scratchRoot` and each `storage.skillPackDataDirs` entry. Folding resolves Windows name aliases: 8.3 short names and letter case, and letter case on a case-insensitive macOS volume. It never follows a component that lstat reports as a link (a symbolic link, or a junction to a drive-letter path): such a path keeps its configured spelling and the link checks below reject it. Volume mount points (junctions to `\??\Volume{GUID}\`), subst drives and mapped network drives look like plain directories or roots to lstat, so construction resolves them once to their final path. A missing tail keeps its spelling, and any other lookup error fails construction. Store-mutex, path-mutation-gate, Agent-home root and relocation identities stay physical: they use the real path. Retention mutates under a root only when the root's real path equals its spelling; otherwise the sweep fails closed with `retention_root_identity_invalid`.
+
+Without `storage.scratchRoot`, derive the default from the canonical store identity (#493). Resolve the deepest existing ancestor of `storeDir` to its real path, then append any missing path components. If `<canonicalStoreDir>/tmp` exceeds the platform limit, use `/private/tmp/byok-scratch-<hash>` on macOS or `/tmp/byok-scratch-<hash>` on Linux. The hash is the first 16 lowercase hexadecimal characters of SHA-256 over the UTF-8 canonical store path. All aliases of that store select the same fixed root. Otherwise, keep the lexical `<storeDir>/tmp` of the folded store and validate it. If that alias exceeds the limit, construction fails. Windows keeps the lexical path without a Unix socket limit.
 
 An explicit `storage.scratchRoot` must pass validation; an excessive length fails construction. A failed root never triggers a substitute. External roots persist their store ownership. A standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
 

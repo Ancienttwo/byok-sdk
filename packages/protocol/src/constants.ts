@@ -10,3 +10,6 @@ export const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 
 /** The frozen wire runtime ids. Any other adapter id is a custom harness (`harnessId`). */
 export const RUNTIME_IDS = Object.freeze(['pi', 'claude', 'codex'] as const);
+
+/** Maximum length of a served model name. */
+export const TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH = 160;

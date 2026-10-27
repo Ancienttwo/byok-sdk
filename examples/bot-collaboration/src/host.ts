@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ownReadOnlyToolsets } from './toolset-policy';
 import { admitBotToolsets } from './rules/team';
-import { promoteReplyReceipts } from './reply-receipts';
 import type { UpdateRoutineAction } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
@@ -290,7 +289,6 @@ export class BotCollaboration {
     // An exported domain stays as it was exported (#975), also across a restart.
     if (!stateOf(persisted.application).switchExport) ledger.transaction(s => {
       const state = stateOf(s.application);
-      promoteReplyReceipts(ledger, s, state, this.now());
       if (options.team === 'external') {
         state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}) };
         return;

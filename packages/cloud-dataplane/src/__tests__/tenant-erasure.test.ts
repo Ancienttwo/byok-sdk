@@ -12,6 +12,7 @@ import {
 } from '@byok-sdk/core';
 import type { BlobObservation } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 import { describe, expect, it } from 'vitest';
 import * as root from '../index';
 import { migrate } from '../migrate';
@@ -112,9 +113,10 @@ class BlockingR2 implements R2ObjectMaintenance {
   }
 }
 
-function failOneSqlDelete(pool: Pool): Pool {
+// Built on the real pool so it still carries the createByokPool brand.
+function failOneSqlDelete(pool: ByokPool): ByokPool {
   let failed = false;
-  return {
+  return Object.assign(Object.create(pool) as ByokPool, {
     query: async (...args: unknown[]) => {
       const sql = typeof args[0] === 'string' ? args[0] : '';
       if (!failed && sql.includes('WITH deleted AS')) {
@@ -123,7 +125,7 @@ function failOneSqlDelete(pool: Pool): Pool {
       }
       return (pool.query as (...queryArgs: unknown[]) => Promise<unknown>)(...args);
     },
-  } as unknown as Pool;
+  });
 }
 
 async function plant(

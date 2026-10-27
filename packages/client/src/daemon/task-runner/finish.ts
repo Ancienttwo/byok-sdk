@@ -151,58 +151,49 @@ export async function finishOnce(this: TaskRunner, taskId: string): Promise<bool
   }
   if (this['tasks'].get(taskId) !== active) return true;
   this['publishExecutionRecord'](active);
-  if (active.agentBinding !== undefined && active.agentRef !== undefined && active.agentHandoff !== undefined) {
-    const agentRef = active.agentRef;
-    const handoff = active.agentHandoff;
-    // Session.close() is the adapter quiescence receipt. Capture only after
-    // it, while this exact Agent-home writer lease is still held, so direct
-    // runtime file-tool writes cannot escape the deterministic snapshot.
-    await this['quiesceAndSnapshotAgentMemory'](active);
-    if (!active.agentTerminalPersisted) {
-      const cause = active.terminalCause ?? 'failed';
-      const result = await this['retryAgentTerminalEvidence'](() =>
-        this['deps'].agentSessionHandoffs!.recordTerminal(
-          {
-            agentRef,
-            sessionRef: handoff.sessionRef,
-            runtimeId: handoff.runtimeId,
-            home: handoff.home,
-            cwd: handoff.cwd,
-            ...(handoff.homeAccess === undefined ? {} : { homeAccess: handoff.homeAccess }),
-          },
-          cause,
-          active.terminalReason,
-        ),
-      );
-      if (result.ok) {
-        active.agentTerminalPersisted = true;
-      } else if (!active.agentTerminalEvidenceFailureReported) {
-        active.agentTerminalEvidenceFailureReported = true;
-        this['reportAgentTerminalEvidenceFailure']({
-          taskId,
+  const agentRef = active.agentRef;
+  const handoff = active.agentHandoff;
+  // Session.close() is the adapter quiescence receipt. Capture only after
+  // it, while this exact Agent-home writer lease is still held, so direct
+  // runtime file-tool writes cannot escape the deterministic snapshot.
+  await this['quiesceAndSnapshotAgentMemory'](active);
+  if (!active.agentTerminalPersisted) {
+    const cause = active.terminalCause ?? 'failed';
+    const result = await this['retryAgentTerminalEvidence'](() =>
+      this['deps'].agentSessionHandoffs!.recordTerminal(
+        {
           agentRef,
+          sessionRef: handoff.sessionRef,
           runtimeId: handoff.runtimeId,
+          home: handoff.home,
           cwd: handoff.cwd,
-          cause,
-          reason: active.terminalReason,
-          error: result.error,
-        });
-      }
+          ...(handoff.homeAccess === undefined ? {} : { homeAccess: handoff.homeAccess }),
+        },
+        cause,
+        active.terminalReason,
+      ),
+    );
+    if (result.ok) {
+      active.agentTerminalPersisted = true;
+    } else if (!active.agentTerminalEvidenceFailureReported) {
+      active.agentTerminalEvidenceFailureReported = true;
+      this['reportAgentTerminalEvidenceFailure']({
+        taskId,
+        agentRef,
+        runtimeId: handoff.runtimeId,
+        cwd: handoff.cwd,
+        cause,
+        reason: active.terminalReason,
+        error: result.error,
+      });
     }
-    let leaseReleased = true;
-    try {
-      await active.agentBinding.lease.release();
-    } catch (error) {
-      console.error(`[byok/client] Agent home lease could not be released for ${taskId}: ${errorMessage(error)}`);
-      leaseReleased = false;
-    }
-    await this['releasePreparationPin'](taskId);
-    this['tasks'].delete(taskId);
-    this['revokeAgentMessageContext'](taskId);
-    this['revokeAgentResultContext'](taskId);
-    this['revokeAgentMemoryContext'](taskId);
-    this['deleteHostToolsetContexts'](taskId);
-    return leaseReleased;
+  }
+  let leaseReleased = true;
+  try {
+    await active.agentBinding.lease.release();
+  } catch (error) {
+    console.error(`[byok/client] Agent home lease could not be released for ${taskId}: ${errorMessage(error)}`);
+    leaseReleased = false;
   }
   await this['releasePreparationPin'](taskId);
   this['tasks'].delete(taskId);
@@ -210,7 +201,7 @@ export async function finishOnce(this: TaskRunner, taskId: string): Promise<bool
   this['revokeAgentResultContext'](taskId);
   this['revokeAgentMemoryContext'](taskId);
   this['deleteHostToolsetContexts'](taskId);
-  return true;
+  return leaseReleased;
 }
 
 export function publishExecutionRecord(this: TaskRunner, active: ActiveTask): void {
