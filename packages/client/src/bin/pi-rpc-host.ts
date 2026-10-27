@@ -1,6 +1,6 @@
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
-import { readFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { readFileSync, mkdirSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { getAgentDir, type CreateAgentSessionOptions } from '@earendil-works/pi-coding-agent';
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential';
@@ -11,12 +11,13 @@ import { webExtension, subagentsExtension } from './pi-extension-factories.js';
 import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
+import { parsePiAgentToolPolicy, piAgentNativeToolOptions, type PiAgentToolPolicy } from '../adapters/pi/agent-tool-policy';
 
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 5;
+  readonly version: 6;
   /**
    * `keys-profile`: the keys launcher parents this host, and the provider key
    * arrives over its private IPC channel. `pi-auth-store`: the device's own
@@ -25,6 +26,7 @@ export interface PiRpcHostConfig {
   readonly credentialSource: (typeof CREDENTIAL_SOURCES)[number];
   /** The session cwd. */
   readonly cwd: string;
+  readonly agentToolPolicy: PiAgentToolPolicy;
   readonly mcp: TaskScopedMcpConfig;
 }
 
@@ -51,11 +53,11 @@ function failUsage(message: string): never {
 export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('config must be an object');
   const raw = value as Record<string, unknown>;
-  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp'];
+  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp', 'agentToolPolicy'];
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
-    fail('config must contain exactly format, version, credentialSource, cwd, mcp');
+    fail('config must contain exactly format, version, credentialSource, cwd, mcp, agentToolPolicy');
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 5) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 6) fail('unsupported config format/version');
   const credentialSource = raw.credentialSource;
   if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
     fail(`config.credentialSource must be one of [${CREDENTIAL_SOURCES.join(', ')}]`);
@@ -65,8 +67,9 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   return {
-    format: 'byok.pi.rpc-launch', version: 5,
+    format: 'byok.pi.rpc-launch', version: 6,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
+    agentToolPolicy: parsePiAgentToolPolicy(raw.agentToolPolicy),
   };
 }
 
@@ -162,16 +165,35 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     }
   }
   else if (process.connected) fail('an undeclared custody IPC channel is open');
-  const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
-  const { createTodoExtension } = await import('#byok-pi-todo-runtime');
-  const todoExtension = createTodoExtension(localeAnchor);
+  const policy = config.agentToolPolicy;
+  const extensionNames = policy.extensions === 'inherit' ? ['web', 'subagent', 'todo'] : policy.extensions;
+  const extensionFactories = [
+    ...(extensionNames.includes('web') ? [webExtension] : []),
+    createByokMcpExtension(config.mcp),
+    ...(extensionNames.includes('subagent') ? [subagentsExtension] : []),
+  ];
+  if (extensionNames.includes('todo')) {
+    const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
+    const { createTodoExtension } = await import('#byok-pi-todo-runtime');
+    extensionFactories.push(createTodoExtension(localeAnchor));
+  }
+  let resourceAgentDir: string | undefined;
+  if (policy.userContext === 'excluded') {
+    resourceAgentDir = join(dirname(args.configPath), 'pi-agent-resources');
+    // A fresh directory owned by this launch; never copy user resources into it.
+    mkdirSync(resourceAgentDir, { mode: 0o700 });
+  }
   await runPiSessionRuntime({
     cwd: config.cwd, session: args.session, sessionDir,
     provider: args.provider, model: args.model, thinking: args.thinking,
-    // The user's own Pi extensions and skills load beside the SDK's own, as in
-    // OAR: the SDK does not presume how the user configures Pi.
+    ...piAgentNativeToolOptions(policy),
+    ...(policy.builtinTools === 'inherit' ? {} : { agentBuiltinTools: policy.builtinTools }),
+    ...(resourceAgentDir === undefined ? {} : { resourceAgentDir }),
     resourceLoaderOptions: {
-      extensionFactories: [webExtension, createByokMcpExtension(config.mcp), subagentsExtension, todoExtension],
+      extensionFactories,
+      ...(policy.userContext === 'excluded' ? {
+        noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+      } : {}),
     },
     ...(providerApiKey === undefined ? {} : { providerApiKey }),
     initialModel: 'required', label: 'byok-pi-rpc', reject: fail,
