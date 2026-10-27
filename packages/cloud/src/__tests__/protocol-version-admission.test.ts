@@ -26,6 +26,7 @@ function resultDocumentExecution(deviceId: string) {
       instruction: 'produce a structured result',
       runtime: 'codex',
       agentRef: { agentId: 'agent', profileRevision: 'revision' },
+      session: { mode: 'fresh' },
       egressPolicy: { policyRevision: 'policy', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
         reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
         transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
