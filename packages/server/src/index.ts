@@ -455,13 +455,17 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   /**
    * The state `byok.tasks.get(taskId)` would report right now.
    *
-   * Deliberately routed through `projectTask` rather than re-deriving it: a
-   * refused steer reports the same `TaskState` the snapshot does, because it is
-   * literally the snapshot's, read at the moment of the refusal.
+   * The snapshot's own `taskStateOf` over the same two reads its state comes
+   * from (the attempt and its pending approval), never a second derivation: a
+   * refused steer and an event read report the state the snapshot does. It
+   * skips the snapshot's other reads, so an event read's first `next()` does
+   * not wait on hashing the offer receipt's id.
    */
   async function readTaskState(taskId: string): Promise<TaskState | undefined> {
     const attempt = await cloud.readTaskAttempt(tenant, taskId);
-    return attempt === undefined ? undefined : (await projectTask(attempt)).state;
+    return attempt === undefined
+      ? undefined
+      : taskStateOf(attempt.status, attempt.cancellation !== undefined, (await readPending(taskId)) !== undefined);
   }
 
   async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {
