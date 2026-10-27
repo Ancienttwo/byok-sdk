@@ -577,7 +577,8 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     second.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-second');
 
-    // A CLI resolving the same aliased config (bin/config's resolveStoreDir) reaches this daemon's control endpoint.
+    // A CLI resolves the same aliased config through DeviceStore.resolveDir, which bin/config's resolveStoreDir
+    // delegates to (bin-config.test.ts pins that wiring), and reaches this daemon's control endpoint.
     const cli = await connectControlClient({ storeDir: DeviceStore.resolveDir(config.productId, config.storeDir), productId: config.productId });
     if (!cli.ok) throw new Error(`expected the CLI to reach the daemon: ${JSON.stringify(cli)}`);
     cli.client.close();
