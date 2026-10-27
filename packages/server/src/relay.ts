@@ -90,13 +90,14 @@ export interface TaskEventRelayOptions {
  * a restart) from now on, without reconstructing earlier events; only a host
  * read creates such a feed. Attaching to a feed a dispatch opened for a task
  * that is already stored makes it `attached-dispatching`, so a refused
- * dispatch hands it back to its reader instead of dropping it. `seed` gives an attached feed that no transition
- * has reached yet its starting entries, read back from the durable stores;
- * once a transition arrived, the feed already says more than that would. A
- * seed waits behind an in-flight dispatch like any delivery, so `Offered`
- * still comes first.
- * `detach` drops an `attached` feed that turned out
- * to have nothing to deliver, and never one a dispatch owns. `entries` reads a feed after a cursor, or from the start of what is
+ * dispatch hands it back to its reader instead of dropping it. `seed` gives an
+ * attached feed that no transition has reached yet its starting entries, read
+ * back from the durable stores and pushed by the same `#begin` that records a
+ * live state's start; once a transition arrived, the feed already says more
+ * than they would. A seed waits behind an in-flight dispatch like any
+ * delivery, so `Offered` still comes first. `detach` drops an `attached` feed
+ * that turned out to have nothing to deliver, and never one a dispatch owns.
+ * `entries` reads a feed after a cursor, or from the start of what is
  * retained, and refuses a cursor that names no position of the feed with
  * `cursor_unknown`. Members carry no block docs here because comments on class
  * members ship in the bundle, which has an exact size budget.
@@ -165,8 +166,7 @@ export class TaskEventRelay implements ByokCloudObserver {
     const state = this.#open(taskId);
     if (state.phase === 'dispatched') return;
     state.phase = 'dispatched';
-    const offered = state.queue.push({ kind: 'state', state: 'Offered', at });
-    if (offered !== undefined) state.current = [offered];
+    this.#begin(state, 'Offered', at);
     this.emitServerEvent({ kind: 'task.created', taskId, at });
     for (const deliver of state.early.splice(0)) deliver();
   }
@@ -186,15 +186,9 @@ export class TaskEventRelay implements ByokCloudObserver {
     return feed;
   }
 
-  seed(feed: TaskFeed, events: readonly ServerTaskEvent[]): void {
+  seed(feed: TaskFeed, next: TaskState, at: string, request?: ServerTaskEvent): void {
     this.#deliver(feed, () => {
-      if (feed.current.length > 0) return;
-      const current: Array<QueueEntry<ServerTaskEvent>> = [];
-      for (const event of events) {
-        const entry = feed.queue.push(event);
-        if (entry !== undefined) current.push(entry);
-      }
-      feed.current = current;
+      if (feed.current.length === 0) this.#begin(feed, next, at, request);
     });
   }
 
@@ -285,12 +279,9 @@ export class TaskEventRelay implements ByokCloudObserver {
       case 'task.artifact':
         state.queue.push({ kind: 'artifact', artifact: envelope.payload });
         return;
-      case 'task.await_approval': {
-        const request = state.queue.push({ kind: 'await_approval', summary: envelope.payload.summary, approvalId: envelope.payload.approvalId });
-        this.#transition(state, taskId, 'AwaitApproval', at);
-        if (request !== undefined) state.current = [request, ...state.current];
+      case 'task.await_approval':
+        this.#transition(state, taskId, 'AwaitApproval', at, { kind: 'await_approval', summary: envelope.payload.summary, approvalId: envelope.payload.approvalId });
         return;
-      }
       case 'task.approval_resolved':
         this.emitServerEvent({
           kind: 'task.approval_resolved',
@@ -334,13 +325,22 @@ export class TaskEventRelay implements ByokCloudObserver {
     this.#serverEvents.close();
   }
 
-  #transition(state: TaskFeed, taskId: string, next: TaskState, at: string): void {
+  #begin(state: TaskFeed, next: TaskState, at: string, request?: ServerTaskEvent): void {
+    const current: Array<QueueEntry<ServerTaskEvent>> = [];
+    const events: Array<ServerTaskEvent | undefined> = [request, { kind: 'state', state: next, at }];
+    for (const event of events) {
+      const entry = event && state.queue.push(event);
+      if (entry) current.push(entry);
+    }
+    if (current.length > 0) state.current = current;
+  }
+
+  #transition(state: TaskFeed, taskId: string, next: TaskState, at: string, request?: ServerTaskEvent): void {
     // First terminal wins here for the same reason it wins in the receipt
     // store: a later stale terminal changed no durable fact, so announcing it
     // would make the feed disagree with the read model.
     if (state.terminalSettled) return;
-    const entry = state.queue.push({ kind: 'state', state: next, at });
-    if (entry !== undefined) state.current = [entry];
+    this.#begin(state, next, at, request);
     this.emitServerEvent({
       kind: 'task.state',
       taskId,

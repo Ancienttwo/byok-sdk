@@ -6,6 +6,7 @@ import {
   type TenantId,
 } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
+import type { QueueEntry } from './event-queue';
 import type { TaskEventRelay } from './relay';
 import { TaskEventsUnavailableError, type ServerTaskEvent, type TaskEventEntry, type TaskHandle, type TaskResult } from './types';
 
@@ -194,7 +195,7 @@ async function* followTaskEvents(
     read = await readState(taskId);
     if (read !== undefined && !TERMINAL_STATES.has(read.state)) {
       const request = read.state === 'AwaitApproval' ? await deps.readApprovalRequest(taskId) : undefined;
-      relay.seed(feed, [...(request === undefined ? [] : [request]), { kind: 'state', state: read.state, at: read.at }]);
+      relay.seed(feed, read.state, read.at, request);
     }
   }
   if (read === undefined) {
@@ -208,17 +209,17 @@ async function* followTaskEvents(
   // `from: 'state'` starts with the entries where the present state began,
   // kept by the relay even when the queue dropped them, then reads on after them.
   const start = from === 'state' ? feed.current : [];
-  const entries = (from === 'state' ? feed.queue.entries(start[start.length - 1]?.sequence) : relay.entries(taskId, feed, after))[Symbol.asyncIterator]();
+  const entries = (from === 'state' ? feed.queue.entries(start.at(-1)?.sequence) : relay.entries(taskId, feed, after))[Symbol.asyncIterator]();
+  const { feedId } = feed;
+  const entry = ({ sequence, value }: QueueEntry<ServerTaskEvent>): TaskEventEntry => ({ cursor: `${feedId}.${sequence}`, event: value });
   // The queue's own return() also releases a pending next(), which this
   // generator's return() could not do while it is suspended in one.
   const stop = () => { void entries.return!(); };
   signal.addEventListener('abort', stop, { once: true });
   try {
     if (signal.aborted) return;
-    for (const entry of start) yield { cursor: `${feed.feedId}.${entry.sequence}`, event: entry.value };
-    for (let next = await entries.next(); !next.done; next = await entries.next()) {
-      yield { cursor: `${feed.feedId}.${next.value.sequence}`, event: next.value.value };
-    }
+    for (const kept of start) yield entry(kept);
+    for (let next = await entries.next(); !next.done; next = await entries.next()) yield entry(next.value);
   } finally {
     signal.removeEventListener('abort', stop);
     await entries.return!();
