@@ -451,15 +451,10 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
 
       adapter.sessions[0]?.emit({ type: 'progress', text: 'about to do something sensitive' });
-      adapter.sessions[0]?.emit({ type: 'needs_approval', summary: 'about to do something sensitive' });
+      void adapter.sessions[0]!.requestApproval('about to do something sensitive');
       const awaitApproval = await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
       expect(awaitApproval.payload).toMatchObject({ summary: 'about to do something sensitive' });
-      // M5 (approval targeting): this exercises the DORMANT `needs_approval`
-      // AgentEvent branch in `pump()` (no bundled adapter emits it on its
-      // own event stream — see task-runner.ts's own doc comment — but a
-      // stub session emitting it directly, as this test does, still drives
-      // it). A real per-approval id must now be stamped here too, mirroring
-      // `dispatchApproval`'s own bookkeeping.
+      // M5 (approval targeting): every dispatched approval carries its own id.
       if (awaitApproval.type !== 'task.await_approval') throw new Error('unreachable');
       const approvalId = awaitApproval.payload.approvalId;
       expect(approvalId).toEqual(expect.any(String));
@@ -472,7 +467,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       const session = adapter.sessions[0];
 
       server.send(createEnvelope('task.approve', { approvalId }, { taskId: 'task-approve-1', seq: server.nextSeq() }));
-      await vi.waitFor(() => expect(session?.resolveApprovalCalls).toEqual([{ approved: true }]));
+      await vi.waitFor(() => expect(session?.approvalResults).toEqual([{ approved: true }]));
 
       // Proof progress resumes: the session keeps producing events and the
       // task still runs to completion exactly as if it had never paused.
@@ -494,7 +489,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
       const fail = await server.waitFor((e) => e.type === 'task.fail' && e.task_id === 'task-reject-1');
       expect(fail.payload).toMatchObject({ reason: 'not authorized', retryable: false });
-      expect(session?.resolveApprovalCalls).toEqual([{ approved: false, reason: 'not authorized' }]);
+      await vi.waitFor(() => expect(session?.approvalResults).toEqual([{ approved: false, reason: 'not authorized' }]));
       expect(session?.interruptCalled).toBe(true);
       expect(session?.closeCalled).toBe(true);
     });
@@ -518,13 +513,13 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
       // The session was never told to resolve anything, and the task was
       // never failed — it stays paused, still resolvable by the CORRECT id.
-      expect(session?.resolveApprovalCalls).toEqual([]);
+      expect(session?.approvalResults).toEqual([]);
       expect(server.received.some((e) => e.type === 'task.fail' && e.task_id === 'task-approve-stale-1')).toBe(false);
 
       // The matching decision still works afterward — proving the task is
       // genuinely still alive/pending, not silently corrupted.
       server.send(createEnvelope('task.approve', { approvalId }, { taskId: 'task-approve-stale-1', seq: server.nextSeq() }));
-      await vi.waitFor(() => expect(session?.resolveApprovalCalls).toEqual([{ approved: true }]));
+      await vi.waitFor(() => expect(session?.approvalResults).toEqual([{ approved: true }]));
     });
   });
 });

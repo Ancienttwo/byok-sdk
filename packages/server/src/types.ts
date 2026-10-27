@@ -585,8 +585,8 @@ export interface HubStats {
   /**
    * Store-aggregated settled counts plus active task/approval projections.
    * Exact at quiescence; a task settling between reads can be temporarily absent.
-   * This is not a transaction snapshot. SQLite persists attempts/cancellation;
-   * its in-memory approval timeline resets at reopen, so AwaitApproval resets.
+   * This is not a transaction snapshot. SQLite persists attempts, cancellation
+   * and approval timelines; unexpired approvals survive reopen without extending TTL.
    */
   taskCountsByState: Record<TaskState, number>;
   /** Total inbound daemon->server envelopes since this server instance was created (every outcome, including rejected/rate-limited), counted at the gate's own step 0. Resets on SQLite reopen. */

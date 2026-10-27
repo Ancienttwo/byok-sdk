@@ -420,6 +420,8 @@ export function selectImpact(paths, context = {}) {
       || path === 'examples/basic/task-events-route.ts' || path === 'examples/basic/task-events-route.test.ts') {
       dirs.add('examples/basic'); continue;
     }
+    // The example page; page-runtimes.test.ts checks its DOM.
+    if (path === 'examples/basic/public/index.html') { dirs.add('examples/basic'); continue; }
     // The usage notes of the clarification and goal/btw examples.
     if (path === 'examples/basic/clarification-usage.md' || path === 'examples/basic/goal-btw-usage.md') { dirs.add('examples/basic'); continue; }
     // The Salesko recovery integration fixture runs the client daemon; no CI job runs scripts/integration.
@@ -460,7 +462,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
-    if (/^packages\/client\/vendor\/oar\/c88a514\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+    if (/^packages\/client\/vendor\/oar\/51b83c9\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {

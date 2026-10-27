@@ -94,7 +94,6 @@ describe('bin/commands/start: stdout is the audit log (issue #395)', () => {
       emit(progress('t1', { type: 'tool_use', tool: 'bash', input: { command: 'cat SENTINEL-INPUT' } }));
       emit(progress('t1', { type: 'tool_result', tool: 'bash', output: 'SENTINEL-OUTPUT' }));
     }
-    emit(progress('t1', { type: 'needs_approval', summary: 'SENTINEL-APPROVAL' }));
     emit(progress('t1', { type: 'error', message: 'SENTINEL-ERROR' }));
     emit(progress('t1', { type: 'usage', inputTokens: 10, outputTokens: 5, totalTokens: 15 }));
     emit(progress('t1', { type: 'turn_end' }));
@@ -119,8 +118,8 @@ describe('bin/commands/start: stdout is the audit log (issue #395)', () => {
     ]);
     expect(records.filter((record) => record.kind === 'turn')).toEqual([
       {
-        kind: 'turn', ts: 'T', taskId: 't1', turn: 1, closedBy: 'turn_end', progressEvents: 40, textBytes,
-        toolUses: 3, toolResults: 3, artifacts: 0, approvals: 1, errors: 1, inputTokens: 10, outputTokens: 5, totalTokens: 15,
+        kind: 'turn', ts: 'T', taskId: 't1', turn: 1, closedBy: 'turn_end', progressEvents: 39, textBytes,
+        toolUses: 3, toolResults: 3, artifacts: 0, errors: 1, inputTokens: 10, outputTokens: 5, totalTokens: 15,
       },
       expect.objectContaining({ taskId: 't2', closedBy: 'terminal', textBytes: Buffer.byteLength('SENTINEL-PARTIAL') }),
       expect.objectContaining({ taskId: 't4', closedBy: 'stop' }),

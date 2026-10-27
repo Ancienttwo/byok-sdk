@@ -1,3 +1,4 @@
+import { selectReaderRuns } from './agent-home-reader-retention';
 import { createHash } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -58,28 +59,7 @@ export async function pruneReaderRuns(input: {
   readonly beforeRemove?: (directory: string) => Promise<void>;
   readonly afterRemove?: (directory: string) => void;
 }): Promise<readonly string[]> {
-  const maxRetained = input.maxRetained ?? AGENT_HOME_READER_RUN_MAX_RETAINED;
-  const cutoff = input.nowMs - (input.maxAgeMs ?? AGENT_HOME_READER_RUN_MAX_AGE_MS);
-  let entries: AsyncIterable<import('node:fs').Dirent> | import('node:fs').Dirent[];
-  try {
-    entries = input.entries ?? await fs.readdir(input.runsRoot, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
-  }
-  const runs: { readonly dir: string; readonly mtimeMs: number; readonly protected: boolean }[] = [];
-  for await (const entry of entries) {
-    if (!entry.isDirectory() || !isReaderRunName(entry.name)) continue;
-    const dir = path.join(input.runsRoot, entry.name);
-    const stat = await fs.lstat(dir);
-    if (!stat.isDirectory()) continue;
-    const referencedAt = input.referenced.get(dir);
-    runs.push({
-      dir,
-      mtimeMs: stat.mtimeMs,
-      protected: input.active.has(dir) || (referencedAt !== undefined && referencedAt >= cutoff),
-    });
-  }
+  const candidates = selectReaderRuns(input);
   const removed: string[] = [];
   const remove = async (dir: string): Promise<boolean> => {
     if (removed.length >= (input.maxDeletions ?? Number.MAX_SAFE_INTEGER) || input.canRemove?.() === false) return false;
@@ -92,17 +72,7 @@ export async function pruneReaderRuns(input: {
     input.afterRemove?.(dir);
     return true;
   };
-  const kept: typeof runs = [];
-  for (const run of runs) {
-    if (!run.protected && run.mtimeMs < cutoff) await remove(run.dir);
-    else kept.push(run);
-  }
-  const overflow = kept.filter((run) => !run.protected).sort((left, right) => left.mtimeMs - right.mtimeMs);
-  let retained = kept.length;
-  for (const run of overflow) {
-    if (retained <= maxRetained) break;
-    if (await remove(run.dir)) retained -= 1;
-  }
+  for await (const run of candidates) await remove(run.dir);
   return removed;
 }
 

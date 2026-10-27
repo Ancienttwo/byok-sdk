@@ -172,7 +172,6 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     throw startFailure('infrastructure', undefined, exited, error);
   }
   return { sessionRef: manifest.taskId, events: (async function*(){for await(const event of queue)yield event;if(failure)throw failure;})(),
-    resolveApproval: async () => { throw new Error('durable Pi is YOLO-only'); },
     steer: async () => { throw new Error('durable steering is outside slice 1'); },
     followUp: async () => { throw new Error('durable continuation requires a new Host execution'); },
     interrupt: async () => { closing = true; recovery.stop(); rpc?.kill(); try { if(rpc)await rpc.dispose(); } finally { await disposeDurableShellGroups(shellGroups); } queue.end(); }, close,

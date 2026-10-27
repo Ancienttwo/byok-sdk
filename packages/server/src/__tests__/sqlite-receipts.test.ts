@@ -203,7 +203,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE request_receipt'); db.close();
     expect(() => open()).toThrow();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '5' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '6' }));
     const check = new DatabaseSync(path, { readOnly: true });
     expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'request_receipt'").get()).toBeUndefined();
     check.close();
@@ -213,7 +213,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE mailbox_message'); db.close();
     expect(() => open()).toThrow(expect.objectContaining({
-      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '5', requiredVersion: '5',
+      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '6', requiredVersion: '6',
       message: expect.stringContaining('FROM mailbox_message'),
     }));
     const check = new DatabaseSync(path, { readOnly: true });
@@ -267,13 +267,13 @@ describe('SQLite receipt recovery', () => {
   });
 
 
-  it('rejects a v5 request receipt table missing its composite primary key', async () => {
+  it('rejects a v6 request receipt table missing its composite primary key', async () => {
     const { open, path } = fixture(); await open().stores.close();
     const corrupt = new DatabaseSync(path);
     corrupt.exec('DROP TABLE request_receipt; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)');
     corrupt.close();
     expect(() => open()).toThrow('Invalid BYOK SQLite request receipt schema');
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '5' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '6' }));
   });
 
   it('keeps cancellation result authority after reopen', async () => {

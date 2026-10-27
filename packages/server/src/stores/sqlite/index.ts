@@ -77,10 +77,11 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '5';
+const SQLITE_SCHEMA_VERSION = '6';
 const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'] as const;
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
+import { APPROVAL_TIMELINE_SCHEMA, SqliteApprovalTimelineStore } from './approval-timeline';
 import type { WakeStore } from '../../wakes/store';
 import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
@@ -255,9 +256,19 @@ class SqliteCoordinator {
           this.db.exec(RECEIPT_SCHEMA);
           this.db.exec(DEVICE_SCHEMA);
           this.db.exec(WAKE_SCHEMA);
+          this.db.exec(APPROVAL_TIMELINE_SCHEMA);
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         assertProjection('claimed_harness_id FROM task_attempt');
+        assertProjection('tenant_id, task_id, entries_json, next_revision, dropped, capacity, expires_at FROM approval_timeline_tail');
+        const approvalColumns = this.db.prepare('PRAGMA table_info(approval_timeline_tail)').all();
+        const approvalNames = ['tenant_id', 'task_id', 'entries_json', 'next_revision', 'dropped', 'capacity', 'expires_at'];
+        if (approvalColumns.length !== approvalNames.length || approvalColumns.some((column, index) =>
+          column.name !== approvalNames[index] || column.notnull !== 1 ||
+          column.type !== (index >= 3 && index <= 5 ? 'INTEGER' : 'TEXT') ||
+          column.pk !== (index < 2 ? index + 1 : 0))) {
+          throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite approval timeline schema');
+        }
         // #980 phase instants: added on open to a file from before them, with
         // no backfill — a NULL instant was never recorded.
         const taskColumns = new Set((this.db.prepare('PRAGMA table_info(task_attempt)').all() as unknown as { name: string }[])
@@ -288,7 +299,7 @@ class SqliteCoordinator {
           column.pk !== (index < 2 ? index + 1 : 0))) {
           throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite request receipt schema');
         }
-        // Schema v5 retains the wire-major fence. A pending old envelope must be
+        // Schema v6 retains the wire-major fence. A pending old envelope must be
         // refused before routes can repeatedly fail to decode the same row.
         for (const row of this.db.prepare("SELECT body FROM mailbox_message WHERE state = 'pending'").iterate()) {
           let envelope: unknown;
@@ -1372,11 +1383,12 @@ export class SqliteBlobContentProxy implements BlobContentProxy {
   }
 }
 
-/** Mixed embedded composition: eight durable interfaces, every other port unchanged in-memory. */
+/** Embedded SQLite authorities share one coordinator; other ports remain process-local. */
 export function createSqliteEmbeddedStores(
   options: SqliteEmbeddedStoreOptions,
   dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto; readonly wake?: WakeConsumer },
 ): SqliteEmbeddedStores {
+  if ('migration' in options) throw new SqliteSchemaError('SQLITE_SCHEMA_UNSUPPORTED', 'SQLite migration selectors are not supported; use a new state path and enrollment.', undefined, SQLITE_SCHEMA_VERSION);
   const coordinator = new SqliteCoordinator(options.path, dependencies.wake);
   const ledger = new InMemoryStorageLedger(dependencies.clock);
   const objects = new SqliteObjectStore(coordinator, dependencies.clock, ledger);
@@ -1414,6 +1426,7 @@ export function createSqliteEmbeddedStores(
   const pairing = new InMemoryPairingCodeStore(dependencies.clock, devices);
   const cloud: CloudStores = {
     ...inMemoryCloud.stores,
+    approvals: new SqliteApprovalTimelineStore(coordinator, dependencies.clock),
     devices,
     pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },
     pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },

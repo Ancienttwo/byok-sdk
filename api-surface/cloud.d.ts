@@ -69,9 +69,6 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
         name: z.ZodString;
         contentType: z.ZodString;
     }, z.core.$strip>, z.ZodObject<{
-        type: z.ZodLiteral<"needs_approval">;
-        summary: z.ZodString;
-    }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"turn_end">;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"error">;
@@ -162,9 +159,6 @@ export declare const TimelineEventSchema: z.ZodObject<{
         type: z.ZodLiteral<"artifact">;
         name: z.ZodString;
         contentType: z.ZodString;
-    }, z.core.$strip>, z.ZodObject<{
-        type: z.ZodLiteral<"needs_approval">;
-        summary: z.ZodString;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"turn_end">;
     }, z.core.$strip>, z.ZodObject<{

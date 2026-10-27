@@ -225,7 +225,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       // An approval summary, then a typed failure whose reason is content.
       offer('task-3');
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(3));
-      adapter.sessions[2]!.emit({ type: 'needs_approval', summary: SENTINEL });
+      void adapter.sessions[2]!.requestApproval(SENTINEL);
       await vi.waitFor(async () => expect((await readAuditRecords(storeDir)).some((r) => r.kind === 'awaiting-approval')).toBe(true));
       adapter.sessions[2]!.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: SENTINEL }));
       await server.waitFor((e) => e.type === 'task.fail' && e.task_id === 'task-3');

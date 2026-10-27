@@ -95,7 +95,6 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
     spill: AgentEventSpillSchema.optional(),
   }),
   z.object({ type: z.literal('artifact'), name: z.string(), contentType: z.string() }),
-  z.object({ type: z.literal('needs_approval'), summary: z.string() }),
   z.object({ type: z.literal('turn_end') }),
   z.object({ type: z.literal('error'), message: z.string() }),
   /**

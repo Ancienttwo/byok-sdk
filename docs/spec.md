@@ -542,7 +542,7 @@ projection below is not a release gate.
 ## Embedded SQLite device and receipt authority
 
 The explicit SQLite composition persists device enrollment, capabilities and
-request receipts alongside six coordination interfaces. Pairing, authenticated
+request receipts and bounded approval timelines alongside six coordination interfaces. Pairing, authenticated
 lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
 codes remain process-local; no runtime or TaskHandle is reconstructed. Embedded
@@ -561,12 +561,24 @@ before open because their WAL paths cannot share recovery authority.
 `close()` is the only server shutdown API; the synchronous `stop()` is removed.
 The upgrade must stop all older owners and external SQLite connections before
 starting this owner, with no parallel sibling-lock path. Schema and wire formats
-were unchanged by the owner-lock refactor.
+were unchanged by the owner-lock refactor; see the schema version policy below and the server README.
 
-Schema v5 retains nullable claimed harness identity in the ownership CAS and
-adds the server-local wake table. There is no adoption of an older file: a
-schema 1–4 database is refused at open (`SQLITE_SCHEMA_UNSUPPORTED`), unchanged,
-and v5 starts on a new database. Old builds refuse schema 5.
+Schema v6 adds a durable approval timeline. Only newly created databases and
+existing v6 files are supported; versions 1–5 and unknown versions fail closed
+without adoption. There is no migration selector. Preserve an old database and
+explicitly choose a new state path and enrollment; never rewrite version markers
+or delete history to bypass the fence. Required approval columns and composite
+primary key are checked on open; missing authority is an error, not an empty tail.
+
+SQLite persists the existing `ApprovalTimelineStore` authority with the same
+capacity and absolute expiry (defaults: 50 observations, ten minutes). Requests,
+resolutions, source IDs, revisions and dropped count survive reopen. Reopen and
+exact replay do not renew TTL. Snapshots, statistics, host decisions and the
+`tasks.events` state seed read this same authority, without startup reconstruction
+or device resend. Expired tails remain absent; this is not indefinite pending
+approval retention or a durable audit log. Host resolve compares the observed
+source/revision and appends its decision within the same SQLite transaction.
+
 Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
 retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
@@ -1712,8 +1724,8 @@ activity as described below.
 
 ### Bounded approval lifecycle authority
 
-Approval observations do not enter `ActivityTail` and do not reinterpret
-`AgentEvent.needs_approval`. The protocol has no monotonic order key shared by
+Approval observations do not enter `ActivityTail`; no `AgentEvent` carries an
+approval. The protocol has no monotonic order key shared by
 `task.progress`, `task.await_approval`, and `task.approval_resolved`, so cloud
 must not fabricate a cross-stream total order. Instead, the approval store
 assigns a monotonic per-task `revision` in arrival order and preserves the
@@ -2980,8 +2992,7 @@ An explicitly selected harness must match the immutable offer receipt. Old peers
 without the capability are refused; no identity is inferred from display names
 or provider/model fields. Business scheduling and device choice stay with the
 host. Deploy migration `0021_custom_harness_identity.sql` for PostgreSQL before
-this server code; embedded SQLite requires schema v5 and its explicit adoption
-rules above.
+this server code; embedded SQLite requires schema v6 under the new-database policy above.
 
 ### Terminal boundary acceptance follow-up (#163 / #167)
 
@@ -3242,7 +3253,7 @@ or complete Windows/bundled-product support requested in #608.
 
 ### Durable Pi lane (experimental, flag-gated)
 
-The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
+The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and never requests one; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
 
 ### Official Pi migration security and installation contract (2026-09-25 consolidation)
 
@@ -3254,7 +3265,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.4.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.71.0 source at `packages/client/vendor/oar/c88a514/`, from upstream commit `c88a514458b3d80f18d32f29863f2b8fea5b1c96`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.4.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.75.0 source at `packages/client/vendor/oar/51b83c9/`, from upstream commit `51b83c96811735b3a9f045ab20bab7cd20e61cdf`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -3407,14 +3418,17 @@ is the explicit local support declaration. Omission means unsupported. Its
 approval-decision list and `structuredQuestions` flag are snapshotted with the
 rest of the runtime descriptor.
 
-This local seam is distinct from the existing remote `needs_approval` /
-`resolveApproval(boolean)` contract. It does not add a daemon control command,
+This local seam is distinct from the remote task approval contract, where a
+session that declares `approvalInteractive: true` calls
+`approvalChannel.request(summary)` and the daemon's approval registry resolves
+it from a wire or local decision (`docs/protocol.md` §5.1). It does not add a daemon control command,
 wire payload, remote authorization, UI, persistent grant, or Host reconnect
 protocol. Claude and Codex wire this seam only when their local adapter is constructed
 with `nativeInteractions` Host callbacks. With that option absent, neither
 advertises native interaction support, and the session runs YOLO (ADR-037). Pi
-remains unsupported. The existing `approvalInteractive` declarations stay
-authoritative for the remote task path. Local capability metadata does not
+remains unsupported. The `approvalInteractive` declarations stay
+authoritative for the remote task path: every bundled adapter declares `false`
+and is never handed the approval channel. Local capability metadata does not
 assert that every task exposes every tool or will ask an interactive question.
 
 Each request carries an SDK `requestId`, a fresh process-lifetime `generation`,

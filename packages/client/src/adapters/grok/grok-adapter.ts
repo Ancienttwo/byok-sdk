@@ -436,7 +436,4 @@ class GrokSession implements Session {
     const usage = this.projection?.takePendingUsage();
     if (usage) this.queue.push(usage);
   }
-  async resolveApproval(): Promise<void> {
-    throw new PolicyUnsupportedError('Grok has no interactive approval product lane');
-  }
 }

@@ -66,7 +66,7 @@ export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unav
 export interface RuntimeCapabilities {
   /** Supports display-only Agent message drafts. Omission means unsupported. */
   readonly messageDraft?: boolean;
-  /** Local native interaction support only; omission is unsupported. Not the remote boolean approval lane. */
+  /** Local native interaction support only; omission is unsupported. Not the approval channel. */
   readonly nativeInteractions?: NativeInteractionCapabilities;
   /** Local adapter advertisement; no new protocol field or capability vocabulary. */
   readonly durablePi?: boolean;
@@ -79,13 +79,10 @@ export interface RuntimeCapabilities {
    */
   readonly mcpToolsets?: boolean;
   /**
-   * Whether this adapter can genuinely pause a running session on
-   * `needs_approval` and resume it from an out-of-band decision — i.e.
-   * whether {@link Session.resolveApproval} really resolves rather than
-   * throwing. This is the ONLY source of truth for the wire's
-   * `RuntimeInfo.capabilities.approvalInteractive` (`daemon/
-   * create-daemon.ts`'s `toRuntimeInfoCapabilities`); the daemon no longer
-   * hardcodes a value.
+   * Whether this adapter's sessions call
+   * {@link RuntimeOperationStartInput.approvalChannel}'s `request` and wait
+   * for the decision. Only such an adapter is handed the channel. It is also
+   * the sole source of the wire's `RuntimeInfo.capabilities.approvalInteractive`.
    *
    * Required, deliberately: a new adapter (or a test fake) that forgets to
    * declare it fails to compile rather than silently defaulting to a claim
@@ -152,19 +149,17 @@ export interface McpToolsetReloadReceipt {
 }
 
 /**
- * Adapter-agnostic out-of-band channel handed to prepared operations by TaskRunner.
- * The shared registry resolves one pending approval for this task and rejects
- * when none is pending. Claude no longer consumes this channel; third-party
- * adapters and the daemon's generic needs_approval/control path may use it.
+ * The one way a session asks for approval. TaskRunner hands it only to an
+ * adapter that declares `approvalInteractive: true`.
  */
 export interface ApprovalChannel {
-  taskId: string;
-  storeDir: string;
-  productId: string;
-  /** Default wait (ms) before the daemon force-resolves an unanswered approval request as a fail-closed rejection — see `TaskRunner.requestApproval`. */
-  timeoutMs: number;
-  /** Resolve the single currently-pending out-of-band approval for this task. Rejects if none is pending right now. */
-  resolve(approved: boolean, reason?: string): Promise<void>;
+  /**
+   * Sends `task.await_approval` for this task and waits for the decision: a
+   * wire `task.approve`/`task.reject`, a local `Daemon.approve`/`reject` or
+   * `approvals.resolve`, or a fail-closed rejection on timeout, task finish or
+   * eviction. The session resumes or stops its runtime from the result.
+   */
+  request(summary: string): Promise<{ approved: boolean; reason?: string }>;
 }
 
 /**
@@ -211,20 +206,6 @@ export interface Session {
    * semantics.
    */
   close(): Promise<void>;
-  /**
-   * Resolve a session paused on `needs_approval` (protocol §5). The
-   * server's own state has already moved by the time this is called (§4 —
-   * `task.approve`/`task.reject` are best-effort notifications, not
-   * requests awaiting a reply): `approved: true` must make the session
-   * resume producing events (`task.progress` continuing is the proof);
-   * `approved: false` means the caller will immediately follow up with
-   * `interrupt()` + `close()` and report `task.fail` — an adapter that has
-   * no notion of `needs_approval` at all (i.e. never emits one) should
-   * throw a descriptive error here rather than silently no-op, since a
-   * caller receiving `task.approve`/`task.reject` for one of its tasks
-   * implies something upstream expected approval support that isn't there.
-   */
-  resolveApproval(approved: boolean, reason?: string): Promise<void>;
   /**
    * Runtime output this session could not turn into `events`, as counts for
    * the whole session up to `close()`. The daemon reads it once, after
@@ -480,7 +461,11 @@ interface RuntimeOperationStartBase {
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
   readonly mcpToolsetTools?: McpToolsetToolObservation;
-  /** Optional, adapter-agnostic out-of-band approval channel. */
+  /**
+   * Present only when the adapter declares `approvalInteractive: true`. A
+   * request made before `start()` returns waits until the task is active.
+   * `start()` must return its Session before awaiting the request's decision.
+   */
   readonly approvalChannel?: ApprovalChannel;
 }
 

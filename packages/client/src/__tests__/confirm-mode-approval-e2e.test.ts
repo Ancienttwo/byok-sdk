@@ -13,7 +13,6 @@ import type { ApprovalsListResult, ApprovalsRequestResult, ControlStatusResult }
 import type { DaemonEvent } from '../daemon/observer';
 import {
   freezeRuntimeAdapterDescriptor,
-  type ApprovalChannel,
   type RuntimeAdapter,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
@@ -41,20 +40,15 @@ async function tmpDir(prefix: string): Promise<string> {
  * `ApprovalRegistry` entry a pending `approvals.request` control call is
  * awaiting (the task's own "dual entry convergence" requirement).
  *
- * ApprovalAwareSession/ApprovalAwareAdapter are test-local third-party-style
- * implementations of the retained shared approval channel. Claude no longer
- * consumes that channel; these tests preserve control/wire dual-entry coverage.
+ * ApprovalAwareSession/ApprovalAwareAdapter are a test-local custom adapter
+ * whose approvals arrive through the control socket's `approvals.request`.
  */
 class ApprovalAwareSession implements Session {
-  readonly resolveApprovalCalls: Array<{ approved: boolean; reason?: string }> = [];
   /** Counts real `interrupt()` calls — used to prove a STALE wire `task.reject` (Decision #3) does NOT tear the session down, unlike a genuine reject. */
   interruptCalls = 0;
   private readonly queue = new AsyncQueue<AgentEvent>();
 
-  constructor(
-    public readonly sessionRef: string,
-    private readonly approvalChannel: ApprovalChannel | undefined,
-  ) {}
+  constructor(public readonly sessionRef: string) {}
 
   get events(): AsyncIterable<AgentEvent> {
     return this.queue;
@@ -66,11 +60,6 @@ class ApprovalAwareSession implements Session {
   }
   async close(): Promise<void> {
     this.queue.end();
-  }
-  async resolveApproval(approved: boolean, reason?: string): Promise<void> {
-    this.resolveApprovalCalls.push(reason === undefined ? { approved } : { approved, reason });
-    if (!this.approvalChannel) throw new Error('no approval channel wired up for this session');
-    await this.approvalChannel.resolve(approved, reason);
   }
 
   /**
@@ -100,7 +89,7 @@ class ApprovalAwareAdapter implements RuntimeAdapter {
       kind: 'prepared',
       operation: {
         start: async (input) => {
-          const session = new ApprovalAwareSession(input.manifest.sessionRef ?? `session-${this.sessions.length + 1}`, input.approvalChannel);
+          const session = new ApprovalAwareSession(input.manifest.sessionRef ?? `session-${this.sessions.length + 1}`);
           this.sessions.push(session);
           return session;
         },
@@ -168,7 +157,6 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const outcome = await requestPromise;
     expect(outcome).toEqual({ approved: true, reason: undefined });
-    expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([{ approved: true }]);
 
     conn.client.close();
   });
@@ -259,15 +247,9 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const outcome = await requestPromise;
     expect(outcome).toEqual({ approved: false, reason: 'operator declined via CLI' });
-    // The local CLI's approvals.resolve resolves the ApprovalRegistry entry
-    // DIRECTLY (control-server.ts's own handler) — it never goes through
-    // TaskRunner.handleApprove/handleReject or session.resolveApproval() at
-    // all (that's the WIRE task.approve/task.reject path's own job — see
-    // test (a) above). Both paths converge on the SAME registry entry,
-    // which is what actually unblocks a pending approvals.request/
-    // a generic out-of-band adapter — that convergence is what this test proves, not
-    // that every path notifies the session identically.
-    expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([]);
+    // The local CLI's approvals.resolve and the wire task.approve/task.reject
+    // (test (a) above) converge on the SAME registry entry, which is what
+    // unblocks a pending approvals.request.
 
     requesterConn.client.close();
     cliConn.client.close();
@@ -373,10 +355,6 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const outcome = await requestPromise;
     expect(outcome).toEqual({ approved: true, reason: undefined });
-    // The local CLI path resolves the ApprovalRegistry entry directly
-    // (control-server.ts) — it never calls session.resolveApproval() at all
-    // (see test (b) above for the same distinction).
-    expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([]);
 
     // NOW the stale wire task.approve arrives — strictly after the local
     // resolution above already settled this exact approval, mirroring
@@ -430,14 +408,11 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const outcome = await requestPromise;
     expect(outcome).toEqual({ approved: false, reason: 'operator declined via CLI' });
-    expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([]);
     expect(adapter.sessions[0]?.interruptCalls).toBe(0);
 
     // The stale wire task.reject arrives strictly after the local reject
-    // above already settled this exact approval. Pre-fix, handleReject
-    // unconditionally interrupted the session and sent task.fail regardless
-    // of whether resolveApproval even threw (see task-runner.ts's own doc
-    // comment on this — a worse bug than handleApprove's).
+    // above already settled this exact approval: it must neither interrupt
+    // the session nor send task.fail.
     server.send(createEnvelope('task.reject', { reason: 'stale server-side reject', approvalId: approvalId! }, { taskId, seq: server.nextSeq() }));
     await vi.waitFor(() => {
       expect(
@@ -517,13 +492,10 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
       ).toBe(true);
     });
 
-    // B is still the one pending — the stale message for A did not resolve
-    // it — and the session was never touched by either A's local resolve or
-    // the stale message (mirrors test (b)'s own "never called" assertion).
+    // B is still the one pending — the stale message for A did not resolve it.
     const listAfterStale = await conn.client.request<ApprovalsListResult>('approvals.list');
     expect(listAfterStale.approvals).toHaveLength(1);
     expect(listAfterStale.approvals[0]?.approvalId).toBe(approvalIdB);
-    expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([]);
     expect(server.received.some((e) => e.type === 'task.fail' && e.task_id === taskId)).toBe(false);
 
     // B resolves normally afterward — proving it was never torn down or

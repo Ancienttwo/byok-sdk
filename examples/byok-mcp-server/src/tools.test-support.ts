@@ -44,7 +44,6 @@ export class FakeSession implements Session {
   async followUp(): Promise<void> { throw new Error('fake runtime takes one instruction'); }
   async interrupt(): Promise<void> { this.interrupted = true; }
   async close(): Promise<void> { this.closed = true; this.wake?.(); this.wake = undefined; }
-  async resolveApproval(): Promise<void> { /* no approval */ }
 }
 export class FakeRuntime implements RuntimeAdapter {
   // Pi projects MCP toolsets. An Agent offer carries the Agent memory MCP whenever the daemon admits it.

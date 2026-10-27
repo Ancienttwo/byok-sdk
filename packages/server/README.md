@@ -174,12 +174,13 @@ State is in memory by default. `storage: { kind: 'sqlite', path }` persists:
 - the mailbox;
 - task attempts and their Agent message admission records;
 - cancellations;
+- approval timelines, bounded by their existing TTL and capacity;
 - objects and blobs.
 
 Everything else stays in the process and is lost on restart, in SQLite mode as
 well: device presence, `TaskHandle` promises and the task-event relay (so
 `tasks.events` cursors), the
-approval timeline, inbound dedup, nonces, Agent egress receipt readback
+inbound dedup, nonces, Agent egress receipt readback
 (`egress.get`), activity, unredeemed pairing codes, storage quota accounting,
 and the token signing key when you do not pass `tokenSigner`.
 
@@ -238,9 +239,13 @@ through `POST /byok/challenge` and `POST /byok/token` against the persisted
 device directory, and continues; no re-pairing is needed. A device reads as
 connected again at its next poll.
 
+SQLite also keeps unexpired approval requests and resolutions. Reopening does
+not extend their expiry (default ten minutes since the last new observation).
+`tasks.get`, stats and `tasks.events(taskId, { from: 'state' })` read the same
+stored timeline. Expired requests are not restored or silently approved.
+
 What a restart does not keep:
 
-- pending approvals, because the approval timeline is in memory;
 - `TaskHandle` promises and event subscriptions. Provider processes run on
   devices; recover server coordination after restart with `tasks.offer(taskId)`
   and `tasks.get(taskId)` (see
@@ -320,9 +325,9 @@ is off by default.
 - `taskCountsByState`: read from the task stores, not from a count kept in the
   process. One aggregate over stored attempts and cancellation markers, then a
   walk of the active attempts and their approval timelines. SQLite keeps
-  attempts and cancellations across a reopen; the approval timeline resets, so a
-  task that was awaiting approval no longer counts as such afterwards. Nothing
-  is scanned at startup.
+  attempts, cancellations and unexpired approval timelines across a reopen;
+  pending approvals keep their AwaitApproval projection until resolution or
+  expiry. Nothing is scanned at startup.
 - `envelopesIn`, `dedupDrops`, `rateLimitEvents`: counted since this server
   instance was created. They reset on every reopen, SQLite mode included.
 - `inboundRefusals`: one counter per reason in `INBOUND_REFUSAL_REASONS`
@@ -428,26 +433,29 @@ with its next delivery number. There is no persisted delivering state, hosted
 timer, cron parser or parallel legacy path. Real sleep timing is not proven by
 fake timers.
 
-## SQLite schema
+## SQLite schema version
 
-The current schema is v5. It retains write-once `claimedHarnessId`, stored
-atomically with task ownership, and includes the embedded wake table. An older
-file (schema 1–4) is not adopted: it is refused at open, unchanged, and v5
-starts on a new database. Older builds cannot reopen v5.
+The current schema is v6. It includes a durable approval timeline alongside the
+existing task, enrollment, receipt and wake authorities. Only a new database or
+an existing v6 file can open. Versions 1–5 and unknown versions are rejected;
+there is no migration selector or automatic adoption path.
 
-Schema refusals at open are a `SqliteSchemaError` with `foundVersion` and
-`requiredVersion`, so a host can check the file at startup and branch on `code`:
+Preserve existing databases. Stop the previous owner and explicitly select a
+new state path and enrollment for v6. Do not delete history or edit version
+markers to make an old database open. Approval observations that existed only
+in an old process's memory cannot be recovered.
 
-- `SQLITE_SCHEMA_UNSUPPORTED`: the file is older (start on a new database) or
-  newer (needs a newer build).
-- `SQLITE_MIGRATION_REFUSED`: the file holds member chain rotate entries from
-  before the KEM floor; preserve the file.
-- `SQLITE_SCHEMA_INVALID`: the file contradicts its declared schema or is not a
-  BYOK database.
-- `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: a pending mailbox row is not a wire v4
-  envelope (for example a v3 offer left undrained). Nothing is rewritten or
-  deleted; drain it with the previous compatible SDK before upgrading, or use a
-  new state directory and enrollment.
+Open failures use `SqliteSchemaError` with `foundVersion` and `requiredVersion`:
+
+- `SQLITE_SCHEMA_UNSUPPORTED`: unsupported schema or removed migration option.
+- `SQLITE_MIGRATION_REFUSED`: member chain rotate entries predate the KEM floor; preserve the file.
+- `SQLITE_SCHEMA_INVALID`: a required authority is missing or malformed.
+- `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox bytes are not wire v4.
+
+A declared v6 file missing its approval table fails closed instead of silently
+recreating an empty authority. Existing database contents are not adopted,
+rewritten or deleted on a version refusal. New files create their schema and
+version marker in one transaction. Older builds cannot open v6.
 
 ## Persistent host request identity
 

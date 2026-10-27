@@ -35,7 +35,7 @@ export class AgentMessageDraftPublisher {
   /** Use TaskRunner's single boundary decision for the same text run as finalTextParts. */
   push(event: AgentEvent, startsMessage = false): void {
     if (!this.canSend()) return;
-    if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
+    if (event.type === 'tool_use' || event.type === 'tool_result') {
       this.reset();
       this.authority = '';
     } else if (event.type === 'progress') {

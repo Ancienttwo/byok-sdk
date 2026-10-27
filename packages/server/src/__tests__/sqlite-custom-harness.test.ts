@@ -127,7 +127,7 @@ describe('SQLite custom-harness claim authority', () => {
     } finally { await runtime.stores.close(); }
   });
 
-  it('refuses a v5 file missing its claim authority without recreating the column', async () => {
+  it('refuses a v6 file missing its claim authority without recreating the column', async () => {
     const { open, path } = fixture();
     await open().stores.close();
     const db = new DatabaseSync(path);
