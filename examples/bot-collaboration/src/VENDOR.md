@@ -102,7 +102,6 @@ src/index.ts
 src/migration.ts
 src/model.ts
 src/persona.ts
-src/reply-receipts.ts
 src/retention.ts
 src/rooms.ts
 src/routines.ts
