@@ -19,10 +19,7 @@ import {
   type TerminalProjectionSelection,
   type TaskDeclinePayload,
   type TaskFailure,
-  type TaskOfferForAgentPayload,
-  type TaskOfferForAgentWithEgressPayload,
-  type TaskOfferForAgentWithEgressFreshPayload,
-  type TaskOfferPreparedPayload,
+  type TaskOfferPlainPayload,
   requiredReceiverCapabilities,
 } from '@byok-sdk/protocol';
 import {
@@ -91,7 +88,7 @@ import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAge
 import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts';
 import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory, bindAgentMemoryFilesystem } from './task-runner/agent-memory';
 import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, evictPendingCancelled, handleSteer } from './task-runner/lifecycle';
-import { admitOffer, reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer } from './task-runner/offer-admission';
+import { admitOffer, reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer, declineOfferMissingCapabilities } from './task-runner/offer-admission';
 import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime';
 import { requestApproval, dispatchApproval, clearPendingApproval, handleApprove, handleReject } from './task-runner/approvals';
 import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence';
@@ -295,7 +292,7 @@ export interface TaskRunnerDeps {
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
   /**
    * The prepared-Execution lane. Absent on a daemon with no `inputPreparation`
-   * section, and a `task.offer_prepared` arriving there is declined by name
+   * section, and a prepared `task.offer` arriving there is declined by name
    * rather than reinterpreted as an ordinary offer.
    *
    * It carries the durable store plus the three device facts a prepared
@@ -336,7 +333,7 @@ export interface TaskRunnerDeps {
    * The writer limit is fixed at one.
    */
   maxConcurrentReaderAttemptsPerAgentHome?: number;
-  /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
+  /** Exact host-selected policy accepted by a `task.offer` that carries `egressPolicy`. */
   agentEgressPolicy?: Readonly<AgentEgressPolicy>;
   /** Latest-value activity lane and reliable spool for Agent egress offers. */
   agentEgress?: AgentEgressController;
@@ -465,6 +462,14 @@ export interface TaskRunnerDeps {
    */
   getServerCapabilities?: () => readonly string[];
   /**
+   * The flags this daemon's current `conn.hello` advertises. Every `task.offer`
+   * is checked against them before it is opened or run: an offer that needs a
+   * flag missing here is declined non-retryably, whatever the sender admitted
+   * (`requiredReceiverCapabilities`). Read fresh at offer time, because a
+   * presence change or a capability declaration edits the advertisement.
+   */
+  advertisedCapabilities: () => readonly string[];
+  /**
    * #654: opens sealed task input and seals sealed task output. Absent on a
    * daemon that holds no scope key, which declines every sealed offer.
    */
@@ -591,11 +596,7 @@ export type AdmissionGuardDecision =
 
 
 
-type AcceptedOfferPayload =
-  | TaskOfferForAgentPayload
-  | TaskOfferForAgentWithEgressPayload
-  | TaskOfferForAgentWithEgressFreshPayload
-  | TaskOfferPreparedPayload;
+type AcceptedOfferPayload = TaskOfferPlainPayload;
 
 
 
@@ -1119,29 +1120,40 @@ export class TaskRunner {
 
   async handleEnvelope(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
-      case 'task.offer_for_agent':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload));
-        return;
-      case 'task.offer_for_agent_with_egress':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload));
-        return;
-      case 'task.offer_for_agent_with_egress_fresh':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload));
-        return;
-      case 'task.offer_prepared':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload));
+      case 'task.offer':
+        // The receiver half of the gates: checked on the wire payload, before
+        // a sealed offer is opened. #654: a sealed offer that cannot be opened
+        // is declined, not dropped, so the task does not wait for a timeout.
+        if (this.declineOfferMissingCapabilities(envelope)) return;
+        await trackOffer(this, envelope.payload.sealing === undefined
+          ? this.handleOffer(envelope.task_id, envelope.payload)
+          : this.handleSealedOffer(envelope));
         return;
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
-      case 'task.steer':
-        // #654 §6.2: a task that seals its input takes no plaintext steer.
-        if (this.deps.sealedTasks?.sealsInput(envelope.task_id)) {
-          console.error(`[byok/client] plaintext task.steer for task ${envelope.task_id} dropped: the task seals its input`);
+      case 'task.steer': {
+        const taskId = envelope.task_id;
+        if (envelope.payload.sealed !== undefined) {
+          // #654: a sealed steer that cannot be opened is dropped.
+          if (this.deps.sealedTasks === undefined) {
+            console.error(
+              `[byok/client] inbound sealed task.steer for task ${taskId} rejected: this daemon does not open sealed task input — acked without retry; this envelope should have been gated server-side`,
+            );
+            return;
+          }
+          if (!this.tasks.has(taskId)) return;
+          await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, text));
           return;
         }
-        await this.handleSteer(envelope.task_id, envelope.payload.text);
+        // #654 §6.2: a task that seals its input takes no plaintext steer.
+        if (this.deps.sealedTasks?.sealsInput(taskId)) {
+          console.error(`[byok/client] plaintext task.steer for task ${taskId} dropped: the task seals its input`);
+          return;
+        }
+        await this.handleSteer(taskId, envelope.payload.text);
         return;
+      }
       case 'task.approve':
         await this.handleApprove(envelope.task_id, envelope.payload.approvalId);
         return;
@@ -1151,26 +1163,6 @@ export class TaskRunner {
       case 'agent.message.disposition':
         await this.handleAgentMessageDisposition(envelope.task_id, envelope.payload);
         return;
-      // #654: a sealed offer that cannot be opened is declined, not dropped,
-      // so the task does not wait for a timeout; a sealed steer that cannot
-      // be opened is dropped.
-      case 'task.offer_for_agent_sealed':
-      case 'task.offer_for_agent_with_egress_sealed':
-      case 'task.offer_for_agent_with_egress_fresh_sealed':
-        await trackOffer(this, this.handleSealedOffer(envelope));
-        return;
-      case 'task.steer_sealed': {
-        if (this.deps.sealedTasks === undefined) {
-          console.error(
-            `[byok/client] inbound sealed task.steer for task ${envelope.task_id} rejected: this daemon does not open sealed task input — acked without retry; this envelope should have been gated server-side`,
-          );
-          return;
-        }
-        if (!this.tasks.has(envelope.task_id)) return;
-        const taskId = envelope.task_id;
-        await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, text));
-        return;
-      }
       default:
         return; // conn.* and daemon->server-only types are handled elsewhere / not applicable
     }
@@ -1760,6 +1752,10 @@ export class TaskRunner {
    */
   private handleSealedOffer(envelope: Envelope): Promise<void> {
     return handleSealedOffer.call(this, envelope);
+  }
+
+  private declineOfferMissingCapabilities(envelope: Extract<Envelope, { type: 'task.offer' }>): boolean {
+    return declineOfferMissingCapabilities.call(this, envelope);
   }
 
   private failurePayload(failure: TaskFailure): { failure?: TaskFailure } {

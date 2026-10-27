@@ -8,7 +8,7 @@ import { createFleetJitter } from '../deterministic-jitter';
 import { type JournalIdentity, journalHash } from '../journal/journal';
 import type { AgentRef } from '../../agent-home';
 import type { SealedRunState } from './state';
-import { decodeEnvelope, createEnvelope, encodeEnvelope, isTaskOfferType } from '@byok-sdk/protocol';
+import { decodeEnvelope, createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import { taskFailureField, DAEMON_TASK_FAILURE } from '../task-failure';
 import { terminalIdentity } from '../terminal-identity';
 import { assertJournalEnvelopeProtocol } from '../daemon-errors';
@@ -152,7 +152,7 @@ export async function openStartRun(daemonScope: DaemonScope) {
     // offer independently of cancellation/placement authority.
     if (task.localState === 'received' && task.seq > durableCursor) continue;
     const offer = decodeEnvelope(task.envelopeBytes);
-    if (!isTaskOfferType(offer.type) || offer.task_id !== task.taskId) throw new Error('invalid durable recovery offer binding');
+    if (offer.type !== 'task.offer' || offer.task_id !== task.taskId) throw new Error('invalid durable recovery offer binding');
     const payload = offer.payload as { agentRef?: AgentRef; messageEgress?: { mode: string; contract?: string }; terminalProjection?: { mode: string; contract?: string } };
     const resultFailure = resultReplyFailureFromState(task.localState);
     if (resultFailure && (payload.agentRef === undefined || payload.messageEgress?.mode !== 'required' || typeof payload.messageEgress.contract !== 'string'

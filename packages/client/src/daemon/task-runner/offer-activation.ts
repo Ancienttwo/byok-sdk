@@ -59,7 +59,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   active = {
     taskId,
     blobAbort,
-    egressEnabled: 'egressPolicy' in payload,
+    egressEnabled: payload.egressPolicy !== undefined,
     adapter: pick.adapter,
     session,
     scratch,

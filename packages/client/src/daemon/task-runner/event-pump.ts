@@ -400,7 +400,7 @@ export async function sendArtifact(this: TaskRunner, active: ActiveTask, name: s
     // #654 decision 12b: a sealed task's artifact is sealed inline content.
     // It is never uploaded as a plaintext blob.
     const inline = bytes.toString('base64');
-    if (Buffer.byteLength(inline, 'utf8') > SEALED_SPLIT_TABLE['task.artifact_sealed'].limits.inline) {
+    if (Buffer.byteLength(inline, 'utf8') > SEALED_SPLIT_TABLE['task.artifact'].limits.inline) {
       this['reportArtifactError'](active, name, `artifact "${name}" is over the sealed inline limit and was not sent`);
       return;
     }

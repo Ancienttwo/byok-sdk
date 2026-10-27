@@ -1,6 +1,6 @@
 // `TaskRunner` members for offer admission before any runtime work, and for
 // sealed offers (see ./support.ts for how a member module runs).
-import type { Envelope, SealedDeclineCode } from '@byok-sdk/protocol';
+import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeResolutionError, type AgentRef } from '../../agent-home';
 import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-readers';
 import type { OfferPhaseContext } from './support';
@@ -181,13 +181,39 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
     decline('server does not support custom-harness identity', false);
     return undefined;
   }
-  const requiredToolsets = 'requiredToolsets' in payload ? payload.requiredToolsets : undefined;
+  const requiredToolsets = payload.requiredToolsets;
   const resolvedMcp = requiredToolsets ? this['resolveMcpServers'](requiredToolsets) : undefined;
   if (resolvedMcp && !resolvedMcp.ok) {
     decline(resolvedMcp.reason, true);
     return undefined;
   }
   return { requiredToolsets, resolvedMcp };
+}
+
+/**
+ * The receiver half of the gates (#925 O4): `requiredReceiverCapabilities` of
+ * the wire offer must be a subset of the flags this daemon advertises, or the
+ * offer is declined non-retryably before it is opened, claimed or run. The
+ * sender checks the same rows, so a sender that misses one cannot run an offer
+ * here. A redelivered offer of a task this daemon already holds is left to
+ * the offer handlers. A task that seals its output takes the closed sealed
+ * decline, because the Host accepts no free-text reason for it.
+ */
+export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extract<Envelope, { type: 'task.offer' }>): boolean {
+  const taskId = envelope.task_id;
+  const advertised = this['deps'].advertisedCapabilities();
+  const missing = requiredReceiverCapabilities('task.offer', envelope.payload).filter((flag) => !advertised.includes(flag));
+  if (missing.length === 0) return false;
+  if (this['tasks'].has(taskId) || this['startupOwnership'].has(taskId) || this['inFlightOffers'].has(taskId) || this['finishedTaskIds'].has(taskId) || this['strictDeclinedTaskIds'].has(taskId) || this['sealedOpening'].has(taskId)) return true;
+  const { agentRef, sealing } = envelope.payload;
+  console.error(`[byok/client] task.offer for task ${taskId} declined: this daemon does not advertise ${missing.join(', ')}`);
+  if (sealing?.categories.includes('task-output') === true) {
+    this['declineSealedOffer'](taskId, agentRef, 'sealed_key_unavailable');
+    return true;
+  }
+  this['addStrictDeclinedTaskId'](taskId);
+  this['decline'](taskId, `offer_capability_missing: this daemon does not advertise ${missing.join(', ')}`, false, agentRef);
+  return true;
 }
 
 export async function handleSealedOffer(this: TaskRunner, envelope: Envelope): Promise<void> {
