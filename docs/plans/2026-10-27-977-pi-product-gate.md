@@ -32,6 +32,8 @@ cell 按方法文档冻结：runtime、provider/模型、平台、语料、是�
 
 第 2 行经过本机 OpenAI 兼容代理，代理可能改写请求，数字不能当 zai 原生 API 的结果。
 
+第 4 行在 0.30.2 上另有一个和 `submit_result` 无关的问题：daemon 的 store 路径如果是别名（比如 8.3 短名），重启时会碰到 [#1030](https://github.com/Ancienttwo/byok-sdk/issues/1030)（`retention_root_identity_invalid`），daemon 起不来。
+
 ## 3. 已知缺陷与差异
 
 - **C04-union**：两次运行都几乎全是 `terminal_failure`，原因还没定位。#1003 / #1005（`a3af443f`，在 main，不在 `v0.30.2` tag 里）修的是 prepared lane 编译根部 `oneOf` schema 的缺陷；#1005 写明它不能解释 #977 普通车道的结果。下一步先读第 1 行 C04 trial 的原始 reason，再决定修 SDK 还是归为模型行为。
@@ -73,7 +75,7 @@ bun examples/bot-collaboration/src/submit-result-measurement/cli.ts --runtime pi
 
 ### 4.2 AiphaBee ask_user 路径（第 2–4 行）
 
-runner 是 AiphaBee 的 `apps/local-agent/src/bot-chat-outcome-live.test.ts`，随 Ancienttwo/aiphabee#379 合入 AiphaBee main（squash `95b9c6c9`），AiphaBee 钉 `@byok-sdk/*` 0.30.2。环境变量和命令以该文件头部注释为准。
+runner 是 AiphaBee 的 `apps/local-agent/src/bot-chat-outcome-live.test.ts`，随 AiphaBee 的 PR 379 合入 AiphaBee main（squash `95b9c6c9`），AiphaBee 钉 `@byok-sdk/*` 0.30.2。环境变量和命令以该文件头部注释为准。
 
 - `AIPHABEE_LIVE_BOT_CHAT_OUTCOME_PROVIDER=loopback`：不花钱的 dry run，检查管线，manifest 标 synthetic。
 - `=zai`：原生 provider，需要 `AIPHABEE_LIVE_BYOK_DATA_DIRECTORY`、`AIPHABEE_LIVE_BYOK_PROFILE_REF` 和授权引用。第 3 行的计数用 `AIPHABEE_LIVE_BOT_CHAT_OUTCOME=count`、`_ROUNDS=20`。
