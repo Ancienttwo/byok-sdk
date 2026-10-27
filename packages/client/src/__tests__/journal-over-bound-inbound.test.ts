@@ -22,7 +22,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
-import { JournalRecordTooLargeError, journalHash, type JournalIdentity } from '../daemon/journal/journal';
+import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity } from '../daemon/journal/journal';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -217,7 +217,7 @@ describe('the withheld offer record of the journal (#826)', () => {
     } finally { await journal.close(); }
   });
 
-  it('adds the withheld column to a journal written before it existed', async () => {
+  it('refuses, at open and without altering it, a journal written before the withheld column existed', async () => {
     const storeDir = await tmp();
     const offer = encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER }, { taskId: 'task-1', seq: 1 }));
     const first = new SqliteLocalTaskJournal({ storeDir });
@@ -229,11 +229,10 @@ describe('the withheld offer record of the journal (#826)', () => {
     } finally { await first.close(); }
     const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
     try { db.exec('ALTER TABLE journal_envelope DROP COLUMN withheld_bytes'); } finally { db.close(); }
+    const before = rows(storeDir, 'SELECT envelope_id, task_id, bytes, bytes_hash FROM journal_envelope');
 
-    const reopened = new SqliteLocalTaskJournal({ storeDir });
-    try {
-      await expect(reopened.readTask('task-1', IDENTITY)).resolves.toMatchObject({ localState: 'received', envelopeBytes: offer });
-    } finally { await reopened.close(); }
-    expect(rows(storeDir, 'SELECT withheld_bytes FROM journal_envelope')).toEqual([{ withheld_bytes: null }]);
+    expect(() => new SqliteLocalTaskJournal({ storeDir })).toThrow(JournalUnavailableError);
+    expect(rows(storeDir, "SELECT name FROM pragma_table_info('journal_envelope') WHERE name = 'withheld_bytes'")).toEqual([]);
+    expect(rows(storeDir, 'SELECT envelope_id, task_id, bytes, bytes_hash FROM journal_envelope')).toEqual(before);
   });
 });
