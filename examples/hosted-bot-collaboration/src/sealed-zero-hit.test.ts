@@ -89,9 +89,9 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('the sealed zero-hit run on the hosted SDK (#
     const storage = await createObjectStorageScope();
     const adapter = new ZeroHitAdapter();
     // What the product's observer is handed is a location too: it is the only reader of a sealed task.artifact.
-    const observed: string[] = [];
+    const observed: { envelope: { type: string; task_id?: string; payload: unknown } }[] = [];
     host = await openHostedCloud({ e2ee: { scopeId: SCOPE, categories: SEALING.categories }, deviceName: `device ${P}`, adapter,
-      objectStorage: storage.config, observer: { onInboundCommitted: (input) => { observed.push(JSON.stringify(input)); } } });
+      objectStorage: storage.config, observer: { onInboundCommitted: (input) => { observed.push(input); } } });
     const { cloud, tenant, deviceId, member, port } = host;
     // The device advertises sealed-payload-v1 once it verified its member keyring against the chain.
     await vi.waitFor(async () => expect((await cloud.listDevices(tenant)).find((device) => device.deviceId === deviceId)?.capabilities)
@@ -169,6 +169,12 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('the sealed zero-hit run on the hosted SDK (#
       .filter((event): event is typeof event & { approvalId: string; sealed: unknown } => event.type === 'approval_requested' && 'sealed' in event);
     expect(requested).toHaveLength(1);
     const approvalMember = await sealedOf(requested[0]!.sealed);
+    // No store keeps a sealed artifact, so the observer is where the test checks that the device sent and sealed it.
+    const artifacts = observed.map(({ envelope }) => envelope).filter((envelope) => envelope.type === 'task.artifact' && envelope.task_id === taskId);
+    expect(artifacts).toHaveLength(1);
+    const { artifactId, sealed: sealedArtifact } = artifacts[0]!.payload as { artifactId: string; sealed: unknown };
+    const artifact = await member!.open('task.artifact', { taskId, artifactId }, deviceId, agentRef, await sealedOf(sealedArtifact)) as { inline: string };
+    expect(Buffer.from(artifact.inline, 'base64').toString('utf8')).toContain(S_CORE);
     expect(JSON.stringify(await member!.open('task.await_approval', { taskId, approvalId: requested[0]!.approvalId }, deviceId, agentRef,
       approvalMember))).toContain(S_CORE);
     const offer = await cloud.readTaskOffer(tenant, taskId);
@@ -194,7 +200,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('the sealed zero-hit run on the hosted SDK (#
       record(plainHits, objectLocation(key, tenant), bytes, plainNeedles);
       record(ciphertextHits, objectLocation(key, tenant), bytes, ciphertextNeedles);
     }
-    for (const input of observed) {
+    for (const input of observed.map((committed) => JSON.stringify(committed))) {
       record(sealedHits, 'hook:observer', input, sealedNeedles);
       record(plainHits, 'hook:observer', input, plainNeedles);
     }
