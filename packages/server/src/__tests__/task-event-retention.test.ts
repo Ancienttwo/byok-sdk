@@ -12,16 +12,26 @@ async function collect(events: AsyncIterable<ServerTaskEvent>): Promise<ServerTa
   return result;
 }
 
-// A bounded fake-time wait makes the original hanging next() fail at once
-// without spending the test runner's timeout or leaving real timers behind. An
-// event read starts with a store read of the task, which takes a few turns.
+// A bounded fake-time race makes the original hanging next() fail immediately
+// without spending the test runner's timeout or leaving real timers behind.
 async function promptly<T>(pending: Promise<T>): Promise<T | 'still waiting'> {
-  let settled = false;
-  const tracked = pending.finally(() => { settled = true; });
-  // Observed by the caller after the wait; mark it handled meanwhile.
-  tracked.catch(() => {});
-  for (let tick = 0; tick < 10 && !settled; tick += 1) await vi.advanceTimersByTimeAsync(1);
-  return settled ? tracked : 'still waiting';
+  const timeout = new Promise<'still waiting'>((resolve) => {
+    setTimeout(() => resolve('still waiting'), 1);
+  });
+  const result = Promise.race([pending, timeout]);
+  await vi.advanceTimersByTimeAsync(1);
+  return result;
+}
+
+// An event read looks the task up in the store before its first entry, and
+// that lookup can finish on the thread pool, so the first entry gets a plain
+// await (the runner's timeout catches a hang there). After it the read only
+// drains the relay, which is what `promptly` bounds.
+async function opened(events: AsyncIterable<ServerTaskEvent>) {
+  const iterator = events[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  expect(first.done).toBe(false);
+  return { first: first.value as ServerTaskEvent, rest: { [Symbol.asyncIterator]: () => iterator } };
 }
 
 function expectFeedExpired(taskId: string) {
@@ -64,14 +74,14 @@ describe('public task handle event retention', () => {
 
   it('ends live and retained readers, then refuses reads after reclamation without recreating state', async () => {
     const handle = await dispatch();
-    const live = collect(handle.events());
+    const live = await opened(handle.events());
+    expect(live.first).toMatchObject({ kind: 'state', state: 'Offered' });
     await handle.cancel('done');
-    const retained = await promptly(live);
-    expect(retained).toMatchObject([
-      { kind: 'state', state: 'Offered' },
-      { kind: 'state', state: 'Cancelled' },
-    ]);
-    expect(await promptly(collect(handle.events()))).toEqual(retained);
+    const rest = await promptly(collect(live.rest));
+    expect(rest).toMatchObject([{ kind: 'state', state: 'Cancelled' }]);
+    const again = await opened(handle.events());
+    expect(again.first).toEqual(live.first);
+    expect(await promptly(collect(again.rest))).toEqual(rest);
     const durable = await handle.result();
     expect(durable.state).toBe('Cancelled');
 
@@ -80,7 +90,7 @@ describe('public task handle event retention', () => {
     // this task would resurrect its reclaimed relay bookkeeping.
     const writes = vi.spyOn(Map.prototype, 'set');
     for (let i = 0; i < 20; i += 1) {
-      await expect(promptly(collect(handle.events()))).rejects.toMatchObject(expectFeedExpired(handle.taskId));
+      await expect(collect(handle.events())).rejects.toMatchObject(expectFeedExpired(handle.taskId));
     }
     expect(writes.mock.calls.filter(([key]) => key === handle.taskId)).toEqual([]);
     writes.mockRestore();
@@ -92,19 +102,19 @@ describe('public task handle event retention', () => {
   it('preserves the bounded truncation marker before expiry', async () => {
     const handle = await dispatch(1);
     await handle.cancel();
-    expect(await promptly(collect(handle.events()))).toEqual([
-      { kind: 'error', reason: 'events_truncated' },
-      expect.objectContaining({ kind: 'state', state: 'Cancelled' }),
-    ]);
+    const read = await opened(handle.events());
+    expect(read.first).toEqual({ kind: 'error', reason: 'events_truncated' });
+    expect(await promptly(collect(read.rest))).toEqual([expect.objectContaining({ kind: 'state', state: 'Cancelled' })]);
     await vi.advanceTimersByTimeAsync(RETENTION_MS);
-    await expect(promptly(collect(handle.events()))).rejects.toMatchObject(expectFeedExpired(handle.taskId));
+    await expect(collect(handle.events())).rejects.toMatchObject(expectFeedExpired(handle.taskId));
   });
 
   it('closes an active reader on stop and keeps subsequent event reads empty and allocation-free', async () => {
     const handle = await dispatch();
-    const live = collect(handle.events());
+    const live = await opened(handle.events());
+    expect(live.first).toMatchObject({ kind: 'state', state: 'Offered' });
     await byok!.close();
-    expect(await promptly(live)).toEqual([expect.objectContaining({ kind: 'state', state: 'Offered' })]);
+    expect(await promptly(collect(live.rest))).toEqual([]);
     const writes = vi.spyOn(Map.prototype, 'set');
     for (let i = 0; i < 20; i += 1) {
       expect(await promptly(collect(handle.events()))).toEqual([]);
