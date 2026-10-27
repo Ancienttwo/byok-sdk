@@ -27,7 +27,7 @@
 
 // The pool factory (int8 parsing configured per-pool, never globally)
 export { createByokPool } from './pool';
-export type { ByokPoolOptions } from './pool';
+export type { ByokPool, ByokPoolOptions } from './pool';
 
 // The cloud-local port implementations, and the composition that bundles them
 export {

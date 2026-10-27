@@ -11,7 +11,7 @@ import {
   type ActivityTail,
 } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 
 interface TailRow {
   readonly tenant_id: string;
@@ -38,7 +38,7 @@ function toTail(row: TailRow): ActivityTail {
 
 export class PostgresActivityStore implements ActivityStore {
   constructor(
-    private readonly pool: Pool,
+    private readonly pool: ByokPool,
     private readonly clock: Clock,
   ) {}
 

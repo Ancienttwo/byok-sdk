@@ -15,7 +15,15 @@
  */
 import pg from 'pg';
 import { describe, expect, it } from 'vitest';
-import { createByokPool } from '../pool';
+import { createWebCrypto } from '@byok-sdk/cloud';
+import { PostgresCloudCleanup } from '../cleanup';
+import { createByokPool, type ByokPool } from '../pool';
+import { createPostgresCloudStores, PostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore,
+  R2ObjectMaintenanceStore, type PostgresAgentMemoryProjectionStoreOptions,
+  type PostgresTaskRedactionStoreOptions } from '../stores/index';
+import { createPostgresCoreStores } from '../stores/core/index';
+import { PostgresTenantErasure } from '../tenant-erasure';
+import { PostgresTruthCommitter, type PostgresTruthCommitterOptions } from '../truth-committer';
 
 /** The pool's frozen construction options — where `types` lives and where `onPoolError` must NOT. */
 type PoolInternals = { readonly options: { readonly types?: NonNullable<pg.PoolConfig['types']>; readonly onPoolError?: unknown } };
@@ -93,5 +101,46 @@ describe('createByokPool pool error handling', () => {
     expect(text('hello')).toBe('hello');
 
     await (pool as unknown as pg.Pool).end();
+  });
+});
+
+describe('store compositions refuse a pool createByokPool did not build (#1040)', () => {
+  const clock = { now: () => new Date() };
+  const objectStorage = {
+    endpoint: 'http://127.0.0.1:1', bucket: 'never-used', accessKeyId: 'key', secretAccessKey: 'secret',
+    region: 'auto', signingClock: clock,
+  };
+  const entries: Record<string, (pool: ByokPool) => unknown> = {
+    createPostgresCoreStores: (pool) => createPostgresCoreStores({ pool, clock, objectStorage }),
+    createPostgresCloudStores: (pool) => createPostgresCloudStores({ pool, clock, crypto: createWebCrypto(), objectStorage }),
+    PostgresTruthCommitter: (pool) => new PostgresTruthCommitter({ pool } as PostgresTruthCommitterOptions),
+    PostgresCloudCleanup: (pool) => new PostgresCloudCleanup({ pool, clock, objectStorage: new R2ObjectMaintenanceStore(objectStorage) }),
+    PostgresTenantErasure: (pool) => new PostgresTenantErasure({ pool, clock, objectStorage: new R2ObjectMaintenanceStore(objectStorage) }),
+    PostgresAgentMemoryProjectionStore: (pool) => new PostgresAgentMemoryProjectionStore({ pool } as PostgresAgentMemoryProjectionStoreOptions),
+    PostgresTaskRedactionStore: (pool) => new PostgresTaskRedactionStore({ pool } as PostgresTaskRedactionStoreOptions),
+  };
+
+  for (const [name, compose] of Object.entries(entries)) {
+    it(`${name} throws at composition for a bare pg.Pool, naming createByokPool`, async () => {
+      // A bare pool reads `bigint` columns as strings: a reservation's 573456
+      // bytes arrive as "573456", and finalize then refuses its own upload.
+      const bare = new pg.Pool({ connectionString: OFFLINE_URL });
+      try {
+        const refusal = await Promise.resolve().then(() => compose(bare as unknown as ByokPool)).then(() => undefined, (error: unknown) => error);
+        expect(refusal).toBeInstanceOf(TypeError);
+        expect((refusal as TypeError).message).toContain(`${name} needs a pool from createByokPool`);
+      } finally {
+        await bare.end();
+      }
+    });
+  }
+
+  it('accepts a pool from createByokPool', async () => {
+    const pool = createByokPool({ connectionString: OFFLINE_URL });
+    try {
+      expect(() => createPostgresCoreStores({ pool, clock, objectStorage })).not.toThrow();
+    } finally {
+      await pool.end();
+    }
   });
 });

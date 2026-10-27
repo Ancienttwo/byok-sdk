@@ -18,8 +18,8 @@ import { describe, expect, it } from 'vitest';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { contentHash, createMutableClock, tenantId } from '@byok-sdk/core';
 import { createEnvelope, encodeEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
-import type { Pool } from 'pg';
 import { migrate } from '../migrate';
+import { createByokPool, type ByokPool } from '../pool';
 import * as runtime from '../runtime';
 import { PostgresMailboxStore } from '../stores/core/mailbox';
 import { PostgresQuotaStore } from '../stores/core/quota';
@@ -55,8 +55,11 @@ function cancelEnvelope(v: unknown, seq = 1): string {
 interface RecordedQuery { readonly sql: string; readonly params: readonly unknown[] }
 interface StubRow { readonly tenant_id: string; readonly device_id: string; readonly seq_text: string; readonly body: string }
 
-/** A pool stand-in that serves the given pending rows through the scan's own keyset contract. */
-function recordingPool(pending: readonly StubRow[]): { readonly pool: Pool; readonly queries: RecordedQuery[] } {
+/**
+ * A never-connected `createByokPool` pool whose `query` serves the given
+ * pending rows through the scan's own keyset contract.
+ */
+function recordingPool(pending: readonly StubRow[]): { readonly pool: ByokPool; readonly queries: RecordedQuery[] } {
   const queries: RecordedQuery[] = [];
   const key = (row: StubRow) => [row.tenant_id, row.device_id, BigInt(row.seq_text)] as const;
   const after = (row: StubRow, cursor: readonly unknown[]) => {
@@ -64,7 +67,7 @@ function recordingPool(pending: readonly StubRow[]): { readonly pool: Pool; read
     const [ct, cd, cs] = [cursor[0] as string, cursor[1] as string, BigInt(cursor[2] as string)];
     return t > ct || (t === ct && (d > cd || (d === cd && s > cs)));
   };
-  const pool = {
+  const pool = Object.assign(createByokPool({ connectionString: 'postgres://byok:byok@127.0.0.1:1/never_connected' }), {
     async query(sql: string, params: readonly unknown[] = []) {
       queries.push({ sql, params });
       const limit = params[params.length - 1] as number;
@@ -72,11 +75,11 @@ function recordingPool(pending: readonly StubRow[]): { readonly pool: Pool; read
       const rows = pending.filter((row) => cursor === undefined || after(row, cursor)).slice(0, limit);
       return { rows };
     },
-  } as unknown as Pool;
+  }) as unknown as ByokPool;
   return { pool, queries };
 }
 
-const compose = (pool: Pool) =>
+const compose = (pool: ByokPool) =>
   createPostgresCloudStores({ pool, clock: createMutableClock(), crypto: createWebCrypto(), objectStorage: OBJECT_STORAGE });
 
 describe('pending-mailbox wire-major fence (substrate-free)', () => {

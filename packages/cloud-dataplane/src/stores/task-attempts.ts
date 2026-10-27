@@ -30,6 +30,7 @@ import {
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 
 export interface TaskRow {
   readonly tenant_id: string;
@@ -119,7 +120,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
 
-  constructor(pool: Pool, clock: Clock) {
+  constructor(pool: ByokPool, clock: Clock) {
     this.#pool = pool;
     this.#clock = clock;
   }

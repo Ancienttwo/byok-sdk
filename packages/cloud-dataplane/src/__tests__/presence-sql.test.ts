@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { PostgresPresenceStore } from '../stores/core/presence';
 
@@ -7,7 +7,7 @@ describe('presence upsert SQL binding contract', () => {
   it.each([0, 10_000])('binds a zero-only bypass while retaining clock-derived TTL and threshold: %s', async minimumIntervalMs => {
     const clock = createMutableClock();
     const query = vi.fn().mockResolvedValue({ rows: [] });
-    const store = new PostgresPresenceStore({ query } as unknown as Pool, clock);
+    const store = new PostgresPresenceStore({ query } as unknown as ByokPool, clock);
     clock.advance(-5_000);
     await expect(store.publish(tenantId('sql-presence'), {
       deviceId: 'device', level: 'working', ttlMs: 60_000, minimumIntervalMs,

@@ -1,6 +1,6 @@
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { DEFAULT_ACTIVITY_TTL_MS, type AgentMessageDraftStore, type AgentMessageDraftApplyInput, type AgentMessageDraftApplyResult, type AgentMessageDraftRow } from '@byok-sdk/cloud';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 
 type DraftRow = {
   task_id: string; device_id: string; agent_ref: AgentMessageDraftRow['agentRef']; revision: string;
@@ -12,7 +12,7 @@ function decode(row: DraftRow): AgentMessageDraftRow {
 }
 
 export class PostgresAgentMessageDraftStore implements AgentMessageDraftStore {
-  constructor(private readonly pool: Pool, private readonly clock: Clock) {}
+  constructor(private readonly pool: ByokPool, private readonly clock: Clock) {}
 
   async apply(tenant: TenantId, input: AgentMessageDraftApplyInput): Promise<AgentMessageDraftApplyResult> {
     const bytes = new TextEncoder().encode(input.text).byteLength;

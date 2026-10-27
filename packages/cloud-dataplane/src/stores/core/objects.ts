@@ -52,6 +52,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
+import type { ByokPool } from '../../pool';
 
 const DEFAULT_LIST_LIMIT = 100;
 
@@ -88,7 +89,7 @@ export class PostgresObjectStore implements ObjectStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
 
-  constructor(pool: Pool, clock: Clock, private readonly objectStorage: Pick<R2ObjectMaintenance, 'deleteObject'>) {
+  constructor(pool: ByokPool, clock: Clock, private readonly objectStorage: Pick<R2ObjectMaintenance, 'deleteObject'>) {
     this.#pool = pool;
     this.#clock = clock;
     if (objectStorage === undefined || typeof objectStorage.deleteObject !== 'function') throw new ByokCoreError('retention_input_invalid', 'ObjectStore requires a physical byte deletion authority.');
