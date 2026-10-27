@@ -97,3 +97,8 @@ Logs: `/tmp/byok-1060-build.log`, `byok-1060-typecheck.log`, `byok-1060-tests.lo
 ## Integration with approval-channel main
 
 Integrated main `bab299384` at candidate `4b6a37191`. Build and root typecheck pass; the same three focused files pass 87 tests (main removed the obsolete resolveApproval case). Version authority passes. The tighter main budgets expose exactly 53 added bytes in each of client, adapters, testing and byok-agent; coordinator wB:p4 signs these four measured limits under #1008 delegated budget authority. No blanket headroom or other budget change. Final API check and PR CI bind the resulting commit.
+
+
+## 与 helper grants / S1 的整合计量
+
+在已冻结的 #1064–#1067 候选之上，startup exclusion 的四个入口增量仍各为 53 B，保持协调席位 wB:p4 已批准的精确增量。实际 cap：client 1848545、adapters 332093、testing 317579、byok-agent 1793187 B。README 与 entry facts 按该组合构建再生，没有额外余量。完整 #1060 仍保持 open。
