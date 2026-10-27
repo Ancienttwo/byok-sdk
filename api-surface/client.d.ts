@@ -2851,35 +2851,27 @@ export declare class AgentSessionHandoffStore {
 }
 // ==== @byok-sdk/client dist/daemon/approvals.d.ts ====
 /**
- * M4 Phase 2: minimal pending-approval registry backing the control
- * socket's `approvals.list`/`approvals.resolve` methods.
- *
- * Nothing PRODUCES an approval yet in Phase 2 — every one of the three
- * bundled runtime adapters (pi/claude/codex) still has no interactive
- * `needs_approval` path (see `create-daemon.ts`'s `toRuntimeInfoCapabilities`
- * doc comment) — so `list()` always returns `[]` and `resolve()` always
- * throws {@link ApprovalNotFoundError} against a real daemon today. This
- * class exists now so Phase 3 (the claude permission-prompt path) only has
- * to call `register()` from wherever it detects a prompt; the control-socket
- * plumbing (`control-server.ts`'s method registry, the CLI's `approve`/
- * `reject` commands) is already wired end-to-end against this same registry.
+ * The pending-approval registry: the one place an approval is resolved.
+ * `TaskRunner.requestApproval` registers each dispatched approval (from a
+ * session's `approvalChannel` or the control socket's `approvals.request`);
+ * wire and local decisions, the CLI's `approvals.resolve`, timeouts, task
+ * finish and eviction all resolve it here.
  */
 export type ApprovalDecision = 'approve' | 'reject';
 /**
  * Distinguishes a resolution
  * that arrived over the wire (a server-sent `task.approve`/`task.reject`,
- * relayed here via `RuntimeOperationStartInput.approvalChannel.resolve` — `task-runner.ts`'s
- * `handleOffer`) from one this device decided on its own (the local
- * `approvals.resolve` control-socket RPC, a fail-closed `requestApproval`
- * timeout, or a fail-closed finish/eviction rejection). `TaskRunner` uses
+ * `TaskRunner.handleApprove`/`handleReject`) from one this device decided on
+ * its own (`Daemon.approve`/`reject`, the local `approvals.resolve`
+ * control-socket RPC, a fail-closed `requestApproval` timeout, or a
+ * fail-closed finish/eviction rejection). `TaskRunner` uses
  * this to decide whether to report `task.approval_resolved` back to the
  * server: a wire-triggered resolution is something the server already knows
  * about (it sent the decision itself) and must never be echoed back;
  * everything else is new information only the device has, and gets
  * reported. `'local'` is the default (see `resolve()`
- * below) precisely because it's the common case: every call site in this
- * module and `task-runner.ts` except the one wire-relay closure is local by
- * construction.
+ * below) precisely because it's the common case: every call site except
+ * the wire decision handlers is local by construction.
  */
 export type ApprovalOrigin = 'wire' | 'local';
 /** What `approvals.list` returns per pending approval — deliberately small; a runtime-specific payload (e.g. the exact tool call awaiting approval) is Phase 3's concern, not this registry's. */
@@ -2931,8 +2923,7 @@ export declare class ApprovalRegistry {
      * `requestApproval` timeout and `finish()` fail-closed cleanup
      * (`task-runner.ts`) — resolves a decision this device made on its own.
      * The one exception, a server-sent wire `task.approve`/`task.reject`
-     * relayed through `RuntimeOperationStartInput.approvalChannel.resolve`
-     * (`task-runner.ts`'s `handleOffer`), passes `'wire'` explicitly.
+     * (`TaskRunner.handleApprove`/`handleReject`), passes `'wire'` explicitly.
      */
     resolve(approvalId: string, decision: ApprovalDecision, reason?: string, origin?: ApprovalOrigin): void;
 }
@@ -4793,21 +4784,13 @@ export interface Daemon {
      */
     unpair(): Promise<void>;
     /**
-     * M3-2a: locally resolve a task currently paused on `needs_approval` —
-     * drives the exact same code path a server-sent `task.approve` does
-     * (`TaskRunner.handleApprove`), invoked directly instead of over the wire,
-     * then reports the decision to the server as `task.approval_resolved`.
-     * Honest-but-currently-unexercised: none of the three bundled adapters
-     * (pi/claude/codex) ever actually pauses for approval — each one's
-     * `resolveApproval` throws unconditionally (see `toRuntimeInfoCapabilities`'s
-     * doc comment below) — so calling this against a task on this daemon today
-     * always fails that task with a clear reason instead of resuming it,
-     * exactly as an honest, doing-nothing-magic implementation should. Ready
-     * for the day a runtime adapter implements real interactive approval, with
-     * no further changes needed here. A no-op (resolves immediately) for a
-     * `taskId` this daemon doesn't currently have active. `approvalId` names
-     * the pending approval, as a wire v4 decision does; a different id is a
-     * stale decision and changes nothing.
+     * Locally approve the pending approval `approvalId` of a task — the same
+     * resolution a server-sent `task.approve` makes (`TaskRunner.handleApprove`),
+     * reported to the server as `task.approval_resolved`. The session that
+     * requested it through its `approvalChannel` (or a control-socket
+     * `approvals.request`) receives `{ approved: true }`. A no-op (resolves
+     * immediately) for a `taskId` this daemon doesn't currently have active;
+     * a different `approvalId` is a stale decision and changes nothing.
      */
     approve(taskId: string, opts: {
         approvalId: string;
@@ -5227,7 +5210,6 @@ export interface DaemonTurnRecord {
     toolUses: number;
     toolResults: number;
     artifacts: number;
-    approvals: number;
     errors: number;
     /** The turn's last `usage` report, when it had one. */
     inputTokens?: number;
@@ -6969,16 +6951,12 @@ export type DaemonEvent = ({
     undeliveredOutboxCount?: number;
 }
 /**
- * M4 Phase 3 hardening: a wire `task.approve`/`task.reject` (or this
- * device's own redelivered copy of one) arrived for an out-of-band
- * approval a DIFFERENT, faster path (a racing local `approvals.resolve`
- * over the control socket, or this exact decision arriving twice) had
- * already resolved — `TaskRunner.handleApprove`/`handleReject`
- * (`task-runner.ts`) emit this instead of failing the task a second time.
- * Audit-only: never gates any teardown/task-state decision, purely a
- * record that a stale message was seen and correctly ignored — see
- * `NoPendingApprovalError`'s own doc comment (`task-runner.ts`) for the
- * full race this closes.
+ * A wire `task.approve`/`task.reject`, or a local `Daemon.approve`/
+ * `reject`, named an approval that is not the one pending for its task:
+ * a faster path (a racing local `approvals.resolve`, a timeout) already
+ * resolved it, the same decision arrived twice, or it targets another
+ * approval. `TaskRunner.handleApprove`/`handleReject` emit this and change
+ * nothing. Audit-only: never gates any teardown/task-state decision.
  */
  | {
     kind: 'stale-approval-decision';
@@ -8236,7 +8214,7 @@ import { type InputPreparationRuntimeIdentityV1, type InputPreparationBindingV1 
 import { AgentHomeManager, type AgentRef } from '../agent-home';
 import { AgentSessionHandoffStore, type AgentTerminalCause } from './agent-session-handoff-store';
 import { type RuntimeDisposalStage } from '../runtime-failure';
-import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
+import { type ApprovalDecision, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { SealedTasks } from './sealed-task';
 import type { AgentResultDescribeParams, AgentResultDescribeResult, AgentResultSubmitParams, AgentResultSubmitResult, TaskQueueWatermark } from './control-protocol';
@@ -8295,24 +8273,6 @@ export declare const AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS = 3;
  * same shape `requestApproval` already uses for an unknown/inactive taskId.
  */
 export declare const MAX_PENDING_APPROVALS_PER_TASK = 16;
-/**
- * M4 Phase 3 hardening (orchestrator-directed fix): thrown by the
- * `ctx.approvalChannel.resolve` closure built in `handleOffer` below when
- * this task has no CURRENTLY pending out-of-band approval to resolve.
- * Distinguished from a plain `Error` specifically so `handleApprove`/
- * `handleReject` can tell "a wire task.approve/task.reject arrived for an
- * approval a DIFFERENT, faster path (a racing local `approvals.resolve`, or
- * this exact decision arriving twice) already resolved" — a benign,
- * expected race, audit-worthy but never task-state-affecting — apart from
- * "the session's own resolveApproval() failed for some other, genuine
- * reason" (an adapter-level problem, which still fails the task exactly as
- * before). Only thrown for a custom adapter wiring an approval channel.
- * Bundled adapters reject confirm and throw their own unsupported errors.
- */
-export declare class NoPendingApprovalError extends Error {
-    readonly taskId: string;
-    constructor(taskId: string);
-}
 /**
  * M3-B: cap for both `finishedTaskIds` and `pendingCancelled` below (each
  * gains one entry per finished/cancelled task and was never pruned) — fine
@@ -8531,10 +8491,10 @@ export interface TaskRunnerDeps {
     /** Default `requestApproval` timeout — see {@link DEFAULT_APPROVAL_TIMEOUT_MS}. */
     approvalTimeoutMs?: number;
     /**
-     * M4 Phase 3 hardening: called by `handleApprove`/`handleReject` instead of
-     * failing the task when the referenced approval turns out to be stale
-     * (see {@link NoPendingApprovalError}) — an audit-only signal, never
-     * gating any task-state decision. `create-daemon.ts` wires this to
+     * Called by `handleApprove`/`handleReject` when a decision names an
+     * approval that is not the one pending for its task (late, repeated or
+     * mistargeted) — an audit-only signal, never gating any task-state
+     * decision. `create-daemon.ts` wires this to
      * `DaemonObserver.noteStaleApprovalDecision`, the same way every other
      * locally-observable daemon event reaches the audit log/`tasks --follow`.
      * Optional so a caller that doesn't care about this audit trail (e.g. a
@@ -9280,66 +9240,33 @@ export declare class TaskRunner {
      */
     private handleSteer;
     /**
-     * Daemon-side shared out-of-band ApprovalChannel, exposed through the
-     * control socket's approvals.request method for custom adapters. Bundled
-     * Claude no longer uses it. The separate needs_approval event path remains
-     * available to adapters that expose a pause through their event stream.
+     * The one approval entry point: `RuntimeOperationStartInput.approvalChannel`
+     * is this method bound to its task, and the control socket's
+     * `approvals.request` calls it for custom adapters.
      *
      * Sends `task.await_approval` (protocol §5), registers a fresh entry in
      * `deps.approvalRegistry`, and races it against `deps.approvalTimeoutMs`
      * (default {@link DEFAULT_APPROVAL_TIMEOUT_MS}) — an unanswered request
-     * force-resolves as a fail-closed rejection once the deadline passes. Both
-     * that timeout AND a real decision (server wire `task.approve`/
-     * `task.reject` via `handleApprove`/`handleReject` below, OR the local
-     * CLI's `approvals.resolve` in `control-server.ts`) converge on the exact
-     * same `ApprovalRegistry.resolve()` call — "first resolution wins, the
-     * loser is a clean already-resolved no-op" is `ApprovalRegistry`'s own
-     * existing guarantee, reused here rather than reimplemented.
+     * force-resolves as a fail-closed rejection once the deadline passes. The
+     * timeout and every decision (a wire `task.approve`/`task.reject` or a
+     * local `Daemon.approve`/`reject` via `handleApprove`/`handleReject`, the
+     * CLI's `approvals.resolve`, `finish()`'s cleanup, registry eviction)
+     * converge on `ApprovalRegistry.resolve()`: the first resolution wins.
      *
      * Fails closed immediately (no registry entry ever created) for a `taskId`
      * that isn't currently active on this device — a stale/unknown/
      * already-finished task has nothing to pause.
      *
-     * Custom adapters can request more than one approval for the same task
-     * before the first request resolves. Before the queue was introduced,
-     * `active.pendingApprovalId = approvalId` above was unconditional — a
-     * second concurrent call for the same task silently overwrote the first
-     * call's id, so only the LATEST request was ever wire-resolvable
-     * (`ctx.approvalChannel.resolve`, below, and any server `task.approve`/
-     * `task.reject`, both resolve by looking up `active.pendingApprovalId`);
-     * every earlier one could only ever time out.
-     *
-     * Fix: only ONE approval per task is ever actually DISPATCHED (registered
-     * in `approvalRegistry` + `task.await_approval` sent + its own timeout
-     * window running) at a time — see `dispatchApproval` below. A second
-     * (third, ...) concurrent call for a task that already has one dispatched
-     * queues (FIFO, `active.approvalQueue`) instead of overwriting anything,
-     * and is only dispatched — with its OWN fresh approvalId and its OWN
-     * timeout window starting at THAT dispatch, not at this call's arrival —
-     * once the currently-dispatched one resolves (see
-     * `dispatchNextQueuedApproval`). The MCP callers on the other end are
-     * already independently blocked, each awaiting its own `requestApproval`
-     * promise, so this added latency for a queued request is transparent to
-     * them: nothing here changes what claude itself observes beyond "the
-     * answer took a bit longer." Bounded by
+     * Only ONE approval per task is DISPATCHED (registered +
+     * `task.await_approval` sent + its own timeout window running) at a time,
+     * so a decision always names exactly one pending id. A further concurrent
+     * call queues (FIFO, `active.approvalQueue`) and is dispatched — with its
+     * OWN approvalId and timeout window — once the dispatched one resolves
+     * (`dispatchNextQueuedApproval`). Bounded by
      * {@link MAX_PENDING_APPROVALS_PER_TASK}: a request arriving once this
-     * task's queue is already full is rejected fail-closed immediately,
-     * mirroring the unknown/inactive-taskId case above.
-     *
-     * C1 (cross-model review, P1): `onOrigin`, if supplied, is invoked
-     * synchronously — strictly BEFORE this method's own returned promise
-     * resolves — with the `ApprovalOrigin` (`'wire' | 'local'`) the eventual
-     * decision actually resolved through (see `ApprovalRegistry.resolve`'s own
-     * `origin` parameter). Purely additive/internal: every existing caller
-     * (`create-daemon.ts`'s control socket and this file's
-     * own tests) omits it and observes exactly the same `{approved, reason}`
-     * resolution as before. `pump()`'s dormant `needs_approval` branch is the
-     * one caller that supplies it, to decide whether it still needs to
-     * forward the decision into `active.session.resolveApproval()` itself —
-     * see that branch's own doc comment for why origin can't simply ride
-     * along on the resolved value instead.
+     * task's queue is full is rejected fail-closed immediately.
      */
-    requestApproval(taskId: string, summary: string, onOrigin?: (origin: ApprovalOrigin) => void): Promise<{
+    requestApproval(taskId: string, summary: string): Promise<{
         approved: boolean;
         reason?: string;
     }>;
@@ -9352,13 +9279,6 @@ export declare class TaskRunner {
      * (`requestApproval`, nothing else pending for this task) or from
      * `dispatchNextQueuedApproval` once the previously-dispatched request for
      * this same task resolves.
-     *
-     * C1: `onOrigin` — see `requestApproval`'s own doc comment — is forwarded
-     * verbatim from whichever caller dispatched this (directly, or via
-     * `QueuedApprovalRequest.onOrigin` once `dispatchNextQueuedApproval` pulls
-     * it off the queue) and invoked from the registered `onResolve` callback
-     * below, BEFORE `resolve(...)` — so it always fires strictly before this
-     * method's own returned promise settles.
      */
     private dispatchApproval;
     /**
@@ -9386,105 +9306,17 @@ export declare class TaskRunner {
      */
     private dispatchNextQueuedApproval;
     /**
-     * Acceptance finding 1 (dormant `needs_approval` branch bypassing the
-     * approval registry): resolves whatever `deps.approvalRegistry` entry
-     * `pendingId` names (if any — a caller passes `undefined` when nothing was
-     * pending to begin with), tagged `'wire'` — the same origin
-     * `ctx.approvalChannel.resolve` already uses for a server-sent
-     * `task.approve`/`task.reject` (see `ApprovalOrigin`'s own doc comment:
-     * `'wire'` is what keeps `sendApprovalResolved` from echoing
-     * `task.approval_resolved` back to a server that already knows this
-     * decision, since it sent it).
-     *
-     * Needed because `active.session.resolveApproval()` is adapter-defined:
-     * - A channel-based session (claude) already resolves this exact registry
-     *   entry itself, via `ctx.approvalChannel.resolve` (`handleOffer` above)
-     *   — by the time this runs, that entry is already gone, so this call
-     *   throws `ApprovalNotFoundError`, swallowed below: the same
-     *   first-resolution-wins race every other caller of `.resolve()` in this
-     *   file already treats as benign (see e.g. `dispatchApproval`'s own
-     *   timeout branch).
-     * - A stream-based session (the dormant `needs_approval` path in `pump()`,
-     *   now dispatched via `requestApproval` exactly like a real out-of-band
-     *   approval) resolves ONLY through its own in-process `resolveApproval()`
-     *   call — nothing else ever touches `deps.approvalRegistry` for it, so
-     *   without this call its registry entry and `active.pendingApprovalId`
-     *   would otherwise linger until this approval's own timeout (or the task
-     *   finishing) instead of clearing the moment the decision actually lands
-     *   — which would leave any OTHER approval queued behind it
-     *   (`active.approvalQueue`) stuck waiting for that same timeout.
-     *
-     * Called from `handleApprove`/`handleReject` AFTER `active.session
-     * .resolveApproval()` has already been given the decision — never before,
-     * since for the channel-based case that call is what actually resolves
-     * the registry entry `pendingId` names.
-     *
-     * CRITICAL follow-up to finding 1 above: `pendingId` is a required
-     * parameter — deliberately NOT read from `active.pendingApprovalId` inside
-     * this method (indeed, this method no longer takes `active` at all). For a
-     * channel-based session (claude), the `await active.session
-     * .resolveApproval()` in `handleApprove`/`handleReject` BELOW THIS CALL is
-     * exactly what synchronously drives `ctx.approvalChannel.resolve` ->
-     * `approvalRegistry.resolve(A)` -> A's own `onResolve`
-     * (`dispatchApproval` above) -> `dispatchNextQueuedApproval` — and that
-     * last step, still inside the SAME synchronous call and therefore still
-     * strictly BEFORE the caller's own `await` settles, dispatches the next
-     * queued approval (B) and reassigns `active.pendingApprovalId = B`. A
-     * caller that read `active.pendingApprovalId` only AFTER that `await`
-     * returned (as this method itself used to, before it took `pendingId` as a
-     * parameter) would therefore observe B, not A — resolving B (silently,
-     * with A's decision: an auto-approve or a force-reject of an approval no
-     * one ever actually decided) instead of the already-gone entry for A this
-     * call is actually meant to (harmlessly) no-op against. Callers now
-     * capture the target id BEFORE that await (`handleApprove`/`handleReject`
-     * below) so this can only ever be asked to resolve the id it was meant to
-     * all along. See `task-runner-approval.test.ts`'s channel-routing
-     * regression test for this exact interleaving reproduced end to end.
-     */
-    private clearPendingApproval;
-    /**
-     * Protocol §5 approval flow: the server's own state already moved
+     * Protocol §5: the server's own state already moved
      * `AwaitApproval -> Running` before this best-effort notification arrives
-     * (§4) — resuming the session is what makes `task.progress` continue.
-     *
-     * M4 Phase 3 hardening (orchestrator-directed fix): a wire `task.approve`
-     * can legitimately arrive AFTER a different, faster path (a racing local
-     * `approvals.resolve` over the control socket, or this exact message
-     * redelivered) already resolved the SAME approval — `ApprovalRegistry`'s
-     * own "first resolution wins" guarantee means `session.resolveApproval()`
-     * throws {@link NoPendingApprovalError} for that loser, not because
-     * anything is actually wrong. Before this fix, ANY thrown error here
-     * (stale or genuine) failed the whole task — for the stale case that
-     * meant a task the winning path had ALREADY correctly resumed (and which
-     * may go on to complete normally) got marked `Failed` anyway, purely
-     * because a second, now-meaningless notification arrived late. Stale is
-     * now an audit-only no-op; a genuine failure (the session itself
-     * couldn't resume for some real reason) still fails the task exactly as
-     * before.
+     * (§4). Resolving the registry entry hands the decision to the session
+     * that requested it.
      */
     private handleApprove;
     /**
-     * Protocol §5 approval flow: the server's own state already moved
+     * Protocol §5: the server's own state already moved
      * `AwaitApproval -> Failed` before this best-effort notification arrives
-     * (§4) — the daemon's job is just to stop the session and prove it via
-     * `task.fail`.
-     *
-     * M4 Phase 3 hardening (orchestrator-directed fix): same race as
-     * `handleApprove` above, but the pre-fix bug here was worse — this method
-     * unconditionally interrupted the session and sent `task.fail` regardless
-     * of whether `resolveApproval` even threw, so a stale/late wire
-     * `task.reject` (the local CLI, or a racing wire approve, already
-     * resolved this exact approval a different way) would tear down and fail
-     * a task that was already correctly approved and possibly still running
-     * fine. Now: a {@link NoPendingApprovalError} short-circuits to an
-     * audit-only no-op BEFORE the interrupt/fail/finish sequence — nothing
-     * about this task's state is touched. Any OTHER outcome (success, or a
-     * genuine non-staleness error) falls through to the existing
-     * interrupt+`task.fail`+finish sequence unchanged: the server's own
-     * record already moved `AwaitApproval -> Failed` for a REAL reject
-     * (§4's "server state is authoritative on its own action" rule), so the
-     * daemon must still conform to that regardless of whether telling the
-     * session about it succeeded.
+     * (§4) — the daemon resolves the approval, stops the session and proves it
+     * via `task.fail`.
      */
     private handleReject;
     /**
@@ -12999,7 +12831,7 @@ export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unav
 export interface RuntimeCapabilities {
     /** Supports display-only Agent message drafts. Omission means unsupported. */
     readonly messageDraft?: boolean;
-    /** Local native interaction support only; omission is unsupported. Not the remote boolean approval lane. */
+    /** Local native interaction support only; omission is unsupported. Not the approval channel. */
     readonly nativeInteractions?: NativeInteractionCapabilities;
     /** Local adapter advertisement; no new protocol field or capability vocabulary. */
     readonly durablePi?: boolean;
@@ -13012,13 +12844,10 @@ export interface RuntimeCapabilities {
      */
     readonly mcpToolsets?: boolean;
     /**
-     * Whether this adapter can genuinely pause a running session on
-     * `needs_approval` and resume it from an out-of-band decision — i.e.
-     * whether {@link Session.resolveApproval} really resolves rather than
-     * throwing. This is the ONLY source of truth for the wire's
-     * `RuntimeInfo.capabilities.approvalInteractive` (`daemon/
-     * create-daemon.ts`'s `toRuntimeInfoCapabilities`); the daemon no longer
-     * hardcodes a value.
+     * Whether this adapter's sessions call
+     * {@link RuntimeOperationStartInput.approvalChannel}'s `request` and wait
+     * for the decision. Only such an adapter is handed the channel. It is also
+     * the sole source of the wire's `RuntimeInfo.capabilities.approvalInteractive`.
      *
      * Required, deliberately: a new adapter (or a test fake) that forgets to
      * declare it fails to compile rather than silently defaulting to a claim
@@ -13070,19 +12899,20 @@ export interface McpToolsetReloadReceipt {
     toolsets: readonly Readonly<McpToolsetStatus>[];
 }
 /**
- * Adapter-agnostic out-of-band channel handed to prepared operations by TaskRunner.
- * The shared registry resolves one pending approval for this task and rejects
- * when none is pending. Claude no longer consumes this channel; third-party
- * adapters and the daemon's generic needs_approval/control path may use it.
+ * The one way a session asks for approval. TaskRunner hands it only to an
+ * adapter that declares `approvalInteractive: true`.
  */
 export interface ApprovalChannel {
-    taskId: string;
-    storeDir: string;
-    productId: string;
-    /** Default wait (ms) before the daemon force-resolves an unanswered approval request as a fail-closed rejection — see `TaskRunner.requestApproval`. */
-    timeoutMs: number;
-    /** Resolve the single currently-pending out-of-band approval for this task. Rejects if none is pending right now. */
-    resolve(approved: boolean, reason?: string): Promise<void>;
+    /**
+     * Sends `task.await_approval` for this task and waits for the decision: a
+     * wire `task.approve`/`task.reject`, a local `Daemon.approve`/`reject` or
+     * `approvals.resolve`, or a fail-closed rejection on timeout, task finish or
+     * eviction. The session resumes or stops its runtime from the result.
+     */
+    request(summary: string): Promise<{
+        approved: boolean;
+        reason?: string;
+    }>;
 }
 /**
  * Display-only text for the daemon's Agent message draft lane. It is not an
@@ -13129,20 +12959,6 @@ export interface Session {
      * semantics.
      */
     close(): Promise<void>;
-    /**
-     * Resolve a session paused on `needs_approval` (protocol §5). The
-     * server's own state has already moved by the time this is called (§4 —
-     * `task.approve`/`task.reject` are best-effort notifications, not
-     * requests awaiting a reply): `approved: true` must make the session
-     * resume producing events (`task.progress` continuing is the proof);
-     * `approved: false` means the caller will immediately follow up with
-     * `interrupt()` + `close()` and report `task.fail` — an adapter that has
-     * no notion of `needs_approval` at all (i.e. never emits one) should
-     * throw a descriptive error here rather than silently no-op, since a
-     * caller receiving `task.approve`/`task.reject` for one of its tasks
-     * implies something upstream expected approval support that isn't there.
-     */
-    resolveApproval(approved: boolean, reason?: string): Promise<void>;
     /**
      * Runtime output this session could not turn into `events`, as counts for
      * the whole session up to `close()`. The daemon reads it once, after
@@ -13388,7 +13204,11 @@ interface RuntimeOperationStartBase {
     readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
     /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
     readonly mcpToolsetTools?: McpToolsetToolObservation;
-    /** Optional, adapter-agnostic out-of-band approval channel. */
+    /**
+     * Present only when the adapter declares `approvalInteractive: true`. A
+     * request made before `start()` returns waits until the task is active.
+     * `start()` must return its Session before awaiting the request's decision.
+     */
     readonly approvalChannel?: ApprovalChannel;
 }
 /** The ordinary start: a resolved instruction the runtime turns into its own first request. */

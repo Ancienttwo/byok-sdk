@@ -21,7 +21,6 @@ import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../ty
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home';
 import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers';
 import type { AgentTerminalCause } from '../agent-session-handoff-store';
-import type { ApprovalOrigin } from '../approvals';
 import type { BlobResolver } from '../blob-client';
 import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-record';
 import { ProgressBatcher } from '../progress-batcher';
@@ -135,7 +134,7 @@ export interface ActiveTask {
   summaryParts: string[];
   /**
    * The FINAL text run only: every `progress` text emitted after the last
-   * tool interaction (`tool_use` / `tool_result` / `needs_approval`), which
+   * tool interaction (`tool_use` / `tool_result`), which
    * reset it. `summaryParts` above stays the whole run's concatenation and
    * remains what `task.complete.summary` carries; this narrower slice is
    * what the DAEMON-authored required Agent message publishes, so the
@@ -162,17 +161,9 @@ export interface ActiveTask {
    * task, if any — set by `requestApproval`/`dispatchApproval`, cleared once
    * resolved (by a real decision or by the timeout). `undefined` whenever
    * nothing is dispatched right now — including while `approvalQueue` below
-   * is non-empty but hasn't been dispatched yet. See `requestApproval` and
-   * `RuntimeOperationStartInput.approvalChannel.resolve`'s doc comments.
+   * is non-empty but hasn't been dispatched yet. See `requestApproval`.
    */
   pendingApprovalId?: string;
-  /**
-   * The approval a `Daemon.approve`/`reject` call is deciding right now. The
-   * registry resolves it as `'wire'`, so `dispatchApproval`'s callback reads
-   * this to report the local decision before it dispatches the next queued
-   * approval.
-   */
-  localApprovalDecision?: string;
   /**
    * M4 Phase 4 (fold-in from the P3 gate): FIFO queue of `requestApproval`
    * calls for this SAME task that arrived while another one was already
@@ -276,12 +267,6 @@ export interface ClaimedAgentFailureContext {
 export interface QueuedApprovalRequest {
   summary: string;
   resolve: (result: { approved: boolean; reason?: string }) => void;
-  /**
-   * C1 (cross-model review, P1): forwarded verbatim to `dispatchApproval`
-   * once this request is actually dispatched (`dispatchNextQueuedApproval`)
-   * — see `requestApproval`'s own doc comment for why this exists at all.
-   */
-  onOrigin?: (origin: ApprovalOrigin) => void;
 }
 
 export type PickResult =

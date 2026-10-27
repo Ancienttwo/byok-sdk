@@ -39,7 +39,6 @@ const RUNTIME_EVENTS: readonly AgentEvent[] = [
   { type: 'tool_use', tool: '/private/path/tool', input: { prompt: TRAJECTORY, env: { SECRET: TRAJECTORY }, argv: [TRAJECTORY] } },
   { type: 'tool_result', tool: 'bash', isError: false, output: { preview: { head: 'HEAD-BYTES', tail: 'TAIL-BYTES' } }, spill: SPILL },
   { type: 'artifact', name: 'report.md', contentType: 'text/markdown' },
-  { type: 'needs_approval', summary: TRAJECTORY },
   { type: 'error', message: TRAJECTORY },
 ];
 

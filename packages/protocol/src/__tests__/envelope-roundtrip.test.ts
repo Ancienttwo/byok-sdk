@@ -448,7 +448,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
             { type: 'progress', text: 'reading files' },
             { type: 'tool_use', tool: 'bash', input: { cmd: 'ls -la' } },
             { type: 'tool_result', tool: 'bash', output: { exitCode: 0 } },
-            { type: 'needs_approval', summary: 'about to delete a file' },
             { type: 'turn_end' },
             { type: 'error', message: 'transient network error' },
             // Additive `usage` variant (partial subset — runtimes report

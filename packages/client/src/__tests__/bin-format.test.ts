@@ -26,7 +26,6 @@ describe('bin/format: formatAgentEvent', () => {
     expect(formatAgentEvent({ type: 'artifact', name: 'out.txt', contentType: 'text/plain' })).toBe(
       'artifact: out.txt (text/plain)',
     );
-    expect(formatAgentEvent({ type: 'needs_approval', summary: 'needs a human' })).toBe('needs_approval: "needs a human"');
     expect(formatAgentEvent({ type: 'turn_end' })).toBe('turn_end');
     expect(formatAgentEvent({ type: 'error', message: 'boom' })).toBe('error: "boom"');
     expect(formatAgentEvent({ type: 'usage', inputTokens: 10, outputTokens: 5, totalTokens: 15 })).toBe(

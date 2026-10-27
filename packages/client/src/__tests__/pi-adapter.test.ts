@@ -820,8 +820,7 @@ const __executionScratch = await testExecutionScratch();
       resume: true,
       mcpToolsets: true,
       messageDraft: true,
-      // S0/H-002: pi has no needs_approval notion at all
-      // (`PiSession.resolveApproval` throws unconditionally).
+      // pi never requests approval, so it is never handed the approval channel.
       approvalInteractive: false,
     });
   });

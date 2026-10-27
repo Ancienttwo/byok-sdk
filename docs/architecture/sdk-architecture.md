@@ -697,12 +697,16 @@ RPC 面据实是 6 个方法（`packages/client/src/daemon/create-daemon.ts:979-
 
 没有独立的 `unpair` 方法，`bin/commands/unpair.ts` 复用 `shutdown` RPC 再清理本地身份。POSIX 依赖 0700/0600；Windows 通过 `icacls` 设置 restrictive DACL，失败抛 `SecureDirHardeningError`，不会继续写入未保护的 device/control secrets。
 
-### 5.2 共享审批 seam 与 Claude interrupt
+### 5.2 审批通道与 Claude interrupt
 
-Claude 的 confirm/approval MCP 路径已删除，三家 bundled adapter 均拒绝
-confirm。`ApprovalChannel`、`needs_approval`、daemon 审批队列与 control 协议
-继续服务 custom adapter；它们不意味着 Claude 仍可交互审批。registry 保留
-approvalId 匹配、超时拒绝与 first-resolution-wins。
+审批只有一个入口、一个解决点。入口是 `TaskRunner.requestApproval`：daemon 只给
+声明 `approvalInteractive: true` 的 adapter 传 `approvalChannel`，session 调
+`approvalChannel.request(summary)` 等 `{ approved, reason? }`，再自己恢复或停下
+runtime；control 协议的 `approvals.request` 走同一个方法。解决点是 daemon 的审批
+登记表：wire `task.approve`/`task.reject`、本地 `Daemon.approve`/`reject`、CLI
+`approvals.resolve`、超时、任务收尾与驱逐都在这里解决，保留 approvalId 匹配、超时
+拒绝与 first-resolution-wins。`Session` 没有审批方法，`AgentEvent` 也不承载审批。
+三家 bundled adapter 都声明 `approvalInteractive: false`，拿不到这个通道。
 
 Claude interrupt 通过 stream-json `control_request` 发出；transport 按
 request_id 匹配 ACK，不依赖事件消费者。成功 ACK 保留会话，1 秒内未确认则
