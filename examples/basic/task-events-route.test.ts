@@ -89,6 +89,31 @@ describe('GET /api/tasks/:taskId/events', () => {
     expect(calls).toEqual(['feed-a.3', undefined]);
   });
 
+  it('drops replayed states stamped before the snapshot when the fallback follows a feed with history', async () => {
+    const history: TaskEventEntry[] = [
+      { cursor: 'feed-b.0', event: { kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' } },
+      { cursor: 'feed-b.1', event: { kind: 'state', state: 'AwaitApproval', at: '2026-10-27T00:00:03.000Z' } },
+      { cursor: 'feed-b.2', event: { kind: 'agent', event: { type: 'progress', text: 'earlier line' } } },
+      { cursor: 'feed-b.3', event: { kind: 'state', state: 'Running', at: SNAPSHOT.updatedAt } },
+      { cursor: 'feed-b.4', event: { kind: 'state', state: 'Complete', at: '2026-10-27T00:00:09.000Z' } },
+    ];
+    const { tasks } = scripted(SNAPSHOT, [new TaskEventsUnavailableError('task-1', 'cursor_unknown'), history]);
+    const response = await app(tasks).request('/api/tasks/task-1/events', { headers: { 'Last-Event-ID': 'feed-a.3' } });
+    expect(await messages(response)).toEqual([
+      { event: { kind: 'state', state: 'Running', at: SNAPSHOT.updatedAt } },
+      { id: 'feed-b.2', event: history[2]!.event },
+      { id: 'feed-b.3', event: history[3]!.event },
+      { id: 'feed-b.4', event: history[4]!.event },
+    ]);
+  });
+
+  it('keeps every state when the browser resumes from a known cursor', async () => {
+    const old: TaskEventEntry = { cursor: 'feed-a.1', event: { kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' } };
+    const { tasks } = scripted(SNAPSHOT, [[old]]);
+    const response = await app(tasks).request('/api/tasks/task-1/events', { headers: { 'Last-Event-ID': 'feed-a.0' } });
+    expect(await messages(response)).toEqual([{ id: 'feed-a.1', event: old.event }]);
+  });
+
   it('sends the pending approval with the current state when the fallback finds the task waiting', async () => {
     const waiting = { ...SNAPSHOT, state: 'AwaitApproval', pendingApprovalId: 'appr-7' } as TaskSnapshot;
     const { tasks } = scripted(waiting, [new TaskEventsUnavailableError('task-1', 'cursor_unknown'), []]);

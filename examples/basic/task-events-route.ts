@@ -10,8 +10,9 @@
 //   only right after it dispatches a task.
 // - When the cursor is unknown but this instance's feed already holds events
 //   (a forged cursor, or a second reader reattached the task after a restart),
-//   the fallback sends the current state and then replays the retained feed,
-//   so older states and lines can repeat before the stream reaches now.
+//   the fallback sends the current state and then replays the retained feed.
+//   It drops replayed states stamped before that snapshot, but older agent
+//   lines repeat, and so can a state from the snapshot's own millisecond.
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { TaskEventsUnavailableError, type ByokServer } from '@byok-sdk/server';
@@ -24,9 +25,12 @@ export function taskEventsRoute(byok: { tasks: Pick<ByokServer['tasks'], 'get' |
     return streamSSE(c, async (stream) => {
       const abort = new AbortController();
       stream.onAbort(() => abort.abort());
-      const follow = async (after?: string) => {
+      // `since` is the snapshot already sent. Feed and snapshot times come from
+      // the same server clock, and a state stamped earlier is history.
+      const follow = async (after?: string, since?: string) => {
         const options = after === undefined ? { signal: abort.signal } : { after, signal: abort.signal };
         for await (const { cursor, event } of byok.tasks.events(taskId, options)) {
+          if (since !== undefined && event.kind === 'state' && event.at < since) continue;
           await stream.writeSSE({ id: cursor, data: JSON.stringify(event) });
         }
       };
@@ -48,7 +52,7 @@ export function taskEventsRoute(byok: { tasks: Pick<ByokServer['tasks'], 'get' |
             await stream.writeSSE({ data: JSON.stringify({ kind: 'await_approval', summary: `approval ${approvalId} is pending`, approvalId }) });
           }
         }
-        if (error.reason === 'cursor_unknown') await follow();
+        if (error.reason === 'cursor_unknown') await follow(undefined, snapshot?.updatedAt);
       }
     });
   };
