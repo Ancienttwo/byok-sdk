@@ -1,9 +1,11 @@
 # Host upgrade to 0.30.2
 
 This page lists what a Host must do to move from 0.29.x, 0.30.0 or 0.30.1 to
-0.30.2 (#978). It covers only changes merged to `main`. The CHANGELOG is the
-authority: this page summarizes the 0.30.2, 0.30.1, 0.30.0 and 0.29.0
-sections, and links to them. When the two disagree, the CHANGELOG wins.
+0.30.2 (#978). Its fixed source is tag `v0.30.2`, not moving `main` or
+Unreleased. The [CHANGELOG at that revision](https://github.com/Ancienttwo/byok-sdk/blob/b1469e5a236e99736c9a63b75fe845f102f81dc0/CHANGELOG.md)
+is the behavior authority: this page summarizes its 0.30.2, 0.30.1,
+0.30.0 and 0.29.0 sections. When the two disagree, that CHANGELOG wins.
+Source paths and API names below refer to this revision.
 
 This page is an upgrade checklist. It does not say that 0.30.2, or a Host on
 it, is ready for production. The product loop gate is #977.
@@ -22,6 +24,10 @@ The exception does not change the general policy or waive validation,
 publication authorization or registry readback.
 
 ## Fixed revisions
+
+The [GitHub publication record](https://github.com/Ancienttwo/byok-sdk/releases/tag/v0.30.2)
+records publication and registry readback on 2026-10-26. Pin 0.30.2 even if
+`latest` later moves. Publication does not complete the checklist below.
 
 All nine public packages move together. Pin each one to exactly 0.30.2.
 
@@ -42,10 +48,35 @@ All nine public packages move together. Pin each one to exactly 0.30.2.
 | Git tag | `v0.30.2` |
 | Release commit SHA | `b1469e5a236e99736c9a63b75fe845f102f81dc0` |
 
-The install command for each install set is in the README
-[install sets](../../README.md#install-sets) section. That block is checked
-by `scripts/release/install-matrix.test.mjs`, so this page links to it and
-does not copy it.
+Verify a source checkout with `git rev-parse 'v0.30.2^{commit}'`; the result
+must equal the release commit above. The annotated tag object is
+`ea8ba2f8fd035d172cf3c3179ab9160b40d4a7aa`; it is not the source commit.
+
+### Install matrix at 0.30.2
+
+Use Node >=24.22.1 for Node hosts and daemons. The install command for each
+composition (Self-hosted, Hosted / Cloudflare, Worker) is in the
+[README install sets at v0.30.2](https://github.com/Ancienttwo/byok-sdk/blob/b1469e5a236e99736c9a63b75fe845f102f81dc0/README.md#install-sets).
+`scripts/release/install-matrix.test.mjs` checks that block, so this page
+does not copy it. Pin every direct SDK dependency to exactly 0.30.2 (npm's
+`--save-exact` keeps npm from saving a caret range), keep the resolved SDK
+graph on 0.30.2, and retain the lockfile.
+
+The Worker set covers Agent sessions in Durable Objects only; it is not a
+complete hosted Postgres Host. A hosted Worker using Postgres imports
+`cloud-dataplane/runtime` through Hyperdrive; migrations run separately in
+Node using `cloud-dataplane`, not inside the Worker. With the Hosted set, the
+daemon is a separate package that installs `client` at 0.30.2.
+
+### Downstream example
+
+AiphaBee's `packages/byok-host/package.json`, at AiphaBee commit `78e80de3`,
+already pins `client`, `core`, `keys`, `protocol` and `server` to exactly
+0.30.2. Its upgrade PR 378 and the [reported macOS smoke](https://github.com/Ancienttwo/byok-sdk/issues/978#issuecomment-6417463835)
+are downstream evidence, not proof of a complete walkthrough here. That
+report leaves the installed-device backup/restore rehearsal open; step 6
+records the Windows forced-kill result. This playbook changes no downstream
+package.
 
 The private `examples/` code is not part of this upgrade scope. Its breaking
 changes in the CHANGELOG apply only to code that copies those examples.
@@ -56,7 +87,7 @@ The envelope wire stays v3 (`PROTOCOL_VERSION = 3`). Since `v0.30.1`, the
 envelope types, `CAPABILITY_FLAGS` and the wire additions are unchanged:
 `packages/protocol/src/wire-additions.ts` and `capability-constants.ts` have
 no diff, and the diff of `version.ts` is comments only. Wire v4 (#925) comes
-after 0.30.2.
+after this fixed revision and is outside this playbook.
 
 Two things outside the envelope wire change:
 
@@ -74,7 +105,7 @@ a daemon.
 
 The migration files in `deploy/sql/` are the authority. The cloud-dataplane
 build copies them to the package's `dist/sql`, and `migrationsDir()` returns
-that directory. `git diff --name-status v0.29.0 main -- deploy/sql` lists
+that directory. `git diff --name-status v0.29.0 v0.30.2 -- deploy/sql` lists
 three added files and nothing else:
 
 | File | Adds | First release |
@@ -230,9 +261,14 @@ list the full upgrade steps.
 - `TenantStores` gains the required `objects` (only code that builds a
   `TenantStores` literal).
 - The device-proof `requestId` is single-use on the E2EE member writes; a
-  reuse with another binding gets 409 `proof_request_conflict`.
+  reuse with another binding or a value above 120 characters gets 409
+  `proof_request_conflict`. An identical replay returns its recorded result.
   `registerDeviceMemberKey` takes the proof, and `E2eeMemberChainWriter` is
   renamed `E2eeMemberWriter`.
+- Custom `E2eeMemberStore` implementations accept the append/put `proof`,
+  registration `request`, `request_conflict`, append `shreds` and put
+  `scope_shredded` results. `InMemoryE2eeMemberStore` takes the composition's
+  `RequestReceiptStore`; see the [0.30.1 store contract](v0.30.1.md#upgrade-notes-for-hosts-and-deployments).
 - pi-durable 1.4.0 migrates a SQLite store to schema version 2 when it
   opens. The client and cloud-do stores cannot go back to a build on Pi
   1.3.0 after that.
@@ -247,6 +283,9 @@ list the full upgrade steps.
   `entries[].event` or an approval `summary` narrows first.
 - `LocalTaskJournal` gains the required `appendWithheldOffer` (a Host that
   injects its own journal implements it, and the 0.30.2 methods above).
+- A custom `TaskRedactionStore` removes the references in the required
+  `TaskRedactionStoreInput.releaseObjectReferences` before deleting task
+  objects, so redacted sealed ciphertext is not retained.
 - Plaintext hosted entries refuse `sealing` and `sealed`.
 - On macOS, the Agent memory helper refuses a mount below the Agent home.
 
@@ -257,20 +296,34 @@ list the full upgrade steps.
 
 ## Checklist
 
-1. **Back up.** Back up the Postgres database, or the embedded server's
-   SQLite file and the daemon's store directory. Keep a copy of the current
+Run this first in an isolated environment. Record the operator, date,
+Host/daemon versions, starting migration ledger and evidence links. Stop
+on any failed gate; a package pin alone does not establish acceptance.
+
+1. **Back up.** Pause new dispatches and drain or explicitly settle in-flight
+   tasks before stopping writers for a consistent backup. Back up the
+   Postgres database, or the embedded server's SQLite store, together with
+   the daemon's store directory and any Pi Durable/DO storage. Use a
+   SQLite-aware backup or stop all writers and preserve its WAL state;
+   copying only an active `.db` file is insufficient. Keep a copy of the current
    daemon config and Host composition: a 0.30.2 daemon refuses
    `hostedJournal`, and a rolled-back 0.30.1 daemon journals only with it.
-   Record the current pinned versions of all nine packages.
+   Record the previous exact package versions, lockfile, application
+   artifact and source SHA; retain the referenced object-store bytes and
+   device key material securely with the recovery set.
 2. **Pre-check.** On a 0.30.0 or 0.30.1 store, run the `rotate` count above.
    Stop if it is not 0.
-3. **Dry run.** Restore the backup into a scratch database. Run the
-   installed 0.30.2 package's migrations against it, with
-   `deploy/scripts/migrate` or `migrate(pool, migrationsDir())`, then
-   `verifyMigrations(pool)`. Expect the files in the migration table for
+3. **Dry run.** Restore the backup into a disposable, isolated database.
+   This rehearsal **writes to the scratch database**; the runner has no
+   `--dry-run`. Use the installed-package command below, which runs
+   `migrate(pool, migrationsDir())`, then `verifyMigrations(pool)`.
+   `deploy/scripts/migrate` instead uses the checkout's built adapter and
+   `deploy/sql`; use it only from the pinned source and verify separately.
+   Expect the files in the migration table for
    your starting version, with no checksum mismatch. For SQLite, open a copy
    of the file with the 0.30.2 server.
-4. **Upgrade the Host, then the devices.** Migrate the live database, deploy
+4. **Upgrade the Host, then the devices.** After the rehearsal and the
+   deployment owner's authorization, migrate the live database, deploy
    the Host on 0.30.2, then move daemons and web clients to 0.30.2. Remove
    `hostedJournal` from each daemon config first.
 5. **Align capabilities.** `GET /byok/capabilities` lists `e2ee.member` and
@@ -290,10 +343,23 @@ list the full upgrade steps.
    does not test it. It ends the task before the process exits, with
    `task.fail` reason `daemon shutting down: operator` and `retryable: true`
    (`packages/client/src/daemon/task-runner/lifecycle.ts`), so the restart
-   has no task to recover. A hosted Host also runs the real tenant flow in
-   `deploy/runbooks/hosted-operations.md`.
-7. **Know the rollback.** Rolling back means pinning all nine packages to
-   the previous version and restoring the kept config.
+   has no task to recover. Verify that the interrupted task's runtime did
+   not start again. On Windows, 0.30.2 fails this step when the daemon's
+   store path is an alias, such as an 8.3 short name: the second start exits
+   with `retention_root_identity_invalid` and no terminal is sent
+   ([#1030](https://github.com/Ancienttwo/byok-sdk/issues/1030); fixed in
+   0.31.0). On a store path that is not an alias, the recorded Windows
+   evidence decides the result. Use a harmless test runtime and isolated stores for the
+   forced kill. This embedded L flow does not test sealing: `createByokServer`
+   does not declare E2EE. A Host enabling sealing separately verifies the
+   capability checks above and a sealed round-trip including the plaintext
+   refusals. A hosted Host also runs the real tenant flow in
+   [hosted operations](../../deploy/runbooks/hosted-operations.md).
+7. **Know the rollback.** Pause dispatch and stop upgraded writers. Choose
+   the previous exact artifact/lockfile and config from step 1; restore all
+   participating Host, web-client and daemon packages together. Do not mix
+   a 0.30.1 Host with 0.30.2 E2EE clients. Rehearse the chosen path on copies
+   before reopening traffic, then repeat capability checks and the L smoke.
    - Postgres has no down migration. Migrations 0027 to 0029 stay; roll back
      the application only, and keep request receipts, tombstones and
      dead-letter rows. The previous version's `migrate` skips ledger rows it
@@ -315,3 +381,57 @@ list the full upgrade steps.
      `daemon.db` that 0.30.2 wrote is not verified here, beyond the
      CHANGELOG note that the refused-terminal replacement adds no table or
      column. Restore the backup from step 1 if it does not.
+   - If version 2 key packages have been written, use a consistent pre-upgrade
+     recovery set for sealed operation; an application-only rollback cannot
+     make those rows readable by 0.30.1. Restore into an isolated target and
+     reconcile post-backup tasks before switching traffic. Do not blindly
+     erase accepted work or reuse stale device key state after revocation.
+
+### Postgres rehearsal command
+
+From a Node operator package with `@byok-sdk/cloud-dataplane@0.30.2`
+installed, set `HOST_UPGRADE_SCRATCH_DATABASE_URL` to the restored scratch
+database using the operator's secret mechanism. Use a migration role whose
+access is limited to that scratch database. Do not use the live database URL.
+
+```sh
+node --input-type=module <<'NODE'
+import { createRequire } from 'node:module';
+import { createByokPool, migrate, migrationsDir, verifyMigrations } from '@byok-sdk/cloud-dataplane';
+const require = createRequire(import.meta.url);
+if (require('@byok-sdk/cloud-dataplane/package.json').version !== '0.30.2') {
+  throw new Error('Install exactly cloud-dataplane 0.30.2 before rehearsing');
+}
+const connectionString = process.env.HOST_UPGRADE_SCRATCH_DATABASE_URL;
+if (!connectionString) throw new Error('Set HOST_UPGRADE_SCRATCH_DATABASE_URL to the restored scratch database');
+const pool = createByokPool({ connectionString, max: 1 });
+try {
+  console.log(await migrate(pool, migrationsDir()));
+  console.log(await verifyMigrations(pool));
+} finally {
+  await pool.end();
+}
+NODE
+```
+
+Expect only the pending files listed above to be applied and verification
+to return without `MigrationStateMismatchError`. Rerunning against the same
+scratch database must apply no files. Preserve sanitized output with the
+starting version and backup identity. A successful empty-database migration
+does not prove that a restored existing store upgrades.
+
+### Walkthrough evidence
+
+- [ ] **[unverified] Maintainer walked the complete checklist** in a clean
+  environment, or linked the completed AiphaBee upgrade evidence to #978.
+- [ ] **[unverified]** Backup restored; rotate precheck and migration/open of
+  the existing-store copy passed; rollback rehearsed on that recovery set.
+- [ ] **[unverified]** Host/daemon capability alignment and the applicable
+  sealed acceptance checks passed.
+- [ ] **[unverified]** Topology L completion and forced-kill recovery passed
+  on the target platforms. On Windows, 0.30.2 fails the forced kill on an
+  aliased store path (#1030, fixed in 0.31.0).
+
+These boxes are not filled by documentation tests. The downstream macOS
+report above is attributed evidence only; this documentation change has not
+run a database migration, a live device flow or a rollback.
