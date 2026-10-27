@@ -92,4 +92,3 @@ export type {
 // Resident Node session listener; deliberately excluded from ./runtime.
 export { createPostgresMailboxWake } from './mailbox-wake';
 export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
-

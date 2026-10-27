@@ -3,8 +3,9 @@
 ## Unreleased
 
 - **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
-  envelope is rejected; there is no v3 reader and no negotiation. Stop the
-  v3 side, then start server and client together on a new store; see
+  envelope is rejected; there is no v3 reader and no negotiation. Drain the
+  v3 deployment, stop it, then start the v4 server side and daemons together
+  on a new store; see
   [the wire v4 upgrade note](docs/releases/925-wire-v4.md).
   - Every offer is Agent-bound. `conn.ack` and the runtime-only offers
     (`task.offer`, `task.offer_with_toolsets`, `task.offer_sealed` and

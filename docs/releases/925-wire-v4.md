@@ -176,8 +176,11 @@ delete rows.
 
 ## Coordinated upgrade
 
-1. Stop the v3 Host and the v3 daemons.
-2. Start the v4 embedded server or hosted cloud on a new store, then the v4
+1. Drain the v3 deployment: stop new submissions, let every pending mailbox
+   row be processed and acknowledged, every in-flight execution reach a
+   terminal, and every daemon pending terminal be acknowledged by the server.
+2. Stop the v3 Host and the v3 daemons.
+3. Start the v4 embedded server or hosted cloud on a new store, then the v4
    daemon clients. A Topology L application upgrades both sides together.
 
 A Host that keeps offer inputs of its own, for example a ledger of frozen

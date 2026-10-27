@@ -82,12 +82,6 @@ describe('task.offer gates: equal to the last v3 release (Q2)', () => {
     'task.offer_for_agent_sealed', 'task.offer_for_agent_with_egress_sealed', 'task.offer_for_agent_with_egress_fresh_sealed',
   ];
 
-  /**
-   * The flags v4 adds over 0.30.2 on purpose. One offer type has one
-   * `agentMemory` row, so a prepared offer's selection takes it too (a daemon
-   * advertises it with `agent-home-contract`). Stage 1 gates `harnessId` on
-   * every Agent offer (#1019).
-   */
   /** The `session` each v3 offer type meant: a v3 resume offer named it in `sessionRef`. */
   const V3_SESSION: Readonly<Record<string, 'resume' | 'fresh'>> = {
     'task.offer_for_agent': 'resume', 'task.offer_for_agent_with_egress': 'resume',
@@ -99,9 +93,16 @@ describe('task.offer gates: equal to the last v3 release (Q2)', () => {
   /** The v4 `task.offer` payload a v3 corpus offer line stands for. */
   function asV4Offer(v3Type: string, payload: Json): Json {
     const { sessionRef, ...rest } = payload;
-    return V3_SESSION[v3Type] === 'fresh' ? { ...rest, session: { mode: 'fresh' } } : { ...rest, session: { mode: 'resume', sessionRef } };
+    if (V3_SESSION[v3Type] === 'fresh') return sessionRef === undefined ? { ...rest, session: { mode: 'fresh' } } : payload;
+    return sessionRef === undefined ? rest : { ...rest, session: { mode: 'resume', sessionRef } };
   }
 
+  /**
+   * The flags v4 adds over 0.30.2 on purpose. One offer type has one
+   * `agentMemory` row, so a prepared offer's selection takes it too (a daemon
+   * advertises it with `agent-home-contract`). Stage 1 gates `harnessId` on
+   * every Agent offer (#1019).
+   */
   function knownAdditions(v3Type: string, payload: Json): string[] {
     return [
       ...(v3Type === 'task.offer_prepared' ? ['agent-memory-selection'] : []),
