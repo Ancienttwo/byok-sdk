@@ -361,19 +361,23 @@ auth, task, cancellation, mailbox, or terminal state machine: those semantics
 belong to `@byok-sdk/cloud` and its injected stores.
 
 The default composition is in-memory. `BYOK_STORE=sqlite` selects the explicit
-SQLite composition for eight durable interfaces sharing one database and
+SQLite composition for durable interfaces sharing one database and
 transaction coordinator: device directory, request receipts, task attempts,
-cancellation, mailbox, object manifests, blob metadata/grants, and blob bytes.
+cancellation, mailbox, object manifests, blob metadata/grants, blob bytes, and bounded approval timelines.
 Pairing and authentication share the device directory. Request receipts use a
 tenant/key primary key and atomic first-write-wins INSERT; immutable rows have
 no deletion/TTL path and outlive mailbox retention. Disk capacity is the first
 scaling limit; deleting receipts is not an admission strategy. Unredeemed pairing
 codes, nonces, presence and other ports remain in-memory.
 
-Schema v5 fences old writers and adds nullable harness identity to the atomic
-claim and every task read model, plus the server-local wake table. A schema 1–4
-file is refused at open, unchanged; v5 starts on a new database. See
-`packages/server/README.md`.
+Schema v6 persists the bounded approval timeline through the existing approvals
+port. Requests and decisions retain their absolute expiry and revision across
+reopen. The SQLite transaction coordinator serializes conditional host resolution
+against the exact pending source/revision; readers project from this one store.
+New files create the table atomically. Existing v6 files must have valid approval
+authority; older schema versions fail closed without migration or mutation.
+Operators preserve old files and explicitly choose a new state path/enrollment.
+See `packages/server/README.md`.
 SQLite restores durable records, not process-owned promises, subscriptions or
 provider processes. The façade accepts a pre-persisted caller taskId with an
 explicit deviceId. `tasks.offer` projects `cloud.readTaskOffer` from immutable
