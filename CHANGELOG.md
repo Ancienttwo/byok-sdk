@@ -3,8 +3,8 @@
 ## Unreleased
 
 - **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
-  envelope is rejected; there is no v3 reader and no negotiation. Drain,
-  migrate stored receipts, then upgrade server and client together; see
+  envelope is rejected; there is no v3 reader and no negotiation. Stop the
+  v3 side, then start server and client together on a new store; see
   [the wire v4 upgrade note](docs/releases/925-wire-v4.md).
   - Every offer is Agent-bound. `conn.ack` and the runtime-only offers
     (`task.offer`, `task.offer_with_toolsets`, `task.offer_sealed` and
@@ -60,44 +60,10 @@
     taskId that already exists is `agent_task_already_exists` (was
     `coordination_input_invalid`). A Host that matches on the old codes must
     match the new ones.
-  - One-shot wire v4 migration of stored state, in two steps per store. The
-    read-only preflight (`preflightPostgresWireV4Migration(pool)` in
-    `@byok-sdk/cloud-dataplane`, `preflightSqliteWireV4Migration(path)` in
-    `@byok-sdk/server`) lists the legacy tasks (offered on a removed offer
-    type) and every row with no v4 form. The migration
-    (`migratePostgresToWireV4(pool, confirmedLegacyTasks)`,
-    `migrateSqliteToWireV4(path, confirmedLegacyTasks)`) takes the confirmed
-    list back and, in one transaction, deletes every row of those tasks and
-    re-encodes the remaining offer and terminal receipts. It changes nothing
-    and throws `ReceiptMigrationUnmappableError` when a receipt has no v4
-    form, an approval was recorded without an id, or a pending v3 mailbox row
-    of another task could still reach a device; and
-    `WireV4LegacyTaskListMismatchError` when the confirmed list differs from
-    the store's. A legacy task's `task-redaction:<taskId>` audit receipt is
-    deleted with it, so a new Agent task may reuse the id;
-    `migratePostgresToWireV4` returns those receipts
-    (`deletedRedactionReceipts`: `redactedAt` and `counts`) for the
-    operator's records, and `@byok-sdk/cloud` exports
-    `taskRedactionReceiptKey`. Expired v3 dead letters are left in place:
-    `replayDeadLetter` refuses their v3 bytes with `cleanup_invalid_input`,
-    and `discardDeadLetter` still drops them. Replay or discard them before
-    the upgrade. Acked rows stay v3 bytes: within the acked retention (1 day
-    by default) a retry with the same messageId fails with an envelope
-    decoding error and delivers nothing; after it, the retry is a new
-    message. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
-    `wireV4TypeOf`, `wireV4FormOf` and `migrateWireV3Envelope`; every v3 Agent
-    offer maps to `task.offer` with its `session` derived (a resume type's
-    `sessionRef` becomes `{ mode: 'resume', sessionRef }`, a fresh or prepared
-    type gains `{ mode: 'fresh' }`, and a `task.offer_for_agent` without
-    `sessionRef` is refused `invalid_under_v4`), and each other `*_sealed`
-    type maps to its plaintext type. A stored `task.offer` with an AgentRef is
-    a v4 receipt and stays unchanged, so the migration can run again. A
-    migrated sealed offer receipt keeps ciphertext bound to its v3 type name,
-    so it no longer opens under v4; nothing in the SDK opens a stored offer
-    again. `@byok-sdk/cloud` adds the
-    store-independent half (`migrateWireV3Receipt`, `wireV4ReceiptKind`,
-    `assertWireV4MigrationConfirmed` and the types and errors above). All of
-    it ships in 0.31.x only; 0.32.0 removes it (#1017).
+  - No wire v3 state carries over. A store a v3 build wrote (embedded SQLite,
+    hosted Postgres) is not supported; a v4 deployment starts from a new
+    store. The one-shot receipt migration planned for 0.31.x is not shipped
+    (owner decision 2026-10-27: no deployment holds wire v3 data; #1017).
   - `harnessId` on every Agent offer is gated on the device's `custom-harness`
     capability, the gate the removed offers carried. Before, an Agent offer
     with `harnessId` needed only the device's declared harness inventory.

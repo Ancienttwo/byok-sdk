@@ -453,8 +453,6 @@ export {
 } from './errors';
 
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
-export { WIRE_V3_TO_V4_TYPES, migrateWireV3Envelope, wireV4FormOf, wireV4TypeOf } from './wire-v4-migration';
-export type { WireV4MigrationRefusal, WireV4MigrationResult } from './wire-v4-migration';
 export type { CreateEnvelopeOptions } from './codec';
 
 export {

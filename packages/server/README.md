@@ -299,25 +299,8 @@ does not expire SDK identity receipts. Monitor disk usage; exhaustion does not
 authorize deleting those fences.
 
 Offer and terminal receipts hold wire bytes, and a wire v4 server reads only
-v4 bytes. A SQLite file written by a v3 build needs the one-shot wire v4
-migration before a v4 server opens it (0.31.x only; 0.32.0 removes it, #1017).
-Stop the server, then:
-
-1. `await preflightSqliteWireV4Migration(path)` reads the file and returns
-   `{ legacyTasks, unmappable }`: the tasks offered on a removed offer type,
-   and every row with no v4 form (a receipt without a v4 form, or a pending
-   v3 mailbox row of another task).
-2. Review the list, then call
-   `await migrateSqliteToWireV4(path, preflight.legacyTasks)`. In one
-   transaction it deletes every row of the confirmed legacy tasks and
-   re-encodes the remaining offer and terminal receipts, returning
-   `{ migrated, unchanged, deletedTasks }`.
-
-Both take the file's exclusive ownership, so they fail while a server owns
-the file. The migration changes nothing and throws
-`ReceiptMigrationUnmappableError` when any row is unmappable, or
-`WireV4LegacyTaskListMismatchError` when the confirmed list is not exactly the
-file's legacy tasks; both errors are exported by `@byok-sdk/cloud`. See
+v4 bytes. There is no migration: a SQLite file a v3 build wrote is not
+supported, so a v4 server starts on a new file. See
 [the wire v4 upgrade note](../../docs/releases/925-wire-v4.md).
 
 ## Stats and liveness

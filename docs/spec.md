@@ -583,13 +583,9 @@ and composite primary key are validated on open. Capacity exhaustion is an
 error; deleting identity fences is not a quota strategy.
 
 Offer and terminal receipts hold wire bytes, and a wire v4 build reads only v4
-bytes. A store written by a v3 build needs the one-shot wire v4 migration
-(0.31.x only; 0.32.0 removes it, #1017) after draining and before a v4 server
-starts. On a stopped embedded store, `preflightSqliteWireV4Migration(path)`
-(`@byok-sdk/server`) lists the legacy tasks (offered on a removed offer type)
-and every row with no v4 form; `migrateSqliteToWireV4(path, confirmedLegacyTasks)`
-takes the confirmed list back, deletes those tasks' rows and re-encodes the
-rest in one transaction, or changes nothing. See
+bytes. There is no receipt migration: a store a wire v3 build wrote is not
+supported, and a v4 deployment starts from a new store (owner decision,
+2026-10-27: no deployment holds wire v3 data). See
 [the wire v4 upgrade note](releases/925-wire-v4.md).
 
 ### Bot turn outcome fragments and routine time points

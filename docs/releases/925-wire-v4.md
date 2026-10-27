@@ -155,8 +155,8 @@ other Host changes its code:
 | `TASK_OFFER_TYPES`, `isTaskOfferType`, `TaskOfferType` | `type === 'task.offer'` |
 | `isSealedMessageType`, `SealedMessageType` | `isSealedPayload(type, payload)`, `isSealableMessageType`, `SealableMessageType` |
 
-New: `SessionSelectionSchema` / `SessionSelection`, `TaskSteerSealedPayloadSchema`
-and `wireV4FormOf`. The `Task*SealedPayload` types of `task.steer` and the
+New: `SessionSelectionSchema` / `SessionSelection` and
+`TaskSteerSealedPayloadSchema`. The `Task*SealedPayload` types of `task.steer` and the
 outputs stay, as the sealed branch types. `SEALED_SPLIT_TABLE` is keyed by the
 plaintext type (`task.offer`, `task.steer` and the seven outputs); it has no
 `plainType`, and its new `marker` (`sealing` or `sealed`) names the field that
@@ -164,122 +164,26 @@ picks the sealed branch. Its `task.offer` entry forbids `preparation`.
 
 ## Stored v3 state
 
-The kernel keeps two receipt families that hold wire bytes and never expire:
-offer receipts (`task-offer:<messageId>`, `{ deviceId, type, payload }`) and
-terminal receipts (`task:<taskId>:terminal`, a v3 envelope). A v4 server
-reads only v4 bytes. Unmigrated receipts break task readback: `tasks.get`,
-`tasks.list`, `tasks.offer` and `tasks.deviceTerminal` read them through the
-offer and terminal projections.
+There is no migration. Offer and terminal receipts and mailbox rows hold wire
+bytes, and a v4 build reads only v4 bytes. A store a v3 build wrote, embedded
+SQLite or hosted Postgres, is not supported: start v4 on a new store. The
+owner chose this on 2026-10-27 because no deployment holds wire v3 data.
 
-A task offered on a removed offer type is a legacy task. It has no
-AgentRef and no v4 form, so the migration deletes it instead of mapping it.
-Every other receipt is mapped with one table, `WIRE_V3_TO_V4_TYPES`
-(`@byok-sdk/protocol`): `migrateWireV3Receipt(kind, body)`
-(`@byok-sdk/cloud`) returns `unchanged`, `migrated` (a terminal is re-encoded
-with the v4 `encodeEnvelope`, so its bytes and hash change) or `refused`.
-
-The table carries the stage 2 renames. Every v3 Agent offer type becomes
-`task.offer`, and `wireV4FormOf(v3Type, payload)` derives its `session`: a
-resume type turns `sessionRef` into `{ mode: 'resume', sessionRef }`, and a
-fresh or prepared type gains `{ mode: 'fresh' }`. A `task.offer_for_agent`
-without `sessionRef` has no v4 form and is refused `invalid_under_v4`, as is
-an offer whose payload v4 would change in any other way (for example a
-`limits` key the strict v4 `limits` does not have). Each other `*_sealed`
-type becomes its plaintext type with the payload unchanged; a sealed terminal
-receipt is re-encoded like any other.
-
-The migration can run again. A stored `task.offer` whose payload carries an
-`agentRef` is a v4 receipt: it is `unchanged` when it parses under v4. A
-stored `task.offer` without an AgentRef is a v3 runtime-only offer, which
-marks a legacy task.
-
-One gap remains. A migrated sealed offer receipt keeps its ciphertext, which
-is bound to the v3 offer type name as its family. Re-opening that historical
-sealed offer under v4 fails, because v4 opens a sealed offer under family
-`task.offer`. Nothing in the SDK opens a stored offer again.
-
-The migration runs in two steps. Each store has its own pair:
-
-| Store | Preflight | Migration |
-| --- | --- | --- |
-| Postgres (`@byok-sdk/cloud-dataplane`) | `preflightPostgresWireV4Migration(pool)` | `migratePostgresToWireV4(pool, confirmedLegacyTasks)` |
-| SQLite (`@byok-sdk/server`) | `preflightSqliteWireV4Migration(path)` | `migrateSqliteToWireV4(path, confirmedLegacyTasks)` |
-
-1. The preflight is read-only. It returns `{ legacyTasks, unmappable }`:
-   each legacy task as `{ tenantId, taskId, deviceId, type }` (`type` is
-   `null` when the offer receipt was never recorded), and every row the
-   migration cannot carry into v4.
-2. The operator reviews the list and passes `legacyTasks` back unchanged.
-   In one transaction the migration deletes every row those tasks own, then
-   re-encodes the remaining offer and terminal receipts. It returns
-   `{ migrated, unchanged, deletedTasks }`.
-
-The migration fails and changes nothing when:
-
-- the confirmed list is missing or differs from what the store holds:
-  `WireV4LegacyTaskListMismatchError` (code
-  `wire_v4_legacy_task_list_mismatch`);
-- any row is unmappable: `ReceiptMigrationUnmappableError` (code
-  `wire_v4_migration_unmappable`), whose `unmappable` lists each row.
-
-A row is unmappable when it is:
-
-- an offer or terminal receipt with no v4 form;
-- on Postgres, an approval timeline entry without the `approvalId` v4
-  requires (SQLite keeps the timeline in memory). The migration never makes
-  up an id;
-- a pending mailbox row of a non-legacy task whose bytes are not v4. A v4
-  daemon fails to decode it and its cursor stops there. Acked rows are never
-  sent again and stay until retention removes them. An expired row also
-  stays. On Postgres it is a dead letter: `replayDeadLetter` decodes it
-  under v4 and refuses its v3 bytes with `cleanup_invalid_input`, and
-  `discardDeadLetter` drops it. On SQLite nothing removes it (see
-  "Expired v3 mailbox rows on SQLite" below).
-
-Deleting a legacy task removes its offer, delivered and terminal receipts,
-its mailbox rows, its Agent message admission, its `sealed-task` object
-reference and its task attempt. On Postgres it also removes the approval and
-activity tails, the message draft, the terminal truth object reference, the
-`task.terminal` attested record and the `task-redaction:<taskId>` audit
-receipt. Object bytes are left to orphan GC. The id is then free: a new
-Agent task may reuse it. Inbound reads the redaction receipt as "this task
-was redacted" and would release a new task's sealed artifact at once, so the
-receipt cannot stay. `migratePostgresToWireV4` returns each deleted receipt
-in `deletedRedactionReceipts` (`tenantId`, `taskId`, `redactedAt`, `counts`);
-keep that list as the audit record. Only the Postgres store redacts tasks.
-Memory-projection metering receipts stay: they are keyed by Agent and epoch,
-and nothing reads them by taskId.
-
-The SQLite pair takes the file's exclusive ownership, so it fails while a
-server owns the file. Both pairs ship in 0.31.x only; 0.32.0 removes them
-(#1017).
+Pending v3 mailbox rows stop startup with the existing wire-major fences
+(`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`, `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`,
+`DaemonJournalProtocolUnsupportedError`). These checks do not rewrite or
+delete rows.
 
 ## Coordinated upgrade
 
-1. On the old SDK, stop Host enqueues. Let the daemons receive and
-   acknowledge every pending mailbox entry before you migrate; settle
-   in-flight executions and confirm every daemon pending terminal.
-2. Let every approval recorded without an id expire: wait
-   `DEFAULT_APPROVAL_TIMELINE_TTL_MS` (10 minutes) and let maintenance
-   collect the tail.
-3. On Postgres, replay or discard each dead letter before the upgrade:
-   replay it with `PostgresCloudCleanup.replayDeadLetter` while v3 devices
-   still run if the device must still get it, or delete it with
-   `discardDeadLetter`. After the upgrade a pre-v4 dead letter cannot be
-   replayed; it stays until `discardDeadLetter` drops it.
-4. Stop writers and keep a backup of the existing state.
-5. Run the preflight, review the legacy tasks and unmappable rows, then run
-   the migration with the confirmed list. If it fails, the store is
-   unchanged; resolve the listed rows and start again from the preflight.
-6. Start the v4 embedded server or hosted cloud, then v4 daemon clients. A
-   Topology L application upgrades both sides together.
+1. Stop the v3 Host and the v3 daemons.
+2. Start the v4 embedded server or hosted cloud on a new store, then the v4
+   daemon clients. A Topology L application upgrades both sides together.
 
 A Host that keeps offer inputs of its own, for example a ledger of frozen
 payloads it submits again or compares with the offer it reads back, holds
 v3 shapes: no `session`, and old type names. A v4 lane refuses them, and a
-comparison with the v4 read-back fails. Let every such intent finish before
-step 1, or migrate the ledger yourself with the same mapping
-(`wireV4FormOf`).
+comparison with the v4 read-back fails. Start such a ledger afresh as well.
 
 For AiphaBee and any other Host built on `examples/host-execution-core`:
 
@@ -288,52 +192,8 @@ For AiphaBee and any other Host built on `examples/host-execution-core`:
   types.
 - Add `session: { mode: 'fresh' }` wherever the Host builds an execution
   payload itself, test fixtures included.
-- Drain the K4 ledger: let every intent written before the upgrade end before
-  step 1. A frozen v3 input fails the v4 schema on submit, and its delivered
-  check reads back a v4 offer that differs from it.
-- Run the receipt migration before the Host reads an old task by id.
-  `tasks.get`, `tasks.offer` and `tasks.deviceTerminal` read the offer and
-  terminal receipts, and fail on unmigrated v3 bytes.
-
-Pending v3 mailbox rows also stop startup with the existing wire-major
-fences (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`,
-`POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`,
-`DaemonJournalProtocolUnsupportedError`). These checks do not rewrite or
-delete rows.
-
-### Retries of messages acked before the upgrade
-
-The migration leaves acked mailbox rows as v3 bytes. An acked row stays for
-the acked retention, 1 day by default. Within it, a retry that names the
-same messageId reads that row back and fails with an envelope decoding
-error; nothing is delivered twice. After the retention the row is gone, and
-the retry is a new message, as any retry after the retention is today.
-
-These paths read a row back by messageId:
-
-- Host operations: an offer (`executions.submit`, `dispatch`), an approval
-  decision, a steer, a scope key package notice, and a cancellation of a task
-  whose cancellation was already enqueued.
-- Device reports the cloud acknowledges: a reliable Agent egress event, a
-  content-read receipt and an Agent message publish.
-
-After the upgrade steps above, such a retry follows only a Host request
-that lost its response before the stop, or a daemon that stopped between
-acking a mailbox row and clearing its local spool.
-
-### Expired v3 mailbox rows on SQLite
-
-Retention removes only acked rows. An expired row (a pending row its device
-never received in time) stays: the SQLite store never deletes one and has no
-`discardDeadLetter`. The two read-backs by messageId do not check a row's
-state, so a v3 expired row keeps failing with an envelope decoding error for
-as long as it exists. For example, a task cancelled while its device was
-offline leaves an expired v3 `task.cancel` row; after the upgrade every
-`tasks.cancel` retry for that task fails to decode, permanently. An offer,
-approval decision or steer retried with the messageId of an expired row
-fails the same way. Postgres avoids this through upgrade step 3, which
-replays or discards each dead letter first; SQLite has no such step, and
-these messageIds stay unusable.
+- Start the K4 ledger afresh. A frozen v3 input fails the v4 schema on
+  submit, and its delivered check reads back a v4 offer that differs from it.
 
 ## Compatibility evidence
 

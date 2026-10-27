@@ -18,7 +18,6 @@ import {
   TaskOfferSealedPayloadSchema,
   WIRE_ADDITIONS,
   requiredReceiverCapabilities,
-  wireV4FormOf,
   type WireAddition,
 } from '../index';
 
@@ -89,6 +88,20 @@ describe('task.offer gates: equal to the last v3 release (Q2)', () => {
    * advertises it with `agent-home-contract`). Stage 1 gates `harnessId` on
    * every Agent offer (#1019).
    */
+  /** The `session` each v3 offer type meant: a v3 resume offer named it in `sessionRef`. */
+  const V3_SESSION: Readonly<Record<string, 'resume' | 'fresh'>> = {
+    'task.offer_for_agent': 'resume', 'task.offer_for_agent_with_egress': 'resume',
+    'task.offer_for_agent_sealed': 'resume', 'task.offer_for_agent_with_egress_sealed': 'resume',
+    'task.offer_for_agent_with_egress_fresh': 'fresh', 'task.offer_for_agent_with_egress_fresh_sealed': 'fresh',
+    'task.offer_prepared': 'fresh',
+  };
+
+  /** The v4 `task.offer` payload a v3 corpus offer line stands for. */
+  function asV4Offer(v3Type: string, payload: Json): Json {
+    const { sessionRef, ...rest } = payload;
+    return V3_SESSION[v3Type] === 'fresh' ? { ...rest, session: { mode: 'fresh' } } : { ...rest, session: { mode: 'resume', sessionRef } };
+  }
+
   function knownAdditions(v3Type: string, payload: Json): string[] {
     return [
       ...(v3Type === 'task.offer_prepared' ? ['agent-memory-selection'] : []),
@@ -100,11 +113,10 @@ describe('task.offer gates: equal to the last v3 release (Q2)', () => {
     const lines = v3Lines.filter((line) => V3_AGENT_OFFERS.includes(line.type));
     expect(new Set(lines.map((line) => line.type))).toEqual(new Set(V3_AGENT_OFFERS));
     for (const line of lines) {
-      const form = wireV4FormOf(line.type, line.payload)!;
-      expect(form.type).toBe('task.offer');
-      expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(form.payload).success, line.type).toBe(true);
+      const payload = asV4Offer(line.type, line.payload);
+      expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(payload).success, line.type).toBe(true);
       const v3 = v3Release.requiredReceiverCapabilities(line.type as never, line.payload) as string[];
-      const v4 = requiredReceiverCapabilities('task.offer', form.payload);
+      const v4 = requiredReceiverCapabilities('task.offer', payload);
       expect(new Set(v4), line.type).toEqual(new Set([...v3, ...knownAdditions(line.type, line.payload)]));
     }
   });

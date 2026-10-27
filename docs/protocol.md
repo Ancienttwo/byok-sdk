@@ -47,9 +47,9 @@ There is no v3 reader and no capability negotiation between v3 and v4. Every
 envelope must carry major `4`. **Drain before upgrading**, exactly as for the
 v2 → v3 cut below: stop new submissions, let every pending mailbox row be
 processed and acknowledged, every in-flight execution reach a terminal, and
-every daemon pending terminal be acknowledged by the server. Then run the
-one-shot receipt migration ([Wire v3 → v4 receipt migration](#wire-v3--v4-receipt-migration))
-and start the v4 server side and the v4 daemons together. A v3 daemon is
+every daemon pending terminal be acknowledged by the server. There is no
+receipt migration: a store a v3 build wrote is not supported, so start the v4
+server side on a new store, together with the v4 daemons. A v3 daemon is
 refused: its envelopes, `conn.hello` included, fail decode at the version
 boundary as the v1 → v2 note below describes, and it receives no v4 offer. A
 `conn.hello` whose `protocolVersions` omits `4` is refused with
@@ -439,93 +439,6 @@ live-only, so a terminal built while the daemon had no connection carries no
 field. `failure` stays plaintext on a sealed `task.fail`. The reference server
 and the hosted cloud advertise the flag and project the field as
 `TaskResult.failure` and `TerminalResult.failure`.
-
-## Wire v3 → v4 receipt migration
-
-Stored v3 envelopes do not decode under v4, so a store that keeps receipts
-across the cut runs a one-shot migration. The operator runs it once, after
-draining mailboxes and ending executions (see the status note above), and
-before the v4 server starts. It ships in 0.31.x only; 0.32.0 removes it
-(#1017).
-
-`@byok-sdk/protocol` exports the envelope half
-(`packages/protocol/src/wire-v4-migration.ts`):
-
-- `WIRE_V3_TO_V4_TYPES` maps every v3 message type to its v4 type, or to
-  `null` when v4 does not carry it: `conn.ack`, `task.offer`,
-  `task.offer_with_toolsets`, `task.offer_sealed` and
-  `task.offer_with_toolsets_sealed`. The four Agent offer types and their
-  three sealed twins map to `task.offer`. Each other `*_sealed` type maps to
-  its plaintext type, whose sealed branch its payload takes unchanged. Every
-  other v3 type keeps its name.
-- `wireV4TypeOf(v3Type)` returns the v4 type, or `undefined`.
-- `wireV4FormOf(v3Type, payload)` returns the v4 type and payload, before v4
-  validation, or `undefined` when v4 does not carry the type. A resume offer
-  (`task.offer_for_agent`, `task.offer_for_agent_with_egress` and their sealed
-  twins) turns `sessionRef` into `session: { mode: 'resume', sessionRef }`.
-  A fresh or prepared offer (`task.offer_for_agent_with_egress_fresh`, its
-  sealed twin and `task.offer_prepared`) gains `session: { mode: 'fresh' }`.
-  A `task.offer_for_agent` without `sessionRef` gets no `session`, so it fails
-  v4 validation: v4 has no fresh offer without `egressPolicy`, and a missing
-  reference never means fresh. Every other payload keeps its fields.
-- `migrateWireV3Envelope(body)` re-encodes one stored v3 envelope as canonical
-  v4 through `wireV4FormOf`, so its bytes and hash differ from the v3 body. It
-  refuses with one of three reasons: `not_wire_v3` (not JSON, not an envelope
-  object, or not `v: 3`), `type_without_v4_form` (a type that maps to `null`
-  or is not listed), or `invalid_under_v4` (the mapped envelope does not parse
-  under v4; for example a `task.await_approval`, `task.approve` or
-  `task.reject` without `approvalId`).
-
-`@byok-sdk/cloud` exports the store-independent half
-(`packages/cloud/src/wire-v4-receipt-migration.ts`):
-
-- `wireV4ReceiptKind(key)` names the two migrated receipt families: `offer`
-  for `task-offer:<messageId>` and `terminal` for `task:<taskId>:terminal`.
-  Every other receipt key is outside the migration.
-- `migrateWireV3Receipt(kind, body)` returns `unchanged`, `migrated` with the
-  new body, or `refused` with a refusal reason. A redaction tombstone is
-  unchanged. A terminal receipt is a v3 envelope and goes through
-  `migrateWireV3Envelope`; one that already decodes under v4 is unchanged. An
-  offer receipt (`{ deviceId, type, payload }`, without a wire version) of a
-  v3 Agent offer type takes its v4 type and payload from `wireV4FormOf`. It is
-  refused (`invalid_under_v4`) when the v4 payload does not parse, or when
-  parsing would drop or change any of its content; for example a v3 resume
-  offer without `sessionRef`, or `limits` with a key the strict v4 `limits`
-  does not have. A stored `task.offer` whose payload carries an `agentRef` is
-  a v4 receipt: it is unchanged when it parses under v4 and refused
-  (`invalid_under_v4`) when it does not, so running the migration again
-  changes nothing it already migrated. A stored `task.offer` without an
-  AgentRef is the v3 runtime-only offer of a legacy task (below); it and an
-  offer receipt of another removed offer type are refused
-  (`type_without_v4_form`).
-- A migrated sealed offer receipt keeps its ciphertext, whose AAD and content
-  MAC are bound to the v3 offer type name as the family. A v4 receiver opens a
-  sealed offer under family `task.offer` (§2.5), so re-opening such a
-  historical sealed offer fails. Nothing in the SDK opens a stored offer
-  again.
-- A legacy task (`WireV3LegacyTask`: `tenantId`, `taskId`, `deviceId`,
-  `type`) is a task offered on a removed offer type, so it has no AgentRef.
-  `wireV3LegacyOfferType(body)` and `wireV3LegacyOfferReceiptKeys(...)` find
-  its offer receipts. It is deleted, not mapped.
-- `WireV4UnmappableRow` is a row with no v4 form: a refused `receipt`, an
-  `approval` recorded without `approvalId`, or a pending `mailbox` row of a
-  non-legacy task in older bytes.
-- `assertWireV4MigrationConfirmed(preflight, confirmedLegacyTasks)` throws
-  `ReceiptMigrationUnmappableError` (code `wire_v4_migration_unmappable`)
-  when any row is unmappable, and `WireV4LegacyTaskListMismatchError` (code
-  `wire_v4_legacy_task_list_mismatch`) when the confirmed list is not exactly
-  the store's legacy tasks.
-
-Each store runs it in two steps. The read-only preflight
-(`preflightPostgresWireV4Migration(pool)` in `@byok-sdk/cloud-dataplane`,
-`preflightSqliteWireV4Migration(path)` in `@byok-sdk/server`) returns
-`{ legacyTasks, unmappable }`. The migration
-(`migratePostgresToWireV4(pool, confirmedLegacyTasks)`,
-`migrateSqliteToWireV4(path, confirmedLegacyTasks)`) takes the operator's
-confirmed list back and, in one transaction, deletes every row those tasks
-own and re-encodes the remaining offer and terminal receipts, or throws and
-changes nothing. See [the wire v4 upgrade note](releases/925-wire-v4.md) for
-what each store deletes and the upgrade order.
 
 ## 1. Envelope
 
@@ -3746,8 +3659,7 @@ malformed JSON causes `SqliteSchemaError` with code
 `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. SQLite schema version 5 alone does not
 prove that the pending wire rows use v4. Retained `acked` and `expired` rows
 do not block startup. The check does not change or retire mailbox rows.
-Stored receipts are a separate step
-([Wire v3 → v4 receipt migration](#wire-v3--v4-receipt-migration)).
+Stored v3 receipts are not migrated: a store a v3 build wrote is not supported.
 
 Before upgrading, stop new dispatch and let the previous server and clients
 finish and acknowledge their pending rows. On an offline copy, check:

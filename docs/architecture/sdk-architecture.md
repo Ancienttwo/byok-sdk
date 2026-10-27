@@ -320,7 +320,7 @@ stateDiagram-v2
 
 ### 2.4 Freeze 与兼容边界
 
-- 当前 wire 是 `v4`：#925 把 `PROTOCOL_VERSION` 由 3 升到 4，删除 `conn.ack`、runtime-only offer 及其 sealed 类型、`strict-agent-only` 与三个审批 capability flag，`approvalId` 在 `task.await_approval`、`task.approve`、`task.reject` 上成为必填。v4 端点拒绝 v3 对端；排空、跑一次性 receipt migration 后，设备与 Host 一起升级（[升级说明](../releases/925-wire-v4.md)）。历史：K7（#468）把 2 升到 3（result-document 的 `schema` 成为必填）；ADR-037 把 1 升到 2（删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`）。v2、v3 corpus 与 registry 只读。
+- 当前 wire 是 `v4`：#925 把 `PROTOCOL_VERSION` 由 3 升到 4，删除 `conn.ack`、runtime-only offer 及其 sealed 类型、`strict-agent-only` 与三个审批 capability flag，`approvalId` 在 `task.await_approval`、`task.approve`、`task.reject` 上成为必填。v4 端点拒绝 v3 对端；不提供 receipt 迁移，v3 写过的 store 不受支持，设备与 Host 在新 store 上一起升级（[升级说明](../releases/925-wire-v4.md)）。历史：K7（#468）把 2 升到 3（result-document 的 `schema` 成为必填）；ADR-037 把 1 升到 2（删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`）。v2、v3 corpus 与 registry 只读。
 - 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v4 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表。v4 尚无已发布版本：`compat.test.ts` 用最后一个 v3 版本 0.30.2（`byok-protocol-previous`）作 rejection oracle，它拒绝每个 v4 envelope；v4 registry 为空，跨版本的 addition 声明在首个 v4 release 发布并 pin 之前没有证明。
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
 - server 只接受当前 major（v4，`PROTOCOL_VERSION = 4`，`packages/protocol/src/version.ts`）。v3 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
