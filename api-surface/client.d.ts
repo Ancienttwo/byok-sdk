@@ -5609,203 +5609,6 @@ export declare class ExecutionRecordAccumulator {
     private openCall;
     private answerCall;
 }
-// ==== @byok-sdk/client dist/daemon/input-preparation-retirement.d.ts ====
-/**
- * The bounded, operator-invoked retirement of an input-preparation namespace
- * written at an older record schema version (the v8 cut's operator
- * precondition, `docs/spec.md`; research contract C6).
- *
- * It is a MOVE, never a migration: the whole `<storeDir>/input-preparation/`
- * directory is renamed, byte-for-byte, into
- * `<storeDir>/input-preparation-retired/<stamp>-v<versions>/input-preparation/`
- * with a manifest beside it. Nothing is deleted, converted or rewritten, and
- * no old record is read forward: the log is read STRUCTURALLY — each line is
- * `JSON.parse`d and only its `recordId`, `version` and `pin` fields are looked
- * at, as untyped values. It never goes through `InputPreparationStore` or its
- * `replay()`, whose strict startup refusal of an old record stays exactly as
- * it is.
- *
- * Every path is derived from the resolved storeDir; Agent home and Agent
- * memory are never touched.
- *
- * {@link retireInputPreparation} is the one public entry point (preview and
- * execute); the `byok-agent retire-input-preparation` CLI is a thin renderer
- * over the same function, so a branded host CLI can own this step without
- * shipping the SDK CLI.
- */
-export declare const INPUT_PREPARATION_RETIREMENT_COMMAND = "retire-input-preparation";
-export declare const INPUT_PREPARATION_RETIREMENT_MANIFEST_FORMAT = "byok.input-preparation.retirement-manifest";
-export declare const INPUT_PREPARATION_RETIREMENT_MANIFEST_VERSION = 1;
-declare const NAMESPACE_DIR = "input-preparation";
-export interface RetirementFileDigest {
-    readonly name: string;
-    readonly sha256: string;
-    readonly sizeBytes: number;
-}
-export interface InputPreparationNamespaceInspection {
-    /** `absent`: no namespace directory. `empty`: no record line and no artifact file. */
-    readonly status: 'absent' | 'empty' | 'present';
-    readonly namespacePath: string;
-    /** Non-empty lines in `records.jsonl`, parseable or not. */
-    readonly lineCount: number;
-    /** Lines that parsed to a JSON object. */
-    readonly recordCount: number;
-    /** Keyed by `JSON.stringify(version)`, or `missing` when the field is absent. */
-    readonly versionCounts: Readonly<Record<string, number>>;
-    /**
-     * Records whose EFFECTIVE line carries a `pin` field — a live pin. The fold
-     * mirrors `InputPreparationStore.replay()`: keyed by `recordId`, the last
-     * line for a key wins. A line whose `recordId` is not a string folds with
-     * nothing, so its pin always counts.
-     */
-    readonly pinnedRecordCount: number;
-    /** 1-based line numbers of lines that are not a JSON object. Line content is never reported. */
-    readonly unparseableLines: readonly number[];
-    readonly artifactFileCount: number;
-    /** Entries this namespace should not contain (relative to it); never followed or read. */
-    readonly unexpectedEntries: readonly string[];
-    readonly recordLog?: RetirementFileDigest;
-    readonly artifacts: readonly RetirementFileDigest[];
-}
-export interface InputPreparationRetirementManifest {
-    readonly format: typeof INPUT_PREPARATION_RETIREMENT_MANIFEST_FORMAT;
-    readonly version: typeof INPUT_PREPARATION_RETIREMENT_MANIFEST_VERSION;
-    readonly command: typeof INPUT_PREPARATION_RETIREMENT_COMMAND;
-    readonly retiredAt: string;
-    readonly currentRecordVersion: number;
-    readonly retiredRecordVersions: readonly number[];
-    readonly recordCountsByVersion: Readonly<Record<string, number>>;
-    readonly recordCount: number;
-    /** Relative to the manifest's own directory. */
-    readonly retiredNamespace: typeof NAMESPACE_DIR;
-    readonly recordLog: RetirementFileDigest;
-    readonly artifacts: readonly RetirementFileDigest[];
-}
-export type InputPreparationRetirementResult = {
-    readonly status: 'nothing-to-retire';
-    readonly inspection: InputPreparationNamespaceInspection;
-} | {
-    readonly status: 'retired';
-    readonly inspection: InputPreparationNamespaceInspection;
-    readonly retiredDir: string;
-    readonly manifestPath: string;
-    readonly manifest: InputPreparationRetirementManifest;
-};
-export declare class InputPreparationRetirementConfirmationRequiredError extends Error {
-    constructor();
-}
-export declare class InputPreparationRetirementDaemonRunningError extends Error {
-    constructor();
-}
-/** Another process (a daemon, pair, doctor or retirement) holds the store's owner lease. Nothing was written. */
-export declare class InputPreparationRetirementStoreBusyError extends Error {
-    constructor(options: {
-        cause: unknown;
-    });
-}
-export type InputPreparationRetirementRefusalReason = 'symlink' | 'not_a_directory' | 'not_a_regular_file' | 'unexpected_entry' | 'unparseable_line' | 'unsupported_version' | 'current_version_present' | 'pinned_record' | 'orphan_artifacts' | 'retired_target_exists';
-/** The namespace is not in a state this command may retire. Nothing was written. */
-export declare class InputPreparationRetirementRefusedError extends Error {
-    readonly reason: InputPreparationRetirementRefusalReason;
-    constructor(reason: InputPreparationRetirementRefusalReason, detail: string);
-}
-/**
- * A step after the rename failed. Nothing is rolled back: the moved namespace
- * stays where it landed, and this names the exact on-disk state.
- */
-export declare class InputPreparationRetirementIncompleteError extends Error {
-    readonly step: 'sync_rename' | 'write_manifest';
-    readonly retiredNamespacePath: string;
-    readonly manifestPath: string;
-    constructor(step: 'sync_rename' | 'write_manifest', retiredNamespacePath: string, manifestPath: string, options: {
-        cause: unknown;
-    });
-}
-/**
- * Read-only structural inspection of `<storeDir>/input-preparation/`. Writes
- * nothing, and never parses a record past its `recordId`, `version` and `pin`
- * fields.
- */
-export declare function inspectInputPreparationNamespace(storeDir: string): Promise<InputPreparationNamespaceInspection>;
-export interface ExecuteInputPreparationRetirementOptions {
-    /** Must be `true` — the CLI's `--yes`. */
-    readonly confirmed: boolean;
-    /** Whether the daemon control socket answered; checked before the owner lease is taken. */
-    readonly controlOnline: boolean;
-    readonly clock?: () => Date;
-}
-/**
- * Retire the namespace (package-internal core; hosts call
- * {@link retireInputPreparation}). Refuses (typed, zero writes) unless confirmed, the
- * control socket is offline, the `doctor` owner lease is acquired, and every
- * record line parses, sits at an integer record version below
- * {@link INPUT_PREPARATION_RECORD_VERSION} and carries no pin. An absent or
- * empty namespace is a no-op.
- */
-export declare function executeInputPreparationRetirement(storeDir: string, options: ExecuteInputPreparationRetirementOptions): Promise<InputPreparationRetirementResult>;
-/** The store {@link retireInputPreparation} acts on: the daemon's `productId` and `storeDir`. */
-export interface RetireInputPreparationTarget {
-    readonly productId: string;
-    /** Same value as `DaemonConfig.storeDir`; omitted resolves the product default. */
-    readonly storeDir?: string;
-}
-/**
- * `preview`: read-only structural inspection, no socket probe, no lease, no
- * write. `execute`: requires `confirmed: true` (the CLI's `--yes`).
- */
-export type RetireInputPreparationInput = {
-    readonly mode: 'preview';
-} | {
-    readonly mode: 'execute';
-    readonly confirmed: true;
-};
-export type RetireInputPreparationResult = {
-    readonly status: 'inspected';
-    readonly inspection: InputPreparationNamespaceInspection;
-} | InputPreparationRetirementResult;
-/**
- * Package-internal test seams (the CLI tests substitute the control probe and
- * clock). The probe is structural so this module's declarations do not pull
- * the CLI control client into the public type surface.
- */
-export interface RetireInputPreparationSeams {
-    readonly clock?: () => Date;
-    readonly connectControl?: (options: {
-        storeDir: string;
-        productId: string;
-    }) => Promise<{
-        ok: true;
-        client: {
-            close(): void;
-        };
-    } | {
-        ok: false;
-        reason: string;
-    }>;
-}
-/** Package-internal: {@link retireInputPreparation} with its test seams. */
-export declare function runInputPreparationRetirement(target: RetireInputPreparationTarget, input: RetireInputPreparationInput, seams?: RetireInputPreparationSeams): Promise<RetireInputPreparationResult>;
-/**
- * Programmatic form of `byok-agent retire-input-preparation` for the v8
- * input-preparation record cut (`docs/spec.md`).
- *
- * `preview` inspects `<storeDir>/input-preparation/` and writes nothing.
- * `execute` refuses, typed and with zero writes, while the daemon control
- * socket answers ({@link InputPreparationRetirementDaemonRunningError}), while
- * another process holds the store owner lease
- * ({@link InputPreparationRetirementStoreBusyError}), and for a live pin, a
- * current-version, mixed, unknown or missing record version, an unparseable
- * line, orphan artifacts, an unexpected entry or any symbolic link
- * ({@link InputPreparationRetirementRefusedError} with its `reason`). Otherwise
- * it moves the whole namespace byte-for-byte under
- * `<storeDir>/input-preparation-retired/` beside a manifest of per-file
- * digests; nothing is ever deleted or converted. An absent or empty namespace
- * is `nothing-to-retire`. A failure after the move is
- * {@link InputPreparationRetirementIncompleteError}, naming where the bytes are.
- * Run it before the daemon starts (for example from the host installer).
- */
-export declare function retireInputPreparation(target: RetireInputPreparationTarget, input: RetireInputPreparationInput): Promise<RetireInputPreparationResult>;
-export {};
 // ==== @byok-sdk/client dist/daemon/input-preparation-store.d.ts ====
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_VERSION, type InputPreparationBindingV1, type InputPreparationArtifactSummaryV1, type InputPreparationCounterEvidenceV1, type InputPreparationModelV1, type InputPreparationPinV1, type InputPreparationProjectionV1, type InputPreparationResidualKeyV1, type InputPreparationStateV1 } from '../input-preparation';
 /**
@@ -5883,13 +5686,13 @@ import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INP
  *
  * 9 is the first version without a permission mode: `PermissionPolicy` left
  * the protocol, so the binding no longer carries `permissionMode`. A
- * version-8 record digests a field this build no longer has; retire it with
- * `byok-agent retire-input-preparation` instead of reading it forward.
+ * version-8 record digests a field this build no longer has, so it is refused,
+ * never read forward.
  *
  * 10 is the first version without tool implementation identities: the
  * attestation stack left the SDK, so the artifact summary names tools, not
  * implementation kinds, and the digests carry no identity. A version-9 record
- * digests fields this build no longer has; retire it the same way.
+ * digests fields this build no longer has and is refused the same way.
  *
  * 11 binds the optional frozen result selection in the request/receipt and
  * counts submit_result in the model-visible manifest. Version-10 records
@@ -10470,9 +10273,6 @@ export type { DeviceEnrollment, DeviceEnrollmentIdentity, DeviceEnrollmentIdenti
  */
 export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer';
 export type { CreateStoredDeviceProofSignerOptions, DeviceProofRequest, DeviceProofSigner, DeviceProofSignerErrorCode, HostDeviceProofSigner, } from './daemon/device-proof-signer';
-/** Programmatic `byok-agent retire-input-preparation` (preview/execute) for the v8 input-preparation cut. */
-export { retireInputPreparation, InputPreparationRetirementConfirmationRequiredError, InputPreparationRetirementDaemonRunningError, InputPreparationRetirementIncompleteError, InputPreparationRetirementRefusedError, InputPreparationRetirementStoreBusyError, } from './daemon/input-preparation-retirement';
-export type { InputPreparationNamespaceInspection, InputPreparationRetirementManifest, InputPreparationRetirementRefusalReason, InputPreparationRetirementResult, RetireInputPreparationInput, RetireInputPreparationResult, RetireInputPreparationTarget, RetirementFileDigest, } from './daemon/input-preparation-retirement';
 /**
  * Plan `skill-pack-delivery-channel`: the device half of the `skills.pack`
  * channel. The install pipeline and the two read APIs are public because the
