@@ -390,6 +390,14 @@ test('#794 D3: a direct Worker example path selects only that example and the da
   assert.throws(() => selectImpact(['examples/hosted-bot-collaboration-worker/wrangler.json']), /reviewed CI mapping required/i);
 });
 
+test('the Codex helper loopback selects client checks without admitting arbitrary scripts', () => {
+  const path = 'packages/client/scripts/codex-reserved-mcp-loopback.mjs';
+  assert.deepEqual(selectImpact([path]), {
+    ...selectImpact(['packages/client/scripts/codex-app-server-real.mjs']), files: [path],
+  });
+  assert.throws(() => selectImpact(['packages/client/scripts/unreviewed-codex-loopback.mjs']), /reviewed CI mapping required/i);
+});
+
 test('the #1022 task events route selects only examples/basic', () => {
   for (const path of ['examples/basic/task-events-route.ts', 'examples/basic/task-events-route.test.ts']) {
     assert.deepEqual(selectImpact([path]).dirs, ['examples/basic'], path);

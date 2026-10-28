@@ -1,7 +1,7 @@
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
-  getAgentDir, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
+  getAgentDir, ModelRuntime, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
   type CreateAgentSessionOptions, type CreateAgentSessionResult, type CreateAgentSessionRuntimeFactory,
 } from '@earendil-works/pi-coding-agent';
 
@@ -26,10 +26,11 @@ function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}
  */
 export function resetResumedPiTools(
   session: CreateAgentSessionResult['session'], settingsManager: SettingsManager, cwd: string,
+  agentBuiltinTools?: readonly string[],
 ): void {
   if (session.sessionManager.buildSessionContext().messages.length === 0) return;
   const registered = session.getAllTools();
-  const defaults = settingsManager.getDefaultTools() ?? createCodingTools(cwd).map((tool) => tool.name);
+  const defaults = agentBuiltinTools ?? settingsManager.getDefaultTools() ?? createCodingTools(cwd).map((tool) => tool.name);
   const extensions = registered.filter((tool) =>
     tool.sourceInfo.path !== `builtin:${tool.name}`
     && session.getToolDefinition(tool.name)?.defaultActive !== false
@@ -62,6 +63,10 @@ export async function runPiSessionRuntime(options: {
   provider?: string; model?: string;
   thinking?: CreateAgentSessionOptions['thinkingLevel'];
   tools?: string[]; excludeTools?: string[]; noTools?: 'all' | 'builtin';
+  /** Native Agent policy; re-applied on resume without changing MCP/extension admission. */
+  agentBuiltinTools?: readonly string[];
+  /** Fresh SDK-owned resources directory. The original Pi directory remains the model/auth authority. */
+  resourceAgentDir?: string;
   /**
    * A launcher-delivered key, handed to Pi only in memory. It lives in the
    * model runtime's non-persistent overlay, never in this process's
@@ -73,16 +78,26 @@ export async function runPiSessionRuntime(options: {
   initialModel: 'required' | 'on-prompt';
   label: string; reject: (message: string) => never;
 }): Promise<void> {
-  const agentDir = getAgentDir();
-  const initialSettings = SettingsManager.create(options.cwd, agentDir);
+  const credentialAgentDir = getAgentDir();
+  const agentDir = options.resourceAgentDir ?? credentialAgentDir;
+  const initialSettings = SettingsManager.create(options.cwd, credentialAgentDir);
   const sessionManager = await openPiRpcSession(options.cwd, options.session, options.sessionDir ?? initialSettings.getSessionDir(), options.reject);
   const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
     if (cwd !== options.cwd || sessionManager.getCwd() !== options.cwd) options.reject('session replacement cannot change authorized cwd');
-    // The session cwd is pre-trusted, as in OAR: project `.pi` settings and
-    // extensions load in every lane, the BYOK key lane too.
+    // The excluded resource loader has no user/global/project settings. Its
+    // model runtime independently opens only Pi's model/auth stores.
+    const isolated = options.resourceAgentDir !== undefined;
+    const modelRuntime = isolated ? await ModelRuntime.create({
+      authPath: join(credentialAgentDir, 'auth.json'),
+      modelsPath: join(credentialAgentDir, 'models.json'),
+      signal: AbortSignal.timeout(15_000),
+    }) : undefined;
     const services = await createAgentSessionServices({
       cwd: options.cwd, agentDir, modelRuntimeSignal: AbortSignal.timeout(15_000),
-      settingsManager: SettingsManager.create(options.cwd, agentDir, { projectTrusted: true }),
+      ...(modelRuntime === undefined ? {} : { modelRuntime }),
+      settingsManager: isolated
+        ? SettingsManager.inMemory({}, { projectTrusted: false })
+        : SettingsManager.create(options.cwd, agentDir, { projectTrusted: true }),
       resourceLoaderOptions: options.resourceLoaderOptions,
     });
     const errors = [
@@ -110,7 +125,9 @@ export async function runPiSessionRuntime(options: {
       model: resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
       tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
     });
-    if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
+    if (options.agentBuiltinTools !== undefined || (options.tools === undefined && options.noTools === undefined)) {
+      resetResumedPiTools(created.session, services.settingsManager, options.cwd, options.agentBuiltinTools);
+    }
     if (created.modelFallbackMessage && options.initialModel === 'required') {
       await created.session.dispose();
       options.reject(created.modelFallbackMessage);

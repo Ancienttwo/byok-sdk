@@ -425,7 +425,8 @@ export interface CodexAdapterOptions {
      * opens, the adapter reads Codex's effective configuration for the task cwd
      * (`config/read`), sets `enabled = false` on every other `mcp_servers`
      * entry, and turns off the `apps` (connectors) and `plugins` features for
-     * the thread. The thread then has no plugins at all, not only no plugin
+     * the thread. Plugin exclusion also applies at app-server launch, before
+     * startup plugin sync. The thread then has no plugins at all, not only no plugin
      * MCP servers. After the open it reads the thread's MCP server status
      * back, and the start fails if any other server is not disabled, or if a
      * user server has the name of a task or SDK server. The user's
@@ -638,7 +639,7 @@ export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
 export { PiAdapter } from './pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig, PiBuiltinToolName, PiAgentExtensionName } from './pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './pi/resolve-bin';
 export { ClaudeAdapter } from './claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './claude/claude-adapter';
@@ -653,14 +654,40 @@ export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInter
 export { buildRuntimeEnv } from '../daemon/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
+// ==== @byok-sdk/client dist/adapters/pi/agent-tool-policy.d.ts ====
+/** Pi native tools exposed by the Agent policy. PowerShell is never implicitly selected. */
+export type PiBuiltinToolName = 'read' | 'grep' | 'find' | 'ls' | 'edit' | 'write' | 'bash';
+export type PiAgentExtensionName = 'web' | 'subagent' | 'todo';
+export interface PiAgentToolPolicy {
+    readonly builtinTools: 'inherit' | readonly PiBuiltinToolName[];
+    readonly userContext: 'inherit' | 'excluded';
+    readonly extensions: 'inherit' | readonly PiAgentExtensionName[];
+}
+export declare const INHERITED_PI_AGENT_TOOL_POLICY: PiAgentToolPolicy;
+/** One parser owns options validation and the digest-bound helper contract. */
+export declare function parsePiAgentToolPolicy(value: unknown): PiAgentToolPolicy;
+export declare function hasPiAgentToolRestrictions(policy: PiAgentToolPolicy): boolean;
+/** Exclusions survive transcript restoration; modifiers retain independently admitted extension/MCP tools. */
+export declare function piAgentNativeToolOptions(policy: PiAgentToolPolicy): {
+    tools?: string[];
+    excludeTools?: string[];
+};
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './rpc-client';
+import { type PiBuiltinToolName, type PiAgentExtensionName } from './agent-tool-policy';
+export type { PiBuiltinToolName, PiAgentExtensionName } from './agent-tool-policy';
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
+    /** Agent tasks only: select native tools; [] disables them. Default inherit. Does not confine file paths. */
+    agentBuiltinTools?: 'inherit' | readonly PiBuiltinToolName[];
+    /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores. Default inherit. */
+    agentUserContext?: 'inherit' | 'excluded';
+    /** Agent tasks only: select SDK web/subagent/todo extensions; MCP remains independently admitted. Default inherit. */
+    agentExtensions?: 'inherit' | readonly PiAgentExtensionName[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /** Opt-in ordinary, lease-bound durable worker. */
@@ -696,6 +723,7 @@ export interface PiByokLauncherConfig {
 export declare function validatePiByokLauncherConfig(launcher: PiByokLauncherConfig | undefined): void;
 export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
+    private readonly agentToolPolicy;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     constructor(options?: PiAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
@@ -10151,7 +10179,7 @@ export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnviron
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig, PiBuiltinToolName, PiAgentExtensionName } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets';
 export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets';
@@ -12719,7 +12747,12 @@ export declare function runSdkReservedHelperCommand(argv?: readonly string[]): P
 export declare const AGENT_MESSAGE_MCP_SERVER_NAME = "byokagentmessage";
 export declare const AGENT_MESSAGE_TOOL_NAME = "send_agent_message";
 export declare const AGENT_MEMORY_MCP_SERVER_NAME = "byokagentmemory";
+export declare const AGENT_MEMORY_RECALL_TOOL_NAME = "memory_recall";
+export declare const AGENT_MEMORY_SAVE_TOOL_NAME = "memory_save";
 export declare const AGENT_TEAM_MCP_SERVER_NAME = "byokagentteam";
+export declare const TEAM_POST_TOOL_NAME = "post_team_message";
+export declare const TEAM_READ_TOOL_NAME = "read_team_messages";
+export declare const TEAM_ACK_TOOL_NAME = "ack_team_messages";
 /** The structured outcome channel of a `terminalProjection.mode: 'result-document'` offer (wire v3). */
 export declare const AGENT_RESULT_MCP_SERVER_NAME = "byokagentresult";
 /** Its one tool; the `inputSchema` it advertises is the offer's frozen result schema. */
@@ -12741,6 +12774,13 @@ export declare const AGENT_RESULT_TOOL_DESCRIPTION = "Submit the structured outc
 export declare const RESERVED_MCP_SERVER_NAMES: readonly ["byokagentmessage", "byokagentmemory", "byokagentteam", "byokagentresult"];
 /** Whether `name` is one of the SDK-owned MCP server names above. */
 export declare function isReservedMcpServerName(name: string): boolean;
+/** Fixed helper protocols; runtime-discovered or host tool names cannot grant themselves approval. */
+export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
+    byokagentmessage: readonly string[];
+    byokagentmemory: readonly string[];
+    byokagentteam: readonly string[];
+    byokagentresult: readonly string[];
+}>;
 // ==== @byok-sdk/client dist/testing/index.d.ts ====
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
 /** The built-in adapters a fake can stand in for. */
