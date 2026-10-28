@@ -462,3 +462,83 @@ describe('tenant closure', () => {
     expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
   });
 });
+
+describe.each(['approve', 'reject'] as const)('committed %s replay targeting (#1085)', (decision) => {
+  const reason = decision === 'reject' ? 'not on a Friday' : undefined;
+  const decide = (harness: CloudHarness, taskId: string, approvalId?: string) =>
+    decision === 'approve'
+      ? harness.cloud.approveTask(TENANT_A, taskId, { approvalId })
+      : harness.cloud.rejectTask(TENANT_A, taskId, { approvalId, reason });
+
+  it('refuses a stale target before recovering a committed decision or redelivering it', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await paused(harness, device, 'approval-a');
+    await approvalResolved(harness, device, task.taskId, 'approval-a');
+    await awaitApproval(harness, device, task.taskId, 'approval-b');
+    const append = vi.spyOn(harness.core.mailbox, 'append')
+      .mockRejectedValueOnce(new Error('injected mailbox append failure'));
+    try {
+      await expect(decide(harness, task.taskId, 'approval-b')).rejects.toThrow('injected mailbox append failure');
+      const committed = await harness.stores.approvals.read(TENANT_A, task.taskId);
+      expect(committed?.entries.at(-1)?.event).toMatchObject({
+        type: 'approval_resolved', approvalId: 'approval-b', decision, resolvedBy: 'host',
+      });
+      expect(append).toHaveBeenCalledTimes(1);
+      expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
+
+      await expect(decide(harness, task.taskId, 'approval-a'))
+        .rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      expect(append).toHaveBeenCalledTimes(1);
+      expect(await harness.stores.approvals.read(TENANT_A, task.taskId)).toEqual(committed);
+      expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
+
+      const recovered = await decide(harness, task.taskId, 'approval-b');
+      const replayed = await decide(harness, task.taskId);
+      expect(replayed.envelope.id).toBe(recovered.envelope.id);
+      expect(replayed.seq).toBe(recovered.seq);
+      const callsBeforeStale = append.mock.calls.length;
+      await expect(decide(harness, task.taskId, 'approval-a'))
+        .rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      expect(append).toHaveBeenCalledTimes(callsBeforeStale);
+      expect(await harness.stores.approvals.read(TENANT_A, task.taskId)).toEqual(committed);
+      const page = await poll(harness, device, task.seq);
+      expect(page.events).toHaveLength(1);
+      expect(page.events[0]).toMatchObject({
+        id: recovered.envelope.id, type: `task.${decision}`, task_id: task.taskId,
+        payload: { approvalId: 'approval-b', ...(reason === undefined ? {} : { reason }) },
+      });
+    } finally {
+      append.mockRestore();
+    }
+  });
+
+  it.each(['approval-b', undefined])('recovers one immutable message when retry approvalId is %s', async (retryId) => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await paused(harness, device, 'approval-b');
+    const append = vi.spyOn(harness.core.mailbox, 'append')
+      .mockRejectedValueOnce(new Error('injected mailbox append failure'));
+    try {
+      await expect(decide(harness, task.taskId, 'approval-b')).rejects.toThrow('injected mailbox append failure');
+      const opposite = decision === 'approve'
+        ? harness.cloud.rejectTask(TENANT_A, task.taskId, { approvalId: 'approval-b' })
+        : harness.cloud.approveTask(TENANT_A, task.taskId, { approvalId: 'approval-b' });
+      await expect(opposite).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      expect(append).toHaveBeenCalledTimes(1);
+      expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
+      const first = await decide(harness, task.taskId, retryId);
+      const second = await decide(harness, task.taskId, retryId);
+      expect(second.envelope.id).toBe(first.envelope.id);
+      expect(second.seq).toBe(first.seq);
+      const page = await poll(harness, device, task.seq);
+      expect(page.events).toHaveLength(1);
+      expect(page.events[0]).toMatchObject({
+        id: first.envelope.id, type: `task.${decision}`,
+        payload: { approvalId: 'approval-b', ...(reason === undefined ? {} : { reason }) },
+      });
+    } finally {
+      append.mockRestore();
+    }
+  });
+});

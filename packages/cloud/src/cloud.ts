@@ -1681,6 +1681,12 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       if (latestRequest !== undefined) {
         const recorded = await recordedHostDecision(tenant, taskId, attempt, tail, latestRequest);
         if (recorded !== undefined) {
+          if (opts?.approvalId !== undefined && opts.approvalId !== recorded.approvalId) {
+            throw new ByokCloudError(
+              'coordination_input_invalid',
+              `Task ${taskId} already has a host approval decision for a different approval.`,
+            );
+          }
           if (recorded.decision !== decision) {
             throw new ByokCloudError(
               'coordination_input_invalid',
