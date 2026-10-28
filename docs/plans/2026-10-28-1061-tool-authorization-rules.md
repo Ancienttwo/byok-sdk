@@ -94,7 +94,7 @@ toolAuthorization: task => ({
 })
 ```
 
-`toolName` 精确、区分大小写，保持 runtime 原名（Pi `bash` / Claude `Bash`）；其余四个 selector 是 `node:path.matchesGlob` 的完整字符串 glob，采用当前平台的 `node:path` 语义，不加 regex、字符串前缀匹配、自动大小写折叠或自然语言推断。`*` 不跨路径 separator，`**` 才跨；command 含文件路径时也遵守这个语义。description 不影响匹配。每条规则的已给字段 **AND**；同一列表内各条规则 **OR**；至少一个 selector。一个条件的字段不存在或不能表示时该规则不命中，不把缺失当作通配。
+`toolName` 精确、区分大小写，保持 runtime 原名（Pi `bash` / Claude `Bash`）；其余四个 selector 是 `node:path.matchesGlob` 的完整字符串 glob，采用当前平台的 `node:path` 语义，不加 regex、字符串前缀匹配、自动大小写折叠或自然语言推断。`*` 不跨路径 separator；globstar `**` 作为独立 path component 时才能跨 separator（例如 `/**/file`）。嵌在 `git push origin **` 这样的 component 中不承诺跨 `/`；command 含文件路径时也遵守 Node 的 path 语义。description 不影响匹配。每条规则的已给字段 **AND**；同一列表内各条规则 **OR**；至少一个 selector。一个条件的字段不存在或不能表示时该规则不命中，不把缺失当作通配。
 
 - command 来自现有 `command` / `cmd` 提取（string 或 string[] 以空格 join）。匹配整段原始 command，**不**剥 wrapper、展开变量、拆 shell chain、执行命令、解析 Git config 或证明 remote/repository。`git push origin *` 中 `*` 也能覆盖空格和额外 shell 文本；这是宽 glob 授权范围，不能当命令 AST 或 sandbox。Host 应展示完整 pattern，并用窄 pattern 或 ask 处理不确定脚本。限定 repository 的 Grok 自然语言例子不能靠本功能自动得到等价保证。
 - path 使用 classifier 已有的 path keys 以及 Codex `file_change.changes`（含 move destination）；相对路径依 runtime call cwd，`~` 依 daemon home 展开并词法 normalize，不跟随 symlink。对一批路径，ask 只需任一路径命中；allow 必须所有已提取路径均命中同一条 path 规则，避免第一个安全路径替整批放行。不扫描任意 input 字段或 shell 文本猜文件访问。
@@ -123,7 +123,7 @@ floor 复用 `sensitive-path`，覆盖现有 `SENSITIVE_HOME_PATHS` 中凭据和
 | 无规则命中、built-in high | 现有 approval | 现有 reminder |
 | 无规则命中、built-in normal | 直接执行 | 不提醒 |
 
-gate 的 classified verdict 添加 `authorization: { source, ruleIds }`。另发本地 `tool-authorization` DaemonEvent（task/call identity、allow/deny、source、ruleIds、risk reasons；不含 input/description）；all 的 `tool-reminder` 添加同样 metadata。daemon record 投影保留 ID/source/reasons，继续不记录原始命令、路径、规则正文或 token。`ruleIds` 是 Host 自定的审计 identifier，Host 不应把秘密放进 ID。observer 异常只影响观察，不能把已决定的 deny 变 allow，也不能阻断正常工具。
+gate 的 classified verdict 添加 `authorization: { source, ruleIds }`。另发本地 `tool-authorization` DaemonEvent（task/call identity、allow/deny、source、ruleIds、risk reasons；不含 input/description）；all 的 `tool-reminder` 添加同样 metadata。daemon record 投影保留 task/call ID、rule ID/source/reasons，继续不记录原始工具名文本、命令、路径、规则正文或 token。实时本地 event 保留 toolName 供 Host 显示。`ruleIds` 是 Host 自定的审计 identifier，Host 不应把秘密放进 ID。observer 异常只影响观察，不能把已决定的 deny 变 allow，也不能阻断正常工具。
 
 ask 的 summary 要区分 custom rule、floor 和 built-in，不把普通动作强行描述成发现某种系统危险。审批仍绑定现有 approvalId；超时、withdrawal 和迟到批准不得复活动作。预算从每次 authorize 开始，包括审批排队；没有 reviewer 延迟或费用。用户一次 approve 只覆盖当前调用，不修改规则。
 
@@ -148,6 +148,15 @@ server protocol、offer、progress schema、`task.await_approval` / `approve` / 
 
 实现前锁定本文件与公开类型；并行 writer 各自独立 clean worktree，按 core / daemon / runtime tests 分文件所有权。parent 负责集成、所有测试、golden 和预算。新功能增量写行为测试；若发现 bug，先记录 red，再修。已有 assertion 只因公开返回值新增审计 metadata 或明确改变的新功能语义而更新，PR 逐项说明；不删除保护旧授权、失败或副作用的 assertion。
 
-本地仅跑指定四项检查与定向测试；全量交 PR CI。权限变更执行一次独立只读实现/断言审查，复用最终检查证据。此设计交付时的调查只读，没有运行付费模型；自然语言规则引入每调用一轮 reviewer 的延迟、费用、凭据和 prompt injection 风险，在本次实现中均不存在。
+本地仅跑指定四项检查与定向测试；全量交 PR CI。权限变更执行一次独立只读实现/断言审查，复用最终检查证据。此设计交付时的调查只读，没有运行付费模型；自然语言 reviewer 会引入每调用一轮的延迟、费用、凭据与 prompt injection 风险；本次不调用 reviewer，也不持有 reviewer BYOK 凭据。
 
 10x 时先遇到人工 approval 队列（当前每 task 16 个排队上限）及逐规则匹配 CPU；匹配成本约为每调用 `rules × fields × 文本长度`，不新增网络往返。对规则数和 pattern 长度设 admission 上限，不做缓存、后台 reviewer、热更新或规则编译服务。缺少任意脚本/文件隔离保证是已知边界，不用扩大本切片来假装解决 #1061 的 sandbox/额外 workspace 工作。
+
+## 本地实施与验证记录（2026-10-29）
+
+- 实现遵循 D1–D7；新增 `ToolAuthorizationDecision` 本地事件，CLI live view 展示 source/ruleIds；持久 record 不保存工具名文本、命令、路径、description，只保留 task/call/rule IDs、source、reason codes 和 decision。没有协议、Pi launch 格式、digest 或 dependency 变更。
+- `bun run build`、`bun run typecheck`、`bun run check:api-surface`、`bun run check:version-authority`：各 **exit 0**。API golden 9 个 package 匹配，43 个 entry 按实测；client/root `1,805,387 → 1,811,508` bytes（+6,121），`byok-agent` `1,749,990 → 1,756,442` bytes（+6,452），其余 entry 不变。包版本仍由已有 release authority 管理；本功能目标 0.31.0，不在此分支另起版本 authority。
+- 定向测试 **15 files / 314 passed，exit 0，无 skipped**：core/daemon/record/CLI formatter 4 files 153；真 Pi、真 Claude、合成 Claude bridge、Codex events、daemon observer、Pi resume/host、approval registry 8 files 128；task approval/resolution/cancel race 3 files 33。Claude 真 CLI 为本机 2.1.302，显式 `BYOK_REAL_CLAUDE_HOOK_TEST=1`；全部模型流量仅到本地 loopback provider。未执行本地全量。
+- red → green：新本地事件最初缺 CLI formatter 分支（build TS2366，单项 formatter test exit 1）；补分支并保留新的精确输出断言后通过。记录投影的 sentinel 测试先暴露工具名文本进入持久日志（2 failed），改为只保存标识和 closed codes 后通过。新增 Grok/Hermes admission 测试起初被 fixture 缺 `custom-harness` server capability 提前拒绝；只补测试 fixture 的合法 admission 前置条件，保留 auto unsupported 和无 claim/start 断言，不修改产品 runtime 能力。
+- 既有 assertion 的必要修改仅两类：classifier/gate 精确返回值增加 authorization metadata；Claude loopback 的新增普通 ask 场景不要求它具有 built-in `write-outside-workspace` 原因，原有拒绝、文件不存在、turn 结束、timeout、withdrawal、subagent 和 resume 断言全部保留。持久投影的新 assertion 要求不保存工具名；没有移除原测试保护或用 mock 代替真实写文件验证。
+- 独立只读 reviewer 在上述 frozen implementation 与本地证据之上审实现及测试；结果在 PR 交付前记录。PR CI 使用仓库现有 scope，本地结果不代表 CI 或合并完成。

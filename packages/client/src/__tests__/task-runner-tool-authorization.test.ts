@@ -46,7 +46,7 @@ class GateCapturingAdapter extends StubRuntimeAdapter {
 const AUTO_CAPABLE: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true, toolAuthorizationAuto: true };
 const NO_AUTO: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true };
 
-function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs'>> = {}) {
+function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs' | 'getServerCapabilities'>> = {}) {
   const approvalRegistry = new ApprovalRegistry();
   const runner = new TaskRunner({
     advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
@@ -324,7 +324,7 @@ describe('daemon tool authorization', () => {
   it.each(['codex', 'grok', 'hermes'])('auto rules do not add missing pre-tool support to %s', async runtimeId => {
     const adapter = new GateCapturingAdapter(NO_AUTO, runtimeId);
     const sent: Envelope[] = [];
-    const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => ({ mode: 'auto', rules: {
+    const { runner } = makeRunner(adapter, sent, { getServerCapabilities: () => ['custom-harness'], toolAuthorization: () => ({ mode: 'auto', rules: {
       allowWithoutAsking: [{ id: 'allow-read', match: { toolName: 'read' } }],
     } }) });
     await offer(runner, `unsupported-${runtimeId}`);
@@ -347,7 +347,8 @@ describe('daemon tool authorization', () => {
     expect(events[0]).toMatchObject({ kind: 'tool-authorization', ...decision });
     const projector = createDaemonRecordProjector();
     const records = events.flatMap(event => projector.project(event));
-    expect(records[0]).toEqual({ kind: 'tool-authorization', ts: events[0]!.ts, ...decision });
+    expect(records[0]).toEqual({ kind: 'tool-authorization', ts: events[0]!.ts, taskId: decision.taskId,
+      toolCallId: decision.toolCallId, decision: decision.decision, authorization: decision.authorization, reasons: decision.reasons });
     expect(records[1]).toEqual({ kind: 'tool-reminder', ts: events[1]!.ts, taskId: 'audit-task',
       authorization: { source: 'floor', ruleIds: [] }, reasons: ['sensitive-path'], summaryBytes: Buffer.byteLength('private summary and path') });
     expect(JSON.stringify(records)).not.toContain('private summary');
