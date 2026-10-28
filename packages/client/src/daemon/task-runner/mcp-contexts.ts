@@ -154,6 +154,7 @@ export function resolveMcpServers(
       ok: true;
       servers: Readonly<Record<string, McpStdioServerConfig>>;
       toolsetIdByServer: ReadonlyMap<string, string>;
+      mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
     }
   | { ok: false; reason: string } {
   const registry = this['deps'].getMcpToolsets?.();
@@ -162,6 +163,7 @@ export function resolveMcpServers(
   }
   const servers = Object.create(null) as Record<string, McpStdioServerConfig>;
   const toolsetIdByServer = new Map<string, string>();
+  const approvals: Record<string, readonly string[]> = Object.create(null);
   for (const toolsetId of requiredToolsets) {
     const toolset = registry.get(toolsetId);
     if (!toolset) {
@@ -178,11 +180,14 @@ export function resolveMcpServers(
         command: server.command,
         ...(server.args ? { args: Object.freeze([...server.args]) } : {}),
       });
+      if (server.approveTools?.length) approvals[serverName] = Object.freeze([...server.approveTools]);
       toolsetIdByServer.set(serverName, toolsetId);
     }
   }
   if (Object.keys(servers).length === 0) {
     return { ok: false, reason: 'required MCP toolsets resolved to no servers; refusing to run without tools' };
   }
-  return { ok: true, servers: Object.freeze(servers), toolsetIdByServer };
+  return { ok: true, servers: Object.freeze(servers), toolsetIdByServer,
+    ...(Object.keys(approvals).length > 0 ? { mcpToolApprovals: Object.freeze(approvals) } : {}),
+  };
 }

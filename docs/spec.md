@@ -1999,7 +1999,8 @@ so a daemon that would strip the field never executes the instruction without
 its required tools.
 
 The device operator configures each id in `DaemonConfig.mcpToolsets` as one or
-more stdio MCP servers. This first slice accepts only `command` and `args`;
+more stdio MCP servers. Each definition accepts `command`, `args`, and optional
+`approveTools` (exact local Host-approved tool names);
 environment variables, headers, remote URLs, tokens, and cookies are not part
 of the selectable shape. This does not sanitize arbitrary instruction text;
 the host must not put connector secrets there. The daemon validates the registry
@@ -2033,9 +2034,38 @@ shape fails the whole observation and the task is declined permanently.
 Claude and Codex list their MCP tools themselves, so the daemon does not probe
 for them. Claude gets the selected servers in a task-scoped `--mcp-config`;
 Codex gets them in the `thread/start` or `thread/resume` config (`mcp_servers`).
-The SDK grants no per-tool
-permission and does not classify tools as read-only or mutating. Each tool call
-follows the agent's own guardrails and the user's own configuration (ADR-037).
+A local Host may set `approveTools` on a toolset server to preapprove exact
+MCP tools. The registry accepts unique names matching `[A-Za-z0-9_][A-Za-z0-9_-]{0,63}`
+and rejects prototype keys (`__proto__`, `prototype`, `constructor`). It rejects
+wildcards, server-wide defaults, duplicate names and any Host use of reserved
+server names. Omitted and empty lists both add no approval. The sorted list is
+part of the canonical definition and registry revision: authorization-only
+reloads change identity and invalidate the old definition's observation.
+
+Servers and approvals are copied together from one registry snapshot before
+runtime detection and claim. The deeply frozen per-attempt `mcpToolApprovals`
+start resource cannot be enlarged by a later `toolsets.reload`; later attempts
+read the new definition. Runtime selection requires the local descriptor's
+`mcpToolApprovals: true` for a nonempty declaration. Codex declares it; other
+bundled runtimes do not. Explicit unsupported runtime selection declines
+non-retryably before claim; automatic selection excludes unsupported adapters.
+No approval declaration or capability is added to wire.
+
+Codex projects only `tools.<exact-name>.approval_mode = "approve"` in the
+thread config for both start and resume, alongside the separate fixed SDK
+helper grants. It does not approve tools on any other server, add an
+`enabled_tools` filter or set `default_tools_approval_mode`. Unknown/misspelled
+tool names do not fail open or trigger extra SDK discovery: the thread may open,
+but the real unapproved tool remains subject to the runtime's existing refusal.
+There is no new status API or SDK `tools/list` probe for Codex.
+
+This is an explicit local approval declaration, not a read-only/mutating
+classifier, a tool deny list or a sandbox. `approvalPolicy` stays `never` by
+default and `on-request` with nativeInteractions. Existing user runtime policy
+and native interaction behavior still apply; absence of a Host declaration
+means no additional SDK approval, not a revocation of user configuration.
+Remote offers, prompts, tool descriptions and transcript contents cannot author
+these declarations.
 
 ### The launch working directory
 

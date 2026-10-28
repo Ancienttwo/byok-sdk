@@ -6,7 +6,6 @@ import {
   type ToolsetId,
 } from '@byok-sdk/protocol';
 import type {
-  McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetLifecycleState,
   McpToolsetObservation,
@@ -14,7 +13,7 @@ import type {
   McpToolsetReloadReceipt,
   McpToolsetStatus,
 } from '../types';
-import { GRANTABLE_MCP_SERVER_NAME } from '../mcp/observation';
+import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../mcp/observation';
 import { isReservedMcpServerName } from '../sdk-reserved-mcp';
 import { compareCodeUnits } from '../util/compare-code-units';
 
@@ -113,10 +112,11 @@ function digest(value: unknown): string {
 function canonicalServers(toolset: McpToolsetConfig): readonly unknown[] {
   return Object.entries(toolset.mcpServers)
     .sort(([left], [right]) => compareCodeUnits(left, right))
-    .map(([name, server]) => [name, server.command, [...(server.args ?? [])]] as const);
+    .map(([name, server]) => [name, server.command, [...(server.args ?? [])],
+      ...(server.approveTools?.length ? [server.approveTools] : [])] as const);
 }
 
-/** The full content identity of one toolset definition: what it runs. */
+/** The full content identity of one local definition: what it runs and explicitly approves. */
 function canonicalToolset(toolset: McpToolsetConfig): unknown {
   return { servers: canonicalServers(toolset) };
 }
@@ -154,7 +154,7 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
       );
     }
 
-    const servers: Record<string, McpStdioServerConfig> = {};
+    const servers: Record<string, McpToolsetConfig['mcpServers'][string]> = {};
     for (const [serverName, rawServer] of serverEntries.sort(([left], [right]) => compareCodeUnits(left, right))) {
       if (!ToolsetIdSchema.safeParse(serverName).success) {
         throw new Error(
@@ -175,12 +175,12 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
         throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} must be an object`);
       }
       const serverKeys = Object.keys(rawServer);
-      if (serverKeys.some((key) => key !== 'command' && key !== 'args')) {
+      if (serverKeys.some((key) => key !== 'command' && key !== 'args' && key !== 'approveTools')) {
         throw new Error(
-          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} accepts only command and args; env, headers, and remote task data are not supported`,
+          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} accepts only command, args and approveTools; env, headers, and remote task data are not supported`,
         );
       }
-      const server = rawServer as { command?: unknown; args?: unknown };
+      const server = rawServer as { command?: unknown; args?: unknown; approveTools?: unknown };
       if (!isNonEmptySingleLine(server.command)) {
         throw new Error(
           `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.command must be a non-empty single-line string no longer than ${MAX_LOCAL_MCP_TOKEN_CHARS} characters`,
@@ -199,8 +199,17 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
           `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.args must contain at most ${MAX_LOCAL_MCP_ARGS} non-empty single-line strings`,
         );
       }
+      const approved = server.approveTools;
+      if (approved !== undefined && (!Array.isArray(approved)
+        || approved.some((name: unknown) => typeof name !== 'string' || !GRANTABLE_TOOL_NAME.test(name)
+          || ['__proto__', 'prototype', 'constructor'].includes(name))
+        || new Set(approved).size !== approved.length)) {
+        throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.approveTools must be a unique list of exact grantable tool names; wildcards and prototype keys are forbidden`);
+      }
+      const approveTools = approved === undefined ? [] : [...(approved as string[])].sort(compareCodeUnits);
       servers[serverName] = Object.freeze({
         command: server.command,
+        ...(approveTools.length > 0 ? { approveTools: Object.freeze(approveTools) } : {}),
         ...(args.length > 0 ? { args: Object.freeze([...args]) as readonly string[] } : {}),
       });
     }

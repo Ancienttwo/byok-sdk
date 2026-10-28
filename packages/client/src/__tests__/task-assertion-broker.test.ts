@@ -316,7 +316,9 @@ describe('task assertion broker: task_assertion.issue', () => {
           },
         },
       } as Partial<DaemonConfig>),
-    ).rejects.toThrow(/only command and args/);
+    ).rejects.toThrow(
+      `DaemonConfig.mcpToolsets.${READ_TOOLSET}.mcpServers.${READ_SERVER} accepts only command, args and approveTools; env, headers, and remote task data are not supported`,
+    );
   });
 
   // -------------------------------------------------------------------------

@@ -320,12 +320,39 @@ createDaemon({
 });
 ```
 
-The map accepts only `command` and `args`; put OAuth tokens, cookies, and other
+The map accepts `command`, `args`, and optional `approveTools`; put OAuth tokens, cookies, and other
 secrets behind the local MCP process's own credential broker.
 
-The SDK grants no per-tool permission
-([ADR-037](../../docs/architecture/adr-2026-10-07-minimal-guardrails.md)).
-Sessions run YOLO and each tool call follows the agent's own guardrails:
+For Codex, the local Host can explicitly preapprove exact tools on one server:
+
+```ts
+mcpToolsets: {
+  'salesko.prospecting': {
+    mcpServers: {
+      'salesko-connectors': {
+        command: '/opt/salesko/bin/connector-mcp',
+        approveTools: ['find_leads'],
+      },
+    },
+  },
+}
+```
+
+Only exact, unique tool names are accepted; no wildcard or server-wide default
+is supported. Reserved SDK server names cannot be configured or overridden.
+An omitted/empty list adds no approval. The list participates in the registry's
+content revision and is frozen with each attempt before runtime detection;
+reloads affect later attempts only. A nonempty list requires the adapter's local
+`mcpToolApprovals` capability (currently Codex); another explicitly selected
+runtime is declined before claim. No wire field or new tool discovery is added.
+
+A misspelled tool name may allow the thread to open but does not authorize the
+real tool. There is no separate approval-status API. Start and resume both use
+the current attempt's declaration, never a remembered transcript grant.
+`approveTools` does not limit tool availability or filesystem access, and does
+not revoke permissions in the user's own agent configuration. The SDK does not
+classify tools as read-only or mutating. Default and nativeInteractions modes
+remain unchanged, and each tool call follows the runtime's own guardrails:
 
 - Claude: the selected servers go into a task-scoped `--mcp-config`, next to
   the user's own MCP configuration. Claude starts with
