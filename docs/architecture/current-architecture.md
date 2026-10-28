@@ -158,4 +158,4 @@ owner 2026-10-29 定了「收回 SDK 优先」：「下游自己写的部分」�
 
 - 三页的全部 Mermaid 图用 Mermaid CLI 本地渲染通过。
 - 审查视图的 `path:line`、规模与依赖边计数由一次独立复核对照基线源码核对，修正已并入。2026-10-29 又按 AST 口径重算了 client 与 cloud 的目录边，公开入口发出的边不计，结果见分层视图 §3.1、R-L1 与 R-L2。
-- 本地运行了 `check:version-authority` 与 `scripts/ci` 的测试。本环境连不上 npm registry，装不了依赖，build、typecheck、test、`check:api-surface` 与 `check:release-graph` 由 PR 的 CI 运行。
+- 本地运行了 `check:version-authority` 与 `scripts/ci` 的测试；本环境连不上 npm registry，装不了依赖。PR 的 CI 按改动范围判定只改了文档，运行了 workflow 与 selector 契约、version authority 和选中的 registry 契约；build、typecheck、test 与 `check:api-surface` 因为没有代码改动，按设计跳过。
