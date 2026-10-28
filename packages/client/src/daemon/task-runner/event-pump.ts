@@ -367,14 +367,23 @@ function noteToolReminder(this: TaskRunner, active: ActiveTask, event: Extract<A
     ? event.input as Record<string, unknown> : {};
   const call = { toolName: event.tool, input, cwd: active.workspaceDir, ...(event.mcp === undefined ? {} : { mcp: event.mcp }) };
   const risk = classifyToolCall(call, active.workspaceDir, undefined, active.toolAuthorization.rules);
-  if (risk.level === 'normal') return;
+  const identity = { taskId: active.taskId, toolName: event.tool,
+    ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }) };
   try {
+    if (risk.level === 'normal') {
+      if (risk.suppressedReasons !== undefined && risk.suppressedReasons.length > 0) {
+        this['deps'].onToolAuthorizationDecision?.(Object.freeze({
+          ...identity, decision: 'allow', authorization: risk.authorization, reasons: Object.freeze([]),
+          suppressedReasons: risk.suppressedReasons,
+        }));
+      }
+      return;
+    }
     this['deps'].onToolReminder?.(Object.freeze({
-      taskId: active.taskId, toolName: event.tool,
-      ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
+      ...identity,
       reasons: risk.reasons, authorization: risk.authorization, summary: describeHighRiskToolCall(call, risk.reasons, risk.authorization),
     }));
   } catch (error) {
-    console.error(`[byok/client] tool reminder observer failed for task ${active.taskId}: ${errorMessage(error)}`);
+    console.error(`[byok/client] tool authorization observer failed for task ${active.taskId}: ${errorMessage(error)}`);
   }
 }

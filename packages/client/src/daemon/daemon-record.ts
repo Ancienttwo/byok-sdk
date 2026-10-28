@@ -50,7 +50,7 @@ export type DaemonRecord =
   | { kind: 'shutdown-requested'; ts: string; reasonBytes: number }
   | { kind: 'shutdown-complete'; ts: string; reasonBytes: number; undeliveredOutboxCount?: number }
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reasonBytes?: number }
-  | { kind: 'tool-reminder'; ts: string; taskId: string; reasons: readonly ToolRiskReason[]; authorization: ToolAuthorizationReason; summaryBytes: number }
+  | { kind: 'tool-reminder'; ts: string; taskId: string; reasons: readonly ToolRiskReason[]; suppressedReasons?: readonly ToolRiskReason[]; authorization: ToolAuthorizationReason; summaryBytes: number }
   | Omit<Extract<DaemonEvent, { kind: 'tool-authorization' }>, 'toolName'>
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reasonBytes: number }
   /** Already content-free: counts and closed codes (`execution-record.ts`). */
@@ -318,11 +318,13 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
       };
     case 'tool-reminder':
       return { kind: 'tool-reminder', ts, taskId: event.taskId, reasons: [...event.reasons],
+        ...(event.suppressedReasons === undefined ? {} : { suppressedReasons: [...event.suppressedReasons] }),
         authorization: { source: event.authorization.source, ruleIds: [...event.authorization.ruleIds] }, summaryBytes: bytes(event.summary) };
     case 'tool-authorization':
       return { kind: 'tool-authorization', ts, taskId: event.taskId,
         ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }), decision: event.decision,
         authorization: { source: event.authorization.source, ruleIds: [...event.authorization.ruleIds] }, reasons: [...event.reasons],
+        ...(event.suppressedReasons === undefined ? {} : { suppressedReasons: [...event.suppressedReasons] }),
         ...(event.code === undefined ? {} : { code: event.code }),
       };
     case 'runtime-disposal-failed':

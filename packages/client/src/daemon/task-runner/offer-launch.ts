@@ -57,7 +57,8 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       taskId, runtimeId: pick.descriptor.id, ...(agentBinding.resolution.agentRef === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
     })));
   } catch (error) {
-    if (!admissionWithdrawn()) decline(`tool_authorization_unresolved: ${errorMessage(error)}`, false);
+    console.error(`[byok/client] tool authorization policy unresolved for task ${taskId}: ${errorMessage(error)}`);
+    if (!admissionWithdrawn()) decline('tool_authorization_unresolved: local tool authorization policy could not be resolved', false);
     return;
   }
   if (toolAuthorization.mode === 'auto' && (pick.descriptor.capabilities.toolAuthorizationAuto !== true || preparation !== undefined)) {
@@ -439,6 +440,7 @@ async function startAndActivateRuntime(
       onDecision: ({ call, risk, verdict }) => this['deps'].onToolAuthorizationDecision?.(Object.freeze({
         taskId, toolName: call.toolName, toolCallId: call.toolCallId, decision: verdict.decision,
         authorization: risk.authorization, reasons: risk.level === 'high' ? risk.reasons : Object.freeze([]),
+        ...(risk.level === 'normal' && risk.suppressedReasons !== undefined ? { suppressedReasons: risk.suppressedReasons } : {}),
         ...(verdict.decision === 'deny' ? { code: verdict.code } : {}),
       })),
       timeoutMs: (this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS) + 5_000,
