@@ -20,7 +20,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
-async function fixture() {
+async function fixture(delegated = false) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-tool-hook-')));
   roots.push(root);
   const agentDir = path.join(root, 'agent');
@@ -29,16 +29,31 @@ async function fixture() {
   const requests: unknown[] = [];
   let target = path.join(cwd, 'target.txt');
   let count = 0;
+  let parentRequests = 0;
+  let childRequests = 0;
+  if (delegated) {
+    await fs.mkdir(path.join(agentDir, 'agents'));
+    await fs.writeFile(path.join(agentDir, 'agents', 'hook-child.md'), '---\nname: hook-child\ndescription: Loopback child for execution-hook propagation\nmodel: hook-loopback/probe\ntools: write\n---\nComplete the delegated file operation.');
+  }
   const server = createServer(async (request, response) => {
     let bytes = '';
     for await (const chunk of request) bytes += chunk;
-    requests.push(JSON.parse(bytes));
+    const body = JSON.parse(bytes) as { tools?: { function?: { name?: string } }[] };
+    requests.push(body);
     const turn = ++count;
+    const parent = body.tools?.some(tool => tool.function?.name === 'subagent') === true;
+    const rootFirst = delegated && parent && ++parentRequests === 1;
+    const childFirst = delegated && !parent && ++childRequests === 1;
+    const tool = rootFirst
+      ? { name: 'subagent', arguments: JSON.stringify({ agent: 'hook-child', task: 'Write the target file', model: 'hook-loopback/probe', async: false, context: 'fresh', output: false, artifacts: false, timeoutMs: 20000 }) }
+      : childFirst || (!delegated && turn % 2 === 1)
+        ? { name: 'write', arguments: JSON.stringify({ path: target, content: 'actual file content' }) }
+        : undefined;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    const delta = turn % 2 === 1
-      ? { role: 'assistant', tool_calls: [{ index: 0, id: `write-${turn}`, type: 'function', function: { name: 'write', arguments: JSON.stringify({ path: target, content: 'actual file content' }) } }] }
+    const delta = tool !== undefined
+      ? { role: 'assistant', tool_calls: [{ index: 0, id: `call-${turn}`, type: 'function', function: tool }] }
       : { role: 'assistant', content: 'finished' };
-    response.end(`data: ${JSON.stringify({ id: `response-${turn}`, object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: `response-${turn}`, object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: turn % 2 === 1 ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`);
+    response.end(`data: ${JSON.stringify({ id: `response-${turn}`, object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: `response-${turn}`, object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: tool === undefined ? 'stop' : 'tool_calls' }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
   servers.push(server);
@@ -105,6 +120,39 @@ describe('Pi local beforeTool execution boundary (#1061)', () => {
     await finish(session);
     expect(await fs.readFile(f.target, 'utf8')).toBe('actual file content');
   }, 30_000);
+
+  it.each(['throw', 'timeout'] as const)('blocks the actual write when the callback fails with %s', async failure => {
+    const f = await fixture();
+    const runtime = adapter({ timeoutMs: 25, onRequest: () => {
+      if (failure === 'throw') throw new Error('callback failed');
+      return new Promise<never>(() => {});
+    } });
+    const session = await startPreparedOperation(runtime, { instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env });
+    sessions.push(session);
+    await finish(session);
+    await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(JSON.stringify(f.requests)).toContain(failure === 'throw' ? 'tool_policy_error' : 'tool_policy_timeout');
+  }, 30_000);
+
+  it('carries the parent gate through the real subagent scheduler into the child write', async () => {
+    const f = await fixture(true);
+    const observed: BeforeToolRequest[] = [];
+    const runtime = adapter({ onRequest: request => {
+      observed.push(request);
+      return request.toolName === 'write' ? { decision: 'deny', reason: 'scheduled child write denied' } : { decision: 'allow' };
+    } });
+    const session = await startPreparedOperation(runtime, { instruction: 'Delegate the file operation to hook-child' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env });
+    sessions.push(session);
+    await finish(session);
+    expect(observed.find(request => request.toolName === 'subagent')).toMatchObject({
+      taskId: 'adapter-unit-test', agentRef: { agentId: 'adapter-unit-agent', profileRevision: 'r1' },
+    });
+    const childCall = observed.find(request => request.toolName === 'write');
+    expect(childCall).toMatchObject({ taskId: 'adapter-unit-test', agentRef: { agentId: 'adapter-unit-agent', profileRevision: 'r1' }, paths: [f.target] });
+    expect(childCall?.nativeAgentId).toMatch(/^pi-subagent:/);
+    expect(JSON.stringify(f.requests)).toContain('scheduled child write denied');
+    await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 45_000);
 
   it('routes an SDK print child through the same parent gate and rejects the actual child write', async () => {
     const f = await fixture();
