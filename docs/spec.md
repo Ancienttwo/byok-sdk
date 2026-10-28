@@ -299,9 +299,13 @@ All nine public packages use one version: the eight aligned dispatch packages
 and `@byok-sdk/keys`. Before 1.0, PATCH is limited to corrections with no new
 public behavior, API, persistence, or security authority; MINOR covers additive
 public API/features, new forward migrations/authority, and any pre-1.0
-breaking cut. A version bump does not authorize publish. The current
-aligned release is `0.30.2`; publication requires separate release
-authorization and registry readback. The packed and published keys
+breaking cut. Breaking changes ship only in a MINOR: there is no PATCH
+exception (Q8, owner 2026-10-29). Every Host-visible change since the last
+release is an entry in the upgrade manifest that `@byok-sdk/client` ships, and
+`bun run check:upgrade-manifest` fails a PATCH that carries a breaking entry
+([upgrade manifest](upgrade-manifest.md)). A version bump does not authorize
+publish. The current aligned release is `0.30.2`; publication requires separate
+release authorization and registry readback. The packed and published keys
 `@byok-sdk/core` edge must be the exact current release, `0.30.2`, proven from
 an isolated standard npm install rather than the workspace graph.
 

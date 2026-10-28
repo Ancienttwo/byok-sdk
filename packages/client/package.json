@@ -67,7 +67,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "upgrade-manifest.json"
   ],
   "publishConfig": {
     "access": "public"

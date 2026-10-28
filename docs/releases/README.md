@@ -16,6 +16,10 @@ first OIDC publication. Current releases do not require live npm trust.
 The nine-package setup, constraints and recovery steps are in
 [npm trusted publishing](oidc-trusted-publishing.md).
 
+## Upgrade manifest
+
+A release ships `packages/client/upgrade-manifest.json` with one entry per Host-visible change since the previous release; breaking entries need a MINOR, never a PATCH (Q8). See [the upgrade manifest](../upgrade-manifest.md#release-steps).
+
 ## Protocol compatibility baseline
 
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility
