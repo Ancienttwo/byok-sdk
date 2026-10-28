@@ -435,6 +435,10 @@ export function selectImpact(paths, context = {}) {
     if (path === 'examples/basic/public/index.html') { dirs.add('examples/basic'); continue; }
     // The usage notes of the clarification and goal/btw examples.
     if (path === 'examples/basic/clarification-usage.md' || path === 'examples/basic/goal-btw-usage.md') { dirs.add('examples/basic'); continue; }
+    // #1061: Codex reference Host fixture (questions-only after native permission fold).
+    if (path === 'examples/codex-interaction-host/fixtures/fake-codex.mjs') {
+      dirs.add('examples/codex-interaction-host'); continue;
+    }
     // The Salesko recovery integration fixture runs the client daemon; no CI job runs scripts/integration.
     if (path === 'scripts/integration/fixtures/salesko-recurring-daemon.ts' || path === 'scripts/integration/salesko-recurring.test.ts') {
       dirs.add('packages/client'); continue;
