@@ -24,8 +24,9 @@ export function removedFieldError(path: string): DaemonConfigFieldRemovedError {
 
 /**
  * Construction-time validation (#1094): throws on the first removed field,
- * then on any other error; logs each unknown-field warning once and returns
- * the warnings for `Daemon.status().config` (Q4': never rejected).
+ * then on any other error, and returns the unknown-field warnings (Q4':
+ * never rejected). Daemon construction logs them once and reports them in
+ * `Daemon.status().config`; `checkDaemonConfig` only reports them.
  */
 export function assertDaemonConfigValid(config: unknown): readonly DaemonConfigIssue[] {
   const { issues } = validateDaemonConfig(config, { source: 'embedded' });
@@ -33,7 +34,5 @@ export function assertDaemonConfigValid(config: unknown): readonly DaemonConfigI
   if (removed !== undefined) throw removedFieldError(removed.path);
   const errors = issues.filter((issue) => issue.severity === 'error');
   if (errors.length > 0) throw new DaemonConfigInvalidError(errors);
-  const warnings = issues.filter((issue) => issue.severity === 'warning');
-  for (const warning of warnings) console.warn(`[byok/client] ${warning.message}`);
-  return warnings;
+  return issues.filter((issue) => issue.severity === 'warning');
 }

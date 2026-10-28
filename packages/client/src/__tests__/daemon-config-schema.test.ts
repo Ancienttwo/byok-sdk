@@ -113,7 +113,9 @@ describe('byok-agent config check: Salesko-shaped CLI config (#1094 acceptance)'
   it('warns on a misspelled field, passes without --strict and fails with it', async () => {
     const storeDir = await tmpDir('byok-config-check-store-');
     const file = await writeConfig({ ...salesko, productName: 'Salesko', storeDir, runtimeAlowlist: ['codex'] });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const plain = runCheck(file);
+    expect(warn).not.toHaveBeenCalled();
     expect(plain.code).toBe(0);
     expect(plain.out).toContain('warning runtimeAlowlist: DaemonConfig.runtimeAlowlist is not a known field and is ignored; did you mean "runtimeAllowlist"?');
     expect(plain.out).toContain('result: ok (0 errors, 1 warning)');
@@ -184,7 +186,8 @@ describe('effective values', () => {
     const status = daemon.status();
     expect(status.config).toEqual(checkDaemonConfig(config, { source: 'embedded', adapters }).effective);
     expect(status.config.warnings).toEqual([expect.objectContaining({ code: 'unknown_field', path: 'stroeDir', severity: 'warning' })]);
-    expect(warn).toHaveBeenCalledWith('[byok/client] DaemonConfig.stroeDir is not a known field and is ignored; did you mean "storeDir"?');
+    // Logged exactly once, at construction; checkDaemonConfig above only reports it.
+    expect(warn.mock.calls.filter(([line]) => String(line).includes('stroeDir'))).toEqual([['[byok/client] DaemonConfig.stroeDir is not a known field and is ignored; did you mean "storeDir"?']]);
     expect(status.config.runtimes).toEqual([{ id: 'pi', source: 'injected', toolAuthorizationAuto: false }]);
     expect(status.config.directories.agentHomes).toBe(path.join(path.resolve(config.agentHome!.hostStorageRoot), 'agents'));
     expect(status.config.memory.mcp).toBe(status.agentMemoryMcp);

@@ -3404,8 +3404,9 @@ export declare class DaemonConfigInvalidError extends Error {
 export declare function removedFieldError(path: string): DaemonConfigFieldRemovedError;
 /**
  * Construction-time validation (#1094): throws on the first removed field,
- * then on any other error; logs each unknown-field warning once and returns
- * the warnings for `Daemon.status().config` (Q4': never rejected).
+ * then on any other error, and returns the unknown-field warnings (Q4':
+ * never rejected). Daemon construction logs them once and reports them in
+ * `Daemon.status().config`; `checkDaemonConfig` only reports them.
  */
 export declare function assertDaemonConfigValid(config: unknown): readonly DaemonConfigIssue[];
 // ==== @byok-sdk/client dist/daemon/config-schema/index.d.ts ====
