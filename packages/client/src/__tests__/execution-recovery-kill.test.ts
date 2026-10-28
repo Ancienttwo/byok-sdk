@@ -8,7 +8,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { decodeEnvelope } from '@byok-sdk/protocol';
+import { BYOK_CAPABILITIES_PATH, decodeEnvelope } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeManager } from '../agent-home';
 
 interface ChildConfig {
@@ -32,6 +32,7 @@ interface JsonLine {
   readonly event?: { readonly kind: string };
   readonly id?: number;
   readonly ready?: boolean;
+  readonly url?: string;
   readonly deviceId?: string;
   readonly result?: unknown;
   readonly error?: string;
@@ -148,18 +149,6 @@ async function run(command: string, args: readonly string[]): Promise<void> {
   });
 }
 
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') return reject(new Error('failed to allocate fixture port'));
-      server.close(() => resolve(address.port));
-    });
-  });
-}
-
 async function writeConfig(name: string, value: unknown): Promise<string> {
   const file = path.join(current?.root ?? suiteRoot, `${name}-${randomUUID()}.json`);
   await fs.writeFile(file, JSON.stringify(value), { mode: 0o600 });
@@ -170,7 +159,15 @@ async function startCloud(): Promise<JsonChild> {
   if (current === undefined) throw new Error('test context missing');
   const child = new JsonChild(cloudBin, current.cloudConfig);
   current.children.push(child);
-  await child.ready();
+  const ready = await child.ready();
+  if (typeof ready.url !== 'string') throw new Error('cloud fixture did not report its bound URL');
+  const bound = new URL(ready.url);
+  if (bound.hostname !== '127.0.0.1' || Number(bound.port) <= 0) throw new Error(`invalid cloud fixture URL: ${ready.url}`);
+  current.port = Number(bound.port);
+  current.daemonBase = { ...current.daemonBase, serverUrl: ready.url };
+  // Reconstructed clouds must keep the endpoint the running daemon knows.
+  const config = JSON.parse(await fs.readFile(current.cloudConfig, 'utf8'));
+  await fs.writeFile(current.cloudConfig, JSON.stringify({ ...config, port: current.port }));
   return child;
 }
 
@@ -318,7 +315,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-execution-recovery-kill-'));
-  const port = await freePort();
+  const port = 0;
   const productId = `execution-recovery-${randomUUID()}`;
   if (process.platform === 'darwin') keychain = await createTestKeychain();
   const cloudDb = path.join(root, 'cloud.db');
@@ -372,6 +369,26 @@ afterEach(async () => {
 
 afterAll(async () => {
   if (suiteRoot !== undefined) await fs.rm(suiteRoot, { recursive: true, force: true });
+});
+
+describe('compiled cloud fixture port ownership', () => {
+  it('starts on its own bound port while a competing listener holds the parent port', async () => {
+    const competitor = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      competitor.once('error', reject);
+      competitor.listen(current!.port, '127.0.0.1', resolve);
+    });
+    try {
+      const cloud = await startCloud();
+      expect(await cloud.rpc('createPairingCode')).toMatchObject({ code: expect.any(String) });
+      const address = competitor.address() as net.AddressInfo;
+      expect(new URL(current!.daemonBase.serverUrl).port).not.toBe(String(address.port));
+      const response = await fetch(`${current!.daemonBase.serverUrl}${BYOK_CAPABILITIES_PATH}`);
+      expect(response.ok).toBe(true);
+    } finally {
+      await new Promise<void>((resolve, reject) => competitor.close(error => error ? reject(error) : resolve()));
+    }
+  });
 });
 
 // The owned-runtime fixture requires POSIX process groups, SIGKILL and Perl
