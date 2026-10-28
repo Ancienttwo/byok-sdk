@@ -1,8 +1,9 @@
 # 进程与命名空间拓扑 + 挂载层
 
+> **定位**：审查视图。当前规范见[当前功能架构](current-architecture.md)；本页给出逐条证据与 Remarks。之后的修订以本页的文件历史为准。
 > **核对基准**：commit `671309da`（2026-10-28）。文中 `path:line` 均指这一版，路径相对仓库根。
 > **事实优先级**：源码 > `docs/spec.md` > 本文。本文是手写视图，ArchContext 不投影它。
-> **配套**：[总分层架构、模块与时序](layered-architecture.md) · [`host-runtime-isolation-matrix.md`](../host-runtime-isolation-matrix.md) · [`host-local-storage-layout.md`](../host-local-storage-layout.md) · [Architecture Index](index.md)
+> **配套**：[当前功能架构](current-architecture.md) · [总分层架构、模块与时序](layered-architecture.md) · [`host-runtime-isolation-matrix.md`](../host-runtime-isolation-matrix.md) · [`host-local-storage-layout.md`](../host-local-storage-layout.md) · [Architecture Index](index.md)
 > **用途**：定位进程、身份与目录边界。`R-Tx` 指向本文 [Remarks](#remarks)，`R-Lx` 指向[分层文档的 Remarks](layered-architecture.md#remarks)。
 
 本文的"命名空间"和"挂载"指代码里实际存在的三样东西：进程树与进程组；身份 keyspace 与目录树；daemon 交给每个 runtime 子进程的 cwd、环境变量和配置文件。SDK 不创建内核 namespace、bind mount、chroot 或容器，`packages/client` 与 `packages/keys` 里检索 `unshare`、`bwrap`、`sandbox-exec`、`landlock`、`chroot`、`seccomp` 均无结果，与 [`host-runtime-isolation-matrix.md`](../host-runtime-isolation-matrix.md) 一致。需要 OS 级隔离时由 Host 自己包一层。
@@ -87,9 +88,9 @@ flowchart LR
 | Topology H Host | Worker 按请求；常驻 Node 另开一条 session 模式 Postgres 连接 `LISTEN` | Host | `packages/cloud-dataplane/src/mailbox-wake.ts:10-19,99` |
 | daemon | 长驻；服务管理器的命令行是 `<node> <byok-agent> start --config <abs> --service` | launchd `gui/<uid>` LaunchAgent、systemd user unit、WinSW | `packages/client/src/lifecycle/service-types.ts:63`；`lifecycle/launchd.ts`、`systemd.ts`、`winsw.ts` |
 | runtime 根进程 | 每任务；`detached: true`，各自成为进程组 leader | daemon | `packages/client/src/adapters/process-tree.ts:54-60` |
-| keys launcher | 每任务，可选；以继承的 stdio 加 IPC 启动 Pi host，provider key 走 IPC | daemon | `packages/keys/src/pi-provider-launcher-core.ts:590` |
+| keys launcher | 每任务，可选；以继承的 stdio 启动 Pi host。rpc 与 durable lane 的 provider key 走私有 IPC；prepared lane 不运行原生工具，key 经环境变量 `PI_PROVIDER_API_KEY` 交给它 | daemon | `packages/keys/src/pi-provider-launcher-core.ts:548-552,586-592` |
 | durable Pi 工具 shell | 每次工具调用；`/bin/bash`（缺失时 `/bin/sh`）`-c`，`detached: true` | Pi host | `packages/client/src/adapters/pi-durable/shell.ts:28-32` |
-| SDK 保留 MCP helper | 随 runtime；`byok-agent-message-mcp`、`-result-mcp`、`-memory-mcp`、`-team-mcp`，经控制通道回拨 daemon | runtime 当作 MCP server 拉起 | `packages/client/src/bin/sdk-reserved-helper-runners.ts:30-40,137-158` |
+| SDK 保留 MCP helper | 随 runtime；`byok-agent-message-mcp`、`-result-mcp`、`-memory-mcp`、`-team-mcp`，经控制通道回拨 daemon | runtime 当作 MCP server 拉起 | `packages/client/src/bin/sdk-reserved-helper-runners.ts:30-40,146-160` |
 | 工具授权闸门 | 每 runtime 一个 loopback HTTP server，仅 `auto` 模式 | daemon 进程内 | `packages/client/src/tool-authorization-ipc.ts:74-103` |
 | 直接子进程 | 短命，不建组 | daemon | git、memory helper、`daemon/mcp-tools-probe.ts`、`daemon/device-credential-store.ts` |
 
@@ -219,7 +220,7 @@ flowchart LR
     B4["协议消息携带 MCP 列表<br/>Codex thread/start<br/>ACP session/new"]:::how
     B5["SDK 设置的目录变量<br/>PI_CODING_AGENT_DIR · HERMES_HOME"]:::how
     B6["原样继承<br/>不改 HOME · CLAUDE_CONFIG_DIR<br/>CODEX_HOME"]:::how
-    B7["Claude：stdio control hook<br/>Pi：BYOK_TOOL_AUTHORIZATION_GATE"]:::how
+    B7["Claude：stdio control hook<br/>Pi：rpc-launch.json 交给 Pi host<br/>Pi host 再经环境变量交给子会话"]:::how
   end
 
   RT["runtime 子进程<br/>claude · codex · pi<br/>hermes · grok"]:::rt
@@ -239,14 +240,14 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | Claude，内置 | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages` | claude 按 `--mcp-config` 文件拉起 | 默认 `--dangerously-skip-permissions`；Host 开启 native interactions 时改为 `--permission-prompt-tool stdio --permission-mode acceptEdits` | 支持，PreToolUse hook 走 stdio control |
 | Codex，内置 | `codex app-server -c sandbox_mode=… --listen stdio://` | codex 按 `thread/start` / `thread/resume` 的 `mcp_servers` 拉起 | `approvalPolicy` 默认 `never`；`sandbox_mode` 默认 `danger-full-access`，`codexSandbox: 'inherit'` 时不覆盖 | 不支持，`auto` 会被 decline |
-| Pi，内置 | Pi host bin，可经 `byok-pi-provider-launcher` 启动 | Pi host 的 `McpServerPool`，配置在 `sdk/rpc-launch.json` | 预信任会话 cwd | 只在普通 `pi-rpc` lane 支持，loopback IPC；prepared 与 durable lane 以 `tool_authorization_unsupported` 失败 |
+| Pi，内置 | Pi host bin，可经 `byok-pi-provider-launcher` 启动 | Pi host 的 `McpServerPool`，配置在 `sdk/rpc-launch.json` | 预信任会话 cwd | 只在普通 `pi-rpc` lane 支持，loopback IPC；prepared offer 与 durable lane 在准入时以 `tool_authorization_unsupported` decline（durable 的 descriptor 不声明 `toolAuthorizationAuto`，启动时的检查只是兜底） |
 | Hermes，Host 注入 | `hermes gateway run --quiet --external-supervisor --force` 与 `hermes --yolo acp` | Hermes 按 ACP `session/new` 的 `mcpServers` 拉起 | `--yolo` | 不支持 |
 | Grok，Host 注入 | `grok agent --always-approve --no-leader stdio` | Grok 按 ACP `session/new` 的 `mcpServers` 拉起 | `--always-approve` | 不支持 |
 
 出处：`packages/client/src/adapters/claude/claude-adapter.ts:128-139,344-366`；`packages/client/src/adapters/codex/codex-adapter.ts:49-65,236,271`；`packages/client/vendor/oar/51b83c9/runtimes/codex/app-server-client.ts:110`；`packages/client/vendor/oar/51b83c9/runtimes/codex/open.ts:112,137`；`packages/client/src/adapters/pi/pi-adapter.ts:227,436-440,525-555`；`packages/client/src/adapters/hermes/hermes-adapter.ts:100,335,346`；`packages/client/vendor/oar/51b83c9/runtimes/grok/session.ts:144`；`auto` 准入见 `packages/client/src/daemon/task-runner/offer-launch.ts:61`。
 
 - **环境变量**：`buildRuntimeEnv` 继承 daemon 的完整环境，只去掉 `CLAUDECODE` 与 `BYOK_*`（`packages/client/src/daemon/environment.ts:1-11,102-103,154`），再叠加 scratch 的 `TMPDIR`、`TEMP`、`TMP`（`packages/client/src/daemon/retention/scratch.ts:187`）。环境里的 provider key 等秘密会传到 agent 子进程（R-T1）。窄 allowlist `buildAllowlistedEnv` 用在 durable Pi 工具 shell、Pi 受控目录 lane，以及经 launcher 或 custody 的 Hermes（`adapters/pi-durable/environment.ts:7`；`adapters/pi/runtime-launch.ts:93`；`adapters/hermes/hermes-adapter.ts:228,262,325`；R-T4）。
-- **目录变量**：`PI_CODING_AGENT_DIR` 只在经 keys launcher 时指向 launcher 的投影目录（`packages/keys/src/pi-provider-launcher-core.ts:396`）；`HERMES_HOME` 指向 Host 提供的 Hermes home（`packages/client/src/adapters/hermes/hermes-adapter.ts:100`）。
+- **目录变量**：`PI_CODING_AGENT_DIR` 只在经 keys launcher 时指向 launcher 的投影目录（`packages/keys/src/pi-provider-launcher-core.ts:396`）；`HERMES_HOME` 指向每次运行新建的 profile `<Hermes home>/profiles/byok-<id>`（`packages/client/src/adapters/hermes/hermes-home.ts:98-104`；`hermes-adapter.ts:100`）。
 - **Claude 的 `agentUserContext: 'excluded'`**：只对 Agent 任务生效，加 `--strict-mcp-config` 与 `--settings <sdk>/claude-settings.json`，排除 Agent home 之外的 `CLAUDE.md` 和 auto memory（`packages/client/src/adapters/claude/claude-adapter.ts:105-106,297-314`；`adapters/claude/agent-user-context.ts:17`）。
 - **skill packs** 只装到 `<dataDir>/skill-packs/<name>/<hash>/`，由 Host 调 `projectSkillPack` 复制到它选的目录；SDK 不替 runtime 决定技能目录（`packages/client/src/daemon/skill-pack-installer.ts:20-32,72`）。
 
