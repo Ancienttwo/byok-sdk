@@ -135,7 +135,7 @@ owner 2026-10-29 定了「收回 SDK 优先」：「下游自己写的部分」�
 
 ## 重构跟进与验证范围
 
-审查视图的 Remarks 已立项，由 [#1093](https://github.com/Ancienttwo/byok-sdk/issues/1093) 跟踪。2026-10-29 的 v2 依据 RAFT 复核、从历史 issue 整理出的 92 条下游问题，以及 owner 定的「收回 SDK 优先」，新增 6 个子 issue，仍分 3 个阶段：
+审查视图的 Remarks 已立项，由 [#1093](https://github.com/Ancienttwo/byok-sdk/issues/1093) 跟踪。2026-10-29 的 v2 依据 RAFT 复核、从历史 issue 整理出的 92 条下游问题，以及 owner 定的「收回 SDK 优先」，新增 6 个子 issue，之后数据流复核又加了 #1113，仍分 3 个阶段：
 
 | 阶段 | issue | 内容 | Remarks |
 | --- | --- | --- | --- |
@@ -153,6 +153,7 @@ owner 2026-10-29 定了「收回 SDK 优先」：「下游自己写的部分」�
 | P2 | [#1099](https://github.com/Ancienttwo/byok-sdk/issues/1099) | client 目录分层；TaskRunner 抽成纯 reducer | R-L1 |
 | P2 | [#1100](https://github.com/Ancienttwo/byok-sdk/issues/1100) | cloud 组合点收尾 | R-L2 |
 | P2 | [#1105](https://github.com/Ancienttwo/byok-sdk/issues/1105) | retention 上界与 soak | — |
+| P2 | [#1113](https://github.com/Ancienttwo/byok-sdk/issues/1113) | 任务进度与结果的单一读取路径，排在 #1045 的设计之后 | — |
 
 本页与两页审查视图只改文档，不改源码、模型 YAML 或生成区。验证范围：
 
