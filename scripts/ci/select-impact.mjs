@@ -325,6 +325,17 @@ export const vitestTmpRootConsumers = Object.freeze([
   'examples/host-execution-core', 'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker',
   'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
 ]);
+// Reviewed M build inputs: exact paths retain workspace consumers and packed-artifact checks.
+const reviewedBuildConfigOwners = Object.freeze({
+  'packages/client/tsup.sealed.config.ts': 'packages/client',
+  'packages/cloud-dataplane/tsup.config.ts': 'packages/cloud-dataplane',
+  'packages/cloud-do/tsup.config.ts': 'packages/cloud-do',
+  'packages/cloud/tsup.config.ts': 'packages/cloud',
+  'packages/protocol/tsup.config.ts': 'packages/protocol',
+  'packages/server/tsup.config.ts': 'packages/server',
+  'packages/testkit/tsup.config.ts': 'packages/testkit',
+  'packages/ui-runtime/tsup.config.ts': 'packages/ui-runtime',
+});
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'packages/AGENTS.md', 'packages/CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 // #605 W5: w5-runner-probe.yml is workflow_dispatch only and reads no repo
 // file, so like release.yml it selects only the CI script checks.
@@ -434,6 +445,9 @@ export function selectImpact(paths, context = {}) {
         dirs.add(dir);
       }
       continue;
+    }
+    if (Object.hasOwn(reviewedBuildConfigOwners, path)) {
+      dirs.add(reviewedBuildConfigOwners[path]); families.add('npm-release-pack'); continue;
     }
     if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/scripts/check-adapters-entry.mjs'
       || path === 'packages/client/tsup.config.ts') {

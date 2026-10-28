@@ -1,6 +1,22 @@
+import { createTenantApi } from './api/tenant';
+import { createTaskReadsApi } from './api/task-reads';
+import { createTaskCancellationApi } from './api/task-cancellation';
+import { createE2eeApi } from './api/e2ee';
+import { createAgentControlsApi } from './api/agent-controls';
+import { createOffersApi } from './api/offers';
+import { createMaintenanceApi } from './api/maintenance';
 import { z } from 'zod';
-import { readTaskAgentMessageDraft, type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
-import { resolveProofReceiptRetention, runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance';
+import {
+  readTaskAgentMessageDraft,
+  type AgentMessageDraftCursor,
+  type AgentMessageDraftReadback,
+} from './agent-message-draft';
+import {
+  resolveProofReceiptRetention,
+  type MaintenanceInput,
+  type MaintenanceReport,
+  type ProofReceiptRetentionOptions,
+} from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
 import {
@@ -84,24 +100,16 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   type Envelope,
-  MESSAGE_PAYLOAD_SCHEMAS,
-  AgentContentReadPayloadSchema,
   AgentContentReceiptPayloadSchema,
   AgentHomeProjectionCompletionRequestSchema,
-  AgentHomeProjectionPayloadSchema,
-  AgentInputPreparationPayloadSchema,
-  ProviderProvisioningAvailablePayloadSchema,
-  AgentMemoryIntentAvailablePayloadSchema,
   E2eeKeyPackageAvailablePayloadSchema,
   InputPreparationCompletionRequestSchema,
   AgentMemoryProjectionCommitRequestSchema,
   AgentEgressAckPayloadSchema,
   AgentMessageServerContextSchema,
-  AgentMessagePublishPayloadSchema,
   AgentEgressPolicySchema,
   InputPreparationOfferBindingSchema,
   SessionSelectionSchema,
-  TaskOfferPayloadSchema,
   TaskOfferPlainPayloadSchema,
   TaskOfferSealedPayloadSchema,
   TaskSteerSealedPayloadSchema,
@@ -115,7 +123,6 @@ import {
   type AgentContentReceiptPayload,
   type AgentContentReadPayload,
   type AgentEgressAckPayload,
-  type AgentEgressReliablePayload,
   type AgentMessageDispositionPayload,
   type AgentMessagePublishPayload,
   type AgentMessageServerContext,
@@ -143,10 +150,7 @@ import { createAuthPlane, type AuthPlane } from './auth/plane';
 import type { TokenSigner } from './auth/tokens';
 import { CLOUD_CAPABILITIES, declares } from './capabilities';
 import {
-  assertBoardLabels,
   DEFAULT_ACTIVITY_BOUNDS,
-  DEFAULT_BOARD_CHANNEL_MAX_BYTES,
-  DEFAULT_BOARD_TITLE_MAX_BYTES,
   DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
   DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
   DEFAULT_PRESENCE_TTL_MS,
@@ -206,20 +210,15 @@ import {
 import { CloudRouteRegistry, type CloudRouteHandler, type RouteDescriptor } from './router/registry';
 import { readAgentMessageDisposition, terminalReceiptKey, type ByokCloudObserver } from './inbound';
 import {
-  agentHomeProjectionRequestKey,
   readAgentHomeProjectionStatus,
   recordAgentHomeProjectionCompletion,
-  sameAgentHomeProjectionRequest,
   type AgentHomeProjectionReceiptInput,
 } from './agent-home-projections';
 import {
-  inputPreparationRequestKey,
   readInputPreparationStatus,
   recordInputPreparationCompletion,
-  sameInputPreparationRequest,
   type InputPreparationReceiptInput,
 } from './input-preparations';
-import { agentReliabilityKey } from './agent-reliability';
 import type {
   AgentMemoryProjectionAuthorizer,
   AgentMemoryProjectionStore,
@@ -236,11 +235,9 @@ import type {
   TaskAttemptPage,
   TaskAttemptStatus,
 } from './stores/ports';
-import { projectTerminalResult, readDeviceTerminalReceipt, type DeviceTerminal, type TerminalResult } from './terminal-result';
+import { type DeviceTerminal, type TerminalResult } from './terminal-result';
 import type { MailboxWake } from './mailbox-wake';
 import {
-  assertTaskContentPresent,
-  isTaskRedactionTombstone,
   parseTaskRedactionInput,
   sameTaskBody,
   taskRedactionCodec,
@@ -2347,14 +2344,40 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return enqueued;
   }
 
+  const maintenanceApi = createMaintenanceApi({ options, proofReceiptRetention });
+
+  const offersApi = createOffersApi({
+    assertAgentCapabilities,
+    refuseSealedFields,
+    assertResumeSession,
+    AgentOfferLaneSchema,
+    PreparedOfferLaneSchema,
+    AgentEgressOfferLaneSchema,
+    enqueueTaskEnvelope,
+    agentMessageOfferWriter,
+  });
+
+  const agentControlsApi = createAgentControlsApi({
+    root,
+    controlPlane,
+    options,
+    assertAgentCapabilities,
+    enqueueAgentControlEnvelope,
+    agentControlEnvelopeId,
+    getAgentHomeProjectionStatus,
+    getInputPreparationStatus,
+  });
+
+  const e2eeApi = createE2eeApi({ e2eeMemberContext });
+
+  const taskCancellationApi = createTaskCancellationApi({ root, controlPlane, options });
+
+  const taskReadsApi = createTaskReadsApi({ root, controlPlane, options, sameAgentRef });
+
+  const tenantApi = createTenantApi({ root, controlPlane, options });
+
   return {
-    async runMaintenance(input) {
-      const report = await runMaintenanceSteps({ core: options.core, cloud: options.cloud, clock: options.clock,
-        ...(options.deviceAssertionReplay === undefined ? {} : { deviceAssertionReplay: options.deviceAssertionReplay }),
-        ...(proofReceiptRetention === undefined ? {} : { proofReceiptRetention }) }, input);
-      try { options.observer?.onMaintenance?.(report); } catch { /* Observers cannot change committed maintenance. */ }
-      return report;
-    },
+    runMaintenance: maintenanceApi.runMaintenance,
     fetch: registry.fetch,
     routes: registry.routes,
     mountedRoutes: registry.mounted,
@@ -2364,51 +2387,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return auth.createPairingCode(tenant, input);
     },
 
-    async enqueueAgentOffer(tenant, deviceId, input) {
-      // Resume-only: this lane never starts a fresh Agent execution; that has
-      // exactly one authority, `submitAgentExecution`. Checked first, before
-      // capability admission and any attempt, receipt or mailbox write, so a JS
-      // caller always gets the same code whatever the target device's state.
-      refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedAgentOffer');
-      assertResumeSession(input.payload);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', input.payload));
-      // Parse the strict control payload before reserving a mailbox sequence.
-      // A malformed/oversized AgentRef therefore cannot leave a durable
-      // delivery row behind.
-      const payload = AgentOfferLaneSchema.parse(input.payload);
-      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
-        createEnvelope('task.offer', payload, { id: messageId, taskId, seq }),
-      );
-    },
+    enqueueAgentOffer: offersApi.enqueueAgentOffer,
 
-    async enqueuePreparedOffer(tenant, deviceId, input) {
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', input.payload));
-      // Parsed before a mailbox sequence is reserved, exactly as the strict
-      // Agent offer above is: a malformed preparation reference must not leave
-      // a durable delivery row behind. A caller that tried to smuggle an
-      // `instruction` or a resume session onto this lane is rejected here.
-      const payload = PreparedOfferLaneSchema.parse(input.payload);
-      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
-        createEnvelope('task.offer', payload, { id: messageId, taskId, seq }),
-        agentMessageOfferWriter(deviceId, payload, input.agentMessageContext),
-      );
-    },
+    enqueuePreparedOffer: offersApi.enqueuePreparedOffer,
 
-    async enqueueAgentEgressOffer(tenant, deviceId, input) {
-      refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedAgentEgressOffer');
-      assertResumeSession(input.payload);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', input.payload));
-      const payload = AgentEgressOfferLaneSchema.parse(input.payload);
-      const enqueued = await enqueueTaskEnvelope(
-        tenant,
-        deviceId,
-        input.taskId,
-        payload.agentRef,
-        (taskId, seq, messageId) => createEnvelope('task.offer', payload, { id: messageId, taskId, seq }),
-        agentMessageOfferWriter(deviceId, payload, input.agentMessageContext),
-      );
-      return enqueued;
-    },
+    enqueueAgentEgressOffer: offersApi.enqueueAgentEgressOffer,
 
     submitAgentExecution,
 
@@ -2416,245 +2399,33 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     enqueueSealedAgentEgressOffer: (tenant, deviceId, input) => enqueueSealedTaskOffer(tenant, deviceId, SealedAgentEgressOfferLaneSchema, input),
     submitSealedAgentExecution,
 
-    async enqueueAgentContentRead(tenant, deviceId, input) {
-      const payload = AgentContentReadPayloadSchema.parse(input.payload);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('agent.content.read', payload));
-      const stores = tenantStoresFor(controlPlane(tenant), root);
-      const persisted = await stores.receipts.record({
-        key: agentReliabilityKey('agent-content-request', deviceId, payload.agentRef, payload.requestId),
-        body: JSON.stringify(payload),
-      });
-      if (!persisted.created && persisted.receipt.body !== JSON.stringify(payload)) {
-        throw new ByokCloudError(
-          'agent_content_request_mismatch',
-          `Request ${payload.requestId} already exists with a different immutable content-read body.`,
-        );
-      }
-      const messageId = await agentControlEnvelopeId(
-        'byok:agent-content-read',
-        tenant,
-        deviceId,
-        payload.agentRef,
-        payload.requestId,
-      );
-      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
-        createEnvelope('agent.content.read', payload, { id: messageId, seq }),
-      );
-      if (
-        control.envelope.type !== 'agent.content.read' ||
-        JSON.stringify(control.envelope.payload) !== JSON.stringify(payload)
-      ) {
-        throw new ByokCloudError(
-          'agent_content_request_mismatch',
-          `Request ${payload.requestId} already exists with a different immutable content-read body.`,
-        );
-      }
-      return control;
-    },
+    enqueueAgentContentRead: agentControlsApi.enqueueAgentContentRead,
 
-    async enqueueAgentHomeProjection(tenant, deviceId, input) {
-      // Validate the bounded opaque request before durable capability admission
-      // or receipt/mailbox allocation. A malformed control can therefore never
-      // leave an immutable desired fact or delivery row behind.
-      const payload = AgentHomeProjectionPayloadSchema.parse(input);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('agent.home.projection', payload));
-      const stores = tenantStoresFor(controlPlane(tenant), root);
-      const requestBody = JSON.stringify(payload);
-      const persisted = await stores.receipts.record({
-        key: agentHomeProjectionRequestKey(deviceId, payload.agentRef, payload.requestId),
-        body: requestBody,
-      });
-      const persistedPayload = AgentHomeProjectionPayloadSchema.parse(JSON.parse(persisted.receipt.body));
-      if (!sameAgentHomeProjectionRequest(payload, persistedPayload)) {
-        throw new ByokCloudError(
-          'agent_home_projection_request_conflict',
-          `Agent-home projection request ${payload.requestId} already exists with a different immutable desired body.`,
-        );
-      }
-      const messageId = await agentControlEnvelopeId(
-        'byok:agent-home-projection',
-        tenant,
-        deviceId,
-        payload.agentRef,
-        payload.requestId,
-      );
-      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
-        createEnvelope('agent.home.projection', payload, { id: messageId, seq }),
-      );
-      if (
-        control.envelope.type !== 'agent.home.projection' ||
-        !sameAgentHomeProjectionRequest(payload, control.envelope.payload)
-      ) {
-        throw new ByokCloudError(
-          'agent_home_projection_request_conflict',
-          `Mailbox request ${payload.requestId} does not match its immutable Agent-home projection fact.`,
-        );
-      }
-      const status = await getAgentHomeProjectionStatus(tenant, deviceId, {
-        requestId: payload.requestId,
-        agentRef: payload.agentRef,
-        projectionHash: payload.projectionHash,
-      });
-      if (status === undefined) {
-        throw new ByokCloudError(
-          'agent_home_projection_receipt_invalid',
-          `Agent-home projection request ${payload.requestId} disappeared after durable allocation.`,
-        );
-      }
-      return { ...control, status };
-    },
+    enqueueAgentHomeProjection: agentControlsApi.enqueueAgentHomeProjection,
 
     getAgentHomeProjectionStatus,
 
     completeAgentHomeProjection,
 
-    async enqueueInputPreparation(tenant, deviceId, input) {
-      // Validate the strict control body BEFORE durable capability admission or
-      // any receipt/mailbox allocation, so a malformed request can never leave
-      // an immutable desired fact or a delivery row behind.
-      const payload = AgentInputPreparationPayloadSchema.parse(input);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('agent.input.preparation', payload));
-      const stores = tenantStoresFor(controlPlane(tenant), root);
-      const requestBody = JSON.stringify(payload);
-      const persisted = await stores.receipts.record({
-        key: inputPreparationRequestKey(deviceId, payload.agentRef, payload.requestId),
-        body: requestBody,
-      });
-      const persistedPayload = AgentInputPreparationPayloadSchema.parse(JSON.parse(persisted.receipt.body));
-      if (!sameInputPreparationRequest(payload, persistedPayload)) {
-        throw new ByokCloudError(
-          'input_preparation_request_conflict',
-          `Input-preparation request ${payload.requestId} already exists with a different immutable desired body.`,
-        );
-      }
-      // The mailbox message id is DERIVED from the logical request identity, so
-      // a retried enqueue under the same requestId reuses the existing row
-      // instead of appending a second delivery of the same desired fact.
-      const messageId = await agentControlEnvelopeId(
-        'byok:agent-input-preparation',
-        tenant,
-        deviceId,
-        payload.agentRef,
-        payload.requestId,
-      );
-      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
-        createEnvelope('agent.input.preparation', payload, { id: messageId, seq }),
-      );
-      if (
-        control.envelope.type !== 'agent.input.preparation' ||
-        !sameInputPreparationRequest(payload, control.envelope.payload)
-      ) {
-        throw new ByokCloudError(
-          'input_preparation_request_conflict',
-          `Mailbox request ${payload.requestId} does not match its immutable input-preparation fact.`,
-        );
-      }
-      const status = await getInputPreparationStatus(tenant, deviceId, {
-        requestId: payload.requestId,
-        agentRef: payload.agentRef,
-      });
-      if (status === undefined) {
-        throw new ByokCloudError(
-          'input_preparation_receipt_invalid',
-          `Input-preparation request ${payload.requestId} disappeared after durable allocation.`,
-        );
-      }
-      return { ...control, status };
-    },
+    enqueueInputPreparation: agentControlsApi.enqueueInputPreparation,
 
     getInputPreparationStatus,
 
-    async enqueueProviderProvisioningNotice(tenant, deviceId, input) {
-      // Strict one-field body first: an extra field (ciphertext, config,
-      // identity) is a validation failure here, before any admission read or
-      // mailbox allocation, never a stripped-and-sent notice.
-      const payload = ProviderProvisioningAvailablePayloadSchema.parse(input);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('provider.provisioning.available', payload));
-      const messageId = uuidFromSha256(
-        await options.crypto.sha256(
-          new TextEncoder().encode(
-            JSON.stringify({
-              domain: 'byok:provider-provisioning-notice',
-              tenant,
-              deviceId,
-              requestId: payload.requestId,
-            }),
-          ),
-        ),
-      );
-      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
-        createEnvelope('provider.provisioning.available', payload, { id: messageId, seq }),
-      );
-      if (
-        control.envelope.type !== 'provider.provisioning.available' ||
-        control.envelope.payload.requestId !== payload.requestId
-      ) {
-        throw new ByokCloudError(
-          'mailbox_receipt_mismatch',
-          `Mailbox message ${messageId} does not carry provider provisioning notice ${payload.requestId}.`,
-        );
-      }
-      return control;
-    },
+    enqueueProviderProvisioningNotice: agentControlsApi.enqueueProviderProvisioningNotice,
 
-    async enqueueAgentMemoryIntentNotice(tenant, deviceId, input) {
-      // Strict two-field body first: an extra field (path, operation,
-      // revision, content) is a validation failure here, before any admission
-      // read or mailbox allocation, never a stripped-and-sent notice.
-      const payload = AgentMemoryIntentAvailablePayloadSchema.parse(input);
-      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('agent.memory.intent.available', payload));
-      const messageId = uuidFromSha256(
-        await options.crypto.sha256(
-          new TextEncoder().encode(
-            JSON.stringify({
-              domain: 'byok:agent-memory-intent-notice',
-              tenant,
-              deviceId,
-              intentId: payload.intentId,
-            }),
-          ),
-        ),
-      );
-      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
-        createEnvelope('agent.memory.intent.available', payload, { id: messageId, seq }),
-      );
-      if (
-        control.envelope.type !== 'agent.memory.intent.available' ||
-        control.envelope.payload.intentId !== payload.intentId ||
-        control.envelope.payload.agentRef.agentId !== payload.agentRef.agentId ||
-        control.envelope.payload.agentRef.profileRevision !== payload.agentRef.profileRevision
-      ) {
-        throw new ByokCloudError(
-          'mailbox_receipt_mismatch',
-          `Mailbox message ${messageId} does not carry Agent memory intent notice ${payload.intentId} for this Agent.`,
-        );
-      }
-      return control;
-    },
+    enqueueAgentMemoryIntentNotice: agentControlsApi.enqueueAgentMemoryIntentNotice,
 
     completeInputPreparation,
     eraseAgentMemoryProjection,
     redactTasks,
 
-    async appendMemberChainEntries(tenant, input) {
-      return e2eeMember.appendMemberChainEntries(e2eeMemberContext(tenant), input, { kind: 'host' });
-    },
-    async readMemberChain(tenant, input) {
-      return e2eeMember.readMemberChain(e2eeMemberContext(tenant), input);
-    },
-    async putScopeKeyPackages(tenant, input) {
-      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input, { kind: 'host' });
-    },
+    appendMemberChainEntries: e2eeApi.appendMemberChainEntries,
+    readMemberChain: e2eeApi.readMemberChain,
+    putScopeKeyPackages: e2eeApi.putScopeKeyPackages,
     enqueueScopeKeyPackageNotice,
-    async readScopeKeyPackages(tenant, input) {
-      return e2eeMember.readScopeKeyPackages(e2eeMemberContext(tenant), input);
-    },
-    async readMemberKeyRegistration(tenant, deviceId) {
-      return e2eeMember.readMemberKeyRegistration(e2eeMemberContext(tenant), deviceId);
-    },
-    async relayClientPairingMac(tenant, deviceId, input) {
-      return e2eeMember.relayClientPairingMac(e2eeMemberContext(tenant), deviceId, input);
-    },
+    readScopeKeyPackages: e2eeApi.readScopeKeyPackages,
+    readMemberKeyRegistration: e2eeApi.readMemberKeyRegistration,
+    relayClientPairingMac: e2eeApi.relayClientPairingMac,
 
     approveTask(tenant, taskId, opts) {
       return resolveApproval(tenant, taskId, 'approve', opts);
@@ -2667,176 +2438,46 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     steerTask,
     steerSealedTask,
 
-    async cancelTask(tenant, taskId, reason) {
-      const stores = tenantStoresFor(controlPlane(tenant), root);
-      const proposedMessageId = options.crypto.randomUuid();
-      const mutation = await stores.cancellations.request({
-        taskId,
-        proposedMessageId,
-        ...(reason === undefined ? {} : { reason }),
-        materialize: async (seq, messageId) => {
-          const envelope = createEnvelope('task.cancel', reason === undefined ? {} : { reason }, {
-            id: messageId,
-            taskId,
-            seq,
-          });
-          const body = encodeEnvelope(envelope);
-          const bytes = new TextEncoder().encode(body);
-          return {
-            body,
-            bodyHash: contentHash(await options.crypto.sha256(bytes)),
-            byteSize: BigInt(bytes.length),
-          };
-        },
-      });
-      if (mutation === undefined) {
-        throw new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
-      }
-      // A redacted task keeps its cancellation row with a tombstone body.
-      if (mutation.message !== undefined && !isTaskRedactionTombstone(mutation.message.body)) {
-        const envelope = decodeEnvelope(mutation.message.body);
-        if (envelope.seq !== mutation.message.seq || envelope.type !== 'task.cancel') {
-          throw new ByokCloudError(
-            'mailbox_seq_mismatch',
-            `Mailbox stored cancellation seq ${String(envelope.seq)} at row ${mutation.message.seq}.`,
-          );
-        }
-      }
-      return mutation.attempt;
-    },
+    cancelTask: taskCancellationApi.cancelTask,
 
-    async readTaskOffer(tenant, taskId) {
-      const stores = tenantStoresFor(controlPlane(tenant), root);
-      const attempt = await stores.tasks.get(taskId);
-      if (attempt === undefined) return undefined;
-      const messageId = await taskOfferMessageId(tenant, taskId, attempt.deviceId, attempt.agentRef, bytes => options.crypto.sha256(bytes));
-      const receipt = await stores.receipts.get(`task-offer:${messageId}`);
-      if (receipt === undefined) return undefined;
-      assertTaskContentPresent(taskId, receipt.body);
-      const invalid = () => new ByokCloudError('coordination_input_invalid', `Task ${taskId} has an unreadable or mismatched immutable offer receipt.`);
-      let stored: { deviceId?: unknown; type?: unknown; payload?: unknown };
-      try { stored = JSON.parse(receipt.body); } catch { throw invalid(); }
-      if (stored === null || typeof stored !== 'object' || stored.deviceId !== attempt.deviceId ||
-          stored.type !== 'task.offer') throw invalid();
-      const parsed = TaskOfferPayloadSchema.safeParse(stored.payload);
-      if (!parsed.success || JSON.stringify(parsed.data) !== JSON.stringify(stored.payload)) throw invalid();
-      if (attempt.agentRef === undefined || !sameAgentRef(parsed.data.agentRef, attempt.agentRef)) throw invalid();
-      const delivered = await stores.receipts.get(`task-offer-delivered:${messageId}`);
-      if (delivered !== undefined && delivered.body !== messageId) throw invalid();
-      return { taskId, deviceId: attempt.deviceId, messageId, type: 'task.offer', payload: parsed.data,
-        recordedAt: receipt.recordedAt, delivered: delivered !== undefined };
-    },
+    readTaskOffer: taskReadsApi.readTaskOffer,
 
-    readTaskAttempt(tenant, taskId) {
-      return tenantStoresFor(controlPlane(tenant), root).tasks.get(taskId);
-    },
+    readTaskAttempt: taskReadsApi.readTaskAttempt,
 
-    listTaskAttempts(tenant, query) {
-      return tenantStoresFor(controlPlane(tenant), root).tasks.list(query);
-    },
+    listTaskAttempts: taskReadsApi.listTaskAttempts,
 
-    countTaskAttempts(tenant) {
-      return tenantStoresFor(controlPlane(tenant), root).tasks.countByStatus();
-    },
+    countTaskAttempts: taskReadsApi.countTaskAttempts,
 
-    async readTerminalReceipt(tenant, taskId) {
-      const receipt = await tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
-      if (receipt !== undefined) assertTaskContentPresent(taskId, receipt.body);
-      return receipt;
-    },
+    readTerminalReceipt: taskReadsApi.readTerminalReceipt,
 
-    async readDeviceTerminal(tenant, taskId) {
-      const receipt = await tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
-      return receipt === undefined ? undefined : readDeviceTerminalReceipt(taskId, receipt);
-    },
+    readDeviceTerminal: taskReadsApi.readDeviceTerminal,
 
-    readTaskAgentMessageDraft(tenant, deviceId, taskId, agentRef, cursor) {
-      return readTaskAgentMessageDraft(tenantStoresFor(controlPlane(tenant), root), deviceId, taskId, agentRef, cursor);
-    },
-    readTaskAgentMessage(tenant, deviceId, taskId, agentRef) {
-      return readTaskAgentMessage(tenantStoresFor(controlPlane(tenant), root), deviceId, taskId, agentRef);
-    },
+    readTaskAgentMessageDraft: taskReadsApi.readTaskAgentMessageDraft,
+    readTaskAgentMessage: taskReadsApi.readTaskAgentMessage,
 
-    async readAgentMessageDisposition(tenant, deviceId, taskId, payload) {
-      const parsed = AgentMessagePublishPayloadSchema.parse(payload);
-      const stores = tenantStoresFor(controlPlane(tenant), root);
-      const disposition = await readAgentMessageDisposition(stores, deviceId, taskId, parsed);
-      if (disposition !== undefined) return disposition;
-      const admission = await stores.tasks.readTaskAgentMessage({ taskId, deviceId });
-      if (admission !== undefined) assertTaskContentPresent(taskId, admission.payloadBody);
-      return undefined;
-    },
+    readAgentMessageDisposition: taskReadsApi.readAgentMessageDisposition,
 
-    readAgentEgress(tenant, deviceId, agentRef, eventId) {
-      return tenantStoresFor(controlPlane(tenant), root).egress.get(deviceId, agentRef, eventId);
-    },
+    readAgentEgress: taskReadsApi.readAgentEgress,
 
-    async readTaskResult(tenant, taskId) {
-      const stores = tenantStoresFor(controlPlane(tenant), root);
-      const attempt = await stores.tasks.get(taskId);
-      if (attempt?.cancellation !== undefined) {
-        return {
-          taskId,
-          state: 'cancelled',
-          ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
-          ...(attempt.cancellation.reason === undefined
-            ? {}
-            : { reason: attempt.cancellation.reason }),
-          ...(attempt.cancellation.reason === undefined
-            ? {}
-            : { terminalCause: attempt.cancellation.reason }),
-          recordedAt: attempt.cancellation.requestedAt,
-        };
-      }
-      const receipt = await stores.receipts.get(
-        terminalReceiptKey(taskId),
-      );
-      return receipt === undefined ? undefined : projectTerminalResult(taskId, receipt);
-    },
+    readTaskResult: taskReadsApi.readTaskResult,
 
-    listDevices(tenant) {
-      return tenantStoresFor(controlPlane(tenant), root).devices.list();
-    },
+    listDevices: tenantApi.listDevices,
 
-    revokeDevice(tenant, deviceId) {
-      return tenantStoresFor(controlPlane(tenant), root).devices.revoke(deviceId);
-    },
+    revokeDevice: tenantApi.revokeDevice,
 
-    createBoardItem(tenant, input) {
-      assertBoardLabels(input.channel, input.title, {
-        channelMaxBytes: options.boardChannelMaxBytes ?? DEFAULT_BOARD_CHANNEL_MAX_BYTES,
-        titleMaxBytes: options.boardTitleMaxBytes ?? DEFAULT_BOARD_TITLE_MAX_BYTES,
-      });
-      return tenantStoresFor(controlPlane(tenant), root).board.create(input);
-    },
+    createBoardItem: tenantApi.createBoardItem,
 
-    listBoardItems(tenant, query) {
-      return tenantStoresFor(controlPlane(tenant), root).board.list(query);
-    },
+    listBoardItems: tenantApi.listBoardItems,
 
-    acceptBoardItem(tenant, itemId) {
-      return tenantStoresFor(controlPlane(tenant), root).board.updateStatus({
-        itemId,
-        expectedStatus: 'in_review',
-        status: 'done',
-      });
-    },
+    acceptBoardItem: tenantApi.acceptBoardItem,
 
-    listPresence(tenant) {
-      return tenantStoresFor(controlPlane(tenant), root).presence.list();
-    },
+    listPresence: tenantApi.listPresence,
 
-    readTenantReadiness(tenant) {
-      return tenantStoresFor(controlPlane(tenant), root).devices.readiness();
-    },
+    readTenantReadiness: tenantApi.readTenantReadiness,
 
-    readActivity(tenant, taskId) {
-      return tenantStoresFor(controlPlane(tenant), root).activity.read(taskId);
-    },
+    readActivity: taskReadsApi.readActivity,
 
-    readApprovalTimeline(tenant, taskId) {
-      return tenantStoresFor(controlPlane(tenant), root).approvals.read(taskId);
-    },
+    readApprovalTimeline: taskReadsApi.readApprovalTimeline,
   };
 }
 
