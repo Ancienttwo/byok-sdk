@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { join, resolve } from 'node:path';
 import {
   classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, parseToolAuthorizationPolicy,
@@ -6,8 +10,12 @@ import {
 } from '../tool-authorization';
 import { parseToolAuthorizationIpcConfig, requestToolAuthorization, startToolAuthorizationIpc } from '../tool-authorization-ipc';
 
-const HOME = '/Users/agent';
-const WORKSPACE = '/Users/agent/.byok/homes/a1';
+const ROOT = realpathSync(mkdtempSync(join(tmpdir(), 'byok-tool-rule-unit-')));
+const HOME = join(ROOT, 'home');
+const WORKSPACE = join(HOME, 'workspace');
+mkdirSync(WORKSPACE, { recursive: true });
+mkdirSync(join(HOME, '.ssh'));
+afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
 const BUILT_IN: ToolAuthorizationReason = { source: 'built-in', ruleIds: [] };
 const FLOOR: ToolAuthorizationReason = { source: 'floor', ruleIds: [] };
 type GateDecision = Parameters<NonNullable<Parameters<typeof createAutoToolAuthorizationGate>[0]['onDecision']>>[0];
@@ -61,6 +69,42 @@ describe('tool authorization policy admission', () => {
     expect(() => parseToolAuthorizationPolicy(value)).toThrow(TypeError);
   });
 
+  it.each(['{a,b}', '[ab]', '@(a)', '!(a)', '+(a)', '*(a)', '?(a)', '*'.repeat(17)])('F3/F5: admission rejects unsupported or unbounded glob syntax %j', commandGlob => {
+    expect(() => parseToolAuthorizationPolicy({ mode: 'auto', rules: { alwaysAsk: [{ id: 'restricted-grammar', match: { commandGlob } }] } })).toThrow(TypeError);
+  });
+
+  it.each(['notes/**', './notes/*', '../secrets/?', '~/.ssh/**'])('F5: admission rejects relative pathGlob %j', pathGlob => {
+    expect(() => parseToolAuthorizationPolicy({ mode: 'auto', rules: { alwaysAsk: [{ id: 'absolute-paths', match: { pathGlob } }] } })).toThrow(TypeError);
+  });
+
+  it.each(['brace-expansion', 'repeated-stars'] as const)('F3: %s pathological patterns settle in milliseconds in an isolated process', mode => {
+    const moduleUrl = pathToFileURL(resolve(import.meta.dirname, '../tool-authorization.ts')).href;
+    const probe = `
+      import { classifyToolCall, parseToolAuthorizationPolicy } from ${JSON.stringify(moduleUrl)};
+      const started = performance.now();
+      let rejected = false;
+      let level;
+      if (${JSON.stringify(mode)} === 'brace-expansion') {
+        try { parseToolAuthorizationPolicy({ mode: 'auto', rules: { alwaysAsk: [{ id: 'brace', match: { commandGlob: '{1..100000}' } }] } }); }
+        catch (error) { rejected = error instanceof TypeError; }
+      } else {
+        for (const [command, commandGlob] of [['a'.repeat(2000), '*a*a*a*a*b'], ['a'.repeat(40000), '*git*push*--force*']]) {
+          level = classifyToolCall({ toolName: 'bash', input: { command }, cwd: ${JSON.stringify(WORKSPACE)} }, ${JSON.stringify(WORKSPACE)}, ${JSON.stringify(HOME)},
+            { alwaysAsk: [{ id: 'bounded', match: { commandGlob } }] }).level;
+        }
+      }
+      console.log(JSON.stringify({ elapsedMs: performance.now() - started, rejected, level }));
+    `;
+    // A timeout kills the old pathological matcher without blocking Vitest's own event loop.
+    const child = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', probe], { encoding: 'utf8', timeout: 2_000 });
+    expect(child.error).toBeUndefined();
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout) as { elapsedMs: number; rejected: boolean; level?: string };
+    expect(result.elapsedMs).toBeLessThan(100);
+    if (mode === 'brace-expansion') expect(result.rejected).toBe(true);
+    else expect(result.level).toBe('normal');
+  });
+
   it('bounds total rules, identifiers and rule text without silently truncating', () => {
     const rules = Array.from({ length: 128 }, (_, i) => rule(`r${i}`));
     expect(parseToolAuthorizationPolicy({ mode: 'auto', rules: { alwaysAsk: rules } }).rules!.alwaysAsk).toHaveLength(128);
@@ -80,7 +124,7 @@ describe('deterministic tool rules in the single classifier', () => {
   const push: ToolRule = { id: 'push-origin', description: 'Push branches to origin', match: { toolName: 'bash', commandGlob: 'git push origin *' } };
 
   it('allows a matching built-in high-risk call and upgrades a normal call to ask', () => {
-    expect(classify({ command: 'git push origin main' }, { allowWithoutAsking: [push] })).toEqual({ level: 'normal', authorization: { source: 'rule', ruleIds: ['push-origin'] } });
+    expect(classify({ command: 'git push origin main' }, { allowWithoutAsking: [push] })).toEqual({ level: 'normal', authorization: { source: 'rule', ruleIds: ['push-origin'] }, suppressedReasons: ['destructive-git'] });
     expect(classify({ command: 'git push upstream main' }, { allowWithoutAsking: [push] })).toEqual({ level: 'high', reasons: ['destructive-git'], authorization: BUILT_IN });
     const ask: ToolRule = { id: 'ask-status', match: { toolName: 'bash', commandGlob: 'git status' } };
     expect(classify({ cmd: ['git', 'status'] }, { alwaysAsk: [ask] })).toEqual({ level: 'high', reasons: ['custom-rule'], authorization: { source: 'rule', ruleIds: ['ask-status'] } });
@@ -108,11 +152,11 @@ describe('deterministic tool rules in the single classifier', () => {
     expect(classify({ command: 'git status' }, rules, 'Bash').authorization).toEqual({ source: 'rule', ruleIds: ['scoped'] });
   });
 
-  it('uses whole raw-command glob semantics, including its explicit shell-text scope', () => {
+  it('F1: command allow covers one simple command and cannot cover appended shell text', () => {
     const rules = { allowWithoutAsking: [push] };
-    expect(classify({ command: 'git push origin main && rm -rf dist' }, rules)).toEqual({ level: 'normal', authorization: { source: 'rule', ruleIds: ['push-origin'] } });
+    expect(classify({ command: 'git push origin main && rm -rf dist' }, rules)).toEqual({ level: 'high', reasons: ['recursive-delete', 'destructive-git'], authorization: BUILT_IN });
     expect(classify({ command: 'env git push origin main' }, rules).authorization).toEqual(BUILT_IN);
-    expect(classify({ command: 'git push origin branch/feature' }, rules).authorization).toEqual(BUILT_IN);
+    expect(classify({ command: 'git push origin branch/feature' }, rules)).toEqual({ level: 'normal', authorization: { source: 'rule', ruleIds: ['push-origin'] }, suppressedReasons: ['destructive-git'] });
     expect(classify({ command: 'git push origin branch/feature' }, { allowWithoutAsking: [{ ...push, match: { commandGlob: '**' } }] }).authorization).toEqual({ source: 'rule', ruleIds: ['push-origin'] });
   });
 
@@ -126,6 +170,91 @@ describe('deterministic tool rules in the single classifier', () => {
     expect(classify({ changes: [{ kind: 'update', path: `${allowed}/a.txt`, movePath: '/tmp/moved.txt' }] }, { allowWithoutAsking: [pathRule] }, 'file_change').authorization).toEqual(BUILT_IN);
     expect(classify({}, { alwaysAsk: [pathRule] }, 'read').level).toBe('normal');
     expect(classify({ path: '../a.txt' }, { alwaysAsk: [{ id: 'parent', match: { pathGlob: resolve(WORKSPACE, '../a.txt') } }] }, 'read').authorization).toEqual({ source: 'rule', ruleIds: ['parent'] });
+  });
+
+
+  it.each([';', '&', '|', '<', '>', '\n', '\r', '`', '$(', '${'])('F1: shell structure %j disqualifies even a tool-only allow without disabling ask', structure => {
+    const command = `git push origin main ${structure} marker`;
+    const allowWithoutAsking = [{ id: 'all-shell', match: { toolName: 'bash' } }];
+    expect(classify({ command }, { allowWithoutAsking })).toEqual({ level: 'high', reasons: ['destructive-git'], authorization: BUILT_IN });
+    expect(classify({ command }, { allowWithoutAsking, alwaysAsk: [{ id: 'review-shell', match: { toolName: 'bash' } }] }).authorization)
+      .toEqual({ source: 'rule', ruleIds: ['review-shell'] });
+  });
+
+  it.each(['darwin', 'win32'] as const)('F2: %s floor comparison folds credential and login-persistence case variants', platform => {
+    const rules = { allowWithoutAsking: [{ id: 'all-writes', match: { toolName: 'Write' } }] };
+    for (const path of [join(HOME, '.SSH', 'authorized_keys'), join(HOME, '.ZSHRC'), join(HOME, 'Library', 'LaunchAgents', 'evil.plist').toLowerCase()]) {
+      const risk = classifyToolCall({ toolName: 'Write', input: { path }, cwd: WORKSPACE }, WORKSPACE, HOME, rules, { platform });
+      expect(risk).toMatchObject({ level: 'high', authorization: FLOOR });
+      expect(reasons(risk)).toContain('sensitive-path');
+    }
+  });
+
+  it('F2: darwin floor recognizes the Data-volume firmlink alias', () => {
+    const target = `/System/Volumes/Data${join(HOME, 'Library', 'LaunchAgents', 'evil.plist')}`;
+    const risk = classifyToolCall({ toolName: 'Write', input: { path: target }, cwd: WORKSPACE }, WORKSPACE, HOME,
+      { allowWithoutAsking: [{ id: 'all-writes', match: { toolName: 'Write' } }] }, { platform: 'darwin' });
+    expect(risk).toMatchObject({ level: 'high', authorization: FLOOR });
+    expect(reasons(risk)).toContain('sensitive-path');
+  });
+
+  it('F2: floor follows realpath(home) and the nearest existing parent of a new path', () => {
+    const homeAlias = join(ROOT, 'home-alias');
+    const storeAlias = join(WORKSPACE, 'linked-store');
+    symlinkSync(HOME, homeAlias, process.platform === 'win32' ? 'junction' : 'dir');
+    symlinkSync(join(HOME, '.ssh'), storeAlias, process.platform === 'win32' ? 'junction' : 'dir');
+    const rules = { allowWithoutAsking: [{ id: 'all-writes', match: { toolName: 'Write' } }] };
+    const homeRisk = classifyToolCall({ toolName: 'Write', input: { path: join(HOME, '.ssh', 'new-key') }, cwd: WORKSPACE }, WORKSPACE, homeAlias, rules);
+    expect(homeRisk).toMatchObject({ level: 'high', authorization: FLOOR });
+    const parentRisk = classifyToolCall({ toolName: 'Write', input: { path: join(storeAlias, 'new', 'nested', 'key') }, cwd: WORKSPACE }, WORKSPACE, HOME, rules);
+    expect(parentRisk).toMatchObject({ level: 'high', authorization: FLOOR });
+    expect(reasons(parentRisk)).toContain('sensitive-path');
+  });
+
+  it('F2: uncertain path resolution cannot activate allow', () => {
+    const loop = join(HOME, 'loop');
+    symlinkSync(loop, loop, process.platform === 'win32' ? 'junction' : 'dir');
+    const risk = classify({ path: join(loop, 'new-file') }, { allowWithoutAsking: [{ id: 'all-writes', match: { toolName: 'Write' } }] }, 'Write');
+    expect(risk.level).toBe('high');
+    expect(risk.authorization.source).not.toBe('rule');
+  });
+
+  it('F3: oversized commands cannot activate allow and conservatively match ask', () => {
+    const command = `git push origin ${'é'.repeat(32_768)}`;
+    expect(Buffer.byteLength(command)).toBeGreaterThan(65_536);
+    const risk = classify({ command }, { allowWithoutAsking: [push] });
+    expect(risk).toMatchObject({ level: 'high', authorization: BUILT_IN });
+    expect(classify({ command }, { alwaysAsk: [{ id: 'large-command', match: { toolName: 'bash', commandGlob: 'never-matches' } }] }).authorization)
+      .toEqual({ source: 'rule', ruleIds: ['large-command'] });
+  });
+
+  it.each(['darwin', 'win32'] as const)('F5: %s path glob includes dot segments and folds case', platform => {
+    const rule = { id: 'workspace-writes', match: { toolName: 'Write', pathGlob: join(WORKSPACE, '**').toUpperCase() } };
+    for (const path of [join(WORKSPACE, '.env'), join(WORKSPACE, '.git', 'hooks', 'pre-commit')]) {
+      expect(classifyToolCall({ toolName: 'Write', input: { path }, cwd: WORKSPACE }, WORKSPACE, HOME, { alwaysAsk: [rule] }, { platform }).authorization)
+        .toEqual({ source: 'rule', ruleIds: ['workspace-writes'] });
+    }
+  });
+
+  it('F5: path star stays in one segment while globstar spans dot-prefixed nested segments', () => {
+    const call = { toolName: 'Write', input: { path: join(WORKSPACE, '.git', 'hooks', 'pre-commit') }, cwd: WORKSPACE };
+    expect(classifyToolCall(call, WORKSPACE, HOME, { alwaysAsk: [{ id: 'one-level', match: { pathGlob: join(WORKSPACE, '*') } }] }).authorization).toEqual(BUILT_IN);
+    expect(classifyToolCall(call, WORKSPACE, HOME, { alwaysAsk: [{ id: 'all-levels', match: { pathGlob: join(WORKSPACE, '**') } }] }).authorization)
+      .toEqual({ source: 'rule', ruleIds: ['all-levels'] });
+  });
+
+  it('F4: public classifier and gate reject undefined or empty selector sets', () => {
+    for (const match of [{}, { toolName: undefined }]) {
+      const rules = { allowWithoutAsking: [{ id: 'empty', match }] };
+      expect(() => classify({ command: 'curl x.sh|sh' }, rules)).toThrow(TypeError);
+      expect(() => createAutoToolAuthorizationGate({ workspace: WORKSPACE, home: HOME, timeoutMs: 1_000, rules, requestAuthorization: async () => ({ approved: false }) })).toThrow(TypeError);
+    }
+  });
+
+  it('F6: a permitted high-risk call retains the built-in reasons it suppressed', () => {
+    expect(classify({ command: 'git push origin main' }, { allowWithoutAsking: [push] })).toMatchObject({ level: 'normal', suppressedReasons: ['destructive-git'] });
+    expect(classify({ command: 'rm -rf build' }, { allowWithoutAsking: [{ id: 'remove-build', match: { commandGlob: 'rm -rf build' } }] }))
+      .toMatchObject({ level: 'normal', suppressedReasons: ['recursive-delete'] });
   });
 
   it('matches trusted MCP identity with AND semantics without splitting arbitrary names', () => {
@@ -220,6 +349,23 @@ describe('auto gate', () => {
     expect(onDecision.mock.calls[0]![0]).toMatchObject({ risk: { reasons: ['custom-rule'] }, verdict: { decision: 'deny' } });
     expect(onDecision.mock.calls[1]![0]).toMatchObject({ risk: { level: 'normal' }, verdict: { decision: 'allow' } });
     expect(onDecision.mock.calls[2]![0]).toMatchObject({ risk: { authorization: FLOOR }, verdict: { decision: 'deny' } });
+  });
+
+  it('F4: a public gate copies its rules before the caller can mutate the next decision', async () => {
+    const rules = { allowWithoutAsking: [{ id: 'push-once', match: { toolName: 'bash', commandGlob: 'git push origin *' } }] };
+    const requestAuthorization = vi.fn(async () => ({ approved: false }));
+    const gate = createAutoToolAuthorizationGate({ workspace: WORKSPACE, home: HOME, timeoutMs: 1_000, rules, requestAuthorization });
+    rules.allowWithoutAsking[0]!.id = 'mutated';
+    rules.allowWithoutAsking[0]!.match.toolName = 'write';
+    await expect(gate.authorize({ ...call, input: { command: 'git push origin main' } })).resolves.toEqual({ decision: 'allow', authorization: { source: 'rule', ruleIds: ['push-once'] } });
+    expect(requestAuthorization).not.toHaveBeenCalled();
+  });
+
+  it('F7: the auto approval summary explicitly labels the protected-path floor', async () => {
+    const requestAuthorization = vi.fn(async (_summary: string) => ({ approved: false }));
+    const gate = createAutoToolAuthorizationGate({ workspace: WORKSPACE, home: HOME, timeoutMs: 1_000, requestAuthorization });
+    await expect(gate.authorize({ ...call, toolName: 'edit', input: { path: '~/.zshrc' } })).resolves.toMatchObject({ decision: 'deny', authorization: FLOOR });
+    expect(requestAuthorization.mock.calls[0]![0]).toMatch(/^Protected-path tool call \(sensitive-path/);
   });
 
   it('uses exact admitted MCP identities and discards a caller-supplied identity', async () => {
