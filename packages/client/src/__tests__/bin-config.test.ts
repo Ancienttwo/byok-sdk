@@ -103,7 +103,7 @@ describe('bin/config: loadConfig', () => {
       const cases: Array<[() => unknown, string]> = [
         [() => loadConfig(configPath), `config at "${configPath}" is not valid JSON`],
         [() => loadConfig(path.join(dir, 'missing.json')), `could not read config at "${path.join(dir, 'missing.json')}"; check the path and read permissions`],
-        [() => loadConfig(undefined, { productName: sentinel }), 'config is missing required field "productId"'],
+        [() => loadConfig(undefined, { productName: sentinel }), 'config is missing required field "productId"; config is missing required field "serverUrl"'],
         [() => loadConfig(undefined, { ...base, localAgentRelease: { version: sentinel } } as never), 'config field "localAgentRelease" is distribution-owned and must not be supplied'],
       ];
       for (const [load, message] of cases) {

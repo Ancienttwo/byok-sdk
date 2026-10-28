@@ -82,6 +82,7 @@ import type { DaemonScope } from './create-daemon/scope';
 import { bindDaemonFunctions } from './create-daemon/functions';
 import { createControlMethods } from './create-daemon/control-methods';
 import type { ToolAuthorizationResolver } from '../tool-authorization';
+import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './config-schema/effective';
 
 /**
  * Optional white-label product display info — purely opaque passthrough
@@ -467,8 +468,11 @@ export interface InputPreparationDaemonConfig {
 }
 
 export interface AgentEgressConfig {
-  /** Exact policy the daemon is willing to consume from an Agent offer. */
-  policy: AgentEgressPolicy;
+  /**
+   * Exact policy the daemon is willing to consume from an Agent offer.
+   * Absent: the client default policy, as a config file's `"agentEgress": {}`.
+   */
+  policy?: AgentEgressPolicy;
   /**
    * Device-local additions required to make one server-selected transfer
    * policy executable. These values only supplement `policy.transfers`: a
@@ -601,6 +605,15 @@ export interface DaemonStatus {
    * macOS or Windows x64 without the SDK release helper, or Windows arm64).
    */
   agentMemoryMcp: 'admitted' | 'off' | 'unavailable';
+  /**
+   * Effective values of this daemon's configuration (#1094): resolved
+   * directories (store, Agent homes, execution scratch root and its socket
+   * budget), the MCP servers tasks may get, the memory helper resolution,
+   * each runtime's isolation options and the tool-authorization mode, plus
+   * unknown-field warnings. Resolved once at construction; the same report
+   * `byok-agent config check` prints.
+   */
+  config: DaemonEffectiveConfig;
 }
 
 export interface Daemon {
@@ -756,26 +769,35 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
-  return buildDaemon(config, () => adapters, overrides, assertionProbe);
+  return buildDaemon(config, () => adapters, 'injected', overrides, assertionProbe);
 }
 
 /** `buildAdapters` receives the resolved Pi launcher, so default adapters and retention share one sessionDir. */
 function buildDaemon(
   config: DaemonConfig,
   buildAdapters: (piByokLauncher: DaemonConfig['piByokLauncher']) => RuntimeAdapter[],
+  runtimeSource: DaemonEffectiveConfig['runtimes'][number]['source'],
   overrides: DaemonOverrides,
   assertionProbe: AssertionIssueProbe | undefined,
 ): Daemon {
   const {
     agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,
     agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, piByokLauncher,
+    memoryHelper, configWarnings,
   } = resolveDaemonConfig({ overrides, config });
+  // Q4': an unknown field never stops the daemon; it is logged once and reported in status().config.
+  for (const warning of configWarnings) console.warn(`[byok/client] ${warning.message}`);
   const adapters = buildAdapters(piByokLauncher);
   const {
     agentHomeReaderLimit, egressPolicy, egressBatcherOptions, presenceCadence, deviceAssertionAudiences,
     deviceAssertionTtlMs, storeDir, storageConfig, retentionClock, scratchRoot, storagePressure,
     inputPreparationLimits, preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf,
   } = composeDaemonStores({ config, overrides, agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, toolsetRegistry, agentMemoryDescribeBin });
+  // Config-derived, so resolved once; `byok-agent config check` builds the same report.
+  const effectiveConfig = describeEffectiveDaemonConfig({
+    config, warnings: configWarnings, memoryHelper, agentMemoryMcpAdmission, storeDir,
+    scratchRoot: storageConfig.scratchRoot, adapters, runtimeSource,
+  });
 
   const memberStatus = (): DeviceMemberStatus => daemonState.deviceMember ?? (daemonState.memberResuming ? 'resuming' : 'none');
   const {
@@ -909,7 +931,8 @@ function buildDaemon(
   const daemonScope: DaemonScope = {
     config, adapters, overrides, assertionProbe, agentMemoryMcpEnabled, piByokLauncher,
     resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin, agentMemoryDescribeBin,
-    agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, agentHomeReaderLimit, egressPolicy,
+    agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, memoryHelper, configWarnings, effectiveConfig,
+    agentHomeReaderLimit, egressPolicy,
     egressBatcherOptions, presenceCadence, deviceAssertionAudiences, deviceAssertionTtlMs, storeDir,
     storageConfig, retentionClock, scratchRoot, storagePressure, inputPreparationLimits,
     preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf, memberStatus,
@@ -976,5 +999,5 @@ function buildDaemon(
  */
 export function createDaemon(config: DaemonConfig, overrides: DaemonOverrides = {}): Daemon {
   if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
-  return buildDaemon(config, (piByokLauncher) => buildDefaultAdapters(config, piByokLauncher), overrides, undefined);
+  return buildDaemon(config, (piByokLauncher) => buildDefaultAdapters(config, piByokLauncher), 'sdk-built', overrides, undefined);
 }

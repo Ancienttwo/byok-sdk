@@ -68,7 +68,8 @@
     "dist",
     "README.md",
     "LICENSE",
-    "upgrade-manifest.json"
+    "upgrade-manifest.json",
+    "daemon-config.schema.json"
   ],
   "publishConfig": {
     "access": "public"

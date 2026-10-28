@@ -7,10 +7,11 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "b16ed5abb9bb659c3eb51d7c7b8803261d7a266f7ecf22a989562d4464197030"
+    "snapshotSha256": "6e90d96c17d451e7d30bece940ff703f1eea20048c0db60692fc96e5487849ec"
   },
   "configFields": {
-    "status": "pending",
+    "status": "tracked",
+    "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
   "entries": [
@@ -26,13 +27,338 @@
         "export:@byok-sdk/client#DiagnosticsSnapshot",
         "export:@byok-sdk/client#LocalToolApprovalPolicy"
       ]
+    },
+    {
+      "id": "daemon-config-schema",
+      "impact": "additive",
+      "summary": "DaemonConfig has a generated, versioned JSON schema (daemon-config.schema.json beside the client package.json) and one validator for config files and createDaemon. Unknown fields are warnings, never rejected at runtime (Q4'); `byok-agent config check [--strict] [--json]` and checkDaemonConfig validate a config and report its effective values (store, Agent-home and scratch directories with the socket budget, MCP servers, memory helper, runtime isolation, tool-authorization mode). Daemon.status().config returns the same report. Each top-level DaemonConfig field is now a config:<field> manifest item. Nothing to change; run `byok-agent config check --strict` in CI to catch typos. AgentEgressConfig.policy is optional, as config files already wrote it (`\"agentEgress\": {}` selects the client default policy).",
+      "migration": "docs/spec.md#daemon-configuration-contract-1094",
+      "items": [
+        "config:agentEgress",
+        "config:agentHome",
+        "config:agentMemory",
+        "config:agentMemoryExport",
+        "config:agentMemoryHelperAssetRoot",
+        "config:agentMemoryIntents",
+        "config:agentMemoryMcp",
+        "config:artifactLimits",
+        "config:authRequestDeadlineMs",
+        "config:branding",
+        "config:codexSandbox",
+        "config:dangerouslyAllowInsecureRemote",
+        "config:deviceAssertion",
+        "config:deviceCredentials",
+        "config:deviceName",
+        "config:durablePi",
+        "config:inputPreparation",
+        "config:localAgentRelease",
+        "config:localToolApproval",
+        "config:machineId",
+        "config:maxConcurrentReaderAttemptsPerAgentHome",
+        "config:maxInlineEventBytes",
+        "config:maxTaskOutputBytes",
+        "config:mcpToolsets",
+        "config:nativeAssetRoot",
+        "config:piByokLauncher",
+        "config:presence",
+        "config:productId",
+        "config:productName",
+        "config:progressBatch",
+        "config:providerProvisioning",
+        "config:runtimeAllowlist",
+        "config:runtimePreference",
+        "config:sdkHelperHost",
+        "config:serverUrl",
+        "config:serviceEnrollment",
+        "config:shutdownGraceMs",
+        "config:startupTimeoutMs",
+        "config:storage",
+        "config:storeDir",
+        "config:toolAuthorization",
+        "export:@byok-sdk/client#AgentEgressConfig",
+        "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
+        "export:@byok-sdk/client#DaemonConfigCheck",
+        "export:@byok-sdk/client#DaemonConfigCheckOptions",
+        "export:@byok-sdk/client#DaemonConfigInvalidError",
+        "export:@byok-sdk/client#DaemonConfigIssue",
+        "export:@byok-sdk/client#DaemonConfigIssueCode",
+        "export:@byok-sdk/client#DaemonConfigSource",
+        "export:@byok-sdk/client#DaemonConfigValidation",
+        "export:@byok-sdk/client#DaemonEffectiveConfig",
+        "export:@byok-sdk/client#DaemonEffectiveMcpServer",
+        "export:@byok-sdk/client#DaemonEffectiveRuntime",
+        "export:@byok-sdk/client#DaemonMemoryHelperResolution",
+        "export:@byok-sdk/client#DaemonStatus",
+        "export:@byok-sdk/client#checkDaemonConfig",
+        "export:@byok-sdk/client#validateDaemonConfig"
+      ]
+    },
+    {
+      "id": "daemon-config-validation",
+      "impact": "breaking",
+      "summary": "Daemon construction now validates DaemonConfig against the schema: a missing required field or a value of the wrong JSON type or literal throws DaemonConfigInvalidError (some fields were previously passed through unchecked), and the bin reports every config error at once. DaemonConfigFieldRemovedError gains a required `migration` (constructor third argument) pointing at the removed-field table; a removed field such as workspaceRoot keeps throwing it. Fix the reported fields; a Host that constructs DaemonConfigFieldRemovedError itself passes the migration anchor.",
+      "migration": "docs/spec.md#removed-daemonconfig-fields",
+      "items": [
+        "export:@byok-sdk/client#DaemonConfigFieldRemovedError"
+      ]
     }
   ],
   "changes": [
     {
+      "item": "config:agentEgress",
+      "change": "added",
+      "after": "optional schema-sha256=0fe1bb45b19bbe3f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:agentHome",
+      "change": "added",
+      "after": "optional schema-sha256=66edf8f80ce054e9",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:agentMemory",
+      "change": "added",
+      "after": "optional schema-sha256=42de4aaa28392fab",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:agentMemoryExport",
+      "change": "added",
+      "after": "optional schema-sha256=02e70d99380d0cc1",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:agentMemoryHelperAssetRoot",
+      "change": "added",
+      "after": "optional schema-sha256=00404e686415370f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:agentMemoryIntents",
+      "change": "added",
+      "after": "optional embedded-only schema-sha256=421bda8258876a6f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:agentMemoryMcp",
+      "change": "added",
+      "after": "optional schema-sha256=3637cb9e656a4b1d",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:artifactLimits",
+      "change": "added",
+      "after": "optional schema-sha256=92efb10e4b237352",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:authRequestDeadlineMs",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:branding",
+      "change": "added",
+      "after": "optional schema-sha256=f5eaf56d7a1d0cc8",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:codexSandbox",
+      "change": "added",
+      "after": "optional schema-sha256=ea0cd9ea07c7a46c",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:dangerouslyAllowInsecureRemote",
+      "change": "added",
+      "after": "optional schema-sha256=7cb541e84f226754",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:deviceAssertion",
+      "change": "added",
+      "after": "optional schema-sha256=67738e44d544c345",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:deviceCredentials",
+      "change": "added",
+      "after": "optional schema-sha256=f92318979ea72557",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:deviceName",
+      "change": "added",
+      "after": "optional schema-sha256=00404e686415370f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:durablePi",
+      "change": "added",
+      "after": "optional schema-sha256=7cb541e84f226754",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:inputPreparation",
+      "change": "added",
+      "after": "optional embedded-only schema-sha256=421bda8258876a6f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:localAgentRelease",
+      "change": "added",
+      "after": "optional distribution-owned schema-sha256=af64007969aeade3",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:localToolApproval",
+      "change": "added",
+      "after": "optional schema-sha256=adf4dd6b2ba80af9",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:machineId",
+      "change": "added",
+      "after": "optional embedded-only schema-sha256=421bda8258876a6f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:maxConcurrentReaderAttemptsPerAgentHome",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:maxInlineEventBytes",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:maxTaskOutputBytes",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:mcpToolsets",
+      "change": "added",
+      "after": "optional schema-sha256=c398321f7555b326",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:nativeAssetRoot",
+      "change": "added",
+      "after": "optional schema-sha256=00404e686415370f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:piByokLauncher",
+      "change": "added",
+      "after": "optional schema-sha256=7c3012d0c95b15da",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:presence",
+      "change": "added",
+      "after": "optional schema-sha256=ca5de1d109969e37",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:productId",
+      "change": "added",
+      "after": "required schema-sha256=00404e686415370f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:productName",
+      "change": "added",
+      "after": "required schema-sha256=00404e686415370f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:progressBatch",
+      "change": "added",
+      "after": "optional schema-sha256=3f9b54486eda932a",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:providerProvisioning",
+      "change": "added",
+      "after": "optional embedded-only schema-sha256=421bda8258876a6f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:runtimeAllowlist",
+      "change": "added",
+      "after": "optional schema-sha256=d7a19ad6de43b74d",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:runtimePreference",
+      "change": "added",
+      "after": "optional schema-sha256=3e8f01f4e19c710e",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:sdkHelperHost",
+      "change": "added",
+      "after": "optional schema-sha256=54a73cacf0ba88bb",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:serverUrl",
+      "change": "added",
+      "after": "required schema-sha256=00404e686415370f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:serviceEnrollment",
+      "change": "added",
+      "after": "optional schema-sha256=2c6116713313cb4b",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:shutdownGraceMs",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:startupTimeoutMs",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:storage",
+      "change": "added",
+      "after": "optional schema-sha256=ed95bb4ee17281a3",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:storeDir",
+      "change": "added",
+      "after": "optional schema-sha256=00404e686415370f",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:toolAuthorization",
+      "change": "added",
+      "after": "optional embedded-only schema-sha256=421bda8258876a6f",
+      "entry": "daemon-config-schema"
+    },
+    {
       "item": "export:@byok-sdk/client#APPROVAL_REQUIRES_HOST",
       "change": "added",
       "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentEgressConfig",
+      "change": "changed",
+      "entry": "daemon-config-schema"
     },
     {
       "item": "export:@byok-sdk/client#ApprovalKind",
@@ -40,9 +366,79 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonConfig",
       "change": "changed",
       "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigCheck",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigCheckOptions",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigFieldRemovedError",
+      "change": "changed",
+      "entry": "daemon-config-validation"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigInvalidError",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigIssue",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigIssueCode",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigSource",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigValidation",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveConfig",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveMcpServer",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveRuntime",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonMemoryHelperResolution",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonStatus",
+      "change": "changed",
+      "entry": "daemon-config-schema"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
@@ -53,6 +449,16 @@
       "item": "export:@byok-sdk/client#LocalToolApprovalPolicy",
       "change": "added",
       "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#checkDaemonConfig",
+      "change": "added",
+      "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#validateDaemonConfig",
+      "change": "added",
+      "entry": "daemon-config-schema"
     }
   ]
 }

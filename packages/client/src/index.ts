@@ -118,6 +118,22 @@ export type {
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export {
+  DAEMON_CONFIG_SCHEMA_VERSION,
+  DaemonConfigInvalidError,
+  checkDaemonConfig,
+  validateDaemonConfig,
+  type DaemonConfigCheck,
+  type DaemonConfigCheckOptions,
+  type DaemonConfigIssue,
+  type DaemonConfigIssueCode,
+  type DaemonConfigSource,
+  type DaemonConfigValidation,
+  type DaemonEffectiveConfig,
+  type DaemonEffectiveMcpServer,
+  type DaemonEffectiveRuntime,
+  type DaemonMemoryHelperResolution,
+} from './daemon/config-schema';
+export {
   DaemonConfigFieldRemovedError,
   DaemonJournalProtocolUnsupportedError,
   type DaemonJournalProtocolRecord,

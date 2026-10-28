@@ -27,13 +27,22 @@ const SOCKET_PATH_MAXIMUM: Partial<Record<NodeJS.Platform, number>> = { darwin: 
 // A runtime binds under exec/<token>/runtime; reserve 16 bytes for its socket name and one NUL.
 const SOCKET_SUFFIX_BYTES = Buffer.byteLength(path.join('/', 'exec', '0'.repeat(12), 'runtime')) + 17;
 
+/**
+ * The runtime Unix socket budget of a scratch root (#493): its byte length
+ * and, where the platform bounds `sun_path`, the longest root that still fits.
+ */
+export function scratchRootSocketBudget(root: string, platform: NodeJS.Platform = process.platform): { readonly bytes: number; readonly maximumBytes?: number } {
+  const maximum = SOCKET_PATH_MAXIMUM[platform];
+  const bytes = Buffer.byteLength(path.resolve(root));
+  return maximum === undefined ? { bytes } : { bytes, maximumBytes: maximum - SOCKET_SUFFIX_BYTES };
+}
+
 export function validateScratchRoot(root: string, platform: NodeJS.Platform = process.platform): string {
   if (typeof root !== 'string' || !path.isAbsolute(root) || /[\0\r\n]/u.test(root)) throw new ScratchRootPathError('must be an absolute, single-line path');
   const resolved = path.resolve(root);
-  const maximum = SOCKET_PATH_MAXIMUM[platform];
-  const bytes = Buffer.byteLength(resolved);
-  if (maximum !== undefined && bytes + SOCKET_SUFFIX_BYTES > maximum) {
-    throw new ScratchRootPathError(`is too long for runtime Unix sockets: ${bytes} bytes, ${platform} allows at most ${maximum - SOCKET_SUFFIX_BYTES}; configure a shorter private root with no symbolic-link ancestors`);
+  const { bytes, maximumBytes } = scratchRootSocketBudget(resolved, platform);
+  if (maximumBytes !== undefined && bytes > maximumBytes) {
+    throw new ScratchRootPathError(`is too long for runtime Unix sockets: ${bytes} bytes, ${platform} allows at most ${maximumBytes}; configure a shorter private root with no symbolic-link ancestors`);
   }
   return resolved;
 }
