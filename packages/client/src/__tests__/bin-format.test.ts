@@ -42,6 +42,15 @@ describe('bin/format: formatAgentEvent', () => {
 });
 
 describe('bin/format: formatDaemonEventLine', () => {
+  it('F6 renders suppressed built-in risk codes on local decision and reminder lines', () => {
+    expect(formatDaemonEventLine({ kind: 'tool-authorization', ts: 'T', taskId: 't', toolName: 'bash',
+      decision: 'allow', authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [], suppressedReasons: ['destructive-git'] }))
+      .toBe('[T] tool-authorization taskId=t tool="bash" decision=allow source=rule ruleIds=["push-origin"] reasons= suppressedReasons=destructive-git');
+    expect(formatDaemonEventLine({ kind: 'tool-reminder', ts: 'T', taskId: 't', toolName: 'bash',
+      authorization: { source: 'rule', ruleIds: ['ask-push'] }, reasons: ['custom-rule'], suppressedReasons: ['destructive-git'], summary: 'review' }))
+      .toBe('[T] tool-reminder taskId=t tool="bash" source=rule ruleIds=["ask-push"] reasons=custom-rule suppressedReasons=destructive-git summary="review"');
+  });
+
   it('renders local rule decisions and reminder provenance without additional input content', () => {
     expect(formatDaemonEventLine({ kind: 'tool-authorization', ts: 'T', taskId: 't1', toolName: 'bash', toolCallId: 'c1',
       decision: 'allow', authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [] }))

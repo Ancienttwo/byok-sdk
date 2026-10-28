@@ -64,6 +64,75 @@ const declineReason = (sent: Envelope[]) => {
 };
 
 describe('daemon tool authorization', () => {
+  it('F6 preserves suppressed built-in risks in an auto allow audit', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const decisions: ToolAuthorizationDecision[] = [];
+    const { runner } = makeRunner(adapter, sent, {
+      toolAuthorization: () => ({ mode: 'auto', rules: { allowWithoutAsking: [
+        { id: 'push-origin', match: { toolName: 'bash', commandGlob: 'git push origin *' } },
+      ] } }),
+      onToolAuthorizationDecision: decision => decisions.push(decision),
+    });
+    await offer(runner, 'F6-auto-allow');
+    const input = adapter.inputs[0]!;
+    await expect(input.toolAuthorization!.authorize({ toolCallId: 'push', toolName: 'bash',
+      input: { command: 'git push origin main' }, cwd: input.manifest.workspace.workspaceDir }))
+      .resolves.toMatchObject({ decision: 'allow', authorization: { source: 'rule', ruleIds: ['push-origin'] } });
+    expect(decisions).toEqual([{
+      taskId: 'F6-auto-allow', toolName: 'bash', toolCallId: 'push', decision: 'allow',
+      authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [], suppressedReasons: ['destructive-git'],
+    }]);
+    expect(sent.some(event => event.type === 'task.await_approval')).toBe(false);
+  });
+
+  it('F6 audits a high-risk all call suppressed by allow without emitting a reminder', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const decisions: ToolAuthorizationDecision[] = [];
+    const reminders: ToolReminder[] = [];
+    const { runner } = makeRunner(adapter, sent, {
+      toolAuthorization: () => ({ mode: 'all', rules: { allowWithoutAsking: [
+        { id: 'push-origin', match: { toolName: 'bash', commandGlob: 'git push origin *' } },
+      ] } }),
+      onToolAuthorizationDecision: decision => decisions.push(decision),
+      onToolReminder: reminder => reminders.push(reminder),
+    });
+    await offer(runner, 'F6-all-allow');
+    expect(adapter.inputs[0]!.toolAuthorization).toBeUndefined();
+    adapter.sessions[0]!.queue.push({ type: 'tool_use', tool: 'bash', toolCallId: 'allowed-push',
+      input: { command: 'git push origin main' } });
+    await vi.waitFor(() => expect(decisions).toHaveLength(1));
+    expect(decisions[0]).toEqual({ taskId: 'F6-all-allow', toolName: 'bash', toolCallId: 'allowed-push', decision: 'allow',
+      authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [], suppressedReasons: ['destructive-git'] });
+    expect(reminders).toEqual([]);
+    expect(sent.some(event => event.type === 'task.await_approval')).toBe(false);
+  });
+
+  it.each(['duplicate-rule', 'resolver-throw'] as const)('F8 keeps %s details local and uses a fixed wire decline', async scenario => {
+    const privateDetail = 'F8_PRIVATE_OWNER_RULE';
+    const localErrors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+      const sent: Envelope[] = [];
+      const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => {
+        if (scenario === 'resolver-throw') throw new Error(privateDetail);
+        return { mode: 'auto', rules: { alwaysAsk: [
+          { id: privateDetail, match: { toolName: 'read' } },
+          { id: privateDetail, match: { toolName: 'write' } },
+        ] } };
+      } });
+      await offer(runner, `F8-${scenario}`);
+      expect(declineReason(sent)).toBe('tool_authorization_unresolved: local tool authorization policy could not be resolved');
+      expect(JSON.stringify(sent)).not.toContain(privateDetail);
+      expect(localErrors.mock.calls.flat().join(' ')).toContain(privateDetail);
+      expect(sent.some(event => event.type === 'task.claim')).toBe(false);
+      expect(adapter.inputs).toEqual([]);
+    } finally {
+      localErrors.mockRestore();
+    }
+  });
+
   it('defaults to all: no gate reaches the runtime, a high-risk tool_use only emits a reminder', async () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
     const sent: Envelope[] = [];
