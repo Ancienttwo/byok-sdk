@@ -3933,11 +3933,13 @@ a resolver every task runs in `all`. A config file sets the static form
 turns it into the same single resolver (`byRuntime[runtimeId] ?? default`). A
 `byRuntime` key that names no runtime of the daemon, or static `auto` on an
 adapter without `toolAuthorizationAuto`, raises `DaemonConfigInvalidError` at
-construction. Rules never enter the server protocol, native settings or model
-prompt. A running task and its native subagents keep their snapshot; each new
-offer, including resume, resolves the current policy again. Pi launch v8 and its
-digest contract are unchanged: rules live in the daemon reached through the
-existing gate.
+construction. Resolution failures use the fixed wire reason
+`tool_authorization_unresolved: local tool authorization policy could not be resolved`;
+rule IDs and diagnostic details remain in local logs. Rules never enter the server protocol,
+native settings or model prompt. A running task and its native subagents keep
+their snapshot; each new offer, including resume, resolves the current policy
+again. Pi launch v8 and its digest contract are unchanged: rules live in the
+daemon reached through the existing gate.
 
 - `all`: no tool is blocked. The daemon classifies each `tool_use` the runtime
   reports and emits a local `tool-reminder` `DaemonEvent` for a high-risk call.
@@ -3986,6 +3988,9 @@ must all match. A rule has a unique nonblank `id`, optional display-only
 
 - `toolName`: exact, case-sensitive native tool name (Pi `bash`, Claude `Bash`).
 - `commandGlob`: whole command/cmd text (string arrays are joined with spaces).
+  An allow can match only a single simple command: any `;`, `&`, `|`, `<`, `>`,
+  newline, carriage return, backtick, `$(` or `${` disqualifies every allow
+  rule for that call, including tool-name-only rules. Ask rules still match.
 - `pathGlob`: lexically resolved path; ask matches any extracted path, while
   allow requires every extracted path, including batch changes/move targets,
   to match the same rule. It does not inspect arbitrary argument fields. In
@@ -3995,21 +4000,37 @@ must all match. A rule has a unique nonblank `id`, optional display-only
   observation, or the normalized event in `all`. Names are not split on `__`;
   unobserved personal MCP tools cannot match these selectors by inference.
 
-The four glob selectors use `node:path.matchesGlob` on the local platform;
-`*` does not cross path separators and `**` does. Missing required facts do
-not match. There is no regex, natural-language reviewer, model call or added
-dependency. Description is never executable policy. Command matching does not
-parse shell chains or resolve Git remote configuration: a broad glob can also
-cover appended shell text, and a literal `origin` is not a repository identity.
+The four glob selectors use the SDK's bounded-state, one-pass matcher, with
+identical Node and Bun semantics. Only literals, `*`, `**` and `?` are supported;
+`{`, `[` and extglobs (`@(`, `!(`, `+(`, `*(`, `?(`) are rejected, as are patterns
+with more than 16 `*` characters. `commandGlob`, `mcpServer` and `mcpTool` stars
+match any characters, including `/`; path `*` stays within one segment and
+`**` crosses separators, including dot-prefixed segments. `?` matches one
+Unicode code point (never a separator for paths). Path separators remain
+literal; `**` does not make a neighboring separator optional. Path matching
+folds case on darwin/win32 and normalizes Windows separators. Relative
+`pathGlob` patterns are rejected at admission. Commands above 64 KiB UTF-8
+cannot match any allow rule; a command selector in an ask rule conservatively
+matches them when its other selectors match. Missing required facts do not
+match. There is no regex matcher, natural-language reviewer, model call or
+added dependency. Description is never executable policy. Command matching
+does not resolve Git remote configuration: a literal `origin` is not a repository identity.
 Repository-scoped semantic permissions and shell isolation are outside this
 contract. Rule validation rejects unknown fields, invalid types, duplicate IDs,
-empty selectors, NUL and oversized values rather than discarding them.
+empty selectors, NUL and oversized values rather than discarding them. Both
+public `classifyToolCall` and `createAutoToolAuthorizationGate` parse rules
+through the same copying/freezing admission boundary; an empty selector set
+can never act as a wildcard. A gate keeps its validated snapshot.
 
 Classified gate verdicts and local `tool-authorization` decision events carry
 `authorization: { source: 'rule' | 'built-in' | 'floor', ruleIds: string[] }`;
 `tool-reminder` carries the same metadata. IDs identify winning rules, not
 the rules overridden by a higher priority. Local daemon records retain this
-metadata without raw command/input/description content. Observer failures do
+metadata without raw command/input/description content. Allowed calls retain
+the built-in codes they override as `suppressedReasons`; local decision events
+and daemon decision/reminder records preserve those codes. An `all` call whose
+high-risk reminder was suppressed emits a local allow audit event, without a
+reminder or approval. Observer failures do
 not change authorization. Approval still uses the existing single task path
 and approvalId; one approval does not create a remembered rule.
 
@@ -4037,7 +4058,12 @@ The built-in fallback treats everything else, including ordinary shell commands,
 reads anywhere, writes in the workspace, web, MCP and subagent calls, as normal;
 a matching Always Ask rule can still require authorization. The
 classifier is lexical: paths resolve against the call's cwd with `~` expanded
-and symlinks not followed, and indirect command forms (scripts, `eval`,
+and protected-path comparison folds case on darwin/win32. The floor compares
+the normalized home and `realpath(home)`, normalizes darwin's
+`/System/Volumes/Data` alias, and resolves each declared target through its
+nearest existing parent, including symlinks. A failed/uncertain home, protected
+root or target resolution disables automatic allow rules; built-in handling
+remains. Unknown indirect command forms (scripts, `eval`,
 encoded payloads, aliases) are not recognized. It is a tool gate, not an
 execution sandbox and not a file-scope boundary: an allowed shell command can
 still reach any file, network or local resource the OS user can. File-scope

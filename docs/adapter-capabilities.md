@@ -98,6 +98,11 @@ Claude use their existing gates; Codex, Grok, Hermes and Pi prepared/durable
 still decline `auto` before claim. Rules and audit metadata remain local; the
 server wire protocol, Pi launch v8 and digest format are unchanged. No reviewer
 model, natural-language matching, deny rule or new dependency is introduced.
+The shared matcher has bounded wildcard syntax and identical Node/Bun results;
+shell control/substitution syntax cannot activate allow. The sensitive-path
+floor resolves home/nearest existing parents, recognizes darwin aliases and
+folds case on darwin/win32. Suppressed high-risk calls retain local audit codes,
+including in `all`; invalid-policy details stay out of wire decline reasons.
 See the spec's
 [Tool authorization](spec.md#tool-authorization-auto-and-all-1061) section for
 the classifier and the honest limits (tool gate, not file scope or sandbox).

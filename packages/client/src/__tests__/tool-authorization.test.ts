@@ -243,6 +243,14 @@ describe('deterministic tool rules in the single classifier', () => {
       .toEqual({ source: 'rule', ruleIds: ['all-levels'] });
   });
 
+  it.each([
+    ['a😀b', 'a?b', true], ['a/b', 'a*b', true], ['ab', '*a?b*', false],
+    ['aaabaa', '*a*a?b*a*', true], ['ab', '**a**b**', true], ['abX', 'a*b', false],
+  ] as const)('F3/F5: bounded automaton matches %j against %j as %j', (command, commandGlob, matched) => {
+    const risk = classify({ command }, { alwaysAsk: [{ id: 'automaton-case', match: { commandGlob } }] });
+    expect(risk.authorization.source === 'rule').toBe(matched);
+  });
+
   it('F4: public classifier and gate reject undefined or empty selector sets', () => {
     for (const match of [{}, { toolName: undefined }]) {
       const rules = { allowWithoutAsking: [{ id: 'empty', match }] };

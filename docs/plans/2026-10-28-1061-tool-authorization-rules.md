@@ -11,7 +11,7 @@
 - `packages/client/src/tool-authorization.ts` 拥有 `ToolCall`、`ToolRisk`、`classifyToolCall` 和 auto gate。`daemon/task-runner/offer-launch.ts` 拥有 admission 和 gate 构造；`event-pump.ts` 通过同一个 classifier 生成 all reminder。审批只有现有的 FIFO approval 路径。
 - Pi ordinary RPC 在其他 extensions 之后注册 `tool_call` hook，原生子代理继承 gate；Claude 通过确认后的 SDK `PreToolUse` hook。Codex/Grok/Hermes、Pi prepared/durable 无完整 pre-tool coverage，auto 在 claim 前 decline。
 - MCP identity 已有 `mcp/event-identity.ts` / `mcp/projection.ts` 的 admitted-name map；名字可能包含 `__`，不能拆字符串猜 server/tool。all 使用 runtime 规范化事件已有的 `mcp`；auto 从本次 admitted observation 精确映射。没有可信 identity 的个人 MCP/自定义 extension，MCP selector 不命中，可用显式 native `toolName`。
-- 客户端 `engines.node >=24.22.1`，workspace `>=24.15.0`。本机 Node 24.22.1 实测存在 `node:path.matchesGlob`。无需新依赖。
+- 客户端 `engines.node >=24.22.1`，workspace `>=24.15.0`。Node/Bun 共用 SDK 内的受限 matcher，不依赖宿主 glob 实现，无新依赖。
 - `.ai/context/capabilities.json`、`.ai/context/context-map.json`、`tasks/` 和 `.codegraph/` 在该 checkout 不存在；本切片不新增 scoped context 或索引。
 
 ## 参考来源及证据限度
@@ -46,7 +46,7 @@ cwd 的证据差异保持可见：auto 使用 hook 提供的 call cwd；all 的�
 | [x] D4 | all 中 allow 压掉 reminder，ask 增加 reminder；floor 不被 allow 压掉 | 两个模式消费相同风险结果，同时 all 保持从不拦截 | 完全忽略规则会造成 Auto 与 all 提醒不一致；让 all 等审批则破坏其合同 |
 | [x] D5 | gate verdict、本地 decision event 和 reminder 携带 source/命中 rule IDs；不把规则写进 wire | Host 可解释“为什么问/为什么直接执行”，并审计被 allow 压掉的提示 | 只记录 reminder 会丢失自动放行依据；外发原始规则/命令会扩大隐私面 |
 | [x] D6 | Pi/Claude 复用 gate；Codex/Grok/Hermes 继续 auto pre-claim decline | UI 和部分终端 hook 不代表全量 pre-tool coverage | 冒充支持会让不经 gate 的文件工具绕过 ask |
-| [x] D7 | 使用 Node `path.matchesGlob`，不加依赖 | 已满足 engines，避免自行维护第二套 glob 语言 | 换自写 matcher 必须定义不同语法并承担 Windows/转义测试；增加依赖没有已证实收益 |
+| [x] D7 | 使用无依赖、受测试约束的单次扫描 matcher（F3/F5 裁定细化） | 固定 grammar 和状态上限，消除 brace 展开/回溯及 Node/Bun 语义差异 | 使用宿主 glob 会恢复 DoS 和 dot/case 差异；增加依赖没有收益 |
 | [x] D8 | 0.31.0，同一个 ready PR 交设计、实现、验证；不合并 | owner 后续明确指令优先 | 保持 0.32.0 或单独 Draft 设计会遗漏已授权交付 |
 
 ## 规则语言的精确定义
@@ -96,10 +96,13 @@ toolAuthorization: task => ({
 })
 ```
 
-`toolName` 精确、区分大小写，保持 runtime 原名（Pi `bash` / Claude `Bash`）；其余四个 selector 是 `node:path.matchesGlob` 的完整字符串 glob，采用当前平台的 `node:path` 语义，不加 regex、字符串前缀匹配、自动大小写折叠或自然语言推断。`*` 不跨路径 separator；globstar `**` 作为独立 path component 时才能跨 separator（例如 `/**/file`）。嵌在 `git push origin **` 这样的 component 中不承诺跨 `/`；command 含文件路径时也遵守 Node 的 path 语义。description 不影响匹配。每条规则的已给字段 **AND**；同一列表内各条规则 **OR**；至少一个 selector。一个条件的字段不存在或不能表示时该规则不命中，不把缺失当作通配。
+`toolName` 精确、区分大小写，保持 runtime 原名（Pi `bash` / Claude `Bash`）；其他 selector 使用同一个 SDK matcher。description 不影响匹配。每条规则的已给字段 **AND**；同一列表各条规则 **OR**；没有已定义 selector 永远不命中，并在所有公开入口拒绝。缺少被要求的动作事实不视作通配。
 
-- command 来自现有 `command` / `cmd` 提取（string 或 string[] 以空格 join）。匹配整段原始 command，**不**剥 wrapper、展开变量、拆 shell chain、执行命令、解析 Git config 或证明 remote/repository。`git push origin *` 中 `*` 也能覆盖空格和额外 shell 文本；这是宽 glob 授权范围，不能当命令 AST 或 sandbox。Host 应展示完整 pattern，并用窄 pattern 或 ask 处理不确定脚本。限定 repository 的 Grok 自然语言例子不能靠本功能自动得到等价保证。
-- path 使用 classifier 已有的 path keys 以及 Codex `file_change.changes`（含 move destination）；相对路径依 runtime call cwd，`~` 依 daemon home 展开并词法 normalize，不跟随 symlink。对一批路径，ask 只需任一路径命中；allow 必须所有已提取路径均命中同一条 path 规则，避免第一个安全路径替整批放行。不扫描任意 input 字段或 shell 文本猜文件访问。
+- grammar 只有字面、`*`、`**`、`?`。出现 `{`、`[` 或 extglob（`@(`、`!(`、`+(`、`*(`、`?(`）在 admission 拒绝；每个 pattern 最多 16 个 `*`。没有 brace/class 展开、正则、转义语言或回溯。`?` 匹配一个 Unicode code point。
+- command 来自现有 `command` / `cmd`（string 或 string[] join）。`*` / `**` 可跨 `/`，匹配完整原文；不剥 wrapper、不展开变量、不执行或推断 repository。**任何**命令含 `; & | < >`、换行、回车、反引号、`$(` 或 `${`，所有 allow（包括 toolName-only）均不命中，退回 built-in；ask 照常。UTF-8 超过 64 KiB 的 command 也禁用 allow，ask 的 command selector 按命中处理，其他 selector 仍须满足。`git push origin *` 不会放行其后拼接的 `&& rm -rf …`；`origin` 仍不是最终仓库身份。
+- pathGlob 必须是绝对路径。`*` / `?` 不跨 separator，`**` 可跨 separator 和点开头的段；separator 仍是字面，不隐含 `**/` 可选目录语法。darwin/win32 case-fold，Windows separator 统一；Node/Bun 的结果相同。路径输入沿用已知 path keys 和 Codex batch/move targets；`~` 展开，相对 target 按 call cwd 解析。ask 任一 target 命中即可；allow 必须所有 target 被同一条规则覆盖。
+- 底线单独使用实际文件身份：同时比较 home 与 `realpath(home)`，darwin 去掉 `/System/Volumes/Data` 别名，darwin/win32 case-fold；对 target 的最近已存在祖先取 realpath 再连接未创建部分，识别 credential/login store 的 symlink alias。不能解析（含 ELOOP、dangling symlink、权限失败）则不激活 allow。它保护已声明路径，不扫描 shell 文本猜任意 operand，也不声称锁住检查后的 filesystem namespace。
+
 - `mcpServer` / `mcpTool` 使用可信 identity map 或规范化事件的字段；不解析任意 `mcp__...` 名称。未被 task observation 识别的个人 MCP 不承诺跨 runtime server/tool 规则覆盖。
 - 不实现 repository/remote selector；只有 command glob 的字面形式。增加可信目标身份需要独立 action contract，不从模型文本推断。
 
@@ -107,15 +110,15 @@ toolAuthorization: task => ({
 
 保留原字符串返回值，是 D3 明确要求的两种公开输入形态；两者在 admission 后立即投影为唯一的 policy 对象，不保留两条执行路径。未配置 resolver 等价 `{ mode: 'all' }`。旧 mode parser 的 `auto | all` 校验仍严格，不加 legacy wording。
 
-policy/rules/rule/match 都拒绝未知 key、错误类型、空或全空白 id、空 selector、缺 selector、非 array 列表及两个列表间重复 id。可选 description 必须 string；不存在就不生成值。拒绝 NUL 和超长输入；总规则数最多 128，id 最多 128 字符，description 和每个 selector 最多 4096 字符；不截断规则。glob 使用 Node 接受的语法，匹配器拒绝的 pattern 在 claim 前报配置错误，不吞错后放行。resolver throw、校验失败统一 `tool_authorization_unresolved` pre-claim decline，运行时不启动。
+policy/rules/rule/match 都拒绝未知 key、错误类型、空或全空白 id、空 selector、缺 selector、非 array 列表及两个列表间重复 id。可选 description 必须 string；不存在就不生成值。拒绝 NUL 和超长输入；总规则数最多 128，id 最多 128 字符，description 和每个 selector 最多 4096 字符；不截断规则。pattern 在 admission 按受限 grammar 校验，不吞错后放行。resolver throw、校验失败统一用固定 wire reason `tool_authorization_unresolved: local tool authorization policy could not be resolved` pre-claim decline；rule id 和细节只写本地日志，运行时不启动。
 
-把用户数组、rule、match 逐层复制并冻结，task 内只读这个快照；Host 后续修改原对象不会改变正在运行的任务。规则不写到 Agent home、native settings 或 MCP/LLM prompt。没有磁盘规则自动发现、远端 rules、模型生成 rules 或持久 remembered grant；存储、UI 增删改和跨 daemon 分发由 Host 拥有。
+把用户数组、rule、match 逐层复制并冻结，task 内只读这个快照；Host 后续修改原对象不会改变正在运行的任务。公开 `classifyToolCall` 和 `createAutoToolAuthorizationGate` 同样先经过 parser；gate 保留复制冻结的 snapshot。SDK 自己已解析、逐层冻结的 rules 可复用验证标记，Host 提供的对象不能靠 frozen 状态绕过校验。规则不写到 Agent home、native settings 或 MCP/LLM prompt。没有磁盘规则自动发现、远端 rules、模型生成 rules 或持久 remembered grant；存储、UI 增删改和跨 daemon 分发由 Host 拥有。
 
 ## 优先级、模式与可观测性
 
-每次先提取现有 built-in 风险与路径，再依 D2 决定最终风险；这不是两个 classifier。Always Ask 命中就 high，`source: rule`，ruleIds 为该列表所有命中项；floor 命中就 high，`source: floor`，没有获胜 allow rule；再看 allow 命中转 normal，`source: rule`；否则保留 built-in 风险，`source: built-in`。多条匹配按配置顺序报告 ID，行为不依赖列表顺序。若 ask 与 floor 同时存在，记录 rule 来源并保留 sensitive-path 风险原因，不能掩盖底线。
+每次先提取现有 built-in 风险与路径，再依 D2 决定最终风险；这不是两个 classifier。Always Ask 命中就 high，`source: rule`，ruleIds 为该列表所有命中项；floor 命中就 high，`source: floor`，没有获胜 allow rule；再看 allow 命中转 normal，`source: rule`，将被压掉的 built-in closed codes 保留在 `suppressedReasons`；否则保留 built-in 风险，`source: built-in`。多条匹配按配置顺序报告 ID，行为不依赖列表顺序。若 ask 与 floor 同时存在，记录 rule 来源并保留 sensitive-path 风险原因，不能掩盖底线。
 
-floor 复用 `sensitive-path`，覆盖现有 `SENSITIVE_HOME_PATHS` 中凭据和登录持久化位置的已识别 read/write/命令访问。它要求人工审批，**不是绝对禁止用户授权**。没有新秘密扫描器，也不声称识别任意编码、脚本、symlink 或外发凭据；未知间接访问仍是现有词法分类器的限制。plain read anywhere 和普通本地工具继续默认放行。
+floor 复用 `sensitive-path`，覆盖现有 `SENSITIVE_HOME_PATHS` 中凭据和登录持久化位置的已识别 read/write/命令访问。它要求人工审批，**不是绝对禁止用户授权**。没有新秘密扫描器，也不声称识别任意编码、脚本或外发凭据；未知间接访问仍是现有词法分类器的限制。plain read anywhere 和普通本地工具继续默认放行。
 
 | 最终结果 | auto | all |
 | --- | --- | --- |
@@ -125,7 +128,7 @@ floor 复用 `sensitive-path`，覆盖现有 `SENSITIVE_HOME_PATHS` 中凭据和
 | 无规则命中、built-in high | 现有 approval | 现有 reminder |
 | 无规则命中、built-in normal | 直接执行 | 不提醒 |
 
-gate 的 classified verdict 添加 `authorization: { source, ruleIds }`。另发本地 `tool-authorization` DaemonEvent（task/call identity、allow/deny、source、ruleIds、risk reasons；不含 input/description）；all 的 `tool-reminder` 添加同样 metadata。daemon record 投影保留 task/call ID、rule ID/source/reasons，继续不记录原始工具名文本、命令、路径、规则正文或 token。实时本地 event 保留 toolName 供 Host 显示。`ruleIds` 是 Host 自定的审计 identifier，Host 不应把秘密放进 ID。observer 异常只影响观察，不能把已决定的 deny 变 allow，也不能阻断正常工具。
+gate 的 classified verdict 添加 `authorization: { source, ruleIds }`。另发本地 `tool-authorization` DaemonEvent（task/call identity、allow/deny、source、ruleIds、risk reasons；不含 input/description）；all 的 `tool-reminder` 添加同样 metadata。all 因 allow 压掉 high-risk reminder 时仍发本地 allow decision event；decision/reminder record 投影保留可选 `suppressedReasons`。daemon record 投影保留 task/call ID、rule ID/source/reasons，继续不记录原始工具名文本、命令、路径、规则正文或 token。实时本地 event 保留 toolName 供 Host 显示。`ruleIds` 是 Host 自定的审计 identifier，Host 不应把秘密放进 ID。observer 异常只影响观察，不能把已决定的 deny 变 allow，也不能阻断正常工具。
 
 ask 的 summary 要区分 custom rule、floor 和 built-in，不把普通动作强行描述成发现某种系统危险。审批仍绑定现有 approvalId；超时、withdrawal 和迟到批准不得复活动作。预算从每次 authorize 开始，包括审批排队；没有 reviewer 延迟或费用。用户一次 approve 只覆盖当前调用，不修改规则。
 
@@ -152,9 +155,9 @@ server protocol、offer、progress schema、`task.await_approval` / `approve` / 
 
 本地仅跑指定四项检查与定向测试；全量交 PR CI。权限变更执行一次独立只读实现/断言审查，复用最终检查证据。此设计交付时的调查只读，没有运行付费模型；自然语言 reviewer 会引入每调用一轮的延迟、费用、凭据与 prompt injection 风险；本次不调用 reviewer，也不持有 reviewer BYOK 凭据。
 
-10x 时先遇到人工 approval 队列（当前每 task 16 个排队上限）及逐规则匹配 CPU；匹配成本约为每调用 `rules × fields × 文本长度`，不新增网络往返。对规则数和 pattern 长度设 admission 上限，不做缓存、后台 reviewer、热更新或规则编译服务。缺少任意脚本/文件隔离保证是已知边界，不用扩大本切片来假装解决 #1061 的 sandbox/额外 workspace 工作。
+10x 时先遇到人工 approval 队列（当前每 task 16 个排队上限）及逐规则匹配 CPU；matcher 用 BigInt 位集模拟有界 NFA：相邻星号先折叠，每个 code point 只做固定次数的位运算/一次 epsilon shift，不回溯。设 pattern 状态数 P ≤ 4096、输入 code points N，位集 mask 构造及扫描的 word-RAM 上界为 `O((P + N) × ceil(P / wordBits))`；在 admission 固定的 P 上限下随 N 线性，不能把它误称为不依赖 P 的 `O(N + P)`。超过命令字节预算不进入 matcher。它不新增网络往返。对规则数和 pattern 长度设 admission 上限，不做缓存、后台 reviewer、热更新或规则编译服务。缺少任意脚本/文件隔离保证是已知边界，不用扩大本切片来假装解决 #1061 的 sandbox/额外 workspace 工作。
 
-## 本地实施与验证记录（2026-10-29）
+## 初版实施与验证记录（2026-10-29，Pi 审查前）
 
 - 实现遵循 D1–D7；新增 `ToolAuthorizationDecision` 本地事件，CLI live view 展示 source/ruleIds；持久 record 不保存工具名文本、命令、路径、description，只保留 task/call/rule IDs、source、reason codes 和 decision。没有协议、Pi launch 格式、digest 或 dependency 变更。
 - `bun run build`、`bun run typecheck`、`bun run check:api-surface`、`bun run check:version-authority`：各 **exit 0**。API golden 9 个 package 匹配，43 个 entry 按实测；client/root `1,805,387 → 1,811,508` bytes（+6,121），`byok-agent` `1,749,990 → 1,756,442` bytes（+6,452），其余 entry 不变。包版本仍由已有 release authority 管理；本功能目标 0.31.0，不在此分支另起版本 authority。
@@ -163,3 +166,27 @@ server protocol、offer、progress schema、`task.await_approval` / `approve` / 
 - 既有 assertion 的必要修改仅两类：classifier/gate 精确返回值增加 authorization metadata；Claude loopback 的新增普通 ask 场景不要求它具有 built-in `write-outside-workspace` 原因，原有拒绝、文件不存在、turn 结束、timeout、withdrawal、subagent 和 resume 断言全部保留。持久投影的新 assertion 要求不保存工具名；没有移除原测试保护或用 mock 代替真实写文件验证。
 - 另以 Node `win32.resolve` / `win32.matchesGlob` 复现 Windows drive-qualified 路径不匹配无盘符 fixture pattern（oldMatch=false、nativeMatch=true），将新增 path-rule 测试的 pattern 改由 native resolve/join 生成；没有改变产品匹配器或削弱断言，不把这个本地 API probe 称作 Windows runtime 验收。
 - 独立只读审查由协调席位派 Pi（Opus），此 PR push 后等待其实现/测试 findings；本席不另派 reviewer，也不把本地验证当作独立验收。PR CI 使用仓库现有 scope，本地结果不代表 CI 或合并完成。
+
+
+## Pi 审查 finding 修复（F1–F8）
+
+基线 `de1566f4d2f66d6c8b20f32ebd41550f11665b9d`。协调席位的修法裁定是 D1–D7 的细化；以下逐项先写回归，在旧产品代码上记录 red 后才修复，P3 也全部处理。
+
+| Finding | 修复 | 旧代码 red → 修复后 green |
+| --- | --- | --- |
+| F1 / P0 | 所有 allow 只接受单条简单命令；控制/替换标记或超长命令禁用 allow，ask 保持匹配 | unit 每个控制标记、拼接删除反例；真 Pi 和真 Claude 各执行 `git push origin main && rm -rf chain-target`。旧版确实向本地 bare remote push 并删除 fixture，两个测试失败；修复后无 push、marker/目录保留、审批拒绝且 turn 结束 |
+| F2 / P1 | floor case-fold（darwin/win32）、Data alias、真实 home 与最近现有父目录身份，解析不确定禁止 allow | case variants、firmlink、symlink home/parent、ELOOP 在旧版失败；修复后 floor 或 built-in fallback，allow 无法覆盖 |
+| F3 / P2 | 受限 wildcard 位集状态机，不再使用宿主 matchesGlob；grammar / star / command bytes 均有界 | isolated child 的 brace/repeated-star 病态测试旧版在 2 秒 timeout 失败；修复后内部用时 <100 ms；拒绝不支持的 grammar 与第 17 个星号 |
+| F4 / P2 | 两个公开入口走同一 parser，gate snapshot 复制冻结；空 selector 不命中 | 空 match / undefined selector、raw rules 事后修改在旧版失败；修复后前者 TypeError、后者原规则仍适用 |
+| F5 / P2 | command star 可跨 `/`；path 单段 star / 跨段 globstar 包含 dot；路径 case-fold、相对 pattern admission 拒绝 | `.env` / `.git/hooks`、case variants、相对 patterns 在旧版失败；修复后按明确 grammar 判定，并加 Unicode/组合 wildcard 确定性矩阵 |
+| F6 / P2 | normal allow 保留 `suppressedReasons`；auto/all 本地 decision、decision/reminder record 保留 closed codes；all 被抑制的 high-risk 另发 allow audit | 旧版 auto/all audit、record、CLI 未保留 suppression，4 个回归失败；修复后保留 destructive-git 等 codes、all 不发 reminder |
+| F7 / P3 | auto summary 传完整 authorization，使用 Protected-path 前缀 | unit 与真 Pi/Claude floor 摘要前缀旧版失败；修复后与 all 一致 |
+| F8 / P3 | unresolved wire reason 固定；rule id / resolver 详细错误只写本地日志 | duplicate private id / resolver throw 两例旧版泄露且失败；修复后 wire 固定文案、细节仅本地 |
+
+red 结果：unit **38 failed**；真 runtime shell-chain 与 floor label **4 failed**；daemon/record/formatter **6 failed**。测试选择时的 skipped 是未选择的旧用例，不计通过；最终完整定向 **15 files / 365 passed、无 skipped、exit 0**，包含真 Pi 和显式开启的真 Claude loopback。全部 shell 副作用只作用于临时目录与真实本地 bare Git remote，没有外部仓库、真实凭据或付费模型调用。
+
+最终 `build`、`typecheck`、`check:api-surface`、`check:version-authority` 均 exit 0；API goldens/43 entry budgets 按实测更新。本修复相对审查 head：client/root `1,811,508 → 1,816,413` bytes（+4,905），`byok-agent` `1,756,442 → 1,761,535` bytes（+5,093），其余 entry 不变。
+
+额外直接加载真实 classifier 的性能 probe：Node 24.22.1 的 repeated-star / 40 KiB force pattern / 最大 4096 字符 pattern 分别 **3.342 / 3.391 / 17.357 ms**；Bun 1.4.3 分别 **1.612 / 3.845 / 28.353 ms**。`{1..100000}` admission 拒绝分别 **0.059 / 0.041 ms**。这说明此次本机 probe；不把本机速度或平台模拟称为 Windows runtime 验收。
+
+独立复审仍由协调席位派 Pi，只复审上述 finding 修复 diff；本席不替代其验收，也不合并。

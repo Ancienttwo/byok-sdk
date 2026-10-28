@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
-import { isAbsolute, matchesGlob, relative, resolve, sep } from 'node:path';
+import { lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { AgentRef } from './agent-home';
 
 /**
@@ -79,6 +80,60 @@ const MAX_TOOL_RULES = 128;
 const MAX_RULE_ID_CHARS = 128;
 const MAX_RULE_TEXT_CHARS = 4_096;
 const MATCH_KEYS = ['toolName', 'commandGlob', 'pathGlob', 'mcpServer', 'mcpTool'] as const;
+const PARSED_RULES = new WeakSet<ToolAuthorizationRules>();
+const MAX_COMMAND_BYTES = 65_536;
+
+function validateGlob(pattern: string, path: boolean): void {
+  if (pattern.includes('{') || pattern.includes('[') || /[@!+*?]\(/.test(pattern)
+    || [...pattern].filter(char => char === '*').length > 16) {
+    throw new TypeError('tool authorization glob supports only literals, *, ** and ? with at most 16 stars');
+  }
+  if (path && !isAbsolute(pattern)) throw new TypeError('tool authorization pathGlob must be absolute');
+}
+
+/** A bounded-state wildcard automaton: one forward scan, no expansion or backtracking. */
+function matchGlob(value: string, pattern: string, path: boolean): boolean {
+  const patternChars = [...pattern];
+  if (!pattern.includes('*')) {
+    const valueChars = [...value];
+    if (valueChars.length !== patternChars.length) return false;
+    for (let index = 0; index < patternChars.length; index++) {
+      if (patternChars[index] === '?' ? path && valueChars[index] === '/' : patternChars[index] !== valueChars[index]) return false;
+    }
+    return true;
+  }
+  const literals = new Map<string, bigint>();
+  let stars = 0n;
+  let crossSegmentStars = 0n;
+  let questions = 0n;
+  let count = 0;
+  let minimum = 0;
+  for (let index = 0; index < patternChars.length; index++, count++) {
+    const bit = 1n << BigInt(count);
+    const char = patternChars[index]!;
+    if (char === '*') {
+      const begin = index;
+      while (patternChars[index + 1] === '*') index++;
+      stars |= bit;
+      if (!path || index > begin) crossSegmentStars |= bit;
+    } else {
+      minimum++;
+      if (char === '?') questions |= bit;
+      else literals.set(char, (literals.get(char) ?? 0n) | bit);
+    }
+  }
+  if (value.length < minimum) return false;
+  // Consecutive stars have been collapsed, so each epsilon closure is one shift.
+  const close = (states: bigint) => states | ((states & stars) << 1n);
+  let states = close(1n);
+  for (const char of value) {
+    const separator = path && char === '/';
+    states = close(((states & ((literals.get(char) ?? 0n) | (separator ? 0n : questions))) << 1n)
+      | (states & (separator ? crossSegmentStars : stars)));
+    if (states === 0n) return false;
+  }
+  return (states & (1n << BigInt(count))) !== 0n;
+}
 
 function policyRecord(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)
@@ -104,6 +159,7 @@ export function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationP
   const mode = parseToolAuthorizationMode(raw.mode);
   if (!Object.hasOwn(raw, 'rules')) return Object.freeze({ mode });
   const rawRules = policyRecord(raw.rules, ['alwaysAsk', 'allowWithoutAsking'], 'rules');
+  if (PARSED_RULES.has(rawRules)) return Object.freeze({ mode, rules: rawRules });
   const ids = new Set<string>();
   let count = 0;
   const rules: { alwaysAsk?: readonly ToolRule[]; allowWithoutAsking?: readonly ToolRule[] } = {};
@@ -125,8 +181,7 @@ export function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationP
       for (const key of MATCH_KEYS) {
         if (!Object.hasOwn(rawMatch, key)) continue;
         const pattern = ruleText(rawMatch[key], key, MAX_RULE_TEXT_CHARS);
-        // Node owns the glob language; do not accept a pattern it cannot evaluate.
-        if (key !== 'toolName') matchesGlob('', pattern);
+        if (key !== 'toolName') validateGlob(pattern, key === 'pathGlob');
         match[key] = pattern;
       }
       const description = Object.hasOwn(rule, 'description')
@@ -135,7 +190,9 @@ export function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationP
     }
     rules[list] = Object.freeze(copied);
   }
-  return Object.freeze({ mode, rules: Object.freeze(rules) });
+  Object.freeze(rules);
+  PARSED_RULES.add(rules);
+  return Object.freeze({ mode, rules });
 }
 
 /** One native tool call, before execution. `input` is the runtime's own argument object. */
@@ -160,7 +217,7 @@ export interface ToolAuthorizationReason {
   readonly ruleIds: readonly string[];
 }
 export type ToolRisk =
-  | { readonly level: 'normal'; readonly authorization: ToolAuthorizationReason }
+  | { readonly level: 'normal'; readonly authorization: ToolAuthorizationReason; readonly suppressedReasons?: readonly ToolRiskReason[] }
   | { readonly level: 'high'; readonly reasons: readonly ToolRiskReason[]; readonly authorization: ToolAuthorizationReason };
 
 const BUILT_IN_AUTHORIZATION: ToolAuthorizationReason = Object.freeze({ source: 'built-in', ruleIds: Object.freeze([]) });
@@ -199,21 +256,74 @@ function commandText(input: Readonly<Record<string, unknown>>): string | undefin
   return undefined;
 }
 
+function normalizedPath(value: string, platform: NodeJS.Platform): string {
+  let normalized = value;
+  if (platform === 'win32') normalized = normalized.replaceAll('\\', '/');
+  if (platform === 'darwin' || platform === 'win32') normalized = normalized.toLowerCase();
+  if (platform === 'darwin' && (normalized === '/system/volumes/data' || normalized.startsWith('/system/volumes/data/'))) {
+    normalized = normalized.slice('/system/volumes/data'.length) || '/';
+  }
+  return normalized;
+}
+
+function withinNormalized(root: string, target: string): boolean {
+  return target === root || target.startsWith(root.endsWith('/') ? root : `${root}/`);
+}
+
+/** Missing leaf components may be new writes; other resolution failures remain unknown. */
+function nearestRealPath(target: string): string | undefined {
+  let ancestor = target;
+  const missing: string[] = [];
+  while (true) {
+    try { return join(realpathSync(ancestor), ...missing.reverse()); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return undefined;
+      // A dangling symlink is an existing but unresolved authority, not a new leaf.
+      try { lstatSync(ancestor); return undefined; } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') return undefined;
+      }
+      const parent = dirname(ancestor);
+      if (parent === ancestor) return undefined;
+      missing.push(basename(ancestor));
+      ancestor = parent;
+    }
+  }
+}
+
 /**
- * The single high-risk classifier for both modes. Paths resolve lexically
- * (`~` expands to `home`); symlinks are not followed. `workspace` is the task
- * cwd the daemon granted, not the runtime-reported cwd.
+ * The single classifier for both modes. Protected-path identity also follows
+ * the nearest existing ancestor; uncertainty cannot activate an allow rule.
+ * `workspace` is the daemon's grant, not the runtime-reported cwd.
  */
 export function classifyToolCall(
   call: Pick<ToolCall, 'toolName' | 'input' | 'cwd' | 'mcp'>, workspace: string, home: string = homedir(),
   rules?: ToolAuthorizationRules,
+  context: { readonly platform?: NodeJS.Platform } = {},
 ): ToolRisk {
+  const policy = parseToolAuthorizationPolicy({ mode: 'auto', ...(rules === undefined ? {} : { rules }) });
+  rules = policy.rules;
+  const platform = context.platform ?? process.platform;
   const reasons = new Set<ToolRiskReason>();
   const command = commandText(call.input);
+  const oversizedCommand = command !== undefined && Buffer.byteLength(command, 'utf8') > MAX_COMMAND_BYTES;
+  const simpleCommand = command === undefined || (!oversizedCommand && !/[;&|<>\n\r`]|\$[({]/.test(command));
+  let floorCertain = true;
+  const lexicalHome = resolve(home);
+  let physicalHome: string | undefined;
+  try { physicalHome = realpathSync(lexicalHome); } catch { /* Unknown home identity cannot grant allow. */ }
+  if (physicalHome === undefined) floorCertain = false;
+  const homes = [...new Set([lexicalHome, physicalHome].filter((value): value is string => value !== undefined))];
+  const protectedRoots = homes.flatMap(base => SENSITIVE_HOME_PATHS.flatMap(path => {
+    const lexical = resolve(base, path);
+    const physical = nearestRealPath(lexical);
+    if (physical === undefined) floorCertain = false;
+    return [normalizedPath(lexical, platform), ...(physical === undefined ? [] : [normalizedPath(physical, platform)])];
+  }));
+  const isProtected = (target: string) => protectedRoots.some(root => withinNormalized(root, normalizedPath(target, platform)));
   if (command !== undefined) {
     for (const [reason, pattern] of COMMAND_RULES) if (pattern.test(command)) reasons.add(reason);
-    const homeForms = ['~/', '$HOME/', '${HOME}/', `${home}/`];
-    if (SENSITIVE_HOME_PATHS.some(path => homeForms.some(prefix => command.includes(`${prefix}${path}`)))) reasons.add('sensitive-path');
+    const homeForms = ['~/', '$HOME/', '${HOME}/', ...homes.map(base => `${base}/`)];
+    const foldedCommand = normalizedPath(command, platform);
+    if (SENSITIVE_HOME_PATHS.some(path => homeForms.some(prefix => foldedCommand.includes(normalizedPath(`${prefix}${path}`, platform))))) reasons.add('sensitive-path');
   }
   // Codex projects one native file operation as a batch, including move destinations.
   // Normalize here so auto decisions and all-mode reminders share the same path checks.
@@ -231,22 +341,26 @@ export function classifyToolCall(
     const expanded = raw === '~' ? home : raw.startsWith('~/') ? `${home}${raw.slice(1)}` : raw;
     const target = resolve(call.cwd, expanded);
     targets.push(target);
-    if (SENSITIVE_HOME_PATHS.some(path => within(resolve(home, path), target))) reasons.add('sensitive-path');
+    const physicalTarget = nearestRealPath(target);
+    if (physicalTarget === undefined) floorCertain = false;
+    if (isProtected(target) || (physicalTarget !== undefined && isProtected(physicalTarget))) reasons.add('sensitive-path');
     if (mutating && !within(workspace, target)) reasons.add('write-outside-workspace');
   }
 
   const matchingIds = (entries: readonly ToolRule[] | undefined, allow: boolean): readonly string[] => {
     const ids: string[] = [];
     for (const { id, match } of entries ?? []) {
+      if (!MATCH_KEYS.some(key => match[key] !== undefined)) continue;
+      if (allow && (!simpleCommand || !floorCertain)) continue;
       if (match.toolName !== undefined && match.toolName !== call.toolName) continue;
-      if (match.commandGlob !== undefined && (command === undefined || !matchesGlob(command, match.commandGlob))) continue;
-      if (match.mcpServer !== undefined && (call.mcp === undefined || !matchesGlob(call.mcp.server, match.mcpServer))) continue;
-      if (match.mcpTool !== undefined && (call.mcp === undefined || !matchesGlob(call.mcp.tool, match.mcpTool))) continue;
+      if (match.commandGlob !== undefined && (command === undefined || (!oversizedCommand && !matchGlob(command, match.commandGlob, false)))) continue;
+      if (match.mcpServer !== undefined && (call.mcp === undefined || !matchGlob(call.mcp.server, match.mcpServer, false))) continue;
+      if (match.mcpTool !== undefined && (call.mcp === undefined || !matchGlob(call.mcp.tool, match.mcpTool, false))) continue;
       if (match.pathGlob !== undefined) {
-        const pattern = match.pathGlob;
+        const pattern = normalizedPath(match.pathGlob, platform);
         if (targets.length === 0 || !(allow
-          ? targets.every(target => matchesGlob(target, pattern))
-          : targets.some(target => matchesGlob(target, pattern)))) continue;
+          ? targets.every(target => matchGlob(normalizedPath(target, platform), pattern, true))
+          : targets.some(target => matchGlob(normalizedPath(target, platform), pattern, true)))) continue;
       }
       ids.push(id);
     }
@@ -262,7 +376,8 @@ export function classifyToolCall(
     return { level: 'high', reasons: Object.freeze([...reasons]), authorization: FLOOR_AUTHORIZATION };
   }
   const allowIds = matchingIds(rules?.allowWithoutAsking, true);
-  if (allowIds.length > 0) return { level: 'normal', authorization: Object.freeze({ source: 'rule', ruleIds: allowIds }) };
+  if (allowIds.length > 0) return { level: 'normal', authorization: Object.freeze({ source: 'rule', ruleIds: allowIds }),
+    ...(reasons.size === 0 ? {} : { suppressedReasons: Object.freeze([...reasons]) }) };
   return reasons.size === 0 ? { level: 'normal', authorization: BUILT_IN_AUTHORIZATION }
     : { level: 'high', reasons: Object.freeze([...reasons]), authorization: BUILT_IN_AUTHORIZATION };
 }
@@ -280,6 +395,7 @@ export interface ToolAuthorizationDecision {
   readonly decision: 'allow' | 'deny';
   readonly authorization: ToolAuthorizationReason;
   readonly reasons: readonly ToolRiskReason[];
+  readonly suppressedReasons?: readonly ToolRiskReason[];
   readonly code?: ToolAuthorizationDenialCode;
 }
 
@@ -314,6 +430,7 @@ export function describeHighRiskToolCall(
 export function createAutoToolAuthorizationGate(input: {
   readonly workspace: string;
   readonly home?: string;
+  readonly platform?: NodeJS.Platform;
   readonly timeoutMs: number;
   readonly rules?: ToolAuthorizationRules;
   readonly mcpIdentities?: ReadonlyMap<string, { readonly server: string; readonly tool: string }>;
@@ -321,6 +438,7 @@ export function createAutoToolAuthorizationGate(input: {
   /** Aborting `signal` must withdraw the request so a later decision cannot revive it. */
   readonly requestAuthorization: (summary: string, signal: AbortSignal) => Promise<{ approved: boolean; reason?: string }>;
 }): ToolAuthorizationGate {
+  const rules = parseToolAuthorizationPolicy({ mode: 'auto', ...(input.rules === undefined ? {} : { rules: input.rules }) }).rules;
   return Object.freeze({
     timeoutMs: input.timeoutMs,
     async authorize(rawCall: ToolCall): Promise<ToolAuthorizationVerdict> {
@@ -342,10 +460,9 @@ export function createAutoToolAuthorizationGate(input: {
         const { mcp: _untrustedMcp, ...nativeCall } = rawCall;
         const mcp = input.mcpIdentities?.get(rawCall.toolName);
         call = { ...nativeCall, ...(mcp === undefined ? {} : { mcp }) };
-        risk = classifyToolCall(call, input.workspace, input.home, input.rules);
+        risk = classifyToolCall(call, input.workspace, input.home, rules, { platform: input.platform });
         if (risk.level === 'normal') return finish({ decision: 'allow' });
-        const summaryAuthorization = risk.authorization.source === 'rule' ? risk.authorization : undefined;
-        const result = await Promise.race([input.requestAuthorization(describeHighRiskToolCall(call, risk.reasons, summaryAuthorization), withdraw.signal), expired]);
+        const result = await Promise.race([input.requestAuthorization(describeHighRiskToolCall(call, risk.reasons, risk.authorization), withdraw.signal), expired]);
         if (result === 'expired') {
           withdraw.abort();
           return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` });
@@ -375,4 +492,5 @@ export interface ToolReminder {
   readonly reasons: readonly ToolRiskReason[];
   readonly summary: string;
   readonly authorization: ToolAuthorizationReason;
+  readonly suppressedReasons?: readonly ToolRiskReason[];
 }
