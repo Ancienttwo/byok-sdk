@@ -59,7 +59,7 @@ Owner 对 open items 的决定（2026-10-07）：
 | Codex | `approvalPolicy: never`，`sandbox_mode` 来自 `codexSandbox` | `config.toml`（`codexSandbox: 'inherit'` 时也包括 sandbox） |
 | Pi | 预信任 session cwd | agentDir、extensions、skills |
 
-Native-interaction 模式是 Host 显式 opt-in 的本地 seam，不属于 YOLO 默认值：Claude 改用 `--permission-prompt-tool stdio --permission-mode acceptEdits`，Codex 改用 `approvalPolicy: on-request`。
+Native-interaction 模式是 Host 显式 opt-in 的本地 seam，不属于 YOLO 默认值：只转发结构化问题。Claude 用 `--permission-prompt-tool stdio --permission-mode acceptEdits`，非 `AskUserQuestion` 的 `can_use_tool` 立即 allow；Codex 仍为 `approvalPolicy: never`，原生 approval 请求按不支持拒绝（不恢复双闸）。
 
 ## Consequences
 
