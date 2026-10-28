@@ -19,7 +19,7 @@ acceptance is not done for 0.31.0 (owner decision, 2026-10-29).
 
 0.31.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 It changes public API in protocol, client, server, cloud, cloud-dataplane and
-cloud-do, it moves the envelope wire to v4 and it adds Postgres migration
+cloud-do, it removes the tool approval of Claude and Codex `nativeInteractions`, it moves the envelope wire to v4 and it adds Postgres migration
 0030 ([version policy](../spec.md#pre-10-package-version-policy)).
 
 ## Fixed revisions
@@ -105,13 +105,13 @@ Postgres store the stores accept (#1040).
 
 ## Breaking changes that touch Host config
 
-The 0.31.0 CHANGELOG section has 15 Breaking entries. Two are in the private
-examples and are out of scope (above). The other thirteen follow; the first
+The 0.31.0 CHANGELOG section has 16 Breaking entries. Two are in the private
+examples and are out of scope (above). The other fourteen follow; the first
 one, #925, is split into three rows.
 
 | Package | Change | What the Host does |
 | --- | --- | --- |
-| protocol, client, server, cloud | Wire v4 (#925, stages 1 and 2: #1019 and #1031). `conn.ack`, the runtime-only offers, the `strict-agent-only` flag, the old approval peer paths and the `task.approval_resolved_implicit` event are removed. The Agent offers merge into one `task.offer` with a required `session`, and sealed is a payload branch. `approvalId` is required. `ByokServer.dispatch` takes only `AgentResumeDispatchInput`, and its refusal codes change to `agent_capability_missing` and `agent_task_already_exists`. `harnessId` needs the device's `custom-harness` flag. | Drain v3, then start the v4 server and the daemons together on a new store (above). Match the new refusal codes. Use `executions.submit` for fresh work and `ByokServer.tasks.events` and `tasks.approve` for its feed and approvals. Replace the removed protocol schemas and types listed in the CHANGELOG (for example `TaskOfferForAgentPayloadSchema` becomes `TaskOfferPayloadSchema`), and narrow a sealed payload with `isSealedPayload`. A third-party daemon that declares harnesses must also declare `custom-harness`. |
+| protocol, client, server, cloud | Wire v4 (#925, stages 1 and 2: #1019 and #1031). `conn.ack`, the runtime-only offers, the `strict-agent-only` flag, the old approval peer paths and the `task.approval_resolved_implicit` event are removed. The Agent offers merge into one `task.offer` with a required `session`, and sealed is a payload branch. `approvalId` is required. `ByokServer.dispatch` takes only `AgentResumeDispatchInput`, and its refusal codes change to `agent_capability_missing` and `agent_task_already_exists`. `harnessId` needs the device's `custom-harness` flag. | Drain v3, then start the v4 server and the daemons together on a new store (above). Match the new refusal codes. Use `executions.submit` for fresh work and `ByokServer.tasks.events` and `tasks.approve` for its feed and approvals. Replace the removed protocol schemas and types listed in the CHANGELOG (for example `TaskOfferForAgentPayloadSchema` becomes `TaskOfferPayloadSchema`), and narrow a sealed payload with `isSealedPayload`. A third-party daemon that declares harnesses must also declare `custom-harness`. The runtime-only `ByokCloud` methods `enqueueOffer`, `enqueueToolsetOffer`, `enqueueSealedOffer` and `enqueueSealedToolsetOffer`, and the four `Enqueue*OfferInput` types, are removed: use `enqueueAgentOffer` (resume), `submitAgentExecution` (fresh) or the other Agent methods. |
 | client | Git workspace mode and the task workspace root are removed (ADR-034), with `GitWorkspaceManager` and the other `GitWorkspace*` exports, `byok-agent workspaces` and the `workspace` retention class. `DaemonConfig.gitWorkspace`, `DaemonOverrides.gitWorkspace`, `DaemonConfig.workspaceRoot` and `DaemonConfig.strictAgentOnly` raise `DaemonConfigFieldRemovedError`. | Delete those fields from daemon configs. Every task runs in its Agent home. The daemon leaves `<storeDir>/git-workspaces.json` and old task directories untouched. |
 | client | `Daemon.approve(taskId, { approvalId })` and `Daemon.reject(taskId, { approvalId, reason? })` require `approvalId` (#925). | Pass the `approvalId` of the approval request. |
 | server | `TaskHandle.events()` reads the `tasks.events` feed (#1022). A read after the terminal feed is reclaimed throws `TaskEventsUnavailableError`. The `await_approval` member of `ServerTaskEvent` requires `approvalId`. | Handle `TaskEventsUnavailableError` (`feed_expired`, `cursor_unknown`) and supply `approvalId` where code constructs the event. |
@@ -126,14 +126,15 @@ one, #925, is split into three rows.
 | client | `AgentEgressProgressInput.agentRef` is required (#1036). | Code that calls `projectLatestValue` passes the AgentRef. |
 | client | One approval entry point (#1036). `Session.resolveApproval`, `NoPendingApprovalError`, the `onOrigin` parameter and `DaemonTurnRecord.approvals` are removed. `ApprovalChannel` is `{ request(summary) }`, and only an adapter that declares `approvalInteractive: true` receives it. | A Host adapter calls `approvalChannel.request` and acts on its result. |
 | protocol | `needs_approval` is no longer an `AgentEvent` (#1036). | Do not emit it. Approval is the `task.await_approval` message; a received `needs_approval` event is an unknown event. |
+| client | Claude and Codex `nativeInteractions` no longer relay tool approval (#1061, #1078). In 0.30.2 Claude ran with `--permission-prompt-tool stdio` and the Host UI answered each `can_use_tool` request, and Codex ran with `approvalPolicy: on-request`. Now both relay structured questions only and no `kind: 'approval'` request reaches the Host. Claude allows a non-question `can_use_tool` request at once; Codex runs `approvalPolicy: never` and refuses its native approval requests (-32601). | A Host that gated tools through native interactions sets `DaemonConfig.toolAuthorization` to return `auto` for Claude and the supported Pi lanes (Pi ordinary RPC). Codex has no `auto` gate in 0.31.0 and declines an `auto` task before claim, so the Host has no tool gate for Codex in this release; `all` only emits reminders. Without a resolver every task runs in `all`. |
 
 Additions a Host may configure:
 
-- **Tool authorization.** `DaemonConfig.toolAuthorization` is a resolver that
-  returns `auto` or `all` per task. Without it every task runs in `all`. `auto`
-  needs a runtime that declares `toolAuthorizationAuto` (Pi ordinary RPC and
-  Claude); other runtimes decline an `auto` task before claim. The classifier
-  is lexical and is not an OS sandbox.
+- **Tool authorization settings.** `DaemonConfig.toolAuthorization` is the
+  resolver named in the `nativeInteractions` row above. `auto` needs a runtime
+  that declares `toolAuthorizationAuto` (Pi ordinary RPC and Claude); other
+  runtimes decline an `auto` task before claim. The classifier is lexical and
+  is not an OS sandbox.
 - **Pi Agent resources.** `PiAdapterOptions.agentUserContext`,
   `agentSkillPaths` and `agentExtensionPaths`.
 - **MCP tool approval.** `approveTools` on a local toolset server definition

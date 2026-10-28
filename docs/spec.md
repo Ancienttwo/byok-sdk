@@ -316,7 +316,8 @@ on keys.
 0.31.0 is a MINOR under the general policy above, with no exception. It adds
 public API and Postgres migration 0030, and it has pre-1.0 breaking cuts: the
 wire v4 cutover in protocol, client, server and cloud, the SQLite store schema
-v6 in server, and the tool authorization cut in client. See the
+v6 in server, and in client the removal of tool approval from Claude and Codex
+`nativeInteractions`, which `DaemonConfig.toolAuthorization` replaces. See the
 [0.31.0 candidate notes](releases/v0.31.0.md).
 
 0.30.2 used a one-release exception. The owner's release decisions, recorded

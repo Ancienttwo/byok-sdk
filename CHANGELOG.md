@@ -12,8 +12,9 @@ v3 receipt migration (see the [wire v4 upgrade
 note](docs/releases/925-wire-v4.md)). The breaking changes by package:
 protocol, client, server and cloud lose `conn.ack`, the runtime-only offers
 and the old approval peer paths, merge the Agent offers into one `task.offer`
-and make sealed a payload property (#925); client also removes Git workspace
-mode, `Session.resolveApproval` and `retire-input-preparation`, requires
+and make sealed a payload property (#925), and cloud also loses `enqueueOffer`
+and its three runtime-only siblings; client also removes Git workspace mode,
+`Session.resolveApproval` and `retire-input-preparation`, requires
 `approvalId` and `agentRef`, adds the `agent-result` and `session-ledger`
 retention classes, and refuses a journal written before #826 (#925, #1009,
 #1016, #1036); protocol also drops the `needs_approval` AgentEvent (#1036);
@@ -22,14 +23,17 @@ and `LegacyDispatchInput`, and changes `TaskHandle.events()` (#1022, #1035,
 #1036); cloud requires `TaskAttemptStore.recordFirstOutput` (#980);
 cloud-dataplane takes only a pool from `createByokPool` (#1040); cloud-do
 declares all Durable Object columns in `CREATE TABLE` (#1036). The examples
-changes of #925 and #1036 are also breaking for a Host that copies them. Tool
-authorization (`auto` and `all`, #1061) is new in client. This candidate is
+changes of #925 and #1036 are also breaking for a Host that copies them.
+Client also stops relaying tool approval through Claude and Codex
+`nativeInteractions` (#1061, #1078): the new `DaemonConfig.toolAuthorization`
+(`auto` and `all`) replaces it, Claude and some Pi lanes support `auto`, and
+Codex has no `auto` gate in this release. This candidate is
 not published. See the [release notes](docs/releases/v0.31.0.md) for scope,
 what is not in 0.31.0 and the known limits, and the [Host upgrade
 checklist](docs/releases/host-upgrade-0.31.0.md) for the upgrade steps. All
 nine public manifests and their lock records move to 0.31.0.
 
-- **Fix (client; #1030)** — a daemon whose store is configured through a
+- **Fixed (client; #1030)** — a daemon whose store is configured through a
   Windows name alias (an 8.3 short name such as `C:\Users\RUNNER~1\…`, or a
   letter-case variant) restarts again. The second start exited with
   `retention_root_identity_invalid` once `<storeDir>\tmp\exec` existed, so the
@@ -85,8 +89,15 @@ nine public manifests and their lock records move to 0.31.0.
     `GitWorkspaceError`, `isGitWorkspaceConfig`,
     `prependGitWorkspaceGuidance`, `GitWorkspaceStore`, `GitWorkspaceConfig`,
     `GitWorkspaceObservation`, `GitWorkspaceLease`, `GitWorkspaceOptions`,
-    `GitErrorCategory`, `GitWorkspaceLedger`, `GitWorkspaceLedgerRecord` or
-    `GitWorkspacePhase`. `RuntimeOperationManifest.workspace` loses
+    `GitErrorCategory`, `GitWorkspaceLedger`, `GitWorkspaceLedgerRecord`,
+    `GitWorkspacePhase`, `GitRunner`, `defaultGitRunner`, `GitCommandOptions`,
+    `GitCommandResult`, `SessionWorkspaceStore`, `SessionWorkspaceRecord`,
+    `canonicalWorkspaceRoot`, `stableGitWorkspaceOwnerId`,
+    `LOCAL_GIT_WORKSPACE_GUIDANCE` or the `GIT_*` and `STABLE_GIT_ERROR_CATEGORIES`
+    constants (`GIT_ERROR_CATEGORIES`, `GIT_WORKSPACE_LEDGER_FILE`,
+    `GIT_WORKSPACE_LEDGER_MAX_RECORDS`, `GIT_WORKSPACE_MAX_OUTPUT_BYTES`,
+    `GIT_WORKSPACE_OWNER_MARKER`, `GIT_WORKSPACE_PHASES` and
+    `GIT_WORKSPACE_TIMEOUT_MS`). `RuntimeOperationManifest.workspace` loses
     `workspaceId` and `baseline`. The `byok-agent workspaces` command, the
     `git-workspace` daemon event and audit record, the doctor `workspace`
     check and the support bundle's `workspace` field are removed; an older
@@ -138,7 +149,14 @@ nine public manifests and their lock records move to 0.31.0.
     `TaskOfferPreparedPayloadSchema` and their payload types, the three
     `TaskOfferForAgent*SealedPayload` types, `TASK_OFFER_TYPES`,
     `isTaskOfferType`, `TaskOfferType`, `isSealedMessageType` and
-    `SealedMessageType`. It adds `TaskOfferPayloadSchema` /
+    `SealedMessageType`. The removed payload types and sealed twin schemas
+    are `ConnAckPayload`, `TaskOfferForAgentPayload`,
+    `TaskOfferForAgentWithEgressPayload`,
+    `TaskOfferForAgentWithEgressFreshPayload`, `TaskOfferPreparedPayload`,
+    `TaskOfferWithToolsetsPayload`, and for each of
+    `TaskOfferForAgent`, `TaskOfferForAgentWithEgress`,
+    `TaskOfferForAgentWithEgressFresh` and `TaskOfferWithToolsets` the
+    `*SealedPayload` type and `*SealedPayloadSchema`. It adds `TaskOfferPayloadSchema` /
     `TaskOfferPayload` (both branches), `TaskOfferPlainPayloadSchema` /
     `TaskOfferPlainPayload`, `TaskOfferSealedPayloadSchema` /
     `TaskOfferSealedPayload`, `SessionSelectionSchema` / `SessionSelection`,
@@ -155,6 +173,14 @@ nine public manifests and their lock records move to 0.31.0.
     lane. `TaskOfferReadback.type` is always `'task.offer'`, and
     `DeviceTerminal.envelope.type` is one of the four plaintext terminal
     types. `ByokServer.dispatch` writes `session` itself.
+  - The runtime-only `ByokCloud` methods `enqueueOffer`,
+    `enqueueToolsetOffer`, `enqueueSealedOffer` and
+    `enqueueSealedToolsetOffer` are removed with the offers they sent, and so
+    are the `EnqueueOfferInput`, `EnqueueToolsetOfferInput`,
+    `EnqueueSealedOfferInput` and `EnqueueSealedToolsetOfferInput` types. Every
+    offer now names an AgentRef: resume with `enqueueAgentOffer`, start fresh
+    with `submitAgentExecution`, and use `enqueueAgentEgressOffer`,
+    `enqueuePreparedOffer` or the sealed Agent methods where they apply.
   - The daemon declines an offer whose gates name a flag its own
     `conn.hello` lacks, before it opens a sealed offer or starts anything:
     non-retryably with `reason` `offer_capability_missing: this daemon does
@@ -334,11 +360,14 @@ nine public manifests and their lock records move to 0.31.0.
   finalize HEAD, list and delete in that process failed with
   `ERR_INVALID_URL`, and blob finalize answered 500. `overrideGlobalObjects:
   false` is no longer needed.
-- **Breaking (client; #1036)** — `byok-agent retire-input-preparation` and
-  `retireInputPreparation` are removed, with the five
-  `InputPreparationRetirement*` error classes and the
-  `RetireInputPreparation*`, `InputPreparationRetirement*`,
-  `InputPreparationNamespaceInspection` and `RetirementFileDigest` types. A
+- **Breaking (client; #1036)** — `byok-agent retire-input-preparation`,
+  `retireInputPreparation`, `executeInputPreparationRetirement`,
+  `runInputPreparationRetirement` and `inspectInputPreparationNamespace` are
+  removed, with the five `InputPreparationRetirement*` error classes, the
+  `RetireInputPreparation*`, `ExecuteInputPreparationRetirementOptions`,
+  `InputPreparationRetirement*`, `InputPreparationNamespaceInspection` and
+  `RetirementFileDigest` types, and the `INPUT_PREPARATION_RETIREMENT_*`
+  constants. A
   daemon whose input-preparation record log holds an older record still
   refuses that lane at open; with the daemon stopped, move
   `<storeDir>/input-preparation/` aside and start it again.
@@ -392,11 +421,28 @@ nine public manifests and their lock records move to 0.31.0.
   the same way for every entry. The implementations of the `ByokCloud` public
   methods move into internal per-area factories. The public `ByokCloud`
   interface and the runtime behavior are unchanged.
+- **Breaking (client; #1061, #1078)** — Claude and Codex `nativeInteractions`
+  no longer relay tool approval. In 0.30.2 a Claude session with
+  `nativeInteractions` ran with `--permission-prompt-tool stdio` and the Host
+  UI answered each `can_use_tool` request, and a Codex session ran with
+  `approvalPolicy: on-request`. Both now relay structured questions only, and
+  no `kind: 'approval'` request reaches the Host from them. Claude answers
+  every `can_use_tool` request that is not an `AskUserQuestion` with allow at
+  once. Codex runs `approvalPolicy: never` and refuses
+  `item/commandExecution/requestApproval` and
+  `item/fileChange/requestApproval` with -32601. A Host that gated tools
+  through native interactions sets `DaemonConfig.toolAuthorization` to return
+  `auto` for Claude and for the supported Pi lanes. Codex has no `auto` gate
+  in 0.31.0 and declines an `auto` task before claim, so a Host that gated
+  Codex tools this way has no tool gate for Codex in this release; `all` only
+  emits reminders.
 - **Feature (client; #1061)** — `DaemonConfig.toolAuthorization` is a local
   resolver, called once per offer, that returns `auto` or `all` for the task
   (`ToolAuthorizationMode`; `parseToolAuthorizationMode`,
-  `TOOL_AUTHORIZATION_MODES`). No adapter owns a separate permission policy,
-  and no remote offer selects the mode. Without a resolver every task runs in
+  `TOOL_AUTHORIZATION_MODES`). It replaces the tool approval that Claude and
+  Codex `nativeInteractions` gave in 0.30.2 (see the Breaking entry above). No
+  adapter owns a separate permission policy, and no remote offer selects the
+  mode. Without a resolver every task runs in
   `all`. `all` keeps tool execution and emits a local high-risk reminder
   (`onToolReminder`, the `tool-reminder` event). `auto` keeps native tools
   available, gates every call before it runs, and sends a high-risk call
