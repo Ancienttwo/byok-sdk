@@ -3919,26 +3919,36 @@ Already-completed durable records remain readable immediately after restart.
 ## Tool authorization: `auto` and `all` (#1061)
 
 The local Host chooses one of exactly two tool-authorization modes per task
-through `DaemonConfig.toolAuthorization(task) => 'auto' | 'all'`. The mode is
+through `DaemonConfig.toolAuthorization(task)`. It returns `'auto' | 'all'` or
+`{ mode: 'auto' | 'all', rules?: { alwaysAsk?: ToolRule[], allowWithoutAsking?: ToolRule[] } }`.
+Both input forms become one copied, frozen local policy before claim. The mode is
 one daemon-level contract shared by every runtime; adapters do not carry a
 permission policy of their own, and the remote offer never selects it. The
 resolver sees the local task identity (`taskId`, `runtimeId`, `agentRef`) and
 is called once, before claim. A throw or any other value (including legacy
 wording such as `full access` or `inherit`) declines the offer with
-`tool_authorization_unresolved`. Without a resolver every task runs in `all`.
-A config file sets the static form `{ default: 'auto' | 'all', byRuntime? }`
-instead (#1094); daemon construction turns it into the same single resolver
-(`byRuntime[runtimeId] ?? default`). A `byRuntime` key that names no runtime
-of the daemon, or static `auto` on an adapter without `toolAuthorizationAuto`,
-raises `DaemonConfigInvalidError` at construction.
+`tool_authorization_unresolved`. Invalid rules also decline before claim. Without
+a resolver every task runs in `all`. A config file sets the static form
+`{ default: 'auto' | 'all', byRuntime? }` instead (#1094); daemon construction
+turns it into the same single resolver (`byRuntime[runtimeId] ?? default`). A
+`byRuntime` key that names no runtime of the daemon, or static `auto` on an
+adapter without `toolAuthorizationAuto`, raises `DaemonConfigInvalidError` at
+construction. Rules never enter the server protocol, native settings or model
+prompt. A running task and its native subagents keep their snapshot; each new
+offer, including resume, resolves the current policy again. Pi launch v8 and its
+digest contract are unchanged: rules live in the daemon reached through the
+existing gate.
 
 - `all`: no tool is blocked. The daemon classifies each `tool_use` the runtime
   reports and emits a local `tool-reminder` `DaemonEvent` for a high-risk call.
+  Always Ask adds reminders, Allow without Asking suppresses them, and the
+  sensitive-path floor cannot be suppressed by Allow. No reminder blocks a call.
   This works for every runtime because it reads the normalized event stream.
 - `auto`: the runtime keeps its full Local Agent capability (files, shell,
   local environment, private resources, continuous tasks). Before each native
   tool call executes, the adapter asks the daemon gate. Ordinary calls run
-  without asking. A high-risk call requests user authorization through the
+  without asking. Rules can upgrade an ordinary call or allow an otherwise
+  high-risk call. A remaining high-risk call requests user authorization through the
   task's single approval path (`task.await_approval`, answered by the wire
   `task.approve`/`task.reject` or the in-process `Daemon.approve`/`reject`), and
   the call runs only after approval. Only the Host approves such a call: the
@@ -3966,8 +3976,42 @@ it never runs ungated, and no third mode exists. Current coverage:
 | Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
 | Hermes | Declined before claim | No pre-execution hook |
 
-High-risk classification is one function (`classifyToolCall`) used by both
-modes. A call is high-risk when:
+Classification is one function (`classifyToolCall`) used by both modes. The
+precedence is **Always Ask > sensitive-path floor > Allow without Asking >
+built-in classifier**. There is no deny rule. A floor still permits approval of
+this one call; it prevents an automatic allow rule from bypassing approval.
+Always Ask and Allow each match any rule in their list; fields within a rule
+must all match. A rule has a unique nonblank `id`, optional display-only
+`description`, and a nonempty `match` with these optional selectors:
+
+- `toolName`: exact, case-sensitive native tool name (Pi `bash`, Claude `Bash`).
+- `commandGlob`: whole command/cmd text (string arrays are joined with spaces).
+- `pathGlob`: lexically resolved path; ask matches any extracted path, while
+  allow requires every extracted path, including batch changes/move targets,
+  to match the same rule. It does not inspect arbitrary argument fields.
+- `mcpServer`, `mcpTool`: trusted MCP identity from the admitted task tool
+  observation, or the normalized event in `all`. Names are not split on `__`;
+  unobserved personal MCP tools cannot match these selectors by inference.
+
+The four glob selectors use `node:path.matchesGlob` on the local platform;
+`*` does not cross path separators and `**` does. Missing required facts do
+not match. There is no regex, natural-language reviewer, model call or added
+dependency. Description is never executable policy. Command matching does not
+parse shell chains or resolve Git remote configuration: a broad glob can also
+cover appended shell text, and a literal `origin` is not a repository identity.
+Repository-scoped semantic permissions and shell isolation are outside this
+contract. Rule validation rejects unknown fields, invalid types, duplicate IDs,
+empty selectors, NUL and oversized values rather than discarding them.
+
+Classified gate verdicts and local `tool-authorization` decision events carry
+`authorization: { source: 'rule' | 'built-in' | 'floor', ruleIds: string[] }`;
+`tool-reminder` carries the same metadata. IDs identify winning rules, not
+the rules overridden by a higher priority. Local daemon records retain this
+metadata without raw command/input/description content. Observer failures do
+not change authorization. Approval still uses the existing single task path
+and approvalId; one approval does not create a remembered rule.
+
+The built-in classifier marks a call high-risk when:
 
 - its command text (`command`/`cmd`) matches privilege escalation (`sudo`,
   `doas`, `su`), recursive deletion (`rm -r…`, `find … -delete`, `shred`),

@@ -1,6 +1,6 @@
 # #1061：用户自定义工具授权规则
 
-状态：decision-complete，按 owner 的 D1–D7 实施；设计与实现同一个 ready PR，请 owner 在 PR 确认或否决。目标 **0.31.0**，取代最初的 0.32.0 / 单独设计批准 / Draft-only 要求。不合并。
+状态：decision-complete；**D1–D7 已获 owner 批准（2026-10-28）**，按批准决定实施，设计与实现同一个 ready PR，不再请求设计批准。目标 **0.31.0**，取代最初的 0.32.0 / 单独设计批准 / Draft-only 要求。不合并，交协调席位按 SHA 绑定 squash。
 
 设计基线：`671309da6cc78bebb21b660180620c431a3dc512`（#1079）。当前产品合同以 [spec](../spec.md#tool-authorization-auto-and-all-1061) 为准；本文件记录这次扩展的决定，不把历史方案作为另一份配置 authority。
 
@@ -34,18 +34,18 @@ all：没有 pre-tool gate → 规范化 `tool_use` → 同一个 `classifyToolC
 
 ## P3 — 默认决定及 owner 勾选
 
-以下为可直接实现的默认合同；没有待实现者猜测的产品分叉。owner 可在 PR 勾选，或明确否决并给出替代选择。
+以下 D1–D7 已获 owner 批准；保留推荐、理由、不选后果供审计。D8 是 owner 更新的交付指令。
 
 | 确认 | 决定与推荐 | 理由 | 不选的后果 |
 | --- | --- | --- | --- |
-| [ ] D1 | SDK 确定性结构化匹配；description 仅展示；不加 reviewer 回调 | 零模型调用、无 BYOK 需求、结果可重放，动作中的自然语言不能操纵 reviewer | 选自然语言必须另定模型、凭据、账单、超时、注入与隐私合同；不能暗中把 description 变成可执行政策 |
-| [ ] D2 | `Always Ask > sensitive-path floor > Allow > built-in`；不加 deny | 普通动作可升级审批；可信 allow 能覆盖 push/publish 等 classifier 风险，凭据与登录持久化路径仍需人批 | allow 优先会压掉用户明确 ask；classifier 总优先会让 allow 无法减少打扰；加 deny 会扩展产品动作及 all 语义 |
-| [ ] D3 | resolver 接受 mode 字符串或 policy 对象，每 offer 校验、复制冻结；resume 重取；wire/Pi launch/digest 不改 | 扩展现有任务 authority；同一 Agent 可按 task 使用不同规则，无 adapter 级双 authority | Agent 固定规则会耦合不同任务；热更新会改变已批准任务的行为；改 launch 会把本地策略复制给 runtime |
-| [ ] D4 | all 中 allow 压掉 reminder，ask 增加 reminder；floor 不被 allow 压掉 | 两个模式消费相同风险结果，同时 all 保持从不拦截 | 完全忽略规则会造成 Auto 与 all 提醒不一致；让 all 等审批则破坏其合同 |
-| [ ] D5 | gate verdict、本地 decision event 和 reminder 携带 source/命中 rule IDs；不把规则写进 wire | Host 可解释“为什么问/为什么直接执行”，并审计被 allow 压掉的提示 | 只记录 reminder 会丢失自动放行依据；外发原始规则/命令会扩大隐私面 |
-| [ ] D6 | Pi/Claude 复用 gate；Codex/Grok/Hermes 继续 auto pre-claim decline | UI 和部分终端 hook 不代表全量 pre-tool coverage | 冒充支持会让不经 gate 的文件工具绕过 ask |
-| [ ] D7 | 使用 Node `path.matchesGlob`，不加依赖 | 已满足 engines，避免自行维护第二套 glob 语言 | 换自写 matcher 必须定义不同语法并承担 Windows/转义测试；增加依赖没有已证实收益 |
-| [ ] D8 | 0.31.0，同一个 ready PR 交设计、实现、验证；不合并 | owner 后续明确指令优先 | 保持 0.32.0 或单独 Draft 设计会遗漏已授权交付 |
+| [x] D1 | SDK 确定性结构化匹配；description 仅展示；不加 reviewer 回调 | 零模型调用、无 BYOK 需求、结果可重放，动作中的自然语言不能操纵 reviewer | 选自然语言必须另定模型、凭据、账单、超时、注入与隐私合同；不能暗中把 description 变成可执行政策 |
+| [x] D2 | `Always Ask > sensitive-path floor > Allow > built-in`；不加 deny | 普通动作可升级审批；可信 allow 能覆盖 push/publish 等 classifier 风险，凭据与登录持久化路径仍需人批 | allow 优先会压掉用户明确 ask；classifier 总优先会让 allow 无法减少打扰；加 deny 会扩展产品动作及 all 语义 |
+| [x] D3 | resolver 接受 mode 字符串或 policy 对象，每 offer 校验、复制冻结；resume 重取；wire/Pi launch/digest 不改 | 扩展现有任务 authority；同一 Agent 可按 task 使用不同规则，无 adapter 级双 authority | Agent 固定规则会耦合不同任务；热更新会改变已批准任务的行为；改 launch 会把本地策略复制给 runtime |
+| [x] D4 | all 中 allow 压掉 reminder，ask 增加 reminder；floor 不被 allow 压掉 | 两个模式消费相同风险结果，同时 all 保持从不拦截 | 完全忽略规则会造成 Auto 与 all 提醒不一致；让 all 等审批则破坏其合同 |
+| [x] D5 | gate verdict、本地 decision event 和 reminder 携带 source/命中 rule IDs；不把规则写进 wire | Host 可解释“为什么问/为什么直接执行”，并审计被 allow 压掉的提示 | 只记录 reminder 会丢失自动放行依据；外发原始规则/命令会扩大隐私面 |
+| [x] D6 | Pi/Claude 复用 gate；Codex/Grok/Hermes 继续 auto pre-claim decline | UI 和部分终端 hook 不代表全量 pre-tool coverage | 冒充支持会让不经 gate 的文件工具绕过 ask |
+| [x] D7 | 使用 Node `path.matchesGlob`，不加依赖 | 已满足 engines，避免自行维护第二套 glob 语言 | 换自写 matcher 必须定义不同语法并承担 Windows/转义测试；增加依赖没有已证实收益 |
+| [x] D8 | 0.31.0，同一个 ready PR 交设计、实现、验证；不合并 | owner 后续明确指令优先 | 保持 0.32.0 或单独 Draft 设计会遗漏已授权交付 |
 
 ## 规则语言的精确定义
 
@@ -105,7 +105,7 @@ toolAuthorization: task => ({
 
 保留原字符串返回值，是 D3 明确要求的两种公开输入形态；两者在 admission 后立即投影为唯一的 policy 对象，不保留两条执行路径。未配置 resolver 等价 `{ mode: 'all' }`。旧 mode parser 的 `auto | all` 校验仍严格，不加 legacy wording。
 
-policy/rules/rule/match 都拒绝未知 key、错误类型、空或全空白 id、空 selector、缺 selector、非 array 列表及两个列表间重复 id。可选 description 必须 string；不存在就不生成值。拒绝 NUL 和超长输入；有限上限在实现与测试中一起锁定，不截断规则。glob 使用 Node 接受的语法，匹配器拒绝的 pattern 在 claim 前报配置错误，不吞错后放行。resolver throw、校验失败统一 `tool_authorization_unresolved` pre-claim decline，运行时不启动。
+policy/rules/rule/match 都拒绝未知 key、错误类型、空或全空白 id、空 selector、缺 selector、非 array 列表及两个列表间重复 id。可选 description 必须 string；不存在就不生成值。拒绝 NUL 和超长输入；总规则数最多 128，id 最多 128 字符，description 和每个 selector 最多 4096 字符；不截断规则。glob 使用 Node 接受的语法，匹配器拒绝的 pattern 在 claim 前报配置错误，不吞错后放行。resolver throw、校验失败统一 `tool_authorization_unresolved` pre-claim decline，运行时不启动。
 
 把用户数组、rule、match 逐层复制并冻结，task 内只读这个快照；Host 后续修改原对象不会改变正在运行的任务。规则不写到 Agent home、native settings 或 MCP/LLM prompt。没有磁盘规则自动发现、远端 rules、模型生成 rules 或持久 remembered grant；存储、UI 增删改和跨 daemon 分发由 Host 拥有。
 
