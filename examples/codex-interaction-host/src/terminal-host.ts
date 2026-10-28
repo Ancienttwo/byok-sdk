@@ -74,6 +74,8 @@ export class TerminalInteractionHost {
   }
 
   private receive(request: NativeInteractionRequest, channel: NativeInteractionChannel): void {
+    // Tool permission is the SDK auto | all decision; this Host relays structured questions only.
+    if (request.kind !== 'question') throw new Error('Host relays structured questions only');
     if (this.ended || this.entries.size >= MAX_REQUESTS || this.entries.has(request.requestId)) {
       throw new Error('Host is not accepting native requests');
     }
@@ -90,7 +92,8 @@ export class TerminalInteractionHost {
     }
     if (!channel.pending().some(p => p.requestId === request.requestId) || Date.now() >= request.expiresAt) return;
     // This terminal is deliberately not a secure secret-entry surface. Never render secret prompts.
-    if (request.kind === 'question' && request.questions.some(q => q.secret)) {
+    if (request.kind !== 'question') return;
+    if (request.questions.some(q => q.secret)) {
       this.write('unavailable', { requestId: request.requestId, reason: 'secret-input-unsupported' });
       void channel.respond({ requestId: request.requestId, kind: 'cancel' }).catch(() => {
         this.write('error', { code: 'secret-cancel-failed' });
@@ -102,13 +105,9 @@ export class TerminalInteractionHost {
     const binding = { hostSessionId: this.hostSessionId, taskId: this.taskId,
       generation: request.generation, requestId: request.requestId };
     this.write('request', { ...binding, expiresAt: request.expiresAt, native: request.native,
-      ...(request.kind === 'approval'
-        ? { kind: request.kind, title: request.title, details: request.details, decisions: request.decisions }
-        : { kind: request.kind, questions: request.questions }) });
-    this.write('answer-template', { ...binding, ...(request.kind === 'approval'
-      ? { kind: 'approval', decision: '<choose an offered decision>' }
-      : { kind: 'question', answers: request.questions.map(q => ({ questionId: q.id,
-        selectedOptionIds: [], ...(q.allowText ? { text: '<explicit answer>' } : {}) })) }) });
+      kind: request.kind, questions: request.questions });
+    this.write('answer-template', { ...binding, kind: 'question', answers: request.questions.map(q => ({ questionId: q.id,
+      selectedOptionIds: [], ...(q.allowText ? { text: '<explicit answer>' } : {}) })) });
     this.write('cancel-template', { ...binding, kind: 'cancel' });
   }
 
@@ -121,7 +120,7 @@ export class TerminalInteractionHost {
       try { value = JSON.parse(line); } catch { throw new Error('invalid-json'); }
       if (!record(value)) throw new Error('invalid-envelope');
       const allowed = ['hostSessionId', 'taskId', 'generation', 'requestId', 'kind',
-        ...(value.kind === 'approval' ? ['decision'] : value.kind === 'question' ? ['answers'] : [])];
+        ...(value.kind === 'question' ? ['answers'] : [])];
       if (Object.keys(value).some(key => !allowed.includes(key))) throw new Error('invalid-envelope');
       if (value.hostSessionId !== this.hostSessionId || value.taskId !== this.taskId) throw new Error('wrong-host-task');
       const entry = typeof value.requestId === 'string' ? this.entries.get(value.requestId) : undefined;

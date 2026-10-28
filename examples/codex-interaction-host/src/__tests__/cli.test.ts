@@ -31,17 +31,19 @@ describe('compiled fixture-only CLI', () => {
     expect(f.stdout()).toBe(''); expect(f.stderr()).toContain('No live Codex launcher');
   });
   it('displays a native request, accepts controlled terminal input, and prints a local receipt', async () => {
-    const f = start(['--fixture', 'approval']);
+    const f = start(['--fixture', 'question']);
     await vi.waitFor(() => { expect(f.stderr()).toBe(''); expect(f.lines('answer-template')).toHaveLength(1); }, { timeout: 15_000 });
-    const answer: Record<string, unknown> = { ...f.lines('answer-template')[0], decision: 'deny' };
+    const template = f.lines('answer-template')[0]!;
+    const answer: Record<string, unknown> = { ...template, answers: [
+      { questionId: 'color', selectedOptionIds: ['Blue'] }, { questionId: 'note', selectedOptionIds: [], text: 'local' }] };
     f.child.stdin!.write(`${JSON.stringify(answer)}\n`);
     expect(await f.done).toBe(0);
     expect(f.lines('receipt')).toEqual([expect.objectContaining({ requestId: answer.requestId,
       status: 'responded', duplicate: false, meaning: 'local-transport-write-only' })]);
     expect(f.lines('host')[0]?.mode).toBe('offline-fixture-only'); expect(f.stderr()).toBe('');
   });
-  it('Ctrl-C closes the owned process without turning the pending request into approval', async () => {
-    const f = start(['--fixture', 'approval']);
+  it('Ctrl-C closes the owned process without turning the pending request into an answer', async () => {
+    const f = start(['--fixture', 'question']);
     await vi.waitFor(() => { expect(f.stderr()).toBe(''); expect(f.lines('request')).toHaveLength(1); }, { timeout: 15_000 });
     f.child.kill('SIGINT'); expect(await f.done).toBe(0);
     expect(f.lines('receipt')).toEqual([expect.objectContaining({ status: 'cancelled', reason: 'closed' })]);

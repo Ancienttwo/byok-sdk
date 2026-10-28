@@ -14,31 +14,33 @@ Use the repository's pinned Bun 1.4.2 tooling and Node >=24.15.0 (CI baseline
 ```sh
 bun ci
 bun run build
-node examples/codex-interaction-host/dist/cli.js --fixture approval
+node examples/codex-interaction-host/dist/cli.js --fixture question
 ```
 
-Scenarios: `approval`, `question`, `secret`, `withdrawn`, `exit`, `two-approvals`,
-`control-text`. Missing/unknown arguments fail before starting a runtime. There
+Scenarios: `question`, `secret`, `withdrawn`, `exit`, `two-questions`,
+`control-text`, `approval`. Missing/unknown arguments fail before starting a runtime. There
 is no `--live`, arbitrary executable, workspace, instruction, account, or MCP
 option. No vendor CLI is installed or discovered. The fixed fixture resolver
 ignores `BYOK_CODEX_BIN` and any installed Codex command.
 
+This Host relays structured questions only. Tool permission is the task's
+single SDK `auto | all` decision, so the adapter runs Codex with
+`approvalPolicy: never` and refuses any native approval request before a Host
+sees it. The `approval` scenario demonstrates that refusal: no request is
+rendered and the fixture receives an unsupported-method RPC error.
+
 The terminal prints one `request` JSON line with the exact native ID and its
 string/number type, method, session/turn/item identity, SDK generation and request
-ID, expiry, and offered choices or question schema. It then prints an
-`answer-template` and `cancel-template`. Copy the template for that request,
-replace the placeholders with your explicit answer, and submit one JSON line.
-No blank line, missing answer, provider text, or default choice grants approval.
-A copied approval template with its placeholder intact is rejected.
+ID, expiry, and question schema. It then prints an `answer-template` and
+`cancel-template`. Copy the template for that request, replace the placeholders
+with your explicit answer, and submit one JSON line. No blank line, missing
+answer, provider text, or default choice answers a question.
 
-- Approval: choose exactly `allow-once`, `allow-session`, `deny`, or `cancel` when
-  offered. `allow-session` remains the native session choice, not a persistent
-  grant, and the Host does not automatically answer later requests.
-- Question: answer every question using its exact `questionId`, allowed
+- Answer every question using its exact `questionId`, allowed
   `selectedOptionIds`, and optional `text` when permitted. An answer is sent to
   the exact native RPC, never as a new prompt or steering text.
-- Cancel either kind: submit the displayed `cancel-template`. A question cancel
-  returns the SDK's native RPC error; it does not invent empty answer text.
+- Cancel: submit the displayed `cancel-template`. Cancel returns the SDK's
+  native RPC error; it does not invent empty answer text.
 - EOF, Ctrl-C, or SIGTERM disposes the owned session. An unfinished line is
   discarded. A restart gets a fresh Host identity and SDK generation. There is
   no restore, automatic retry, resume, or replay of mutations. Output errors/closure
@@ -88,22 +90,24 @@ bun run typecheck
 
 Tests drive the same terminal input and rendered request output through the
 public built SDK and a real synthetic child process. They verify exact native
-frames for once/session/deny/cancel; independent numeric/string IDs; structured
-questions; duplicate/conflicting answers; wrong Host/task/request/generation;
+frames for structured answers and cancel; `approvalPolicy: never` and the SDK
+refusal of native approval requests before the Host; independent numeric/string
+IDs; duplicate/conflicting answers; wrong Host/task/request/generation;
 invalid/out-of-schema input; expiry and withdrawal; process end; fresh-generation
 restart; EOF; terminal-control injection; oversized input; secret cancellation; startup/output failures and cleanup; and early cancellation.
 The CLI executable is separately exercised with controlled synthetic stdin.
 
 The fixture is intentionally not a vendor simulator or live certification. In
-particular, mapping `allow-session` to `acceptForSession` proves wire scope
-preservation, not actual vendor grant lifetime or sandbox behavior.
+particular, question relay under `approvalPolicy: never` has fixture evidence
+only; live Codex behavior is not certified here.
 
 ## Remaining live-Host release gate (NOT RUN)
 
 The current SDK Codex adapter keeps the sandbox that `DaemonConfig.codexSandbox`
-selects (default `danger-full-access`) even with `approvalPolicy: on-request`.
-The offer carries no permission policy (ADR-037). Native callbacks
-are therefore **not mandatory per-tool confirmation or confinement**. This
+selects (default `danger-full-access`). Codex does not declare the `auto`
+tool-authorization gate, so an `auto` task declines before claim; an `all` task
+runs without per-tool confirmation. Native question callbacks are **not
+per-tool confirmation or confinement**. This
 example does not introduce a restricted-launcher shim or provide a live command
 that silently accepts broad authority.
 
@@ -116,7 +120,7 @@ change. Then bind approval to:
   version, Node version, OS and isolated disposable workspace/home
 - The authorized account/provider/model, data sent, potential costs, test-case
   commands/file paths and resulting side effects, and secure existing login
-- Once/session/deny/cancel behavior; exact question answers; repeated answer
+- Native approval refusal under `approvalPolicy: never`; exact question answers; repeated answer
   idempotence; timeout/withdrawal/process-end and fresh-generation stale refusal
 - Stop conditions, retained transport receipts and provider/tool readback,
   explicit cleanup authority, and lack of browser/mobile/SaaS coverage
