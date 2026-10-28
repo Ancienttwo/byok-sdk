@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { createEnvelope } from '@byok-sdk/protocol';
 import type { ApprovalDecision, ApprovalOrigin } from '../approvals';
 import { DAEMON_TASK_FAILURE } from '../task-failure';
-import type { ActiveTask } from './support';
+import type { ActiveTask, ApprovalKind } from './support';
 import type { TaskRunner } from '../task-runner';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, MAX_PENDING_APPROVALS_PER_TASK } from '../task-runner';
 
@@ -12,7 +12,8 @@ export async function requestApproval(
   this: TaskRunner,
   taskId: string,
   summary: string,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  kind: ApprovalKind,
 ): Promise<{ approved: boolean; reason?: string }> {
   if (signal?.aborted) return { approved: false, reason: WITHDRAWN };
   const active = this['tasks'].get(taskId);
@@ -21,7 +22,7 @@ export async function requestApproval(
     return { approved: false, reason: 'task is not currently active on this device' };
   }
 
-  if (active.pendingApprovalId !== undefined) {
+  if (active.pendingApproval !== undefined) {
     if (active.approvalQueue.length >= MAX_PENDING_APPROVALS_PER_TASK) {
       return {
         approved: false,
@@ -29,7 +30,7 @@ export async function requestApproval(
       };
     }
     return new Promise((resolve) => {
-      const request = { summary, resolve, ...(signal === undefined ? {} : { signal }) };
+      const request = { summary, kind, resolve, ...(signal === undefined ? {} : { signal }) };
       active.approvalQueue.push(request);
       // A withdrawn request leaves the queue, so it is never dispatched and a
       // later decision has nothing to revive.
@@ -42,7 +43,7 @@ export async function requestApproval(
     });
   }
 
-  return this['dispatchApproval'](active, summary, signal);
+  return this['dispatchApproval'](active, summary, signal, kind);
 }
 
 const WITHDRAWN = 'approval request was withdrawn by its requester';
@@ -51,12 +52,13 @@ export function dispatchApproval(
   this: TaskRunner,
   active: ActiveTask,
   summary: string,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  kind: ApprovalKind,
 ): Promise<{ approved: boolean; reason?: string }> {
   const { taskId } = active;
   if (signal?.aborted) return Promise.resolve({ approved: false, reason: WITHDRAWN });
   const approvalId = randomUUID();
-  active.pendingApprovalId = approvalId;
+  active.pendingApproval = { approvalId, kind };
   // Finding F4: see `onApprovalDispatched`'s own doc comment — must fire
   // BEFORE `deps.send` below so the observer has already stashed this
   // approvalId by the time that same synchronous call triggers
@@ -97,7 +99,7 @@ export function dispatchApproval(
       (decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin) => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', withdraw);
-        if (active.pendingApprovalId === approvalId) active.pendingApprovalId = undefined;
+        if (active.pendingApproval?.approvalId === approvalId) active.pendingApproval = undefined;
         // Every resolution of this approval lands here: a wire decision, a
         // local `Daemon.approve`/`reject` or `approvals.resolve`, the timeout
         // above, `finish()`'s fail-closed cleanup and registry eviction. Only
@@ -126,9 +128,9 @@ export async function handleApprove(this: TaskRunner, taskId: string, approvalId
 
 /**
  * A wire `task.reject` or a local `Daemon.reject`: resolves the pending
- * approval it names, then stops the session and reports `task.fail` — the
- * server already moved the task `AwaitApproval -> Failed`. A decision for any
- * other id is stale and changes nothing.
+ * approval it names. Only a task-terminal approval stops the session and
+ * reports `task.fail`; tool authorization returns a tool denial and the turn
+ * continues. A decision for any other id is stale and changes nothing.
  */
 export async function handleReject(this: TaskRunner, taskId: string, reason: string | undefined, approvalId: string, decidedBy: ApprovalOrigin): Promise<void> {
   const active = this['tasks'].get(taskId);
@@ -138,9 +140,12 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
     return;
   }
   if (!pendingMatches.call(this, active, approvalId, 'reject')) return;
+  // Snapshot before resolve: its callback can dispatch a queued approval.
+  const terminatesTask = active.pendingApproval!.kind === 'task-terminal';
   // Before the terminal: `finish()` rejects whatever is still pending as a
   // local decision, which would echo this decision back to the server.
   this['deps'].approvalRegistry.resolve(approvalId, 'reject', reason, decidedBy);
+  if (!terminatesTask) return;
   await this['settleSemanticTerminal'](active, async () => {
     await this['interruptBounded'](active);
     // As with cancel, the server has already closed its progress stream.
@@ -161,12 +166,12 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
  * still holds it. A late, repeated or mistargeted decision is audit-only.
  */
 function pendingMatches(this: TaskRunner, active: ActiveTask, approvalId: string, decision: ApprovalDecision): boolean {
-  if (approvalId === active.pendingApprovalId) return true;
+  if (approvalId === active.pendingApproval?.approvalId) return true;
   this['deps'].onStaleApprovalDecision?.(
     active.taskId,
     decision,
     `approvalId ${approvalId} does not match the currently pending approval` +
-      (active.pendingApprovalId ? ` (${active.pendingApprovalId})` : ' (none pending)'),
+      (active.pendingApproval ? ` (${active.pendingApproval.approvalId})` : ' (none pending)'),
   );
   return false;
 }

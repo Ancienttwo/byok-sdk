@@ -82,7 +82,7 @@ import {
   type AgentMemoryTaskContext,
 } from './agent-memory';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
+import type { ApprovalKind, ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
 import { offerSettlements, trackOffer } from './task-runner/support';
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
 import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts';
@@ -869,7 +869,7 @@ export class TaskRunner {
     return [...this.tasks.values()].map((active) => ({
       taskId: active.taskId,
       progressBatcherPending: active.batcher.pendingCount,
-      pendingApprovals: (active.pendingApprovalId !== undefined ? 1 : 0) + active.approvalQueue.length,
+      pendingApprovals: (active.pendingApproval !== undefined ? 1 : 0) + active.approvalQueue.length,
     }));
   }
 
@@ -1516,7 +1516,7 @@ export class TaskRunner {
    * Either way a later decision for it is stale.
    */
   requestApproval(taskId: string, summary: string, signal?: AbortSignal): Promise<{ approved: boolean; reason?: string }> {
-    return requestApproval.call(this, taskId, summary, signal);
+    return requestApproval.call(this, taskId, summary, signal, 'task-terminal');
   }
 
   /**
@@ -1529,8 +1529,8 @@ export class TaskRunner {
    * `dispatchNextQueuedApproval` once the previously-dispatched request for
    * this same task resolves.
    */
-  private dispatchApproval(active: ActiveTask, summary: string, signal?: AbortSignal): Promise<{ approved: boolean; reason?: string }> {
-    return dispatchApproval.call(this, active, summary, signal);
+  private dispatchApproval(active: ActiveTask, summary: string, signal: AbortSignal | undefined, kind: ApprovalKind): Promise<{ approved: boolean; reason?: string }> {
+    return dispatchApproval.call(this, active, summary, signal, kind);
   }
 
   /**
@@ -1563,7 +1563,7 @@ export class TaskRunner {
   private dispatchNextQueuedApproval(active: ActiveTask): void {
     const next = active.approvalQueue.shift();
     if (!next) return;
-    void this.dispatchApproval(active, next.summary, next.signal).then(next.resolve);
+    void this.dispatchApproval(active, next.summary, next.signal, next.kind).then(next.resolve);
   }
 
   /**
@@ -1577,10 +1577,8 @@ export class TaskRunner {
   }
 
   /**
-   * Protocol §5: the server's own state already moved
-   * `AwaitApproval -> Failed` before this best-effort notification arrives
-   * (§4) — the daemon resolves the approval, stops the session and proves it
-   * via `task.fail`.
+   * Resolves the named approval. Its local kind decides whether rejection
+   * terminates the task or denies one tool call while the turn continues.
    */
   private handleReject(taskId: string, reason: string | undefined, approvalId: string, decidedBy: ApprovalOrigin = 'wire'): Promise<void> {
     return handleReject.call(this, taskId, reason, approvalId, decidedBy);

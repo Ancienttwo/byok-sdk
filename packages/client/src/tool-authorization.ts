@@ -62,6 +62,7 @@ export const SENSITIVE_HOME_PATHS: readonly string[] = Object.freeze([
   '.zshrc', '.zprofile', '.bashrc', '.bash_profile', '.profile', 'Library/Keychains', 'Library/LaunchAgents', '.config/autostart',
 ]);
 const MUTATING_TOOLS = new Set(['write', 'edit', 'multiedit', 'notebookedit', 'apply_patch']);
+const MUTATING_FILE_CHANGE_KINDS = new Set(['add', 'update', 'delete']);
 const PATH_KEYS = ['path', 'file_path', 'filePath', 'notebook_path'] as const;
 
 function within(root: string, target: string): boolean {
@@ -90,13 +91,22 @@ export function classifyToolCall(
     const homeForms = ['~/', '$HOME/', '${HOME}/', `${home}/`];
     if (SENSITIVE_HOME_PATHS.some(path => homeForms.some(prefix => command.includes(`${prefix}${path}`)))) reasons.add('sensitive-path');
   }
-  for (const key of PATH_KEYS) {
-    const raw = call.input[key];
+  // Codex projects one native file operation as a batch, including move destinations.
+  // Normalize here so auto decisions and all-mode reminders share the same path checks.
+  const paths = PATH_KEYS.map(key => ({ path: call.input[key], mutating: MUTATING_TOOLS.has(call.toolName.toLowerCase()) }));
+  if (call.toolName === 'file_change' && Array.isArray(call.input.changes)) {
+    for (const change of call.input.changes) {
+      if (change === null || typeof change !== 'object' || Array.isArray(change)) continue;
+      const mutating = MUTATING_FILE_CHANGE_KINDS.has(change.kind);
+      paths.push({ path: change.path, mutating }, { path: change.movePath, mutating });
+    }
+  }
+  for (const { path: raw, mutating } of paths) {
     if (typeof raw !== 'string' || raw.length === 0) continue;
     const expanded = raw === '~' ? home : raw.startsWith('~/') ? `${home}${raw.slice(1)}` : raw;
     const target = resolve(call.cwd, expanded);
     if (SENSITIVE_HOME_PATHS.some(path => within(resolve(home, path), target))) reasons.add('sensitive-path');
-    if (MUTATING_TOOLS.has(call.toolName.toLowerCase()) && !within(workspace, target)) reasons.add('write-outside-workspace');
+    if (mutating && !within(workspace, target)) reasons.add('write-outside-workspace');
   }
   return reasons.size === 0 ? { level: 'normal' } : { level: 'high', reasons: Object.freeze([...reasons]) };
 }

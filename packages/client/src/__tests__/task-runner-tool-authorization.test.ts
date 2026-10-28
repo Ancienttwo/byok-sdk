@@ -1,3 +1,13 @@
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
+import { TestServer } from './fixtures/test-server';
+import { testAgentHomeConfig } from './fixtures/test-agent';
+import { testScratchRoot } from './fixtures/execution-scratch';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { CodexProjection } from '../adapters/codex/projection';
+import { createSessionKernel } from '../../vendor/oar/51b83c9/shared/session-kernel';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { describe, expect, it, vi } from 'vitest';
@@ -63,6 +73,30 @@ describe('daemon tool authorization', () => {
     await vi.waitFor(() => expect(reminders).toHaveLength(1));
     expect(reminders[0]).toMatchObject({ taskId: 'task-all', toolName: 'bash', toolCallId: 'c2', reasons: ['destructive-git'] });
     expect(reminders[0]!.summary).toContain('git push --force origin main');
+    expect(sent.some(e => e.type === 'task.await_approval')).toBe(false);
+  });
+
+  it('all: real Codex fileChange projection reminds on every changed high-risk path', async () => {
+    const adapter = new GateCapturingAdapter(NO_AUTO);
+    const sent: Envelope[] = [];
+    const reminders: ToolReminder[] = [];
+    const { runner } = makeRunner(adapter, sent, { onToolReminder: r => reminders.push(r) });
+    await offer(runner, 'codex-file-change');
+    const workspace = adapter.inputs[0]!.manifest.workspace.workspaceDir;
+    const kernel = createSessionKernel('root');
+    const projection = new CodexProjection(workspace, 'root');
+    const body = { type: 'item/started', origin: 'byok-native', events: [], native: {
+      item: { type: 'fileChange', id: 'files', changes: [
+        { path: path.join(workspace, 'ordinary.txt'), kind: { type: 'add' } },
+        { path: path.join(workspace, '..', 'outside.txt'), kind: { type: 'delete' } },
+        { path: path.join(os.homedir(), '.ssh', 'id_ed25519'), kind: { type: 'update' } },
+      ] },
+    } };
+    const frame = kernel.frame(body, { sessionId: 'root' });
+    projection.consume(kernel, frame, event => adapter.sessions[0]!.queue.push(event));
+    await vi.waitFor(() => expect(reminders).toHaveLength(1));
+    expect(reminders[0]).toMatchObject({ toolName: 'file_change', toolCallId: 'files',
+      reasons: expect.arrayContaining(['write-outside-workspace', 'sensitive-path']) });
     expect(sent.some(e => e.type === 'task.await_approval')).toBe(false);
   });
 
@@ -173,5 +207,119 @@ describe('daemon tool authorization', () => {
     await offer(runner, 'task-unresolved');
     expect(adapter.inputs).toEqual([]);
     expect(declineReason(sent)).toMatch(/^tool_authorization_unresolved: /);
+  });
+});
+
+
+async function withPublicDaemon(run: (daemon: Daemon, server: TestServer, adapter: GateCapturingAdapter) => Promise<void>): Promise<void> {
+  const server = await TestServer.start();
+  server.setAckCapabilities(['custom-harness']);
+  const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-tool-auth-public-'));
+  const adapter = new GateCapturingAdapter({ ...AUTO_CAPABLE, approvalInteractive: true });
+  const daemon = createDaemonWithAdapters({
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'tool-auth-public',
+    serverUrl: server.url, storeDir, agentMemoryMcp: 'off',
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
+    storage: { scratchRoot: testScratchRoot() }, toolAuthorization: () => 'auto',
+  }, [adapter]);
+  try {
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' },
+      { taskId: 'public-task', seq: server.nextSeq() }));
+    await server.waitFor(e => e.type === 'task.started' && e.task_id === 'public-task');
+    await run(daemon, server, adapter);
+  } finally {
+    await daemon.stop();
+    await server.close();
+    await fs.rm(storeDir, { recursive: true, force: true });
+  }
+}
+
+describe('public tool authorization decisions', () => {
+  it.each(['local', 'wire'] as const)('auto: public %s reject denies only the tool and the turn continues', async entry => {
+    await withPublicDaemon(async (daemon, server, adapter) => {
+      const input = adapter.inputs[0]!;
+      const gate = input.toolAuthorization!;
+      const session = adapter.sessions[0]!;
+      const call = { toolCallId: 'dangerous', toolName: 'bash', input: { command: 'sudo rm -rf /var/db' }, cwd: input.manifest.workspace.workspaceDir };
+      const verdict = gate.authorize(call);
+      const awaited = await server.waitFor(e => e.type === 'task.await_approval');
+      if (awaited.type !== 'task.await_approval' || awaited.payload.sealed !== undefined) throw new Error('missing approval');
+      const approvalId = awaited.payload.approvalId;
+      if (entry === 'local') await daemon.reject('public-task', { approvalId, reason: 'choose a safer tool' });
+      else server.send(createEnvelope('task.reject', { approvalId, reason: 'choose a safer tool' },
+        { taskId: 'public-task', seq: server.nextSeq() }));
+      await expect(verdict).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: 'choose a safer tool' });
+      await expect(gate.authorize({ ...call, toolCallId: 'safe', input: { command: 'ls -la' } })).resolves.toEqual({ decision: 'allow' });
+      expect(session.interruptCalled).toBe(false);
+      expect(session.closeCalled).toBe(false);
+      session.queue.push({ type: 'progress', text: 'continuing with the safer alternative' });
+      await server.waitFor(e => e.type === 'task.progress', 4_000);
+      expect(session.interruptCalled).toBe(false);
+      expect(session.closeCalled).toBe(false);
+      expect(server.received.filter(e => e.type === 'task.fail')).toEqual([]);
+      expect(server.received.filter(e => e.type === 'task.approval_resolved')).toHaveLength(entry === 'local' ? 1 : 0);
+    });
+  });
+
+  it.each(['local', 'wire'] as const)('public %s task-terminal approval still rejects the task', async entry => {
+    await withPublicDaemon(async (daemon, server, adapter) => {
+      const session = adapter.sessions[0]!;
+      const outcome = session.requestApproval('task-terminal approval');
+      const awaited = await server.waitFor(e => e.type === 'task.await_approval');
+      if (awaited.type !== 'task.await_approval' || awaited.payload.sealed !== undefined) throw new Error('missing approval');
+      const approvalId = awaited.payload.approvalId;
+      if (entry === 'local') await daemon.reject('public-task', { approvalId, reason: 'stop this task' });
+      else server.send(createEnvelope('task.reject', { approvalId, reason: 'stop this task' }, { taskId: 'public-task', seq: server.nextSeq() }));
+      await outcome;
+      await server.waitFor(e => e.type === 'task.fail');
+      expect(session.interruptCalled).toBe(true);
+      expect(session.approvalResults).toEqual([{ approved: false, reason: 'stop this task' }]);
+    });
+  });
+
+  it.each(['tool-authorization', 'task-terminal'] as const)('queued %s keeps its kind across the preceding decision', async queuedKind => {
+    await withPublicDaemon(async (daemon, server, adapter) => {
+      const input = adapter.inputs[0]!;
+      const session = adapter.sessions[0]!;
+      const call = { toolCallId: 'first', toolName: 'bash', input: { command: 'sudo true' }, cwd: input.manifest.workspace.workspaceDir };
+      const first = input.toolAuthorization!.authorize(call);
+      const awaited = await server.waitFor(e => e.type === 'task.await_approval');
+      if (awaited.type !== 'task.await_approval' || awaited.payload.sealed !== undefined) throw new Error('missing first approval');
+      const firstId = awaited.payload.approvalId;
+      const queued = queuedKind === 'tool-authorization'
+        ? input.toolAuthorization!.authorize({ ...call, toolCallId: 'second' })
+        : session.requestApproval('task-terminal queued');
+      await daemon.reject('public-task', { approvalId: firstId, reason: 'first tool denied' });
+      await expect(first).resolves.toMatchObject({ decision: 'deny' });
+      expect(session.interruptCalled).toBe(false);
+      const next = await server.waitFor(e => e.type === 'task.await_approval' && e.payload.approvalId !== firstId);
+      if (next.type !== 'task.await_approval' || next.payload.sealed !== undefined) throw new Error('missing queued approval');
+      await daemon.reject('public-task', { approvalId: next.payload.approvalId, reason: 'queued denied' });
+      if (queuedKind === 'tool-authorization') {
+        await expect(queued).resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_denied' });
+        expect(session.interruptCalled).toBe(false);
+        expect(server.received.some(e => e.type === 'task.fail')).toBe(false);
+      } else {
+        await queued;
+        await server.waitFor(e => e.type === 'task.fail');
+        expect(session.interruptCalled).toBe(true);
+      }
+    });
+  });
+
+  it.each(['local', 'wire'] as const)('auto: public %s approve permits the tool without stopping the task', async entry => {
+    await withPublicDaemon(async (daemon, server, adapter) => {
+      const input = adapter.inputs[0]!;
+      const verdict = input.toolAuthorization!.authorize({ toolCallId: 'dangerous', toolName: 'bash', input: { command: 'sudo true' }, cwd: input.manifest.workspace.workspaceDir });
+      const awaited = await server.waitFor(e => e.type === 'task.await_approval');
+      if (awaited.type !== 'task.await_approval' || awaited.payload.sealed !== undefined) throw new Error('missing approval');
+      const approvalId = awaited.payload.approvalId;
+      if (entry === 'local') await daemon.approve('public-task', { approvalId });
+      else server.send(createEnvelope('task.approve', { approvalId }, { taskId: 'public-task', seq: server.nextSeq() }));
+      await expect(verdict).resolves.toEqual({ decision: 'allow' });
+      expect(adapter.sessions[0]!.interruptCalled).toBe(false);
+    });
   });
 });
