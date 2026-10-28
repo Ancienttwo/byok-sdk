@@ -254,6 +254,10 @@ other app-server error does.
 
 ### Grok: user-level configuration
 
+ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
+does not provide a hidden-terminal mode; see the [qualified observation and
+limits](notes/2026-10-28-grok-terminal-capability-boundary.md).
+
 The [vendored launch profile](../packages/client/vendor/oar/51b83c9/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.

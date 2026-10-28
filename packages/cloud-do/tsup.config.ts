@@ -9,6 +9,10 @@ export default defineConfig({
   sourcemap: true,
   splitting: false,
   treeshake: true,
+  minifyWhitespace: true,
+  esbuildOptions(options) {
+    options.legalComments = 'inline';
+  },
   clean: true,
   external: ['cloudflare:workers', /^@earendil-works\//],
 });

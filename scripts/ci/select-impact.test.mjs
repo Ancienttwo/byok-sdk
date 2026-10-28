@@ -449,3 +449,26 @@ test('the configured path fold selects the client suite and the Windows client j
   assert.deepEqual(selectImpact(['packages/client/src/util/fold-name-aliases.ts']).families, ['dataplane', 'windows-client']);
   assert.ok(selectImpact(['packages/client/src/util/fold-name-aliases.ts']).dirs.includes('packages/client'));
 });
+
+
+test('the sealed client build config retains the ordinary client build scope', () => {
+  const ordinary = selectImpact(['packages/client/tsup.config.ts']);
+  const sealed = selectImpact(['packages/client/tsup.sealed.config.ts']);
+  assert.deepEqual(sealed.dirs, ordinary.dirs);
+  assert.deepEqual(sealed.families, ordinary.families);
+  assert.equal(sealed.reason, ordinary.reason);
+});
+
+test('reviewed M package build configs keep owner consumers and packed artifacts, not adjacent unknown configs', () => {
+  for (const owner of ['cloud-dataplane', 'cloud-do', 'cloud', 'protocol', 'server', 'testkit', 'ui-runtime']) {
+    const path = `packages/${owner}/tsup.config.ts`;
+    const plan = selectImpact([path]);
+    const ownerScope = selectImpact([`packages/${owner}/tsconfig.json`]);
+    assert.deepEqual(plan.dirs, ownerScope.dirs, path);
+    assert.deepEqual(plan.families, sorted(new Set([...ownerScope.families, 'npm-release-pack'])), path);
+    assert.throws(() => selectImpact([`packages/${owner}/tsup.unreviewed.config.ts`]), /reviewed CI mapping required/i);
+    assert.throws(() => selectImpact([`packages/${owner}/tsup.config.mjs`]), /reviewed CI mapping required/i);
+  }
+  assert.throws(() => selectImpact(['packages/client/tsup.other.config.ts']), /reviewed CI mapping required/i);
+  assert.throws(() => selectImpact(['packages/unreviewed/tsup.config.ts']), /reviewed CI mapping required/i);
+});
