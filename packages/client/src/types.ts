@@ -1,5 +1,6 @@
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
+import type { ToolAuthorizationGate } from './tool-authorization';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
@@ -64,6 +65,12 @@ export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unav
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+  /**
+   * Enforces the `auto` tool authorization gate before every native tool call
+   * of an ordinary instruction start. Omission means `auto` tasks are declined
+   * for this adapter before claim; `all` needs no adapter support.
+   */
+  readonly toolAuthorizationAuto?: boolean;
   /** Supports display-only Agent message drafts. Omission means unsupported. */
   readonly messageDraft?: boolean;
   /** Local native interaction support only; omission is unsupported. Not the approval channel. */
@@ -474,6 +481,12 @@ interface RuntimeOperationStartBase {
    * `start()` must return its Session before awaiting the request's decision.
    */
   readonly approvalChannel?: ApprovalChannel;
+  /**
+   * Present only for an `auto` task on an adapter declaring
+   * `toolAuthorizationAuto`. Every native tool call must pass it before
+   * execution; a denial becomes the tool's error result.
+   */
+  readonly toolAuthorization?: ToolAuthorizationGate;
 }
 
 /** The ordinary start: a resolved instruction the runtime turns into its own first request. */
@@ -541,6 +554,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     ...(descriptor.trajectoryEvidence === 'event-stream' ? { trajectoryEvidence: 'event-stream' as const } : {}),
     ...(descriptor.platforms === undefined ? {} : { platforms: Object.freeze([...descriptor.platforms]) }),
     capabilities: Object.freeze({
+      ...(descriptor.capabilities.toolAuthorizationAuto === undefined ? {} : { toolAuthorizationAuto: descriptor.capabilities.toolAuthorizationAuto === true }),
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {
         nativeInteractions: Object.freeze({

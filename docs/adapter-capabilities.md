@@ -17,20 +17,26 @@ they are not a second runtime-selection registry.
 | Native session rollback | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | No new support introduced |
 | Legacy boolean interactive approval | Unsupported | Unsupported | Unsupported | No new support introduced |
 | Native approval / structured question replies, default construction | Unsupported and omitted | Unsupported and omitted | Unsupported and omitted | No new support introduced |
-| Local native interaction opt-in | allow-once / deny / cancel; structured AskUserQuestion | allow-once / allow-session / deny / cancel; structured question IDs | Unsupported; every permission request is answered `cancelled` | Unsupported |
+| Local native interaction opt-in | Structured AskUserQuestion only; other `can_use_tool` requests pass through as allow | Structured question IDs only; `approvalPolicy: never`, approval requests refused | Unsupported; every permission request is answered `cancelled` | Unsupported |
 | Recover pending native interactions after process restart | Unsupported | Unsupported | Unsupported | No new support introduced |
 | Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
 | Trajectory evidence for the execution record (`trajectoryEvidence`) | Not declared; records are `unknown` | Not declared; records are `unknown` | Not declared; records are `unknown` | Declared (`event-stream`); not declared with `durablePi: true` |
 | Display-only message draft (`messageDraft`) | Declared; text deltas from `--include-partial-messages` | Declared; `item/agentMessage/delta` | Declared; ACP `text_delta` | Declared; `text_delta` progress |
+| Tool authorization `auto` (`toolAuthorizationAuto`) | Declared; SDK `PreToolUse` callback, confirmed `hooks_applied` | Not declared; `auto` declined before claim | Not declared; hosted terminal is partial coverage, `auto` declined before claim | Declared on the ordinary RPC lane and native Pi subagents; durable declares `false`, prepared declined by the daemon |
 | MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Set for task toolset servers from Claude's own `mcp_status` answer | Set from the native `mcpToolCall` `server` and `tool`, for every server Codex runs, SDK helpers included | Not set; ACP `tool_call` defines no MCP server field, and live Grok evidence is pending (#633) | Set by exact observed name; ordinary, prepared and durable |
 
 By default Claude and Codex run YOLO
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude with
 `--dangerously-skip-permissions`, Codex with `approvalPolicy: never`. Native
-interaction opt-in replaces those flags: Claude uses
-`--permission-prompt-tool stdio --permission-mode acceptEdits`, Codex uses
-`approvalPolicy: on-request`. Native request/reply support does not establish
-an every-tool confirmation policy.
+interaction opt-in relays questions only: Claude uses
+`--permission-prompt-tool stdio --permission-mode acceptEdits` and passes every
+non-question request through as allow; Codex keeps `approvalPolicy: never`.
+Tool permission is solely the task's `auto | all` decision.
+
+Tool authorization `all` needs no adapter support: the daemon reminds from the
+normalized `tool_use` stream for every runtime. See the spec's
+[Tool authorization](spec.md#tool-authorization-auto-and-all-1061) section for
+the classifier and the honest limits (tool gate, not file scope or sandbox).
 
 Pi is intentionally outside this qualification change. Existing Pi behavior
 and its existing tests are unchanged; this matrix does not downgrade its
@@ -727,12 +733,13 @@ the callback's exact request ID and channel to submit typed answers, and may
 read a pending snapshot in that same live process. Restarted/resumed processes
 receive a new generation and cannot answer the old process's requests.
 
-- Claude uses the official stdio initialize/can_use_tool protocol. It never
-  emits persistent permission updates. Questions preserve exact question text,
+- Claude uses the official stdio initialize/can_use_tool protocol for
+  AskUserQuestion; other requests are allowed at once without a Host prompt. It
+  never emits persistent permission updates. Questions preserve exact question text,
   selected labels, multiple selections and free text. Unknown native controls,
   reused IDs and malformed requests dispose the process.
-- Codex 0.160.0 uses explicit `on-request` policy and verifies its readback;
-  command/file decisions retain their native scope. Questions preserve native
+- Codex 0.160.0 keeps `approvalPolicy: never`; command/file approval requests
+  are refused as unsupported. Questions preserve native
   question IDs and answer arrays. Exact active-turn and resume-thread checks
   precede Host callbacks. Permissions profiles, dynamic tools and MCP
   elicitation remain unsupported.
@@ -743,8 +750,8 @@ receive a new generation and cannot answer the old process's requests.
 
 `structuredQuestions` describes the installed bridge capability. A task must
 also expose the provider's question tool; the user's own agent configuration
-can remove it. Native requests can also be bypassed by the provider's own allow rules, so an opted-in
-Host must not infer that every tool call necessarily prompts.
+can remove it. Native interactions never prompt for tool permission; that is
+the task's `auto | all` decision.
 
 The enabled-mode suites are `native-interactions.test.ts`,
 `claude-native-interactions.test.ts`, `codex-native-interactions.test.ts`, and
@@ -830,9 +837,8 @@ the [downstream diagnostics guide](agent-diagnostics-integration.md).
 ### Pi explicitly authorized resources
 
 Pi ordinary RPC Agent operations accept `agentSkillPaths` and `agentExtensionPaths`
-(default `[]`), independently of `agentUserContext` and the SDK-only
-`agentExtensions` selection. Supply absolute local paths; no package download
-selectors or implicit user-directory discovery are added by these options.
+(default `[]`), independently of `agentUserContext` and `auto | all` tool
+authorization. Supply absolute local paths; no package download selectors or implicit user-directory discovery are added by these options.
 For example, a Host can exclude personal context while loading one task skill:
 
 ```ts
@@ -845,9 +851,9 @@ new PiAdapter({
 
 The Host authorizes the extension as executable code, including resources it
 registers. This is not a sandbox. Default/inherit behavior and non-Agent operations
-are unchanged. Explicit resource policies require the ordinary RPC lane; prepared
-and durable lanes reject unsupported policies. Policy selection remains adapter
-scoped, so different task policies require separately configured adapters.
+are unchanged. Explicit resource loading requires the ordinary RPC lane; prepared
+and durable lanes reject it. Resource selection remains adapter scoped, so
+different task resources require separately configured adapters.
 
 Explicit skill paths must exist and be readable. Pi remains the authority for
 skill parsing and its advisory diagnostics: a readable path that yields no valid

@@ -143,6 +143,8 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
       return `${prefix} shutdown-complete reason=${quote(event.reason)}${event.undeliveredOutboxCount !== undefined ? ` undeliveredOutboxCount=${event.undeliveredOutboxCount}` : ''}`;
     case 'stale-approval-decision':
       return `${prefix} stale-approval-decision taskId=${event.taskId} decision=${event.decision}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
+    case 'tool-reminder':
+      return `${prefix} tool-reminder taskId=${event.taskId} tool=${quote(event.toolName)} reasons=${event.reasons.join(',')} summary=${quote(event.summary)}`;
     case 'agent-memory-intent-integrity':
       return `${prefix} agent-memory-intent-integrity intentId=${event.intentId} disposition=${event.disposition}`;
     case 'runtime-disposal-failed':

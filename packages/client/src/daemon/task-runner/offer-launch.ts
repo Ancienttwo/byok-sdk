@@ -21,6 +21,8 @@ import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
 import { activateOffer, type OfferActivationInput } from './offer-activation';
+import { createAutoToolAuthorizationGate, parseToolAuthorizationMode, type ToolAuthorizationMode } from '../../tool-authorization';
+import { DEFAULT_APPROVAL_TIMEOUT_MS } from '../task-runner';
 
 export interface OfferManifestInput
   extends Pick<OfferRequest, 'agentRef' | 'agentMemory' | 'preparation' | 'preparedMemorySelected' | 'readerAttempt' | 'sessionRef'>,
@@ -41,6 +43,25 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, workspaceDir, blobAbort,
     preparationLane, terminalProjection,
   } = input;
+  // The local Host owns the mode; it never comes from the offer. `auto` needs
+  // a pre-execution gate, so a runtime or lane without one is declined here,
+  // before claim, instead of running ungated.
+  let toolAuthorization: ToolAuthorizationMode;
+  try {
+    const resolver = this['deps'].toolAuthorization;
+    toolAuthorization = resolver === undefined ? 'all' : parseToolAuthorizationMode(resolver(Object.freeze({
+      taskId, runtimeId: pick.descriptor.id, ...(agentBinding.resolution.agentRef === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
+    })));
+  } catch (error) {
+    if (!admissionWithdrawn()) decline(`tool_authorization_unresolved: ${errorMessage(error)}`, false);
+    return;
+  }
+  if (toolAuthorization === 'auto' && (pick.descriptor.capabilities.toolAuthorizationAuto !== true || preparation !== undefined)) {
+    if (!admissionWithdrawn()) {
+      decline(`tool_authorization_unsupported: runtime ${pick.descriptor.id} cannot gate ${preparation === undefined ? '' : 'prepared '}tool calls before execution, so auto mode cannot run`, false);
+    }
+    return;
+  }
   let runtimeLaunch: PiRuntimeLaunchResources | undefined;
   if (prepared.operation.resolveRuntimeLaunch !== undefined) {
     try {
@@ -207,7 +228,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       calls: 0,
     };
   }
-  return { runtimeLaunch, manifest, preparedLaunch, preparedObservation };
+  return { runtimeLaunch, manifest, preparedLaunch, preparedObservation, toolAuthorization };
 }
 
 export interface OfferClaimInput
@@ -315,7 +336,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
 export interface OfferStartInput
   extends Pick<OfferRequest, 'ordinaryMemoryMode' | 'readerAttempt'>,
     Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'mcpToolApprovals' | 'pick' | 'prepared' | 'scratch'>,
-    Pick<OfferManifest, 'manifest' | 'preparedLaunch' | 'runtimeLaunch'>,
+    Pick<OfferManifest, 'manifest' | 'preparedLaunch' | 'runtimeLaunch' | 'toolAuthorization'>,
     Pick<OfferClaim, 'resolvedInstruction' | 'taskMcpServers'> {
   readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly blobAbort: AbortController;
@@ -362,8 +383,11 @@ async function startAndActivateRuntime(
   const { taskId } = phase;
   const {
     agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
-    preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline,
+    preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
   } = input;
+  const requestApproval = (summary: string, signal?: AbortSignal) => launch.settled
+    ? this.requestApproval(taskId, summary, signal)
+    : launch.promise.then(() => this.requestApproval(taskId, summary, signal));
   const startInput: RuntimeOperationStartInput = {
     scratch,
     ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {
@@ -399,11 +423,14 @@ async function startAndActivateRuntime(
     ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
     ...(mcpToolApprovals === undefined ? {} : { mcpToolApprovals }),
     ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
-    ...(pick.descriptor.capabilities.approvalInteractive
-      ? { approvalChannel: { request: (summary: string) => launch.settled
-        ? this.requestApproval(taskId, summary)
-        : launch.promise.then(() => this.requestApproval(taskId, summary)) } }
-      : {}),
+    ...(pick.descriptor.capabilities.approvalInteractive ? { approvalChannel: { request: requestApproval } } : {}),
+    // User authorization reuses the task's one approval path: the wire
+    // `task.await_approval` and local `Daemon.approve`/`reject` resolve it.
+    ...(toolAuthorization !== 'auto' ? {} : { toolAuthorization: createAutoToolAuthorizationGate({
+      workspace: manifest.workspace.workspaceDir,
+      timeoutMs: (this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS) + 5_000,
+      requestAuthorization: requestApproval,
+    }) }),
   };
   let session: Session;
   try {

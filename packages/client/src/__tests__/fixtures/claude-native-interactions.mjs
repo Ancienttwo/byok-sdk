@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('2.1.0-native-fixture'); process.exit(0); }
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true })); process.exit(0); }
-const scenario = process.env.CLAUDE_NATIVE_SCENARIO ?? 'approval';
+const scenario = process.env.CLAUDE_NATIVE_SCENARIO ?? 'questions';
 const transcript = process.env.CLAUDE_NATIVE_TRANSCRIPT;
 const enabled = args.includes('--permission-prompt-tool') && args[args.indexOf('--permission-prompt-tool') + 1] === 'stdio';
 const resumeIndex = args.indexOf('--resume');
@@ -49,7 +49,8 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', line =
   ];
   if (scenario === 'duplicate-question') questions[1].question = questions[0].question;
   if (scenario === 'duplicate-option') questions[0].options[1].label = questions[0].options[0].label;
-  const isQuestion = ['questions', 'duplicate-question', 'duplicate-option'].includes(scenario);
+  // Only `permission` sends a tool permission request; every other scenario relays AskUserQuestion.
+  const isQuestion = scenario !== 'permission';
   const request = {
     type: 'control_request', request_id: requestId,
     request: { subtype: 'can_use_tool', tool_name: isQuestion ? 'AskUserQuestion' : 'Bash', input: isQuestion ? { questions } : { command: 'echo offline-fixture', nested: { exact: true } }, tool_use_id: `tool-use-${turn}`, title: 'Run the offline fixture command?' },

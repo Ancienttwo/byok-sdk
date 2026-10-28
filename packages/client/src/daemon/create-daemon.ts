@@ -81,6 +81,7 @@ import { composeDaemonWorkspaces } from './create-daemon/workspaces';
 import type { DaemonScope } from './create-daemon/scope';
 import { bindDaemonFunctions } from './create-daemon/functions';
 import { createControlMethods } from './create-daemon/control-methods';
+import type { ToolAuthorizationResolver } from '../tool-authorization';
 
 /**
  * Optional white-label product display info — purely opaque passthrough
@@ -103,6 +104,15 @@ export interface DaemonBranding {
 export interface DaemonConfig {
   /** Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option. */
   nativeAssetRoot?: string;
+  /**
+   * Per-task tool authorization, decided by this Host for every runtime:
+   * `all` (default) never blocks and emits a `tool-reminder` event for each
+   * high-risk call; `auto` asks the user through the task's approval path
+   * before a high-risk call runs and is declined before claim on a runtime
+   * without `toolAuthorizationAuto`. Called once per offer; a throw or any
+   * other value declines the offer. Not an OS sandbox or file scope.
+   */
+  toolAuthorization?: ToolAuthorizationResolver;
   /** Select an explicit macOS keychain for device enrollment custody. */
   deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
   storage?: StorageConfig;

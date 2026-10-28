@@ -30,6 +30,8 @@ import { resetResumedPiTools } from './pi-session-runtime';
 import { readFileSync } from 'node:fs';
 import { parsePiPrintArgv } from '../subagents/print-argv';
 import { assertSubagentProviderCredential } from '../subagents/credential-guard';
+import { readToolAuthorizationGateEnv } from '../tool-authorization-ipc';
+import { createPiToolAuthorizationHook } from '../adapters/pi/tool-authorization-hook';
 
 /** Options for one delegated print-mode task, read from the vendor argv. */
 interface PrintPayloadPlan {
@@ -68,6 +70,8 @@ export async function runSubagentPrint(argv: readonly string[]): Promise<number>
   const agentDir = getAgentDir();
   // Before the session, its extensions or any request exist (#385).
   assertSubagentProviderCredential(agentDir);
+  // A native child of an `auto` session passes the same parent gate.
+  const gate = readToolAuthorizationGateEnv();
   const plan = planPrintPayload(argv);
   const sessionManager = plan.sessionFile
     ? SessionManager.open(plan.sessionFile, plan.sessionDir)
@@ -78,7 +82,7 @@ export async function runSubagentPrint(argv: readonly string[]): Promise<number>
     cwd: plan.cwd,
     agentDir,
     modelRuntimeSignal: AbortSignal.timeout(15_000),
-    resourceLoaderOptions: { extensionFactories: [subagentsExtension] },
+    resourceLoaderOptions: { extensionFactories: [subagentsExtension, ...(gate === undefined ? [] : [createPiToolAuthorizationHook(gate)])] },
   });
   const errors = [
     ...services.diagnostics.filter((diagnostic) => diagnostic.type === 'error').map((diagnostic) => diagnostic.message),

@@ -38,6 +38,12 @@ async function requested(requests: NativeInteractionRequest[]) {
   return requests[0]!;
 }
 function responseFrames(frames: Record<string, any>[]) { return frames.filter(frame => frame.type === 'control_response'); }
+/** A complete answer to the fixture's three AskUserQuestion prompts. */
+function answer(request: NativeInteractionRequest, first = '0') {
+  return { kind: 'question' as const, requestId: request.requestId, answers: [
+    { questionId: '0', selectedOptionIds: [first] }, { questionId: '1', selectedOptionIds: ['0'] }, { questionId: '2', selectedOptionIds: ['0'] },
+  ] };
+}
 
 afterEach(async () => {
   await Promise.all(sessions.splice(0).map(session => session.close()));
@@ -47,7 +53,7 @@ afterEach(async () => {
 
 describe('Claude native interactions through prepared process transport', () => {
   it('omits native capability, handshake and stdio flag by default', async () => {
-    const { adapter, session, frames } = await start('approval', undefined);
+    const { adapter, session, frames } = await start('permission', undefined);
     expect(adapter.descriptor.capabilities.nativeInteractions).toBeUndefined();
     expect(adapter.descriptor.capabilities.approvalInteractive).toBe(false);
     expect(session.interactions).toBeUndefined();
@@ -57,24 +63,15 @@ describe('Claude native interactions through prepared process transport', () => 
     expect(sent.filter(frame => frame.type === 'control_request')).toEqual([]);
   });
 
-  it('initializes before the user frame and sends exact one-shot approval without persistent grants', async () => {
+  it('passes a tool permission request through at once: permission is the SDK auto|all decision, never a Host prompt', async () => {
     const requests: NativeInteractionRequest[] = [];
-    const { adapter, session, frames } = await start('approval', { onRequest: request => { requests.push(request); } });
+    const { adapter, session, frames } = await start('permission', { onRequest: request => { requests.push(request); } });
     expect(await adapter.detect()).toMatchObject({ kind: 'available', version: '2.1.0-native-fixture', authPresent: true });
-    expect(adapter.descriptor.capabilities.nativeInteractions).toEqual({ approvalDecisions: ['allow-once', 'deny', 'cancel'], structuredQuestions: true });
+    expect(adapter.descriptor.capabilities.nativeInteractions).toEqual({ approvalDecisions: [], structuredQuestions: true });
     expect(adapter.descriptor.capabilities.approvalInteractive).toBe(false);
-    const request = await requested(requests);
-    expect(request.native).toEqual({ id: 'native-request-1', method: 'can_use_tool', sessionRef: session.sessionRef, itemId: 'tool-use-1' });
-    expect(request.requestId).not.toBe(request.native.id);
-    expect(request.requestId).not.toBe(request.native.itemId);
-    expect(request).toMatchObject({ kind: 'approval', details: { toolName: 'Bash', input: { command: 'echo offline-fixture', nested: { exact: true } } } });
-    await expect(session.interactions!.respond({ kind: 'approval', requestId: request.requestId, decision: 'allow-session' })).rejects.toMatchObject({ code: 'invalid_response' });
-    const answer = { kind: 'approval' as const, requestId: request.requestId, decision: 'allow-once' as const };
-    const receipt = await session.interactions!.respond(answer);
-    expect(receipt.status).toBe('responded');
-    expect(await session.interactions!.respond(answer)).toEqual(receipt);
-    await expect(session.interactions!.respond({ ...answer, decision: 'deny' })).rejects.toMatchObject({ code: 'response_conflict' });
     expect((await takeTurn(session)).map(event => event.type)).toContain('turn_end');
+    expect(requests).toEqual([]);
+    expect(session.interactions!.pending()).toEqual([]);
     const sent = await frames();
     expect(sent[0]!.argv).toContain('--permission-prompt-tool');
     expect(sent[1]).toMatchObject({ type: 'control_request', request: { subtype: 'initialize', hooks: null } });
@@ -82,6 +79,19 @@ describe('Claude native interactions through prepared process transport', () => 
     expect(responseFrames(sent)).toEqual([{ type: 'control_response', response: { subtype: 'success', request_id: 'native-request-1', response: { behavior: 'allow', updatedInput: { command: 'echo offline-fixture', nested: { exact: true } } } } }]);
     expect(JSON.stringify(sent)).not.toContain('updatedPermissions');
     await expect(session.steer('do this instead')).rejects.toThrow();
+  });
+
+  it('answers a question exactly once and rejects a conflicting second answer', async () => {
+    const requests: NativeInteractionRequest[] = [];
+    const { session } = await start('questions', { onRequest: request => { requests.push(request); } });
+    const request = await requested(requests);
+    expect(request.native).toEqual({ id: 'native-request-1', method: 'can_use_tool', sessionRef: session.sessionRef, itemId: 'tool-use-1' });
+    expect(request.requestId).not.toBe(request.native.id);
+    const receipt = await session.interactions!.respond(answer(request));
+    expect(receipt.status).toBe('responded');
+    expect(await session.interactions!.respond(answer(request))).toEqual(receipt);
+    await expect(session.interactions!.respond(answer(request, '1'))).rejects.toMatchObject({ code: 'response_conflict' });
+    await takeTurn(session);
   });
 
   it('returns structured multi-question answers with original text and labels and no extra user frame', async () => {
@@ -110,19 +120,6 @@ describe('Claude native interactions through prepared process transport', () => 
     expect(JSON.stringify(sent)).not.toContain('updatedPermissions');
   });
 
-  it.each(['deny', 'cancel'] as const)('sends %s through control_response only', async decision => {
-    const requests: NativeInteractionRequest[] = [];
-    const { session, frames } = await start('approval', { onRequest: request => { requests.push(request); } });
-    const request = await requested(requests);
-    await session.interactions!.respond({ kind: 'approval', requestId: request.requestId, decision });
-    await takeTurn(session);
-    const sent = responseFrames(await frames());
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.response).toMatchObject({ request_id: 'native-request-1', response: { behavior: 'deny' } });
-    expect(sent[0]!.response.response.interrupt).toBe(decision === 'cancel' ? true : undefined);
-    expect(sent[0]!.response.response.updatedPermissions).toBeUndefined();
-  });
-
   it('cancels a question with deny+interrupt rather than fabricated answers', async () => {
     const requests: NativeInteractionRequest[] = [];
     const { session, frames } = await start('questions', { onRequest: request => { requests.push(request); } });
@@ -135,11 +132,11 @@ describe('Claude native interactions through prepared process transport', () => 
   it('timeout sends deny+interrupt and rejects a late answer', async () => {
     const requests: NativeInteractionRequest[] = [];
     const receipts: NativeInteractionReceipt[] = [];
-    const { session, frames } = await start('approval', { timeoutMs: 60, onRequest: request => { requests.push(request); }, onResolved: receipt => { receipts.push(receipt); } });
+    const { session, frames } = await start('questions', { timeoutMs: 60, onRequest: request => { requests.push(request); }, onResolved: receipt => { receipts.push(receipt); } });
     const request = await requested(requests);
     await takeTurn(session);
     expect(receipts).toContainEqual({ requestId: request.requestId, status: 'timed-out', reason: 'deadline' });
-    await expect(session.interactions!.respond({ kind: 'approval', requestId: request.requestId, decision: 'allow-once' })).rejects.toMatchObject({ code: 'request_settled' });
+    await expect(session.interactions!.respond(answer(request))).rejects.toMatchObject({ code: 'request_settled' });
     expect(responseFrames(await frames())[0]!.response.response).toEqual({ behavior: 'deny', message: 'Native interaction timed out', interrupt: true });
   });
 
@@ -149,7 +146,7 @@ describe('Claude native interactions through prepared process transport', () => 
     const { session, frames } = await start(scenario, { onRequest: request => { requests.push(request); }, onResolved: receipt => { receipts.push(receipt); } });
     const request = await requested(requests);
     await vi.waitFor(() => expect(receipts).toContainEqual({ requestId: request.requestId, status: 'cancelled', reason }));
-    await expect(session.interactions!.respond({ kind: 'approval', requestId: request.requestId, decision: 'allow-once' })).rejects.toMatchObject({ code: 'request_settled' });
+    await expect(session.interactions!.respond(answer(request))).rejects.toMatchObject({ code: 'request_settled' });
     expect(session.interactions!.pending()).toEqual([]);
     expect(responseFrames(await frames())).toEqual([]);
   });
@@ -157,44 +154,44 @@ describe('Claude native interactions through prepared process transport', () => 
   it('interrupt withdraws before the native ACK and does not write an approval response', async () => {
     const requests: NativeInteractionRequest[] = [];
     const receipts: NativeInteractionReceipt[] = [];
-    const { session, frames } = await start('approval', { onRequest: request => { requests.push(request); }, onResolved: receipt => { receipts.push(receipt); } });
+    const { session, frames } = await start('questions', { onRequest: request => { requests.push(request); }, onResolved: receipt => { receipts.push(receipt); } });
     const request = await requested(requests);
     await session.interrupt();
     expect(receipts).toContainEqual({ requestId: request.requestId, status: 'cancelled', reason: 'interrupted' });
-    await expect(session.interactions!.respond({ kind: 'approval', requestId: request.requestId, decision: 'allow-once' })).rejects.toMatchObject({ code: 'request_settled' });
+    await expect(session.interactions!.respond(answer(request))).rejects.toMatchObject({ code: 'request_settled' });
     expect(responseFrames(await frames())).toEqual([]);
     expect((await frames()).filter(frame => frame.type === 'control_request').map(frame => frame.request.subtype)).toEqual(['initialize', 'interrupt']);
   });
 
   it('close invalidates and resume assigns a new generation even when native IDs repeat', async () => {
     const firstRequests: NativeInteractionRequest[] = [];
-    const first = await start('approval', { onRequest: request => { firstRequests.push(request); } });
+    const first = await start('questions', { onRequest: request => { firstRequests.push(request); } });
     const oldRequest = await requested(firstRequests);
     await first.session.close();
     expect(first.session.interactions!.pending()).toEqual([]);
     const resumedRequests: NativeInteractionRequest[] = [];
-    const resumed = await start('approval', { onRequest: request => { resumedRequests.push(request); } }, first.session.sessionRef);
+    const resumed = await start('questions', { onRequest: request => { resumedRequests.push(request); } }, first.session.sessionRef);
     const newRequest = await requested(resumedRequests);
     expect(newRequest.native.id).toBe(oldRequest.native.id);
     expect(newRequest.native.sessionRef).toBe(oldRequest.native.sessionRef);
     expect(newRequest.generation).not.toBe(oldRequest.generation);
-    await expect(resumed.session.interactions!.respond({ kind: 'approval', requestId: oldRequest.requestId, decision: 'allow-once' })).rejects.toMatchObject({ code: 'unknown_request' });
-    await resumed.session.interactions!.respond({ kind: 'approval', requestId: newRequest.requestId, decision: 'deny' });
+    await expect(resumed.session.interactions!.respond(answer(oldRequest))).rejects.toMatchObject({ code: 'unknown_request' });
+    await resumed.session.interactions!.respond(answer(newRequest, '1'));
     await takeTurn(resumed.session);
   });
 
   it('re-arms native requests for a follow-up turn on the same generation', async () => {
     const requests: NativeInteractionRequest[] = [];
-    const { session, frames } = await start('approval', { onRequest: request => { requests.push(request); } });
+    const { session, frames } = await start('questions', { onRequest: request => { requests.push(request); } });
     const first = await requested(requests);
-    await session.interactions!.respond({ kind: 'approval', requestId: first.requestId, decision: 'allow-once' });
+    await session.interactions!.respond(answer(first));
     await takeTurn(session);
     await session.followUp({ ...task, instruction: 'Second offline turn' });
     await vi.waitFor(() => expect(requests).toHaveLength(2));
     const second = requests[1]!;
     expect(second.generation).toBe(first.generation);
     expect(second.native.id).toBe('native-request-2');
-    await session.interactions!.respond({ kind: 'approval', requestId: second.requestId, decision: 'allow-once' });
+    await session.interactions!.respond(answer(second));
     await takeTurn(session);
     expect(responseFrames(await frames())).toHaveLength(2);
   });
@@ -229,7 +226,10 @@ describe('Claude native interactions through prepared process transport', () => 
 });
 
 describe('Claude native bridge transport fencing', () => {
-  const permission = { type: 'control_request', request_id: 'native-1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'echo fixture' }, tool_use_id: 'tool-1' } };
+  const permission = { type: 'control_request', request_id: 'native-1', request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', tool_use_id: 'tool-1', input: { questions: [
+    { question: 'Proceed?', header: 'Proceed', options: [{ label: 'Yes', description: 'Continue' }, { label: 'No', description: 'Stop' }], multiSelect: false },
+  ] } } };
+  const reply = (request: NativeInteractionRequest) => ({ kind: 'question' as const, requestId: request.requestId, answers: [{ questionId: '0', selectedOptionIds: ['0'] }] });
   function bridge(write: (frame: Record<string, unknown>) => Promise<void>, onFatal = vi.fn(), extras: Partial<NativeInteractionHostOptions> = {}) {
     const requests: NativeInteractionRequest[] = [];
     const native = new ClaudeNativeInteractionBridge({ onRequest: request => { requests.push(request); }, onFatal, ...extras });
@@ -240,10 +240,70 @@ describe('Claude native bridge transport fencing', () => {
     return { native, request: requests[0]!, onFatal };
   }
 
+  it.each(['Bash', 'Write', 'mcp__host__tool'])('allows a %s permission request without opening a Host request', async toolName => {
+    const write = vi.fn(async (_frame: Record<string, unknown>) => {});
+    const onRequest = vi.fn();
+    const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal: vi.fn() });
+    native.bind(write);
+    native.beginTurn();
+    native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
+    native.receive({ type: 'control_request', request_id: 'perm-1', request: { subtype: 'can_use_tool', tool_name: toolName, input: { command: 'rm -rf build' }, tool_use_id: 't' } });
+    await Promise.resolve();
+    expect(onRequest).not.toHaveBeenCalled();
+    expect(native.channel.pending()).toEqual([]);
+    expect(write).toHaveBeenCalledWith({ type: 'control_response', response: { subtype: 'success', request_id: 'perm-1', response: { behavior: 'allow', updatedInput: { command: 'rm -rf build' } } } });
+    native.close();
+  });
+
+  it('passes non-question requests through outside the question budget and bounds, then still bounds questions', async () => {
+    const write = vi.fn(async (_frame: Record<string, unknown>) => {});
+    const onRequest = vi.fn();
+    const onFatal = vi.fn();
+    const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal, maxRequests: 1 });
+    native.bind(write);
+    native.beginTurn();
+    native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
+    let deep: Record<string, unknown> = { leaf: true };
+    for (let level = 0; level < 20; level += 1) deep = { nested: deep };
+    const large = { content: 'x'.repeat(200 * 1024), deep };
+    for (const [index, input] of [{ command: 'ls' }, large, { command: 'pwd' }].entries()) {
+      // A repeated pass-through ID is answered too: it never enters the question ledger.
+      native.receive({ type: 'control_request', request_id: index === 2 ? 'pass-0' : `pass-${index}`, request: { subtype: 'can_use_tool', tool_name: 'Write', input } });
+    }
+    await Promise.resolve();
+    expect(onFatal).not.toHaveBeenCalled();
+    expect(onRequest).not.toHaveBeenCalled();
+    expect(write).toHaveBeenCalledTimes(3);
+    expect(write.mock.calls[1]![0]).toEqual({ type: 'control_response', response: { subtype: 'success', request_id: 'pass-1', response: { behavior: 'allow', updatedInput: large } } });
+    // The single-request question budget is still whole after three pass-throughs.
+    native.receive(permission);
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    native.receive({ ...permission, request_id: 'native-2' });
+    expect(onFatal).toHaveBeenCalledTimes(1);
+    expect(onFatal.mock.calls[0]![0]).toMatchObject({ code: 'capacity' });
+  });
+
+  it.each([
+    ['larger than 64 KiB', { questions: permission.request.input.questions, padding: 'x'.repeat(65_536) }],
+    ['deeper than 8 levels', { questions: permission.request.input.questions, deep: { a: { b: { c: { d: { e: { f: { g: { h: true } } } } } } } } }],
+  ])('keeps question bounds: an AskUserQuestion %s is fatal', (_label, input) => {
+    const onFatal = vi.fn();
+    const onRequest = vi.fn();
+    const write = vi.fn(async () => {});
+    const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal });
+    native.bind(write);
+    native.beginTurn();
+    native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
+    native.receive({ ...permission, request: { ...permission.request, input } });
+    expect(onRequest).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(onFatal).toHaveBeenCalledTimes(1);
+  });
+
   it('provider cancellation fences a response queued in the same tick', async () => {
     const write = vi.fn(async () => {});
     const { native, request } = bridge(write);
-    const responding = native.channel.respond({ kind: 'approval', requestId: request.requestId, decision: 'allow-once' });
+    const responding = native.channel.respond(reply(request));
     native.receive({ type: 'control_cancel_request', request_id: 'native-1' });
     expect(await responding).toMatchObject({ status: 'cancelled', reason: 'provider-cancelled' });
     expect(write).not.toHaveBeenCalled();
@@ -258,7 +318,7 @@ describe('Claude native bridge transport fencing', () => {
     const other = native.channel.pending().find(pending => pending.requestId !== request.requestId)!;
     await native.channel.respond({ kind: 'cancel', requestId: request.requestId });
     expect(receipts).toContainEqual({ requestId: other.requestId, status: 'cancelled', reason: 'interrupted' });
-    await expect(native.channel.respond({ kind: 'approval', requestId: other.requestId, decision: 'allow-once' })).rejects.toMatchObject({ code: 'request_settled' });
+    await expect(native.channel.respond(reply(other))).rejects.toMatchObject({ code: 'request_settled' });
     expect(write).toHaveBeenCalledTimes(1);
     native.close();
   });
@@ -301,7 +361,7 @@ describe('Claude native bridge transport fencing', () => {
 
   it('write rejection invokes owner fatal handling exactly once and settles outstanding requests', async () => {
     const { native, request, onFatal } = bridge(async () => { throw new Error('pipe failed'); });
-    expect(await native.channel.respond({ kind: 'approval', requestId: request.requestId, decision: 'allow-once' })).toMatchObject({ status: 'failed', reason: 'transport' });
+    expect(await native.channel.respond(reply(request))).toMatchObject({ status: 'failed', reason: 'transport' });
     expect(onFatal).toHaveBeenCalledTimes(1);
     expect(native.channel.pending()).toEqual([]);
   });
@@ -310,7 +370,7 @@ describe('Claude native bridge transport fencing', () => {
     vi.useFakeTimers();
     const write = vi.fn(() => new Promise<void>(() => {}));
     const { native, request, onFatal } = bridge(write, vi.fn(), { writeTimeoutMs: 20 });
-    const responding = native.channel.respond({ kind: 'approval', requestId: request.requestId, decision: 'allow-once' });
+    const responding = native.channel.respond(reply(request));
     await Promise.resolve();
     expect(write).toHaveBeenCalledTimes(1);
     native.receive({ type: 'control_cancel_request', request_id: 'native-1' });

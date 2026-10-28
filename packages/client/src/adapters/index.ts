@@ -26,7 +26,7 @@ export type {
 } from '../runtime-failure';
 
 export { PiAdapter } from './pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig, PiBuiltinToolName, PiAgentExtensionName } from './pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './pi/resolve-bin';
 
 export { ClaudeAdapter } from './claude/claude-adapter';

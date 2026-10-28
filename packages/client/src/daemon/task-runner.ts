@@ -96,6 +96,7 @@ import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecution
 import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump';
 import { handleOffer } from './task-runner/offer';
 import { OfferAdmissionTiming } from './task-runner/offer-admission-timing';
+import type { ToolAuthorizationResolver, ToolReminder } from '../tool-authorization';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -406,6 +407,10 @@ export interface TaskRunnerDeps {
    * to supply one — mirrors `onStaleApprovalDecision`'s own contract.
    */
   onApprovalDispatched?: (taskId: string, approvalId: string) => void;
+  /** `DaemonConfig.toolAuthorization`; absent means every task runs in `all`. */
+  toolAuthorization?: ToolAuthorizationResolver;
+  /** One high-risk tool call observed in an `all` task; local observability only. */
+  onToolReminder?: (reminder: ToolReminder) => void;
   /** Overrides the bounded soft-interrupt window before authoritative `Session.close()` disposal begins. */
   shutdownInterruptTimeoutMs?: number;
   startupTimeoutMs?: number;
@@ -1505,9 +1510,13 @@ export class TaskRunner {
    * (`dispatchNextQueuedApproval`). Bounded by
    * {@link MAX_PENDING_APPROVALS_PER_TASK}: a request arriving once this
    * task's queue is full is rejected fail-closed immediately.
+   *
+   * Aborting `signal` withdraws the request wherever it is: a queued one
+   * leaves the queue undispatched, a dispatched one resolves as a rejection.
+   * Either way a later decision for it is stale.
    */
-  requestApproval(taskId: string, summary: string): Promise<{ approved: boolean; reason?: string }> {
-    return requestApproval.call(this, taskId, summary);
+  requestApproval(taskId: string, summary: string, signal?: AbortSignal): Promise<{ approved: boolean; reason?: string }> {
+    return requestApproval.call(this, taskId, summary, signal);
   }
 
   /**
@@ -1520,8 +1529,8 @@ export class TaskRunner {
    * `dispatchNextQueuedApproval` once the previously-dispatched request for
    * this same task resolves.
    */
-  private dispatchApproval(active: ActiveTask, summary: string): Promise<{ approved: boolean; reason?: string }> {
-    return dispatchApproval.call(this, active, summary);
+  private dispatchApproval(active: ActiveTask, summary: string, signal?: AbortSignal): Promise<{ approved: boolean; reason?: string }> {
+    return dispatchApproval.call(this, active, summary, signal);
   }
 
   /**
@@ -1554,7 +1563,7 @@ export class TaskRunner {
   private dispatchNextQueuedApproval(active: ActiveTask): void {
     const next = active.approvalQueue.shift();
     if (!next) return;
-    void this.dispatchApproval(active, next.summary).then(next.resolve);
+    void this.dispatchApproval(active, next.summary, next.signal).then(next.resolve);
   }
 
   /**

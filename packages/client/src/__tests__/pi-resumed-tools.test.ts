@@ -6,7 +6,6 @@ import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, type ExtensionFactory,
 } from '@earendil-works/pi-coding-agent';
 import { resetResumedPiTools } from '../bin/pi-session-runtime';
-import { parsePiAgentToolPolicy, piAgentNativeToolOptions } from '../adapters/pi/agent-tool-policy';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -34,7 +33,7 @@ type Registrations = { atLoad: ToolSpec[]; atStart?: ToolSpec[] };
 /** Opens a session as the SDK hosts do, then binds extensions (`session_start`). */
 async function open(
   paths: ReturnType<typeof dirs>, sessionManager: SessionManager, registrations: Registrations,
-  options: { tools?: string[]; excludeTools?: string[]; agentBuiltinTools?: readonly string[]; reset: boolean },
+  options: { excludeTools?: string[]; reset: boolean },
 ): Promise<string[]> {
   const { cwd, agentDir } = paths;
   const extension: ExtensionFactory = (pi) => {
@@ -45,10 +44,10 @@ async function open(
   const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager, extensionFactories: [extension] });
   await resourceLoader.reload();
   const { session } = await createAgentSession({
-    cwd, agentDir, sessionManager, settingsManager, resourceLoader, tools: options.tools, excludeTools: options.excludeTools,
+    cwd, agentDir, sessionManager, settingsManager, resourceLoader, excludeTools: options.excludeTools,
   });
   try {
-    if (options.reset) resetResumedPiTools(session, settingsManager, cwd, options.agentBuiltinTools);
+    if (options.reset) resetResumedPiTools(session, settingsManager, cwd);
     await session.bindExtensions({});
     return session.getActiveToolNames().sort();
   } finally {
@@ -82,17 +81,6 @@ async function resumedAndFresh(
 const DEFAULTS = ['read', 'bash', 'edit', 'write'];
 
 describe('resumed Pi session tools (Pi 1.4)', () => {
-  it.each([{agentBuiltinTools:['read'] as const}, {agentBuiltinTools:[] as const}])('replaces stale native tools with Agent selection $agentBuiltinTools and preserves current MCP tools', async ({agentBuiltinTools}) => {
-    const paths = dirs();
-    const file = previousTranscript(paths, [...DEFAULTS, 'stale_mcp', 'late_off']);
-    const policy = parsePiAgentToolPolicy({builtinTools:agentBuiltinTools,userContext:'excluded',extensions:[],skillPaths:[],extensionPaths:[]});
-    const registrations = {atLoad:[{name:'current_mcp'}],atStart:[{name:'late_off',defaultActive:false}]};
-    const options = {...piAgentNativeToolOptions(policy),agentBuiltinTools,reset:true};
-    const resumed = await open(paths,SessionManager.open(file,paths.sessionDir),registrations,options);
-    const fresh = await open(paths,SessionManager.create(paths.cwd,paths.sessionDir),registrations,options);
-    expect(resumed).toEqual([...agentBuiltinTools,'current_mcp'].sort());
-    expect(resumed).toEqual(fresh);
-  });
   // Pi 1.3 kept a load-time tool the transcript did not declare inactive;
   // Pi 1.4 (upstream #11062) activates it natively.
   it('without the reset, native Pi 1.4 offers a load-time tool the transcript did not declare', async () => {

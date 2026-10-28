@@ -118,6 +118,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       approvalInteractive: false,
       mcpToolsets: true,
       messageDraft: true,
+      toolAuthorizationAuto: true,
     });
     // Claude reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter.descriptor.requiresMcpToolsetToolObservation).not.toBe(true);

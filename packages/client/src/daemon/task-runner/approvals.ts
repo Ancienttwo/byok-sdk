@@ -12,7 +12,9 @@ export async function requestApproval(
   this: TaskRunner,
   taskId: string,
   summary: string,
+  signal?: AbortSignal,
 ): Promise<{ approved: boolean; reason?: string }> {
+  if (signal?.aborted) return { approved: false, reason: WITHDRAWN };
   const active = this['tasks'].get(taskId);
   // Teardown may retain ownership solely to retry disposal or terminal commit.
   if (!active || active.beingTornDown) {
@@ -27,19 +29,32 @@ export async function requestApproval(
       };
     }
     return new Promise((resolve) => {
-      active.approvalQueue.push({ summary, resolve });
+      const request = { summary, resolve, ...(signal === undefined ? {} : { signal }) };
+      active.approvalQueue.push(request);
+      // A withdrawn request leaves the queue, so it is never dispatched and a
+      // later decision has nothing to revive.
+      signal?.addEventListener('abort', () => {
+        const index = active.approvalQueue.indexOf(request);
+        if (index === -1) return;
+        active.approvalQueue.splice(index, 1);
+        resolve({ approved: false, reason: WITHDRAWN });
+      }, { once: true });
     });
   }
 
-  return this['dispatchApproval'](active, summary);
+  return this['dispatchApproval'](active, summary, signal);
 }
+
+const WITHDRAWN = 'approval request was withdrawn by its requester';
 
 export function dispatchApproval(
   this: TaskRunner,
   active: ActiveTask,
   summary: string,
+  signal?: AbortSignal,
 ): Promise<{ approved: boolean; reason?: string }> {
   const { taskId } = active;
+  if (signal?.aborted) return Promise.resolve({ approved: false, reason: WITHDRAWN });
   const approvalId = randomUUID();
   active.pendingApprovalId = approvalId;
   // Finding F4: see `onApprovalDispatched`'s own doc comment — must fire
@@ -67,11 +82,21 @@ export function dispatchApproval(
       }
     }, timeoutMs);
     timer.unref?.();
+    // Withdrawal resolves the entry like the timeout does, so a decision
+    // arriving afterwards is stale and cannot revive it.
+    const withdraw = () => {
+      try {
+        this['deps'].approvalRegistry.resolve(approvalId, 'reject', WITHDRAWN);
+      } catch {
+        // Already resolved.
+      }
+    };
 
     this['deps'].approvalRegistry.register(
       { approvalId, taskId, summary, createdAt: new Date().toISOString() },
       (decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin) => {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', withdraw);
         if (active.pendingApprovalId === approvalId) active.pendingApprovalId = undefined;
         // Every resolution of this approval lands here: a wire decision, a
         // local `Daemon.approve`/`reject` or `approvals.resolve`, the timeout
@@ -82,6 +107,7 @@ export function dispatchApproval(
         this['dispatchNextQueuedApproval'](active);
       },
     );
+    signal?.addEventListener('abort', withdraw, { once: true });
   });
 }
 

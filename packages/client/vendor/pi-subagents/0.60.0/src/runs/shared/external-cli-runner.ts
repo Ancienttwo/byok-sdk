@@ -1,3 +1,4 @@
+import { assertSubagentRunnerAuthorized } from "../../../../../../src/subagents/tool-authorization-runner.ts";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import * as fs from "node:fs";
@@ -173,6 +174,7 @@ export function runExternalCli(input: {
 	onStdout?: (chunk: Buffer) => void;
 	onStderr?: (chunk: Buffer) => void;
 }): Promise<ExternalCliRunResult> {
+	assertSubagentRunnerAuthorized();
 	const limits = {
 		stdoutLogBytes: narrowLimit(input.limits?.stdoutLogBytes, MAX_RAW_LOG_BYTES, "stdoutLogBytes"),
 		stderrLogBytes: narrowLimit(input.limits?.stderrLogBytes, MAX_RAW_LOG_BYTES, "stderrLogBytes"),

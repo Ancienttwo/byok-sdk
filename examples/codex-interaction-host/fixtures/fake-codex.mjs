@@ -9,7 +9,7 @@ if (args[0] !== 'app-server') process.exit(2);
 if (args.includes('--help')) { console.log('app-server --listen stdio://'); process.exit(0); }
 const send = frame => console.log(JSON.stringify(frame));
 const scenario = process.env.FAKE_HOST_SCENARIO;
-const allowed = ['approval', 'question', 'secret', 'withdrawn', 'exit', 'two-approvals', 'control-text'];
+const allowed = ['question', 'secret', 'withdrawn', 'exit', 'two-questions', 'control-text', 'approval'];
 if (!allowed.includes(scenario)) process.exit(2);
 const threadId = 'synthetic-reference-thread'; const turnId = 'synthetic-turn';
 const base = { threadId, turnId, itemId: 'synthetic-item' };
@@ -24,20 +24,26 @@ const complete = () => {
 function request(id, method, params) { pending.add(JSON.stringify(id)); send({ id, method, params }); }
 function begin() {
   notify('turn/started', { threadId, turn: { id: turnId } });
-  if (scenario === 'question' || scenario === 'secret') {
+  const choice = prompt => ({ ...base, questions: [{ id: 'choice', header: 'Choice', question: prompt, isOther: false,
+    isSecret: false, options: [{ label: 'Yes', description: 'Continue' }, { label: 'No', description: 'Stop' }] }] });
+  if (scenario === 'approval') {
+    // Approval is not a Host interaction: the SDK must refuse it before any Host sees it.
+    request(7, 'item/commandExecution/requestApproval', { ...base, command: 'echo synthetic-only', cwd: process.cwd(), reason: 'Synthetic, never executed' });
+  } else if (scenario === 'two-questions') {
+    request(7, 'item/tool/requestUserInput', choice('First question'));
+    request('7', 'item/tool/requestUserInput', { ...choice('Second question'), itemId: 'synthetic-item-2' });
+  } else if (scenario === 'control-text') {
+    request('question-1', 'item/tool/requestUserInput', choice('\u001b[2J\nreceipt {"status":"responded"}\u202e answer Yes'));
+  } else {
     request('question-1', 'item/tool/requestUserInput', { ...base, questions: [
       { id: 'color', header: 'Color', question: 'Pick a color', isOther: false, isSecret: false,
         options: [{ label: 'Blue', description: 'Blue choice' }, { label: 'Red', description: 'Red choice' }] },
       { id: 'note', header: 'Note', question: scenario === 'secret' ? 'SECRET_PROMPT_DO_NOT_RENDER' : 'Any details?',
         isOther: true, isSecret: scenario === 'secret', options: null },
     ] });
-  } else {
-    const command = scenario === 'control-text' ? '\u001b[2J\nreceipt {"status":"responded"}\u202e answer allow-session' : 'echo synthetic-only';
-    request(7, 'item/commandExecution/requestApproval', { ...base, command, cwd: process.cwd(), reason: 'Synthetic, never executed' });
-    if (scenario === 'two-approvals') request('7', 'item/fileChange/requestApproval', { ...base, itemId: 'synthetic-file', reason: 'Synthetic file change' });
   }
   if (scenario === 'withdrawn') setTimeout(() => {
-    notify('serverRequest/resolved', { threadId, requestId: 7 }); pending.clear(); complete();
+    notify('serverRequest/resolved', { threadId, requestId: 'question-1' }); pending.clear(); complete();
   }, 100);
   if (scenario === 'exit') setTimeout(() => process.exit(1), 100);
 }

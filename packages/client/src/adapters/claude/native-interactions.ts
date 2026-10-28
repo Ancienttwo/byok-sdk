@@ -9,8 +9,9 @@ import {
 import { snapshotPlainData } from '../../util/plain-data';
 import type { ClaudeStreamMessage } from './events';
 
+/** Questions only: tool permission is the SDK `auto | all` decision. */
 export const CLAUDE_NATIVE_INTERACTION_CAPABILITIES = Object.freeze({
-  approvalDecisions: Object.freeze(['allow-once', 'deny', 'cancel'] as const),
+  approvalDecisions: Object.freeze([] as const),
   structuredQuestions: true,
 });
 
@@ -43,7 +44,7 @@ function parseQuestions(input: Record<string, unknown>): NativeQuestion[] {
   });
 }
 
-/** One opt-in bridge per owned Claude process. It never grants persistent permissions. */
+/** One opt-in bridge per owned Claude process: structured questions only, never a permission prompt. */
 export class ClaudeNativeInteractionBridge {
   private readonly controller: NativeInteractionController;
   private readonly active = new Map<string, string>();
@@ -114,24 +115,37 @@ export class ClaudeNativeInteractionBridge {
   }
 
   private open(message: ClaudeStreamMessage): void {
-    if (!text(message.request_id) || !this.accepting || !this.sessionRef || !this.write) invalid();
+    if (!text(message.request_id) || !this.write) invalid();
     const id = message.request_id;
+    const respond = (response: Record<string, unknown>) => this.write!({
+      type: 'control_response', response: { subtype: 'success', request_id: id, response },
+    });
+    const raw = message.request;
+    if (!record(raw) || raw.subtype !== 'can_use_tool' || !text(raw.tool_name) || !record(raw.input)) invalid();
+    // `can_use_tool` is only the transport that carries AskUserQuestion to the
+    // Host. Permission was already decided once, by the SDK gate's PreToolUse
+    // hook (`auto`) or not at all (`all`), so no Host permission prompt opens.
+    // The question budget, depth and size bounds below apply to questions only.
+    if (raw.tool_name !== 'AskUserQuestion') {
+      void respond({ behavior: 'allow', updatedInput: raw.input }).catch(error => {
+        this.fail(new NativeInteractionError('transport', error instanceof Error ? error.message : 'Claude permission pass-through failed'));
+      });
+      return;
+    }
+    if (!this.accepting || !this.sessionRef) invalid();
     if (this.seen.has(id)) throw new NativeInteractionError('duplicate_request', 'Claude native request ID was reused in this process generation');
     if (this.seen.size >= (this.options.maxRequests ?? 4096)) throw new NativeInteractionError('capacity', 'Claude native request lifetime bound exceeded');
     this.seen.add(id);
-    const request = snapshotPlainData(message.request, { maxDepth: 8 });
-    if (!record(request) || request.subtype !== 'can_use_tool' || !text(request.tool_name) || !record(request.input)
+    const request = snapshotPlainData(raw, { maxDepth: 8 });
+    if (!record(request) || !record(request.input)
       || (request.tool_use_id !== undefined && !text(request.tool_use_id))
       || Buffer.byteLength(JSON.stringify(request)) > 64 * 1024) invalid();
     const originalInput = request.input;
-    const questions = request.tool_name === 'AskUserQuestion' ? parseQuestions(originalInput) : undefined;
+    const questions = parseQuestions(originalInput);
     const native = {
       id, method: 'can_use_tool', sessionRef: this.sessionRef,
       ...(request.tool_use_id === undefined ? {} : { itemId: request.tool_use_id }),
     };
-    const respond = (response: Record<string, unknown>) => this.write!({
-      type: 'control_response', response: { subtype: 'success', request_id: id, response },
-    });
     const cancel = (reason: 'deadline' | 'cancelled') => {
       // Claude's interrupt cancels the turn, including any other pending prompts.
       this.accepting = false;
@@ -142,25 +156,9 @@ export class ClaudeNativeInteractionBridge {
         behavior: 'deny', message: reason === 'deadline' ? 'Native interaction timed out' : 'Native interaction cancelled', interrupt: true,
       });
     };
-    const opened = this.controller.open(questions === undefined
-      ? {
-        native, kind: 'approval', title: text(request.title) ? request.title : `Allow ${request.tool_name}?`,
-        details: {
-          toolName: request.tool_name, input: originalInput,
-          ...(text(request.description) ? { description: request.description } : {}),
-          ...(text(request.blocked_path) ? { blockedPath: request.blocked_path } : {}),
-          ...(text(request.decision_reason) ? { decisionReason: request.decision_reason } : {}),
-        },
-        decisions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES.approvalDecisions,
-      }
-      : { native, kind: 'question', questions }, {
+    const opened = this.controller.open({ native, kind: 'question', questions }, {
       respond: (response: NativeInteractionResponse) => {
-        if (response.kind === 'approval') {
-          if (response.decision === 'allow-once') return respond({ behavior: 'allow', updatedInput: originalInput });
-          if (response.decision === 'deny') return respond({ behavior: 'deny', message: 'Native permission denied' });
-          return cancel('cancelled');
-        }
-        if (response.kind !== 'question' || questions === undefined) return cancel('cancelled');
+        if (response.kind !== 'question') return cancel('cancelled');
         const answers: Record<string, string | string[]> = Object.create(null) as Record<string, string | string[]>;
         for (const question of questions) {
           const answer = response.answers.find(value => value.questionId === question.id)!;

@@ -179,7 +179,7 @@ export async function handleOffer(
       preparationLane, terminalProjection,
     });
     if (sealed === undefined) return;
-    const { runtimeLaunch, manifest, preparedLaunch, preparedObservation } = sealed;
+    const { runtimeLaunch, manifest, preparedLaunch, preparedObservation, toolAuthorization } = sealed;
 
     const claimed = await claimOffer.call(this, phase, {
       agentBinding, agentRef, pick, manifest, preparedLaunch, blobAbort, payload, taskMcpServers,
@@ -190,9 +190,9 @@ export async function handleOffer(
 
     await startOfferRuntime.call(this, phase, held, {
       agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
-      preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline,
+      preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
     }, {
-      agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
+      agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation, toolAuthorization,
       workspaceDir, blobAbort, payload, messageRequirement, terminalProjection,
     });
   } finally {

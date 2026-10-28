@@ -1,5 +1,7 @@
 # #1061 S3 Claude native tools
 
+> 已被 [2026-10-28-1061-auth-auto-all.md](2026-10-28-1061-auth-auto-all.md) 取代：工具白名单与 `inherit` 默认路径已删除，产品只保留 `auto` | `all`。以下为历史记录。
+
 状态：Claude-only 实施切片；父方验收待执行。Base `origin/main` = `bab2993840814a6f2732cfb7df71612dec92cdbd`。
 
 授权：D6 已批准 runtime 独立选项；owner 本轮批准 Claude-only 实施。真实零费用资格与命名合同见 `docs/notes/2026-10-28-1061-claude-native-tools-evidence.md`；Grok 不在本切片。

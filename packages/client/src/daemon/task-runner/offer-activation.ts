@@ -15,7 +15,7 @@ export interface OfferActivationInput
   extends Pick<OfferRequest, 'readerAttempt'>,
     Pick<OfferRuntime, 'pick' | 'scratch'>,
     Pick<OfferWorkspace, 'appliedAgentHomeProjection' | 'readerMemoryBaseline'>,
-    Pick<OfferManifest, 'preparedObservation'>,
+    Pick<OfferManifest, 'preparedObservation' | 'toolAuthorization'>,
     Pick<OfferWorkspace, 'workspaceDir'> {
   readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly blobAbort: AbortController;
@@ -34,7 +34,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   const { taskId } = phase;
   const {
     agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
-    workspaceDir, blobAbort, payload, session, messageRequirement, terminalProjection,
+    workspaceDir, blobAbort, payload, session, messageRequirement, terminalProjection, toolAuthorization,
   } = input;
   try {
   try {
@@ -62,6 +62,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     session,
     scratch,
     workspaceDir,
+    toolAuthorization,
     agentBinding,
     agentRef: agentBinding.resolution.agentRef,
     agentHandoff: {

@@ -9,11 +9,15 @@ export interface CodexNativeReply {
   reject(code: number, message: string): Promise<void>;
   cancelled(): void;
 }
-const approvals = new Set(['item/commandExecution/requestApproval', 'item/fileChange/requestApproval']);
 const key = (id: string | number) => JSON.stringify([typeof id, id]);
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
-/** Qualified against Codex rust-v0.160.0. Not an MCP elicitation or dynamic-tool bridge. */
+/**
+ * Qualified against Codex rust-v0.160.0. Relays structured user input only:
+ * tool permission belongs to the SDK `auto | all` decision, so the session
+ * runs with `approvalPolicy: never` and a native approval request is refused
+ * like any other unsupported method. Not an MCP elicitation or dynamic-tool bridge.
+ */
 export class CodexNativeInteractions {
   readonly channel: NativeInteractionChannel;
   private readonly controller: NativeInteractionController;
@@ -35,7 +39,7 @@ export class CodexNativeInteractions {
     if (this.seen.has(wireKey)) throw new NativeInteractionError('duplicate_request', 'native RPC request ID already used');
     if (this.seen.size >= this.maxRequests) throw new NativeInteractionError('capacity', 'native RPC lifetime request bound exceeded');
     this.seen.add(wireKey);
-    if (!approvals.has(method) && method !== 'item/tool/requestUserInput') {
+    if (method !== 'item/tool/requestUserInput') {
       void reply.reject(-32601, 'unsupported native interaction').catch(() => {});
       return;
     }
@@ -51,23 +55,13 @@ export class CodexNativeInteractions {
     }
     const native: NativeInteractionIdentity = { id, method, sessionRef: params.threadId as string, turnId: params.turnId as string, itemId: params.itemId as string };
     const forget = () => this.requests.delete(wireKey);
-    let questions: readonly NativeQuestion[] | undefined;
-    if (!approvals.has(method)) {
-      try { questions = parseQuestions(params.questions); }
-      catch { void reply.reject(-32602, 'invalid native questions').catch(() => {}); return; }
-    }
-    const request = this.controller.open(questions === undefined ? {
-      kind: 'approval', native,
-      title: method === 'item/fileChange/requestApproval' ? 'Approve file changes' : 'Approve command execution',
-      details: params,
-      decisions: ['allow-once', 'allow-session', 'deny', 'cancel'],
-    } : { kind: 'question', native, questions }, {
+    let questions: readonly NativeQuestion[];
+    try { questions = parseQuestions(params.questions); }
+    catch { void reply.reject(-32602, 'invalid native questions').catch(() => {}); return; }
+    const request = this.controller.open({ kind: 'question', native, questions }, {
       respond: async response => {
         try {
-        if (response.kind === 'approval') {
-          const decisions = { 'allow-once': 'accept', 'allow-session': 'acceptForSession', deny: 'decline', cancel: 'cancel' } as const;
-          await reply.respond({ decision: decisions[response.decision] });
-        } else if (response.kind === 'question') {
+        if (response.kind === 'question') {
           // Provider question IDs and option labels remain keys/values; no steer or synthetic prompt.
           const answers: Record<string, { answers: string[] }> = Object.create(null);
           for (const answer of response.answers) {
@@ -79,9 +73,8 @@ export class CodexNativeInteractions {
       },
       cancel: async () => {
         try {
-        if (questions === undefined) await reply.respond({ decision: 'cancel' });
         // User-input has no cancel-result variant. Reject its RPC rather than forge an empty answer.
-        else await reply.reject(-32000, 'native user input cancelled');
+        await reply.reject(-32000, 'native user input cancelled');
         } finally { forget(); }
       },
     });

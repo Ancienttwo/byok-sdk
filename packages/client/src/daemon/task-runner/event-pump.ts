@@ -8,6 +8,7 @@ import { projectRuntimeBoundaryFailure } from '../../runtime-failure';
 import { spillOversizedEvent } from '../event-spill';
 import { ProgressEventTooLargeError } from '../progress-batcher';
 import type { ActiveTask } from './support';
+import { classifyToolCall, describeHighRiskToolCall } from '../../tool-authorization';
 import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage } from './support';
 import type { TaskRunner } from '../task-runner';
 import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from '../task-runner';
@@ -42,6 +43,9 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
         active.messageDraft?.pushDelta(event.text, event.startsMessage);
         continue;
       }
+      // `all` never blocks: classify the full reported input before any
+      // spill, and only remind. `auto` already gated the call before it ran.
+      if (event.type === 'tool_use' && active.toolAuthorization === 'all') noteToolReminder.call(this, active, event);
 
       // DaemonConfig.maxInlineEventBytes: bound this ONE event before it is
       // counted, batched, or sent. An oversized `tool_use.input` /
@@ -356,4 +360,21 @@ export function reportArtifactError(this: TaskRunner, active: ActiveTask, name: 
     `[byok/client] artifact for task ${active.taskId} dropped: nameBytes=${Buffer.byteLength(name, 'utf8')} reasonBytes=${Buffer.byteLength(reason, 'utf8')}`,
   );
   active.batcher.push({ type: 'error', message: reason });
+}
+
+function noteToolReminder(this: TaskRunner, active: ActiveTask, event: Extract<AgentEvent, { type: 'tool_use' }>): void {
+  const input = event.input !== null && typeof event.input === 'object' && !Array.isArray(event.input)
+    ? event.input as Record<string, unknown> : {};
+  const call = { toolName: event.tool, input, cwd: active.workspaceDir };
+  const risk = classifyToolCall(call, active.workspaceDir);
+  if (risk.level === 'normal') return;
+  try {
+    this['deps'].onToolReminder?.(Object.freeze({
+      taskId: active.taskId, toolName: event.tool,
+      ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
+      reasons: risk.reasons, summary: describeHighRiskToolCall(call, risk.reasons),
+    }));
+  } catch (error) {
+    console.error(`[byok/client] tool reminder observer failed for task ${active.taskId}: ${errorMessage(error)}`);
+  }
 }
