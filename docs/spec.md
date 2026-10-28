@@ -3988,7 +3988,9 @@ must all match. A rule has a unique nonblank `id`, optional display-only
 - `commandGlob`: whole command/cmd text (string arrays are joined with spaces).
 - `pathGlob`: lexically resolved path; ask matches any extracted path, while
   allow requires every extracted path, including batch changes/move targets,
-  to match the same rule. It does not inspect arbitrary argument fields.
+  to match the same rule. It does not inspect arbitrary argument fields. In
+  `auto` paths use the hook's call cwd; `all` has no per-call cwd in its event
+  and resolves relative paths against the task workspace.
 - `mcpServer`, `mcpTool`: trusted MCP identity from the admitted task tool
   observation, or the normalized event in `all`. Names are not split on `__`;
   unobserved personal MCP tools cannot match these selectors by inference.
@@ -4031,8 +4033,9 @@ The built-in classifier marks a call high-risk when:
   `apply_patch`) targets a path outside the task workspace granted by the
   daemon.
 
-Everything else, including ordinary shell commands, reads anywhere, writes in
-the workspace, web, MCP and subagent calls, runs without asking. The
+The built-in fallback treats everything else, including ordinary shell commands,
+reads anywhere, writes in the workspace, web, MCP and subagent calls, as normal;
+a matching Always Ask rule can still require authorization. The
 classifier is lexical: paths resolve against the call's cwd with `~` expanded
 and symlinks not followed, and indirect command forms (scripts, `eval`,
 encoded payloads, aliases) are not recognized. It is a tool gate, not an

@@ -32,6 +32,8 @@ auto：runtime hook → 现有 gate → daemon 从 admitted observation 补 MCP 
 
 all：没有 pre-tool gate → 规范化 `tool_use` → 同一个 `classifyToolCall` 和该 task 冻结的 rules → normal 不提醒，high 产生带规则信息的本地 reminder。它是观察，不能保证动作前提醒或阻止执行。
 
+cwd 的证据差异保持可见：auto 使用 hook 提供的 call cwd；all 的规范化 event 没有 per-call cwd，按现有 event pump 使用 task workspace 解析相对路径。all 的路径 reminder 因此不是执行前路径授权，也不声称恢复 runtime 的目录切换。
+
 ## P3 — 默认决定及 owner 勾选
 
 以下 D1–D7 已获 owner 批准；保留推荐、理由、不选后果供审计。D8 是 owner 更新的交付指令。
