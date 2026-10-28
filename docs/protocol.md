@@ -1878,8 +1878,8 @@ stateDiagram-v2
     Running --> Complete: task.complete
     Running --> Failed: task.fail
     Running --> Cancelled: task.cancel / task.cancelled
-    AwaitApproval --> Running: task.approve / task.approval_resolved
-    AwaitApproval --> Failed: task.reject / task.fail
+    AwaitApproval --> Running: task.approve / task.reject / task.approval_resolved
+    AwaitApproval --> Failed: task.fail
     AwaitApproval --> Cancelled: task.cancel / task.cancelled
     Complete --> [*]
     Failed --> [*]
@@ -2047,9 +2047,16 @@ outcome.
 
 ## 4. Cancel/approve/reject wire semantics (M1 gap #3)
 
-**Rule: the server's own action is authoritative.** Calling the embedded
-server API (`TaskHandle.cancel()` / `.approve()` / `.reject()`) moves that
-server's task record immediately. Calling the hosted cloud's tenant-scoped
+**Rule: an accepted host decision is authoritative at its owning boundary.**
+For approvals, `cloud.approveTask` / `cloud.rejectTask` record
+`approval_resolved` with `resolvedBy: 'host'` in the approval timeline and
+enqueues the named `task.approve` / `task.reject`. The embedded server's
+`approvePendingApproval` / `rejectPendingApproval` project the task back to
+`Running`. Rejecting an approval does not itself record a `Failed` terminal;
+the daemon decides the runtime effect and reports any terminal outcome.
+
+Cancellation has its own terminal authority. The embedded server's
+`TaskHandle.cancel()` projects `Cancelled`. The hosted cloud's tenant-scoped
 `cancelTask(taskId, reason?)` atomically records a cancellation tombstone and
 durable mailbox delivery; an unleased attempt becomes `cancelled`, while a
 leased attempt exposes `cancel_requested` until the daemon acknowledgement.
@@ -2064,7 +2071,10 @@ observable proof of the daemon-side effect:
 - `task.approve` → daemon resumes the paused session; proof is `task.progress`
   resuming (or `task.fail` / `task.cancelled` if resuming turns out to be
   impossible).
-- `task.reject` → daemon stops the session; proof is `task.fail`.
+- `task.reject` → daemon resolves the named approval. A task-terminal
+  approval stops the session and produces `task.fail`; a tool-authorization
+  approval returns `tool_authorization_denied` as the tool error and the turn
+  continues ([Tool authorization](spec.md#tool-authorization-auto-and-all-1061)).
 - `task.cancel` → daemon stops the session; proof is `task.cancelled`
   ([§3.3](#33-cancelled-is-its-own-message-not-taskfailreasoncancelled-m1-gap-6)).
 
@@ -2081,74 +2091,78 @@ filtered from subsequent delivery, and reconnect redelivers the cancellation.
 `task.complete` may be retained as raw receipt evidence but cannot overwrite
 the accepted cancelled result or trigger downstream business projection.
 
-**`task.cancel`/`task.reject` stay individually redeliverable even though
-their task is already terminal server-side by the time they're queued.**
-`cancelTask`/`rejectTask` move the record to `Cancelled`/`Failed` *before*
-queuing the notification for delivery — that ordering is what makes the
-server's own state authoritative immediately, per the rule above — but it
-also means the notification's task has already reached a terminal state
-before it ever enters the redelivery backlog. The redelivery procedure's
-normal rule of skipping anything that belongs to an already-terminal task
-(§9) is therefore explicitly exempted for these two types: without the
-exemption, a `task.cancel`/`task.reject` that never reached the daemon (the
-connection dropped mid-send, say) could never be redelivered on reconnect —
-by definition, its task was terminal from the moment it was queued.
-`task.approve`/`task.steer` need no such exemption: neither is ever sent
-while its task is already terminal in the first place (both require a
-specific non-terminal state to send at all), so the ordinary terminal-task
-skip never wrongly catches them.
+**`task.cancel`/`task.reject` remain durably redeliverable.** The mailbox is
+an at-least-once delivery log, not a task-state-derived relevance view.
+`GET /byok/events` filters an offer after its task has an accepted
+cancellation; it retains every other owed mailbox row, including control
+messages whose task subsequently becomes terminal. This also applies to
+`task.approve` / `task.steer`: no special terminal-task exemption is needed.
+Cancellation may already be authoritative before delivery, while rejecting
+an approval resolves that approval without making the task terminal. Late or
+duplicate decisions still pass through the daemon's approval-id and task
+lifecycle guards.
 
 ## 5. Approval flow (M1 gap #8)
 
 The full round trip from a runtime pausing for human input to it resuming:
 
-1. The session calls `approvalChannel.request(summary)` (§5.1) and waits, or a
-   custom adapter's helper calls the control socket's `approvals.request`.
+1. The session calls `approvalChannel.request(summary)` (§5.1) and waits, a
+   custom adapter's helper calls the control socket's `approvals.request`, or
+   an `auto` tool-authorization gate requests approval for a high-risk call
+   ([Tool authorization](spec.md#tool-authorization-auto-and-all-1061)).
 2. The daemon registers the approval under its own `approvalId` and sends
    `task.await_approval { summary, approvalId }`. Server: `Running → AwaitApproval`.
 3. The server-embedding SaaS surfaces the summary to a human (or automated
    policy) and calls `TaskHandle.approve()` or `.reject(reason?)`.
-4. Server state moves immediately (`AwaitApproval → Running` or
-   `AwaitApproval → Failed`); `task.approve` / `task.reject`, each naming the
-   pending `approvalId`, go out as best-effort notifications
+4. Cloud records `approval_resolved` (`resolvedBy: 'host'`) in the approval
+   timeline and enqueues `task.approve` / `task.reject`, each naming the
+   pending `approvalId`. The embedded server projects `AwaitApproval → Running`
+   for either decision; rejection does not itself fail the task. Delivery is
+   a best-effort notification of the durable decision
    ([§4](#4-cancelapprovereject-wire-semantics-m1-gap-3)).
 5. Daemon reacts: it resolves the named approval in its registry, which
-   hands the decision to the waiting requester. On approve the session
-   resumes its runtime and normal `task.progress` traffic continues; on
-   reject the daemon stops the session and sends `task.fail`.
+   hands the decision to the waiting requester. On approve normal runtime
+   work continues. On reject, the local approval kind determines the effect:
+   a task-terminal approval stops the session and sends `task.fail`; a
+   tool-authorization approval returns a tool error and the turn continues
+   ([Tool authorization](spec.md#tool-authorization-auto-and-all-1061)).
 
 An approval can also resolve on the device without a wire decision; the
 daemon then reports it with `task.approval_resolved` (§5.2). Nothing else
 resolves a pending approval: task activity while the task awaits approval is
 applied but leaves the approval pending (§3).
 
-### 5.1 One entry point, one resolution point; bundled runtimes never ask
+### 5.1 One request owner, one resolution point
 
 `task.await_approval`, `task.approve`/`task.reject` and
 `task.approval_resolved` are the approval messages of the v4 wire; no
 `AgentEvent` requests or carries an approval. On the device an approval has
 one entry point and one resolution point:
 
-- **Entry:** `TaskRunner.requestApproval`. The daemon hands it, bound to the
-  task, as `RuntimeOperationStartInput.approvalChannel.request(summary)` to an
-  adapter that declares `approvalInteractive: true`, and only to such an
-  adapter. The session awaits `{ approved, reason? }` and resumes or stops
-  its own runtime. The control socket's `approvals.request` reaches the same
-  method for a custom adapter's out-of-process helper.
+- **Entry:** the shared `requestApproval` function in
+  `packages/client/src/daemon/task-runner/approvals.ts`. The daemon binds it
+  to the task as `RuntimeOperationStartInput.approvalChannel.request(summary)`
+  only for an adapter declaring `approvalInteractive: true`. The control
+  socket's `approvals.request` reaches it through `TaskRunner.requestApproval`.
+  These requests are task-terminal approvals. The `auto` tool gate uses the
+  same owner with the local tool-authorization kind; the kind is preserved
+  through queueing and dispatch and is not selected by the wire decision.
 - **Resolution:** the daemon's approval registry. A wire `task.approve`/
   `task.reject`, a local `Daemon.approve`/`reject`, the CLI's
   `approvals.resolve`, the fail-closed timeout, task finish and registry
   eviction each resolve the named approval there, and the first resolution
   wins.
 
-None of the bundled adapters requests approval: ordinary sessions run YOLO
-([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)), and each
-declares `approvalInteractive: false`, so none is handed the channel. v2
-removed the `PermissionMode` enum with the offer `policy`.
+Bundled adapters declare `approvalInteractive: false` and are not handed
+`approvalChannel`. Supported `auto` runtimes instead ask the daemon's
+pre-execution tool gate, which may request approval through the same flow
+above; `all` runs tools without blocking. This is independent of the retired
+adapter permission modes ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)).
+v2 removed the `PermissionMode` enum with the offer `policy`.
 
 `RuntimeInfo.capabilities.approvalInteractive` reports whether a runtime's
-sessions request approval. There is no connection-level approval capability
-flag.
+sessions use `approvalChannel`; it is separate from `toolAuthorizationAuto`.
+There is no connection-level approval capability flag.
 
 ### 5.2 `task.approval_resolved` — local-resolution report
 
@@ -2197,9 +2211,11 @@ stale, audit-only no-op (an `approvalId` that is no longer its pending one —
 no-op; neither crashes or double-applies anything. The window is
 network-latency-sized (however long `task.approval_resolved` takes to reach
 the server), and the only possible divergence is the kind §4 already accepts:
-the server's record disagreeing with a daemon that (in the reject case)
-already stopped, or (in the approve case) already continued, its own local
-session.
+the server's approval view temporarily lagging the daemon's resolved
+approval and runtime activity. A task-terminal rejection may already have
+stopped the session, while a tool-authorization rejection denies only the
+call and lets the turn continue; rejection alone does not determine a server
+terminal.
 
 ### 5.3 `approvalId` targeting
 
@@ -2221,7 +2237,7 @@ decision naming no pending approval is stale and resolves nothing.
 
 - **Daemon** (`TaskRunner.handleApprove`/`handleReject`, `task-runner.ts`):
   an incoming `task.approve`/`task.reject` whose `approvalId` does not match
-  this task's currently dispatched `ActiveTask.pendingApprovalId` is a stale,
+  this task's currently dispatched `ActiveTask.pendingApproval.approvalId` is a stale,
   audit-only no-op — logged via the `onStaleApprovalDecision` hook, never
   resolving anything and never tearing the task down. The daemon-side check is the AUTHORITATIVE gate — see the
   residual race below for why.
@@ -2244,7 +2260,7 @@ dispatch a new one at any instant the server cannot observe until the next
 `task.await_approval` arrives. A server-side `approveTask`/`rejectTask` call
 issued in that gap has nothing stale to compare against yet — the
 `StaleApprovalError` check only catches a mismatch the server ALREADY knows
-about. The DAEMON-side exact-match check (`ActiveTask.pendingApprovalId`) is
+about. The DAEMON-side exact-match check (`ActiveTask.pendingApproval.approvalId`) is
 therefore the authoritative gate: the wire decision still names the approval
 the server believed was current, and the daemon's own up-to-the-instant
 comparison resolves it as a no-op when the daemon has already moved past it.
@@ -2996,15 +3012,14 @@ already processed) a redelivered envelope.
    first-ever connection).
 2. The daemon issues an authenticated `GET /byok/events?cursor=N`; the
    response advertises current capabilities and contains the redelivery page.
-3. The server then redelivers, in `seq` order, every server → daemon envelope it
-   sent with `seq > cursor` that is **still relevant** — i.e. belongs to a
-   task that has not since reached a terminal state on the server, **or is a
-   `task.cancel`/`task.reject` notification** ([§4](#4-cancelapprovereject-wire-semantics-m1-gap-3)
-   exempts these two from the terminal-task check specifically because their
-   own task is *always* already terminal by the time they're queued).
-   Envelopes for tasks that are already `Complete`/`Failed`/`Cancelled` by
-   the time of reconnection are not redelivered — with that one exemption —
-   because there is nothing left for the daemon to act on.
+3. The server redelivers owed durable mailbox rows with `seq > cursor`, in
+   `seq` order and within the retained window. `GET /byok/events` omits an
+   offer whose task has an accepted cancellation. It does not otherwise
+   filter rows by the task's terminal state: controls such as `task.cancel`,
+   `task.reject`, `task.approve` and `task.steer` remain deliverable even if
+   their task has since become terminal
+   ([§4](#4-cancelapprovereject-wire-semantics-m1-gap-3)). The daemon applies its
+   lifecycle and approval-id guards to late or duplicate controls.
 4. Normal traffic resumes.
 
 This requires the server to retain enough state per device to reconstruct
