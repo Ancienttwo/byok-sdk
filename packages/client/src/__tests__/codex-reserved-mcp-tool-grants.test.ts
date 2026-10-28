@@ -59,7 +59,8 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
     for await (const event of session.events) if (event.type === 'turn_end') break;
     const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
     const opened = frames.find(frame => frame.method === (sessionRef === undefined ? 'thread/start' : 'thread/resume')).params;
-    expect(opened.approvalPolicy).toBe(interactive ? 'on-request' : 'never');
+    // Native interactions relay questions only; permission never moves to a Codex approval prompt.
+    expect(opened.approvalPolicy).toBe('never');
     expect(opened.config.mcp_servers.host).toEqual({ command: process.execPath, args: ['host.mjs'], enabled: true, tools: { submit_result: approve } });
     expect(opened.config.mcp_servers.other).toEqual({ command: process.execPath, args: ['other.mjs'], enabled: true });
     expect(opened.config.mcp_servers.byokagentresult.tools).toEqual(expectedTools.byokagentresult);

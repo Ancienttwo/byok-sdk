@@ -293,7 +293,7 @@ Codex 的同一 beforeOpen 投影处理 start/resume：固定 SDK helper 表与 
 声明按 server 隔离，仅写精确工具的 `approval_mode: approve`，不写 wildcard、
 server 默认批准或 `enabled_tools`。不增加 wire、tools/list 探测、status API，
 不从 prompt、模型输出、用户 config/read 或 transcript 推导 Host 声明。
-缺省没有额外 SDK 授权；用户原生配置与 nativeInteractions 保持原语义。
+缺省没有额外 SDK 授权；用户原生配置保持原语义。nativeInteractions 只转发结构化问题，approvalPolicy 恒为 never。
 这不是工具禁用名单或 filesystem sandbox；拼错名由 runtime 保持拒绝。
 
 Connector 首次建立长期绑定时，可把 daemon 签发的 device assertion 作为一次性

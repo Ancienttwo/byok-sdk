@@ -352,8 +352,8 @@ real tool. There is no separate approval-status API. Start and resume both use
 the current attempt's declaration, never a remembered transcript grant.
 `approveTools` does not limit tool availability or filesystem access, and does
 not revoke permissions in the user's own agent configuration. The SDK does not
-classify tools as read-only or mutating. Default and nativeInteractions modes
-remain unchanged, and each tool call follows the runtime's own guardrails:
+classify tools as read-only or mutating here; each tool call follows the
+task's `auto | all` mode and the runtime's own guardrails:
 
 - Claude: the selected servers go into a task-scoped `--mcp-config`, next to
   the user's own MCP configuration. Claude starts with

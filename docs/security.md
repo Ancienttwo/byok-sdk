@@ -453,8 +453,10 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
 
 ### 3. Shared approval path
 
-Bundled adapters never request approval: ordinary sessions run YOLO
-(ADR-037). The local native-interaction opt-in is a separate seam
+Bundled adapters do not declare `approvalInteractive`. Tool permission is the
+task's `auto | all` mode: under `auto`, the daemon itself requests approval on
+this path for a high-risk call. The local native-interaction opt-in relays
+structured questions only and never asks for tool permission
 (`docs/spec.md`, "Local native interaction contract"). The daemon approval
 registry and control methods serve a custom adapter that declares
 `approvalInteractive: true` and calls its `approvalChannel.request`, or a

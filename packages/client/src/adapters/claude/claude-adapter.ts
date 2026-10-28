@@ -131,11 +131,11 @@ export interface ClaudeAdapterOptions {
  * `~/.claude` settings and deny rules).
  *
  * Explicit nativeInteractions opts into the Agent SDK stdio control handshake
- * (`--permission-prompt-tool stdio`) instead of the skip flag: the local Host
- * UI answers each request the CLI forwards to can_use_tool, including
- * AskUserQuestion. Existing allow rules may bypass that callback; this is not a
- * blanket all-tools confirmation policy. Remote boolean approvals remain
- * unsupported, as does mid-turn steering.
+ * (`--permission-prompt-tool stdio`) instead of the skip flag so that
+ * AskUserQuestion reaches the local Host UI. Every other can_use_tool request
+ * is allowed by the SDK at once: tool permission is decided only by the task's
+ * `auto | all` mode (the PreToolUse gate), never by a second native prompt.
+ * Remote boolean approvals remain unsupported, as does mid-turn steering.
  */
 export class ClaudeAdapter implements RuntimeAdapter {
   readonly descriptor;
@@ -357,12 +357,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
         ...(persistSession ? [] : ['--no-session-persistence']),
         ...(manifestModelId ? ['--model', manifestModelId] : []),
         ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
-        // YOLO by default, as in OAR (`runtimes/claude/session.ts`): no human
-        // sits at an approval prompt, so a permission gate is a hang, not
-        // safety. A Host that opted into native interactions answers each
-        // request in its own UI instead. Under `acceptEdits` with no
-        // per-tool grant, that includes every MCP tool call — the SDK's
-        // reserved memory and message tools too.
+        // YOLO by default, as in OAR (`runtimes/claude/session.ts`). Native
+        // interactions need the stdio prompt tool to relay AskUserQuestion;
+        // the bridge passes every other request through (see the class doc).
         ...(this.nativeOptions === undefined
           ? ['--dangerously-skip-permissions']
           : ['--permission-prompt-tool', 'stdio', '--permission-mode', 'acceptEdits']),

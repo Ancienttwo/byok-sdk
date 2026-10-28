@@ -50,7 +50,7 @@ export class ClaudeToolAuthorizationBridge {
   bind(write: (frame: Record<string, unknown>) => Promise<void>): void { this.write = write; }
   close(): void { this.ended = true; }
 
-  /** True only for this bridge's control requests, keeping native interactions independent. */
+  /** True only for this bridge's hook callbacks; native question relay receives the rest. */
   receive(message: ClaudeStreamMessage): boolean {
     if (message.type !== 'control_request' || !record(message.request) || message.request.subtype !== 'hook_callback') return false;
     if (this.ended) return true;

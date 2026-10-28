@@ -119,7 +119,8 @@ export class CodexAdapter implements RuntimeAdapter {
       steer: true,
       resume: true,
       approvalInteractive: false,
-      ...(this.options.nativeInteractions === undefined ? {} : { nativeInteractions: { approvalDecisions: ['allow-once', 'allow-session', 'deny', 'cancel'] as const, structuredQuestions: true } }),
+      // Questions only: tool permission is the SDK `auto | all` decision.
+      ...(this.options.nativeInteractions === undefined ? {} : { nativeInteractions: { approvalDecisions: [], structuredQuestions: true } }),
       mcpToolsets: true,
       messageDraft: true,
     },
@@ -267,7 +268,6 @@ export class CodexAdapter implements RuntimeAdapter {
           cwd,
           env: { ...input.env, ...input.scratch.env } as Record<string, string>,
           ...(model === undefined ? {} : { model }),
-          ...(this.options.nativeInteractions === undefined ? {} : { approvalPolicy: "on-request" as const }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           launchArgs: [

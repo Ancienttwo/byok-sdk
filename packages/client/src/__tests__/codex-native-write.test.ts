@@ -36,8 +36,8 @@ describe('acknowledged native reply transport', () => {
     const bridge = new CodexNativeInteractions(() => 'thread', { onRequest: r => { request = r; }, onResolved: r => { receipts.push(r); }, writeTimeoutMs: 20 }, onFatal);
     bridge.beginTurn(); bridge.notification('turn/started', { threadId: 'thread', turn: { id: 'turn' } });
     const reply = { respond: vi.fn(() => new Promise<void>(() => {})), reject: vi.fn(async () => {}), cancelled: vi.fn() };
-    bridge.receive(7, 'item/fileChange/requestApproval', { threadId: 'thread', turnId: 'turn', itemId: 'item' }, reply);
-    const result = bridge.channel.respond({ requestId: request.requestId, kind: 'approval', decision: 'allow-once' }); await Promise.resolve();
+    bridge.receive(7, 'item/tool/requestUserInput', { threadId: 'thread', turnId: 'turn', itemId: 'item', questions: [{ id: 'q', header: '', question: 'Proceed?', isOther: true, isSecret: false, options: null }] }, reply);
+    const result = bridge.channel.respond({ requestId: request.requestId, kind: 'question', answers: [{ questionId: 'q', selectedOptionIds: [], text: 'yes' }] }); await Promise.resolve();
     expect(reply.respond).toHaveBeenCalledOnce();
     bridge.notification(notification, notification === 'serverRequest/resolved' ? { threadId: 'thread', requestId: 7 } : { threadId: 'thread', turn: { id: 'turn' } });
     expect(await result).toMatchObject({ status: 'cancelled' }); expect(reply.cancelled).toHaveBeenCalledOnce();

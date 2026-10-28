@@ -44,11 +44,11 @@ export interface ClaudeAdapterOptions {
  * `~/.claude` settings and deny rules).
  *
  * Explicit nativeInteractions opts into the Agent SDK stdio control handshake
- * (`--permission-prompt-tool stdio`) instead of the skip flag: the local Host
- * UI answers each request the CLI forwards to can_use_tool, including
- * AskUserQuestion. Existing allow rules may bypass that callback; this is not a
- * blanket all-tools confirmation policy. Remote boolean approvals remain
- * unsupported, as does mid-turn steering.
+ * (`--permission-prompt-tool stdio`) instead of the skip flag so that
+ * AskUserQuestion reaches the local Host UI. Every other can_use_tool request
+ * is allowed by the SDK at once: tool permission is decided only by the task's
+ * `auto | all` mode (the PreToolUse gate), never by a second native prompt.
+ * Remote boolean approvals remain unsupported, as does mid-turn steering.
  */
 export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;

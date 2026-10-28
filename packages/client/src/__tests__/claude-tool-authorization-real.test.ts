@@ -10,11 +10,13 @@ import { startPreparedOperation } from './fixtures/prepared-operation';
 
 /** Explicit local-runtime acceptance; all model traffic ends at the zero-cost loopback provider. */
 describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto gate with a loopback provider', () => {
-  it.each(['denied', 'approved', 'workspace', 'all', 'subagent'] as const)('%s: enforced under bypassPermissions, allow rules and disableAllHooks', async mode => {
+  it.each(['denied', 'approved', 'workspace', 'all', 'subagent', 'native-all', 'native-approved', 'native-denied'] as const)('%s: enforced under bypassPermissions, allow rules and disableAllHooks', async mode => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-real-auth-')));
     const workspace = path.join(root, 'home');
     await fs.mkdir(workspace);
     // Outside the granted workspace is high-risk; inside it is ordinary work.
+    const native = mode.startsWith('native-');
+    const nativeRequests: unknown[] = [];
     const target = mode === 'workspace' ? path.join(workspace, 'target.txt') : path.join(root, 'target.txt');
     const calls: ToolCall[] = [];
     const summaries: string[] = [];
@@ -90,26 +92,30 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
       };
       const adapter = new ClaudeAdapter({
         ...(process.env.BYOK_REAL_CLAUDE_BIN ? { resolveBin: () => ({ command: process.env.BYOK_REAL_CLAUDE_BIN!, source: 'env' as const }) } : {}),
+        // The native relay must neither veto (`all`) nor ask a second time (`auto`).
+        ...(native ? { nativeInteractions: { onRequest: (request: unknown) => { nativeRequests.push(request); } } } : {}),
       });
       const inner = createAutoToolAuthorizationGate({ workspace, timeoutMs: 5_000, requestAuthorization: async summary => {
         summaries.push(summary);
-        return mode === 'approved' ? { approved: true } : { approved: false, reason: '主人尚未授权' };
+        return mode === 'approved' || mode === 'native-approved' ? { approved: true } : { approved: false, reason: '主人尚未授权' };
       } });
-      const toolAuthorization = mode === 'all' ? undefined : { timeoutMs: inner.timeoutMs, authorize: (call: ToolCall) => { calls.push(call); return inner.authorize(call); } };
+      const toolAuthorization = mode === 'all' || mode === 'native-all' ? undefined : { timeoutMs: inner.timeoutMs, authorize: (call: ToolCall) => { calls.push(call); return inner.authorize(call); } };
       session = await startPreparedOperation(adapter, { instruction: 'Perform the requested file operation, then finish.' }, {
         workspaceDir: workspace, agentHome: workspace, env, ...(toolAuthorization === undefined ? {} : { toolAuthorization }),
       });
       let ended = false;
       for await (const event of session.events) { if (event.type === 'turn_end') { ended = true; break; } }
       expect(ended).toBe(true);
-      if (mode === 'denied' || mode === 'subagent') {
+      if (mode === 'denied' || mode === 'subagent' || mode === 'native-denied') {
         await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
         expect(JSON.stringify(results)).toContain('tool_authorization_denied: 主人尚未授权');
         expect(summaries.some(summary => summary.includes('write-outside-workspace') && summary.includes(target))).toBe(true);
       } else {
         expect(await fs.readFile(target, 'utf8')).toBe('native-write');
       }
-      if (mode === 'all') expect(calls).toEqual([]);
+      if (mode === 'all' || mode === 'native-all') expect(calls).toEqual([]);
+      if (native) expect(nativeRequests).toEqual([]);
+      if (mode === 'native-approved') expect(summaries).toHaveLength(1);
       if (mode === 'workspace') expect(summaries).toEqual([]);
       if (mode === 'approved') expect(summaries).toHaveLength(1);
       if (mode === 'subagent') {

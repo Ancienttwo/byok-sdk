@@ -2059,8 +2059,8 @@ but the real unapproved tool remains subject to the runtime's existing refusal.
 There is no new status API or SDK `tools/list` probe for Codex.
 
 This is an explicit local approval declaration, not a read-only/mutating
-classifier, a tool deny list or a sandbox. `approvalPolicy` stays `never` by
-default and `on-request` with nativeInteractions. Existing user runtime policy
+classifier, a tool deny list or a sandbox. `approvalPolicy` stays `never`,
+with or without nativeInteractions. Existing user runtime policy
 and native interaction behavior still apply; absence of a Host declaration
 means no additional SDK approval, not a revocation of user configuration.
 Remote offers, prompts, tool descriptions and transcript contents cannot author
@@ -3519,32 +3519,35 @@ credential or persistent-access operation is part of its fixture validation.
 
 ### Qualified local provider bridges
 
+Native interactions relay structured questions only. Tool permission is decided
+once per call by the task's `auto | all` mode (see Tool authorization below); no
+native path may veto a call under `all` or ask a second time under `auto`, so
+both bridges advertise an empty `approvalDecisions` list.
+
 Claude uses the official Agent SDK stdio control handshake and
-`--permission-prompt-tool stdio`. It preserves `request_id` independently of
-`tool_use_id`, sends one-shot `behavior:allow` with the original `updatedInput`,
-and never sends `updatedPermissions`. It offers only allow-once, deny and cancel.
-`AskUserQuestion` answers retain the native question text and option labels
+`--permission-prompt-tool stdio`, which is the transport that carries
+`AskUserQuestion` to the Host. Every other `can_use_tool` request is answered
+by the SDK at once with one-shot `behavior:allow` and the original
+`updatedInput`, without opening a Host request; `updatedPermissions` is never
+sent. Under `auto`, the PreToolUse gate has already decided before Claude
+reaches that callback. `AskUserQuestion` answers retain the native question text and option labels
 inside `updatedInput.answers`; duplicate native text/labels are refused rather
 than overwritten. Cancellation/timeout sends deny plus interrupt, while a
 native `control_cancel_request` writes no answer. Unknown/malformed requests or
 native identity drift dispose the process. Opt-in launches Claude with
 `--permission-prompt-tool stdio --permission-mode acceptEdits` instead of
-`--dangerously-skip-permissions`. Claude then asks the Host for every MCP tool
-call, the SDK reserved memory and message tools included; no per-tool grant
-exists. Claude's own existing allow rules may bypass the callback, so this is
-not an all-tools-confirmation policy.
+`--dangerously-skip-permissions`; the pass-through above keeps that mode from
+becoming a second permission system.
 
 Codex is qualified against CLI 0.160.0. As in OAR, the version is read, never
 gated: Codex updates itself, so any other version is admitted with a
 `runtime_version_unqualified` advisory. Native contracts are probed instead
-(app-server presence). Opt-in opens/resumes with `on-request` and
-requires approval-policy readback before a session is exposed; ordinary default
-mode remains `never`. The sandbox is `danger-full-access` by default, as in
+(app-server presence). Every session, native opt-in included, opens/resumes
+with `approvalPolicy: never`, so Codex never asks for tool permission. The sandbox is `danger-full-access` by default, as in
 OAR. `DaemonConfig.codexSandbox` selects `read-only` or `workspace-write`, or
 `inherit` to pass no sandbox override so the user's own `config.toml` applies.
-Only command/file approval requests and
-`item/tool/requestUserInput` are mapped. Allow-once maps to `accept`, session
-scope to `acceptForSession`, denial to `decline` and cancellation to `cancel`.
+Only `item/tool/requestUserInput` is mapped; a command/file approval request
+is refused as an unsupported native interaction and never reaches the Host.
 Structured questions keep native question IDs and answer arrays. User-input
 cancellation rejects that RPC rather than manufacturing an empty answer.
 Permissions-profile requests, dynamic tools and MCP elicitation are not
