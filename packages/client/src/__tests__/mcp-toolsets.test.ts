@@ -19,7 +19,7 @@ import {
   probeMcpServer,
 } from '../daemon/mcp-tools-probe';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from '../daemon/toolset-registry';
-import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
+import { freezeRuntimeAdapterDescriptor, type McpToolsetConfig, type RuntimeCapabilities, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -29,6 +29,26 @@ import { AgentEgressController } from '../daemon/agent-egress-controller';
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
 const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+
+class HostApprovalAdapter extends StubRuntimeAdapter {
+  override readonly descriptor = freezeRuntimeAdapterDescriptor({
+    id: 'codex', supportsDispatchSelection: true, mcpToolApprovals: true,
+    capabilities: { steer: false, resume: true, approvalInteractive: false, mcpToolsets: true },
+  });
+  readonly approvals: Array<RuntimeOperationStartInput['mcpToolApprovals']> = [];
+
+  override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const result = await super.prepare(input);
+    if (result.kind === 'reject') return result;
+    return { kind: 'prepared', operation: {
+      ...result.operation,
+      start: start => {
+        this.approvals.push(start.mcpToolApprovals);
+        return result.operation.start(start);
+      },
+    } };
+  }
+}
 
 const MCP_CAPABLE: RuntimeCapabilities = {
   steer: false,
@@ -73,7 +93,7 @@ const SILENT_SERVER_COUNT = 6;
 const SHORTENED_PROBE_TIMEOUT_MS = 700;
 
 async function makeRunner(
-  adapter: StubRuntimeAdapter,
+  adapter: StubRuntimeAdapter | StubRuntimeAdapter[],
   sent: Envelope[],
   mcpToolsets?: ReadonlyMap<string, McpToolsetConfig>,
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>,
@@ -81,7 +101,7 @@ async function makeRunner(
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe,
-    adapters: [adapter],
+    adapters: Array.isArray(adapter) ? adapter : [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => sent.push(envelope),
@@ -95,6 +115,72 @@ async function makeRunner(
 }
 
 describe('TaskRunner logical MCP toolset resolution', () => {
+  it('freezes Host approvals before detection and reload affects only the next attempt without probing', async () => {
+    const config = (approveTools: string[]) => ({ host: { mcpServers: { host: { command: '/opt/host-mcp', approveTools } } } });
+    const registry = new McpToolsetRegistry(config(['read']));
+    const adapter = new HostApprovalAdapter();
+    const probe = vi.fn(stubToolsProbe);
+    const sent: Envelope[] = [];
+    vi.spyOn(adapter, 'detect').mockImplementationOnce(async () => {
+      registry.reload(config(['read', 'write']), registry.status().revision);
+      return { kind: 'available' };
+    });
+    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot().toolsets, probe);
+    try {
+      for (const [index, taskId] of ['before-reload', 'after-reload'].entries()) {
+        await runner.handleEnvelope(createEnvelope('task.offer', {
+          agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'codex', requiredToolsets: ['host'],
+        }, { taskId, seq: index + 1 }));
+      }
+      expect(adapter.approvals).toEqual([{ host: ['read'] }, { host: ['read', 'write'] }]);
+      expect(Object.isFrozen(adapter.approvals[0])).toBe(true);
+      expect(Object.isFrozen(adapter.approvals[0]!.host)).toBe(true);
+      expect(adapter.startCalls[0]!.ctx.mcpServers).toEqual({ host: { command: '/opt/host-mcp' } });
+      expect(probe).not.toHaveBeenCalled();
+      expect(sent.filter(e => e.type === 'task.claim')).toHaveLength(2);
+    } finally {
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'before-reload', seq: 3 }));
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'after-reload', seq: 4 }));
+    }
+  });
+
+  it('refuses unsupported explicit runtimes before detection, probing or claim', async () => {
+    const registry = new McpToolsetRegistry({ host: { mcpServers: { host: { command: '/opt/host-mcp', approveTools: ['read'] } } } });
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const detect = vi.spyOn(adapter, 'detect');
+    const probe = vi.fn(stubToolsProbe);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot().toolsets, probe);
+    await runner.handleEnvelope(createEnvelope('task.offer', {
+      agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'claude', requiredToolsets: ['host'],
+    }, { taskId: 'unsupported-approvals', seq: 1 }));
+    expect(sent.find(e => e.type === 'task.decline')?.payload).toMatchObject({
+      reason: 'runtime "claude" cannot enforce Host MCP tool approvals', retryable: false,
+    });
+    expect(sent.some(e => e.type === 'task.claim')).toBe(false);
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(detect).not.toHaveBeenCalled();
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it('automatic runtime selection skips a runtime that cannot enforce the Host declaration', async () => {
+    const unsupported = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const supported = new HostApprovalAdapter();
+    const detect = vi.spyOn(unsupported, 'detect');
+    const registry = new McpToolsetRegistry({ host: { mcpServers: { host: { command: '/opt/host-mcp', approveTools: ['read'] } } } });
+    const runner = await makeRunner([unsupported, supported], [], undefined, () => registry.snapshot().toolsets);
+    try {
+      await runner.handleEnvelope(createEnvelope('task.offer', {
+        agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', requiredToolsets: ['host'],
+      }, { taskId: 'automatic-approvals', seq: 1 }));
+      expect(detect).not.toHaveBeenCalled();
+      expect(supported.approvals).toEqual([{ host: ['read'] }]);
+      expect(unsupported.startCalls).toHaveLength(0);
+    } finally {
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'automatic-approvals', seq: 2 }));
+    }
+  });
+
   it('resolves local server definitions into TaskContext and strips logical ids before adapter.start', async () => {
     const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
@@ -439,7 +525,7 @@ describe('McpToolsetRegistry atomic reload and explicit observation authority', 
         { mail: { mcpServers: { gmail: { command: '/opt/gmail-mcp', env: { TOKEN: 'secret' } } } } } as never,
         before.revision,
       ),
-    ).toThrow(/accepts only command and args/);
+    ).toThrow(/accepts only command, args and approveTools/);
     expect(registry.status()).toEqual(before);
 
     const receipt = registry.reload(
@@ -555,7 +641,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
         },
         [adapter],
       ),
-    ).toThrow(/accepts only command and args/);
+    ).toThrow(/accepts only command, args and approveTools/);
   });
 
   /**
@@ -833,6 +919,6 @@ describe('TaskRunner host toolset context nonce injection', () => {
             },
           },
         } as never),
-    ).toThrow(/accepts only command and args/);
+    ).toThrow(/accepts only command, args and approveTools/);
   });
 });

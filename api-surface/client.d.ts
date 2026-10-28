@@ -3,7 +3,17 @@ import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepa
 import { type ResolvedBin } from './resolve-bin';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type SpawnFn } from './process-client';
+declare const CLAUDE_AGENT_BUILTIN_TOOLS: readonly ['Agent', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'Edit', 'EnterWorktree', 'ExitWorktree', 'ListAgents', 'NotebookEdit', 'Read', 'ReportFindings', 'ScheduleWakeup', 'SendMessage', 'Skill', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskStop', 'TaskUpdate', 'WebFetch', 'WebSearch', 'Workflow', 'Write'];
+export type ClaudeBuiltinToolName = typeof CLAUDE_AGENT_BUILTIN_TOOLS[number];
 export interface ClaudeAdapterOptions {
+    /**
+     * Agent operations only: select exact Claude native tools before startup.
+     * Default `inherit` leaves the CLI defaults unchanged; [] disables all native
+     * tools. MCP stays independent. Fresh/resumed sessions use this frozen set;
+     * follow-ups keep the same process policy. Settings, hooks and user-context
+     * behavior are unchanged: this is not a filesystem or extension sandbox.
+     */
+    agentBuiltinTools?: 'inherit' | readonly ClaudeBuiltinToolName[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /** Override bin resolution — tests substitute the fake-claude fixture script. */
@@ -54,6 +64,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
+    private readonly agentBuiltinTools;
     constructor(options?: ClaudeAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -78,6 +89,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private probeAuthPresent;
     private resolveBin;
 }
+export {};
 // ==== @byok-sdk/client dist/adapters/claude/events.d.ts ====
 import type { McpEventIdentities } from '../../mcp/event-identity';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -425,7 +437,8 @@ export interface CodexAdapterOptions {
      * opens, the adapter reads Codex's effective configuration for the task cwd
      * (`config/read`), sets `enabled = false` on every other `mcp_servers`
      * entry, and turns off the `apps` (connectors) and `plugins` features for
-     * the thread. The thread then has no plugins at all, not only no plugin
+     * the thread. Plugin exclusion also applies at app-server launch, before
+     * startup plugin sync. The thread then has no plugins at all, not only no plugin
      * MCP servers. After the open it reads the thread's MCP server status
      * back, and the start fails if any other server is not disabled, or if a
      * user server has the name of a task or SDK server. The user's
@@ -638,7 +651,7 @@ export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
 export { PiAdapter } from './pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig, PiBuiltinToolName, PiAgentExtensionName } from './pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './pi/resolve-bin';
 export { ClaudeAdapter } from './claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './claude/claude-adapter';
@@ -653,14 +666,40 @@ export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInter
 export { buildRuntimeEnv } from '../daemon/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
+// ==== @byok-sdk/client dist/adapters/pi/agent-tool-policy.d.ts ====
+/** Pi native tools exposed by the Agent policy. PowerShell is never implicitly selected. */
+export type PiBuiltinToolName = 'read' | 'grep' | 'find' | 'ls' | 'edit' | 'write' | 'bash';
+export type PiAgentExtensionName = 'web' | 'subagent' | 'todo';
+export interface PiAgentToolPolicy {
+    readonly builtinTools: 'inherit' | readonly PiBuiltinToolName[];
+    readonly userContext: 'inherit' | 'excluded';
+    readonly extensions: 'inherit' | readonly PiAgentExtensionName[];
+}
+export declare const INHERITED_PI_AGENT_TOOL_POLICY: PiAgentToolPolicy;
+/** One parser owns options validation and the digest-bound helper contract. */
+export declare function parsePiAgentToolPolicy(value: unknown): PiAgentToolPolicy;
+export declare function hasPiAgentToolRestrictions(policy: PiAgentToolPolicy): boolean;
+/** Exclusions survive transcript restoration; modifiers retain independently admitted extension/MCP tools. */
+export declare function piAgentNativeToolOptions(policy: PiAgentToolPolicy): {
+    tools?: string[];
+    excludeTools?: string[];
+};
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './rpc-client';
+import { type PiBuiltinToolName, type PiAgentExtensionName } from './agent-tool-policy';
+export type { PiBuiltinToolName, PiAgentExtensionName } from './agent-tool-policy';
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
+    /** Agent tasks only: select native tools; [] disables them. Default inherit. Does not confine file paths. */
+    agentBuiltinTools?: 'inherit' | readonly PiBuiltinToolName[];
+    /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores. Default inherit. */
+    agentUserContext?: 'inherit' | 'excluded';
+    /** Agent tasks only: select SDK web/subagent/todo extensions; MCP remains independently admitted. Default inherit. */
+    agentExtensions?: 'inherit' | readonly PiAgentExtensionName[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /** Opt-in ordinary, lease-bound durable worker. */
@@ -696,6 +735,7 @@ export interface PiByokLauncherConfig {
 export declare function validatePiByokLauncherConfig(launcher: PiByokLauncherConfig | undefined): void;
 export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
+    private readonly agentToolPolicy;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     constructor(options?: PiAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
@@ -10151,7 +10191,7 @@ export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnviron
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig, PiBuiltinToolName, PiAgentExtensionName } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets';
 export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets';
@@ -12864,7 +12904,10 @@ export interface McpStdioServerConfig {
 }
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
-    mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
+    mcpServers: Readonly<Record<string, McpStdioServerConfig & {
+        /** Exact Host-approved tool names; omitted or empty adds no approval. Local configuration only. */
+        readonly approveTools?: readonly string[];
+    }>>;
 }
 /** Lifecycle facts a device host may explicitly report for one configured toolset. */
 export type McpToolsetLifecycleState = 'installed' | 'unauthorized' | 'starting' | 'ready' | 'degraded' | 'crashed' | 'incompatible';
@@ -13003,6 +13046,8 @@ export interface RuntimeAdapterDescriptor {
      * never makes an offer wait on one it has no use for.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
+    /** Can enforce the local Host's exact per-tool MCP approvals. Nonempty grants require this capability. */
+    readonly mcpToolApprovals?: boolean;
     /**
      * Whether each `progress` event carries one complete assistant message
      * rather than a streaming delta. Codex emits one event per completed
@@ -13202,6 +13247,8 @@ interface RuntimeOperationStartBase {
     readonly env: NodeJS.ProcessEnv;
     /** Local MCP authority resolved from logical wire ids. */
     readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+    /** Local registry approvals copied and frozen with this attempt's servers; never sourced from wire or transcript. */
+    readonly mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
     /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
     readonly mcpToolsetTools?: McpToolsetToolObservation;
     /**

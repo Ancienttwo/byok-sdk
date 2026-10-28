@@ -17,6 +17,7 @@ export interface PreparedOperationResources {
   scratch?: import('../../daemon/retention/scratch').ExecutionScratch;
   env: NodeJS.ProcessEnv;
   mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+  mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
   /** Stands in for the daemon's `tools/list` observation; required whenever `mcpServers` carries a non-reserved server. */
   mcpToolsetTools?: McpToolsetToolObservation;
   /**
@@ -83,6 +84,7 @@ export async function startPreparedOperation(
       instruction: offer.instruction,
       env: resources.env,
       ...(resources.mcpServers === undefined ? {} : { mcpServers: resources.mcpServers }),
+      ...(resources.mcpToolApprovals === undefined ? {} : { mcpToolApprovals: resources.mcpToolApprovals }),
       ...(resources.startMcpToolsetTools !== undefined
         ? { mcpToolsetTools: resources.startMcpToolsetTools }
         : resources.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: resources.mcpToolsetTools }),

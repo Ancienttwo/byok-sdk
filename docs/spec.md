@@ -1192,7 +1192,24 @@ Host UI or native tools. SDK source is now v9 (see the v9 cut); downstream paire
 remain separate actions. No v7 reader, mode default or fallback is retained.
 
 Fresh Pi execution keeps Pi's default native tools and the user's own
-extensions and skills. Prepared execution launches no native tool. Observed MCP
+extensions and skills by default. For Agent tasks on the ordinary RPC lane,
+local `PiAdapterOptions.agentBuiltinTools` selects the native tools (an empty
+list disables all), `agentUserContext: 'excluded'` removes user extensions,
+skills, templates, themes, instruction files and session resource settings, and
+`agentExtensions` selects the SDK web/subagent/todo extensions independently.
+The MCP bridge remains admitted separately. The excluded loader uses a fresh
+SDK resources directory while Pi's original model/auth stores remain the
+authentication authority; credentials are not copied or added to tool environments.
+The existing session-storage directory setting remains authoritative for continuity.
+An explicit tool policy is re-applied on resume, including dropping stale
+transcript tools. A resume that cannot clear pending tools fails closed.
+These options apply only when the manifest carries `agentRef`; unsupported
+prepared/durable lanes reject a non-inherited policy before spawning.
+The launch config is digest-bound v6; v5 is not accepted.
+Tool selection does not restrict file paths or provide an OS sandbox. Keeping
+user extensions or SDK web/subagent extensions permits their separately
+registered tools; a strict total tool set requires excluded user context and
+an explicit SDK extension set. Prepared execution launches no native tool. Observed MCP
 toolsets and reserved helpers on fresh offers remain separately admitted;
 prepared offers expose only their counted MCP tools and explicitly selected SDK
 memory tools.
@@ -1982,7 +1999,8 @@ so a daemon that would strip the field never executes the instruction without
 its required tools.
 
 The device operator configures each id in `DaemonConfig.mcpToolsets` as one or
-more stdio MCP servers. This first slice accepts only `command` and `args`;
+more stdio MCP servers. Each definition accepts `command`, `args`, and optional
+`approveTools` (exact local Host-approved tool names);
 environment variables, headers, remote URLs, tokens, and cookies are not part
 of the selectable shape. This does not sanitize arbitrary instruction text;
 the host must not put connector secrets there. The daemon validates the registry
@@ -2016,9 +2034,38 @@ shape fails the whole observation and the task is declined permanently.
 Claude and Codex list their MCP tools themselves, so the daemon does not probe
 for them. Claude gets the selected servers in a task-scoped `--mcp-config`;
 Codex gets them in the `thread/start` or `thread/resume` config (`mcp_servers`).
-The SDK grants no per-tool
-permission and does not classify tools as read-only or mutating. Each tool call
-follows the agent's own guardrails and the user's own configuration (ADR-037).
+A local Host may set `approveTools` on a toolset server to preapprove exact
+MCP tools. The registry accepts unique names matching `[A-Za-z0-9_][A-Za-z0-9_-]{0,63}`
+and rejects prototype keys (`__proto__`, `prototype`, `constructor`). It rejects
+wildcards, server-wide defaults, duplicate names and any Host use of reserved
+server names. Omitted and empty lists both add no approval. The sorted list is
+part of the canonical definition and registry revision: authorization-only
+reloads change identity and invalidate the old definition's observation.
+
+Servers and approvals are copied together from one registry snapshot before
+runtime detection and claim. The deeply frozen per-attempt `mcpToolApprovals`
+start resource cannot be enlarged by a later `toolsets.reload`; later attempts
+read the new definition. Runtime selection requires the local descriptor's
+`mcpToolApprovals: true` for a nonempty declaration. Codex declares it; other
+bundled runtimes do not. Explicit unsupported runtime selection declines
+non-retryably before claim; automatic selection excludes unsupported adapters.
+No approval declaration or capability is added to wire.
+
+Codex projects only `tools.<exact-name>.approval_mode = "approve"` in the
+thread config for both start and resume, alongside the separate fixed SDK
+helper grants. It does not approve tools on any other server, add an
+`enabled_tools` filter or set `default_tools_approval_mode`. Unknown/misspelled
+tool names do not fail open or trigger extra SDK discovery: the thread may open,
+but the real unapproved tool remains subject to the runtime's existing refusal.
+There is no new status API or SDK `tools/list` probe for Codex.
+
+This is an explicit local approval declaration, not a read-only/mutating
+classifier, a tool deny list or a sandbox. `approvalPolicy` stays `never` by
+default and `on-request` with nativeInteractions. Existing user runtime policy
+and native interaction behavior still apply; absence of a Host declaration
+means no additional SDK approval, not a revocation of user configuration.
+Remote offers, prompts, tool descriptions and transcript contents cannot author
+these declarations.
 
 ### The launch working directory
 
@@ -3566,6 +3613,8 @@ wire contracts do not change.
 `DaemonConfig.storage` owns optional budget, scratchRoot, skillPackDataDirs and retention cadence/limits/expiring TTLs. Defaults: 15-minute sweeps, 5-minute pressure sweeps, 256 deletions, 10-second soft pass limit, runtime/old skill revisions 24 hours, daemon/home temps one hour, reader runs seven days, Agent result records seven days and 256 per home, confirmed journal receipts 30 days. Agent result records are still swept under storage pressure. Home temps cannot be configured below one hour; confirmed journal TTL must exceed the seven-day mailbox redelivery window. Input preparation retains its own absolute artifact/record horizons and pins; only its timer moves to the unified sweeper. Current skill revisions are resolved from installer lock.json under a shared publication gate. One usage measurement visits at most 65,536 entries across the store, scratch, skill, Agent-home and Pi sessionDir roots in that order. Past that bound it stops: each class whose root it did not finish reports `truncated: true` with lower-bound `bytes`/`entries`, and a class whose roots it never reached is also `measured: false`. Pressure is computed from the lower-bound used bytes and the complete free-space reading; truncation alone neither latches emergency nor fails startup, and an error-free truncated measurement can clear an emergency latch. Real I/O, root identity, journal usage and free-space errors still fail closed.
 
 Reader-run retention reads the complete session reference authority under the idle-home lease using the original pass inspection and soft-time budget. Only after a complete read does its 250 ms deletion window begin; deletion also consumes the remaining pass budget. An incomplete reference scan protects all reader runs in that home, without caching a partial map across passes. A slow home may therefore hold its maintenance lease for the remaining pass soft budget, delaying writer admission; a soft limit does not interrupt an outstanding filesystem call. Progress requires the full scan and some deletion work to fit in that budget.
+
+Startup fully enumerates the owned `exec-sdk` namespace before publishing capabilities. This safety enumeration is outside the maintenance inspection quota and soft wall-clock limit; its I/O cost grows with execution directories retained during the runtime TTL window. Actual SDK tree reclamation remains bounded and an incomplete cleanup still refuses startup. Normally released history alone does not exhaust startup enumeration. Periodic and pressure sweeps retain their existing quotas.
 
 Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution. They must await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. On Unix, the root must belong to the current process user before any permission change. Unix socket validation reserves 16 bytes for the runtime socket name and one terminating NUL. The root limit is 61 UTF-8 bytes on macOS and 65 on Linux.
 

@@ -406,6 +406,7 @@ function runProbeOrTurnFlow() {
     '--verbose': false,
     '--include-partial-messages': false,
     '--model': true,
+    '--tools': true,
     '--resume': true,
     '--dangerously-skip-permissions': false,
     '--permission-mode': true,
@@ -426,6 +427,10 @@ function runProbeOrTurnFlow() {
     if (FLAG_TAKES_VALUE[arg]) i += 1; // skip this flag's value token
   }
 
+  // Mirrors the qualified native registry, not permission-pattern grants.
+  const toolsIndex = argv.indexOf('--tools');
+  const nativeTools = toolsIndex < 0 ? undefined : argv[toolsIndex + 1] === '' ? [] : argv[toolsIndex + 1].split(',');
+  const nativeToolAllowed = name => nativeTools === undefined || nativeTools.includes(name);
   const sessionId = process.env.FAKE_CLAUDE_SESSION_ID ?? 'fake-claude-session-1';
 
   const resumeIdx = argv.indexOf('--resume');
@@ -551,7 +556,7 @@ function runProbeOrTurnFlow() {
       subtype: 'init',
       cwd: process.cwd(),
       session_id: reportedSessionId,
-      tools: ['Bash', 'Edit', 'Read', 'Write'],
+      tools: nativeTools ?? ['Bash', 'Edit', 'Read', 'Write'],
       permissionMode: 'default',
     });
 
@@ -564,6 +569,15 @@ function runProbeOrTurnFlow() {
 
     const toolUseId = `toolu_fake_${turn}`;
     const artifactPath = process.env.FAKE_CLAUDE_ARTIFACT_PATH;
+    const rejectDisabledTool = name => {
+      const text = `Error: No such tool available: ${name}. ${name} is disabled for this session, in subagents as well as here.`;
+      send({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: `<tool_use_error>${text}</tool_use_error>`, is_error: true }] },
+        tool_use_result: text,
+        session_id: reportedSessionId,
+      });
+    };
     let mcpResultText;
 
     // The daemon prepends Agent guidance to the task instruction; the
@@ -591,7 +605,9 @@ function runProbeOrTurnFlow() {
         session_id: reportedSessionId,
       });
 
-      if (process.env.FAKE_CLAUDE_DENY === '1') {
+      if (!nativeToolAllowed('Write')) {
+        rejectDisabledTool('Write');
+      } else if (process.env.FAKE_CLAUDE_DENY === '1') {
         send({
           type: 'user',
           message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: `Claude requested permissions to write to ${resolved}, but you haven't granted it yet.`, is_error: true }] },
@@ -615,7 +631,9 @@ function runProbeOrTurnFlow() {
         session_id: reportedSessionId,
       });
 
-      if (process.env.FAKE_CLAUDE_DENY === '1') {
+      if (!nativeToolAllowed('Bash')) {
+        rejectDisabledTool('Bash');
+      } else if (process.env.FAKE_CLAUDE_DENY === '1') {
         send({
           type: 'user',
           message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'Claude requested permissions to use Bash, but you haven\'t granted it yet.', is_error: true }] },

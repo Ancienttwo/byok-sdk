@@ -171,6 +171,11 @@ option on its own `ClaudeAdapter` through `createDaemonWithAdapters`.
 
 ### Codex: user-level configuration
 
+A custom provider selects model routing, not all Codex network destinations.
+Even with plugins disabled, eligible ChatGPT authentication can trigger a
+separate authenticated cloud-config request. See [custom-provider background
+services and evidence limits](notes/2026-10-28-codex-custom-provider-background-services.md).
+
 The [Codex adapter](../packages/client/src/adapters/codex/codex-adapter.ts)
 starts the user's app server with the supplied environment. Native config remains
 in effect except for explicit adapter overrides such as sandbox and approval
