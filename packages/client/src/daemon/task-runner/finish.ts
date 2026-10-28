@@ -112,7 +112,7 @@ export async function finishOnce(this: TaskRunner, taskId: string): Promise<bool
 
   // M4 Phase 4 (gatekeeper LOW advisory): a task can finish (complete,
   // fail, or cancel) while ONE approval is still DISPATCHED
-  // (`active.pendingApprovalId`) and/or MORE are QUEUED behind it
+  // (`active.pendingApproval`) and/or MORE are QUEUED behind it
   // (`active.approvalQueue` — see `requestApproval`'s own doc comment for
   // the full concurrent-approval design). Left alone, a queued request
   // would eventually get dispatched (a fresh, pointless `task.await_approval`
@@ -133,9 +133,9 @@ export async function finishOnce(this: TaskRunner, taskId: string): Promise<bool
         reason: `task ${taskId} finished before this queued approval request could be dispatched`,
       });
     }
-    if (active.pendingApprovalId !== undefined) {
+    if (active.pendingApproval !== undefined) {
       try {
-        this['deps'].approvalRegistry.resolve(active.pendingApprovalId, 'reject', `task ${taskId} finished`);
+        this['deps'].approvalRegistry.resolve(active.pendingApproval.approvalId, 'reject', `task ${taskId} finished`);
       } catch {
         // Already resolved by a real decision/timeout that raced this.
       }

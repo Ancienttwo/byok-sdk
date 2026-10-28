@@ -1,3 +1,4 @@
+import { classifyToolCall } from '../tool-authorization';
 import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { MessageDraftDelta } from '../types';
@@ -347,5 +348,24 @@ describe('Codex agentMessage draft deltas', () => {
     s.feed('item/agentMessage/delta', delta('old', 'STALE', 'turn-1'));
     s.feed('item/agentMessage/delta', { threadId: 'root', turnId: 'turn-2', itemId: 'm1', delta: 7 });
     expect(s.output).toEqual([]);
+  });
+});
+
+
+describe('Codex projected file-change risk classification', () => {
+  it.each([
+    { changes: [{ path: '/workspace/local', kind: { type: 'add' } }], reasons: [] },
+    ...['add', 'update', 'delete'].map(kind => ({ changes: [{ path: '/outside/file', kind: { type: kind } }], reasons: ['write-outside-workspace'] })),
+    { changes: [{ path: '/outside/file', kind: { type: 'read' } }], reasons: [] },
+    { changes: [{ path: '/workspace/local', kind: { type: 'add' } }, { path: '/Users/agent/.ssh/id_ed25519', kind: { type: 'update' } }], reasons: ['sensitive-path', 'write-outside-workspace'] },
+    { changes: [{ path: '/workspace/local', kind: { type: 'update', movePath: '/outside/moved' } }], reasons: ['write-outside-workspace'] },
+  ])('classifies native changes $changes through the real projection', ({ changes, reasons }) => {
+    const s = setup();
+    s.feed('item/started', { item: { type: 'fileChange', id: 'risk', changes } });
+    const event = s.output[0];
+    if (event?.type !== 'tool_use') throw new Error('missing projected tool_use');
+    expect(event.tool).toBe('file_change');
+    const risk = classifyToolCall({ toolName: event.tool, input: event.input as Record<string, unknown>, cwd: '/workspace' }, '/workspace', '/Users/agent');
+    expect(risk.level === 'high' ? [...risk.reasons].sort() : []).toEqual(reasons);
   });
 });

@@ -1,3 +1,5 @@
+import { requestApproval as requestTaskApproval } from './approvals';
+import type { ApprovalKind } from './support';
 // `handleOffer` stages from the runtime launch to a started session: seal the
 // manifest, claim, and start (see ./support.ts for how a member module runs).
 import { observePreparedMemory, type PreparedAgentMemoryState } from '../prepared-agent-memory';
@@ -385,9 +387,9 @@ async function startAndActivateRuntime(
     agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
     preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
   } = input;
-  const requestApproval = (summary: string, signal?: AbortSignal) => launch.settled
-    ? this.requestApproval(taskId, summary, signal)
-    : launch.promise.then(() => this.requestApproval(taskId, summary, signal));
+  const requestApproval = (summary: string, signal?: AbortSignal, kind: ApprovalKind = 'task-terminal') => launch.settled
+    ? requestTaskApproval.call(this, taskId, summary, signal, kind)
+    : launch.promise.then(() => requestTaskApproval.call(this, taskId, summary, signal, kind));
   const startInput: RuntimeOperationStartInput = {
     scratch,
     ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {
@@ -429,7 +431,7 @@ async function startAndActivateRuntime(
     ...(toolAuthorization !== 'auto' ? {} : { toolAuthorization: createAutoToolAuthorizationGate({
       workspace: manifest.workspace.workspaceDir,
       timeoutMs: (this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS) + 5_000,
-      requestAuthorization: requestApproval,
+      requestAuthorization: (summary, signal) => requestApproval(summary, signal, 'tool-authorization'),
     }) }),
   };
   let session: Session;

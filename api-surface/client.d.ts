@@ -9354,10 +9354,8 @@ export declare class TaskRunner {
      */
     private handleApprove;
     /**
-     * Protocol §5: the server's own state already moved
-     * `AwaitApproval -> Failed` before this best-effort notification arrives
-     * (§4) — the daemon resolves the approval, stops the session and proves it
-     * via `task.fail`.
+     * Resolves the named approval. Its local kind decides whether rejection
+     * terminates the task or denies one tool call while the turn continues.
      */
     private handleReject;
     /**
