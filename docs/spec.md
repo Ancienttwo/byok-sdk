@@ -1579,7 +1579,11 @@ next to them. It holds no scope key in plaintext, so it cannot open them.
   file paths and the model in `usage`) and what sealing does not protect.
   `examples/hosted-bot-collaboration/src/sealed-zero-hit.test.ts` measures it:
   a sealed task's content has zero hits in every store, object, log line and
-  observer call that the run writes.
+  observer call that the run writes. The same assertions also run on local
+  workerd through a Hyperdrive local connection string in
+  `examples/hosted-bot-collaboration-worker/src/sealed-zero-hit.test.ts`,
+  including the Worker's stdout/stderr. This local evidence does not replace
+  the real Workers + Hyperdrive deployment or device/browser matrix.
 
 ## Hosted task cancellation authority
 

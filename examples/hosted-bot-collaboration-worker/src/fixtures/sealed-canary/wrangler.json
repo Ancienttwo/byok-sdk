@@ -1,0 +1,7 @@
+{
+  "name": "byok-sealed-canary-local",
+  "main": "worker.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "hyperdrive": [{ "binding": "BYOK_PG", "id": "byok-sealed-canary-local-only" }]
+}
