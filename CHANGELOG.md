@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Change (client)** — the Pi web extension moves from pi-web-access 0.24.1
+  to 0.45.0, and the private todo extension from rpiv-todo 2.8.0 to 2.15.0
+  (`@juicesharp/rpiv-i18n` and `@juicesharp/rpiv-config` 2.15.0).
+  pi-web-access now ships its own JavaScript build, so the client imports
+  `pi-web-access/dist/index.js` as an ordinary dependency instead of bundling
+  its TypeScript source, and no longer pins that package's own dependencies
+  (`@mozilla/readability`, `linkedom`, `p-limit`, `promise.try`, `turndown`,
+  `unpdf`). The web extension adds `source_check` and, by upstream default
+  (`toolActivation: "auto"` in `web-search.json`), starts a new session on a
+  model that accepts added tools with only `web_enable`; the model calls it to
+  load `web_search`, `fetch_content` and `get_search_content`. Set
+  `"toolActivation": "eager"` to keep every web tool available from the
+  first request. The vendored todo source keeps the same six SDK deltas, plus
+  one type-only non-null assertion in `view/format.ts`; the bundled todo asset
+  root moves to `extensions/rpiv-todo/2.15.0` with unchanged locale files.
+  Vendored pi-subagents stays at 0.60.0.
 - **Fix (client; #1030)** — a daemon whose store is configured through a
   Windows name alias (an 8.3 short name such as `C:\Users\RUNNER~1\…`, or a
   letter-case variant) restarts again. The second start exited with

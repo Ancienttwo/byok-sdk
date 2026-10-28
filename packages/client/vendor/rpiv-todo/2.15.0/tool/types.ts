@@ -12,6 +12,15 @@ export const TOOL_NAME = "todo";
 export const TOOL_LABEL = "Todo";
 export const COMMAND_NAME = "todos";
 
+/**
+ * Custom session-entry type carrying the `details` snapshot of every
+ * state-changing `todo` call — the replay source that survives calls made
+ * through another tool (`ctx.executeTool`, e.g. Pi's codemode), whose results
+ * never land on the branch as standalone `toolResult` messages. Persistence key
+ * for branch replay, like `TOOL_NAME`. DO NOT rename.
+ */
+export const STATE_ENTRY_TYPE = "rpiv-todo-state";
+
 // ---------------------------------------------------------------------------
 // User-facing strings (kept stable for /todos UX parity).
 // ---------------------------------------------------------------------------
@@ -57,6 +66,16 @@ export interface TaskDetails {
  * signature (`[key: string]: unknown`) lets the runtime pass through TypeBox
  * `Static<typeof TodoParamsSchema>` without `as` casts.
  */
+/** One item in a batch `create` `tasks[]` payload. Same create-shaped fields as a single create, minus nested `tasks`. */
+export interface CreateTaskInput {
+	subject: string;
+	description?: string;
+	activeForm?: string;
+	blockedBy?: number[];
+	owner?: string;
+	metadata?: Record<string, unknown>;
+}
+
 export interface TaskMutationParams {
 	[key: string]: unknown;
 	subject?: string;
@@ -70,17 +89,44 @@ export interface TaskMutationParams {
 	metadata?: Record<string, unknown>;
 	id?: number;
 	includeDeleted?: boolean;
+	/** Batch create items. One-of with `subject` on `create`. */
+	tasks?: CreateTaskInput[];
 }
 
 // ---------------------------------------------------------------------------
 // TypeBox parameter schema — every `description` doubles as LLM-facing prompt
-// copy. Field order and wording are pinned by registration tests and the
-// pre-refactor schema at `packages/rpiv-todo/todo.ts:512-573`.
+// copy. Field order and wording are pinned by registration tests.
 // ---------------------------------------------------------------------------
+
+const CreateTaskInputSchema = Type.Object({
+	subject: Type.String({ description: "Task subject line" }),
+	description: Type.Optional(Type.String({ description: "Long-form task description" })),
+	activeForm: Type.Optional(
+		Type.String({
+			description: "Present-continuous spinner label shown while status is in_progress (e.g. 'writing tests')",
+		}),
+	),
+	blockedBy: Type.Optional(
+		Type.Array(Type.Number(), {
+			description:
+				"Existing task ids this item waits on. Cannot name another item in this same batch; create the prerequisite first, then the dependent with blockedBy.",
+		}),
+	),
+	owner: Type.Optional(Type.String({ description: "Agent/owner assigned to this task" })),
+	metadata: Type.Optional(
+		Type.Record(Type.String(), Type.Unknown(), {
+			description: "Arbitrary metadata",
+		}),
+	),
+});
 
 export const TodoParamsSchema = Type.Object({
 	action: StringEnum(["create", "update", "list", "get", "delete", "clear"] as const),
-	subject: Type.Optional(Type.String({ description: "Task subject line (required for create)" })),
+	subject: Type.Optional(
+		Type.String({
+			description: "Task subject line (required for create unless tasks[] is set)",
+		}),
+	),
 	description: Type.Optional(Type.String({ description: "Long-form task description" })),
 	activeForm: Type.Optional(
 		Type.String({
@@ -122,6 +168,12 @@ export const TodoParamsSchema = Type.Object({
 	includeDeleted: Type.Optional(
 		Type.Boolean({
 			description: "If true, list action returns deleted (tombstoned) tasks as well. Default: false.",
+		}),
+	),
+	tasks: Type.Optional(
+		Type.Array(CreateTaskInputSchema, {
+			description:
+				"Batch create: independent tasks in one call, one-of with subject. The whole list is validated then committed together. Items cannot blockedBy each other; create the prerequisite first, then the dependent with blockedBy.",
 		}),
 	),
 });

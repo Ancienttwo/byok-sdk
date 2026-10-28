@@ -16,7 +16,7 @@
     },
     {
       "name": "@juicesharp/rpiv-config",
-      "version": "2.8.0",
+      "version": "2.15.0",
       "files": [
         {
           "path": "config.ts",
@@ -24,15 +24,15 @@
         },
         {
           "path": "index.ts",
-          "sha256": "e28cca50596e6017e9d6800710851f6910f70589a54b58edc936c66bad4224bf"
+          "sha256": "ba8bcdf6c85cc605a5e9721b0c7487437dc758537e35147ffa503ec7f833e436"
         }
       ],
       "licenseText": "MIT License\n\nCopyright (c) 2026 juicesharp\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
-      "licenseSource": "same repository/same2.8.0 sibling rpiv-i18n LICENSE; rpiv-config package declares MIT but omits license file"
+      "licenseSource": "same repository/same2.15.0 sibling rpiv-i18n LICENSE; rpiv-config package declares MIT but omits license file"
     },
     {
       "name": "@juicesharp/rpiv-i18n",
-      "version": "2.8.0",
+      "version": "2.15.0",
       "files": [
         {
           "path": "i18n.ts",
@@ -40,7 +40,7 @@
         },
         {
           "path": "loader.ts",
-          "sha256": "3828789c504204449b7c6d13a56eac22ff7976f947bc63dbf8ec490c4a506705"
+          "sha256": "5d5692f1b21e717d00abf178816036dce73c01093ab4caf762495e4241cad528"
         }
       ],
       "licenseText": "MIT License\n\nCopyright (c) 2026 juicesharp\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",

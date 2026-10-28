@@ -1,7 +1,7 @@
 {
   "format": "byok.todo-locale-layout",
   "version": 1,
-  "basePath": "extensions/rpiv-todo/2.8.0",
+  "basePath": "extensions/rpiv-todo/2.15.0",
   "locales": [
     "de",
     "en",
