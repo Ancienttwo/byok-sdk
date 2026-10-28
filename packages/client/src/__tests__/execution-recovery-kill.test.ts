@@ -357,9 +357,13 @@ afterEach(async () => {
   try {
     for (const child of current.children) child.kill();
     await Promise.all(current.children.map((child) => child.exited().catch(() => undefined)));
-    const unpair = new JsonChild(daemonBin, await writeConfig('unpair', { ...current.daemonBase, action: 'unpair' }));
-    const cleanup = await unpair.exited();
-    if (cleanup.code !== 0) throw new Error(`fixture credential cleanup failed (${cleanup.code ?? cleanup.signal}): ${unpair.stderr}`);
+    // Cloud-only tests never acquire device credentials. A daemon spawn still
+    // requires cleanup even if pairing or readiness subsequently failed.
+    if (current.children.some(({ child }) => child.spawnfile === daemonBin)) {
+      const unpair = new JsonChild(daemonBin, await writeConfig('unpair', { ...current.daemonBase, action: 'unpair' }));
+      const cleanup = await unpair.exited();
+      if (cleanup.code !== 0) throw new Error(`fixture credential cleanup failed (${cleanup.code ?? cleanup.signal}): ${unpair.stderr}`);
+    }
   } finally {
     await keychain?.dispose(); keychain = undefined;
     await fs.rm(current.root, { recursive: true, force: true });
