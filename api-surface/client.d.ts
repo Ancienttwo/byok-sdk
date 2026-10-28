@@ -674,6 +674,8 @@ export interface PiAgentToolPolicy {
     readonly builtinTools: 'inherit' | readonly PiBuiltinToolName[];
     readonly userContext: 'inherit' | 'excluded';
     readonly extensions: 'inherit' | readonly PiAgentExtensionName[];
+    readonly skillPaths: readonly string[];
+    readonly extensionPaths: readonly string[];
 }
 export declare const INHERITED_PI_AGENT_TOOL_POLICY: PiAgentToolPolicy;
 /** One parser owns options validation and the digest-bound helper contract. */
@@ -700,6 +702,10 @@ export interface PiAdapterOptions {
     agentUserContext?: 'inherit' | 'excluded';
     /** Agent tasks only: select SDK web/subagent/todo extensions; MCP remains independently admitted. Default inherit. */
     agentExtensions?: 'inherit' | readonly PiAgentExtensionName[];
+    /** Agent tasks only: explicitly load local skill files/directories even when user context is excluded. Default []. */
+    agentSkillPaths?: readonly string[];
+    /** Agent tasks only: explicitly trust local executable extensions even when user context is excluded. Default []. */
+    agentExtensionPaths?: readonly string[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /** Opt-in ordinary, lease-bound durable worker. */

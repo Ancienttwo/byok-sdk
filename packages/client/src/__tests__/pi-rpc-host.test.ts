@@ -47,8 +47,8 @@ function fixture() {
   const entry = join(root, 'host-entry.ts');
   writeFileSync(entry, `import {runPiRpcHost} from ${JSON.stringify(resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js'))}; runPiRpcHost(process.argv.slice(2)).catch(error=>{console.error(String(error));process.exit(1)});`);
   const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
-  const config = { format: 'byok.pi.rpc-launch', version: 6, credentialSource: 'pi-auth-store', cwd,
-    agentToolPolicy: { builtinTools: 'inherit', userContext: 'inherit', extensions: 'inherit' },
+  const config = { format: 'byok.pi.rpc-launch', version: 7, credentialSource: 'pi-auth-store', cwd,
+    agentToolPolicy: { builtinTools: 'inherit', userContext: 'inherit', extensions: 'inherit', skillPaths: [], extensionPaths: [] },
     mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } };
   const configPath = join(root, 'config.json');
   const serialized=serializePiHostConfig(config);
@@ -90,7 +90,7 @@ describe('SDK ordinary Pi RPC entry', () => {
     expect(evaluate(`
       const base = ${JSON.stringify(f.config)};
       console.log(JSON.stringify([
-        {...base, version:5}, {...base, agentToolPolicy:undefined},
+        {...base, version:6}, {...base, agentToolPolicy:undefined},
         {...base, agentToolPolicy:{...base.agentToolPolicy,builtinTools:['bash','bash']}},
         {...base, agentToolPolicy:{...base.agentToolPolicy,builtinTools:['shell']}},
         {...base, agentToolPolicy:{...base.agentToolPolicy,userContext:'best-effort'}},
@@ -154,7 +154,7 @@ describe('SDK ordinary Pi RPC entry', () => {
       baseUrl:`http://127.0.0.1:${address.port}/v1`, api:'openai-completions', apiKey:'synthetic-not-a-secret',
       models:[{id:'probe',name:'probe',contextWindow:4096,maxTokens:32,input:['text'],reasoning:false}],
     } } }));
-    const config = { ...f.config, mcp, agentToolPolicy: { builtinTools, userContext:'excluded', extensions:[] } };
+    const config = { ...f.config, mcp, agentToolPolicy: { builtinTools, userContext:'excluded', extensions:[], skillPaths:[], extensionPaths:[] } };
     const serialized = serializePiHostConfig(config);
     writeFileSync(f.configPath, serialized.bytes);
     const client = new PiRpcClient({
@@ -176,6 +176,91 @@ describe('SDK ordinary Pi RPC entry', () => {
       const continuation = await toolResultBody;
       expect(JSON.stringify(continuation.messages)).toContain('Tool bash not found');
       expect(existsSync(bashMarker)).toBe(false);
+    } finally {
+      await client.dispose();
+      await new Promise<void>((done,reject)=>server.close(error=>error?reject(error):done()));
+    }
+  }, 30_000);
+
+  it('refuses startup when an explicitly authorized skill is missing', () => {
+    const f = fixture();
+    const config = {...f.config,agentToolPolicy:{builtinTools:[],userContext:'excluded',extensions:[],skillPaths:[join(f.root,'missing','SKILL.md')],extensionPaths:[]}};
+    const serialized = serializePiHostConfig(config);
+    writeFileSync(f.configPath, serialized.bytes);
+    const result = spawnSync(bun, [f.entry,`--config-digest=${serialized.digest}`,'--config',f.configPath,'--mode','rpc','--provider','anthropic','--model','claude-sonnet-4-5'], {
+      cwd:f.sealed,env:f.env,encoding:'utf8',timeout:8_000,
+      input:JSON.stringify({id:'state',type:'get_state'})+'\n',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('ENOENT');
+    expect(result.stdout).not.toContain('"success":true');
+  }, 15_000);
+
+  it('runs an explicitly authorized skill and extension while excluding unrelated user context and resources', async () => {
+    const f = fixture();
+    const agentDir = join(f.root, 'agent');
+    const skills = join(agentDir, 'skills');
+    const extensions = join(agentDir, 'extensions');
+    mkdirSync(join(skills, 'approved'), { recursive: true });
+    mkdirSync(join(skills, 'unselected'), { recursive: true });
+    mkdirSync(extensions, { recursive: true });
+    const skillPath = join(skills, 'approved', 'SKILL.md');
+    const extensionPath = join(extensions, 'approved.ts');
+    const marker = join(f.root, 'authorized-tool-ran');
+    writeFileSync(skillPath, '---\nname: approved\ndescription: Authorized task skill.\n---\nAUTHORIZED_SKILL_BODY: call authorized_probe.\n');
+    writeFileSync(join(skills, 'unselected', 'SKILL.md'), '---\nname: unselected\ndescription: UNSELECTED_SKILL\n---\nDo not load.\n');
+    writeFileSync(join(agentDir, 'AGENTS.md'), 'FORBIDDEN_GLOBAL_CONTEXT');
+    writeFileSync(join(f.cwd, 'AGENTS.md'), 'FORBIDDEN_PROJECT_CONTEXT');
+    writeFileSync(join(extensions, 'unselected.ts'), 'throw new Error("UNSELECTED_EXTENSION_LOADED");');
+    writeFileSync(extensionPath, `import {writeFileSync} from 'node:fs'; export default function(pi) {
+      pi.registerTool({name:'authorized_probe',label:'Authorized probe',description:'Execute the authorized task.',parameters:{type:'object',properties:{}},
+        execute:async()=>{writeFileSync(${JSON.stringify(marker)},'executed');return {content:[{type:'text',text:'AUTHORIZED_TOOL_RESULT'}],details:{}};}});
+    }`);
+    let first!: (body: any) => void;
+    const firstRequest = new Promise<any>(done => { first = done; });
+    let second!: (body: any) => void;
+    const secondRequest = new Promise<any>(done => { second = done; });
+    let count = 0;
+    const server = createServer(async (request, response) => {
+      let bytes = '';
+      for await (const chunk of request) bytes += chunk;
+      const body = JSON.parse(bytes);
+      const initial = ++count === 1;
+      if (initial) first(body); else second(body);
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      const delta = initial
+        ? {role:'assistant',tool_calls:[{index:0,id:'authorized-call',type:'function',function:{name:'authorized_probe',arguments:'{}'}}]}
+        : {role:'assistant',content:'done'};
+      response.end('data: ' + JSON.stringify({id:'probe',object:'chat.completion.chunk',choices:[{index:0,delta,finish_reason:null}]}) + '\n\n' +
+        'data: ' + JSON.stringify({id:'probe',object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:initial?'tool_calls':'stop'}]}) + '\n\ndata: [DONE]\n\n');
+    });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('missing loopback address');
+    writeFileSync(join(agentDir, 'models.json'), JSON.stringify({providers:{'resource-probe':{
+      baseUrl:`http://127.0.0.1:${address.port}/v1`,api:'openai-completions',apiKey:'synthetic',
+      models:[{id:'probe',name:'probe',contextWindow:4096,maxTokens:64,input:['text'],reasoning:false}],
+    }}}));
+    const config = {...f.config,agentToolPolicy:{builtinTools:[],userContext:'excluded',extensions:[],skillPaths:[skillPath],extensionPaths:[extensionPath]}};
+    const serialized = serializePiHostConfig(config);
+    writeFileSync(f.configPath, serialized.bytes);
+    const client = new PiRpcClient({command:bun,cwd:f.sealed,env:f.env,
+      args:[f.entry,`--config-digest=${serialized.digest}`,'--config',f.configPath,'--mode','rpc','--provider','resource-probe','--model','probe']});
+    try {
+      const commands = await client.send({type:'get_commands'});
+      expect(commands.success).toBe(true);
+      const names = (commands.data as {commands:{name:string}[]}).commands.map(command=>command.name);
+      expect(names).toContain('skill:approved');
+      expect(names).not.toContain('skill:unselected');
+      expect((await client.send({type:'prompt',message:'/skill:approved'})).success).toBe(true);
+      const body = await firstRequest;
+      expect(body.tools.map((tool: {function:{name:string}})=>tool.function.name)).toEqual(['authorized_probe']);
+      expect(JSON.stringify(body.messages)).toContain('AUTHORIZED_SKILL_BODY');
+      expect(JSON.stringify(body.messages)).not.toContain('FORBIDDEN_GLOBAL_CONTEXT');
+      expect(JSON.stringify(body.messages)).not.toContain('FORBIDDEN_PROJECT_CONTEXT');
+      expect(JSON.stringify(body.messages)).not.toContain('UNSELECTED_SKILL');
+      expect(JSON.stringify((await secondRequest).messages)).toContain('AUTHORIZED_TOOL_RESULT');
+      expect(existsSync(marker)).toBe(true);
     } finally {
       await client.dispose();
       await new Promise<void>((done,reject)=>server.close(error=>error?reject(error):done()));
