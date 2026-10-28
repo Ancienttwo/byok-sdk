@@ -7,6 +7,8 @@ import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { CodexProjection } from '../adapters/codex/projection';
+import { createDaemonRecordProjector } from '../daemon/daemon-record';
+import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
 import { createSessionKernel } from '../../vendor/oar/51b83c9/shared/session-kernel';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
@@ -19,10 +21,10 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
-import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { FRESH_OFFER, freshOfferEgressDeps, resumeSession } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeCapabilities, RuntimeOperationStartInput } from '../types';
-import type { ToolAuthorizationResolver, ToolAuthorizationTask, ToolReminder } from '../tool-authorization';
+import type { ToolAuthorizationDecision, ToolAuthorizationResolver, ToolAuthorizationTask, ToolReminder } from '../tool-authorization';
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => { throw new Error('not used in this test'); },
@@ -32,7 +34,7 @@ const unusedBlobClient: BlobResolver = {
 /** Records the daemon-built start input, including the `auto` gate. */
 class GateCapturingAdapter extends StubRuntimeAdapter {
   readonly inputs: RuntimeOperationStartInput[] = [];
-  constructor(capabilities: RuntimeCapabilities) { super('pi', { kind: 'available', version: '0.0.0' }, capabilities); }
+  constructor(capabilities: RuntimeCapabilities, runtimeId = 'pi') { super(runtimeId, { kind: 'available', version: '0.0.0' }, capabilities); }
   override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     const result = await super.prepare(input);
     if (result.kind !== 'prepared') return result;
@@ -44,7 +46,7 @@ class GateCapturingAdapter extends StubRuntimeAdapter {
 const AUTO_CAPABLE: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true, toolAuthorizationAuto: true };
 const NO_AUTO: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true };
 
-function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'approvalTimeoutMs'>> = {}) {
+function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs'>> = {}) {
   const approvalRegistry = new ApprovalRegistry();
   const runner = new TaskRunner({
     advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
@@ -116,7 +118,7 @@ describe('daemon tool authorization', () => {
     const workspace = adapter.inputs[0]!.manifest.workspace.workspaceDir;
 
     await expect(gate.authorize({ toolCallId: 'n', toolName: 'write', input: { path: 'notes/a.md' }, cwd: workspace }))
-      .resolves.toEqual({ decision: 'allow' });
+      .resolves.toEqual({ decision: 'allow', authorization: { source: 'built-in', ruleIds: [] } });
     expect(sent.some(e => e.type === 'task.await_approval')).toBe(false);
 
     const denied = gate.authorize({ toolCallId: 'h1', toolName: 'bash', input: { command: 'sudo rm -rf /var/db' }, cwd: workspace });
@@ -125,7 +127,7 @@ describe('daemon tool authorization', () => {
     if (request?.type !== 'task.await_approval' || request.payload.sealed !== undefined) throw new Error('missing await_approval');
     expect(request.payload.summary).toContain('privilege-escalation');
     approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', 'not now', 'control');
-    await expect(denied).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: 'not now' });
+    await expect(denied).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: 'not now', authorization: { source: 'built-in', ruleIds: [] } });
 
     const allowed = gate.authorize({ toolCallId: 'h2', toolName: 'edit', input: { file_path: '~/.zshrc' }, cwd: workspace });
     await vi.waitFor(() => expect(approvalRegistry.list()).toHaveLength(1));
@@ -135,7 +137,7 @@ describe('daemon tool authorization', () => {
     expect(() => approvalRegistry.resolve(pending.approvalId, 'approve', undefined, 'control')).toThrow(ApprovalRequiresHostError);
     expect(approvalRegistry.list()).toEqual([pending]);
     await runner.resolveApprovalLocally('task-auto', pending.approvalId, 'approve');
-    await expect(allowed).resolves.toEqual({ decision: 'allow' });
+    await expect(allowed).resolves.toEqual({ decision: 'allow', authorization: { source: 'floor', ruleIds: [] } });
 
     // `auto` already asked before execution; the event stream adds no reminder.
     adapter.sessions[0]!.queue.push({ type: 'tool_use', tool: 'bash', toolCallId: 'h1', input: { command: 'sudo rm -rf /var/db' } });
@@ -166,7 +168,7 @@ describe('daemon tool authorization', () => {
       const dispatchedLate = approvalRegistry.list()[0]!.approvalId;
       await vi.advanceTimersByTimeAsync(gate.timeoutMs - 6_000);
       expect(settled).toEqual(['first', 'second']);
-      await expect(second).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${gate.timeoutMs}ms` });
+      await expect(second).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${gate.timeoutMs}ms`, authorization: { source: 'built-in', ruleIds: [] } });
       // Withdrawn: a late decision cannot revive it, and nothing stays queued.
       expect(approvalRegistry.list()).toEqual([]);
       expect(() => approvalRegistry.resolve(dispatchedLate, 'approve', undefined, 'in-process')).toThrow();
@@ -202,6 +204,154 @@ describe('daemon tool authorization', () => {
     expect(adapter.inputs).toEqual([]);
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
     expect(declineReason(sent)).toMatch(/^tool_authorization_unsupported: runtime pi /);
+  });
+
+  it.each([
+    { mode: 'auto', rules: { alwaysAsk: [{ id: 'empty', match: {} }] } },
+    { mode: 'auto', rules: { allowWithoutAsking: 'all' } },
+    { mode: 'all', rules: { alwaysAsk: [{ id: 'same', match: { toolName: 'read' } }], allowWithoutAsking: [{ id: 'same', match: { toolName: 'write' } }] } },
+    { mode: 'auto', rules: { alwaysAsk: [{ id: 'bad', match: { commandRegex: '.*' } }] } },
+  ])('declines malformed rule policies before claim: %j', async policy => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const { runner } = makeRunner(adapter, sent, { toolAuthorization: (() => policy) as unknown as ToolAuthorizationResolver });
+    await offer(runner, 'invalid-rules');
+    expect(declineReason(sent)).toMatch(/^tool_authorization_unresolved: /);
+    expect(sent.some(event => event.type === 'task.claim')).toBe(false);
+    expect(adapter.inputs).toEqual([]);
+  });
+
+  it('all uses the same rule precedence: ask reminds, allow suppresses, floor still reminds', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const reminders: ToolReminder[] = [];
+    const { runner } = makeRunner(adapter, sent, {
+      toolAuthorization: () => ({ mode: 'all', rules: {
+        alwaysAsk: [{ id: 'ask-tests', match: { commandGlob: 'npm test' } }],
+        allowWithoutAsking: [{ id: 'allow-bash', match: { toolName: 'bash' } }],
+      } }),
+      onToolReminder: reminder => reminders.push(reminder),
+    });
+    await offer(runner, 'all-rule-precedence');
+    expect(adapter.inputs[0]!.toolAuthorization).toBeUndefined();
+    const session = adapter.sessions[0]!;
+    session.queue.push({ type: 'tool_use', tool: 'bash', toolCallId: 'allowed', input: { command: 'git push origin main' } });
+    session.queue.push({ type: 'tool_use', tool: 'bash', toolCallId: 'asked', input: { command: 'npm test' } });
+    session.queue.push({ type: 'tool_use', tool: 'bash', toolCallId: 'floor', input: { command: 'cat ~/.ssh/id_ed25519' } });
+    session.queue.push({ type: 'tool_use', tool: 'Bash', toolCallId: 'builtin', input: { command: 'sudo true' } });
+    await vi.waitFor(() => expect(reminders).toHaveLength(3));
+    expect(reminders.map(reminder => [reminder.toolCallId, reminder.authorization])).toEqual([
+      ['asked', { source: 'rule', ruleIds: ['ask-tests'] }],
+      ['floor', { source: 'floor', ruleIds: [] }],
+      ['builtin', { source: 'built-in', ruleIds: [] }],
+    ]);
+    expect(sent.some(event => event.type === 'task.await_approval')).toBe(false);
+  });
+
+  it('all matches MCP selectors from the event identity, never by splitting the tool label', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const reminders: ToolReminder[] = [];
+    const { runner } = makeRunner(adapter, sent, {
+      toolAuthorization: () => ({ mode: 'all', rules: { alwaysAsk: [{ id: 'mcp-delete', match: { mcpServer: 'x__y', mcpTool: 'delete_*' } }] } }),
+      onToolReminder: reminder => reminders.push(reminder),
+    });
+    await offer(runner, 'all-mcp-rules');
+    const session = adapter.sessions[0]!;
+    session.queue.push({ type: 'tool_use', tool: 'mcp__x__y__delete_item', toolCallId: 'label-only', input: {} });
+    session.queue.push({ type: 'tool_use', tool: 'mcp__x__y__delete_item', toolCallId: 'identified', input: {}, mcp: { server: 'x__y', tool: 'delete_item' } });
+    await vi.waitFor(() => expect(reminders).toHaveLength(1));
+    expect(reminders[0]).toMatchObject({ toolCallId: 'identified', authorization: { source: 'rule', ruleIds: ['mcp-delete'] } });
+  });
+
+  it('copies the resolved policy before claim and isolates later tasks from the active snapshot', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const decisions: ToolAuthorizationDecision[] = [];
+    const policy = { mode: 'auto' as const, rules: { alwaysAsk: [{ id: 'read-once', match: { toolName: 'read' } }] } };
+    const { runner, approvalRegistry } = makeRunner(adapter, sent, {
+      toolAuthorization: () => policy, onToolAuthorizationDecision: decision => decisions.push(decision),
+    });
+    await offer(runner, 'snapshot-first');
+    policy.rules.alwaysAsk[0]!.id = 'changed';
+    policy.rules.alwaysAsk[0]!.match.toolName = 'write';
+    await offer(runner, 'snapshot-second');
+    const call = { toolCallId: 'reading', toolName: 'read', input: { path: 'notes.md' }, cwd: adapter.inputs[0]!.manifest.workspace.workspaceDir };
+    const first = adapter.inputs[0]!.toolAuthorization!.authorize(call);
+    await vi.waitFor(() => expect(approvalRegistry.list()).toHaveLength(1));
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', 'ask rule applies');
+    await expect(first).resolves.toMatchObject({ decision: 'deny', authorization: { source: 'rule', ruleIds: ['read-once'] } });
+    await expect(adapter.inputs[1]!.toolAuthorization!.authorize({ ...call, toolCallId: 'new-reading', cwd: adapter.inputs[1]!.manifest.workspace.workspaceDir }))
+      .resolves.toMatchObject({ decision: 'allow', authorization: { source: 'built-in', ruleIds: [] } });
+    expect(decisions.map(decision => [decision.taskId, decision.decision, decision.authorization])).toEqual([
+      ['snapshot-first', 'deny', { source: 'rule', ruleIds: ['read-once'] }],
+      ['snapshot-second', 'allow', { source: 'built-in', ruleIds: [] }],
+    ]);
+    expect(JSON.stringify(decisions)).not.toContain('notes.md');
+  });
+
+  it('re-resolves rules for a resume offer of the same Agent instead of reviving a previous allow', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const seen: string[] = [];
+    let askOnResume = false;
+    const { runner, approvalRegistry } = makeRunner(adapter, sent, { toolAuthorization: task => {
+      seen.push(task.taskId);
+      return { mode: 'auto', rules: askOnResume
+        ? { alwaysAsk: [{ id: 'resumed-read', match: { toolName: 'read' } }] }
+        : { allowWithoutAsking: [{ id: 'first-read', match: { toolName: 'read' } }] } };
+    } });
+    const agentRef = freshTestAgentRef();
+    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef, ...FRESH_OFFER, instruction: 'first turn' }, { taskId: 'first-turn', seq: 1 }));
+    const first = adapter.inputs[0]!;
+    await expect(first.toolAuthorization!.authorize({ toolCallId: 'first-read', toolName: 'read', input: { path: 'notes.md' }, cwd: first.manifest.workspace.workspaceDir }))
+      .resolves.toMatchObject({ decision: 'allow', authorization: { source: 'rule', ruleIds: ['first-read'] } });
+    const sessionRef = adapter.sessions[0]!.sessionRef;
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some(event => event.type === 'task.complete' && event.task_id === 'first-turn')).toBe(true));
+    askOnResume = true;
+    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef, ...resumeSession(sessionRef), instruction: 'resumed turn' }, { taskId: 'resumed-turn', seq: 2 }));
+    expect(adapter.inputs).toHaveLength(2);
+    expect(adapter.inputs[1]!.manifest.sessionRef).toBe(sessionRef);
+    expect(seen).toEqual(['first-turn', 'resumed-turn']);
+    const verdict = adapter.inputs[1]!.toolAuthorization!.authorize({ toolCallId: 'resumed-read', toolName: 'read', input: { path: 'notes.md' }, cwd: first.manifest.workspace.workspaceDir });
+    await vi.waitFor(() => expect(approvalRegistry.list()).toHaveLength(1));
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', 'resume needs approval');
+    await expect(verdict).resolves.toMatchObject({ decision: 'deny', authorization: { source: 'rule', ruleIds: ['resumed-read'] } });
+    expect(adapter.sessions[1]!.interruptCalled).toBe(false);
+  });
+
+  it.each(['codex', 'grok', 'hermes'])('auto rules do not add missing pre-tool support to %s', async runtimeId => {
+    const adapter = new GateCapturingAdapter(NO_AUTO, runtimeId);
+    const sent: Envelope[] = [];
+    const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => ({ mode: 'auto', rules: {
+      allowWithoutAsking: [{ id: 'allow-read', match: { toolName: 'read' } }],
+    } }) });
+    await offer(runner, `unsupported-${runtimeId}`);
+    expect(declineReason(sent)).toMatch(new RegExp(`^tool_authorization_unsupported: runtime ${runtimeId} `));
+    expect(sent.some(event => event.type === 'task.claim')).toBe(false);
+    expect(adapter.inputs).toEqual([]);
+  });
+
+  it('publishes content-free gate audit records and redacts reminder summaries', () => {
+    const observer = new DaemonObserver();
+    const events: DaemonEvent[] = [];
+    observer.subscribe(event => events.push(event));
+    const decision: ToolAuthorizationDecision = {
+      taskId: 'audit-task', toolName: 'bash', toolCallId: 'audit-call', decision: 'allow',
+      authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [],
+    };
+    observer.noteToolAuthorizationDecision(decision);
+    observer.noteToolReminder({ taskId: 'audit-task', toolName: 'read', toolCallId: 'read-call',
+      authorization: { source: 'floor', ruleIds: [] }, reasons: ['sensitive-path'], summary: 'private summary and path' });
+    expect(events[0]).toMatchObject({ kind: 'tool-authorization', ...decision });
+    const projector = createDaemonRecordProjector();
+    const records = events.flatMap(event => projector.project(event));
+    expect(records[0]).toEqual({ kind: 'tool-authorization', ts: events[0]!.ts, ...decision });
+    expect(records[1]).toEqual({ kind: 'tool-reminder', ts: events[1]!.ts, taskId: 'audit-task',
+      authorization: { source: 'floor', ruleIds: [] }, reasons: ['sensitive-path'], summaryBytes: Buffer.byteLength('private summary and path') });
+    expect(JSON.stringify(records)).not.toContain('private summary');
+    expect(JSON.stringify(records)).not.toContain('description');
   });
 
   it.each([
@@ -249,6 +399,8 @@ async function withPublicDaemon(
 describe('public tool authorization decisions', () => {
   it.each(['local', 'wire'] as const)('auto: public %s reject denies only the tool and the turn continues', async entry => {
     await withPublicDaemon(async (daemon, server, adapter) => {
+      const decisions: DaemonEvent[] = [];
+      const unsubscribe = daemon.subscribe(event => { if (event.kind === 'tool-authorization') decisions.push(event); });
       const input = adapter.inputs[0]!;
       const gate = input.toolAuthorization!;
       const session = adapter.sessions[0]!;
@@ -260,8 +412,13 @@ describe('public tool authorization decisions', () => {
       if (entry === 'local') await daemon.reject('public-task', { approvalId, reason: 'choose a safer tool' });
       else server.send(createEnvelope('task.reject', { approvalId, reason: 'choose a safer tool' },
         { taskId: 'public-task', seq: server.nextSeq() }));
-      await expect(verdict).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: 'choose a safer tool' });
-      await expect(gate.authorize({ ...call, toolCallId: 'safe', input: { command: 'ls -la' } })).resolves.toEqual({ decision: 'allow' });
+      await expect(verdict).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: 'choose a safer tool', authorization: { source: 'built-in', ruleIds: [] } });
+      await expect(gate.authorize({ ...call, toolCallId: 'safe', input: { command: 'ls -la' } })).resolves.toEqual({ decision: 'allow', authorization: { source: 'built-in', ruleIds: [] } });
+      expect(decisions).toMatchObject([
+        { kind: 'tool-authorization', taskId: 'public-task', toolCallId: 'dangerous', decision: 'deny', authorization: { source: 'built-in', ruleIds: [] } },
+        { kind: 'tool-authorization', taskId: 'public-task', toolCallId: 'safe', decision: 'allow', authorization: { source: 'built-in', ruleIds: [] } },
+      ]);
+      unsubscribe();
       expect(session.interruptCalled).toBe(false);
       expect(session.closeCalled).toBe(false);
       session.queue.push({ type: 'progress', text: 'continuing with the safer alternative' });
@@ -328,7 +485,7 @@ describe('public tool authorization decisions', () => {
       const approvalId = awaited.payload.approvalId;
       if (entry === 'local') await daemon.approve('public-task', { approvalId });
       else server.send(createEnvelope('task.approve', { approvalId }, { taskId: 'public-task', seq: server.nextSeq() }));
-      await expect(verdict).resolves.toEqual({ decision: 'allow' });
+      await expect(verdict).resolves.toEqual({ decision: 'allow', authorization: { source: 'built-in', ruleIds: [] } });
       expect(adapter.sessions[0]!.interruptCalled).toBe(false);
     });
   });

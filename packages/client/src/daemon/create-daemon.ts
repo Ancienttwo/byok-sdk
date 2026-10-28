@@ -113,17 +113,11 @@ export interface DaemonConfig {
    * Per-task tool authorization, decided by this Host for every runtime:
    * `all` (default) never blocks and emits a `tool-reminder` event for each
    * high-risk call; `auto` asks the user through the task's approval path
-   * before a high-risk call runs. Not an OS sandbox or file scope.
-   *
-   * A static policy (`{ default, byRuntime }`, the only form a config file
-   * can set) gives each runtime a fixed mode: its `byRuntime` entry, else
-   * `default`. Daemon construction refuses a `byRuntime` key that is not a
-   * runtime of this daemon, and `auto` for a runtime without
-   * `toolAuthorizationAuto`.
-   *
-   * An embedded Host may pass a function instead. It is called once per
-   * offer; a throw or any other value declines the offer, and `auto` on a
-   * runtime without `toolAuthorizationAuto` declines it before claim.
+   * before a high-risk call runs and is declined before claim on a runtime
+   * without `toolAuthorizationAuto`. Returns a mode or `{ mode, rules }`;
+   * the policy is validated, copied and frozen before claim, once per offer
+   * (including resume). Invalid policies decline the offer. Rules never
+   * change the wire or native launch. Not an OS sandbox or file scope.
    */
   toolAuthorization?: ToolAuthorizationResolver | StaticToolAuthorization;
   /**

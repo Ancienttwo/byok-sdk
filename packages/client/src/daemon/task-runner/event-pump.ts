@@ -45,7 +45,7 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
       }
       // `all` never blocks: classify the full reported input before any
       // spill, and only remind. `auto` already gated the call before it ran.
-      if (event.type === 'tool_use' && active.toolAuthorization === 'all') noteToolReminder.call(this, active, event);
+      if (event.type === 'tool_use' && active.toolAuthorization.mode === 'all') noteToolReminder.call(this, active, event);
 
       // DaemonConfig.maxInlineEventBytes: bound this ONE event before it is
       // counted, batched, or sent. An oversized `tool_use.input` /
@@ -365,14 +365,14 @@ export function reportArtifactError(this: TaskRunner, active: ActiveTask, name: 
 function noteToolReminder(this: TaskRunner, active: ActiveTask, event: Extract<AgentEvent, { type: 'tool_use' }>): void {
   const input = event.input !== null && typeof event.input === 'object' && !Array.isArray(event.input)
     ? event.input as Record<string, unknown> : {};
-  const call = { toolName: event.tool, input, cwd: active.workspaceDir };
-  const risk = classifyToolCall(call, active.workspaceDir);
+  const call = { toolName: event.tool, input, cwd: active.workspaceDir, ...(event.mcp === undefined ? {} : { mcp: event.mcp }) };
+  const risk = classifyToolCall(call, active.workspaceDir, undefined, active.toolAuthorization.rules);
   if (risk.level === 'normal') return;
   try {
     this['deps'].onToolReminder?.(Object.freeze({
       taskId: active.taskId, toolName: event.tool,
       ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
-      reasons: risk.reasons, summary: describeHighRiskToolCall(call, risk.reasons),
+      reasons: risk.reasons, authorization: risk.authorization, summary: describeHighRiskToolCall(call, risk.reasons, risk.authorization),
     }));
   } catch (error) {
     console.error(`[byok/client] tool reminder observer failed for task ${active.taskId}: ${errorMessage(error)}`);

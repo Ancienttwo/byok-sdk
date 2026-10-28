@@ -1,5 +1,5 @@
 // Types and helpers shared by `TaskRunner` (../task-runner.ts) and the member
-import type { ToolAuthorizationMode } from '../../tool-authorization';
+import type { ToolAuthorizationPolicy } from '../../tool-authorization';
 import type { RuntimeTaskInput } from '../../types';
 // modules in this directory.
 //
@@ -110,7 +110,7 @@ export interface ActiveTask {
   eventPump?: Promise<void>;
   workspaceDir: string;
   /** Host-resolved before claim; `all` tasks get reminders from the event stream. */
-  toolAuthorization: ToolAuthorizationMode;
+  toolAuthorization: ToolAuthorizationPolicy;
   agentBinding: AgentHomeExecutionBinding;
   agentRef: AgentRef;
   agentHandoff: {
