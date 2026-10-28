@@ -1,3 +1,4 @@
+import { ToolExecutionUnsupportedError, type BeforeToolOptions } from '../../tool-execution-hook';
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
 import type { RuntimeTaskInput } from '../../types';
 import { existsSync } from 'node:fs';
@@ -43,6 +44,8 @@ const COMPAT_INSTRUCTIONS_OFF = Object.freeze({
 });
 
 export interface GrokAdapterOptions {
+  /** Unsupported: this runtime has no complete pre-tool interception contract. */
+  beforeTool?: BeforeToolOptions;
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
   /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
@@ -107,6 +110,7 @@ export class GrokAdapter implements RuntimeAdapter {
   }); }
 
   constructor(private readonly options: GrokAdapterOptions = {}) {
+    if (options.beforeTool !== undefined) throw new ToolExecutionUnsupportedError('grok', 'complete pre-tool interception is not supported');
     const retained = options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES;
     if (!Number.isSafeInteger(retained) || retained < 1) throw new TypeError('invalid Grok retention budget');
     const interrupt = options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS;

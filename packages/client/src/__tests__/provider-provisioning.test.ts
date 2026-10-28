@@ -420,7 +420,7 @@ describe('no local listener for provisioning', () => {
     );
   }
 
-  it('adds no createServer/listen in client or keys beyond the existing local control and ownership sockets', () => {
+  it('limits listeners to local control, ownership, and authenticated tool-policy IPC', () => {
     const offenders = [...productionSources(clientSrc), ...productionSources(keysSrc)]
       .filter((file) => LISTENER.test(readFileSync(file, 'utf8')))
       .map((file) => path.relative(path.resolve(here, '../../..'), file).split(path.sep).join('/'))
@@ -429,6 +429,7 @@ describe('no local listener for provisioning', () => {
       'client/src/daemon/control-server.ts',
       'client/src/daemon/daemon-owner.ts',
       'client/src/daemon/path-mutation-gate.ts',
+      'client/src/tool-execution-hook.ts',
     ]);
   });
 

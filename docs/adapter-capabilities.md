@@ -10,6 +10,7 @@ they are not a second runtime-selection registry.
 
 | Capability | Claude | Codex | Grok | Pi |
 | --- | --- | --- | --- | --- |
+| Local execution policy (`beforeTool`) | Native SDK PreToolUse; requires confirmed registration | Unsupported | Unsupported; hosted terminal is incomplete coverage | Ordinary RPC and native Pi subagents; prepared/durable and external subagent runners unsupported |
 | Resume a known native session | Supported; exact `--resume` identity | Supported; exact `thread/resume` identity | Supported; exact ACP `session/resume` identity | Not requalified in this slice |
 | Redirect the active turn (`steer`) | Unsupported; typed rejection | Supported; exact active `expectedTurnId` | Unsupported; typed rejection | Not requalified in this slice |
 | New instruction after an idle turn (`followUp`) | Supported, same native session | Supported, same native thread | Supported, same native session | Not requalified in this slice |
@@ -826,3 +827,71 @@ the [downstream diagnostics guide](agent-diagnostics-integration.md).
   The extraction adopts capability honesty and explicit lifecycle boundaries;
   it does not import a second agent runtime, WebSocket transport, or computer
   control surface.
+
+## Local pre-tool execution policy (#1061)
+
+`PiAdapter` and `ClaudeAdapter` accept an optional `beforeTool` with `onRequest`
+and `timeoutMs` (default 5000 ms, maximum 60000 ms). The callback runs in the
+embedding Local Agent daemon. It returns `{ decision: 'allow' }` or
+`{ decision: 'deny', reason: '...' }`; it may return a Promise. The SDK performs
+no remote Host round trip, stores no authorization, and does not wait for a
+human. Omitting the option preserves the existing tool and permission modes.
+
+Requests contain the parent `taskId`, optional `agentRef`, `runtimeId`, native
+`toolCallId`/`toolName`, raw `input`, `cwd`, `command` when present in native
+arguments, and `paths` projected directly from native path arguments. Paths
+remain native values, potentially relative; the SDK does not parse a shell
+command to infer its filesystem effects. `nativeAgentId` identifies a child
+when the runtime supplies it. A callback also receives an `AbortSignal` for
+its deadline/session lifetime. Keep callbacks short: a synchronous JavaScript
+loop cannot be preempted by an in-process timer.
+
+Policy denials are tool errors, so a turn can continue and finish. Their text
+starts with `tool_policy_denied`, `tool_policy_error`, `tool_policy_timeout`,
+or `tool_policy_unavailable`; a Host denial retains its reason verbatim after
+the code prefix. Exceptions and malformed callback returns never allow a call.
+A late allow cannot supersede a timeout. If the embedding event loop cannot
+answer at all, Claude independently refuses the tool with its native
+PreToolUse timeout diagnostic (`is_error: true`), rather than an SDK-generated
+error code. Unsupported opt-in throws an error
+with `code: 'tool_execution_hook_unsupported'` and `runtimeId`; callers should
+use that code across the independently bundled root/adapters entries.
+
+Pi binds its private authenticated loopback IPC endpoint into RPC launch v7.
+Native SDK Pi subagents inherit that endpoint and install the same execution
+hook. Task/Agent identity comes from the parent manifest, never child input.
+The gate runs after the resource loader's inherited extension handlers. The
+loopback bearer token is inherited by Pi descendants, including allowed shell
+commands: it authenticates local IPC routing, not a security boundary against
+code already authorized to run as the same OS user. Prepared
+and durable Pi lanes reject this option; external-cli/external-job subagents
+are refused before their runtime executes when the gate is enabled. Their
+unsupported rejection is a subagent tool error, not an adapter-construction
+exception; its message retains `tool_execution_hook_unsupported`.
+
+Claude registers a native SDK `PreToolUse` callback during initialization and
+requires `hooks_applied: true` before the first prompt. This is independent of
+`can_use_tool`, does not change `--dangerously-skip-permissions`, and remains
+active when settings hooks are disabled. Native built-in/MCP/subagent tool
+calls use this hook. `EndConversation` and implicit `@file` prompt expansion
+are not covered by PreToolUse. A runtime that cannot confirm registration
+fails unsupported rather than silently ignoring the callback.
+
+Codex's approval requests do not cover every call under full access. Grok's
+hosted terminal callback does not cover its other tools. Both reject
+`beforeTool` at construction and do not advertise `capabilities.beforeTool`.
+No terminal-only or approval-only substitute is advertised as full support.
+
+This is a native tool-call boundary, not an OS sandbox: an allowed shell,
+MCP tool, or extension may execute arbitrary code internally. Those internal
+operations are not separate native tool calls. The Host must authorize the
+whole call. Pi IPC requests are limited to 1 MiB; oversized requests fail
+closed. No context, skills, web tools or native Pi subagents are globally
+removed by enabling the callback.
+
+Acceptance sources: `tool-execution-hook.test.ts`,
+`pi-tool-execution-hook.test.ts`, `claude-before-tool.test.ts`, and the opt-in
+`BYOK_REAL_CLAUDE_HOOK_TEST=1` real CLI loopback suite. The latter isolates HOME,
+uses a synthetic local provider, and checks actual file side effects with
+allow rules and `disableAllHooks` enabled. Both Pi and Claude suites also exercise actual native subagent scheduling,
+allow delegation, deny the child write, and verify the parent identity.

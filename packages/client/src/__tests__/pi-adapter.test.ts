@@ -816,6 +816,7 @@ const __executionScratch = await testExecutionScratch();
   it('descriptor advertises exactly what the adapter can express', () => {
     const adapter = fakePiAdapter();
     expect(adapter.descriptor.capabilities).toEqual({
+      beforeTool: true,
       steer: true,
       resume: true,
       mcpToolsets: true,

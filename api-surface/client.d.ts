@@ -1,4 +1,5 @@
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
+import { type BeforeToolOptions } from '../../tool-execution-hook';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type ResolvedBin } from './resolve-bin';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
@@ -6,6 +7,8 @@ import { type SpawnFn } from './process-client';
 declare const CLAUDE_AGENT_BUILTIN_TOOLS: readonly ['Agent', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'Edit', 'EnterWorktree', 'ExitWorktree', 'ListAgents', 'NotebookEdit', 'Read', 'ReportFindings', 'ScheduleWakeup', 'SendMessage', 'Skill', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskStop', 'TaskUpdate', 'WebFetch', 'WebSearch', 'Workflow', 'Write'];
 export type ClaudeBuiltinToolName = typeof CLAUDE_AGENT_BUILTIN_TOOLS[number];
 export interface ClaudeAdapterOptions {
+    /** Opt-in local pre-execution policy for native, MCP and subagent tool calls; failures deny the call. */
+    beforeTool?: BeforeToolOptions;
     /**
      * Agent operations only: select exact Claude native tools before startup.
      * Default `inherit` leaves the CLI defaults unchanged; [] disables all native
@@ -64,6 +67,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
+    private readonly beforeToolOptions?;
     private readonly agentBuiltinTools;
     constructor(options?: ClaudeAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
@@ -403,6 +407,7 @@ export interface ResolvedBin {
  */
 export declare function resolveClaudeBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/codex/codex-adapter.d.ts ====
+import { type BeforeToolOptions } from '../../tool-execution-hook';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
@@ -412,6 +417,8 @@ export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full
 /** Throws a TypeError unless `value` is a {@link CodexSandboxSetting}. */
 export declare function assertCodexSandboxSetting(value: unknown, label: string): asserts value is CodexSandboxSetting;
 export interface CodexAdapterOptions {
+    /** Unsupported: this runtime has no complete pre-tool interception contract. */
+    beforeTool?: BeforeToolOptions;
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /**
@@ -485,10 +492,13 @@ export interface ResolvedBin {
  */
 export declare function resolveCodexBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/grok/grok-adapter.d.ts ====
+import { type BeforeToolOptions } from '../../tool-execution-hook';
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
 import type { ResolvedBin } from '../codex/resolve-bin';
 export interface GrokAdapterOptions {
+    /** Unsupported: this runtime has no complete pre-tool interception contract. */
+    beforeTool?: BeforeToolOptions;
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
@@ -666,6 +676,8 @@ export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInter
 export { buildRuntimeEnv } from '../daemon/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
+export { ToolExecutionUnsupportedError } from '../tool-execution-hook';
+export type { BeforeToolOptions, BeforeToolRequest, BeforeToolDecision, ToolExecutionCall, ToolExecutionDenialCode } from '../tool-execution-hook';
 // ==== @byok-sdk/client dist/adapters/pi/agent-tool-policy.d.ts ====
 /** Pi native tools exposed by the Agent policy. PowerShell is never implicitly selected. */
 export type PiBuiltinToolName = 'read' | 'grep' | 'find' | 'ls' | 'edit' | 'write' | 'bash';
@@ -685,6 +697,7 @@ export declare function piAgentNativeToolOptions(policy: PiAgentToolPolicy): {
     excludeTools?: string[];
 };
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
+import { type BeforeToolOptions } from '../../tool-execution-hook';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
@@ -694,6 +707,8 @@ import { type PiBuiltinToolName, type PiAgentExtensionName } from './agent-tool-
 export type { PiBuiltinToolName, PiAgentExtensionName } from './agent-tool-policy';
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
+    /** Local execution gate for ordinary sessions and their native Pi subagents. Default disabled. */
+    beforeTool?: BeforeToolOptions;
     /** Agent tasks only: select native tools; [] disables them. Default inherit. Does not confine file paths. */
     agentBuiltinTools?: 'inherit' | readonly PiBuiltinToolName[];
     /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores. Default inherit. */
@@ -736,6 +751,7 @@ export declare function validatePiByokLauncherConfig(launcher: PiByokLauncherCon
 export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
     private readonly agentToolPolicy;
+    private readonly beforeTool;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     constructor(options?: PiAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
@@ -10216,6 +10232,8 @@ export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
+export { ToolExecutionUnsupportedError } from './tool-execution-hook';
+export type { BeforeToolOptions, BeforeToolRequest, BeforeToolDecision, ToolExecutionCall, ToolExecutionDenialCode } from './tool-execution-hook';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
@@ -12642,6 +12660,12 @@ export interface RuntimeFailureProjection {
  * contract violation by the caller.
  */
 export declare function projectRuntimeExecutionFailure(failure: RuntimeExecutionFailure): RuntimeFailureProjection;
+/** Local opt-in rejected before execution; never a retryable runtime outage. */
+export declare class ToolExecutionUnsupportedError extends Error {
+    readonly runtimeId: string;
+    readonly code = "tool_execution_hook_unsupported";
+    constructor(runtimeId: string, reason: string);
+}
 export declare const RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON: Readonly<{
     start: string;
     run: string;
@@ -12810,6 +12834,70 @@ export interface FakeRuntimeAdapterBehavior {
  * SDK. Only `detect` and `prepare` are the test's.
  */
 export declare function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior?: FakeRuntimeAdapterBehavior): RuntimeAdapter;
+// ==== @byok-sdk/client dist/tool-execution-hook.d.ts ====
+import type { AgentRef, RuntimeOperationManifest } from './types';
+/** Native arguments are preserved; command/path projections never interpret shell syntax. */
+export interface ToolExecutionCall {
+    readonly toolCallId: string;
+    readonly toolName: string;
+    readonly input: Readonly<Record<string, unknown>>;
+    readonly cwd: string;
+    readonly command?: string;
+    readonly paths: readonly string[];
+    readonly nativeAgentId?: string;
+    readonly parentToolCallId?: string;
+}
+export interface BeforeToolRequest extends ToolExecutionCall {
+    /** SDK-bound parent identity, including for native subagents. */
+    readonly taskId: string;
+    readonly agentRef?: AgentRef;
+    readonly runtimeId: string;
+    /** Aborted on timeout or session disposal. A late allow never executes the tool. */
+    readonly signal: AbortSignal;
+}
+export type BeforeToolDecision = {
+    readonly decision: 'allow';
+} | {
+    readonly decision: 'deny';
+    readonly reason: string;
+};
+export interface BeforeToolOptions {
+    readonly onRequest: (request: BeforeToolRequest) => BeforeToolDecision | Promise<BeforeToolDecision>;
+    /** Local callback deadline, 1–60000 ms; defaults to 5000 ms. */
+    readonly timeoutMs?: number;
+}
+export type ToolExecutionDenialCode = 'tool_policy_denied' | 'tool_policy_error' | 'tool_policy_timeout' | 'tool_policy_unavailable';
+export type ToolExecutionVerdict = {
+    readonly decision: 'allow';
+} | {
+    readonly decision: 'deny';
+    readonly code: ToolExecutionDenialCode;
+    readonly reason: string;
+};
+export { ToolExecutionUnsupportedError } from './runtime-failure';
+export declare function normalizeBeforeToolOptions(options: BeforeToolOptions | undefined): BeforeToolOptions | undefined;
+/** Private loopback IPC address; never a remote Host endpoint. */
+export interface ToolExecutionGateConfig {
+    readonly url: string;
+    readonly token: string;
+    readonly timeoutMs: number;
+}
+export declare function parseToolExecutionGateConfig(value: unknown): ToolExecutionGateConfig;
+export declare function formatToolExecutionDenial(verdict: Extract<ToolExecutionVerdict, {
+    decision: 'deny';
+}>): string;
+/** A timeout settles the tool decision even if the Host ignores cancellation. */
+export declare function evaluateBeforeToolRequest(options: BeforeToolOptions, request: Omit<BeforeToolRequest, 'signal'>, signal?: AbortSignal): Promise<ToolExecutionVerdict>;
+/** Each gate owns one immutable parent task identity and lives exactly as long as its runtime. */
+export declare function startToolExecutionGate(input: {
+    options: BeforeToolOptions;
+    manifest: RuntimeOperationManifest;
+    runtimeId: string;
+}): Promise<{
+    readonly config: ToolExecutionGateConfig;
+    close(): Promise<void>;
+}>;
+export declare function requestToolExecutionDecision(config: ToolExecutionGateConfig, call: ToolExecutionCall): Promise<ToolExecutionVerdict>;
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
@@ -12869,6 +12957,8 @@ export interface RuntimeDetectionAdvisory {
 export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported';
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+    /** Complete native pre-tool callback support; unsupported lanes still reject explicitly. */
+    readonly beforeTool?: boolean;
     /** Supports display-only Agent message drafts. Omission means unsupported. */
     readonly messageDraft?: boolean;
     /** Local native interaction support only; omission is unsupported. Not the approval channel. */

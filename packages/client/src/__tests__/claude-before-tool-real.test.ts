@@ -10,7 +10,7 @@ import { startPreparedOperation } from './fixtures/prepared-operation';
 
 /** Explicit local-runtime acceptance; all model traffic ends at the zero-cost loopback provider. */
 describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude PreToolUse with a loopback provider', () => {
-  it.each(['deny', 'throw', 'timeout', 'allow', 'disabled', 'subagent'] as const)('enforces %s under bypassPermissions and disableAllHooks', async mode => {
+  it.each(['deny', 'throw', 'timeout', 'allow', 'disabled', 'subagent', 'stalled-host'] as const)('enforces %s under bypassPermissions and disableAllHooks', async mode => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-real-hook-')));
     const target = path.join(root, 'target.txt');
     const calls: BeforeToolRequest[] = [];
@@ -89,6 +89,10 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude PreT
         ...(mode === 'disabled' ? {} : { beforeTool: { timeoutMs: 100, onRequest: (request: BeforeToolRequest) => {
           calls.push(request);
           if (mode === 'subagent' && (request.toolName === 'Agent' || request.toolName === 'Task')) return { decision: 'allow' as const };
+          if (mode === 'stalled-host') {
+            const deadline = Date.now() + 2500;
+            while (Date.now() < deadline) { /* Exercise the CLI deadline while the embedding event loop cannot respond. */ }
+          }
           if (mode === 'throw') throw new Error('fixture callback failed');
           if (mode === 'timeout') return new Promise<never>(() => {});
           return mode === 'allow' ? { decision: 'allow' as const } : { decision: 'deny' as const, reason: '本地规则拒绝' };
@@ -104,7 +108,7 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude PreT
         await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
         expect(calls.some(call => call.toolName === 'Write' && call.taskId === 'adapter-unit-test'
           && call.agentRef?.agentId === 'adapter-unit-agent' && call.paths.includes(target))).toBe(true);
-        const expected = mode === 'deny' || mode === 'subagent' ? 'tool_policy_denied: 本地规则拒绝' : mode === 'throw' ? 'tool_policy_error' : 'tool_policy_timeout';
+        const expected = mode === 'stalled-host' ? 'PreToolUse hook did not respond before its timeout' : mode === 'deny' || mode === 'subagent' ? 'tool_policy_denied: 本地规则拒绝' : mode === 'throw' ? 'tool_policy_error' : 'tool_policy_timeout';
         expect(JSON.stringify(results)).toContain(expected);
       }
       if (mode === 'disabled') expect(calls).toEqual([]);

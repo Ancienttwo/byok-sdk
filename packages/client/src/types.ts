@@ -64,6 +64,8 @@ export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unav
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+  /** Complete native pre-tool callback support; unsupported lanes still reject explicitly. */
+  readonly beforeTool?: boolean;
   /** Supports display-only Agent message drafts. Omission means unsupported. */
   readonly messageDraft?: boolean;
   /** Local native interaction support only; omission is unsupported. Not the approval channel. */
@@ -541,6 +543,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     ...(descriptor.trajectoryEvidence === 'event-stream' ? { trajectoryEvidence: 'event-stream' as const } : {}),
     ...(descriptor.platforms === undefined ? {} : { platforms: Object.freeze([...descriptor.platforms]) }),
     capabilities: Object.freeze({
+      ...(descriptor.capabilities.beforeTool === undefined ? {} : { beforeTool: descriptor.capabilities.beforeTool === true }),
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {
         nativeInteractions: Object.freeze({

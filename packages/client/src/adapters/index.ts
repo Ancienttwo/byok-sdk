@@ -52,3 +52,6 @@ export { buildRuntimeEnv } from '../daemon/environment';
 
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
+
+export { ToolExecutionUnsupportedError } from '../tool-execution-hook';
+export type { BeforeToolOptions, BeforeToolRequest, BeforeToolDecision, ToolExecutionCall, ToolExecutionDenialCode } from '../tool-execution-hook';

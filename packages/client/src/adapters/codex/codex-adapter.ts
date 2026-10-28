@@ -1,3 +1,4 @@
+import { ToolExecutionUnsupportedError, type BeforeToolOptions } from '../../tool-execution-hook';
 import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import type { RuntimeTaskInput } from '../../types';
@@ -58,6 +59,8 @@ export function assertCodexSandboxSetting(value: unknown, label: string): assert
 }
 
 export interface CodexAdapterOptions {
+  /** Unsupported: this runtime has no complete pre-tool interception contract. */
+  beforeTool?: BeforeToolOptions;
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
   /**
@@ -125,6 +128,7 @@ export class CodexAdapter implements RuntimeAdapter {
     },
   }); }
   constructor(private readonly options: CodexAdapterOptions = {}) {
+    if (options.beforeTool !== undefined) throw new ToolExecutionUnsupportedError('codex', 'complete pre-tool interception is not supported');
     if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
     if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
       throw new TypeError('CodexAdapterOptions.agentUserMcpServers must be inherit or excluded');

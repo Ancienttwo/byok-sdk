@@ -187,6 +187,28 @@ export function projectRuntimeExecutionFailure(failure: RuntimeExecutionFailure)
   };
 }
 
+const TOOL_EXECUTION_UNSUPPORTED_BRAND = Symbol.for('@byok-sdk/client/ToolExecutionUnsupportedError/v1');
+
+/** Local opt-in rejected before execution; never a retryable runtime outage. */
+export class ToolExecutionUnsupportedError extends Error {
+  readonly runtimeId: string;
+  readonly code = 'tool_execution_hook_unsupported';
+  constructor(runtimeId: string, reason: string) {
+    super(`tool_execution_hook_unsupported: ${runtimeId}: ${reason}`);
+    this.runtimeId = runtimeId;
+    this.name = 'ToolExecutionUnsupportedError';
+    Object.defineProperty(this, TOOL_EXECUTION_UNSUPPORTED_BRAND, { value: true });
+    Object.freeze(this);
+  }
+}
+
+function isToolExecutionUnsupported(value: unknown): value is ToolExecutionUnsupportedError {
+  return typeof value === 'object' && value !== null
+    && (value as Record<symbol, unknown>)[TOOL_EXECUTION_UNSUPPORTED_BRAND] === true
+    && typeof (value as ToolExecutionUnsupportedError).runtimeId === 'string'
+    && typeof (value as ToolExecutionUnsupportedError).message === 'string';
+}
+
 export const RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON = Object.freeze({
   start: 'runtime adapter contract violation during start',
   run: 'runtime adapter contract violation during run',
@@ -201,6 +223,9 @@ export function projectRuntimeBoundaryFailure(
   value: unknown,
   expectedPhase: RuntimeFailurePhase,
 ): RuntimeFailureProjection & { contractViolation: boolean } {
+  if (expectedPhase === 'start' && isToolExecutionUnsupported(value)) {
+    return { reason: value.message, retryable: false, failure: UNKNOWN_FAILURE, contractViolation: false };
+  }
   if (isRuntimeExecutionFailure(value) && value.phase === expectedPhase) {
     return { ...projectRuntimeExecutionFailure(value), contractViolation: false };
   }

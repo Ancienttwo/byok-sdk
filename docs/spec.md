@@ -3670,3 +3670,23 @@ timeout or timer. Notification scope is the same embedded ByokServer instance:
 a completion (or exact replay) must reach that instance to wake a pending wait.
 Writes by another process to a shared store do not provide distributed wakeups.
 Already-completed durable records remain readable immediately after restart.
+
+
+## Local adapter pre-tool execution callback
+
+The embedding Local Agent Host may configure adapter-level `beforeTool`.
+The default is disabled; `agentRef` is identity, never an implicit permission
+reduction. A configured callback receives parent task/Agent identity and
+structured native tool input before execution, and returns allow or a denial
+reason. Denial, callback failure and timeout become classified tool errors;
+they do not open a runtime approval prompt or wait for a user. Authorization
+state and any optional remote communication remain Host-owned.
+
+Pi ordinary RPC sessions and SDK native Pi children route calls through the
+same parent callback. Claude uses confirmed native SDK PreToolUse registration,
+not the bypassable can_use_tool approval path. Unsupported lanes/runtimes
+reject explicitly: no partial tool coverage may be advertised as complete.
+The precise coverage and limits are recorded in
+[adapter capabilities](adapter-capabilities.md#local-pre-tool-execution-policy-1061).
+The callback is not an OS sandbox and does not inspect the internal effects
+of an allowed tool. No wire protocol or server behavior changes for this feature.

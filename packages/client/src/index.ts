@@ -550,3 +550,6 @@ export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 
 export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
+
+export { ToolExecutionUnsupportedError } from './tool-execution-hook';
+export type { BeforeToolOptions, BeforeToolRequest, BeforeToolDecision, ToolExecutionCall, ToolExecutionDenialCode } from './tool-execution-hook';

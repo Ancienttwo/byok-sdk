@@ -749,14 +749,18 @@
     {
       "path": "src/runs/shared/external-cli-preflight.ts",
       "upstreamSha256": "5701877efb7f11dd6e1617630d1197e3460df524cb461b02fcb621a4c789a98a",
-      "vendoredSha256": "5701877efb7f11dd6e1617630d1197e3460df524cb461b02fcb621a4c789a98a",
-      "delta": []
+      "vendoredSha256": "9950d574422ba438b1322232bfc51381ecb1f2ab5c294e5cddd5b315bde5d61b",
+      "delta": [
+        "Reject external runners before preflight or execution when the SDK local beforeTool gate is enabled (#1061)."
+      ]
     },
     {
       "path": "src/runs/shared/external-cli-runner.ts",
       "upstreamSha256": "51f41fc6ee753ca3d96cfb93a083e64c62acc5d359ac4169e0f9e357967ca0e0",
-      "vendoredSha256": "51f41fc6ee753ca3d96cfb93a083e64c62acc5d359ac4169e0f9e357967ca0e0",
-      "delta": []
+      "vendoredSha256": "7ed53b2e10f672a1c43e724c1550c4e5e5434a195f1fbd2d3bf5c8c9525f7296",
+      "delta": [
+        "Reject external runners before preflight or execution when the SDK local beforeTool gate is enabled (#1061)."
+      ]
     },
     {
       "path": "src/runs/shared/external-job-bridge.ts",
@@ -767,8 +771,10 @@
     {
       "path": "src/runs/shared/external-job-runner.ts",
       "upstreamSha256": "1978d02e0cb7a7279af48acf299d9e0cd8a8e77dd4d21214845eab691c286100",
-      "vendoredSha256": "1978d02e0cb7a7279af48acf299d9e0cd8a8e77dd4d21214845eab691c286100",
-      "delta": []
+      "vendoredSha256": "d22371b64a33be079cd275a925f00edae4d9aeb99fbd969573700dbb5c4e5a25",
+      "delta": [
+        "Reject external runners before preflight or execution when the SDK local beforeTool gate is enabled (#1061)."
+      ]
     },
     {
       "path": "src/runs/shared/host-step-status.ts",

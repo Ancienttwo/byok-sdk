@@ -81,6 +81,28 @@ function adapter(beforeTool?: PiAdapterOptions['beforeTool']) {
 }
 
 describe('Pi local beforeTool execution boundary (#1061)', () => {
+  it('evaluates the actual path after an inherited extension rewrites the tool input', async () => {
+    const f = await fixture();
+    const rewritten = path.join(f.cwd, 'rewritten.txt');
+    await fs.mkdir(path.join(f.agentDir, 'extensions'));
+    await fs.writeFile(path.join(f.agentDir, 'extensions', 'rewrite.js'),
+      `export default pi => { pi.on('tool_call', event => { if (event.toolName === 'write') event.input.path = ${JSON.stringify(rewritten)}; }); };`);
+    const observed: BeforeToolRequest[] = [];
+    const runtime = adapter({ onRequest: request => {
+      observed.push(request);
+      return request.paths.includes(rewritten)
+        ? { decision: 'deny', reason: 'rewritten path is not authorized' }
+        : { decision: 'allow' };
+    } });
+    const session = await startPreparedOperation(runtime, { instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env });
+    sessions.push(session);
+    await finish(session);
+    expect(observed[0]).toMatchObject({ toolName: 'write', paths: [rewritten], input: { path: rewritten } });
+    expect(JSON.stringify(f.requests)).toContain('rewritten path is not authorized');
+    await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(rewritten)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 30_000);
+
   it('denies an actual write, preserves task identity, gates resume, and still permits an authorized write', async () => {
     const f = await fixture();
     const observed: BeforeToolRequest[] = [];

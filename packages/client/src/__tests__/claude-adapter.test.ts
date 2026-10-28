@@ -113,6 +113,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('descriptor advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm rejected)', () => {
     const adapter = fakeClaudeAdapter();
     expect(adapter.descriptor.capabilities).toEqual({
+      beforeTool: true,
       steer: false,
       resume: true,
       approvalInteractive: false,
