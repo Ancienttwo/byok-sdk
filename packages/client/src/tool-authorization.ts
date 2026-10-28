@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { isAbsolute, matchesGlob, relative, resolve, sep } from 'node:path';
 import type { AgentRef } from './agent-home';
 
 /**
@@ -19,7 +19,31 @@ export interface ToolAuthorizationTask {
   readonly runtimeId: string;
   readonly agentRef?: AgentRef;
 }
-export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationMode;
+export interface ToolRule {
+  readonly id: string;
+  /** Host display text, never interpreted as executable policy. */
+  readonly description?: string;
+  readonly match: {
+    /** Exact, case-sensitive native tool name. */
+    readonly toolName?: string;
+    readonly commandGlob?: string;
+    readonly pathGlob?: string;
+    readonly mcpServer?: string;
+    readonly mcpTool?: string;
+  };
+}
+
+export interface ToolAuthorizationRules {
+  readonly alwaysAsk?: readonly ToolRule[];
+  readonly allowWithoutAsking?: readonly ToolRule[];
+}
+
+export interface ToolAuthorizationPolicy {
+  readonly mode: ToolAuthorizationMode;
+  readonly rules?: ToolAuthorizationRules;
+}
+
+export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationMode | ToolAuthorizationPolicy;
 
 /**
  * A tool-authorization policy that a config file can express (#1094):
@@ -51,6 +75,69 @@ export function parseToolAuthorizationMode(value: unknown): ToolAuthorizationMod
   return value;
 }
 
+const MAX_TOOL_RULES = 128;
+const MAX_RULE_ID_CHARS = 128;
+const MAX_RULE_TEXT_CHARS = 4_096;
+const MATCH_KEYS = ['toolName', 'commandGlob', 'pathGlob', 'mcpServer', 'mcpTool'] as const;
+
+function policyRecord(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
+    || Reflect.ownKeys(value).some(key => typeof key !== 'string' || !keys.includes(key))) {
+    throw new TypeError(`invalid tool authorization ${label}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function ruleText(value: unknown, label: string, maxChars: number, allowEmpty = false): string {
+  if (typeof value !== 'string' || (!allowEmpty && value.trim().length === 0)
+    || value.length > maxChars || value.includes('\0')) {
+    throw new TypeError(`tool authorization ${label} must be ${allowEmpty ? 'a' : 'a nonempty'} string of at most ${maxChars} characters without NUL`);
+  }
+  return value;
+}
+
+/** The admission boundary: one copied, frozen policy for either public input form. */
+export function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy {
+  if (typeof value === 'string') return Object.freeze({ mode: parseToolAuthorizationMode(value) });
+  const raw = policyRecord(value, ['mode', 'rules'], 'policy');
+  const mode = parseToolAuthorizationMode(raw.mode);
+  if (!Object.hasOwn(raw, 'rules')) return Object.freeze({ mode });
+  const rawRules = policyRecord(raw.rules, ['alwaysAsk', 'allowWithoutAsking'], 'rules');
+  const ids = new Set<string>();
+  let count = 0;
+  const rules: { alwaysAsk?: readonly ToolRule[]; allowWithoutAsking?: readonly ToolRule[] } = {};
+  for (const list of ['alwaysAsk', 'allowWithoutAsking'] as const) {
+    if (!Object.hasOwn(rawRules, list)) continue;
+    const entries = rawRules[list];
+    if (!Array.isArray(entries) || (count += entries.length) > MAX_TOOL_RULES) {
+      throw new TypeError(`tool authorization rules must contain at most ${MAX_TOOL_RULES} rules in arrays`);
+    }
+    const copied: ToolRule[] = [];
+    for (const entry of entries) {
+      const rule = policyRecord(entry, ['id', 'description', 'match'], 'rule');
+      const id = ruleText(rule.id, 'rule id', MAX_RULE_ID_CHARS);
+      if (ids.has(id)) throw new TypeError(`duplicate tool authorization rule id: ${id}`);
+      ids.add(id);
+      const rawMatch = policyRecord(rule.match, MATCH_KEYS, 'rule match');
+      if (Object.keys(rawMatch).length === 0) throw new TypeError('tool authorization rule match requires at least one selector');
+      const match: { -readonly [K in keyof ToolRule['match']]: ToolRule['match'][K] } = {};
+      for (const key of MATCH_KEYS) {
+        if (!Object.hasOwn(rawMatch, key)) continue;
+        const pattern = ruleText(rawMatch[key], key, MAX_RULE_TEXT_CHARS);
+        // Node owns the glob language; do not accept a pattern it cannot evaluate.
+        if (key !== 'toolName') matchesGlob('', pattern);
+        match[key] = pattern;
+      }
+      const description = Object.hasOwn(rule, 'description')
+        ? ruleText(rule.description, 'rule description', MAX_RULE_TEXT_CHARS, true) : undefined;
+      copied.push(Object.freeze({ id, ...(description === undefined ? {} : { description }), match: Object.freeze(match) }));
+    }
+    rules[list] = Object.freeze(copied);
+  }
+  return Object.freeze({ mode, rules: Object.freeze(rules) });
+}
+
 /** One native tool call, before execution. `input` is the runtime's own argument object. */
 export interface ToolCall {
   readonly toolCallId: string;
@@ -60,13 +147,24 @@ export interface ToolCall {
   readonly cwd: string;
   readonly nativeAgentId?: string;
   readonly parentToolCallId?: string;
+  /** Trusted admitted identity; not inferred from a native tool's spelling. */
+  readonly mcp?: { readonly server: string; readonly tool: string };
 }
 
 export type ToolRiskReason =
   | 'privilege-escalation' | 'recursive-delete' | 'system-modification' | 'destructive-git'
   | 'publish-or-deploy' | 'remote-script-execution' | 'permission-broadening'
-  | 'sensitive-path' | 'write-outside-workspace';
-export type ToolRisk = { readonly level: 'normal' } | { readonly level: 'high'; readonly reasons: readonly ToolRiskReason[] };
+  | 'sensitive-path' | 'write-outside-workspace' | 'custom-rule';
+export interface ToolAuthorizationReason {
+  readonly source: 'rule' | 'built-in' | 'floor';
+  readonly ruleIds: readonly string[];
+}
+export type ToolRisk =
+  | { readonly level: 'normal'; readonly authorization: ToolAuthorizationReason }
+  | { readonly level: 'high'; readonly reasons: readonly ToolRiskReason[]; readonly authorization: ToolAuthorizationReason };
+
+const BUILT_IN_AUTHORIZATION: ToolAuthorizationReason = Object.freeze({ source: 'built-in', ruleIds: Object.freeze([]) });
+const FLOOR_AUTHORIZATION: ToolAuthorizationReason = Object.freeze({ source: 'floor', ruleIds: Object.freeze([]) });
 
 // Lexical patterns over the command text. Indirect forms (scripts, eval,
 // encoded payloads, aliases) are not recognized; this is a tool gate, not a sandbox.
@@ -107,7 +205,8 @@ function commandText(input: Readonly<Record<string, unknown>>): string | undefin
  * cwd the daemon granted, not the runtime-reported cwd.
  */
 export function classifyToolCall(
-  call: Pick<ToolCall, 'toolName' | 'input' | 'cwd'>, workspace: string, home: string = homedir(),
+  call: Pick<ToolCall, 'toolName' | 'input' | 'cwd' | 'mcp'>, workspace: string, home: string = homedir(),
+  rules?: ToolAuthorizationRules,
 ): ToolRisk {
   const reasons = new Set<ToolRiskReason>();
   const command = commandText(call.input);
@@ -126,20 +225,63 @@ export function classifyToolCall(
       paths.push({ path: change.path, mutating }, { path: change.movePath, mutating });
     }
   }
+  const targets: string[] = [];
   for (const { path: raw, mutating } of paths) {
     if (typeof raw !== 'string' || raw.length === 0) continue;
     const expanded = raw === '~' ? home : raw.startsWith('~/') ? `${home}${raw.slice(1)}` : raw;
     const target = resolve(call.cwd, expanded);
+    targets.push(target);
     if (SENSITIVE_HOME_PATHS.some(path => within(resolve(home, path), target))) reasons.add('sensitive-path');
     if (mutating && !within(workspace, target)) reasons.add('write-outside-workspace');
   }
-  return reasons.size === 0 ? { level: 'normal' } : { level: 'high', reasons: Object.freeze([...reasons]) };
+
+  const matchingIds = (entries: readonly ToolRule[] | undefined, allow: boolean): readonly string[] => {
+    const ids: string[] = [];
+    for (const { id, match } of entries ?? []) {
+      if (match.toolName !== undefined && match.toolName !== call.toolName) continue;
+      if (match.commandGlob !== undefined && (command === undefined || !matchesGlob(command, match.commandGlob))) continue;
+      if (match.mcpServer !== undefined && (call.mcp === undefined || !matchesGlob(call.mcp.server, match.mcpServer))) continue;
+      if (match.mcpTool !== undefined && (call.mcp === undefined || !matchesGlob(call.mcp.tool, match.mcpTool))) continue;
+      if (match.pathGlob !== undefined) {
+        const pattern = match.pathGlob;
+        if (targets.length === 0 || !(allow
+          ? targets.every(target => matchesGlob(target, pattern))
+          : targets.some(target => matchesGlob(target, pattern)))) continue;
+      }
+      ids.push(id);
+    }
+    return Object.freeze(ids);
+  };
+  const askIds = matchingIds(rules?.alwaysAsk, false);
+  if (askIds.length > 0) {
+    reasons.add('custom-rule');
+    return { level: 'high', reasons: Object.freeze([...reasons]),
+      authorization: Object.freeze({ source: 'rule', ruleIds: askIds }) };
+  }
+  if (reasons.has('sensitive-path')) {
+    return { level: 'high', reasons: Object.freeze([...reasons]), authorization: FLOOR_AUTHORIZATION };
+  }
+  const allowIds = matchingIds(rules?.allowWithoutAsking, true);
+  if (allowIds.length > 0) return { level: 'normal', authorization: Object.freeze({ source: 'rule', ruleIds: allowIds }) };
+  return reasons.size === 0 ? { level: 'normal', authorization: BUILT_IN_AUTHORIZATION }
+    : { level: 'high', reasons: Object.freeze([...reasons]), authorization: BUILT_IN_AUTHORIZATION };
 }
 
 export type ToolAuthorizationDenialCode = 'tool_authorization_denied' | 'tool_authorization_unavailable';
 export type ToolAuthorizationVerdict =
-  | { readonly decision: 'allow' }
-  | { readonly decision: 'deny'; readonly code: ToolAuthorizationDenialCode; readonly reason: string };
+  | { readonly decision: 'allow'; readonly authorization?: ToolAuthorizationReason }
+  | { readonly decision: 'deny'; readonly code: ToolAuthorizationDenialCode; readonly reason: string; readonly authorization?: ToolAuthorizationReason };
+
+/** Local audit projection; raw tool arguments and rule descriptions stay private. */
+export interface ToolAuthorizationDecision {
+  readonly taskId: string;
+  readonly toolName: string;
+  readonly toolCallId?: string;
+  readonly decision: 'allow' | 'deny';
+  readonly authorization: ToolAuthorizationReason;
+  readonly reasons: readonly ToolRiskReason[];
+  readonly code?: ToolAuthorizationDenialCode;
+}
 
 /**
  * The `auto` gate a daemon hands to an adapter that declares
@@ -157,39 +299,63 @@ export interface ToolAuthorizationGate {
 }
 
 const MAX_SUMMARY_CHARS = 1_000;
-export function describeHighRiskToolCall(call: Pick<ToolCall, 'toolName' | 'input'>, reasons: readonly ToolRiskReason[]): string {
+export function describeHighRiskToolCall(
+  call: Pick<ToolCall, 'toolName' | 'input'>, reasons: readonly ToolRiskReason[], authorization?: ToolAuthorizationReason,
+): string {
   const subject = commandText(call.input)
     ?? PATH_KEYS.map(key => call.input[key]).find((value): value is string => typeof value === 'string')
     ?? '';
-  const summary = `High-risk tool call (${reasons.join(', ')}): ${call.toolName}${subject ? ` ${subject}` : ''}`;
+  const label = authorization?.source === 'rule' ? `Tool authorization rule (${authorization.ruleIds.join(', ')})`
+    : authorization?.source === 'floor' ? 'Protected-path tool call' : 'High-risk tool call';
+  const summary = `${label} (${reasons.join(', ')}): ${call.toolName}${subject ? ` ${subject}` : ''}`;
   return summary.length > MAX_SUMMARY_CHARS ? `${summary.slice(0, MAX_SUMMARY_CHARS - 1)}…` : summary;
 }
 
 export function createAutoToolAuthorizationGate(input: {
   readonly workspace: string;
+  readonly home?: string;
   readonly timeoutMs: number;
+  readonly rules?: ToolAuthorizationRules;
+  readonly mcpIdentities?: ReadonlyMap<string, { readonly server: string; readonly tool: string }>;
+  readonly onDecision?: (decision: { readonly call: ToolCall; readonly risk: ToolRisk; readonly verdict: ToolAuthorizationVerdict }) => void;
   /** Aborting `signal` must withdraw the request so a later decision cannot revive it. */
   readonly requestAuthorization: (summary: string, signal: AbortSignal) => Promise<{ approved: boolean; reason?: string }>;
 }): ToolAuthorizationGate {
   return Object.freeze({
     timeoutMs: input.timeoutMs,
-    async authorize(call: ToolCall): Promise<ToolAuthorizationVerdict> {
+    async authorize(rawCall: ToolCall): Promise<ToolAuthorizationVerdict> {
+      let call = rawCall;
       const withdraw = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
       const expired = new Promise<'expired'>(resolve => { timer = setTimeout(() => resolve('expired'), input.timeoutMs); });
+      let risk: ToolRisk | undefined;
+      const finish = (verdict: ToolAuthorizationVerdict): ToolAuthorizationVerdict => {
+        const classifiedVerdict = risk === undefined ? verdict : { ...verdict, authorization: risk.authorization };
+        if (risk !== undefined) {
+          try { input.onDecision?.({ call, risk, verdict: classifiedVerdict }); } catch { /* Observers do not own authorization. */ }
+        }
+        return classifiedVerdict;
+      };
       try {
-        const risk = classifyToolCall(call, input.workspace);
-        if (risk.level === 'normal') return { decision: 'allow' };
-        const result = await Promise.race([input.requestAuthorization(describeHighRiskToolCall(call, risk.reasons), withdraw.signal), expired]);
+        // A runtime label is not an MCP authority. Only an exact admitted mapping
+        // may attach identity to a gate request, even if the request supplies one.
+        const { mcp: _untrustedMcp, ...nativeCall } = rawCall;
+        const mcp = input.mcpIdentities?.get(rawCall.toolName);
+        call = { ...nativeCall, ...(mcp === undefined ? {} : { mcp }) };
+        risk = classifyToolCall(call, input.workspace, input.home, input.rules);
+        if (risk.level === 'normal') return finish({ decision: 'allow' });
+        const summaryAuthorization = risk.authorization.source === 'rule' ? risk.authorization : undefined;
+        const result = await Promise.race([input.requestAuthorization(describeHighRiskToolCall(call, risk.reasons, summaryAuthorization), withdraw.signal), expired]);
         if (result === 'expired') {
           withdraw.abort();
-          return { decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` };
+          return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` });
         }
-        if (result.approved === true) return { decision: 'allow' };
-        return { decision: 'deny', code: 'tool_authorization_denied', reason: result.reason ?? 'user did not authorize this high-risk tool call' };
+        if (result.approved === true) return finish({ decision: 'allow' });
+        return finish({ decision: 'deny', code: 'tool_authorization_denied', reason: result.reason
+          ?? (risk.authorization.source === 'rule' ? 'user did not authorize this tool call' : 'user did not authorize this high-risk tool call') });
       } catch {
         withdraw.abort();
-        return { decision: 'deny', code: 'tool_authorization_unavailable', reason: 'tool authorization is unavailable' };
+        return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: 'tool authorization is unavailable' });
       } finally {
         clearTimeout(timer);
       }
@@ -208,4 +374,5 @@ export interface ToolReminder {
   readonly toolCallId?: string;
   readonly reasons: readonly ToolRiskReason[];
   readonly summary: string;
+  readonly authorization: ToolAuthorizationReason;
 }
