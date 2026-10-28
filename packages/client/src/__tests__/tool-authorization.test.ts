@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { join, resolve } from 'node:path';
 import {
   classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, parseToolAuthorizationPolicy,
   type ToolAuthorizationReason, type ToolAuthorizationRules, type ToolCall, type ToolRule,
@@ -116,15 +117,15 @@ describe('deterministic tool rules in the single classifier', () => {
   });
 
   it('normalizes path operands once and requires one allow rule to cover the whole batch', () => {
-    const allowed = '/tmp/allowed';
-    const pathRule: ToolRule = { id: 'outside-output', match: { pathGlob: `${allowed}/**` } };
+    const allowed = resolve('/tmp/allowed');
+    const pathRule: ToolRule = { id: 'outside-output', match: { pathGlob: join(allowed, '**') } };
     expect(classify({ path: `${allowed}/a.txt` }, { allowWithoutAsking: [pathRule] }, 'write').level).toBe('normal');
     const batch = { changes: [{ kind: 'add', path: `${allowed}/a.txt` }, { kind: 'update', path: '/tmp/other.txt' }] };
     expect(classify(batch, { allowWithoutAsking: [pathRule] }, 'file_change')).toEqual({ level: 'high', reasons: ['write-outside-workspace'], authorization: BUILT_IN });
     expect(classify(batch, { alwaysAsk: [pathRule] }, 'file_change').authorization).toEqual({ source: 'rule', ruleIds: ['outside-output'] });
     expect(classify({ changes: [{ kind: 'update', path: `${allowed}/a.txt`, movePath: '/tmp/moved.txt' }] }, { allowWithoutAsking: [pathRule] }, 'file_change').authorization).toEqual(BUILT_IN);
     expect(classify({}, { alwaysAsk: [pathRule] }, 'read').level).toBe('normal');
-    expect(classify({ path: '../a.txt' }, { alwaysAsk: [{ id: 'parent', match: { pathGlob: '/Users/agent/.byok/homes/a.txt' } }] }, 'read').authorization).toEqual({ source: 'rule', ruleIds: ['parent'] });
+    expect(classify({ path: '../a.txt' }, { alwaysAsk: [{ id: 'parent', match: { pathGlob: resolve(WORKSPACE, '../a.txt') } }] }, 'read').authorization).toEqual({ source: 'rule', ruleIds: ['parent'] });
   });
 
   it('matches trusted MCP identity with AND semantics without splitting arbitrary names', () => {
