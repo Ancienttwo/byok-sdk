@@ -4,25 +4,30 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { createAutoToolAuthorizationGate, type ToolCall } from '../tool-authorization';
+import { createAutoToolAuthorizationGate, type ToolAuthorizationRules, type ToolAuthorizationVerdict, type ToolCall } from '../tool-authorization';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
 /** Explicit local-runtime acceptance; all model traffic ends at the zero-cost loopback provider. */
 describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto gate with a loopback provider', () => {
-  it.each(['denied', 'approved', 'workspace', 'all', 'subagent', 'native-all', 'native-approved', 'native-denied'] as const)('%s: enforced under bypassPermissions, allow rules and disableAllHooks', async mode => {
+  it.each(['denied', 'approved', 'workspace', 'all', 'subagent', 'native-all', 'native-approved', 'native-denied',
+    'rules-ask', 'rules-allow', 'rules-floor', 'rules-resume'] as const)('%s: enforced under bypassPermissions, allow rules and disableAllHooks', async mode => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-real-auth-')));
     const workspace = path.join(root, 'home');
     await fs.mkdir(workspace);
     // Outside the granted workspace is high-risk; inside it is ordinary work.
     const native = mode.startsWith('native-');
     const nativeRequests: unknown[] = [];
-    const target = mode === 'workspace' ? path.join(workspace, 'target.txt') : path.join(root, 'target.txt');
+    const target = mode === 'workspace' || mode === 'rules-ask' ? path.join(workspace, 'target.txt')
+      : mode === 'rules-floor' ? path.join(root, '.ssh', 'fixture-key') : path.join(root, 'target.txt');
+    if (mode === 'rules-floor') await fs.mkdir(path.dirname(target));
     const calls: ToolCall[] = [];
     const summaries: string[] = [];
+    const verdicts: ToolAuthorizationVerdict[] = [];
     const results: unknown[] = [];
     let delegationOffered = false;
     let childWriteIssued = false;
+    let resumedWriteIssued = false;
     const childPrompt = 'BYOK_SUBAGENT_LOOPBACK_CHILD: perform the requested write, then finish.';
     let session: Session | undefined;
     const server = createServer(async (request, response) => {
@@ -44,15 +49,18 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
           : Array.isArray(message.content) ? message.content.filter((block: { type?: string }) => block.type === 'text')
             .map((block: { text?: string }) => block.text ?? '') : []);
       const child = userTexts.some(text => text.includes('BYOK_SUBAGENT_LOOPBACK_CHILD'));
+      const resumeWrite = mode === 'rules-resume' && !resumedWriteIssued
+        && userTexts.some(text => text.includes('BYOK_RULE_RESUME_WRITE'));
       let content: Array<{ type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } | { type: 'text'; text: string }>;
       if (mode === 'subagent' && !child && toolResults.length === 0 && delegation?.name) {
         delegationOffered = true;
         content = [{ type: 'tool_use', id: 'loopback-delegate', name: delegation.name, input: {
           description: 'Verify local child tool policy', prompt: childPrompt, subagent_type: 'general-purpose',
         } }];
-      } else if (write && toolResults.length === 0 && (mode !== 'subagent' || child)) {
+      } else if (write && (toolResults.length === 0 || resumeWrite) && (mode !== 'subagent' || child)) {
         if (mode === 'subagent') childWriteIssued = true;
-        content = [{ type: 'tool_use', id: 'loopback-write', name: 'Write', input: { file_path: target, content: 'native-write' } }];
+        if (resumeWrite) resumedWriteIssued = true;
+        content = [{ type: 'tool_use', id: resumeWrite ? 'loopback-write-resumed' : 'loopback-write', name: 'Write', input: { file_path: target, content: 'native-write' } }];
       } else content = [{ type: 'text', text: 'Finished.' }];
       const message = { id: `msg-${Date.now()}`, type: 'message', role: 'assistant', model: parsed.model ?? 'claude-sonnet-4-6',
         content, stop_reason: content[0]?.type === 'tool_use' ? 'tool_use' : 'end_turn', stop_sequence: null,
@@ -95,21 +103,30 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
         // The native relay must neither veto (`all`) nor ask a second time (`auto`).
         ...(native ? { nativeInteractions: { onRequest: (request: unknown) => { nativeRequests.push(request); } } } : {}),
       });
-      const inner = createAutoToolAuthorizationGate({ workspace, timeoutMs: 5_000, requestAuthorization: async summary => {
+      const matchedWrite = { id: mode === 'rules-ask' ? 'ask-write' : 'allow-write',
+        description: 'Host display text only', match: { toolName: 'Write', pathGlob: target } };
+      const rules: ToolAuthorizationRules | undefined = mode === 'rules-ask' ? { alwaysAsk: [matchedWrite] }
+        : mode === 'rules-allow' || mode === 'rules-floor' || mode === 'rules-resume' ? { allowWithoutAsking: [matchedWrite] } : undefined;
+      const inner = createAutoToolAuthorizationGate({ workspace, home: root, timeoutMs: 5_000, rules, requestAuthorization: async summary => {
         summaries.push(summary);
         return mode === 'approved' || mode === 'native-approved' ? { approved: true } : { approved: false, reason: '主人尚未授权' };
       } });
-      const toolAuthorization = mode === 'all' || mode === 'native-all' ? undefined : { timeoutMs: inner.timeoutMs, authorize: (call: ToolCall) => { calls.push(call); return inner.authorize(call); } };
+      const toolAuthorization = mode === 'all' || mode === 'native-all' ? undefined : { timeoutMs: inner.timeoutMs, authorize: async (call: ToolCall) => {
+        calls.push(call);
+        const verdict = await inner.authorize(call);
+        verdicts.push(verdict);
+        return verdict;
+      } };
       session = await startPreparedOperation(adapter, { instruction: 'Perform the requested file operation, then finish.' }, {
         workspaceDir: workspace, agentHome: workspace, env, ...(toolAuthorization === undefined ? {} : { toolAuthorization }),
       });
       let ended = false;
       for await (const event of session.events) { if (event.type === 'turn_end') { ended = true; break; } }
       expect(ended).toBe(true);
-      if (mode === 'denied' || mode === 'subagent' || mode === 'native-denied') {
+      if (mode === 'denied' || mode === 'subagent' || mode === 'native-denied' || mode === 'rules-ask' || mode === 'rules-floor') {
         await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
         expect(JSON.stringify(results)).toContain('tool_authorization_denied: 主人尚未授权');
-        expect(summaries.some(summary => summary.includes('write-outside-workspace') && summary.includes(target))).toBe(true);
+        if (mode !== 'rules-ask') expect(summaries.some(summary => summary.includes('write-outside-workspace') && summary.includes(target))).toBe(true);
       } else {
         expect(await fs.readFile(target, 'utf8')).toBe('native-write');
       }
@@ -118,6 +135,43 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
       if (mode === 'native-approved') expect(summaries).toHaveLength(1);
       if (mode === 'workspace') expect(summaries).toEqual([]);
       if (mode === 'approved') expect(summaries).toHaveLength(1);
+      if (mode === 'rules-ask' || mode === 'rules-floor') {
+        expect(summaries).toHaveLength(1);
+        expect(verdicts).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: '主人尚未授权',
+          authorization: { source: mode === 'rules-floor' ? 'floor' : 'rule', ruleIds: mode === 'rules-floor' ? [] : ['ask-write'] } }]);
+        if (mode === 'rules-floor') expect(summaries[0]).toContain('sensitive-path');
+      }
+      if (mode === 'rules-allow' || mode === 'rules-resume') {
+        expect(summaries).toEqual([]);
+        expect(verdicts).toEqual([{ decision: 'allow', authorization: { source: 'rule', ruleIds: ['allow-write'] } }]);
+      }
+      if (mode === 'rules-resume') {
+        const sessionRef = session.sessionRef;
+        await session.close();
+        await fs.rm(target);
+        const resumedGate = createAutoToolAuthorizationGate({ workspace, home: root, timeoutMs: 5_000,
+          rules: { alwaysAsk: [{ id: 'ask-resumed-write', match: { toolName: 'Write', pathGlob: target } }] },
+          requestAuthorization: async summary => { summaries.push(summary); return { approved: false, reason: '主人尚未授权' }; },
+        });
+        session = await startPreparedOperation(adapter, { instruction: 'BYOK_RULE_RESUME_WRITE: perform the file operation again, then finish.', sessionRef }, {
+          workspaceDir: workspace, agentHome: workspace, env, toolAuthorization: { timeoutMs: resumedGate.timeoutMs, authorize: async call => {
+            const verdict = await resumedGate.authorize(call);
+            verdicts.push(verdict);
+            return verdict;
+          } },
+        });
+        let resumedEnded = false;
+        for await (const event of session.events) { if (event.type === 'turn_end') { resumedEnded = true; break; } }
+        expect(resumedEnded).toBe(true);
+        expect(session.sessionRef).toBe(sessionRef);
+        expect(resumedWriteIssued).toBe(true);
+        await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(summaries).toHaveLength(1);
+        expect(verdicts[1]).toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: '主人尚未授权',
+          authorization: { source: 'rule', ruleIds: ['ask-resumed-write'] } });
+        expect(calls).toHaveLength(1);
+        expect(JSON.stringify(results)).toContain('tool_authorization_denied: 主人尚未授权');
+      }
       if (mode === 'subagent') {
         expect(delegationOffered).toBe(true);
         expect(childWriteIssued).toBe(true);

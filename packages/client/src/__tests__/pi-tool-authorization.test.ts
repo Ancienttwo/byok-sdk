@@ -5,8 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
-import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolCall } from '../tool-authorization';
-import { readToolAuthorizationGateEnv, requestToolAuthorization, TOOL_AUTHORIZATION_GATE_ENV } from '../tool-authorization-ipc';
+import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolAuthorizationRules, type ToolAuthorizationVerdict, type ToolCall } from '../tool-authorization';
+import { startToolAuthorizationIpc, TOOL_AUTHORIZATION_GATE_ENV } from '../tool-authorization-ipc';
+import { assertSubagentRunnerAuthorized } from '../subagents/tool-authorization-runner';
 import type { Session } from '../types';
 
 const roots: string[] = [];
@@ -86,16 +87,89 @@ function adapter() {
   }) });
 }
 /** The daemon's `auto` gate with an inspectable user decision. */
-function gate(workspace: string, decide: (summary: string) => { approved: boolean; reason?: string } = () => ({ approved: false, reason: 'owner authorization required' })) {
+function gate(
+  workspace: string,
+  decide: (summary: string) => { approved: boolean; reason?: string } = () => ({ approved: false, reason: 'owner authorization required' }),
+  options: { rules?: ToolAuthorizationRules; home?: string } = {},
+) {
   const calls: ToolCall[] = [];
   const summaries: string[] = [];
-  const inner = createAutoToolAuthorizationGate({ workspace, timeoutMs: 5_000, requestAuthorization: async summary => { summaries.push(summary); return decide(summary); } });
-  const toolAuthorization: ToolAuthorizationGate = { timeoutMs: inner.timeoutMs, authorize: call => { calls.push(call); return inner.authorize(call); } };
-  return { toolAuthorization, calls, summaries };
+  const verdicts: ToolAuthorizationVerdict[] = [];
+  const inner = createAutoToolAuthorizationGate({ workspace, timeoutMs: 5_000, ...options, requestAuthorization: async summary => { summaries.push(summary); return decide(summary); } });
+  const toolAuthorization: ToolAuthorizationGate = { timeoutMs: inner.timeoutMs, authorize: async call => {
+    calls.push(call);
+    const verdict = await inner.authorize(call);
+    verdicts.push(verdict);
+    return verdict;
+  } };
+  return { toolAuthorization, calls, summaries, verdicts };
 }
 
 
 describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback provider)', () => {
+  it.each(['ask', 'allow', 'floor'] as const)('custom rules %s: enforce the decision before the real write', async mode => {
+    const f = await fixture();
+    f.target = mode === 'ask' ? path.join(f.cwd, 'notes.md')
+      : mode === 'floor' ? path.join(f.root, '.ssh', 'fixture-key') : f.target;
+    if (mode === 'floor') await fs.mkdir(path.dirname(f.target));
+    const rule = { id: `owner-${mode}`, description: 'Host display text only', match: { toolName: 'write', pathGlob: f.target } };
+    const g = gate(f.cwd, undefined, { home: f.root, rules: mode === 'ask'
+      ? { alwaysAsk: [rule] } : { allowWithoutAsking: [rule] } });
+    const session = await startPreparedOperation(adapter(), { instruction: 'write the file' }, {
+      workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization,
+    });
+    sessions.push(session);
+    await finish(session);
+    expect(g.calls).toHaveLength(1);
+    expect(g.calls[0]).toMatchObject({ toolName: 'write', input: { path: f.target } });
+    if (mode === 'allow') {
+      expect(await fs.readFile(f.target, 'utf8')).toBe('actual file content');
+      expect(g.summaries).toEqual([]);
+      expect(g.verdicts).toEqual([{ decision: 'allow', authorization: { source: 'rule', ruleIds: ['owner-allow'] } }]);
+    } else {
+      await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(g.summaries).toHaveLength(1);
+      expect(JSON.stringify(f.requests)).toContain('tool_authorization_denied: owner authorization required');
+      expect(g.verdicts).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: 'owner authorization required',
+        authorization: { source: mode === 'floor' ? 'floor' : 'rule', ruleIds: mode === 'floor' ? [] : ['owner-ask'] } }]);
+      if (mode === 'floor') expect(g.summaries[0]).toContain('sensitive-path');
+    }
+  }, 30_000);
+
+  it('applies a newly selected Always Ask rule when a previously allowed native session resumes', async () => {
+    const f = await fixture();
+    const runtime = adapter();
+    const allowed = gate(f.cwd, undefined, { rules: { allowWithoutAsking: [
+      { id: 'allow-first-write', match: { toolName: 'write', pathGlob: f.target } },
+    ] } });
+    const first = await startPreparedOperation(runtime, { instruction: 'write the file' }, {
+      workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: allowed.toolAuthorization,
+    });
+    sessions.push(first);
+    await finish(first);
+    expect(await fs.readFile(f.target, 'utf8')).toBe('actual file content');
+    expect(allowed.summaries).toEqual([]);
+    const sessionRef = first.sessionRef;
+    await first.close();
+    await fs.rm(f.target);
+
+    const ask = gate(f.cwd, undefined, { rules: { alwaysAsk: [
+      { id: 'ask-resumed-write', match: { toolName: 'write', pathGlob: f.target } },
+    ] } });
+    const resumed = await startPreparedOperation(runtime, { instruction: 'write the file again', sessionRef }, {
+      workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: ask.toolAuthorization,
+    });
+    sessions.push(resumed);
+    await finish(resumed);
+    expect(resumed.sessionRef).toBe(sessionRef);
+    await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(ask.summaries).toHaveLength(1);
+    expect(ask.verdicts).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: 'owner authorization required',
+      authorization: { source: 'rule', ruleIds: ['ask-resumed-write'] } }]);
+    expect(allowed.calls).toHaveLength(1);
+    expect(JSON.stringify(f.requests)).toContain('tool_authorization_denied: owner authorization required');
+  }, 60_000);
+
   it('denies a high-risk write before execution, gates resume, and runs it once the user approves', async () => {
     const f = await fixture();
     let approved = false;
