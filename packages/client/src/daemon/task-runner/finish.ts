@@ -135,7 +135,7 @@ export async function finishOnce(this: TaskRunner, taskId: string): Promise<bool
     }
     if (active.pendingApproval !== undefined) {
       try {
-        this['deps'].approvalRegistry.resolve(active.pendingApproval.approvalId, 'reject', `task ${taskId} finished`);
+        this['deps'].approvalRegistry.resolve(active.pendingApproval.approvalId, 'reject', `task ${taskId} finished`, 'fail-closed');
       } catch {
         // Already resolved by a real decision/timeout that raced this.
       }

@@ -116,7 +116,7 @@ export function composeStartTerminals(daemonScope: DaemonScope, run: Pick<StartR
     if (envelope.type !== 'task.await_approval' || approvalId === undefined) return;
     console.error(`[byok/client] approval ${approvalId} of sealed task ${envelope.task_id} was not sent; denied locally`);
     try {
-      approvalRegistry.resolve(approvalId, 'reject', 'the approval request could not be sealed for the Host');
+      approvalRegistry.resolve(approvalId, 'reject', 'the approval request could not be sealed for the Host', 'fail-closed');
     } catch {
       // Already resolved, for example by the approval timeout.
     }

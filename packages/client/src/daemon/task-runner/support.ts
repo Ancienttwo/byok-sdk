@@ -27,6 +27,7 @@ import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-r
 import { ProgressBatcher } from '../progress-batcher';
 import { AgentMessageOutbox } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
+import type { ApprovalKind } from '../approvals';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from '../task-runner';
 import type { OfferAdmissionTiming } from './offer-admission-timing';
@@ -265,8 +266,6 @@ export interface ClaimedAgentFailureContext {
   readonly runtimeId: string;
   readonly sessionRef?: string;
 }
-
-export type ApprovalKind = 'task-terminal' | 'tool-authorization';
 
 /** One not-yet-dispatched `requestApproval` call waiting its turn — see `ActiveTask.approvalQueue`. */
 export interface QueuedApprovalRequest {

@@ -24,7 +24,7 @@ import {
   type LocalAgentReleaseIdentity,
 } from '../release-identity';
 import { assertCodexSandboxSetting, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
-import { ApprovalRegistry } from './approvals';
+import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals';
 import { AuthManager } from './auth-manager';
 import { resolveMachineId } from './machine-id';
 import { DaemonHaltError, type DaemonLifecycle } from './daemon-lifecycle';
@@ -113,6 +113,19 @@ export interface DaemonConfig {
    * other value declines the offer. Not an OS sandbox or file scope.
    */
   toolAuthorization?: ToolAuthorizationResolver;
+  /**
+   * Who may approve a `tool-authorization` approval (an `auto` high-risk tool
+   * call). Absent (default): only the Host — a wire `task.approve` or an
+   * in-process {@link Daemon.approve}. The control socket's
+   * `approvals.resolve` (`byok-agent approve`) can only reject it, and an
+   * approve fails with the control error code `approval_requires_host`
+   * ({@link APPROVAL_REQUIRES_HOST}). `'allow'` lets the control socket
+   * approve it too. Any same-user process that can read `control.token`,
+   * including the agent whose tool call waits, can then approve it, and the
+   * server records it as a local approval. `task-terminal` approvals are not
+   * affected. See `docs/security.md`.
+   */
+  localToolApproval?: LocalToolApprovalPolicy;
   /** Select an explicit macOS keychain for device enrollment custody. */
   deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
   storage?: StorageConfig;
@@ -643,9 +656,12 @@ export interface Daemon {
    */
   unpair(): Promise<void>;
   /**
-   * Locally approve the pending approval `approvalId` of a task — the same
-   * resolution a server-sent `task.approve` makes (`TaskRunner.handleApprove`),
-   * reported to the server as `task.approval_resolved`. The session that
+   * Approve, from the Host process that embeds this daemon, the pending
+   * approval `approvalId` of a task — the same resolution a server-sent
+   * `task.approve` makes (`TaskRunner.handleApprove`), reported to the server
+   * as `task.approval_resolved`. Unlike the control socket's
+   * `approvals.resolve`, it also approves a `tool-authorization` approval
+   * whatever {@link DaemonConfig.localToolApproval} says. The session that
    * requested it through its `approvalChannel` (or a control-socket
    * `approvals.request`) receives `{ approved: true }`. A no-op (resolves
    * immediately) for a `taskId` this daemon doesn't currently have active;
@@ -809,11 +825,9 @@ function buildDaemon(
   // internal stop()/start() cycle within the same instance. See `observer.ts`.
   const outbound: OutboundStatus = { accepted: 0, duplicate: 0, rejected: 0, rejectedByReason: {}, rejectedTerminals: 0 };
   const observer = new DaemonObserver();
-  // M4 Phase 2: registry backing the control socket's `approvals.list`/
-  // `approvals.resolve` methods — see `approvals.ts`'s module doc comment.
-  // Nothing populates it yet in Phase 2; it's constructed now so Phase 3
-  // only needs to add producers.
-  const approvalRegistry = new ApprovalRegistry();
+  // The one pending-approval registry: `TaskRunner` registers, and wire,
+  // in-process and control-socket decisions resolve — see `approvals.ts`.
+  const approvalRegistry = new ApprovalRegistry({ localToolApproval: config.localToolApproval });
 
   // Both network reads and individual offer waits are bounded. Reconnects do
   // not extend an offer's deadline. This is an operational wait, not token TTL.

@@ -1,3 +1,4 @@
+import { APPROVAL_REQUIRES_HOST } from '../../daemon/approvals';
 import { ControlError } from '../../daemon/control-protocol';
 import { connectControlClient } from '../control-client';
 
@@ -9,24 +10,18 @@ export interface ApproveRejectDeps {
 }
 
 /**
- * M4 Phase 2: `approve`/`reject` now genuinely work from a separate,
- * short-lived CLI invocation — they call the control socket's
- * `approvals.resolve` method (`create-daemon.ts`'s method registry, backed
- * by `daemon/approvals.ts`'s `ApprovalRegistry`) rather than requiring a
- * `Daemon` this same process just started (which never worked at all: see
- * git history for the pre-M4 version of this module, which called
- * `daemon.approve`/`daemon.reject` directly and always failed with
- * "daemon is not started" for exactly that reason — `byok-agent.ts` used to
- * not even dispatch to these commands as a result).
+ * `approve`/`reject` from a separate, short-lived CLI invocation: they call
+ * the running daemon's control-socket `approvals.resolve` method, backed by
+ * `daemon/approvals.ts`'s `ApprovalRegistry`. Pending approvals come from the
+ * `auto` tool gate (`tool-authorization`) and from runtimes or custom
+ * adapters that ask whether a task may continue (`task-terminal`);
+ * `byok-agent approvals` lists them, and `approvals.list` returns each kind.
  *
- * Still honest about what these can resolve TODAY: no bundled runtime
- * adapter (pi/claude/codex) raises an approval yet (see `create-daemon.ts`'s
- * `toRuntimeInfoCapabilities` doc comment), so nothing ever calls
- * `ApprovalRegistry.register()` in this SDK version — every `approve`/
- * `reject` against a real daemon today resolves to the registry's own
- * `not_found` error, UNLESS the daemon isn't reachable at all, in which case
- * that's reported first. Both failure modes are reported with a clear,
- * specific message rather than a generic "not started" one.
+ * The control socket is a same-user channel, so it can reject anything and
+ * approve a `task-terminal` approval, but approving a `tool-authorization`
+ * approval fails with `approval_requires_host` unless the Host set
+ * `DaemonConfig.localToolApproval: 'allow'` (see `docs/security.md`). An
+ * unknown id fails `not_found`, and an unreachable daemon is reported first.
  */
 export async function runApproveCommand(
   storeDir: string,
@@ -79,6 +74,8 @@ async function resolveApproval(
       // `err` itself (re-thrown below, unchanged) still carries the
       // original message alone; this hint is rendered-output-only.
       error(`${err.message} — run \`byok-agent approvals\` to see pending approvalIds`);
+    } else if (err instanceof ControlError && err.code === APPROVAL_REQUIRES_HOST) {
+      error(`${err.message} — approve it in the Host, or run \`byok-agent reject ${approvalId}\``);
     } else {
       error(`${decision} failed: ${err instanceof Error ? err.message : String(err)}`);
     }

@@ -3693,8 +3693,15 @@ wording such as `full access` or `inherit`) declines the offer with
   tool call executes, the adapter asks the daemon gate. Ordinary calls run
   without asking. A high-risk call requests user authorization through the
   task's single approval path (`task.await_approval`, answered by the wire
-  `task.approve`/`task.reject` or the local `Daemon.approve`/`reject`), and the
-  call runs only after approval. Rejection, the approval timeout, a lost gate
+  `task.approve`/`task.reject` or the in-process `Daemon.approve`/`reject`), and
+  the call runs only after approval. Only the Host approves such a call: the
+  pending approval has kind `tool-authorization` (`approvals.list` returns
+  `kind`), and the control socket's `approvals.resolve` (`byok-agent approve`)
+  can reject it but an approve fails with the control error code
+  `approval_requires_host` (`APPROVAL_REQUIRES_HOST`) and leaves it pending,
+  unless the Host sets `DaemonConfig.localToolApproval: 'allow'`.
+  `task-terminal` approvals stay resolvable over the control socket.
+  Rejection, the approval timeout, a lost gate
   or a malformed exchange deny the call with
   `tool_authorization_denied` or `tool_authorization_unavailable` as the tool's
   error result; the turn continues.

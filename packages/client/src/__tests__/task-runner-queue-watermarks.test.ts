@@ -104,14 +104,14 @@ describe('TaskRunner.getQueueWatermarks', () => {
     let watermark = runner.getQueueWatermarks().find((w) => w.taskId === taskId);
     expect(watermark?.pendingApprovals).toBe(2);
 
-    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'approve');
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'approve', undefined, 'control');
     await outcome1;
 
     // The second is now dispatched (still just the one in flight).
     watermark = runner.getQueueWatermarks().find((w) => w.taskId === taskId);
     expect(watermark?.pendingApprovals).toBe(1);
 
-    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject');
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', undefined, 'control');
     await outcome2;
 
     watermark = runner.getQueueWatermarks().find((w) => w.taskId === taskId);

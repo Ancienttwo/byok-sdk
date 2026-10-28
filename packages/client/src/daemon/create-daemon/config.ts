@@ -56,6 +56,9 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (config.toolAuthorization !== undefined && typeof config.toolAuthorization !== 'function') {
     throw new Error('toolAuthorization must be a function returning auto or all');
   }
+  if (config.localToolApproval !== undefined && config.localToolApproval !== 'allow') {
+    throw new Error(`DaemonConfig.localToolApproval must be 'allow' or omitted — got ${JSON.stringify(config.localToolApproval)}`);
+  }
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
   }

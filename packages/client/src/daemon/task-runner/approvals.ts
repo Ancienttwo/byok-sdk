@@ -2,9 +2,9 @@
 // (see ./support.ts for how a member module runs).
 import { randomUUID } from 'node:crypto';
 import { createEnvelope } from '@byok-sdk/protocol';
-import type { ApprovalDecision, ApprovalOrigin } from '../approvals';
+import type { ApprovalDecision, ApprovalKind, ApprovalOrigin } from '../approvals';
 import { DAEMON_TASK_FAILURE } from '../task-failure';
-import type { ActiveTask, ApprovalKind } from './support';
+import type { ActiveTask } from './support';
 import type { TaskRunner } from '../task-runner';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, MAX_PENDING_APPROVALS_PER_TASK } from '../task-runner';
 
@@ -76,7 +76,7 @@ export function dispatchApproval(
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       try {
-        this['deps'].approvalRegistry.resolve(approvalId, 'reject', `approval timed out after ${timeoutMs}ms with no decision`);
+        this['deps'].approvalRegistry.resolve(approvalId, 'reject', `approval timed out after ${timeoutMs}ms with no decision`, 'fail-closed');
       } catch {
         // Already resolved by a real decision that raced the timer — the
         // registered onResolve callback below already fired; nothing left
@@ -88,23 +88,24 @@ export function dispatchApproval(
     // arriving afterwards is stale and cannot revive it.
     const withdraw = () => {
       try {
-        this['deps'].approvalRegistry.resolve(approvalId, 'reject', WITHDRAWN);
+        this['deps'].approvalRegistry.resolve(approvalId, 'reject', WITHDRAWN, 'fail-closed');
       } catch {
         // Already resolved.
       }
     };
 
     this['deps'].approvalRegistry.register(
-      { approvalId, taskId, summary, createdAt: new Date().toISOString() },
+      { approvalId, taskId, kind, summary, createdAt: new Date().toISOString() },
       (decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin) => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', withdraw);
         if (active.pendingApproval?.approvalId === approvalId) active.pendingApproval = undefined;
-        // Every resolution of this approval lands here: a wire decision, a
-        // local `Daemon.approve`/`reject` or `approvals.resolve`, the timeout
-        // above, `finish()`'s fail-closed cleanup and registry eviction. Only
-        // a local one is new to the server (see `ApprovalOrigin`).
-        if (origin === 'local') this['sendApprovalResolved'](taskId, approvalId, decision);
+        // Every resolution of this approval lands here: a wire decision, an
+        // in-process `Daemon.approve`/`reject`, a control-socket
+        // `approvals.resolve`, the timeout above, `finish()`'s fail-closed
+        // cleanup and registry eviction. All but a wire one are new to the
+        // server (see `ApprovalOrigin`).
+        if (origin !== 'wire') this['sendApprovalResolved'](taskId, approvalId, decision);
         resolve({ approved: decision === 'approve', reason });
         this['dispatchNextQueuedApproval'](active);
       },
@@ -114,7 +115,7 @@ export function dispatchApproval(
 }
 
 /**
- * A wire `task.approve` or a local `Daemon.approve`: resolves the pending
+ * A wire `task.approve` or an in-process `Daemon.approve`: resolves the pending
  * approval it names in the registry, which hands `{ approved: true }` to the
  * session that requested it. A decision for any other id is stale and
  * changes nothing.
@@ -127,7 +128,7 @@ export async function handleApprove(this: TaskRunner, taskId: string, approvalId
 }
 
 /**
- * A wire `task.reject` or a local `Daemon.reject`: resolves the pending
+ * A wire `task.reject` or an in-process `Daemon.reject`: resolves the pending
  * approval it names. Only a task-terminal approval stops the session and
  * reports `task.fail`; tool authorization returns a tool denial and the turn
  * continues. A decision for any other id is stale and changes nothing.
