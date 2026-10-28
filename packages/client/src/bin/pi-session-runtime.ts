@@ -1,3 +1,5 @@
+import { access } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
@@ -92,6 +94,11 @@ export async function runPiSessionRuntime(options: {
       modelsPath: join(credentialAgentDir, 'models.json'),
       signal: AbortSignal.timeout(15_000),
     }) : undefined;
+    // Pi reports a missing explicit skill as a warning and continues without it.
+    // Require readable grants without promoting unrelated advisory diagnostics.
+    for (const path of options.resourceLoaderOptions?.additionalSkillPaths ?? []) {
+      await access(path, constants.R_OK);
+    }
     const services = await createAgentSessionServices({
       cwd: options.cwd, agentDir, modelRuntimeSignal: AbortSignal.timeout(15_000),
       ...(modelRuntime === undefined ? {} : { modelRuntime }),

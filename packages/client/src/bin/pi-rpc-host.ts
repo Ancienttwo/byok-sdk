@@ -17,7 +17,7 @@ const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 6;
+  readonly version: 7;
   /**
    * `keys-profile`: the keys launcher parents this host, and the provider key
    * arrives over its private IPC channel. `pi-auth-store`: the device's own
@@ -57,7 +57,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
     fail('config must contain exactly format, version, credentialSource, cwd, mcp, agentToolPolicy');
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 6) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 7) fail('unsupported config format/version');
   const credentialSource = raw.credentialSource;
   if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
     fail(`config.credentialSource must be one of [${CREDENTIAL_SOURCES.join(', ')}]`);
@@ -67,7 +67,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   return {
-    format: 'byok.pi.rpc-launch', version: 6,
+    format: 'byok.pi.rpc-launch', version: 7,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
     agentToolPolicy: parsePiAgentToolPolicy(raw.agentToolPolicy),
   };
@@ -191,6 +191,8 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     ...(resourceAgentDir === undefined ? {} : { resourceAgentDir }),
     resourceLoaderOptions: {
       extensionFactories,
+      additionalSkillPaths: [...policy.skillPaths],
+      additionalExtensionPaths: [...policy.extensionPaths],
       ...(policy.userContext === 'excluded' ? {
         noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
       } : {}),

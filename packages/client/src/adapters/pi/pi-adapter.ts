@@ -89,6 +89,10 @@ export interface PiAdapterOptions {
   agentUserContext?: 'inherit' | 'excluded';
   /** Agent tasks only: select SDK web/subagent/todo extensions; MCP remains independently admitted. Default inherit. */
   agentExtensions?: 'inherit' | readonly PiAgentExtensionName[];
+  /** Agent tasks only: explicitly load local skill files/directories even when user context is excluded. Default []. */
+  agentSkillPaths?: readonly string[];
+  /** Agent tasks only: explicitly trust local executable extensions even when user context is excluded. Default []. */
+  agentExtensionPaths?: readonly string[];
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
   /** Opt-in ordinary, lease-bound durable worker. */
@@ -231,6 +235,8 @@ export class PiAdapter implements RuntimeAdapter {
       builtinTools: options.agentBuiltinTools === undefined ? 'inherit' : options.agentBuiltinTools,
       userContext: options.agentUserContext === undefined ? 'inherit' : options.agentUserContext,
       extensions: options.agentExtensions === undefined ? 'inherit' : options.agentExtensions,
+      skillPaths: options.agentSkillPaths === undefined ? [] : options.agentSkillPaths,
+      extensionPaths: options.agentExtensionPaths === undefined ? [] : options.agentExtensionPaths,
     });
     if (options.durablePi !== undefined && typeof options.durablePi !== 'boolean') throw new Error('PiAdapterOptions.durablePi must be boolean; pass replicaRoot through durableContext');
     // T0 verified the RPC lanes only. The durable worker's own frames and
@@ -527,7 +533,7 @@ export class PiAdapter implements RuntimeAdapter {
             // What is written is the START observation, already compared
             // above with the one this operation was admitted with.
             const serialized = serializePiHostConfig({
-              format: 'byok.pi.rpc-launch', version: 6,
+              format: 'byok.pi.rpc-launch', version: 7,
               // Digest-bound, as in the prepared lane: under `keys-profile`
               // the host takes the provider key over the launcher's private
               // IPC channel and refuses to start without it.

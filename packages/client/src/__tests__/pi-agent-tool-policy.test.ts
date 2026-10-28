@@ -21,7 +21,7 @@ afterEach(async () => {
 
 describe('Pi Agent tool policy (#1061 S1)', () => {
   it.each([
-    { agentBuiltinTools:['read'], agentUserContext:'excluded', agentExtensions:[] },
+    { agentBuiltinTools:['read'], agentUserContext:'excluded', agentExtensions:[], agentSkillPaths:[path.resolve('approved-skill')], agentExtensionPaths:[path.resolve('approved.ts')] },
     { agentBuiltinTools:[], agentUserContext:'excluded', agentExtensions:['todo'] },
   ] satisfies PiAdapterOptions[])('seals the local policy only for Agent operations: %j', async (options) => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-pi-agent-policy-')));
@@ -41,17 +41,17 @@ describe('Pi Agent tool policy (#1061 S1)', () => {
       });
       sessions.push(session);
     }
-    expect(configs.map(config=>config.version)).toEqual([6,6]);
-    expect(configs[0]?.agentToolPolicy).toEqual({builtinTools:'inherit',userContext:'inherit',extensions:'inherit'});
-    expect(configs[1]?.agentToolPolicy).toEqual({builtinTools:options.agentBuiltinTools,userContext:options.agentUserContext,extensions:options.agentExtensions});
+    expect(configs.map(config=>config.version)).toEqual([7,7]);
+    expect(configs[0]?.agentToolPolicy).toEqual({builtinTools:'inherit',userContext:'inherit',extensions:'inherit',skillPaths:[],extensionPaths:[]});
+    expect(configs[1]?.agentToolPolicy).toEqual({builtinTools:options.agentBuiltinTools,userContext:options.agentUserContext,extensions:options.agentExtensions,skillPaths:options.agentSkillPaths ?? [],extensionPaths:options.agentExtensionPaths ?? []});
   });
 
   it('freezes selection at construction and binds changes into the launch digest', () => {
     const tools = ['read'];
-    const policy = parsePiAgentToolPolicy({builtinTools:tools,userContext:'excluded',extensions:[]});
+    const policy = parsePiAgentToolPolicy({builtinTools:tools,userContext:'excluded',extensions:[],skillPaths:[],extensionPaths:[]});
     tools.push('bash');
     expect(policy.builtinTools).toEqual(['read']);
-    const base = {format:'byok.pi.rpc-launch',version:6,agentToolPolicy:policy};
+    const base = {format:'byok.pi.rpc-launch',version:7,agentToolPolicy:policy};
     expect(serializePiHostConfig(base).digest).not.toBe(serializePiHostConfig({...base,agentToolPolicy:{...policy,builtinTools:['bash']}}).digest);
   });
 
@@ -62,8 +62,26 @@ describe('Pi Agent tool policy (#1061 S1)', () => {
     expect(()=>new PiAdapter(options as PiAdapterOptions)).toThrow('Pi Agent tool policy');
   });
 
+  it('copies explicit resource grants and binds them into the launch digest', () => {
+    const skillPaths = [path.resolve('approved-skill')];
+    const extensionPaths = [path.resolve('approved-extension.ts')];
+    const policy = parsePiAgentToolPolicy({builtinTools:'inherit',userContext:'excluded',extensions:[],skillPaths,extensionPaths});
+    skillPaths.push(path.resolve('unselected-skill'));
+    extensionPaths.length = 0;
+    expect(policy.skillPaths).toEqual([path.resolve('approved-skill')]);
+    expect(policy.extensionPaths).toEqual([path.resolve('approved-extension.ts')]);
+    expect(serializePiHostConfig(policy).digest).not.toBe(serializePiHostConfig({...policy,skillPaths:[]}).digest);
+  });
+
+  it.each([
+    {agentSkillPaths:['relative']}, {agentSkillPaths:null},
+    {agentExtensionPaths:['npm:unapproved']}, {agentExtensionPaths:[path.resolve('x'),path.resolve('x')]},
+  ])('rejects invalid resource grants %j', options => {
+    expect(()=>new PiAdapter(options as PiAdapterOptions)).toThrow('Pi Agent tool policy');
+  });
+
   it('selects native tools without filtering MCP tools by a global allowlist', () => {
-    const policy = parsePiAgentToolPolicy({builtinTools:['read','grep'],userContext:'excluded',extensions:[]});
+    const policy = parsePiAgentToolPolicy({builtinTools:['read','grep'],userContext:'excluded',extensions:[],skillPaths:[],extensionPaths:[]});
     const options = piAgentNativeToolOptions(policy);
     expect(options.excludeTools).toEqual(['find','ls','edit','write','bash','powershell']);
     expect(options.tools).toEqual(['-find','-ls','-edit','-write','-bash','-powershell','+read','+grep']);
