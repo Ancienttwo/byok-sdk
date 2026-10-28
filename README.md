@@ -402,7 +402,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 121378 B |
 | `@byok-sdk/client/mcp-server` | Tools-only MCP server | — | forbidden | 13135 B |
 | `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 28384 B |
-| `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 4914 B |
+| `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 4943 B |
 | `@byok-sdk/client/testing` | Runtime adapter test doubles; no daemon | — | forbidden | 323115 B |
 | `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok) | `@agentclientprotocol/sdk`, `zod` | allowed | 75757 B |
 | `@byok-sdk/client#byok-hermes-session` | Private Hermes session runtime; loaded only when starting an execution | — | forbidden | 14606 B |
