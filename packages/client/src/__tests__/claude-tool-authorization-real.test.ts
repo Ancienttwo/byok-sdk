@@ -1,4 +1,6 @@
 import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,16 +10,35 @@ import { createAutoToolAuthorizationGate, type ToolAuthorizationRules, type Tool
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
+const execFileAsync = promisify(execFile);
+async function localPushFixture(root: string, workspace: string, env: NodeJS.ProcessEnv) {
+  const remote = path.join(root, 'origin.git');
+  const options = { cwd: workspace, env: { ...env, GIT_CONFIG_NOSYSTEM: '1' } };
+  await execFileAsync('git', ['init', '--bare', remote], options);
+  await execFileAsync('git', ['init', '-b', 'main'], options);
+  await fs.writeFile(path.join(workspace, 'tracked.txt'), 'local push fixture');
+  await execFileAsync('git', ['add', 'tracked.txt'], options);
+  await execFileAsync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture'], options);
+  await execFileAsync('git', ['remote', 'add', 'origin', remote], options);
+  const target = path.join(workspace, 'chain-target');
+  await fs.mkdir(target);
+  const marker = path.join(target, 'keep.txt');
+  await fs.writeFile(marker, 'must survive the denied shell chain');
+  return { target, marker, pushedRef: path.join(remote, 'refs', 'heads', 'main') };
+}
+
 /** Explicit local-runtime acceptance; all model traffic ends at the zero-cost loopback provider. */
 describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto gate with a loopback provider', () => {
   it.each(['denied', 'approved', 'workspace', 'all', 'subagent', 'native-all', 'native-approved', 'native-denied',
-    'rules-ask', 'rules-allow', 'rules-floor', 'rules-resume'] as const)('%s: enforced under bypassPermissions, allow rules and disableAllHooks', async mode => {
+    'rules-ask', 'rules-allow', 'rules-floor', 'rules-resume', 'F1-shell-chain'] as const)('%s: enforced under bypassPermissions, allow rules and disableAllHooks', async mode => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-real-auth-')));
     const workspace = path.join(root, 'home');
     await fs.mkdir(workspace);
     // Outside the granted workspace is high-risk; inside it is ordinary work.
     const native = mode.startsWith('native-');
     const nativeRequests: unknown[] = [];
+    const shellChain = mode === 'F1-shell-chain';
+    const command = 'git push origin main && rm -rf chain-target';
     const target = mode === 'workspace' || mode === 'rules-ask' ? path.join(workspace, 'target.txt')
       : mode === 'rules-floor' ? path.join(root, '.ssh', 'fixture-key') : path.join(root, 'target.txt');
     if (mode === 'rules-floor') await fs.mkdir(path.dirname(target));
@@ -52,7 +73,9 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
       const resumeWrite = mode === 'rules-resume' && !resumedWriteIssued
         && userTexts.some(text => text.includes('BYOK_RULE_RESUME_WRITE'));
       let content: Array<{ type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } | { type: 'text'; text: string }>;
-      if (mode === 'subagent' && !child && toolResults.length === 0 && delegation?.name) {
+      if (shellChain && toolResults.length === 0 && tools.some(tool => tool.name === 'Bash')) {
+        content = [{ type: 'tool_use', id: 'loopback-shell-chain', name: 'Bash', input: { command } }];
+      } else if (mode === 'subagent' && !child && toolResults.length === 0 && delegation?.name) {
         delegationOffered = true;
         content = [{ type: 'tool_use', id: 'loopback-delegate', name: delegation.name, input: {
           description: 'Verify local child tool policy', prompt: childPrompt, subagent_type: 'general-purpose',
@@ -98,6 +121,7 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
         ANTHROPIC_MODEL: 'claude-sonnet-4-6', ANTHROPIC_SMALL_FAST_MODEL: 'claude-sonnet-4-6',
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1',
       };
+      const local = shellChain ? await localPushFixture(root, workspace, env) : undefined;
       const adapter = new ClaudeAdapter({
         ...(process.env.BYOK_REAL_CLAUDE_BIN ? { resolveBin: () => ({ command: process.env.BYOK_REAL_CLAUDE_BIN!, source: 'env' as const }) } : {}),
         // The native relay must neither veto (`all`) nor ask a second time (`auto`).
@@ -105,7 +129,9 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
       });
       const matchedWrite = { id: mode === 'rules-ask' ? 'ask-write' : 'allow-write',
         description: 'Host display text only', match: { toolName: 'Write', pathGlob: target } };
-      const rules: ToolAuthorizationRules | undefined = mode === 'rules-ask' ? { alwaysAsk: [matchedWrite] }
+      const rules: ToolAuthorizationRules | undefined = shellChain
+        ? { allowWithoutAsking: [{ id: 'allow-push', match: { toolName: 'Bash', commandGlob: 'git push origin *' } }] }
+        : mode === 'rules-ask' ? { alwaysAsk: [matchedWrite] }
         : mode === 'rules-allow' || mode === 'rules-floor' || mode === 'rules-resume' ? { allowWithoutAsking: [matchedWrite] } : undefined;
       const inner = createAutoToolAuthorizationGate({ workspace, home: root, timeoutMs: 5_000, rules, requestAuthorization: async summary => {
         summaries.push(summary);
@@ -123,7 +149,19 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
       let ended = false;
       for await (const event of session.events) { if (event.type === 'turn_end') { ended = true; break; } }
       expect(ended).toBe(true);
-      if (mode === 'denied' || mode === 'subagent' || mode === 'native-denied' || mode === 'rules-ask' || mode === 'rules-floor') {
+      if (shellChain) {
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toMatchObject({ toolName: 'Bash', input: { command } });
+        expect(await fs.readFile(local!.marker, 'utf8')).toBe('must survive the denied shell chain');
+        expect((await fs.stat(local!.target)).isDirectory()).toBe(true);
+        await expect(fs.stat(local!.pushedRef)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(summaries).toHaveLength(1);
+        expect(summaries[0]).toContain('recursive-delete');
+        expect(summaries[0]).toContain('destructive-git');
+        expect(verdicts).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: '主人尚未授权',
+          authorization: { source: 'built-in', ruleIds: [] } }]);
+        expect(JSON.stringify(results)).toContain('tool_authorization_denied: 主人尚未授权');
+      } else if (mode === 'denied' || mode === 'subagent' || mode === 'native-denied' || mode === 'rules-ask' || mode === 'rules-floor') {
         await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
         expect(JSON.stringify(results)).toContain('tool_authorization_denied: 主人尚未授权');
         if (mode !== 'rules-ask') expect(summaries.some(summary => summary.includes('write-outside-workspace') && summary.includes(target))).toBe(true);
@@ -139,7 +177,10 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
         expect(summaries).toHaveLength(1);
         expect(verdicts).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: '主人尚未授权',
           authorization: { source: mode === 'rules-floor' ? 'floor' : 'rule', ruleIds: mode === 'rules-floor' ? [] : ['ask-write'] } }]);
-        if (mode === 'rules-floor') expect(summaries[0]).toContain('sensitive-path');
+        if (mode === 'rules-floor') {
+          expect(summaries[0]).toContain('sensitive-path');
+          expect(summaries[0]).toMatch(/^Protected-path tool call/);
+        }
       }
       if (mode === 'rules-allow' || mode === 'rules-resume') {
         expect(summaries).toEqual([]);

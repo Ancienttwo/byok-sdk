@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,7 +23,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
-async function fixture(delegated = false, childAgent = 'hook-child', background = false) {
+async function fixture(delegated = false, childAgent = 'hook-child', background = false, command?: string) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-tool-auth-')));
   roots.push(root);
   const agentDir = path.join(root, 'agent');
@@ -54,7 +56,9 @@ async function fixture(delegated = false, childAgent = 'hook-child', background 
         ? { agent: childAgent, task: 'Write the target file', model: 'hook-loopback/probe', async: background, context: 'fresh', output: false, artifacts: false, timeoutMs: 20000 }
         : { agent: childAgent, task: 'Write the target file' }) }
       : childFirst || (!delegated && turn % 2 === 1)
-        ? { name: 'write', arguments: JSON.stringify({ path: target, content: 'actual file content' }) }
+        ? command === undefined
+          ? { name: 'write', arguments: JSON.stringify({ path: target, content: 'actual file content' }) }
+          : { name: 'bash', arguments: JSON.stringify({ command }) }
         : undefined;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const delta = tool !== undefined
@@ -74,6 +78,23 @@ async function fixture(delegated = false, childAgent = 'hook-child', background 
   return { root, cwd, agentDir, requests, get target() { return target; }, set target(value: string) { target = value; },
     env: { HOME: root, PATH: process.env.PATH!, PI_CODING_AGENT_DIR: agentDir },
   };
+}
+
+const execFileAsync = promisify(execFile);
+async function localPushFixture(root: string, workspace: string, env: NodeJS.ProcessEnv) {
+  const remote = path.join(root, 'origin.git');
+  const options = { cwd: workspace, env: { ...env, GIT_CONFIG_NOSYSTEM: '1' } };
+  await execFileAsync('git', ['init', '--bare', remote], options);
+  await execFileAsync('git', ['init', '-b', 'main'], options);
+  await fs.writeFile(path.join(workspace, 'tracked.txt'), 'local push fixture');
+  await execFileAsync('git', ['add', 'tracked.txt'], options);
+  await execFileAsync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture'], options);
+  await execFileAsync('git', ['remote', 'add', 'origin', remote], options);
+  const target = path.join(workspace, 'chain-target');
+  await fs.mkdir(target);
+  const marker = path.join(target, 'keep.txt');
+  await fs.writeFile(marker, 'must survive the denied shell chain');
+  return { target, marker, pushedRef: path.join(remote, 'refs', 'heads', 'main') };
 }
 
 async function finish(session: Session): Promise<void> {
@@ -107,6 +128,31 @@ function gate(
 
 
 describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback provider)', () => {
+  it('F1: does not let a push allow rule execute a chained real shell deletion', async () => {
+    const command = 'git push origin main && rm -rf chain-target';
+    const f = await fixture(false, 'hook-child', false, command);
+    const local = await localPushFixture(f.root, f.cwd, f.env);
+    const g = gate(f.cwd, undefined, { home: f.root, rules: { allowWithoutAsking: [
+      { id: 'allow-push', match: { toolName: 'bash', commandGlob: 'git push origin *' } },
+    ] } });
+    const session = await startPreparedOperation(adapter(), { instruction: 'Run the requested shell command, then finish.' }, {
+      workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization,
+    });
+    sessions.push(session);
+    await finish(session);
+    expect(g.calls).toHaveLength(1);
+    expect(g.calls[0]).toMatchObject({ toolName: 'bash', input: { command } });
+    expect(await fs.readFile(local.marker, 'utf8')).toBe('must survive the denied shell chain');
+    expect((await fs.stat(local.target)).isDirectory()).toBe(true);
+    await expect(fs.stat(local.pushedRef)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(g.summaries).toHaveLength(1);
+    expect(g.summaries[0]).toContain('recursive-delete');
+    expect(g.summaries[0]).toContain('destructive-git');
+    expect(g.verdicts).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: 'owner authorization required',
+      authorization: { source: 'built-in', ruleIds: [] } }]);
+    expect(JSON.stringify(f.requests)).toContain('tool_authorization_denied: owner authorization required');
+  }, 30_000);
+
   it.each(['ask', 'allow', 'floor'] as const)('custom rules %s: enforce the decision before the real write', async mode => {
     const f = await fixture();
     f.target = mode === 'ask' ? path.join(f.cwd, 'notes.md')
@@ -132,7 +178,10 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
       expect(JSON.stringify(f.requests)).toContain('tool_authorization_denied: owner authorization required');
       expect(g.verdicts).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: 'owner authorization required',
         authorization: { source: mode === 'floor' ? 'floor' : 'rule', ruleIds: mode === 'floor' ? [] : ['owner-ask'] } }]);
-      if (mode === 'floor') expect(g.summaries[0]).toContain('sensitive-path');
+      if (mode === 'floor') {
+        expect(g.summaries[0]).toContain('sensitive-path');
+        expect(g.summaries[0]).toMatch(/^Protected-path tool call/);
+      }
     }
   }, 30_000);
 
