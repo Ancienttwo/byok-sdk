@@ -664,6 +664,10 @@ import { type SpawnFn } from './rpc-client';
 export interface PiAdapterOptions {
     /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores. Default inherit. Not a tool permission. */
     agentUserContext?: 'inherit' | 'excluded';
+    /** Agent RPC tasks only: explicit absolute local skill files/directories, including with excluded context. Default []. */
+    agentSkillPaths?: readonly string[];
+    /** Agent RPC tasks only: trusted executable local extensions, including with excluded context. Default []. */
+    agentExtensionPaths?: readonly string[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /** Opt-in ordinary, lease-bound durable worker. */
@@ -700,6 +704,7 @@ export declare function validatePiByokLauncherConfig(launcher: PiByokLauncherCon
 export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
+    private readonly agentResources;
     constructor(options?: PiAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -9297,8 +9302,12 @@ export declare class TaskRunner {
      * (`dispatchNextQueuedApproval`). Bounded by
      * {@link MAX_PENDING_APPROVALS_PER_TASK}: a request arriving once this
      * task's queue is full is rejected fail-closed immediately.
+     *
+     * Aborting `signal` withdraws the request wherever it is: a queued one
+     * leaves the queue undispatched, a dispatched one resolves as a rejection.
+     * Either way a later decision for it is stale.
      */
-    requestApproval(taskId: string, summary: string): Promise<{
+    requestApproval(taskId: string, summary: string, signal?: AbortSignal): Promise<{
         approved: boolean;
         reason?: string;
     }>;
@@ -12863,7 +12872,11 @@ export type ToolAuthorizationVerdict = {
  * before execution; it never throws.
  */
 export interface ToolAuthorizationGate {
-    /** Upper bound on one decision, user authorization included. */
+    /**
+     * Wall-clock bound on one decision, measured from the `authorize` call and
+     * covering any wait behind earlier approvals. An adapter's native hook
+     * deadline must exceed it.
+     */
     readonly timeoutMs: number;
     authorize(call: ToolCall): Promise<ToolAuthorizationVerdict>;
 }
@@ -12871,7 +12884,8 @@ export declare function describeHighRiskToolCall(call: Pick<ToolCall, 'toolName'
 export declare function createAutoToolAuthorizationGate(input: {
     readonly workspace: string;
     readonly timeoutMs: number;
-    readonly requestAuthorization: (summary: string) => Promise<{
+    /** Aborting `signal` must withdraw the request so a later decision cannot revive it. */
+    readonly requestAuthorization: (summary: string, signal: AbortSignal) => Promise<{
         approved: boolean;
         reason?: string;
     }>;

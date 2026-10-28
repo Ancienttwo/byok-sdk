@@ -112,7 +112,11 @@ export type ToolAuthorizationVerdict =
  * before execution; it never throws.
  */
 export interface ToolAuthorizationGate {
-  /** Upper bound on one decision, user authorization included. */
+  /**
+   * Wall-clock bound on one decision, measured from the `authorize` call and
+   * covering any wait behind earlier approvals. An adapter's native hook
+   * deadline must exceed it.
+   */
   readonly timeoutMs: number;
   authorize(call: ToolCall): Promise<ToolAuthorizationVerdict>;
 }
@@ -129,19 +133,30 @@ export function describeHighRiskToolCall(call: Pick<ToolCall, 'toolName' | 'inpu
 export function createAutoToolAuthorizationGate(input: {
   readonly workspace: string;
   readonly timeoutMs: number;
-  readonly requestAuthorization: (summary: string) => Promise<{ approved: boolean; reason?: string }>;
+  /** Aborting `signal` must withdraw the request so a later decision cannot revive it. */
+  readonly requestAuthorization: (summary: string, signal: AbortSignal) => Promise<{ approved: boolean; reason?: string }>;
 }): ToolAuthorizationGate {
   return Object.freeze({
     timeoutMs: input.timeoutMs,
     async authorize(call: ToolCall): Promise<ToolAuthorizationVerdict> {
+      const withdraw = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const expired = new Promise<'expired'>(resolve => { timer = setTimeout(() => resolve('expired'), input.timeoutMs); });
       try {
         const risk = classifyToolCall(call, input.workspace);
         if (risk.level === 'normal') return { decision: 'allow' };
-        const result = await input.requestAuthorization(describeHighRiskToolCall(call, risk.reasons));
+        const result = await Promise.race([input.requestAuthorization(describeHighRiskToolCall(call, risk.reasons), withdraw.signal), expired]);
+        if (result === 'expired') {
+          withdraw.abort();
+          return { decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` };
+        }
         if (result.approved === true) return { decision: 'allow' };
         return { decision: 'deny', code: 'tool_authorization_denied', reason: result.reason ?? 'user did not authorize this high-risk tool call' };
       } catch {
+        withdraw.abort();
         return { decision: 'deny', code: 'tool_authorization_unavailable', reason: 'tool authorization is unavailable' };
+      } finally {
+        clearTimeout(timer);
       }
     },
   });

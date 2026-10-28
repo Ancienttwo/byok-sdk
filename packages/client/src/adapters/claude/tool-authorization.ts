@@ -30,6 +30,9 @@ export function encodeClaudePreToolUse(verdict: ToolAuthorizationVerdict): Recor
   };
 }
 
+const DELIVERY_GRACE_MS = 2_000;
+const NATIVE_MARGIN_MS = 5_000;
+
 /**
  * An SDK callback hook registered at `initialize`. Unlike `can_use_tool` it
  * is not skipped by allow rules or bypass permissions, and `disableAllHooks`
@@ -39,16 +42,25 @@ export class ClaudeToolAuthorizationBridge {
   private readonly callbackId = randomUUID();
   private write: ((frame: Record<string, unknown>) => Promise<void>) | undefined;
   private ended = false;
+  private readonly deliveryDeadlineMs: number;
+  private readonly undelivered = new Set<ReturnType<typeof setTimeout>>();
   readonly hooks: Readonly<Record<string, unknown>>;
 
   constructor(private readonly gate: ToolAuthorizationGate, private readonly onFatal: (error: Error) => void) {
-    // The gate settles first (user authorization has its own deadline); the
-    // native timeout only backstops a dead control transport.
-    this.hooks = { PreToolUse: [{ hookCallbackIds: [this.callbackId], timeout: Math.ceil(gate.timeoutMs / 1_000) + 5 }] };
+    // The gate settles within `timeoutMs` of receipt, queue wait included.
+    // A hook timeout lets Claude continue the tool call, so a verdict not
+    // delivered DELIVERY_GRACE_MS later disposes the process strictly before
+    // the native timeout (at least NATIVE_MARGIN_MS after the gate) fires.
+    this.deliveryDeadlineMs = gate.timeoutMs + DELIVERY_GRACE_MS;
+    this.hooks = { PreToolUse: [{ hookCallbackIds: [this.callbackId], timeout: Math.ceil((gate.timeoutMs + NATIVE_MARGIN_MS) / 1_000) }] };
   }
 
   bind(write: (frame: Record<string, unknown>) => Promise<void>): void { this.write = write; }
-  close(): void { this.ended = true; }
+  close(): void {
+    this.ended = true;
+    for (const timer of this.undelivered) clearTimeout(timer);
+    this.undelivered.clear();
+  }
 
   /** True only for this bridge's hook callbacks; native question relay receives the rest. */
   receive(message: ClaudeStreamMessage): boolean {
@@ -59,7 +71,13 @@ export class ClaudeToolAuthorizationBridge {
       return true;
     }
     const requestId = message.request_id;
+    const backstop = setTimeout(() => {
+      this.undelivered.delete(backstop);
+      if (!this.ended) this.onFatal(new Error('Claude tool authorization verdict was not delivered before the native hook timeout'));
+    }, this.deliveryDeadlineMs);
+    this.undelivered.add(backstop);
     void this.respond(requestId, message.request.input)
+      .then(() => { clearTimeout(backstop); this.undelivered.delete(backstop); })
       .catch(error => this.onFatal(error instanceof Error ? error : new Error('Claude tool authorization response failed')));
     return true;
   }

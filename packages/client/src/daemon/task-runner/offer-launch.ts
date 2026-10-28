@@ -385,9 +385,9 @@ async function startAndActivateRuntime(
     agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
     preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
   } = input;
-  const requestApproval = (summary: string) => launch.settled
-    ? this.requestApproval(taskId, summary)
-    : launch.promise.then(() => this.requestApproval(taskId, summary));
+  const requestApproval = (summary: string, signal?: AbortSignal) => launch.settled
+    ? this.requestApproval(taskId, summary, signal)
+    : launch.promise.then(() => this.requestApproval(taskId, summary, signal));
   const startInput: RuntimeOperationStartInput = {
     scratch,
     ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {

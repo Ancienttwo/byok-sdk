@@ -977,7 +977,7 @@ flowchart TB
 工具授权只有两种模式，由 `DaemonConfig.toolAuthorization` 在 claim 前按任务决定，所有
 runtime 共用（契约见 `docs/spec.md` 的 Tool authorization 一节）。`auto` 的门由 daemon
 构造并放进 `RuntimeOperationStartInput.toolAuthorization`，高风险调用走任务唯一的
-approval 路径；adapter 只负责在执行前调用它（Pi 经 digest 绑定的 v7 launch 中的
+approval 路径；adapter 只负责在执行前调用它（Pi 经 digest 绑定的 v8 launch 中的
 loopback 地址，Claude 经 `initialize` 注册的 SDK `PreToolUse` 回调）。没有
 `toolAuthorizationAuto` 的 runtime 在 claim 前被拒绝。`all` 不向 adapter 传任何东西，
 daemon 从规范化的 `tool_use` 事件流发出 `tool-reminder`。`agentUserContext: excluded`

@@ -270,6 +270,7 @@ export interface ClaimedAgentFailureContext {
 export interface QueuedApprovalRequest {
   summary: string;
   resolve: (result: { approved: boolean; reason?: string }) => void;
+  readonly signal?: AbortSignal;
 }
 
 export type PickResult =

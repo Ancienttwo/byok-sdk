@@ -2,8 +2,9 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { ClaudeToolAuthorizationBridge } from '../adapters/claude/tool-authorization';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolCall } from '../tool-authorization';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { MessageDraftDelta, Session } from '../types';
@@ -84,5 +85,54 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
     await expect(start(workspace, gate, { ...process.env, FAKE_HOOK_REGISTRATION: mode }))
       .rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message: expect.stringContaining('tool_authorization_unsupported') });
     expect(await fs.readdir(workspace)).toEqual([]);
+  });
+});
+
+describe('Claude PreToolUse delivery deadline', () => {
+  const callback = (bridge: ClaudeToolAuthorizationBridge, requestId: string) => {
+    const hook = (bridge.hooks.PreToolUse as Array<{ hookCallbackIds: string[]; timeout: number }>)[0]!;
+    bridge.receive({ type: 'control_request', request_id: requestId, request: { subtype: 'hook_callback', callback_id: hook.hookCallbackIds[0], input: {
+      hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: requestId, tool_input: { command: 'sudo rm -rf /var/db' }, cwd: '/tmp',
+    } } });
+    return hook.timeout * 1_000;
+  };
+
+  it('denies two concurrent unanswered high-risk calls before the native hook timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const writes: Array<Record<string, any>> = [];
+      const onFatal = vi.fn();
+      const gate = createAutoToolAuthorizationGate({ workspace: '/tmp', timeoutMs: 1_000, requestAuthorization: () => new Promise(() => {}) });
+      const bridge = new ClaudeToolAuthorizationBridge(gate, onFatal);
+      bridge.bind(async frame => { writes.push(frame); });
+      const nativeTimeoutMs = callback(bridge, 'hook-1');
+      await vi.advanceTimersByTimeAsync(300);
+      callback(bridge, 'hook-2');
+      await vi.advanceTimersByTimeAsync(1_300);
+      expect(1_300).toBeLessThan(nativeTimeoutMs);
+      expect(writes.map(frame => [frame.response.request_id, frame.response.response.hookSpecificOutput.permissionDecision])).toEqual([['hook-1', 'deny'], ['hook-2', 'deny']]);
+      expect(writes[0]!.response.response.hookSpecificOutput.permissionDecisionReason).toMatch(/^tool_authorization_unavailable: /);
+      await vi.advanceTimersByTimeAsync(nativeTimeoutMs);
+      expect(onFatal).not.toHaveBeenCalled();
+      bridge.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('disposes the process before the native timeout when a verdict cannot be delivered', async () => {
+    vi.useFakeTimers();
+    try {
+      const onFatal = vi.fn();
+      const gate: ToolAuthorizationGate = { timeoutMs: 1_000, authorize: () => new Promise(() => {}) };
+      const bridge = new ClaudeToolAuthorizationBridge(gate, onFatal);
+      bridge.bind(async () => {});
+      const nativeTimeoutMs = callback(bridge, 'hook-1');
+      await vi.advanceTimersByTimeAsync(nativeTimeoutMs - 1);
+      expect(onFatal).toHaveBeenCalledTimes(1);
+      bridge.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

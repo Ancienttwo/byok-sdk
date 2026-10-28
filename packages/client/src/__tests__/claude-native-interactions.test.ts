@@ -255,6 +255,51 @@ describe('Claude native bridge transport fencing', () => {
     native.close();
   });
 
+  it('passes non-question requests through outside the question budget and bounds, then still bounds questions', async () => {
+    const write = vi.fn(async (_frame: Record<string, unknown>) => {});
+    const onRequest = vi.fn();
+    const onFatal = vi.fn();
+    const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal, maxRequests: 1 });
+    native.bind(write);
+    native.beginTurn();
+    native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
+    let deep: Record<string, unknown> = { leaf: true };
+    for (let level = 0; level < 20; level += 1) deep = { nested: deep };
+    const large = { content: 'x'.repeat(200 * 1024), deep };
+    for (const [index, input] of [{ command: 'ls' }, large, { command: 'pwd' }].entries()) {
+      // A repeated pass-through ID is answered too: it never enters the question ledger.
+      native.receive({ type: 'control_request', request_id: index === 2 ? 'pass-0' : `pass-${index}`, request: { subtype: 'can_use_tool', tool_name: 'Write', input } });
+    }
+    await Promise.resolve();
+    expect(onFatal).not.toHaveBeenCalled();
+    expect(onRequest).not.toHaveBeenCalled();
+    expect(write).toHaveBeenCalledTimes(3);
+    expect(write.mock.calls[1]![0]).toEqual({ type: 'control_response', response: { subtype: 'success', request_id: 'pass-1', response: { behavior: 'allow', updatedInput: large } } });
+    // The single-request question budget is still whole after three pass-throughs.
+    native.receive(permission);
+    expect(onRequest).toHaveBeenCalledTimes(1);
+    native.receive({ ...permission, request_id: 'native-2' });
+    expect(onFatal).toHaveBeenCalledTimes(1);
+    expect(onFatal.mock.calls[0]![0]).toMatchObject({ code: 'capacity' });
+  });
+
+  it.each([
+    ['larger than 64 KiB', { questions: permission.request.input.questions, padding: 'x'.repeat(65_536) }],
+    ['deeper than 8 levels', { questions: permission.request.input.questions, deep: { a: { b: { c: { d: { e: { f: { g: { h: true } } } } } } } } }],
+  ])('keeps question bounds: an AskUserQuestion %s is fatal', (_label, input) => {
+    const onFatal = vi.fn();
+    const onRequest = vi.fn();
+    const write = vi.fn(async () => {});
+    const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal });
+    native.bind(write);
+    native.beginTurn();
+    native.receive({ type: 'system', subtype: 'init', session_id: 'session-1' });
+    native.receive({ ...permission, request: { ...permission.request, input } });
+    expect(onRequest).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(onFatal).toHaveBeenCalledTimes(1);
+  });
+
   it('provider cancellation fences a response queued in the same tick', async () => {
     const write = vi.fn(async () => {});
     const { native, request } = bridge(write);

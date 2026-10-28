@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, type ToolCall,
 } from '../tool-authorization';
@@ -82,6 +82,34 @@ describe('auto gate', () => {
   it('denies when the authorization path fails', async () => {
     const gate = createAutoToolAuthorizationGate({ workspace: WORKSPACE, timeoutMs: 1_000, requestAuthorization: async () => { throw new Error('offline'); } });
     await expect(gate.authorize(call)).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_unavailable', reason: 'tool authorization is unavailable' });
+  });
+
+  it('denies every unanswered call at its own wall-clock deadline and withdraws its request', async () => {
+    vi.useFakeTimers();
+    try {
+      const signals: AbortSignal[] = [];
+      const gate = createAutoToolAuthorizationGate({ workspace: WORKSPACE, timeoutMs: 1_000, requestAuthorization: (_summary, signal) => {
+        signals.push(signal);
+        return new Promise(() => {});
+      } });
+      const first = gate.authorize(call);
+      await vi.advanceTimersByTimeAsync(400);
+      const second = gate.authorize({ ...call, toolCallId: 'h2' });
+      const settled: string[] = [];
+      void first.then(() => settled.push('first'));
+      void second.then(() => settled.push('second'));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(settled).toEqual(['first']);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(settled).toEqual(['first', 'second']);
+      const expired = { decision: 'deny', code: 'tool_authorization_unavailable', reason: 'tool authorization timed out after 1000ms' };
+      await expect(first).resolves.toEqual(expired);
+      await expect(second).resolves.toEqual(expired);
+      expect(signals.map(signal => signal.aborted)).toEqual([true, true]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

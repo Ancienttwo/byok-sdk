@@ -115,28 +115,32 @@ export class ClaudeNativeInteractionBridge {
   }
 
   private open(message: ClaudeStreamMessage): void {
-    if (!text(message.request_id) || !this.accepting || !this.sessionRef || !this.write) invalid();
+    if (!text(message.request_id) || !this.write) invalid();
     const id = message.request_id;
-    if (this.seen.has(id)) throw new NativeInteractionError('duplicate_request', 'Claude native request ID was reused in this process generation');
-    if (this.seen.size >= (this.options.maxRequests ?? 4096)) throw new NativeInteractionError('capacity', 'Claude native request lifetime bound exceeded');
-    this.seen.add(id);
-    const request = snapshotPlainData(message.request, { maxDepth: 8 });
-    if (!record(request) || request.subtype !== 'can_use_tool' || !text(request.tool_name) || !record(request.input)
-      || (request.tool_use_id !== undefined && !text(request.tool_use_id))
-      || Buffer.byteLength(JSON.stringify(request)) > 64 * 1024) invalid();
-    const originalInput = request.input;
     const respond = (response: Record<string, unknown>) => this.write!({
       type: 'control_response', response: { subtype: 'success', request_id: id, response },
     });
+    const raw = message.request;
+    if (!record(raw) || raw.subtype !== 'can_use_tool' || !text(raw.tool_name) || !record(raw.input)) invalid();
     // `can_use_tool` is only the transport that carries AskUserQuestion to the
     // Host. Permission was already decided once, by the SDK gate's PreToolUse
     // hook (`auto`) or not at all (`all`), so no Host permission prompt opens.
-    if (request.tool_name !== 'AskUserQuestion') {
-      void respond({ behavior: 'allow', updatedInput: originalInput }).catch(error => {
+    // The question budget, depth and size bounds below apply to questions only.
+    if (raw.tool_name !== 'AskUserQuestion') {
+      void respond({ behavior: 'allow', updatedInput: raw.input }).catch(error => {
         this.fail(new NativeInteractionError('transport', error instanceof Error ? error.message : 'Claude permission pass-through failed'));
       });
       return;
     }
+    if (!this.accepting || !this.sessionRef) invalid();
+    if (this.seen.has(id)) throw new NativeInteractionError('duplicate_request', 'Claude native request ID was reused in this process generation');
+    if (this.seen.size >= (this.options.maxRequests ?? 4096)) throw new NativeInteractionError('capacity', 'Claude native request lifetime bound exceeded');
+    this.seen.add(id);
+    const request = snapshotPlainData(raw, { maxDepth: 8 });
+    if (!record(request) || !record(request.input)
+      || (request.tool_use_id !== undefined && !text(request.tool_use_id))
+      || Buffer.byteLength(JSON.stringify(request)) > 64 * 1024) invalid();
+    const originalInput = request.input;
     const questions = parseQuestions(originalInput);
     const native = {
       id, method: 'can_use_tool', sessionRef: this.sessionRef,

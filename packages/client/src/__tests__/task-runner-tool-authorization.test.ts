@@ -32,7 +32,7 @@ class GateCapturingAdapter extends StubRuntimeAdapter {
 const AUTO_CAPABLE: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true, toolAuthorizationAuto: true };
 const NO_AUTO: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true };
 
-function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder'>> = {}) {
+function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'approvalTimeoutMs'>> = {}) {
   const approvalRegistry = new ApprovalRegistry();
   const runner = new TaskRunner({
     advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
@@ -101,6 +101,56 @@ describe('daemon tool authorization', () => {
     adapter.sessions[0]!.queue.push({ type: 'progress', text: 'done' });
     await vi.waitFor(() => expect(sent.some(e => e.type === 'task.progress')).toBe(true), { timeout: 3_000 }).catch(() => {});
     expect(reminders).toEqual([]);
+  });
+
+  it('auto: two concurrent unanswered calls are both denied within the gate deadline, queue wait included', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const { runner, approvalRegistry } = makeRunner(adapter, sent, { toolAuthorization: () => 'auto', approvalTimeoutMs: 6_000 });
+    await offer(runner, 'task-queued');
+    const gate = adapter.inputs[0]!.toolAuthorization!;
+    const workspace = adapter.inputs[0]!.manifest.workspace.workspaceDir;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const settled: string[] = [];
+      const first = gate.authorize({ toolCallId: 'h1', toolName: 'bash', input: { command: 'sudo rm -rf /var/db' }, cwd: workspace });
+      const second = gate.authorize({ toolCallId: 'h2', toolName: 'bash', input: { command: 'git push --force origin main' }, cwd: workspace });
+      void first.then(() => settled.push('first'));
+      void second.then(() => settled.push('second'));
+      await vi.advanceTimersByTimeAsync(6_000);
+      await expect(first).resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_denied' });
+      // The queued call was only now dispatched, with its own 6s approval
+      // window that would end at 12s: past the gate's 11s wall-clock bound.
+      expect(approvalRegistry.list()).toHaveLength(1);
+      const dispatchedLate = approvalRegistry.list()[0]!.approvalId;
+      await vi.advanceTimersByTimeAsync(gate.timeoutMs - 6_000);
+      expect(settled).toEqual(['first', 'second']);
+      await expect(second).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${gate.timeoutMs}ms` });
+      // Withdrawn: a late decision cannot revive it, and nothing stays queued.
+      expect(approvalRegistry.list()).toEqual([]);
+      expect(() => approvalRegistry.resolve(dispatchedLate, 'approve')).toThrow();
+      expect(sent.filter(e => e.type === 'task.await_approval')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('auto: the gate withdraws a queued approval it stops waiting for, before it is ever dispatched', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const { runner, approvalRegistry } = makeRunner(adapter, sent, { toolAuthorization: () => 'auto', approvalTimeoutMs: 60_000 });
+    await offer(runner, 'task-withdraw');
+    const holder = runner.requestApproval('task-withdraw', 'hold the approval slot');
+    const withdraw = new AbortController();
+    const queued = runner.requestApproval('task-withdraw', 'queued', withdraw.signal);
+    expect(approvalRegistry.list()).toHaveLength(1);
+    withdraw.abort();
+    await expect(queued).resolves.toMatchObject({ approved: false });
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'approve');
+    await expect(holder).resolves.toEqual({ approved: true, reason: undefined });
+    // The withdrawn request never reached the server.
+    expect(sent.filter(e => e.type === 'task.await_approval')).toHaveLength(1);
+    expect(approvalRegistry.list()).toEqual([]);
   });
 
   it('auto on a runtime without a pre-execution gate is declined before claim, never run ungated', async () => {

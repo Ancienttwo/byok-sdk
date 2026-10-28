@@ -837,9 +837,8 @@ the [downstream diagnostics guide](agent-diagnostics-integration.md).
 ### Pi explicitly authorized resources
 
 Pi ordinary RPC Agent operations accept `agentSkillPaths` and `agentExtensionPaths`
-(default `[]`), independently of `agentUserContext` and the SDK-only
-`agentExtensions` selection. Supply absolute local paths; no package download
-selectors or implicit user-directory discovery are added by these options.
+(default `[]`), independently of `agentUserContext` and `auto | all` tool
+authorization. Supply absolute local paths; no package download selectors or implicit user-directory discovery are added by these options.
 For example, a Host can exclude personal context while loading one task skill:
 
 ```ts
@@ -852,9 +851,9 @@ new PiAdapter({
 
 The Host authorizes the extension as executable code, including resources it
 registers. This is not a sandbox. Default/inherit behavior and non-Agent operations
-are unchanged. Explicit resource policies require the ordinary RPC lane; prepared
-and durable lanes reject unsupported policies. Policy selection remains adapter
-scoped, so different task policies require separately configured adapters.
+are unchanged. Explicit resource loading requires the ordinary RPC lane; prepared
+and durable lanes reject it. Resource selection remains adapter scoped, so
+different task resources require separately configured adapters.
 
 Explicit skill paths must exist and be readable. Pi remains the authority for
 skill parsing and its advisory diagnostics: a readable path that yields no valid
