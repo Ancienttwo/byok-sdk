@@ -505,7 +505,7 @@ export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './uti
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 
 export { PiAdapter } from './adapters/pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig, PiBuiltinToolName, PiAgentExtensionName } from './adapters/pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets';
 export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets';
@@ -550,3 +550,9 @@ export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 
 export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
+
+export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
+export type {
+  ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask,
+  ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason,
+} from './tool-authorization';

@@ -965,7 +965,7 @@ flowchart TB
 | --- | --- | --- |
 | device auth | pairing single-use、Ed25519 nonce proof、bearer claims、revoke | 同一 OS user 读取本地 `device.json` |
 | transport gate | remote plaintext 默认拒绝；HTTPS 默认路径（本地开发可用 loopback HTTP） | SDK 自己提供 TLS termination |
-| agent guardrail | YOLO launch；用户 agent 自身配置（sandbox、deny rules、MCP、extensions）生效；Codex sandbox 由 `codexSandbox` 选择；普通 Pi RPC Agent task 可显式选择 native tools、SDK extensions 并排除用户资源 | Pi 文件路径或 network 限制；kernel-level sandbox；未排除的扩展不会自动受 native allowlist 限制 |
+| agent guardrail | YOLO launch；用户 agent 自身配置（sandbox、deny rules、MCP、extensions）生效；Codex sandbox 由 `codexSandbox` 选择；Host 每任务选择 `auto`/`all`：`auto` 在执行前对高风险工具调用请求用户授权（Pi 普通 RPC、Claude），`all` 只提醒；普通 Pi RPC Agent task 可排除用户资源 | 文件路径或 network 限制；kernel-level sandbox；词法分类器识别不了间接命令 |
 | runtime credentials | subscription login store 与 BYOK key 都不由 dispatch daemon 读取；authoritative BYOK 走独立 launcher | 同一 OS user 无法调试/观察 launcher 或 Pi child process |
 | control socket | mutual HMAC、endpoint permission/DACL、method pre-auth unreachable | 同一 user 且能读 token 的恶意进程 |
 | audit/observer | 只记录 task id、event type、tool/runtime name、counts/sizes | 保存完整 tool input/output 作为审计证据 |
@@ -974,15 +974,15 @@ flowchart TB
 
 `limits.maxTokens` 当前不能由任一 bundled adapter 精确执行，因此必须在 pre-claim fail-closed，而不是估算。Agent home 是 cwd convention，不应被 UI 描述成 sandbox。
 
-Pi 的 Agent 工具策略由本机 `PiAdapterOptions` 冻结，随 v6 RPC launch config
-进入既有 digest 校验；helper 只读 v6。`agentBuiltinTools` 通过 native selection
-modifiers 与固定 native exclusions 生效，使 MCP/extension 准入不被全局 tools
-allowlist 意外删除。resume 清除旧 pending loadout，再应用当前 native 与 extension
-工具；无法清空时拒绝恢复。`agentUserContext: excluded` 为 resource loader 使用
-新建的 SDK 目录和内存 settings，`ModelRuntime` 单独使用原 Pi 的 auth/models
-store；既有 sessionDir 设置仍负责会话存储连续性。不复制整个用户目录、不把登录凭据放进工具 env。SDK web/subagent/todo
-由 `agentExtensions` 单独选择，MCP bridge 始终按任务准入。prepared/durable
-不执行这些策略，若 Agent task 配置了非 inherit 策略，启动前拒绝。
+工具授权只有两种模式，由 `DaemonConfig.toolAuthorization` 在 claim 前按任务决定，所有
+runtime 共用（契约见 `docs/spec.md` 的 Tool authorization 一节）。`auto` 的门由 daemon
+构造并放进 `RuntimeOperationStartInput.toolAuthorization`，高风险调用走任务唯一的
+approval 路径；adapter 只负责在执行前调用它（Pi 经 digest 绑定的 v7 launch 中的
+loopback 地址，Claude 经 `initialize` 注册的 SDK `PreToolUse` 回调）。没有
+`toolAuthorizationAuto` 的 runtime 在 claim 前被拒绝。`all` 不向 adapter 传任何东西，
+daemon 从规范化的 `tool_use` 事件流发出 `tool-reminder`。`agentUserContext: excluded`
+仍为 Pi resource loader 使用新建 SDK 目录和内存 settings，`ModelRuntime` 单独使用原
+Pi 的 auth/models store；它只隔离上下文，不删除工具。
 
 ### 9.1 Credential isolation 的具体承诺
 

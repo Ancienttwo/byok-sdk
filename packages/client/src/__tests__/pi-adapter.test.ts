@@ -822,6 +822,7 @@ const __executionScratch = await testExecutionScratch();
       messageDraft: true,
       // pi never requests approval, so it is never handed the approval channel.
       approvalInteractive: false,
+      toolAuthorizationAuto: true,
     });
   });
 });

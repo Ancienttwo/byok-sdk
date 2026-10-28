@@ -1,4 +1,5 @@
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
+import type { ToolReminder } from '../tool-authorization';
 import {
   partitionAgentEvents,
   TASK_TRANSITIONS,
@@ -75,6 +76,8 @@ export type DaemonEvent =
    * internals.
    */
   | { kind: 'awaiting-approval'; ts: string; taskId: string; summary: string; approvalId?: string }
+  /** An `all` task reported a high-risk tool call; it was not blocked. `auto` asks through `awaiting-approval` instead. */
+  | ({ kind: 'tool-reminder'; ts: string } & ToolReminder)
   | { kind: 'completed'; ts: string; taskId: string; summary: string; sessionRef: string }
   /**
    * Covers BOTH a post-claim `task.fail` and a pre-claim `task.decline` —
@@ -561,6 +564,10 @@ export class DaemonObserver {
   }
 
   /** M4 Phase 3 hardening: see the `stale-approval-decision` `DaemonEvent` variant's own doc comment. */
+  noteToolReminder(reminder: ToolReminder): void {
+    this.emit({ kind: 'tool-reminder', ts: nowIso(), ...reminder });
+  }
+
   noteStaleApprovalDecision(taskId: string, decision: 'approve' | 'reject', reason?: string): void {
     this.emit({ kind: 'stale-approval-decision', ts: nowIso(), taskId, decision, reason });
   }

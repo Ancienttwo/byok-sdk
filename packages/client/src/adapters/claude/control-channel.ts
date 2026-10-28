@@ -31,7 +31,8 @@ export function parseClaudeContextWindow(
 const MCP_STATUS_TIMEOUT_MS = 5_000;
 
 /** One correlated control request at a time; separate from the user/result event queue. */
-export function createClaudeControlChannel(timeoutMs: number) {
+export function createClaudeControlChannel(timeoutMs: number, hooks?: Readonly<Record<string, unknown>>) {
+  let hooksApplied: boolean | undefined;
   let write: ((frame: Record<string, unknown>) => Promise<void>) | undefined;
   let ended = false;
   let initModel: string | undefined;
@@ -62,7 +63,7 @@ export function createClaudeControlChannel(timeoutMs: number) {
     pending = { id, subtype, promise, settle };
     void write({
       type: 'control_request', request_id: id,
-      request: subtype === 'initialize' ? { subtype, hooks: null } : { subtype },
+      request: subtype === 'initialize' ? { subtype, hooks: hooks ?? null } : { subtype },
     }).catch(() => settle(false));
     return promise;
   };
@@ -85,6 +86,8 @@ export function createClaudeControlChannel(timeoutMs: number) {
     });
   };
   return {
+    /** The runtime's own `initialize` acknowledgement of SDK callback hooks. */
+    get hooksApplied() { return hooksApplied; },
     get contextWindow() {
       return contextWindow;
     },
@@ -114,8 +117,13 @@ export function createClaudeControlChannel(timeoutMs: number) {
         subtype?: unknown;
         response?: unknown;
       };
-      if (response.request_id === pending?.id)
+      if (response.request_id === pending?.id) {
+        if (pending?.subtype === 'initialize' && response.subtype === 'success' && response.response && typeof response.response === 'object') {
+          const applied = (response.response as { hooks_applied?: unknown }).hooks_applied;
+          hooksApplied = typeof applied === 'boolean' ? applied : undefined;
+        }
         pending?.settle(response.subtype === 'success');
+      }
       if (response.request_id === status?.id)
         status?.settle(response.subtype === 'success' ? response.response : undefined);
     },

@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1792314,
+      "budgetBytes": 1803162,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -46,6 +46,7 @@
         "#byok-pi-runtime-host",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "http",
         "koffi"
       ],
       "thirdParty": [
@@ -65,6 +66,7 @@
           "crypto",
           "fs",
           "fs/promises",
+          "http",
           "module",
           "net",
           "os",
@@ -100,7 +102,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 334079,
+      "budgetBytes": 337297,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -131,6 +133,7 @@
       "lazyImports": [
         "#byok-acp-runtime",
         "#byok-hermes-session",
+        "http",
         "koffi"
       ],
       "thirdParty": [],
@@ -141,6 +144,7 @@
           "child_process",
           "crypto",
           "fs",
+          "http",
           "module",
           "net",
           "os",
@@ -361,7 +365,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 319565,
+      "budgetBytes": 322752,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -392,6 +396,7 @@
       "lazyImports": [
         "#byok-acp-runtime",
         "#byok-hermes-session",
+        "http",
         "koffi"
       ],
       "thirdParty": [],
@@ -402,6 +407,7 @@
           "child_process",
           "crypto",
           "fs",
+          "http",
           "module",
           "net",
           "os",
@@ -517,7 +523,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 4174323,
+      "budgetBytes": 4175758,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -853,7 +859,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 4130454,
+      "budgetBytes": 4131889,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2200,7 +2206,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1736956,
+      "budgetBytes": 1747768,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2238,6 +2244,7 @@
         "#byok-pi-runtime-host",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "http",
         "koffi"
       ],
       "thirdParty": [
@@ -2257,6 +2264,7 @@
           "crypto",
           "fs",
           "fs/promises",
+          "http",
           "module",
           "net",
           "os",

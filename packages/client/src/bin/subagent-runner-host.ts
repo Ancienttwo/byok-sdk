@@ -12,11 +12,14 @@
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { runSubagentRunnerEntry } from '../subagents/runner-bridge.js';
 import { assertSubagentProviderCredential } from '../subagents/credential-guard';
+import { readToolAuthorizationGateEnv } from '../tool-authorization-ipc';
 
 export async function runSubagentRunner(configPath: string): Promise<void> {
   try {
     // Before the vendored runner reads its config or starts a child (#385).
     assertSubagentProviderCredential(getAgentDir());
+    // Fails closed on a malformed inherited gate before any child starts.
+    readToolAuthorizationGateEnv();
     await runSubagentRunnerEntry([configPath]);
   } catch (error: unknown) {
     process.stderr.write(`pi-subagent-runner: ${(error as Error).message}\n`);

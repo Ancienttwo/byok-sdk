@@ -1,5 +1,7 @@
 # #1061 Agent task 工具边界设计
 
+> 已被 [2026-10-28-1061-auth-auto-all.md](2026-10-28-1061-auth-auto-all.md) 取代：工具白名单与 `inherit` 默认路径已删除，产品只保留 `auto` | `all`。以下为历史记录。
+
 状态：D1–D6 已获 owner 批准，S1 获准实施；S2/S3 尚未实施，不宣称隔离已生效。
 基线：`494e92217f518bf9e9455b5f31180a36433efa5c`。
 需求：https://github.com/Ancienttwo/byok-sdk/issues/1061

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn as realSpawn } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PiAdapter, type PiAdapterOptions } from '../adapters/pi/pi-adapter';
-import { parsePiAgentToolPolicy, piAgentNativeToolOptions } from '../adapters/pi/agent-tool-policy';
+import { parsePiAgentResources } from '../adapters/pi/agent-resources';
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { sealRuntimeOperationManifest, type Session } from '../types';
@@ -19,11 +19,11 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root=>fs.rm(root,{recursive:true,force:true})));
 });
 
-describe('Pi Agent tool policy (#1061 S1)', () => {
+describe('Pi Agent resources', () => {
   it.each([
-    { agentBuiltinTools:['read'], agentUserContext:'excluded', agentExtensions:[], agentSkillPaths:[path.resolve('approved-skill')], agentExtensionPaths:[path.resolve('approved.ts')] },
-    { agentBuiltinTools:[], agentUserContext:'excluded', agentExtensions:['todo'] },
-  ] satisfies PiAdapterOptions[])('seals the local policy only for Agent operations: %j', async (options) => {
+    { agentUserContext:'excluded', agentSkillPaths:[path.resolve('approved-skill')], agentExtensionPaths:[path.resolve('approved.ts')] },
+    { agentUserContext:'inherit' },
+  ] satisfies PiAdapterOptions[])('seals explicit resources only for Agent operations: %j', async (options) => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-pi-agent-policy-')));
     roots.push(root);
     const configs: Record<string,unknown>[] = [];
@@ -41,57 +41,36 @@ describe('Pi Agent tool policy (#1061 S1)', () => {
       });
       sessions.push(session);
     }
-    expect(configs.map(config=>config.version)).toEqual([7,7]);
-    expect(configs[0]?.agentToolPolicy).toEqual({builtinTools:'inherit',userContext:'inherit',extensions:'inherit',skillPaths:[],extensionPaths:[]});
-    expect(configs[1]?.agentToolPolicy).toEqual({builtinTools:options.agentBuiltinTools,userContext:options.agentUserContext,extensions:options.agentExtensions,skillPaths:options.agentSkillPaths ?? [],extensionPaths:options.agentExtensionPaths ?? []});
-  });
-
-  it('freezes selection at construction and binds changes into the launch digest', () => {
-    const tools = ['read'];
-    const policy = parsePiAgentToolPolicy({builtinTools:tools,userContext:'excluded',extensions:[],skillPaths:[],extensionPaths:[]});
-    tools.push('bash');
-    expect(policy.builtinTools).toEqual(['read']);
-    const base = {format:'byok.pi.rpc-launch',version:7,agentToolPolicy:policy};
-    expect(serializePiHostConfig(base).digest).not.toBe(serializePiHostConfig({...base,agentToolPolicy:{...policy,builtinTools:['bash']}}).digest);
-  });
-
-  it.each([
-    {agentBuiltinTools:['shell']}, {agentBuiltinTools:['read','read']}, {agentBuiltinTools:null},
-    {agentUserContext:'excluded-ish'}, {agentExtensions:['mcp']},
-  ])('rejects invalid local policy %j', options => {
-    expect(()=>new PiAdapter(options as PiAdapterOptions)).toThrow('Pi Agent tool policy');
+    expect(configs.map(config=>config.version)).toEqual([8,8]);
+    expect(configs[0]).toMatchObject({agentUserContext:'inherit',agentSkillPaths:[],agentExtensionPaths:[]});
+    expect(configs[1]).toMatchObject({agentUserContext:options.agentUserContext,agentSkillPaths:options.agentSkillPaths ?? [],agentExtensionPaths:options.agentExtensionPaths ?? []});
+    for (const config of configs) expect(config).not.toHaveProperty('agentToolPolicy');
   });
 
   it('copies explicit resource grants and binds them into the launch digest', () => {
     const skillPaths = [path.resolve('approved-skill')];
     const extensionPaths = [path.resolve('approved-extension.ts')];
-    const policy = parsePiAgentToolPolicy({builtinTools:'inherit',userContext:'excluded',extensions:[],skillPaths,extensionPaths});
+    const resources = parsePiAgentResources({userContext:'excluded',skillPaths,extensionPaths});
     skillPaths.push(path.resolve('unselected-skill'));
     extensionPaths.length = 0;
-    expect(policy.skillPaths).toEqual([path.resolve('approved-skill')]);
-    expect(policy.extensionPaths).toEqual([path.resolve('approved-extension.ts')]);
-    expect(serializePiHostConfig(policy).digest).not.toBe(serializePiHostConfig({...policy,skillPaths:[]}).digest);
+    expect(resources.skillPaths).toEqual([path.resolve('approved-skill')]);
+    expect(resources.extensionPaths).toEqual([path.resolve('approved-extension.ts')]);
+    expect(serializePiHostConfig(resources).digest).not.toBe(serializePiHostConfig({...resources,skillPaths:[]}).digest);
   });
 
   it.each([
+    {agentUserContext:'excluded-ish'}, {agentUserContext:null},
     {agentSkillPaths:['relative']}, {agentSkillPaths:null},
     {agentExtensionPaths:['npm:unapproved']}, {agentExtensionPaths:[path.resolve('x'),path.resolve('x')]},
   ])('rejects invalid resource grants %j', options => {
-    expect(()=>new PiAdapter(options as PiAdapterOptions)).toThrow('Pi Agent tool policy');
+    expect(()=>new PiAdapter(options as PiAdapterOptions)).toThrow('Pi Agent resources');
   });
 
-  it('selects native tools without filtering MCP tools by a global allowlist', () => {
-    const policy = parsePiAgentToolPolicy({builtinTools:['read','grep'],userContext:'excluded',extensions:[],skillPaths:[],extensionPaths:[]});
-    const options = piAgentNativeToolOptions(policy);
-    expect(options.excludeTools).toEqual(['find','ls','edit','write','bash','powershell']);
-    expect(options.tools).toEqual(['-find','-ls','-edit','-write','-bash','-powershell','+read','+grep']);
-  });
-
-  it('refuses a restricted Agent prepared lane before spawning or reading its prepared artifact', async () => {
+  it.each([{agentUserContext:'excluded'}, {agentSkillPaths:[path.resolve('skill')]}, {agentExtensionPaths:[path.resolve('extension.ts')]}] satisfies PiAdapterOptions[])('refuses Agent resources %j on the prepared lane before spawning or reading its artifact', async options => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-pi-unsupported-policy-')));
     roots.push(root);
     let spawned = false;
-    const adapter = new PiAdapter({agentBuiltinTools:[],resolveBin:()=>({command:FAKE_PI,source:'env'}),spawnFn:(()=>{spawned=true;throw new Error('unexpected spawn');}) as never});
+    const adapter = new PiAdapter({...options,resolveBin:()=>({command:FAKE_PI,source:'env'}),spawnFn:(()=>{spawned=true;throw new Error('unexpected spawn');}) as never});
     const prepared = await adapter.prepare({offer:{instruction:'hello'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     const scratch = await testExecutionScratch();
@@ -103,7 +82,7 @@ describe('Pi Agent tool policy (#1061 S1)', () => {
         workspace:{workspaceDir:root},forwardedEnvironmentNames:[],
       });
       await expect(prepared.operation.start({kind:'prepared',scratch,runtimeLaunch,manifest,env:process.env,preparation:{} as never}))
-        .rejects.toThrow('Pi Agent tool policy is supported only by the ordinary RPC lane');
+        .rejects.toThrow('Pi Agent resources are supported only by the ordinary RPC lane');
       expect(spawned).toBe(false);
     } finally { await scratch.release(); }
   });

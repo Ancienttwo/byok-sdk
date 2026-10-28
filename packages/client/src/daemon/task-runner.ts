@@ -96,6 +96,7 @@ import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecution
 import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump';
 import { handleOffer } from './task-runner/offer';
 import { OfferAdmissionTiming } from './task-runner/offer-admission-timing';
+import type { ToolAuthorizationResolver, ToolReminder } from '../tool-authorization';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -406,6 +407,10 @@ export interface TaskRunnerDeps {
    * to supply one — mirrors `onStaleApprovalDecision`'s own contract.
    */
   onApprovalDispatched?: (taskId: string, approvalId: string) => void;
+  /** `DaemonConfig.toolAuthorization`; absent means every task runs in `all`. */
+  toolAuthorization?: ToolAuthorizationResolver;
+  /** One high-risk tool call observed in an `all` task; local observability only. */
+  onToolReminder?: (reminder: ToolReminder) => void;
   /** Overrides the bounded soft-interrupt window before authoritative `Session.close()` disposal begins. */
   shutdownInterruptTimeoutMs?: number;
   startupTimeoutMs?: number;

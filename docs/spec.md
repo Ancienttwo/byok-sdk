@@ -1191,38 +1191,27 @@ tool schemas do not freeze memory file contents. This cut adds no automatic snap
 Host UI or native tools. SDK source is now v9 (see the v9 cut); downstream paired upgrade and deployment
 remain separate actions. No v7 reader, mode default or fallback is retained.
 
-Fresh Pi execution keeps Pi's default native tools and the user's own
-extensions and skills by default. For Agent tasks on the ordinary RPC lane,
-local `PiAdapterOptions.agentBuiltinTools` selects the native tools (an empty
-list disables all), `agentUserContext: 'excluded'` removes user extensions,
-skills, templates, themes, instruction files and session resource settings, and
-`agentExtensions` selects the SDK web/subagent/todo extensions independently.
-The MCP bridge remains admitted separately. The excluded loader uses a fresh
-SDK resources directory while Pi's original model/auth stores remain the
-authentication authority; credentials are not copied or added to tool environments.
-The existing session-storage directory setting remains authoritative for continuity.
-An explicit tool policy is re-applied on resume, including dropping stale
-transcript tools. A resume that cannot clear pending tools fails closed.
-These options apply only when the manifest carries `agentRef`; unsupported
-prepared/durable lanes reject a non-inherited policy before spawning.
-The launch config is digest-bound v7; earlier versions are not accepted.
-`agentSkillPaths` and `agentExtensionPaths` explicitly authorize absolute local
-skill and extension paths independently of user-context discovery (default empty).
-They are copied and frozen with the adapter policy and apply only to Agent RPC
-operations, including resume. With excluded context, only these explicit resources
-and selected SDK extensions load; personal context/settings remain excluded.
-Explicit skill paths must exist and be readable; Pi owns parsing and advisory
-diagnostics, so this does not guarantee that every readable path yields a skill.
-An extension is executable trusted code and may supply further resources; these
-options are not a filesystem or extension sandbox. Hosts use separately configured
-adapters for different policies; this does not add a per-offer wire policy.
-Tool selection does not restrict file paths or provide an OS sandbox. Keeping
-user extensions or SDK web/subagent extensions permits their separately
-registered tools; a strict total tool set requires excluded user context and
-an explicit SDK extension set with no additional extension paths. Prepared execution launches no native tool. Observed MCP
-toolsets and reserved helpers on fresh offers remain separately admitted;
-prepared offers expose only their counted MCP tools and explicitly selected SDK
-memory tools.
+Fresh Pi execution keeps Pi's default native tools, the SDK web/subagent/todo
+extensions and the user's own extensions and skills. For Agent tasks on the
+ordinary RPC lane, local `PiAdapterOptions.agentUserContext: 'excluded'`
+removes user extensions, skills, templates, themes, instruction files and
+session resource settings; it isolates context and never removes a tool. The
+excluded loader uses a fresh SDK resources directory while Pi's original
+model/auth stores remain the authentication authority; credentials are not
+copied or added to tool environments. Prepared/durable lanes reject `excluded`
+before spawning. The ordinary launch config is digest-bound v8 (`agentUserContext`,
+explicit resource paths and the `auto` gate address); earlier versions are not accepted.
+`agentSkillPaths` and `agentExtensionPaths` explicitly load absolute local skill
+and trusted executable extension paths (default empty), including under excluded
+user context. They are copied and frozen at adapter construction and apply only
+to Agent RPC operations, including resume. Prepared/durable lanes reject explicit
+resource paths before spawning. Explicit skills must exist and be readable; Pi
+owns parsing and advisory diagnostics. Extensions may supply further resources;
+these options do not provide a filesystem or extension sandbox. The existing
+session-storage directory setting remains authoritative for continuity. Prepared execution launches
+no native tool. Observed MCP toolsets and reserved helpers on fresh offers
+remain separately admitted; prepared offers expose only their counted MCP tools
+and explicitly selected SDK memory tools.
 
 Pin strictly precedes claim, and that ordering is the whole single-consumption
 guarantee. Two runners can both compare successfully; they then race one
@@ -3680,3 +3669,75 @@ timeout or timer. Notification scope is the same embedded ByokServer instance:
 a completion (or exact replay) must reach that instance to wake a pending wait.
 Writes by another process to a shared store do not provide distributed wakeups.
 Already-completed durable records remain readable immediately after restart.
+
+
+## Tool authorization: `auto` and `all` (#1061)
+
+The local Host chooses one of exactly two tool-authorization modes per task
+through `DaemonConfig.toolAuthorization(task) => 'auto' | 'all'`. The mode is
+one daemon-level contract shared by every runtime; adapters do not carry a
+permission policy of their own, and the remote offer never selects it. The
+resolver sees the local task identity (`taskId`, `runtimeId`, `agentRef`) and
+is called once, before claim. A throw or any other value (including legacy
+wording such as `full access` or `inherit`) declines the offer with
+`tool_authorization_unresolved`. Without a resolver every task runs in `all`.
+
+- `all`: no tool is blocked. The daemon classifies each `tool_use` the runtime
+  reports and emits a local `tool-reminder` `DaemonEvent` for a high-risk call.
+  This works for every runtime because it reads the normalized event stream.
+- `auto`: the runtime keeps its full Local Agent capability (files, shell,
+  local environment, private resources, continuous tasks). Before each native
+  tool call executes, the adapter asks the daemon gate. Ordinary calls run
+  without asking. A high-risk call requests user authorization through the
+  task's single approval path (`task.await_approval`, answered by the wire
+  `task.approve`/`task.reject` or the local `Daemon.approve`/`reject`), and the
+  call runs only after approval. Rejection, the approval timeout, a lost gate
+  or a malformed exchange deny the call with
+  `tool_authorization_denied` or `tool_authorization_unavailable` as the tool's
+  error result; the turn continues.
+
+`auto` requires the adapter capability `toolAuthorizationAuto`. A runtime or
+lane without it is declined before claim with `tool_authorization_unsupported`;
+it never runs ungated, and no third mode exists. Current coverage:
+
+| Runtime | `auto` | How |
+| --- | --- | --- |
+| Pi, ordinary RPC lane | Supported | Digest-bound loopback gate in the v7 launch; a Pi `tool_call` hook registered after every other extension judges the final input; SDK native Pi subagents (scheduler and print children) inherit the same gate; external-cli/external-job subagent runners refuse to start while it is present |
+| Pi, prepared and durable lanes | Declined before claim | No native tools (prepared) / unverified worker (durable) |
+| Claude | Supported | SDK `PreToolUse` callback hook registered at `initialize`; the prompt is sent only after the CLI confirms `hooks_applied`. It covers native tools, MCP tools and native subagents and is not skipped by bypass mode, allow rules or `disableAllHooks` (qualified with Claude 2.1.312 against a loopback provider) |
+| Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |
+| Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
+| Hermes | Declined before claim | No pre-execution hook |
+
+High-risk classification is one function (`classifyToolCall`) used by both
+modes. A call is high-risk when:
+
+- its command text (`command`/`cmd`) matches privilege escalation (`sudo`,
+  `doas`, `su`), recursive deletion (`rm -r…`, `find … -delete`, `shred`),
+  system modification (`mkfs`, `diskutil`, `fdisk`, `parted`, `dd of=`,
+  `shutdown`, `reboot`, `halt`, `launchctl`, `systemctl`, `crontab`),
+  destructive or outward git (`push`, `reset --hard`, `clean -f`, `branch -D`,
+  `filter-branch`, `filter-repo`), publish/deploy (`npm|pnpm|yarn|bun|cargo|gem|poetry
+  publish`, `twine upload`, `gh release create|pr merge|repo delete`,
+  `docker push`, `kubectl apply|delete`, `terraform apply|destroy`), a piped
+  remote script (`curl|wget … | sh`), permission broadening (`chmod -R`,
+  `chmod 777`, `chown -R`), or names a sensitive home path;
+- a file tool's path resolves into a sensitive home path (`.ssh`, `.aws`,
+  `.gnupg`, `.kube`, `.docker/config.json`, `.config/gh`, `.netrc`,
+  `.git-credentials`, `.npmrc`, shell startup files, `Library/Keychains`,
+  `Library/LaunchAgents`, `.config/autostart`), read or write;
+- a mutating file tool (`write`, `edit`, `multiedit`, `notebookedit`,
+  `apply_patch`) targets a path outside the task workspace granted by the
+  daemon.
+
+Everything else, including ordinary shell commands, reads anywhere, writes in
+the workspace, web, MCP and subagent calls, runs without asking. The
+classifier is lexical: paths resolve against the call's cwd with `~` expanded
+and symlinks not followed, and indirect command forms (scripts, `eval`,
+encoded payloads, aliases) are not recognized. It is a tool gate, not an
+execution sandbox and not a file-scope boundary: an allowed shell command can
+still reach any file, network or local resource the OS user can. File-scope
+grants (additional workspaces, canonical-path enforcement) remain open under
+#1061. The loopback gate token is inherited by SDK child sessions and does not
+isolate against same-user code.
+

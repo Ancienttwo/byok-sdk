@@ -22,6 +22,7 @@ they are not a second runtime-selection registry.
 | Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
 | Trajectory evidence for the execution record (`trajectoryEvidence`) | Not declared; records are `unknown` | Not declared; records are `unknown` | Not declared; records are `unknown` | Declared (`event-stream`); not declared with `durablePi: true` |
 | Display-only message draft (`messageDraft`) | Declared; text deltas from `--include-partial-messages` | Declared; `item/agentMessage/delta` | Declared; ACP `text_delta` | Declared; `text_delta` progress |
+| Tool authorization `auto` (`toolAuthorizationAuto`) | Declared; SDK `PreToolUse` callback, confirmed `hooks_applied` | Not declared; `auto` declined before claim | Not declared; hosted terminal is partial coverage, `auto` declined before claim | Declared on the ordinary RPC lane and native Pi subagents; durable declares `false`, prepared declined by the daemon |
 | MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Set for task toolset servers from Claude's own `mcp_status` answer | Set from the native `mcpToolCall` `server` and `tool`, for every server Codex runs, SDK helpers included | Not set; ACP `tool_call` defines no MCP server field, and live Grok evidence is pending (#633) | Set by exact observed name; ordinary, prepared and durable |
 
 By default Claude and Codex run YOLO
@@ -31,6 +32,11 @@ interaction opt-in replaces those flags: Claude uses
 `--permission-prompt-tool stdio --permission-mode acceptEdits`, Codex uses
 `approvalPolicy: on-request`. Native request/reply support does not establish
 an every-tool confirmation policy.
+
+Tool authorization `all` needs no adapter support: the daemon reminds from the
+normalized `tool_use` stream for every runtime. See the spec's
+[Tool authorization](spec.md#tool-authorization-auto-and-all-1061) section for
+the classifier and the honest limits (tool gate, not file scope or sandbox).
 
 Pi is intentionally outside this qualification change. Existing Pi behavior
 and its existing tests are unchanged; this matrix does not downgrade its

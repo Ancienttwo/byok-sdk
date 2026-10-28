@@ -1,4 +1,5 @@
 // Types and helpers shared by `TaskRunner` (../task-runner.ts) and the member
+import type { ToolAuthorizationMode } from '../../tool-authorization';
 import type { RuntimeTaskInput } from '../../types';
 // modules in this directory.
 //
@@ -107,6 +108,8 @@ export interface ActiveTask {
   /** One consumer; teardown drains its final usage within the existing interrupt deadline. */
   eventPump?: Promise<void>;
   workspaceDir: string;
+  /** Host-resolved before claim; `all` tasks get reminders from the event stream. */
+  toolAuthorization: ToolAuthorizationMode;
   agentBinding: AgentHomeExecutionBinding;
   agentRef: AgentRef;
   agentHandoff: {

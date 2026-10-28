@@ -1,3 +1,4 @@
+import { parsePiAgentResources } from '../adapters/pi/agent-resources';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -11,13 +12,14 @@ import { webExtension, subagentsExtension } from './pi-extension-factories.js';
 import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
-import { parsePiAgentToolPolicy, piAgentNativeToolOptions, type PiAgentToolPolicy } from '../adapters/pi/agent-tool-policy';
+import { parseToolAuthorizationIpcConfig, setToolAuthorizationGateEnv, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
+import { createPiToolAuthorizationHook } from '../adapters/pi/tool-authorization-hook';
 
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 7;
+  readonly version: 8;
   /**
    * `keys-profile`: the keys launcher parents this host, and the provider key
    * arrives over its private IPC channel. `pi-auth-store`: the device's own
@@ -26,7 +28,12 @@ export interface PiRpcHostConfig {
   readonly credentialSource: (typeof CREDENTIAL_SOURCES)[number];
   /** The session cwd. */
   readonly cwd: string;
-  readonly agentToolPolicy: PiAgentToolPolicy;
+  /** `excluded` isolates user resources; it never removes a tool. */
+  readonly agentUserContext: 'inherit' | 'excluded';
+  readonly agentSkillPaths: readonly string[];
+  readonly agentExtensionPaths: readonly string[];
+  /** The `auto` gate for this session and its native Pi subagents; null in `all`. */
+  readonly toolAuthorization: ToolAuthorizationIpcConfig | null;
   readonly mcp: TaskScopedMcpConfig;
 }
 
@@ -53,11 +60,12 @@ function failUsage(message: string): never {
 export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('config must be an object');
   const raw = value as Record<string, unknown>;
-  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp', 'agentToolPolicy'];
+  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp', 'agentUserContext', 'agentSkillPaths', 'agentExtensionPaths', 'toolAuthorization'];
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
-    fail('config must contain exactly format, version, credentialSource, cwd, mcp, agentToolPolicy');
+    fail(`config must contain exactly ${keys.join(', ')}`);
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 7) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 8) fail('unsupported config format/version');
+  const resources = parsePiAgentResources({ userContext: raw.agentUserContext, skillPaths: raw.agentSkillPaths, extensionPaths: raw.agentExtensionPaths });
   const credentialSource = raw.credentialSource;
   if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
     fail(`config.credentialSource must be one of [${CREDENTIAL_SOURCES.join(', ')}]`);
@@ -67,9 +75,12 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   return {
-    format: 'byok.pi.rpc-launch', version: 7,
+    format: 'byok.pi.rpc-launch', version: 8,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
-    agentToolPolicy: parsePiAgentToolPolicy(raw.agentToolPolicy),
+    agentUserContext: resources.userContext,
+    agentSkillPaths: resources.skillPaths,
+    agentExtensionPaths: resources.extensionPaths,
+    toolAuthorization: raw.toolAuthorization === null ? null : parseToolAuthorizationIpcConfig(raw.toolAuthorization),
   };
 }
 
@@ -165,20 +176,15 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     }
   }
   else if (process.connected) fail('an undeclared custody IPC channel is open');
-  const policy = config.agentToolPolicy;
-  const extensionNames = policy.extensions === 'inherit' ? ['web', 'subagent', 'todo'] : policy.extensions;
-  const extensionFactories = [
-    ...(extensionNames.includes('web') ? [webExtension] : []),
-    createByokMcpExtension(config.mcp),
-    ...(extensionNames.includes('subagent') ? [subagentsExtension] : []),
-  ];
-  if (extensionNames.includes('todo')) {
-    const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
-    const { createTodoExtension } = await import('#byok-pi-todo-runtime');
-    extensionFactories.push(createTodoExtension(localeAnchor));
-  }
+  const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
+  const { createTodoExtension } = await import('#byok-pi-todo-runtime');
+  const extensionFactories = [webExtension, createByokMcpExtension(config.mcp), subagentsExtension, createTodoExtension(localeAnchor)];
+  // Register last: earlier handlers may rewrite the input the gate must judge.
+  // The environment hands the same gate to SDK-owned native Pi subagents.
+  setToolAuthorizationGateEnv(config.toolAuthorization);
+  if (config.toolAuthorization !== null) extensionFactories.push(createPiToolAuthorizationHook(config.toolAuthorization));
   let resourceAgentDir: string | undefined;
-  if (policy.userContext === 'excluded') {
+  if (config.agentUserContext === 'excluded') {
     resourceAgentDir = join(dirname(args.configPath), 'pi-agent-resources');
     // A fresh directory owned by this launch; never copy user resources into it.
     mkdirSync(resourceAgentDir, { mode: 0o700 });
@@ -186,14 +192,12 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   await runPiSessionRuntime({
     cwd: config.cwd, session: args.session, sessionDir,
     provider: args.provider, model: args.model, thinking: args.thinking,
-    ...piAgentNativeToolOptions(policy),
-    ...(policy.builtinTools === 'inherit' ? {} : { agentBuiltinTools: policy.builtinTools }),
     ...(resourceAgentDir === undefined ? {} : { resourceAgentDir }),
     resourceLoaderOptions: {
       extensionFactories,
-      additionalSkillPaths: [...policy.skillPaths],
-      additionalExtensionPaths: [...policy.extensionPaths],
-      ...(policy.userContext === 'excluded' ? {
+      additionalSkillPaths: [...config.agentSkillPaths],
+      additionalExtensionPaths: [...config.agentExtensionPaths],
+      ...(config.agentUserContext === 'excluded' ? {
         noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
       } : {}),
     },

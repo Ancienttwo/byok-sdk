@@ -117,7 +117,9 @@ local stdio servers in a task-scoped `--mcp-config`; the user's own Claude MCP
 configuration also loads. Codex receives them in the `thread/start` or
 `thread/resume` config (`mcp_servers`), on top of the user's `config.toml`. Pi starts them from its task-scoped pool
 after the daemon's `tools/list` observation. The SDK grants no per-tool
-permission; each call follows the agent's own guardrails. This boundary
+permission beyond the Host's tool-authorization mode: in `auto`, a high-risk
+call waits for user authorization before execution (see the spec's Tool
+authorization section); otherwise each call follows the agent's own guardrails. This boundary
 prevents a SaaS task from turning tool selection into remote command or secret
 injection, but it is not an OS sandbox: the configured MCP subprocess still
 runs as the daemon's user.

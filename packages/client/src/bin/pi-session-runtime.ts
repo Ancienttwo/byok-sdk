@@ -28,11 +28,10 @@ function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}
  */
 export function resetResumedPiTools(
   session: CreateAgentSessionResult['session'], settingsManager: SettingsManager, cwd: string,
-  agentBuiltinTools?: readonly string[],
 ): void {
   if (session.sessionManager.buildSessionContext().messages.length === 0) return;
   const registered = session.getAllTools();
-  const defaults = agentBuiltinTools ?? settingsManager.getDefaultTools() ?? createCodingTools(cwd).map((tool) => tool.name);
+  const defaults = settingsManager.getDefaultTools() ?? createCodingTools(cwd).map((tool) => tool.name);
   const extensions = registered.filter((tool) =>
     tool.sourceInfo.path !== `builtin:${tool.name}`
     && session.getToolDefinition(tool.name)?.defaultActive !== false
@@ -65,8 +64,6 @@ export async function runPiSessionRuntime(options: {
   provider?: string; model?: string;
   thinking?: CreateAgentSessionOptions['thinkingLevel'];
   tools?: string[]; excludeTools?: string[]; noTools?: 'all' | 'builtin';
-  /** Native Agent policy; re-applied on resume without changing MCP/extension admission. */
-  agentBuiltinTools?: readonly string[];
   /** Fresh SDK-owned resources directory. The original Pi directory remains the model/auth authority. */
   resourceAgentDir?: string;
   /**
@@ -132,9 +129,7 @@ export async function runPiSessionRuntime(options: {
       model: resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
       tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
     });
-    if (options.agentBuiltinTools !== undefined || (options.tools === undefined && options.noTools === undefined)) {
-      resetResumedPiTools(created.session, services.settingsManager, options.cwd, options.agentBuiltinTools);
-    }
+    if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
     if (created.modelFallbackMessage && options.initialModel === 'required') {
       await created.session.dispose();
       options.reject(created.modelFallbackMessage);

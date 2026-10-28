@@ -238,37 +238,31 @@ Claude loads the user's own MCP configuration,
 settings, deny rules and hooks. The SDK adds its task servers with
 `--mcp-config`. Ordinary Pi loads the user's own extensions and skills from
 its agent directory.
-For ordinary Pi RPC Agent tasks, local Hosts can select native tools and
-resources independently:
+Tool authorization has exactly two modes, chosen by the Host per task and
+shared by every runtime:
 
 ```ts
-new PiAdapter({
-  agentBuiltinTools: ['read', 'grep', 'find', 'ls'],
-  agentUserContext: 'excluded',
-  agentExtensions: [],
+createDaemon({
+  // ...
+  toolAuthorization: ({ taskId, runtimeId, agentRef }) => (userGrantedFullAccess(agentRef) ? 'all' : 'auto'),
 });
 ```
 
-These options default to `inherit` and apply only to Agent manifests.
-`agentBuiltinTools: []` disables native tools while task MCP and SDK helpers
-remain separately admitted. `agentExtensions` selects `web`, `subagent` and
-`todo`; an empty list loads none of those. Excluded user context loads no user
-extensions, skills, templates, themes, instruction files or session resource settings.
-The existing session-storage directory setting still applies for session continuity. Pi model
-and authentication stores are still used without copying credentials into the
-resources directory. Resume applies the current policy and rejects if pending
-tools cannot be cleared. Prepared and durable Pi reject non-inherited policies.
-Native file tools still access paths with the process user's permissions;
-this option does not confine them to Agent home. Retained extensions may expose
-additional tools, so use excluded context and an explicit extension set when
-the complete tool surface must be bounded.
+`all` (the default) never blocks and emits a `tool-reminder` daemon event for
+each high-risk call. `auto` keeps every tool available and asks the user,
+through the task's normal approval (`task.await_approval`, `Daemon.approve` /
+`reject`), before a high-risk call runs: privileged, destructive, publishing
+or credential-touching commands, and file writes outside the task workspace.
+`auto` is supported on Claude and the ordinary Pi RPC lane (including native
+Pi subagents); an `auto` task for Codex, Grok, Hermes or a prepared/durable Pi
+lane is declined before claim. The classifier is lexical and is not an OS
+sandbox or a file-scope boundary.
 
-For Agent operations, `new ClaudeAdapter({ agentBuiltinTools: ['Read'] })`
-selects only the named Claude native tools; `[]` disables them all and the default
-`inherit` keeps the CLI defaults. The set is frozen at construction and applies
-to fresh sessions, follow-ups and resume. Task MCP stays independent. Unknown
-names are rejected before spawn; names are qualified against Claude 2.1.302.
-This does not restrict file paths or disable settings, hooks or user extensions.
+For ordinary Pi RPC Agent tasks, `new PiAdapter({ agentUserContext: 'excluded' })`
+loads no user extensions, skills, templates, themes, instruction files or
+session resource settings; Pi model and authentication stores are still used
+without copying credentials. It isolates context and does not remove tools.
+Prepared and durable Pi reject it.
 
 Codex runs with sandbox `danger-full-access` by default. Set
 `DaemonConfig.codexSandbox` to `read-only` or `workspace-write` for a stricter

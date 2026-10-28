@@ -3,17 +3,7 @@ import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepa
 import { type ResolvedBin } from './resolve-bin';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type SpawnFn } from './process-client';
-declare const CLAUDE_AGENT_BUILTIN_TOOLS: readonly ['Agent', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'Edit', 'EnterWorktree', 'ExitWorktree', 'ListAgents', 'NotebookEdit', 'Read', 'ReportFindings', 'ScheduleWakeup', 'SendMessage', 'Skill', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskStop', 'TaskUpdate', 'WebFetch', 'WebSearch', 'Workflow', 'Write'];
-export type ClaudeBuiltinToolName = typeof CLAUDE_AGENT_BUILTIN_TOOLS[number];
 export interface ClaudeAdapterOptions {
-    /**
-     * Agent operations only: select exact Claude native tools before startup.
-     * Default `inherit` leaves the CLI defaults unchanged; [] disables all native
-     * tools. MCP stays independent. Fresh/resumed sessions use this frozen set;
-     * follow-ups keep the same process policy. Settings, hooks and user-context
-     * behavior are unchanged: this is not a filesystem or extension sandbox.
-     */
-    agentBuiltinTools?: 'inherit' | readonly ClaudeBuiltinToolName[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /** Override bin resolution — tests substitute the fake-claude fixture script. */
@@ -64,7 +54,6 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
-    private readonly agentBuiltinTools;
     constructor(options?: ClaudeAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -89,7 +78,6 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private probeAuthPresent;
     private resolveBin;
 }
-export {};
 // ==== @byok-sdk/client dist/adapters/claude/events.d.ts ====
 import type { McpEventIdentities } from '../../mcp/event-identity';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -651,7 +639,7 @@ export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
 export { PiAdapter } from './pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig, PiBuiltinToolName, PiAgentExtensionName } from './pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './pi/resolve-bin';
 export { ClaudeAdapter } from './claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './claude/claude-adapter';
@@ -666,46 +654,16 @@ export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInter
 export { buildRuntimeEnv } from '../daemon/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
-// ==== @byok-sdk/client dist/adapters/pi/agent-tool-policy.d.ts ====
-/** Pi native tools exposed by the Agent policy. PowerShell is never implicitly selected. */
-export type PiBuiltinToolName = 'read' | 'grep' | 'find' | 'ls' | 'edit' | 'write' | 'bash';
-export type PiAgentExtensionName = 'web' | 'subagent' | 'todo';
-export interface PiAgentToolPolicy {
-    readonly builtinTools: 'inherit' | readonly PiBuiltinToolName[];
-    readonly userContext: 'inherit' | 'excluded';
-    readonly extensions: 'inherit' | readonly PiAgentExtensionName[];
-    readonly skillPaths: readonly string[];
-    readonly extensionPaths: readonly string[];
-}
-export declare const INHERITED_PI_AGENT_TOOL_POLICY: PiAgentToolPolicy;
-/** One parser owns options validation and the digest-bound helper contract. */
-export declare function parsePiAgentToolPolicy(value: unknown): PiAgentToolPolicy;
-export declare function hasPiAgentToolRestrictions(policy: PiAgentToolPolicy): boolean;
-/** Exclusions survive transcript restoration; modifiers retain independently admitted extension/MCP tools. */
-export declare function piAgentNativeToolOptions(policy: PiAgentToolPolicy): {
-    tools?: string[];
-    excludeTools?: string[];
-};
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './rpc-client';
-import { type PiBuiltinToolName, type PiAgentExtensionName } from './agent-tool-policy';
-export type { PiBuiltinToolName, PiAgentExtensionName } from './agent-tool-policy';
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
-    /** Agent tasks only: select native tools; [] disables them. Default inherit. Does not confine file paths. */
-    agentBuiltinTools?: 'inherit' | readonly PiBuiltinToolName[];
-    /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores. Default inherit. */
+    /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores. Default inherit. Not a tool permission. */
     agentUserContext?: 'inherit' | 'excluded';
-    /** Agent tasks only: select SDK web/subagent/todo extensions; MCP remains independently admitted. Default inherit. */
-    agentExtensions?: 'inherit' | readonly PiAgentExtensionName[];
-    /** Agent tasks only: explicitly load local skill files/directories even when user context is excluded. Default []. */
-    agentSkillPaths?: readonly string[];
-    /** Agent tasks only: explicitly trust local executable extensions even when user context is excluded. Default []. */
-    agentExtensionPaths?: readonly string[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /** Opt-in ordinary, lease-bound durable worker. */
@@ -741,7 +699,6 @@ export interface PiByokLauncherConfig {
 export declare function validatePiByokLauncherConfig(launcher: PiByokLauncherConfig | undefined): void;
 export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
-    private readonly agentToolPolicy;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     constructor(options?: PiAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
@@ -4289,6 +4246,7 @@ import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
 import { type AgentMemoryIntentTransport } from './agent-memory-intent';
 import { type AgentContentReadRoot } from './agent-content-read';
+import type { ToolAuthorizationResolver } from '../tool-authorization';
 /**
  * Optional white-label product display info — purely opaque passthrough
  * (never interpreted, validated, or rendered by the daemon itself). Carried
@@ -4309,6 +4267,15 @@ export interface DaemonBranding {
 export interface DaemonConfig {
     /** Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option. */
     nativeAssetRoot?: string;
+    /**
+     * Per-task tool authorization, decided by this Host for every runtime:
+     * `all` (default) never blocks and emits a `tool-reminder` event for each
+     * high-risk call; `auto` asks the user through the task's approval path
+     * before a high-risk call runs and is declined before claim on a runtime
+     * without `toolAuthorizationAuto`. Called once per offer; a throw or any
+     * other value declines the offer. Not an OS sandbox or file scope.
+     */
+    toolAuthorization?: ToolAuthorizationResolver;
     /** Select an explicit macOS keychain for device enrollment custody. */
     deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
     storage?: StorageConfig;
@@ -5085,6 +5052,7 @@ export declare class DaemonHaltError extends Error {
  */
 export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefined;
 // ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
+import type { ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { type AssertionLane, type DaemonEvent } from './observer';
 import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../lifecycle/service-environment';
@@ -5191,6 +5159,12 @@ export type DaemonRecord = Extract<DaemonEvent, {
     taskId: string;
     decision: 'approve' | 'reject';
     reasonBytes?: number;
+} | {
+    kind: 'tool-reminder';
+    ts: string;
+    taskId: string;
+    reasons: readonly ToolRiskReason[];
+    summaryBytes: number;
 } | {
     kind: 'runtime-disposal-failed';
     ts: string;
@@ -6807,6 +6781,7 @@ export declare function prependAgentReaderResultGuidance(instruction: string): s
 export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
+import type { ToolReminder } from '../tool-authorization';
 import { type AgentEvent, type BlobRef, type Envelope, type OfferAdmissionTimings, type TaskState } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { ExecutionRecord } from './execution-record';
@@ -6913,7 +6888,12 @@ export type DaemonEvent = ({
     taskId: string;
     summary: string;
     approvalId?: string;
-} | {
+}
+/** An `all` task reported a high-risk tool call; it was not blocked. `auto` asks through `awaiting-approval` instead. */
+ | ({
+    kind: 'tool-reminder';
+    ts: string;
+} & ToolReminder) | {
     kind: 'completed';
     ts: string;
     taskId: string;
@@ -7234,6 +7214,7 @@ export declare class DaemonObserver {
         audience?: string;
     }): void;
     /** M4 Phase 3 hardening: see the `stale-approval-decision` `DaemonEvent` variant's own doc comment. */
+    noteToolReminder(reminder: ToolReminder): void;
     noteStaleApprovalDecision(taskId: string, decision: 'approve' | 'reject', reason?: string): void;
     /** WP2I-S2: see the `agent-memory-intent-integrity` `DaemonEvent` variant's own doc comment. */
     noteAgentMemoryIntentIntegrity(event: {
@@ -8273,6 +8254,7 @@ import { type McpServerObservation } from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { type AgentMemoryAuditWarning, type AgentMemoryHostedProjection } from './agent-memory';
+import type { ToolAuthorizationResolver, ToolReminder } from '../tool-authorization';
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
  * before force-resolving an unanswered out-of-band approval as a fail-closed
@@ -8562,6 +8544,10 @@ export interface TaskRunnerDeps {
      * to supply one — mirrors `onStaleApprovalDecision`'s own contract.
      */
     onApprovalDispatched?: (taskId: string, approvalId: string) => void;
+    /** `DaemonConfig.toolAuthorization`; absent means every task runs in `all`. */
+    toolAuthorization?: ToolAuthorizationResolver;
+    /** One high-risk tool call observed in an `all` task; local observability only. */
+    onToolReminder?: (reminder: ToolReminder) => void;
     /** Overrides the bounded soft-interrupt window before authoritative `Session.close()` disposal begins. */
     shutdownInterruptTimeoutMs?: number;
     startupTimeoutMs?: number;
@@ -10197,7 +10183,7 @@ export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnviron
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig, PiBuiltinToolName, PiAgentExtensionName } from './adapters/pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets';
 export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets';
@@ -10222,6 +10208,8 @@ export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
+export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
+export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, } from './tool-authorization';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
@@ -12816,9 +12804,93 @@ export interface FakeRuntimeAdapterBehavior {
  * SDK. Only `detect` and `prepare` are the test's.
  */
 export declare function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior?: FakeRuntimeAdapterBehavior): RuntimeAdapter;
+// ==== @byok-sdk/client dist/tool-authorization.d.ts ====
+import type { AgentRef } from './agent-home';
+/**
+ * The only product tool-authorization modes, chosen by the local Host per task
+ * and shared by every runtime:
+ * - `all`: every tool runs; high-risk calls produce a reminder, never a denial.
+ * - `auto`: every tool runs except high-risk calls, which wait for user
+ *   authorization before execution.
+ * Neither mode is an OS sandbox or a file-scope boundary.
+ */
+export type ToolAuthorizationMode = 'auto' | 'all';
+export declare const TOOL_AUTHORIZATION_MODES: readonly ToolAuthorizationMode[];
+/** Local facts the Host decides on; never sourced from the wire offer or the model. */
+export interface ToolAuthorizationTask {
+    readonly taskId: string;
+    readonly runtimeId: string;
+    readonly agentRef?: AgentRef;
+}
+export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationMode;
+export declare function parseToolAuthorizationMode(value: unknown): ToolAuthorizationMode;
+/** One native tool call, before execution. `input` is the runtime's own argument object. */
+export interface ToolCall {
+    readonly toolCallId: string;
+    readonly toolName: string;
+    readonly input: Readonly<Record<string, unknown>>;
+    /** The runtime's working directory for this call; relative paths resolve against it. */
+    readonly cwd: string;
+    readonly nativeAgentId?: string;
+    readonly parentToolCallId?: string;
+}
+export type ToolRiskReason = 'privilege-escalation' | 'recursive-delete' | 'system-modification' | 'destructive-git' | 'publish-or-deploy' | 'remote-script-execution' | 'permission-broadening' | 'sensitive-path' | 'write-outside-workspace';
+export type ToolRisk = {
+    readonly level: 'normal';
+} | {
+    readonly level: 'high';
+    readonly reasons: readonly ToolRiskReason[];
+};
+/** Home-relative credential stores and login persistence points. */
+export declare const SENSITIVE_HOME_PATHS: readonly string[];
+/**
+ * The single high-risk classifier for both modes. Paths resolve lexically
+ * (`~` expands to `home`); symlinks are not followed. `workspace` is the task
+ * cwd the daemon granted, not the runtime-reported cwd.
+ */
+export declare function classifyToolCall(call: Pick<ToolCall, 'toolName' | 'input' | 'cwd'>, workspace: string, home?: string): ToolRisk;
+export type ToolAuthorizationDenialCode = 'tool_authorization_denied' | 'tool_authorization_unavailable';
+export type ToolAuthorizationVerdict = {
+    readonly decision: 'allow';
+} | {
+    readonly decision: 'deny';
+    readonly code: ToolAuthorizationDenialCode;
+    readonly reason: string;
+};
+/**
+ * The `auto` gate a daemon hands to an adapter that declares
+ * `toolAuthorizationAuto`. The adapter calls it for every native tool call
+ * before execution; it never throws.
+ */
+export interface ToolAuthorizationGate {
+    /** Upper bound on one decision, user authorization included. */
+    readonly timeoutMs: number;
+    authorize(call: ToolCall): Promise<ToolAuthorizationVerdict>;
+}
+export declare function describeHighRiskToolCall(call: Pick<ToolCall, 'toolName' | 'input'>, reasons: readonly ToolRiskReason[]): string;
+export declare function createAutoToolAuthorizationGate(input: {
+    readonly workspace: string;
+    readonly timeoutMs: number;
+    readonly requestAuthorization: (summary: string) => Promise<{
+        approved: boolean;
+        reason?: string;
+    }>;
+}): ToolAuthorizationGate;
+export declare function formatToolAuthorizationDenial(verdict: Extract<ToolAuthorizationVerdict, {
+    decision: 'deny';
+}>): string;
+/** An `all`-mode notice for one high-risk call the runtime reported; the call was not blocked. */
+export interface ToolReminder {
+    readonly taskId: string;
+    readonly toolName: string;
+    readonly toolCallId?: string;
+    readonly reasons: readonly ToolRiskReason[];
+    readonly summary: string;
+}
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
+import type { ToolAuthorizationGate } from './tool-authorization';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
@@ -12875,6 +12947,12 @@ export interface RuntimeDetectionAdvisory {
 export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported';
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+    /**
+     * Enforces the `auto` tool authorization gate before every native tool call
+     * of an ordinary instruction start. Omission means `auto` tasks are declined
+     * for this adapter before claim; `all` needs no adapter support.
+     */
+    readonly toolAuthorizationAuto?: boolean;
     /** Supports display-only Agent message drafts. Omission means unsupported. */
     readonly messageDraft?: boolean;
     /** Local native interaction support only; omission is unsupported. Not the approval channel. */
@@ -13263,6 +13341,12 @@ interface RuntimeOperationStartBase {
      * `start()` must return its Session before awaiting the request's decision.
      */
     readonly approvalChannel?: ApprovalChannel;
+    /**
+     * Present only for an `auto` task on an adapter declaring
+     * `toolAuthorizationAuto`. Every native tool call must pass it before
+     * execution; a denial becomes the tool's error result.
+     */
+    readonly toolAuthorization?: ToolAuthorizationGate;
 }
 /** The ordinary start: a resolved instruction the runtime turns into its own first request. */
 export interface RuntimeOperationInstructionStartInput extends RuntimeOperationStartBase {

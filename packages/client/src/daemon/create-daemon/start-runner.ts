@@ -143,6 +143,8 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     onApprovalDispatched: (taskId, approvalId) => {
       observer.noteApprovalDispatched(taskId, approvalId);
     },
+    ...(config.toolAuthorization === undefined ? {} : { toolAuthorization: config.toolAuthorization }),
+    onToolReminder: (reminder) => observer.noteToolReminder(reminder),
     // M4 (additive-minor, `task.approval_resolved`): read fresh at call
     // time via `connection` (assigned just below — safe by the time this
     // is actually invoked, same closure pattern `send` above already

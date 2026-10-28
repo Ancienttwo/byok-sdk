@@ -29,6 +29,7 @@ import { buildRuntimeEnv } from '../../daemon/environment';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { resolveRuntimeInvocation, type RuntimeInvocation } from '../runtime-invocation';
 import { createClaudeControlChannel } from './control-channel';
+import { ClaudeToolAuthorizationBridge } from './tool-authorization';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
 import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './events';
@@ -88,41 +89,7 @@ async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | 
   throw failure;
 }
 
-// Exact model tool names qualified with Claude 2.1.302; see the #1061 evidence note.
-// The CLI silently ignores unknown names, so validate before spawning it.
-const CLAUDE_AGENT_BUILTIN_TOOLS = [
-  'Agent', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'Edit',
-  'EnterWorktree', 'ExitWorktree', 'ListAgents', 'NotebookEdit', 'Read',
-  'ReportFindings', 'ScheduleWakeup', 'SendMessage', 'Skill', 'TaskCreate',
-  'TaskGet', 'TaskList', 'TaskStop', 'TaskUpdate', 'WebFetch', 'WebSearch',
-  'Workflow', 'Write',
-] as const;
-
-export type ClaudeBuiltinToolName = typeof CLAUDE_AGENT_BUILTIN_TOOLS[number];
-
-function snapshotAgentBuiltinTools(value: unknown): readonly ClaudeBuiltinToolName[] | undefined {
-  if (value === undefined || value === 'inherit') return undefined;
-  if (!Array.isArray(value)) throw new TypeError('ClaudeAdapterOptions.agentBuiltinTools must be inherit or an array of native tool names');
-  const names: readonly string[] = CLAUDE_AGENT_BUILTIN_TOOLS;
-  const result: ClaudeBuiltinToolName[] = [];
-  for (const name of value) {
-    if (typeof name !== 'string' || !names.includes(name)) throw new TypeError('ClaudeAdapterOptions.agentBuiltinTools contains an unknown native tool name');
-    if (result.includes(name as ClaudeBuiltinToolName)) throw new TypeError('ClaudeAdapterOptions.agentBuiltinTools contains a duplicate native tool name');
-    result.push(name as ClaudeBuiltinToolName);
-  }
-  return Object.freeze(result);
-}
-
 export interface ClaudeAdapterOptions {
-  /**
-   * Agent operations only: select exact Claude native tools before startup.
-   * Default `inherit` leaves the CLI defaults unchanged; [] disables all native
-   * tools. MCP stays independent. Fresh/resumed sessions use this frozen set;
-   * follow-ups keep the same process policy. Settings, hooks and user-context
-   * behavior are unchanged: this is not a filesystem or extension sandbox.
-   */
-  agentBuiltinTools?: 'inherit' | readonly ClaudeBuiltinToolName[];
-
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
   /** Override bin resolution — tests substitute the fake-claude fixture script. */
@@ -173,10 +140,8 @@ export interface ClaudeAdapterOptions {
 export class ClaudeAdapter implements RuntimeAdapter {
   readonly descriptor;
   private readonly nativeOptions?: NativeInteractionHostOptions;
-  private readonly agentBuiltinTools: readonly ClaudeBuiltinToolName[] | undefined;
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
-    this.agentBuiltinTools = snapshotAgentBuiltinTools(options.agentBuiltinTools);
     const timeout = options.interruptTimeoutMs ?? 1000;
     if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
     if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
@@ -198,6 +163,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         steer: false,
         resume: true,
         approvalInteractive: false,
+        toolAuthorizationAuto: true,
         mcpToolsets: true,
         messageDraft: true,
         ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
@@ -282,6 +248,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
     // Generate only task-scoped host/reserved MCP config outside the operation workspace.
     let client: ClaudeProcessClient | undefined;
+    let gate: ClaudeToolAuthorizationBridge | undefined;
     let cancellation: RuntimeExecutionFailure | undefined;
     let rejectCancellation!: (failure: RuntimeExecutionFailure) => void;
     const cancelled = new Promise<never>((_, reject) => { rejectCancellation = reject; });
@@ -390,9 +357,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
         ...(persistSession ? [] : ['--no-session-persistence']),
         ...(manifestModelId ? ['--model', manifestModelId] : []),
         ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
-        ...(startInput.manifest.agentRef !== undefined && this.agentBuiltinTools !== undefined
-          ? ['--tools', this.agentBuiltinTools.join(',')]
-          : []),
         // YOLO by default, as in OAR (`runtimes/claude/session.ts`): no human
         // sits at an approval prompt, so a permission gate is a hang, not
         // safety. A Host that opted into native interactions answers each
@@ -406,7 +370,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ];
 
       throwIfCancelled();
-      const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000);
+      gate = startInput.toolAuthorization === undefined ? undefined
+        : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => client?.abortStartup(error));
+      const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000, gate?.hooks);
       const native = this.nativeOptions === undefined ? undefined : new ClaudeNativeInteractionBridge({
         ...this.nativeOptions,
         // The adapter, never the host callback, owns fatal process termination.
@@ -419,10 +385,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
           cwd: manifestCwd,
           env: { ...startInput.env, ...startInput.scratch.env },
           nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
-          control: native === undefined ? control : {
-            bind: write => { control.bind(write); native.bind(write); },
-            receive: message => { control.receive(message); native.receive(message); },
-            closed: () => { control.closed(); native.close(); },
+          control: native === undefined && gate === undefined ? control : {
+            bind: write => { control.bind(write); native?.bind(write); gate?.bind(write); },
+            receive: message => { control.receive(message); if (!gate?.receive(message)) native?.receive(message); },
+            closed: () => { control.closed(); native?.close(); gate?.close(); },
           },
         });
       } catch (cause) {
@@ -434,7 +400,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       }
 
       throwIfCancelled();
-      if (native !== undefined) {
+      if (native !== undefined || gate !== undefined) {
         const initialized = await Promise.race([control.initialize(), cancelled]);
         throwIfCancelled();
         if (!initialized) throw new RuntimeExecutionFailure({
@@ -443,7 +409,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
           failure: startupExit(client),
         });
         throwIfCancelled();
-        native.beginTurn();
+        // No prompt is sent unless the runtime confirms the gate is registered.
+        if (gate !== undefined && control.hooksApplied !== true) throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'semantic', retry: 'non-retryable',
+          reason: 'tool_authorization_unsupported: Claude did not confirm registration of the PreToolUse authorization hook',
+        });
+        native?.beginTurn();
       }
       // `--input-format stream-json` expects the first turn's instruction on
       // stdin too, not as a positional CLI argument — empirically confirmed
@@ -518,8 +489,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
         manifestModelId,
         native,
         new Map(Object.entries(taskMcpServers).filter(([name]) => !isReservedMcpServerName(name))),
+        gate,
       );
     } catch (cause) {
+      gate?.close();
       return rejectOwnedStartup(cause, client, startInput.scratch, cancellation !== undefined);
     } finally {
       signal?.removeEventListener('abort', onAbort);
@@ -628,6 +601,7 @@ class ClaudeSession implements Session {
     private readonly native?: ClaudeNativeInteractionBridge,
     /** Task-projected toolset servers in `--mcp-config`; only these receive event MCP identity. */
     private readonly toolsetServers: ReadonlyMap<string, McpStdioServerConfig> = new Map(),
+    private readonly gate?: ClaudeToolAuthorizationBridge,
   ) { this.correlation = createToolUseCorrelation(this.mcpIdentities); if (native !== undefined) this.interactions = native.channel; }
 
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
@@ -807,6 +781,7 @@ class ClaudeSession implements Session {
 
   async close(): Promise<void> {
     this.native?.close('closed');
+    this.gate?.close();
     if (!this.closeAttempt) {
       const attempt = (async () => {
         await this.client.dispose();

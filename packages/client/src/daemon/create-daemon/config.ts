@@ -53,6 +53,9 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (Object.hasOwn(config, 'resultDocument')) {
     throw new DaemonConfigFieldRemovedError('resultDocument', 'DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool');
   }
+  if (config.toolAuthorization !== undefined && typeof config.toolAuthorization !== 'function') {
+    throw new Error('toolAuthorization must be a function returning auto or all');
+  }
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
   }

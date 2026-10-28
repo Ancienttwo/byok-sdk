@@ -28,6 +28,7 @@ export interface PreparedOperationResources {
    */
   startMcpToolsetTools?: McpToolsetToolObservation;
   approvalChannel?: ApprovalChannel;
+  toolAuthorization?: import('../../tool-authorization').ToolAuthorizationGate;
   /** Seals a `memory-reader` Agent manifest whose run directory is `workspaceDir`. */
   reader?: { canonicalHome: string };
   /** Seals a canonical writer Agent manifest. */
@@ -89,6 +90,7 @@ export async function startPreparedOperation(
         ? { mcpToolsetTools: resources.startMcpToolsetTools }
         : resources.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: resources.mcpToolsetTools }),
       ...(resources.approvalChannel === undefined ? {} : { approvalChannel: resources.approvalChannel }),
+      ...(resources.toolAuthorization === undefined ? {} : { toolAuthorization: resources.toolAuthorization }),
     });
   } catch (error) {
     if (!isRuntimeStartupDisposalFailure(error)) await scratch.release();
