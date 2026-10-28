@@ -12,7 +12,9 @@ import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
-import { ApprovalRegistry } from '../daemon/approvals';
+import { APPROVAL_REQUIRES_HOST, ApprovalRegistry, ApprovalRequiresHostError } from '../daemon/approvals';
+import { connectControlClient } from '../bin/control-client';
+import { ControlError } from '../daemon/control-protocol';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -122,12 +124,17 @@ describe('daemon tool authorization', () => {
     const request = sent.find(e => e.type === 'task.await_approval');
     if (request?.type !== 'task.await_approval' || request.payload.sealed !== undefined) throw new Error('missing await_approval');
     expect(request.payload.summary).toContain('privilege-escalation');
-    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', 'not now');
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', 'not now', 'control');
     await expect(denied).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: 'not now' });
 
     const allowed = gate.authorize({ toolCallId: 'h2', toolName: 'edit', input: { file_path: '~/.zshrc' }, cwd: workspace });
     await vi.waitFor(() => expect(approvalRegistry.list()).toHaveLength(1));
-    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'approve');
+    const pending = approvalRegistry.list()[0]!;
+    expect(pending.kind).toBe('tool-authorization');
+    // #1101: the control socket cannot approve a tool authorization; it stays pending for the Host.
+    expect(() => approvalRegistry.resolve(pending.approvalId, 'approve', undefined, 'control')).toThrow(ApprovalRequiresHostError);
+    expect(approvalRegistry.list()).toEqual([pending]);
+    await runner.resolveApprovalLocally('task-auto', pending.approvalId, 'approve');
     await expect(allowed).resolves.toEqual({ decision: 'allow' });
 
     // `auto` already asked before execution; the event stream adds no reminder.
@@ -162,7 +169,7 @@ describe('daemon tool authorization', () => {
       await expect(second).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${gate.timeoutMs}ms` });
       // Withdrawn: a late decision cannot revive it, and nothing stays queued.
       expect(approvalRegistry.list()).toEqual([]);
-      expect(() => approvalRegistry.resolve(dispatchedLate, 'approve')).toThrow();
+      expect(() => approvalRegistry.resolve(dispatchedLate, 'approve', undefined, 'in-process')).toThrow();
       expect(sent.filter(e => e.type === 'task.await_approval')).toHaveLength(2);
     } finally {
       vi.useRealTimers();
@@ -180,7 +187,7 @@ describe('daemon tool authorization', () => {
     expect(approvalRegistry.list()).toHaveLength(1);
     withdraw.abort();
     await expect(queued).resolves.toMatchObject({ approved: false });
-    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'approve');
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'approve', undefined, 'control');
     await expect(holder).resolves.toEqual({ approved: true, reason: undefined });
     // The withdrawn request never reached the server.
     expect(sent.filter(e => e.type === 'task.await_approval')).toHaveLength(1);
@@ -211,7 +218,10 @@ describe('daemon tool authorization', () => {
 });
 
 
-async function withPublicDaemon(run: (daemon: Daemon, server: TestServer, adapter: GateCapturingAdapter) => Promise<void>): Promise<void> {
+async function withPublicDaemon(
+  run: (daemon: Daemon, server: TestServer, adapter: GateCapturingAdapter, storeDir: string) => Promise<void>,
+  extra: { localToolApproval?: 'allow' } = {},
+): Promise<void> {
   const server = await TestServer.start();
   server.setAckCapabilities(['custom-harness']);
   const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-tool-auth-public-'));
@@ -220,7 +230,7 @@ async function withPublicDaemon(run: (daemon: Daemon, server: TestServer, adapte
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'tool-auth-public',
     serverUrl: server.url, storeDir, agentMemoryMcp: 'off',
     agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-    storage: { scratchRoot: testScratchRoot() }, toolAuthorization: () => 'auto',
+    storage: { scratchRoot: testScratchRoot() }, toolAuthorization: () => 'auto', ...extra,
   }, [adapter]);
   try {
     await daemon.pair('pairing-code');
@@ -228,7 +238,7 @@ async function withPublicDaemon(run: (daemon: Daemon, server: TestServer, adapte
     server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' },
       { taskId: 'public-task', seq: server.nextSeq() }));
     await server.waitFor(e => e.type === 'task.started' && e.task_id === 'public-task');
-    await run(daemon, server, adapter);
+    await run(daemon, server, adapter, storeDir);
   } finally {
     await daemon.stop();
     await server.close();
@@ -320,6 +330,94 @@ describe('public tool authorization decisions', () => {
       else server.send(createEnvelope('task.approve', { approvalId }, { taskId: 'public-task', seq: server.nextSeq() }));
       await expect(verdict).resolves.toEqual({ decision: 'allow' });
       expect(adapter.sessions[0]!.interruptCalled).toBe(false);
+    });
+  });
+});
+
+/** #1101: the control socket (`byok-agent approve`) is a same-user channel, not the Host. */
+describe('control-socket decisions on tool authorization', () => {
+  it("rejects a localToolApproval value other than 'allow' at construction", () => {
+    expect(() => createDaemonWithAdapters({
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'tool-auth-config',
+      serverUrl: 'http://127.0.0.1:1', storeDir: path.join(os.tmpdir(), 'byok-tool-auth-config-unused'), agentMemoryMcp: 'off',
+      agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
+      storage: { scratchRoot: testScratchRoot() }, localToolApproval: 'deny' as unknown as 'allow',
+    }, [new GateCapturingAdapter(AUTO_CAPABLE)])).toThrow(/localToolApproval must be 'allow' or omitted/);
+  });
+
+  async function controlResolve(storeDir: string, params: { approvalId: string; decision: 'approve' | 'reject'; reason?: string }) {
+    const conn = await connectControlClient({ storeDir, productId: 'tool-auth-public' });
+    if (!conn.ok) throw new Error(conn.reason);
+    try {
+      return await conn.client.request('approvals.resolve', params);
+    } finally {
+      conn.client.close();
+    }
+  }
+  async function controlList(storeDir: string) {
+    const conn = await connectControlClient({ storeDir, productId: 'tool-auth-public' });
+    if (!conn.ok) throw new Error(conn.reason);
+    try {
+      return (await conn.client.request<{ approvals: Array<{ approvalId: string; kind: string }> }>('approvals.list')).approvals;
+    } finally {
+      conn.client.close();
+    }
+  }
+  function dangerousCall(adapter: GateCapturingAdapter) {
+    const input = adapter.inputs[0]!;
+    return input.toolAuthorization!.authorize({ toolCallId: 'dangerous', toolName: 'bash', input: { command: 'sudo true' }, cwd: input.manifest.workspace.workspaceDir });
+  }
+  async function awaitedApprovalId(server: TestServer): Promise<string> {
+    const awaited = await server.waitFor(e => e.type === 'task.await_approval');
+    if (awaited.type !== 'task.await_approval' || awaited.payload.sealed !== undefined) throw new Error('missing approval');
+    return awaited.payload.approvalId;
+  }
+
+  it('by default refuses a control approve with approval_requires_host and keeps it pending; the Host then approves', async () => {
+    await withPublicDaemon(async (daemon, server, adapter, storeDir) => {
+      const verdict = dangerousCall(adapter);
+      const approvalId = await awaitedApprovalId(server);
+      expect(await controlList(storeDir)).toEqual([expect.objectContaining({ approvalId, kind: 'tool-authorization' })]);
+      const refused = controlResolve(storeDir, { approvalId, decision: 'approve' });
+      await expect(refused).rejects.toBeInstanceOf(ControlError);
+      await expect(refused).rejects.toMatchObject({ code: APPROVAL_REQUIRES_HOST });
+      expect(await controlList(storeDir)).toEqual([expect.objectContaining({ approvalId })]);
+      expect(server.received.filter(e => e.type === 'task.approval_resolved')).toEqual([]);
+      await daemon.approve('public-task', { approvalId });
+      await expect(verdict).resolves.toEqual({ decision: 'allow' });
+    });
+  });
+
+  it('by default still accepts a control reject, which denies only the tool', async () => {
+    await withPublicDaemon(async (_daemon, server, adapter, storeDir) => {
+      const verdict = dangerousCall(adapter);
+      const approvalId = await awaitedApprovalId(server);
+      await expect(controlResolve(storeDir, { approvalId, decision: 'reject', reason: 'not from here' })).resolves.toEqual({ resolved: true });
+      await expect(verdict).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: 'not from here' });
+      await server.waitFor(e => e.type === 'task.approval_resolved');
+      expect(adapter.sessions[0]!.interruptCalled).toBe(false);
+    });
+  });
+
+  it("with localToolApproval: 'allow' accepts a control approve", async () => {
+    await withPublicDaemon(async (_daemon, server, adapter, storeDir) => {
+      const verdict = dangerousCall(adapter);
+      const approvalId = await awaitedApprovalId(server);
+      await expect(controlResolve(storeDir, { approvalId, decision: 'approve' })).resolves.toEqual({ resolved: true });
+      await expect(verdict).resolves.toEqual({ decision: 'allow' });
+      await server.waitFor(e => e.type === 'task.approval_resolved');
+    }, { localToolApproval: 'allow' });
+  });
+
+  it('by default still accepts a control approve of a task-terminal approval', async () => {
+    await withPublicDaemon(async (_daemon, server, adapter, storeDir) => {
+      const session = adapter.sessions[0]!;
+      const outcome = session.requestApproval('task-terminal approval');
+      const approvalId = await awaitedApprovalId(server);
+      expect(await controlList(storeDir)).toEqual([expect.objectContaining({ approvalId, kind: 'task-terminal' })]);
+      await expect(controlResolve(storeDir, { approvalId, decision: 'approve' })).resolves.toEqual({ resolved: true });
+      await outcome;
+      expect(session.approvalResults).toEqual([{ approved: true }]);
     });
   });
 });

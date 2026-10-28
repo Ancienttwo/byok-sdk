@@ -46,7 +46,7 @@ import {
 import {
   type RuntimeDisposalStage,
 } from '../runtime-failure';
-import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
+import { type ApprovalDecision, type ApprovalKind, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { SealedTasks } from './sealed-task';
 import { taskFailureField } from './task-failure';
@@ -82,7 +82,7 @@ import {
   type AgentMemoryTaskContext,
 } from './agent-memory';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-import type { ApprovalKind, ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
+import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
 import { offerSettlements, trackOffer } from './task-runner/support';
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
 import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts';
@@ -1592,8 +1592,8 @@ export class TaskRunner {
    */
   resolveApprovalLocally(taskId: string, approvalId: string, decision: ApprovalDecision, reason?: string): Promise<void> {
     return decision === 'approve'
-      ? this.handleApprove(taskId, approvalId, 'local')
-      : this.handleReject(taskId, reason, approvalId, 'local');
+      ? this.handleApprove(taskId, approvalId, 'in-process')
+      : this.handleReject(taskId, reason, approvalId, 'in-process');
   }
 
   /**

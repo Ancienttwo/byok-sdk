@@ -99,7 +99,7 @@ describe('TaskRunner.requestApproval', () => {
     expect(pending[0]?.taskId).toBe(taskId);
     expect(pending[0]?.summary).toBe('Bash: echo hi');
 
-    approvalRegistry.resolve(pending[0]!.approvalId, 'approve');
+    approvalRegistry.resolve(pending[0]!.approvalId, 'approve', undefined, 'control');
     await expect(outcomePromise).resolves.toEqual({ approved: true, reason: undefined });
     // Resolved entry is consumed — nothing left pending.
     expect(approvalRegistry.list()).toEqual([]);
@@ -146,7 +146,7 @@ describe('TaskRunner.requestApproval', () => {
 
     const outcomePromise = runner.requestApproval(taskId, 'Write: /etc/passwd');
     const pending = approvalRegistry.list();
-    approvalRegistry.resolve(pending[0]!.approvalId, 'reject', 'absolutely not');
+    approvalRegistry.resolve(pending[0]!.approvalId, 'reject', 'absolutely not', 'control');
 
     await expect(outcomePromise).resolves.toEqual({ approved: false, reason: 'absolutely not' });
   });
@@ -177,7 +177,7 @@ describe('TaskRunner.requestApproval', () => {
 
     const outcomePromise = runner.requestApproval(taskId, 'Bash: echo hi');
     const pending = approvalRegistry.list();
-    approvalRegistry.resolve(pending[0]!.approvalId, 'approve');
+    approvalRegistry.resolve(pending[0]!.approvalId, 'approve', undefined, 'control');
 
     await expect(outcomePromise).resolves.toEqual({ approved: true, reason: undefined });
     // Wait past the (short) timeout window to prove it never fires a second,
@@ -200,8 +200,8 @@ describe('TaskRunner.requestApproval', () => {
     const forA = pending.find((p) => p.taskId === 'task-a')!;
     const forB = pending.find((p) => p.taskId === 'task-b')!;
 
-    approvalRegistry.resolve(forB.approvalId, 'reject', 'no B');
-    approvalRegistry.resolve(forA.approvalId, 'approve');
+    approvalRegistry.resolve(forB.approvalId, 'reject', 'no B', 'control');
+    approvalRegistry.resolve(forA.approvalId, 'approve', undefined, 'control');
 
     await expect(outcomeA).resolves.toEqual({ approved: true, reason: undefined });
     await expect(outcomeB).resolves.toEqual({ approved: false, reason: 'no B' });
@@ -238,7 +238,7 @@ describe('TaskRunner.requestApproval', () => {
       expect(sent.filter((e) => e.type === 'task.await_approval')).toHaveLength(1);
 
       const firstApprovalId = pending[0]!.approvalId;
-      approvalRegistry.resolve(firstApprovalId, 'approve');
+      approvalRegistry.resolve(firstApprovalId, 'approve', undefined, 'control');
       await expect(outcome1).resolves.toEqual({ approved: true, reason: undefined });
 
       // The second is now dispatched: its own registry entry (distinct
@@ -251,7 +251,7 @@ describe('TaskRunner.requestApproval', () => {
       expect(secondApprovalId).not.toBe(firstApprovalId);
       expect(sent.filter((e) => e.type === 'task.await_approval')).toHaveLength(2);
 
-      approvalRegistry.resolve(secondApprovalId, 'reject', 'no second');
+      approvalRegistry.resolve(secondApprovalId, 'reject', 'no second', 'control');
       await expect(outcome2).resolves.toEqual({ approved: false, reason: 'no second' });
     });
 
@@ -284,7 +284,7 @@ describe('TaskRunner.requestApproval', () => {
       for (let i = 0; i < MAX_PENDING_APPROVALS_PER_TASK + 1; i++) {
         const pending = approvalRegistry.list();
         expect(pending).toHaveLength(1);
-        approvalRegistry.resolve(pending[0]!.approvalId, 'approve');
+        approvalRegistry.resolve(pending[0]!.approvalId, 'approve', undefined, 'control');
       }
       await first;
       await Promise.all(queued);
@@ -367,7 +367,7 @@ describe('TaskRunner.requestApproval', () => {
     release();
     await offering;
     await vi.waitFor(() => expect(sent.some((e) => e.type === 'task.await_approval' && e.task_id === taskId)).toBe(true));
-    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'approve');
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'approve', undefined, 'control');
     await expect(early).resolves.toEqual({ approved: true, reason: undefined });
   });
 
@@ -431,7 +431,7 @@ describe('TaskRunner.requestApproval', () => {
     } finally {
       release();
       await offering.catch(() => {});
-      for (const pending of approvalRegistry.list()) approvalRegistry.resolve(pending.approvalId, 'reject', 'test cleanup');
+      for (const pending of approvalRegistry.list()) approvalRegistry.resolve(pending.approvalId, 'reject', 'test cleanup', 'control');
       rejectCommit = false;
       await runner.shutdownActiveTasks('test cleanup');
       await early;
@@ -513,7 +513,7 @@ describe('TaskRunner.requestApproval', () => {
 
       // B can still be resolved independently, with its OWN decision —
       // proving it was never silently consumed by A's approve.
-      approvalRegistry.resolve(approvalIdB, 'reject', 'B declined independently');
+      approvalRegistry.resolve(approvalIdB, 'reject', 'B declined independently', 'control');
       await expect(outcomeB).resolves.toEqual({ approved: false, reason: 'B declined independently' });
       expect(bResult).toEqual({ approved: false, reason: 'B declined independently' });
       expect(approvalRegistry.list()).toEqual([]);
@@ -545,7 +545,7 @@ describe('TaskRunner.requestApproval', () => {
 
       // The control socket's LOCAL `approvals.resolve` RPC resolves the
       // registry entry directly (origin defaults to 'local').
-      approvalRegistry.resolve(pending[0]!.approvalId, 'approve');
+      approvalRegistry.resolve(pending[0]!.approvalId, 'approve', undefined, 'control');
 
       await vi.waitFor(() => {
         expect(session.approvalResults).toEqual([{ approved: true }]);

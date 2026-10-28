@@ -304,6 +304,18 @@ describe('bin/commands/approve-reject (M4 Phase 2: control socket, not a live in
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('runApproveCommand points at the Host or reject when the daemon answers approval_requires_host (#1101)', async () => {
+    const handleRequest = vi.fn().mockRejectedValue(new ControlError('approval_requires_host', 'approval "approval-t" is a tool authorization: only the Host can approve it'));
+    const { connectControl, close } = fakeConnected(handleRequest);
+    const errors: string[] = [];
+
+    await expect(
+      runApproveCommand('/store', 'acme-product', 'approval-t', { error: (l) => errors.push(l), connectControl }),
+    ).rejects.toMatchObject({ code: 'approval_requires_host' });
+    expect(errors).toEqual(['approval "approval-t" is a tool authorization: only the Host can approve it — approve it in the Host, or run `byok-agent reject approval-t`']);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('runRejectCommand calls approvals.resolve with the reason and logs success', async () => {
     const handleRequest = vi.fn().mockResolvedValue({ resolved: true });
     const { connectControl } = fakeConnected(handleRequest);

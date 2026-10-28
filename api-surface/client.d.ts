@@ -2862,34 +2862,62 @@ export declare class AgentSessionHandoffStore {
  * The pending-approval registry: the one place an approval is resolved.
  * `TaskRunner.requestApproval` registers each dispatched approval (from a
  * session's `approvalChannel` or the control socket's `approvals.request`);
- * wire and local decisions, the CLI's `approvals.resolve`, timeouts, task
- * finish and eviction all resolve it here.
+ * wire and in-process decisions, the CLI's `approvals.resolve`, timeouts,
+ * task finish and eviction all resolve it here, and here a control-socket
+ * approval of a `tool-authorization` approval is refused (see
+ * {@link ApprovalOrigin}).
  */
 export type ApprovalDecision = 'approve' | 'reject';
 /**
- * Distinguishes a resolution
- * that arrived over the wire (a server-sent `task.approve`/`task.reject`,
- * `TaskRunner.handleApprove`/`handleReject`) from one this device decided on
- * its own (`Daemon.approve`/`reject`, the local `approvals.resolve`
- * control-socket RPC, a fail-closed `requestApproval` timeout, or a
- * fail-closed finish/eviction rejection). `TaskRunner` uses
- * this to decide whether to report `task.approval_resolved` back to the
- * server: a wire-triggered resolution is something the server already knows
- * about (it sent the decision itself) and must never be echoed back;
- * everything else is new information only the device has, and gets
- * reported. `'local'` is the default (see `resolve()`
- * below) precisely because it's the common case: every call site except
- * the wire decision handlers is local by construction.
+ * What an approval asks for. `task-terminal`: a runtime asks whether its task
+ * may continue, and a rejection ends the task. `tool-authorization`: the
+ * `auto` tool gate asks whether one high-risk tool call may run, and a
+ * rejection denies that call while the turn continues.
  */
-export type ApprovalOrigin = 'wire' | 'local';
+export type ApprovalKind = 'task-terminal' | 'tool-authorization';
+/**
+ * The channel a resolution arrived on. Two decisions depend on it:
+ *
+ * - Reporting. `'wire'` is a server-sent `task.approve`/`task.reject`
+ *   (`TaskRunner.handleApprove`/`handleReject`): the server already knows it,
+ *   so it is never echoed back. Every other origin is new to the server and is
+ *   reported as `task.approval_resolved`.
+ * - Authority. A `tool-authorization` approval is approved only by the Host:
+ *   `'wire'` or `'in-process'` (`Daemon.approve`, called by a Host that embeds
+ *   the daemon). `'control'` (the control socket's `approvals.resolve`, which
+ *   `byok-agent approve` calls) can be used by any same-user process that can
+ *   read `control.token`, including the agent being authorized, so it can only
+ *   reject such an approval unless `DaemonConfig.localToolApproval` is
+ *   `'allow'`.
+ *
+ * `'fail-closed'` is the device's own rejection: a `requestApproval` timeout
+ * or withdrawal, task finish, registry eviction, or an approval that could not
+ * be sealed for the Host.
+ */
+export type ApprovalOrigin = 'wire' | 'in-process' | 'control' | 'fail-closed';
+/** Whether the control socket may approve a `tool-authorization` approval. Absent means it may only reject. */
+export type LocalToolApprovalPolicy = 'allow';
 /** What `approvals.list` returns per pending approval — deliberately small; a runtime-specific payload (e.g. the exact tool call awaiting approval) is Phase 3's concern, not this registry's. */
 export interface PendingApproval {
     approvalId: string;
     taskId: string;
+    kind: ApprovalKind;
     summary?: string;
     createdAt: string;
 }
+/** Stable control error code for a control-socket approval of a `tool-authorization` approval. */
+export declare const APPROVAL_REQUIRES_HOST = "approval_requires_host";
 export declare class ApprovalNotFoundError extends Error {
+    constructor(approvalId: string);
+}
+/**
+ * The control socket tried to approve a `tool-authorization` approval while
+ * `DaemonConfig.localToolApproval` is not `'allow'`. The approval stays
+ * pending: the Host can still decide it, and the control socket can still
+ * reject it.
+ */
+export declare class ApprovalRequiresHostError extends Error {
+    readonly code = "approval_requires_host";
     constructor(approvalId: string);
 }
 /** Cap on simultaneously pending approvals — generous for any plausible concurrent-approval workload, and existing purely as a defensive bound (mirrors `task-runner.ts`'s `MAX_TRACKED_TASK_IDS`/`observer.ts`'s `MAX_TRACKED_TASKS`), not a real-world limit this is expected to ever approach. */
@@ -2905,6 +2933,10 @@ type ResolveCallback = (decision: ApprovalDecision, reason: string | undefined, 
  */
 export declare class ApprovalRegistry {
     private readonly pending;
+    private readonly localToolApproval;
+    constructor(options?: {
+        localToolApproval?: LocalToolApprovalPolicy;
+    });
     /**
      * Registers a new pending approval, evicting the OLDEST entry first if
      * already at {@link MAX_PENDING_APPROVALS} — bounded, not unbounded
@@ -2924,16 +2956,11 @@ export declare class ApprovalRegistry {
      * `approvals.resolve`) needs to distinguish "resolved" from "nothing to
      * resolve".
      *
-     * `origin` defaults to `'local'` (see {@link ApprovalOrigin}'s own doc
-     * comment for why that's the correct default, not just a convenient one):
-     * every existing caller of this method — the control socket's
-     * `approvals.resolve` RPC (`create-daemon.ts`), `TaskRunner`'s
-     * `requestApproval` timeout and `finish()` fail-closed cleanup
-     * (`task-runner.ts`) — resolves a decision this device made on its own.
-     * The one exception, a server-sent wire `task.approve`/`task.reject`
-     * (`TaskRunner.handleApprove`/`handleReject`), passes `'wire'` explicitly.
+     * Throws {@link ApprovalRequiresHostError}, leaving the approval pending,
+     * when a `'control'` origin approves a `tool-authorization` approval and
+     * `localToolApproval` is not `'allow'`. Every origin may reject.
      */
-    resolve(approvalId: string, decision: ApprovalDecision, reason?: string, origin?: ApprovalOrigin): void;
+    resolve(approvalId: string, decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin): void;
 }
 export {};
 // ==== @byok-sdk/client dist/daemon/assertion-client.d.ts ====
@@ -4232,6 +4259,7 @@ import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agen
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
+import { type LocalToolApprovalPolicy } from './approvals';
 import { type DaemonLifecycle } from './daemon-lifecycle';
 import { type ControlStorageStatus } from './control-protocol';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
@@ -4281,6 +4309,19 @@ export interface DaemonConfig {
      * other value declines the offer. Not an OS sandbox or file scope.
      */
     toolAuthorization?: ToolAuthorizationResolver;
+    /**
+     * Who may approve a `tool-authorization` approval (an `auto` high-risk tool
+     * call). Absent (default): only the Host — a wire `task.approve` or an
+     * in-process {@link Daemon.approve}. The control socket's
+     * `approvals.resolve` (`byok-agent approve`) can only reject it, and an
+     * approve fails with the control error code `approval_requires_host`
+     * ({@link APPROVAL_REQUIRES_HOST}). `'allow'` lets the control socket
+     * approve it too. Any same-user process that can read `control.token`,
+     * including the agent whose tool call waits, can then approve it, and the
+     * server records it as a local approval. `task-terminal` approvals are not
+     * affected. See `docs/security.md`.
+     */
+    localToolApproval?: LocalToolApprovalPolicy;
     /** Select an explicit macOS keychain for device enrollment custody. */
     deviceCredentials?: import('./device-credential-store').DeviceCredentialConfig;
     storage?: StorageConfig;
@@ -4802,9 +4843,12 @@ export interface Daemon {
      */
     unpair(): Promise<void>;
     /**
-     * Locally approve the pending approval `approvalId` of a task — the same
-     * resolution a server-sent `task.approve` makes (`TaskRunner.handleApprove`),
-     * reported to the server as `task.approval_resolved`. The session that
+     * Approve, from the Host process that embeds this daemon, the pending
+     * approval `approvalId` of a task — the same resolution a server-sent
+     * `task.approve` makes (`TaskRunner.handleApprove`), reported to the server
+     * as `task.approval_resolved`. Unlike the control socket's
+     * `approvals.resolve`, it also approves a `tool-authorization` approval
+     * whatever {@link DaemonConfig.localToolApproval} says. The session that
      * requested it through its `approvalChannel` (or a control-socket
      * `approvals.request`) receives `{ approved: true }`. A no-op (resolves
      * immediately) for a `taskId` this daemon doesn't currently have active;
@@ -10075,6 +10119,9 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
+/** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
+export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';
+export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals';
 export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner';
 export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace';
 export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';

@@ -2,41 +2,76 @@
  * The pending-approval registry: the one place an approval is resolved.
  * `TaskRunner.requestApproval` registers each dispatched approval (from a
  * session's `approvalChannel` or the control socket's `approvals.request`);
- * wire and local decisions, the CLI's `approvals.resolve`, timeouts, task
- * finish and eviction all resolve it here.
+ * wire and in-process decisions, the CLI's `approvals.resolve`, timeouts,
+ * task finish and eviction all resolve it here, and here a control-socket
+ * approval of a `tool-authorization` approval is refused (see
+ * {@link ApprovalOrigin}).
  */
 
 export type ApprovalDecision = 'approve' | 'reject';
 
 /**
- * Distinguishes a resolution
- * that arrived over the wire (a server-sent `task.approve`/`task.reject`,
- * `TaskRunner.handleApprove`/`handleReject`) from one this device decided on
- * its own (`Daemon.approve`/`reject`, the local `approvals.resolve`
- * control-socket RPC, a fail-closed `requestApproval` timeout, or a
- * fail-closed finish/eviction rejection). `TaskRunner` uses
- * this to decide whether to report `task.approval_resolved` back to the
- * server: a wire-triggered resolution is something the server already knows
- * about (it sent the decision itself) and must never be echoed back;
- * everything else is new information only the device has, and gets
- * reported. `'local'` is the default (see `resolve()`
- * below) precisely because it's the common case: every call site except
- * the wire decision handlers is local by construction.
+ * What an approval asks for. `task-terminal`: a runtime asks whether its task
+ * may continue, and a rejection ends the task. `tool-authorization`: the
+ * `auto` tool gate asks whether one high-risk tool call may run, and a
+ * rejection denies that call while the turn continues.
  */
-export type ApprovalOrigin = 'wire' | 'local';
+export type ApprovalKind = 'task-terminal' | 'tool-authorization';
+
+/**
+ * The channel a resolution arrived on. Two decisions depend on it:
+ *
+ * - Reporting. `'wire'` is a server-sent `task.approve`/`task.reject`
+ *   (`TaskRunner.handleApprove`/`handleReject`): the server already knows it,
+ *   so it is never echoed back. Every other origin is new to the server and is
+ *   reported as `task.approval_resolved`.
+ * - Authority. A `tool-authorization` approval is approved only by the Host:
+ *   `'wire'` or `'in-process'` (`Daemon.approve`, called by a Host that embeds
+ *   the daemon). `'control'` (the control socket's `approvals.resolve`, which
+ *   `byok-agent approve` calls) can be used by any same-user process that can
+ *   read `control.token`, including the agent being authorized, so it can only
+ *   reject such an approval unless `DaemonConfig.localToolApproval` is
+ *   `'allow'`.
+ *
+ * `'fail-closed'` is the device's own rejection: a `requestApproval` timeout
+ * or withdrawal, task finish, registry eviction, or an approval that could not
+ * be sealed for the Host.
+ */
+export type ApprovalOrigin = 'wire' | 'in-process' | 'control' | 'fail-closed';
+
+/** Whether the control socket may approve a `tool-authorization` approval. Absent means it may only reject. */
+export type LocalToolApprovalPolicy = 'allow';
 
 /** What `approvals.list` returns per pending approval — deliberately small; a runtime-specific payload (e.g. the exact tool call awaiting approval) is Phase 3's concern, not this registry's. */
 export interface PendingApproval {
   approvalId: string;
   taskId: string;
+  kind: ApprovalKind;
   summary?: string;
   createdAt: string;
 }
+
+/** Stable control error code for a control-socket approval of a `tool-authorization` approval. */
+export const APPROVAL_REQUIRES_HOST = 'approval_requires_host';
 
 export class ApprovalNotFoundError extends Error {
   constructor(approvalId: string) {
     super(`no pending approval with id "${approvalId}"`);
     this.name = 'ApprovalNotFoundError';
+  }
+}
+
+/**
+ * The control socket tried to approve a `tool-authorization` approval while
+ * `DaemonConfig.localToolApproval` is not `'allow'`. The approval stays
+ * pending: the Host can still decide it, and the control socket can still
+ * reject it.
+ */
+export class ApprovalRequiresHostError extends Error {
+  readonly code = APPROVAL_REQUIRES_HOST;
+  constructor(approvalId: string) {
+    super(`approval "${approvalId}" is a tool authorization: only the Host can approve it (the control channel can reject it, or set DaemonConfig.localToolApproval to 'allow')`);
+    this.name = 'ApprovalRequiresHostError';
   }
 }
 
@@ -60,6 +95,11 @@ interface RegisteredApproval {
  */
 export class ApprovalRegistry {
   private readonly pending = new Map<string, RegisteredApproval>();
+  private readonly localToolApproval: LocalToolApprovalPolicy | undefined;
+
+  constructor(options: { localToolApproval?: LocalToolApprovalPolicy } = {}) {
+    this.localToolApproval = options.localToolApproval;
+  }
 
   /**
    * Registers a new pending approval, evicting the OLDEST entry first if
@@ -81,12 +121,10 @@ export class ApprovalRegistry {
         console.warn(
           `[byok/client] approval registry exceeded ${MAX_PENDING_APPROVALS} pending entries — evicted the oldest (${oldestId})`,
         );
-        // 'local': an eviction is this registry's own bookkeeping, never a
-        // relayed server decision — see `ApprovalOrigin`'s own doc comment.
         evicted?.onResolve(
           'reject',
           `evicted: approval registry exceeded ${MAX_PENDING_APPROVALS} pending entries`,
-          'local',
+          'fail-closed',
         );
       }
     }
@@ -103,18 +141,21 @@ export class ApprovalRegistry {
    * `approvals.resolve`) needs to distinguish "resolved" from "nothing to
    * resolve".
    *
-   * `origin` defaults to `'local'` (see {@link ApprovalOrigin}'s own doc
-   * comment for why that's the correct default, not just a convenient one):
-   * every existing caller of this method — the control socket's
-   * `approvals.resolve` RPC (`create-daemon.ts`), `TaskRunner`'s
-   * `requestApproval` timeout and `finish()` fail-closed cleanup
-   * (`task-runner.ts`) — resolves a decision this device made on its own.
-   * The one exception, a server-sent wire `task.approve`/`task.reject`
-   * (`TaskRunner.handleApprove`/`handleReject`), passes `'wire'` explicitly.
+   * Throws {@link ApprovalRequiresHostError}, leaving the approval pending,
+   * when a `'control'` origin approves a `tool-authorization` approval and
+   * `localToolApproval` is not `'allow'`. Every origin may reject.
    */
-  resolve(approvalId: string, decision: ApprovalDecision, reason?: string, origin: ApprovalOrigin = 'local'): void {
+  resolve(approvalId: string, decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin): void {
     const entry = this.pending.get(approvalId);
     if (!entry) throw new ApprovalNotFoundError(approvalId);
+    if (
+      decision === 'approve' &&
+      origin === 'control' &&
+      entry.approval.kind === 'tool-authorization' &&
+      this.localToolApproval !== 'allow'
+    ) {
+      throw new ApprovalRequiresHostError(approvalId);
+    }
     this.pending.delete(approvalId);
     entry.onResolve(decision, reason, origin);
   }

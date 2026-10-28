@@ -5,7 +5,7 @@ import { type DeviceRecord, DeviceRecordRePairRequiredError } from '../store';
 import { PairedWithoutMemberError } from './support';
 import { INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationRequestParams, INPUT_PREPARATION_LOOKUP_METHOD, parseInputPreparationLookupParams, INPUT_PREPARATION_CANCEL_METHOD, parseInputPreparationCancelParams } from '../control-protocol';
 import { McpToolsetRevisionConflictError } from '../toolset-registry';
-import { ApprovalNotFoundError } from '../approvals';
+import { ApprovalNotFoundError, ApprovalRequiresHostError } from '../approvals';
 import { encodeTeamMemberContext, decodeTeamMemberContext } from '../team-workspace';
 import { DEVICE_ASSERTION_AUDIENCE_MAX_BYTES } from '@byok-sdk/core';
 import { mintDeviceAssertion, mintTaskAssertion } from '../device-assertion-signer';
@@ -191,9 +191,10 @@ function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unar
       const parsed = parseApprovalsResolveParams(params);
       if (!parsed) throw new ControlError('bad_request', 'approvals.resolve requires {approvalId, decision}');
       try {
-        approvalRegistry.resolve(parsed.approvalId, parsed.decision, parsed.reason);
+        approvalRegistry.resolve(parsed.approvalId, parsed.decision, parsed.reason, 'control');
       } catch (err) {
         if (err instanceof ApprovalNotFoundError) throw new ControlError('not_found', err.message);
+        if (err instanceof ApprovalRequiresHostError) throw new ControlError(err.code, err.message);
         throw err;
       }
       return { resolved: true };

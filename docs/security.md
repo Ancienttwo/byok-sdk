@@ -465,6 +465,25 @@ custom adapter's helper calling `approvals.request`.
 - **Fail-closed timeout on the daemon side**: `TaskRunner.requestApproval`
   force-resolves as a rejection once `approvalTimeoutMs` elapses with no
   decision (default 10 minutes) — `task-runner.ts`'s `dispatchApproval`.
+- **Tool authorization is approved by the Host only (#1101)**: every pending
+  approval records its kind (`task-terminal` or `tool-authorization`), and
+  `ApprovalRegistry.resolve()` records the channel a decision came on
+  (`wire`, `in-process`, `control`, `fail-closed`). A `tool-authorization`
+  approval (an `auto` high-risk tool call) is approved only by a wire
+  `task.approve` or the in-process `Daemon.approve` of the embedding Host.
+  The control socket's `approvals.resolve` can reject it, but an approve fails
+  with the control error code `approval_requires_host` and the approval stays
+  pending. The reason: `control.token` is 0600, which stops other OS users but
+  not the agent CLI or a tool shell it starts, since they run as the same user
+  as the daemon. Without this rule the agent could approve its own tool call
+  with a second command, and the Host would see a "local approval" no person
+  made. `DaemonConfig.localToolApproval: 'allow'` turns control-socket
+  approval back on for a Host that wants terminal approval; it accepts both
+  risks again (an agent can approve itself, and the record cannot tell). The
+  `auto` gate is still lexical and not a sandbox (see "Tool authorization" in
+  `docs/spec.md`); this rule fixes who can approve, not what is classified.
+  `task-terminal` approvals and the fail-closed rejections (timeout, task
+  finish, eviction) are unchanged.
 - **Dual entry, first resolution wins**: a wire `task.approve`/`task.reject`
   (the SaaS/operator, remotely) and a local `approvals.resolve` over the
   control socket (the device owner, locally) both resolve through the same
@@ -483,8 +502,19 @@ custom adapter's helper calling `approvals.request`.
 |---|---|---|
 | Remote network | — | Reach the local control socket |
 | Malicious/compromised SaaS | Send `task.approve`/`task.reject` for a task it offered — a legitimate use of the wire's own approve channel, racing any local decision, in a window now narrowed to network latency (see below) | Bypass the fail-closed timeout; force an approval to resolve any faster than a real decision arriving; read or resolve an approval for a task it didn't offer |
-| Same-user local process | Call `approvals.resolve` directly over the control socket, independent of claude/MCP entirely — the device owner's own override path, by design | — |
+| Same-user local process | Call `approvals.resolve` directly over the control socket, independent of claude/MCP entirely — the device owner's own override path, by design: reject anything, approve a `task-terminal` approval, and approve a `tool-authorization` approval only when `DaemonConfig.localToolApproval` is `'allow'` | Approve a `tool-authorization` approval by default (`approval_requires_host`) |
 | Other local user | — | Reach the control socket (blocked by perms) |
+
+**Migration (#1101, for the #1094 versioned migration section):** after this
+change `byok-agent approve <approvalId>` and a control-socket
+`approvals.resolve` with `decision: 'approve'` fail with control error code
+`approval_requires_host` for a `tool-authorization` approval; the approval
+stays pending for the Host. `byok-agent reject` and `task-terminal` approvals
+work as before. A Host that approves `auto` tool calls should call the
+in-process `Daemon.approve` or answer the wire `task.await_approval`. A Host
+that wants terminal approval sets `DaemonConfig.localToolApproval: 'allow'`
+and accepts the risks above. `approvals.list` entries (and `status().approvals`)
+now carry `kind`.
 
 A compromised SaaS approving its own offered task is not a privilege
 escalation beyond what it already had as the offering party — the actual

@@ -88,7 +88,7 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
     const approvalId = pending[0]!.approvalId;
     // No `origin` arg — mirrors what create-daemon.ts's real
     // 'approvals.resolve' control-socket handler passes, defaulting to 'local'.
-    approvalRegistry.resolve(approvalId, 'approve');
+    approvalRegistry.resolve(approvalId, 'approve', undefined, 'control');
     await expect(outcomePromise).resolves.toEqual({ approved: true, reason: undefined });
 
     const resolved = findApprovalResolved(sent);
@@ -113,7 +113,7 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
 
     const outcomePromise = runner.requestApproval(taskId, 'Bash: rm -rf /');
     const pending = approvalRegistry.list();
-    approvalRegistry.resolve(pending[0]!.approvalId, 'reject', 'operator declined via CLI');
+    approvalRegistry.resolve(pending[0]!.approvalId, 'reject', 'operator declined via CLI', 'control');
     await outcomePromise;
 
     const resolved = findApprovalResolved(sent);
@@ -185,7 +185,7 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
 
     const outcomePromise = runner.requestApproval(taskId, 'Bash: echo hi');
     const pending = approvalRegistry.list();
-    approvalRegistry.resolve(pending[0]!.approvalId, 'approve');
+    approvalRegistry.resolve(pending[0]!.approvalId, 'approve', undefined, 'control');
     await outcomePromise;
 
     expect(findApprovalResolved(sent)?.payload).toMatchObject({ approvalId: pending[0]!.approvalId, decision: 'approve', resolvedBy: 'local' });
@@ -200,7 +200,7 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
 
     const outcomePromise = runner.requestApproval(taskId, 'Bash: echo hi');
     const pending = approvalRegistry.list();
-    approvalRegistry.resolve(pending[0]!.approvalId, 'approve');
+    approvalRegistry.resolve(pending[0]!.approvalId, 'approve', undefined, 'control');
     await outcomePromise;
 
     // The resumed session immediately produces more progress and completes —

@@ -409,7 +409,7 @@ describe('bin/format: formatLiveStatusLines', () => {
 
     const lines = formatLiveStatusLines(
       baseLive({
-        approvals: [{ approvalId: 'appr-1', taskId: 't1', summary: 'Bash: rm -rf /tmp/x', createdAt: '2026-01-01T00:00:00.000Z' }],
+        approvals: [{ approvalId: 'appr-1', taskId: 't1', kind: 'task-terminal', summary: 'Bash: rm -rf /tmp/x', createdAt: '2026-01-01T00:00:00.000Z' }],
         approvalsPending: 1,
       }),
     );
@@ -421,7 +421,7 @@ describe('bin/format: formatLiveStatusLines', () => {
     const longSummary = 'x'.repeat(100);
     const lines = formatLiveStatusLines(
       baseLive({
-        approvals: [{ approvalId: 'appr-2', taskId: 't2', summary: longSummary, createdAt: '2026-01-01T00:00:00.000Z' }],
+        approvals: [{ approvalId: 'appr-2', taskId: 't2', kind: 'task-terminal', summary: longSummary, createdAt: '2026-01-01T00:00:00.000Z' }],
       }),
     );
     expect(lines.some((l) => l.startsWith('live-approval: appr-2') && l.includes('…') && !l.includes(longSummary))).toBe(true);
@@ -429,7 +429,7 @@ describe('bin/format: formatLiveStatusLines', () => {
 
   it('renders "(no summary)" for a pending approval with no summary at all', () => {
     const lines = formatLiveStatusLines(
-      baseLive({ approvals: [{ approvalId: 'appr-3', taskId: 't3', createdAt: '2026-01-01T00:00:00.000Z' }] }),
+      baseLive({ approvals: [{ approvalId: 'appr-3', taskId: 't3', kind: 'task-terminal', createdAt: '2026-01-01T00:00:00.000Z' }] }),
     );
     expect(lines).toContain('live-approval: appr-3 taskId=t3 summary="(no summary)"');
   });
@@ -456,7 +456,7 @@ describe('bin/format: formatLiveStatusLines', () => {
         deviceId: 'dev-1',
         activeTasks: [{ taskId: 't1', state: 'Running' }],
         queueWatermarks: [{ taskId: 't1', progressBatcherPending: 1, pendingApprovals: 1 }],
-        approvals: [{ approvalId: 'appr-1', taskId: 't1', summary: 'Bash: echo hi', createdAt: '2026-01-01T00:00:00.000Z' }],
+        approvals: [{ approvalId: 'appr-1', taskId: 't1', kind: 'task-terminal', summary: 'Bash: echo hi', createdAt: '2026-01-01T00:00:00.000Z' }],
         approvalsPending: 1,
       }),
     );
@@ -483,7 +483,7 @@ describe('bin/format: formatToolsetsReloadReceiptLines', () => {
 
 describe('bin/format: formatApprovalsListLines (finding F4)', () => {
   function approval(overrides: Partial<PendingApproval> = {}): PendingApproval {
-    return { approvalId: 'appr-1', taskId: 't1', summary: 'Bash: rm -rf /tmp/x', createdAt: '2026-01-01T00:00:00.000Z', ...overrides };
+    return { approvalId: 'appr-1', taskId: 't1', kind: 'task-terminal', summary: 'Bash: rm -rf /tmp/x', createdAt: '2026-01-01T00:00:00.000Z', ...overrides };
   }
 
   it('shows a placeholder for an empty list', () => {
