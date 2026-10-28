@@ -94,7 +94,7 @@ sequenceDiagram
 
 ### 审批与 `auto` 工具授权
 
-`auto` 还是 `all` 由设备本地的 Host resolver 决定，不来自 offer。`auto` 需要执行前的闸门：runtime 未声明 `toolAuthorizationAuto`，或 offer 是 prepared 时，在 claim 前 decline。runtime 的 `approvalChannel` 与闸门都进入同一个 `TaskRunner.requestApproval`，每个 task 同时至多派发一个待审批。审批是 Host 控制面的方法，不是 HTTP 路由。
+`auto` 还是 `all` 由设备本地的 Host resolver 决定，不来自 offer。CLI 路径设不了 resolver，所以总是 `all`。`auto` 需要执行前的闸门：runtime 未声明 `toolAuthorizationAuto`，或 offer 是 prepared 时，在 claim 前 decline。runtime 的 `approvalChannel` 与闸门都进入同一个 `TaskRunner.requestApproval`，每个 task 同时至多派发一个待审批。审批是 Host 控制面的方法，不是 HTTP 路由；设备上的本地裁决（`Daemon.approve`、控制通道、超时、任务结束）不区分审批种类（R-T2）。
 
 ### 投递唤醒
 
@@ -115,7 +115,7 @@ server 与进程内组合用进程内 wake；常驻 Node + Postgres 用 `LISTEN 
 | runtime 登录目录（`~/.claude`、`CODEX_HOME` 等） | 用户自己的 agent 配置，原样继承 | 用户 |
 | daemon 进程 | 长驻；服务管理器或 Host 进程托管 | Host 选择 CLI 服务或内嵌 |
 | runtime 进程组 | 每任务；`detached` 成组，POSIX 记入 `owned-processes/` 台账 | daemon |
-| 控制通道与工具授权闸门 | 同一 OS 用户；HMAC 或 token 只防跨用户 | daemon |
+| 控制通道与工具授权闸门 | 同一 OS 用户；HMAC 或 token 只防跨用户（R-T2） | daemon |
 
 SDK 不创建内核 namespace、bind mount、chroot 或容器；需要 OS 级隔离时由 Host 自己包一层。
 
@@ -126,29 +126,36 @@ SDK 不创建内核 namespace、bind mount、chroot 或容器；需要 OS 级隔
 | | 内嵌路径 | CLI 路径 |
 | --- | --- | --- |
 | 入口 | Host 进程内调用 `createDaemonWithAdapters`（Topology L 时再加 `createByokServer`） | `byok-agent start --config <abs>`，由服务管理器托管 |
-| 配置 | 代码组装 `DaemonConfig`，自己提供 `localAgentRelease` | JSON 文件；CLI 只校验 `productName`、`productId`、`serverUrl`，`localAgentRelease` 由发行版固定、不许填写 |
-| 服务与升级 | Host 自己负责 | `byok-agent install` 生成服务定义；没有升级机制 |
+| 配置 | 代码组装 `DaemonConfig`，自己提供 `localAgentRelease`；可以传 `toolAuthorization` resolver，可以自己构造 adapter 并设隔离选项 | JSON 文件；CLI 只校验 `productName`、`productId`、`serverUrl`，`localAgentRelease` 由发行版固定、不许填写；`toolAuthorization` 与 adapter 隔离选项写不进配置（R-T5） |
+| 服务与升级 | Host 自己负责 | `byok-agent install` 生成服务定义；没有升级机制，日志不轮转（R-T6） |
+| 下游自己写的部分 | 服务注册、payload 切换与回滚、adapter 构造、目录布局、K4 副本、打包脚本 | 服务与更新、`CODEX_HOME` 隔离 |
 | 例子 | AiphaBee（0.30.2） | Salesko（旧版） |
 
-指引、配置 schema 与共用的服务和升级机制由 #1094、#1097 跟进。
+owner 2026-10-29 定了「收回 SDK 优先」：「下游自己写的部分」里，除下载源、发布渠道、签名和界面外，都由 SDK 收回。清单与对应 issue 见 [#1093](https://github.com/Ancienttwo/byok-sdk/issues/1093)。
 
 ## 重构跟进与验证范围
 
-审查视图的 Remarks 已立项，由 [#1093](https://github.com/Ancienttwo/byok-sdk/issues/1093) 跟踪，分 3 个阶段：
+审查视图的 Remarks 已立项，由 [#1093](https://github.com/Ancienttwo/byok-sdk/issues/1093) 跟踪。2026-10-29 的 v2 依据 RAFT 复核、从历史 issue 整理出的 92 条下游问题，以及 owner 定的「收回 SDK 优先」，新增 6 个子 issue，仍分 3 个阶段：
 
 | 阶段 | issue | 内容 | Remarks |
 | --- | --- | --- | --- |
-| P0 | [#1094](https://github.com/Ancienttwo/byok-sdk/issues/1094) | 下游指引、`DaemonConfig` JSON Schema、`config check` | R-T5 |
-| P0 → P1 | [#1095](https://github.com/Ancienttwo/byok-sdk/issues/1095) | 闸门 token 改文件传递；runtime 环境默认收窄为 allowlist | R-T1、R-T2、R-T4 |
-| P0 | [#1096](https://github.com/Ancienttwo/byok-sdk/issues/1096) | 能力声明与 ports 双向一致 | R-L3 |
-| P1 | [#1097](https://github.com/Ancienttwo/byok-sdk/issues/1097) | 服务定义、日志轮转、升级机制做成库 API | R-T6 |
-| P1 | [#1061](https://github.com/Ancienttwo/byok-sdk/issues/1061) | resolver 输入带 `autoSupported`；hello 与 presence 公开 `toolAuthorizationAuto` | R-T3 |
-| P2 | [#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098) | 依赖方向 checker；`ui-runtime` 不再值导入 `cloud` | R-L4、R-L5 |
-| P2 | [#1099](https://github.com/Ancienttwo/byok-sdk/issues/1099) | client 目录分层，拆导入环；TaskRunner 抽成纯 reducer | R-L1 |
-| P2 | [#1100](https://github.com/Ancienttwo/byok-sdk/issues/1100) | `cloud.ts` 反向导入清零 | R-L2 |
+| P0 → P1 | [#1094](https://github.com/Ancienttwo/byok-sdk/issues/1094) | 下游指引、配置 schema、`config check`（含生效值）、布局 helper；P1 加 CLI 的 `runtimes` 配置块与静态 `toolAuthorization` | R-T5、R-T3 |
+| P0 | [#1102](https://github.com/Ancienttwo/byok-sdk/issues/1102) | Host 可见变更清单、CI 门禁、store 兼容预检；PATCH 不含破坏性变化 | R-T6 |
+| P0 | [#1101](https://github.com/Ancienttwo/byok-sdk/issues/1101) | 工具授权的批准只认 Host | R-T2 |
+| P0 → P1 | [#1095](https://github.com/Ancienttwo/byok-sdk/issues/1095) | 闸门 token 改用文件传递；环境策略落到 adapter 层 | R-T1、R-T2、R-T4 |
+| P0 → P1 | [#1103](https://github.com/Ancienttwo/byok-sdk/issues/1103) | runtime 契约套件、版本策略与能力矩阵 | R-T3 |
+| P1 | [#1061](https://github.com/Ancienttwo/byok-sdk/issues/1061) | 公开 `toolAuthorizationAuto`，resolver 输入带 `autoSupported` | R-T3 |
+| P1 | [#1097](https://github.com/Ancienttwo/byok-sdk/issues/1097) | 服务、升级与运维收进 SDK | R-T6 |
+| P1 | [#1096](https://github.com/Ancienttwo/byok-sdk/issues/1096) | 能力声明与 ports 双向一致 | R-L3 |
+| P1 | [#1104](https://github.com/Ancienttwo/byok-sdk/issues/1104) | 分发清单、打包 helper、打包一致性 lane | — |
+| P1 | [#1106](https://github.com/Ancienttwo/byok-sdk/issues/1106) | K4 收进 SDK | — |
+| P2 | [#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098) | 依赖方向检查 | R-L4、R-L5 |
+| P2 | [#1099](https://github.com/Ancienttwo/byok-sdk/issues/1099) | client 目录分层；TaskRunner 抽成纯 reducer | R-L1 |
+| P2 | [#1100](https://github.com/Ancienttwo/byok-sdk/issues/1100) | cloud 组合点收尾 | R-L2 |
+| P2 | [#1105](https://github.com/Ancienttwo/byok-sdk/issues/1105) | retention 上界与 soak | — |
 
 本页与两页审查视图只改文档，不改源码、模型 YAML 或生成区。验证范围：
 
 - 三页的全部 Mermaid 图用 Mermaid CLI 本地渲染通过。
-- 审查视图的 `path:line`、规模与依赖边计数由一次独立复核对照基线源码核对，修正已并入。
-- 因为只改文档，没有运行 `bun run test`。
+- 审查视图的 `path:line`、规模与依赖边计数由一次独立复核对照基线源码核对，修正已并入。2026-10-29 又按 AST 口径重算了 client 与 cloud 的目录边，公开入口发出的边不计，结果见分层视图 §3.1、R-L1 与 R-L2。
+- 本地运行了 `check:version-authority` 与 `scripts/ci` 的测试。本环境连不上 npm registry，装不了依赖，build、typecheck、test、`check:api-surface` 与 `check:release-graph` 由 PR 的 CI 运行。

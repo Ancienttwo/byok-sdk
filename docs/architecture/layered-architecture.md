@@ -144,7 +144,7 @@ flowchart TB
   subgraph E["入口 · 9.9k"]
     direction LR
     Bin["bin 6.1k<br/>byok-agent · pi hosts<br/>保留 MCP helper"]:::entry
-    Idx["index.ts 0.6k<br/>公开入口 re-export"]:::entry
+    Idx["index.ts 与子路径入口<br/>公开 API re-export"]:::entry
     Life["lifecycle 1.5k<br/>launchd · systemd · WinSW"]:::entry
     Diag["diagnostics 1.7k<br/>doctor · support-bundle"]:::entry
   end
@@ -183,30 +183,30 @@ flowchart TB
   O ==>|"8"| Mcp
   Ad ==>|"11"| Mcp
   O ==>|"50"| Root
-  Ad ==>|"45"| Root
+  Ad ==>|"42"| Root
   O ==>|"40"| Util
   Ad ==>|"12"| Util
-  O <-.-|"13 · R-L1"| Ad
-  O <-.-|"10 · R-L1"| Sub
+  O <-.-|"11 · R-L1"| Ad
   O <-.-|"4 · R-L1"| Root
+  Life <-.-|"3 · R-L1"| O
   Bin <-.-|"1 · R-L1"| O
-  Bin <-.-|"5 · R-L1"| Sub
+  Bin <-.-|"2 · R-L1"| Sub
   Diag -.->|"7 · R-L1"| Bin
-  Bin -.->|"runtime-probe · R-L1"| Idx
+  Bin -.->|"5 · R-L1"| Idx
 ```
 
-边上的数字是值导入语句数，口径同 §2，并且不计 `index.ts` 的 re-export（它把 30 条边记到根模块 → daemon、7 条记到根模块 → adapters）。虚线是逆向依赖，箭头指向被依赖的一方；文件级环见 R-L1。
+边上的数字是值导入语句数，口径同 §2。公开入口（`index.ts`，以及 `adapters/`、`agent-memory/`、`assertion-client/`、`mcp-server/`、`testing/` 的子路径入口）只做 re-export，它们发出的边不计；其中 `index.ts` 发出 59 条，30 条指向 daemon。虚线是逆向依赖，箭头指向被依赖的一方。图里没画的逆向边：根模块 → bin、根模块 → subagents、util → lifecycle 各 1 条，runtime → adapters 2 条。全部逆向边与文件级环见 R-L1。
 
 | 模块 | 职责 | 关键锚点 |
 | --- | --- | --- |
-| `bin/` | 8 个 bin 的入口：`byok-agent` 子命令、Pi 三种 host（rpc、prepared、durable）、4 个 SDK 保留 MCP helper。`control-client.ts`、`audit-log.ts`、`format.ts`、`runtime-probe.ts`、`agent-memory-mcp-server.ts` 也在这里，被 daemon、diagnostics 与 agent-memory 当库使用（R-L1）。 | `packages/client/src/bin/byok-agent.ts`；`packages/client/src/bin/sdk-reserved-helper-runners.ts` |
-| `index.ts` | 公开 API 汇总，只做 re-export。`bin/runtime-probe.ts` 从这里取 adapter，形成经公开入口的环（R-L1）。 | `packages/client/src/index.ts`；`packages/client/src/bin/runtime-probe.ts:2` |
+| `bin/` | 8 个 bin 的入口：`byok-agent` 子命令、Pi 三种 host（rpc、prepared、durable）、4 个 SDK 保留 MCP helper。`control-client.ts`、`audit-log.ts`、`format.ts`、`runtime-probe.ts`、`agent-memory-mcp-server.ts`、`sdk-reserved-helper-runners.ts` 也在这里，被 daemon、diagnostics、agent-memory 与根模块当库使用（R-L1）。 | `packages/client/src/bin/byok-agent.ts`；`packages/client/src/bin/sdk-reserved-helper-runners.ts` |
+| `index.ts` | 公开 API 汇总，只做 re-export；`adapters/`、`agent-memory/` 等子路径各有自己的入口。`bin/` 有 5 个文件从这里取 API，其中 `bin/runtime-probe.ts` 经它与 `diagnostics/` 成环（R-L1）。 | `packages/client/src/index.ts`；`packages/client/src/bin/runtime-probe.ts:2` |
 | 根模块 | Agent home 布局、工具授权模式与 IPC、runtime 失败投影、共享类型。被 daemon 与 adapters 广泛依赖。 | `packages/client/src/agent-home.ts:28`；`packages/client/src/tool-authorization.ts:13`；`packages/client/src/tool-authorization-ipc.ts:74` |
 | `daemon/create-daemon/` | 把 store、journal、连接、TaskRunner、控制通道组合成 `Daemon`。`createDaemon` 只构建 pi、claude、codex，Hermes 与 Grok 由 Host 经 `createDaemonWithAdapters` 注入。`daemon.start()` 总会拉起控制通道，内嵌 Host 也一样。 | `packages/client/src/daemon/create-daemon.ts:718,963`；`packages/client/src/daemon/create-daemon/support.ts:288-292`；`packages/client/src/daemon/create-daemon/lifecycle.ts:41` |
 | `daemon/connection-manager.ts` 等 | 单会话 HTTP long-poll：`conn.hello` 握手、cursor 持久化即 ack、outbox 批量发送、token 续期。 | `packages/client/src/daemon/connection-manager.ts:273-327`；`packages/client/src/daemon/auth-manager.ts:312` |
 | `daemon/task-runner/` | offer 准入、Agent home 预留、workspace 与 manifest 封存、claim/started、事件泵、审批、终态与清理。 | `packages/client/src/daemon/task-runner/offer.ts`；`offer-activation.ts:179-203`；`approvals.ts:11`；`finish.ts:145` |
 | `daemon/journal/`、`daemon/retention/` | SQLite journal（offer 与终态的崩溃恢复）、scratch 与 session ledger 的保留清理。 | `packages/client/src/daemon/journal/sqlite-journal.ts`；`packages/client/src/daemon/retention/scratch.ts` |
-| `daemon/environment.ts` | runtime 子进程的环境：完整继承与窄 allowlist 两种构造。adapters 有 9 条值导入指向它（R-L1）。 | `packages/client/src/daemon/environment.ts:1-14` |
+| `daemon/environment.ts` | runtime 子进程的环境：完整继承与窄 allowlist 两种构造。adapters 有 8 条值导入指向它，`./adapters` 子路径入口也 re-export 它（R-L1）。 | `packages/client/src/daemon/environment.ts:1-14` |
 | `adapters/` | 每个 runtime 一个 `RuntimeAdapter`：拼命令行、写 MCP 配置、解析事件流、工具授权桥、进程树所有权。 | `packages/client/src/adapters/process-tree.ts`；`adapters/claude/claude-adapter.ts:344-366`；`adapters/pi/pi-adapter.ts` |
 | `mcp/`、`mcp-server/` | `mcp/` 是 daemon 探测 MCP server 用的 client；`mcp-server/` 是对外的 `./mcp-server` 子路径（stdio 与 HTTP）。 | `packages/client/src/daemon/mcp-tools-probe.ts`；`docs/mcp-server-http.md` |
 | `lifecycle/`、`diagnostics/` | 服务安装（launchd、systemd --user、WinSW）与 `doctor`、`support-bundle`。 | `packages/client/src/lifecycle/service-types.ts:63` |
@@ -245,7 +245,7 @@ flowchart LR
   Cmp --> St
 ```
 
-同一目录里的 `cloud.ts` 与领域文件被目录级检查视为一个单元，所以 `api/`、`handlers/`、`stores/` 与根目录之间显示为双向依赖（R-L2）。实际上没有一条值导入指向 `cloud.ts`：`api/` 只以 `import type` 引用它。文件级只有 `inbound.ts ↔ task-agent-message.ts` 一个环。
+同一目录里的 `cloud.ts` 与领域文件被目录级检查视为一个单元，所以 `api/`、`handlers/`、`stores/` 与根目录之间显示为双向依赖（R-L2）。实际上子目录没有值导入指向 `cloud.ts`：`api/` 只以 `import type` 引用它，唯一的值导入来自上层的 `composition/in-memory.ts`。文件级只有 `inbound.ts ↔ task-agent-message.ts` 一个环。
 
 | 模块 | 职责 | 关键锚点 |
 | --- | --- | --- |
@@ -452,6 +452,7 @@ sequenceDiagram
 - Claude 的闸门在 stdio control 通道里以 hook 形式运行（`packages/client/src/adapters/claude/claude-adapter.ts:369-372`）；Pi 经 `startToolAuthorizationIpc` 起 IPC（`packages/client/src/adapters/pi/pi-adapter.ts:525-555`）。
 - TaskRunner 把两条入口都接到同一个 `requestApproval`（`packages/client/src/daemon/task-runner/offer-launch.ts:390-434`）。cloud 的待审批槽由 timeline 尾部折叠得出，尾部过期即没有待审批，调用方 fail-closed（`packages/cloud/src/approval-control.ts:1-35`）。server 的 SQLite 审批 timeline 跨重启保留（#1049，`packages/server/src/stores/sqlite/approval-timeline.ts`）。
 - cloud 没有设备侧的审批路由：审批是 Host 控制面的方法，不是 HTTP 路由（`packages/cloud/src/cloud.ts:1341-1345`）。
+- 本地裁决不区分审批种类：登记表不记录种类（`packages/client/src/daemon/approvals.ts:29-34`），经控制通道的 `approvals.resolve`（`byok-agent approve`）也能批准 `tool-authorization` 审批（`packages/client/src/daemon/create-daemon/control-methods.ts:189-199`），见 R-T2。
 
 ### 4.4 投递唤醒：Topology L 与 H
 
@@ -485,12 +486,12 @@ sequenceDiagram
 
 ## Remarks
 
-按级别排序。`高`：影响正确性或安全边界。`中`：结构负担或重复。`低`：命名与清理。本页只记录观察到的事实与方向，不代表已立项。
+按级别排序。`高`：影响正确性或安全边界。`中`：结构负担或重复。`低`：命名与清理。各条已立项，由 [#1093](https://github.com/Ancienttwo/byok-sdk/issues/1093) 及其子 issue 跟踪，见最后一列。
 
-| ID | 级别 | 问题 | 证据 | 精简方向 |
+| ID | 级别 | 问题 | 证据 | 方向与跟踪 |
 | --- | --- | --- | --- | --- |
-| R-L1 | 中 | client 内部目录没有方向规则，实测存在多组值导入环：`daemon ↔ adapters`（15 / 13）、`daemon ↔ 根模块`（50 / 34）、`daemon ↔ bin`（1 / 19）、`adapters ↔ runtime`（8 / 2）、`adapters ↔ 根模块`（45 / 7）、`bin ↔ diagnostics`（3 / 7）、`bin ↔ agent-memory`（2 / 5）。`bin/control-client.ts` 被 `daemon/assertion-client.ts` 与 `diagnostics/device-doctor.ts` 当库导入；`index.ts` 导入 `bin/team-tmux-view`。 | §2 统计口径应用到 `packages/client/src/<dir>`；`packages/client/src/daemon/assertion-client.ts` → `../bin/control-client`；`packages/client/src/agent-memory/index.ts` → `../bin/agent-memory-mcp-server` | 把 `bin/` 里的库代码（control-client、各 MCP server 实现）移到非入口目录，`bin/` 只留 argv 外壳；之后为 client 加目录方向检查。 |
-| R-L2 | 中 | `cloud.ts` 是 2.6k 行的组合点，`api/`、`handlers/`、`stores/` 都反向导入根模块（21 / 11 / 11 条值边）。#1074 已拆出 offers、取消、读取等 API，`steerTask` 与 `submitAgentExecution` 仍在 `cloud.ts` 内。 | `packages/cloud/src/cloud.ts:1814,2303`；§3.2 图 | 继续按 Host API 拆分，根模块只留组合；共享的错误与类型移到不被组合点依赖的叶子文件。 |
-| R-L3 | 中 | 内嵌 `server` 把 `e2eeMemberStore` 传给 `createByokCloud`，但用不带参数的 `fullCapabilityDeclaration()`，它默认不含 `e2ee.member`、`truth.records`、`skills.pack`、`agent.memory.projection`、`host-mcp-task-context`，所以这些路由在 Topology L 永远不挂载。是否有意需要确认。 | `packages/server/src/index.ts:413,418`；`packages/cloud/src/capabilities.ts:157-178`；`packages/cloud/src/cloud.ts:1260` | 若有意，删掉传入的 store 或在注释里说明；若无意，让 server 按传入的 ports 打开对应声明。 |
-| R-L4 | 低 | `ui-runtime` 有 2 条对 `cloud` 的值导入（`TimelineEventSchema` 等），浏览器端打包会带入这部分 cloud 代码。 | `packages/ui-runtime/src/timeline.ts:1-5`；`packages/ui-runtime/src/approval-timeline.ts:5` | 若 schema 属于契约，移到 `protocol`；否则保持现状并在 API surface 里锁定。 |
-| R-L5 | 低 | package 级方向没有 checker，目前靠 `package.json` 与 review 维持；`check-package-graph.mjs` 只查发布集合与依赖纯度。 | §2 检查覆盖 | 在 `check:release-graph` 加一条：workspace 依赖只能指向 §1 中更低的层。 |
+| R-L1 | 中 | client 内部目录没有方向规则。按 §3.1 的四层与口径，逆层值导入有 24 条：adapters → daemon 11（其中 8 条指向 `daemon/environment.ts`）、根模块 → daemon 4、daemon → lifecycle 3、agent-memory → bin 2、daemon → bin 1、根模块 → bin 1、根模块 → subagents 1、util → lifecycle 1。同层互指：diagnostics ↔ bin（7 / 3）、runtime ↔ adapters（2 / 4）。文件级环 3 个：`daemon/task-runner.ts` 与 `task-runner/` 下 14 个阶段文件；经公开入口 `index.ts` 的 `bin/runtime-probe.ts` 与 `diagnostics/` 的 4 个文件；`agent-home-readers.ts` ↔ `agent-home-reader-retention.ts`。 | §3.1 图；`packages/client/src/daemon/assertion-client.ts` → `bin/control-client.ts`；`packages/client/src/agent-memory/prepared-capability.ts` → `bin/agent-memory-mcp-server.ts`；`packages/client/src/daemon/task-runner/approvals.ts:9`；`packages/client/src/bin/runtime-probe.ts:2` | `bin/` 只留 argv 外壳，库代码移出；`environment.ts`、`service-environment.ts` 等被下层使用的原语下沉；TaskRunner 抽成纯 reducer。[#1099](https://github.com/Ancienttwo/byok-sdk/issues/1099)；检查由 [#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098) 提供，以只减不增的基线上线。 |
+| R-L2 | 低 | `cloud.ts` 仍是 2,565 行的组合点，`steerTask` 与 `submitAgentExecution` 还在其中。子目录对它没有值导入，§3.2 图里的双向依赖来自同目录的领域文件。文件级只有 `inbound.ts ↔ task-agent-message.ts` 一个环。 | `packages/cloud/src/cloud.ts:1814,2303`；`packages/cloud/src/api/offers.ts:1-7`（`import type`）；`packages/cloud/src/inbound.ts:1`；`packages/cloud/src/task-agent-message.ts:7` | steer 与 submit 移入 `api/`；`parseAgentMessageDisposition` 移到叶子文件以拆环；目录检查把 `cloud.ts` 与领域文件分开计算。[#1100](https://github.com/Ancienttwo/byok-sdk/issues/1100)。 |
+| R-L3 | 中 | 内嵌 `server` 把 `e2eeMemberStore` 传给 `createByokCloud`，但用不带参数的 `fullCapabilityDeclaration()`，它默认不含 `e2ee.member`、`truth.records`、`skills.pack`、`agent.memory.projection`、`host-mcp-task-context`，所以这些路由在 Topology L 永远不挂载，Host 看到的是 404。目前没有下游报告。 | `packages/server/src/index.ts:413,418`；`packages/cloud/src/capabilities.ts:157-178`；`packages/cloud/src/cloud.ts:1260` | owner 已定（Q1）：删掉传入的 store，能力声明与 ports 双向校验，声明由 ports 推导。`SqliteE2eeMemberStore` 还承担 proof receipt 的保留（`packages/server/src/stores/sqlite/index.ts:1438-1444`），删除前先拆出。[#1096](https://github.com/Ancienttwo/byok-sdk/issues/1096)。 |
+| R-L4 | 低 | `ui-runtime` 有 2 条对 `cloud` 的值导入（`TimelineEventSchema` 等），浏览器端打包会带入这部分 cloud 代码。 | `packages/ui-runtime/src/timeline.ts:1-5`；`packages/ui-runtime/src/approval-timeline.ts:5` | 若 schema 属于契约，移到 `protocol`；否则在 api-surface 里锁定并写明理由。[#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098)。 |
+| R-L5 | 低 | package 级方向没有 checker，目前靠 `package.json` 与 review 维持；`check-package-graph.mjs` 只查发布集合、依赖纯度和两条 manifest 方向。源码导入与 manifest 也可能不一致（`conformance` → `testkit`）。 | §2 检查覆盖 | `check:release-graph` 加方向规则，并核对源码值导入都已在 manifest 声明；被下游复制的示例纳入检查。[#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098)。 |
