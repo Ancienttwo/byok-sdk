@@ -1,3 +1,5 @@
+import { normalizeBeforeToolOptions, ToolExecutionUnsupportedError, type BeforeToolOptions } from '../../tool-execution-hook';
+import { ClaudeBeforeToolBridge } from './before-tool';
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import type { RuntimeTaskInput } from '../../types';
 import { claudeMcpEventIdentities } from './mcp-identity';
@@ -52,8 +54,8 @@ function startupExit(client: ClaudeProcessClient) {
 }
 
 /** One owner covers process teardown and task config on every failed start. */
-async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
-  const failure = isRuntimeExecutionFailure(cause) ? cause : new RuntimeExecutionFailure({
+async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, scratch: ExecutionScratch, retainPendingDisposal = false, beforeTool?: ClaudeBeforeToolBridge): Promise<never> {
+  const failure = isRuntimeExecutionFailure(cause) || cause instanceof ToolExecutionUnsupportedError ? cause : new RuntimeExecutionFailure({
     phase: 'start', category: 'infrastructure', retry: 'retryable',
     reason: 'claude runtime startup failed',
   }, { cause });
@@ -66,6 +68,7 @@ async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | 
         // that a thrown constructor means no process was spawned.
         if (isRuntimeStartupDisposalFailure(cause)) await cause.retryDisposal();
         else await client?.dispose();
+        beforeTool?.close();
         await scratch.release();
       })();
       disposalAttempt = attempt.catch(error => { disposalAttempt = undefined; throw error; });
@@ -114,6 +117,8 @@ function snapshotAgentBuiltinTools(value: unknown): readonly ClaudeBuiltinToolNa
 }
 
 export interface ClaudeAdapterOptions {
+  /** Opt-in local pre-execution policy for native, MCP and subagent tool calls; failures deny the call. */
+  beforeTool?: BeforeToolOptions;
   /**
    * Agent operations only: select exact Claude native tools before startup.
    * Default `inherit` leaves the CLI defaults unchanged; [] disables all native
@@ -173,10 +178,12 @@ export interface ClaudeAdapterOptions {
 export class ClaudeAdapter implements RuntimeAdapter {
   readonly descriptor;
   private readonly nativeOptions?: NativeInteractionHostOptions;
+  private readonly beforeToolOptions?: BeforeToolOptions;
   private readonly agentBuiltinTools: readonly ClaudeBuiltinToolName[] | undefined;
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
     this.agentBuiltinTools = snapshotAgentBuiltinTools(options.agentBuiltinTools);
+    this.beforeToolOptions = normalizeBeforeToolOptions(options.beforeTool);
     const timeout = options.interruptTimeoutMs ?? 1000;
     if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
     if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
@@ -200,6 +207,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         approvalInteractive: false,
         mcpToolsets: true,
         messageDraft: true,
+        beforeTool: true,
         ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
       },
     });
@@ -282,6 +290,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
     // Generate only task-scoped host/reserved MCP config outside the operation workspace.
     let client: ClaudeProcessClient | undefined;
+    let beforeTool: ClaudeBeforeToolBridge | undefined;
     let cancellation: RuntimeExecutionFailure | undefined;
     let rejectCancellation!: (failure: RuntimeExecutionFailure) => void;
     const cancelled = new Promise<never>((_, reject) => { rejectCancellation = reject; });
@@ -406,7 +415,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ];
 
       throwIfCancelled();
-      const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000);
+      beforeTool = this.beforeToolOptions === undefined ? undefined : new ClaudeBeforeToolBridge(
+        this.beforeToolOptions, startInput.manifest, error => client?.abortStartup(error),
+      );
+      const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000, beforeTool?.hooks);
       const native = this.nativeOptions === undefined ? undefined : new ClaudeNativeInteractionBridge({
         ...this.nativeOptions,
         // The adapter, never the host callback, owns fatal process termination.
@@ -419,10 +431,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
           cwd: manifestCwd,
           env: { ...startInput.env, ...startInput.scratch.env },
           nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
-          control: native === undefined ? control : {
-            bind: write => { control.bind(write); native.bind(write); },
-            receive: message => { control.receive(message); native.receive(message); },
-            closed: () => { control.closed(); native.close(); },
+          control: native === undefined && beforeTool === undefined ? control : {
+            bind: write => { control.bind(write); native?.bind(write); beforeTool?.bind(write); },
+            receive: message => { control.receive(message); if (!beforeTool?.receive(message)) native?.receive(message); },
+            closed: () => { control.closed(); native?.close(); beforeTool?.close(); },
           },
         });
       } catch (cause) {
@@ -434,16 +446,20 @@ export class ClaudeAdapter implements RuntimeAdapter {
       }
 
       throwIfCancelled();
-      if (native !== undefined) {
+      if (native !== undefined || beforeTool !== undefined) {
         const initialized = await Promise.race([control.initialize(), cancelled]);
         throwIfCancelled();
+        if (!initialized && beforeTool !== undefined) throw new ToolExecutionUnsupportedError('claude', 'runtime did not accept mandatory PreToolUse initialization');
         if (!initialized) throw new RuntimeExecutionFailure({
           phase: 'start', category: 'infrastructure', retry: 'retryable',
           reason: 'Claude native control initialization failed',
           failure: startupExit(client),
         });
         throwIfCancelled();
-        native.beginTurn();
+        if (beforeTool !== undefined && control.hooksApplied !== true) {
+          throw new ToolExecutionUnsupportedError('claude', 'runtime did not confirm registration of the mandatory PreToolUse callback');
+        }
+        native?.beginTurn();
       }
       // `--input-format stream-json` expects the first turn's instruction on
       // stdin too, not as a positional CLI argument — empirically confirmed
@@ -518,9 +534,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
         manifestModelId,
         native,
         new Map(Object.entries(taskMcpServers).filter(([name]) => !isReservedMcpServerName(name))),
+        beforeTool,
       );
     } catch (cause) {
-      return rejectOwnedStartup(cause, client, startInput.scratch, cancellation !== undefined);
+      return rejectOwnedStartup(cause, client, startInput.scratch, cancellation !== undefined, beforeTool);
     } finally {
       signal?.removeEventListener('abort', onAbort);
     }
@@ -628,6 +645,7 @@ class ClaudeSession implements Session {
     private readonly native?: ClaudeNativeInteractionBridge,
     /** Task-projected toolset servers in `--mcp-config`; only these receive event MCP identity. */
     private readonly toolsetServers: ReadonlyMap<string, McpStdioServerConfig> = new Map(),
+    private readonly beforeTool?: ClaudeBeforeToolBridge,
   ) { this.correlation = createToolUseCorrelation(this.mcpIdentities); if (native !== undefined) this.interactions = native.channel; }
 
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
@@ -807,6 +825,7 @@ class ClaudeSession implements Session {
 
   async close(): Promise<void> {
     this.native?.close('closed');
+    this.beforeTool?.close();
     if (!this.closeAttempt) {
       const attempt = (async () => {
         await this.client.dispose();
