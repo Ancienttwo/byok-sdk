@@ -7,13 +7,24 @@
   },
   "to": {
     "version": "0.30.2",
-    "snapshotSha256": "4c1d6e321bf106b7f0529dcb1c81bcc54a44382a0163ae70d0dd516d39160fc8"
+    "snapshotSha256": "00bafc1aeb8767d49b6cafbcf34cd1535d6df409cb3c703457171b6332c36643"
   },
   "configFields": {
     "status": "pending",
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "local-tool-approval-host-only",
+      "impact": "breaking",
+      "summary": "Tool-authorization approvals are Host-only by default (#1101): the control socket and byok-agent approve can no longer approve them; rejection is unaffected. Set DaemonConfig.localToolApproval: 'allow' to restore local tool-authorization approval.",
+      "migration": "docs/security.md#3-shared-approval-path",
+      "items": [
+        "export:@byok-sdk/client#APPROVAL_REQUIRES_HOST",
+        "export:@byok-sdk/client#ApprovalKind",
+        "export:@byok-sdk/client#LocalToolApprovalPolicy"
+      ]
+    },
     {
       "id": "wire-v4-envelope-types",
       "impact": "breaking",
@@ -488,6 +499,16 @@
       "entry": "wire-v4-vendored-examples"
     },
     {
+      "item": "export:@byok-sdk/client#APPROVAL_REQUIRES_HOST",
+      "change": "added",
+      "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#ApprovalKind",
+      "change": "added",
+      "entry": "local-tool-approval-host-only"
+    },
+    {
       "item": "export:@byok-sdk/client#ClassUsage",
       "change": "changed",
       "entry": "agent-result-retention"
@@ -641,6 +662,11 @@
       "item": "export:@byok-sdk/client#InputPreparationRetirementStoreBusyError",
       "change": "removed",
       "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalToolApprovalPolicy",
+      "change": "added",
+      "entry": "local-tool-approval-host-only"
     },
     {
       "item": "export:@byok-sdk/client#McpToolsetConfig",
