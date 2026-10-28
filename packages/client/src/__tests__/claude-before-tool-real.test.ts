@@ -37,7 +37,7 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude PreT
         .flatMap((message: { content?: unknown }) => typeof message.content === 'string' ? [message.content]
           : Array.isArray(message.content) ? message.content.filter((block: { type?: string }) => block.type === 'text')
             .map((block: { text?: string }) => block.text ?? '') : []);
-      const child = userTexts.at(-1)?.includes('BYOK_SUBAGENT_LOOPBACK_CHILD') === true;
+      const child = userTexts.some(text => text.includes('BYOK_SUBAGENT_LOOPBACK_CHILD'));
       let content: Array<{ type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } | { type: 'text'; text: string }>;
       if (mode === 'subagent' && !child && toolResults.length === 0 && delegation?.name) {
         delegationOffered = true;
