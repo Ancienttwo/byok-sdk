@@ -2,7 +2,38 @@
 
 ## Unreleased
 
-- **Fix (client; #1030)** — a daemon whose store is configured through a
+## 0.31.0 — source candidate
+
+0.31.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+It moves the envelope wire to v4 (#925) and adds Postgres migration 0030. A v3
+envelope is rejected and there is no v3 reader, so a deployment drains v3 and
+then starts the v4 server and the daemons together on a new store; there is no
+v3 receipt migration (see the [wire v4 upgrade
+note](docs/releases/925-wire-v4.md)). The breaking changes by package:
+protocol, client, server and cloud lose `conn.ack`, the runtime-only offers
+and the old approval peer paths, merge the Agent offers into one `task.offer`
+and make sealed a payload property (#925), and cloud also loses `enqueueOffer`
+and its three runtime-only siblings; client also removes Git workspace mode,
+`Session.resolveApproval` and `retire-input-preparation`, requires
+`approvalId` and `agentRef`, adds the `agent-result` and `session-ledger`
+retention classes, and refuses a journal written before #826 (#925, #1009,
+#1016, #1036); protocol also drops the `needs_approval` AgentEvent (#1036);
+server accepts only a schema 6 SQLite store, removes the `migration` option
+and `LegacyDispatchInput`, and changes `TaskHandle.events()` (#1022, #1035,
+#1036); cloud requires `TaskAttemptStore.recordFirstOutput` (#980);
+cloud-dataplane takes only a pool from `createByokPool` (#1040); cloud-do
+declares all Durable Object columns in `CREATE TABLE` (#1036). The examples
+changes of #925 and #1036 are also breaking for a Host that copies them.
+Client also stops relaying tool approval through Claude and Codex
+`nativeInteractions` (#1061, #1078): the new `DaemonConfig.toolAuthorization`
+(`auto` and `all`) replaces it, Claude and some Pi lanes support `auto`, and
+Codex has no `auto` gate in this release. This candidate is
+not published. See the [release notes](docs/releases/v0.31.0.md) for scope,
+what is not in 0.31.0 and the known limits, and the [Host upgrade
+checklist](docs/releases/host-upgrade-0.31.0.md) for the upgrade steps. All
+nine public manifests and their lock records move to 0.31.0.
+
+- **Fixed (client; #1030)** — a daemon whose store is configured through a
   Windows name alias (an 8.3 short name such as `C:\Users\RUNNER~1\…`, or a
   letter-case variant) restarts again. The second start exited with
   `retention_root_identity_invalid` once `<storeDir>\tmp\exec` existed, so the
@@ -58,8 +89,15 @@
     `GitWorkspaceError`, `isGitWorkspaceConfig`,
     `prependGitWorkspaceGuidance`, `GitWorkspaceStore`, `GitWorkspaceConfig`,
     `GitWorkspaceObservation`, `GitWorkspaceLease`, `GitWorkspaceOptions`,
-    `GitErrorCategory`, `GitWorkspaceLedger`, `GitWorkspaceLedgerRecord` or
-    `GitWorkspacePhase`. `RuntimeOperationManifest.workspace` loses
+    `GitErrorCategory`, `GitWorkspaceLedger`, `GitWorkspaceLedgerRecord`,
+    `GitWorkspacePhase`, `GitRunner`, `defaultGitRunner`, `GitCommandOptions`,
+    `GitCommandResult`, `SessionWorkspaceStore`, `SessionWorkspaceRecord`,
+    `canonicalWorkspaceRoot`, `stableGitWorkspaceOwnerId`,
+    `LOCAL_GIT_WORKSPACE_GUIDANCE` or the `GIT_*` and `STABLE_GIT_ERROR_CATEGORIES`
+    constants (`GIT_ERROR_CATEGORIES`, `GIT_WORKSPACE_LEDGER_FILE`,
+    `GIT_WORKSPACE_LEDGER_MAX_RECORDS`, `GIT_WORKSPACE_MAX_OUTPUT_BYTES`,
+    `GIT_WORKSPACE_OWNER_MARKER`, `GIT_WORKSPACE_PHASES` and
+    `GIT_WORKSPACE_TIMEOUT_MS`). `RuntimeOperationManifest.workspace` loses
     `workspaceId` and `baseline`. The `byok-agent workspaces` command, the
     `git-workspace` daemon event and audit record, the doctor `workspace`
     check and the support bundle's `workspace` field are removed; an older
@@ -111,7 +149,14 @@
     `TaskOfferPreparedPayloadSchema` and their payload types, the three
     `TaskOfferForAgent*SealedPayload` types, `TASK_OFFER_TYPES`,
     `isTaskOfferType`, `TaskOfferType`, `isSealedMessageType` and
-    `SealedMessageType`. It adds `TaskOfferPayloadSchema` /
+    `SealedMessageType`. The removed payload types and sealed twin schemas
+    are `ConnAckPayload`, `TaskOfferForAgentPayload`,
+    `TaskOfferForAgentWithEgressPayload`,
+    `TaskOfferForAgentWithEgressFreshPayload`, `TaskOfferPreparedPayload`,
+    `TaskOfferWithToolsetsPayload`, and for each of
+    `TaskOfferForAgent`, `TaskOfferForAgentWithEgress`,
+    `TaskOfferForAgentWithEgressFresh` and `TaskOfferWithToolsets` the
+    `*SealedPayload` type and `*SealedPayloadSchema`. It adds `TaskOfferPayloadSchema` /
     `TaskOfferPayload` (both branches), `TaskOfferPlainPayloadSchema` /
     `TaskOfferPlainPayload`, `TaskOfferSealedPayloadSchema` /
     `TaskOfferSealedPayload`, `SessionSelectionSchema` / `SessionSelection`,
@@ -128,6 +173,14 @@
     lane. `TaskOfferReadback.type` is always `'task.offer'`, and
     `DeviceTerminal.envelope.type` is one of the four plaintext terminal
     types. `ByokServer.dispatch` writes `session` itself.
+  - The runtime-only `ByokCloud` methods `enqueueOffer`,
+    `enqueueToolsetOffer`, `enqueueSealedOffer` and
+    `enqueueSealedToolsetOffer` are removed with the offers they sent, and so
+    are the `EnqueueOfferInput`, `EnqueueToolsetOfferInput`,
+    `EnqueueSealedOfferInput` and `EnqueueSealedToolsetOfferInput` types. Every
+    offer now names an AgentRef: resume with `enqueueAgentOffer`, start fresh
+    with `submitAgentExecution`, and use `enqueueAgentEgressOffer`,
+    `enqueuePreparedOffer` or the sealed Agent methods where they apply.
   - The daemon declines an offer whose gates name a flag its own
     `conn.hello` lacks, before it opens a sealed offer or starts anything:
     non-retryably with `reason` `offer_capability_missing: this daemon does
@@ -204,7 +257,8 @@
   message draft with text or message body after the claim; `task.progress`
   does not count. Postgres adds migration 0030 (four nullable `timestamptz`
   columns on `task`); a SQLite store adds the columns when it opens, with no
-  schema version change. Apply `0030_task_attempt_phase_times.sql` before
+  schema version change of its own (schema 6 is the server entry of #1035
+  below). Apply `0030_task_attempt_phase_times.sql` before
   deploying the new Postgres stores: their `TASK_SELECT_COLUMNS` reads the
   four columns, so every task query fails on an unmigrated database. The
   exported `TaskRow` and `TASK_SELECT_COLUMNS` gain the four columns; a Host
@@ -256,6 +310,208 @@
   Baseten entries. The prepared entry still refuses
   `sendSessionAffinityHeaders`, which its frozen wire does not carry, and
   compiles no `anthropic-messages` request.
+- **Feature (protocol, client; #1014)** — `task.claim` and `task.decline` gain
+  an optional `admission` (`OfferAdmissionTimingsSchema`, strict): how long
+  the device took to admit the offer, in whole milliseconds, with a required
+  `totalMs` and optional `agentHomeWaitMs`, `messageHelperPreflightMs`,
+  `resultHelperPreflightMs`, `toolsetProbeMs` and `runtimeLaunchMs`. Each
+  value is capped at seven days (`OFFER_ADMISSION_MAX_DURATION_MS`). The
+  daemon sends it on the claim or decline its task runner sends for each
+  offer, a sealed task's decline included, in plaintext; the `claimed` and
+  `failed` `DaemonEvent`s carry it.
+- **Feature (protocol, client; #1014)** — the `usage` AgentEvent gains an
+  optional `model`: the model the provider served, as the runtime reported it,
+  1 to 160 characters, never the requested id. Pi sets it from pi-ai's
+  `responseModel`; Claude sets it on the turn's usage when every root-agent
+  frame named the same model; Codex does not set it. Terminal usage copies it
+  from the last observation, and a last observation with a model but no token
+  counts now yields the block. `TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH`
+  moves to `@byok-sdk/protocol/constants`; the root export is unchanged.
+- **Breaking (client; #1016)** — a new expiring retention class
+  `session-ledger` removes
+  `.byok/runtime-sessions/<runtime>-<session-hash>.jsonl` session ledgers from
+  an idle Agent home once their last append is
+  `storage.retention.ttlMs['session-ledger']` old (default 30 days, minimum
+  0). `-task-` terminal evidence stays protected. `EXPIRING_CLASS_IDS`,
+  `ExpiringClassId`, `RetentionClassId`, `DEFAULT_RETENTION_TTL_MS` and the
+  resolved `ttlMs` gain `'session-ledger'`, so status and support bundles
+  report 23 classes. A resume, or an `agent.content.read`, with a sessionRef
+  whose ledger was removed fails closed as before; the decline reason now says
+  the handoff does not exist on this device. The class sweeps last in each
+  pass, so a device upgrading with a large backlog of old ledgers drains it
+  over many passes without delaying the other classes.
+- **Breaking (cloud-dataplane; #1040)** — the Postgres stores accept only a
+  pool from `createByokPool`. `createByokPool` returns the new `ByokPool` type
+  (exported from `@byok-sdk/cloud-dataplane` and `/runtime`), and every store
+  constructor and composition option takes `pool: ByokPool`, so TypeScript
+  refuses a bare `pg.Pool`. `createPostgresCoreStores`,
+  `createPostgresCloudStores` and the options-object stores
+  (`PostgresTruthCommitter`, `PostgresCloudCleanup` /
+  `createPostgresCloudMaintenance`, `PostgresTenantErasure` /
+  `createPostgresTenantErasure`, `PostgresAgentMemoryProjectionStore`,
+  `PostgresTaskRedactionStore`) also throw `TypeError: <name> needs a pool
+  from createByokPool.` at composition. A bare pool read int8 columns as
+  strings, so byte-count checks compared strings and an object upload's
+  finalize failed with `storage_integrity_mismatch`. Build the pool with
+  `createByokPool`; `migrate` still takes any pool.
+- **Fixed (cloud-dataplane; #1039)** — the R2 blob and maintenance stores sign
+  requests correctly when the host replaces the global `Request` class, as
+  `@hono/node-server`'s `serve()` does by default. Before, every presign,
+  finalize HEAD, list and delete in that process failed with
+  `ERR_INVALID_URL`, and blob finalize answered 500. `overrideGlobalObjects:
+  false` is no longer needed.
+- **Breaking (client; #1036)** — `byok-agent retire-input-preparation`,
+  `retireInputPreparation`, `executeInputPreparationRetirement`,
+  `runInputPreparationRetirement` and `inspectInputPreparationNamespace` are
+  removed, with the five `InputPreparationRetirement*` error classes, the
+  `RetireInputPreparation*`, `ExecuteInputPreparationRetirementOptions`,
+  `InputPreparationRetirement*`, `InputPreparationNamespaceInspection` and
+  `RetirementFileDigest` types, and the `INPUT_PREPARATION_RETIREMENT_*`
+  constants. A
+  daemon whose input-preparation record log holds an older record still
+  refuses that lane at open; with the daemon stopped, move
+  `<storeDir>/input-preparation/` aside and start it again.
+- **Breaking (client; #1036)** — the local journal declares `withheld_bytes`
+  in `CREATE TABLE` and no longer adds it to an older `daemon.db`. A journal
+  written before #826 is refused at open with `JournalUnavailableError`, and
+  left unchanged.
+- **Breaking (cloud-do; #1036)** — every Durable Object table declares all its
+  columns in `CREATE TABLE`; `ensureSchema()` no longer adds columns to older
+  storage or seeds legacy run membership. `CloudState.pendingBackfills`,
+  `CloudState.applyBackfill` and `RunRow.membershipPending` are removed. No
+  cloud-do Durable Object is deployed; clear any local development state.
+- **Breaking (server; #1035, #1036)** — the embedded SQLite store opens only a
+  new database or a schema 6 file. A file of schema 1 to 5 is refused at open
+  with `SqliteSchemaError` (`SQLITE_SCHEMA_UNSUPPORTED`) and left unchanged;
+  start on a new database path and enroll the devices again.
+  `SqliteEmbeddedStoreOptions.migration` and the SQLite storage `migration`
+  option (`'v1-to-v5'`, `'v2-to-v5'`, `'v3-to-v5'` and `'v4-to-v5'`) are
+  removed, and a `migration` option that is still passed is refused with the
+  same error. Schema 6 stores the bounded approval timeline in SQLite, so a
+  pending approval, `tasks.get`, the statistics, Host approve and reject, and
+  `tasks.events(taskId, { from: 'state' })` read the same data after a
+  restart. The 10-minute TTL and the capacity of 50 entries are unchanged, and
+  neither a restart nor a repeated event extends the TTL.
+- **Breaking (client; #1036)** — `AgentEgressProgressInput.agentRef` is
+  required; `AgentEgressController.projectLatestValue` no longer passes
+  through events of a task without an AgentRef. Every offer the daemon runs is
+  bound to an Agent.
+- **Breaking (examples; #1036)** — bot-collaboration drops
+  `promoteReplyReceipts`. State that still needed it is collaboration state
+  version 1 or 2, which `stateOf` already refuses.
+- **Breaking (client; #1036)** — approval has one entry point and one
+  resolution point. `Session.resolveApproval` is removed. `ApprovalChannel` is
+  now `{ request(summary): Promise<{ approved, reason? }> }` — the task's
+  `TaskRunner.requestApproval` — and the daemon hands it only to an adapter
+  that declares `approvalInteractive: true`. The session resumes or stops its
+  runtime from the result. Wire and local decisions, `approvals.resolve`,
+  timeouts, task finish and eviction all resolve the approval in the daemon's
+  registry. `NoPendingApprovalError`, the `onOrigin` parameter of
+  `TaskRunner.requestApproval` and `DaemonTurnRecord.approvals` are removed.
+- **Breaking (protocol; #1036)** — `needs_approval` is no longer an
+  `AgentEvent`. Approval is the `task.await_approval` message; a
+  `needs_approval` event is read as an unknown event.
+- **Fixed (client; #1055)** — the progress batch timer stops as soon as a task
+  reaches a terminal state (cancel, reject, fail or close). A task that is
+  winding down after a cancel no longer sends a buffered `task.progress`;
+  progress before completion still goes out with the last batch at `turn_end`.
+- **Changed (build, cloud; #1012)** — the published JavaScript no longer
+  carries ordinary source comments; legal and semantic comments, declaration
+  docs and source maps are kept, and the entry-closure budgets are measured
+  the same way for every entry. The implementations of the `ByokCloud` public
+  methods move into internal per-area factories. The public `ByokCloud`
+  interface and the runtime behavior are unchanged.
+- **Breaking (client; #1061, #1078)** — Claude and Codex `nativeInteractions`
+  no longer relay tool approval. In 0.30.2 a Claude session with
+  `nativeInteractions` ran with `--permission-prompt-tool stdio` and the Host
+  UI answered each `can_use_tool` request, and a Codex session ran with
+  `approvalPolicy: on-request`. Both now relay structured questions only, and
+  no `kind: 'approval'` request reaches the Host from them. Claude answers
+  every `can_use_tool` request that is not an `AskUserQuestion` with allow at
+  once. Codex runs `approvalPolicy: never` and refuses
+  `item/commandExecution/requestApproval` and
+  `item/fileChange/requestApproval` with -32601. A Host that gated tools
+  through native interactions sets `DaemonConfig.toolAuthorization` to return
+  `auto` for Claude and for the supported Pi lanes. Codex has no `auto` gate
+  in 0.31.0 and declines an `auto` task before claim, so a Host that gated
+  Codex tools this way has no tool gate for Codex in this release; `all` only
+  emits reminders.
+- **Feature (client; #1061)** — `DaemonConfig.toolAuthorization` is a local
+  resolver, called once per offer, that returns `auto` or `all` for the task
+  (`ToolAuthorizationMode`; `parseToolAuthorizationMode`,
+  `TOOL_AUTHORIZATION_MODES`). It replaces the tool approval that Claude
+  `nativeInteractions` gave in 0.30.2; Codex has no replacement gate in 0.31.0
+  (see the Breaking entry above). No
+  adapter owns a separate permission policy, and no remote offer selects the
+  mode. Without a resolver every task runs in
+  `all`. `all` keeps tool execution and emits a local high-risk reminder
+  (`onToolReminder`, the `tool-reminder` event). `auto` keeps native tools
+  available, gates every call before it runs, and sends a high-risk call
+  through the task's approval path; a rejection, a timeout or an unavailable
+  gate returns a tool error and the call does not run. Rejecting a high-risk
+  tool through `Daemon.reject` or a wire `task.reject` denies that call and
+  the session continues; only an approval that ends the task still fails it. A
+  runtime declares `toolAuthorizationAuto` to support `auto`; Pi ordinary RPC
+  (including native Pi subagents) and Claude (a `PreToolUse` hook after
+  `hooks_applied`) do, and Codex, Grok, Hermes and the Pi prepared and durable
+  lanes decline an `auto` task before claim. Codex `file_change` events are
+  classified by every path and move destination, so they also raise reminders.
+  The classifier is lexical. It is not an OS sandbox or a file-scope grant,
+  and indirect scripts, `eval` and encoded commands are not recognized. The Pi
+  RPC launch config is now digest-bound version 8, and older versions are
+  rejected.
+- **Feature (client; #1061)** — Pi Agent RPC tasks can keep personal context
+  out and still load what the task needs. `PiAdapterOptions.agentUserContext:
+  'excluded'` isolates user resources and settings but keeps the Pi model and
+  auth stores. `agentSkillPaths` and `agentExtensionPaths` (absolute local
+  paths, default empty) name skills and extensions that the adapter validates,
+  copies and freezes at construction. They load under excluded context and on
+  resume, and a missing or unreadable skill path fails the start. An extension
+  is Host-authorized executable code that can register further resources; this
+  is not a filesystem sandbox. The policy belongs to the adapter, not the
+  offer, and the prepared and durable lanes refuse explicit Agent resources
+  before they spawn.
+- **Feature (client; #1058)** — a Host names exact MCP tools to pre-approve in
+  a local toolset definition:
+  `McpToolsetConfig.mcpServers[name].approveTools`. The SDK validates and
+  freezes the list at admission together with the definition digest, and a
+  reload does not widen an admitted attempt. A non-empty list needs a runtime
+  that declares support, and other runtimes refuse it at admission. Codex
+  projects the list into per-tool approval for fresh and resumed threads. A
+  Host that sets nothing adds no approval, and wildcards and server-wide
+  approval are not supported.
+- **Fixed (client; #1058)** — Codex now pre-approves the fixed MCP tools of
+  the SDK helper servers (message, memory, team and result) at `thread/start`
+  and `thread/resume`, so `submit_result` and the other helpers run under
+  `approvalPolicy: never` instead of being refused before they reach the
+  helper. Host and user MCP tools get no default approval.
+- **Fixed (client; #1060)** — when a Codex Agent task excludes user MCP
+  servers, plugins are also disabled at app-server launch, before the startup
+  plugin sync, and not only at `thread/start` or `thread/resume`. This is not
+  network isolation;
+  [the adapter capability notes](docs/adapter-capabilities.md) record what Codex
+  still requests.
+- **Fixed (client; #1059)** — Codex credential detection uses the exit code of
+  `codex login status` instead of its display text, which Codex 0.164 changed.
+  A zero exit code means a credential is configured; it does not prove that
+  the remote accepts it.
+- **Fixed (client; #1034, #1020)** — retention makes progress on large
+  directories. A released exec-runtime token above 16,384 entries is reclaimed
+  leaf by leaf in budgeted, resumable passes, and `exec-runtime` takes at most
+  half of a pass's inspections (4,096) so later classes are not starved. The
+  exec-sdk, daemon-temp and reader-run classes are also reclaimed in bounded
+  rounds (4,096 inspections for runtimes, 1,024 for each of the other three
+  classes). Startup lists a full released namespace before it cleans, so 1,024
+  or more released execution directories no longer make startup refuse every
+  time. A pending daemon-temp target that its owner has already deleted only
+  clears its state. A reader-run reference scan that takes more than 250 ms is
+  no longer thrown away, which kept the next pass on the same ledger prefix.
+  Live, TTL, reference and path-identity checks are unchanged, and an
+  incomplete reference list still protects the whole home.
+- **Changed (client)** — update the private OAR source to 0.75.0 (`51b83c9`);
+  Pi stays pinned to 1.4.0. The SDK keeps ownership of processes, filtered
+  environments, approval policy, redaction and record budgets. Codex refuses
+  `appendSystemPrompt` on resume instead of sending an option it ignores.
 
 ## 0.30.2 — 2026-10-26 (published)
 
