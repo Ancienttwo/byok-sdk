@@ -200,7 +200,7 @@ describe('Pi launch', () => {
     expect(args).toContain('--mode');
     for (const flag of ['--tools', '--exclude-tools', '--no-tools', '--no-skills', '--no-extensions']) expect(args).not.toContain(flag);
     const config = JSON.parse(await fs.readFile(args[args.indexOf('--config') + 1]!, 'utf8')) as Record<string, unknown> & { mcp: Record<string, unknown> };
-    expect(config).toMatchObject({ format: 'byok.pi.rpc-launch', version: 6, credentialSource: 'pi-auth-store' });
+    expect(config).toMatchObject({ format: 'byok.pi.rpc-launch', version: 7, credentialSource: 'pi-auth-store' });
     expect(config).not.toHaveProperty('binding');
     expect(config).not.toHaveProperty('policy');
     expect(config.mcp).not.toHaveProperty('permissionMode');

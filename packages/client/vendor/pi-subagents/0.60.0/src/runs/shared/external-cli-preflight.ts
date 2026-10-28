@@ -1,3 +1,4 @@
+import { assertSubagentToolHookRunnerSupported } from "../../../../../../src/subagents/tool-execution-hook.ts";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -78,6 +79,7 @@ function specKey(spec: ExternalCliPreflightSpec): string {
 }
 
 export function preflightExternalCli(command: string, spec: ExternalCliPreflightSpec, env: NodeJS.ProcessEnv, cwd?: string): ExternalCliPreflightResult {
+	assertSubagentToolHookRunnerSupported();
 	const binaryPath = resolveBinary(command, env);
 	const binaryMtimeMs = fs.statSync(binaryPath).mtimeMs;
 	const lookupKey = JSON.stringify([binaryPath, binaryMtimeMs, specKey(spec)]);

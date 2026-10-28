@@ -1,3 +1,4 @@
+import { normalizeBeforeToolOptions, startToolExecutionGate, ToolExecutionUnsupportedError, type BeforeToolOptions } from '../../tool-execution-hook';
 import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
 import type { RuntimeTaskInput } from '../../types';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
@@ -83,6 +84,8 @@ function errorMessage(err: unknown): string {
 
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
+  /** Local execution gate for ordinary sessions and their native Pi subagents. Default disabled. */
+  beforeTool?: BeforeToolOptions;
   /** Agent tasks only: select native tools; [] disables them. Default inherit. Does not confine file paths. */
   agentBuiltinTools?: 'inherit' | readonly PiBuiltinToolName[];
   /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores. Default inherit. */
@@ -200,6 +203,7 @@ export function validatePiByokLauncherConfig(
 
 export class PiAdapter implements RuntimeAdapter {
   private readonly agentToolPolicy: PiAgentToolPolicy;
+  private readonly beforeTool: ReturnType<typeof normalizeBeforeToolOptions>;
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi',
     supportsDispatchSelection: true,
@@ -223,10 +227,13 @@ export class PiAdapter implements RuntimeAdapter {
       mcpToolsets: true,
       messageDraft: true,
       approvalInteractive: false,
+      beforeTool: true,
     },
   });
 
   constructor(private readonly options: PiAdapterOptions = {}) {
+    this.beforeTool = normalizeBeforeToolOptions(options.beforeTool);
+    if (this.beforeTool !== undefined && options.durablePi === true) throw new ToolExecutionUnsupportedError('pi', 'beforeTool is unavailable for the durable Pi lane');
     this.agentToolPolicy = parsePiAgentToolPolicy({
       builtinTools: options.agentBuiltinTools === undefined ? 'inherit' : options.agentBuiltinTools,
       userContext: options.agentUserContext === undefined ? 'inherit' : options.agentUserContext,
@@ -236,7 +243,7 @@ export class PiAdapter implements RuntimeAdapter {
     // T0 verified the RPC lanes only. The durable worker's own frames and
     // respawn path are unverified, so it declares no trajectory evidence.
     // Windows waits for validated parent-death Job Object recovery.
-    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false } });
+    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], capabilities: { ...this.descriptor.capabilities, durablePi: true, beforeTool: false, steer: false, resume: false } });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
@@ -420,6 +427,7 @@ export class PiAdapter implements RuntimeAdapter {
           return boundRuntime;
         },
         start: async (startInput: RuntimeOperationStartInput): Promise<Session> => {
+          if (this.beforeTool !== undefined && startInput.kind !== 'instruction') throw new ToolExecutionUnsupportedError('pi', 'beforeTool is unavailable for the prepared Pi lane');
           const runtimeLaunch = startInput.runtimeLaunch;
           if (runtimeLaunch === undefined || runtimeLaunch !== boundRuntime) throw authorityFailure('Pi start requires its resolved runtime launch');
           if (runtimeLaunch.scratch !== startInput.scratch) throw authorityFailure('Pi start scratch differs from runtime launch');
@@ -510,7 +518,15 @@ export class PiAdapter implements RuntimeAdapter {
           const taskMcpServers = startInput.mcpServers ?? {};
           let hostConfigDigest: string;
           let hostConfigPath: string;
+          let scratch = startInput.scratch;
           try {
+            const gate = this.beforeTool === undefined ? undefined : await startToolExecutionGate({
+              options: this.beforeTool, manifest: startInput.manifest, runtimeId: 'pi',
+            });
+            if (gate !== undefined) scratch = Object.freeze({ ...scratch, release: async () => {
+              await gate.close();
+              await startInput.scratch.release();
+            } });
             // mkdtemp creates the directory 0700. The one file in it is
             // created 0600 ('wx': a new file, so the mode applies at creation)
             // and is removed on every start failure and on close. It holds
@@ -527,13 +543,14 @@ export class PiAdapter implements RuntimeAdapter {
             // What is written is the START observation, already compared
             // above with the one this operation was admitted with.
             const serialized = serializePiHostConfig({
-              format: 'byok.pi.rpc-launch', version: 6,
+              format: 'byok.pi.rpc-launch', version: 7,
               // Digest-bound, as in the prepared lane: under `keys-profile`
               // the host takes the provider key over the launcher's private
               // IPC channel and refuses to start without it.
               credentialSource: runtimeLaunch.credentialSource,
               cwd: runtimeLaunch.sessionCwd,
               agentToolPolicy,
+              beforeTool: gate?.config ?? null,
               mcp: {
                 mcpEnv,
                 mcpServers: taskMcpServers,
@@ -545,7 +562,7 @@ export class PiAdapter implements RuntimeAdapter {
             hostConfigDigest = serialized.digest;
             await fs.writeFile(hostConfigPath, serialized.bytes, { mode: 0o600, flag: 'wx' });
           } catch (cause) {
-            await startInput.scratch.release();
+            await scratch.release();
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
               reason: 'pi task-scoped MCP configuration could not be created',
@@ -569,7 +586,7 @@ export class PiAdapter implements RuntimeAdapter {
               nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
             });
           } catch (cause) {
-            await disposePiStartup(undefined, startInput.scratch, cause);
+            await disposePiStartup(undefined, scratch, cause);
             if (cause instanceof RuntimeExecutionFailure) throw cause;
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
@@ -582,14 +599,14 @@ export class PiAdapter implements RuntimeAdapter {
             response = await rpc.send({ type: 'prompt', message: startInput.instruction });
           } catch (cause) {
             const failure = startupExit(rpc);
-            await disposePiStartup(rpc, startInput.scratch);
+            await disposePiStartup(rpc, scratch);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
               reason: `pi initial prompt transport failed: ${errorMessage(cause)}`, failure,
             }, { cause });
           }
           if (response.success === false) {
-            await disposePiStartup(rpc, startInput.scratch);
+            await disposePiStartup(rpc, scratch);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'semantic', retry: 'non-retryable',
               reason: typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt',
@@ -600,17 +617,17 @@ export class PiAdapter implements RuntimeAdapter {
           try {
             sessionRef = await resolveAuthoritativeSessionId(rpc);
           } catch (err) {
-            await disposePiStartup(rpc, startInput.scratch);
+            await disposePiStartup(rpc, scratch);
             throw err;
           }
           if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
-            await disposePiStartup(rpc, startInput.scratch);
+            await disposePiStartup(rpc, scratch);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'authority', retry: 'non-retryable',
               reason: 'pi resumed a different authoritative session than requested',
             });
           }
-          return new PiSession(sessionRef, rpc, manifestSelection, startInput.scratch, undefined, mcpEventIdentities(startInput.mcpToolsetTools));
+          return new PiSession(sessionRef, rpc, manifestSelection, scratch, undefined, mcpEventIdentities(startInput.mcpToolsetTools));
         },
       },
     };

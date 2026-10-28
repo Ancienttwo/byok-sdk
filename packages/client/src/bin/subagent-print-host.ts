@@ -1,3 +1,4 @@
+import { createPiToolExecutionHook, readPiToolExecutionGate } from '../adapters/pi/tool-execution-hook';
 /**
  * The in-bundle leaf executor for one `pi-subagent-print` child, reached ONLY
  * through the `#byok-pi-runtime-host` seam. This module statically imports the
@@ -69,6 +70,7 @@ export async function runSubagentPrint(argv: readonly string[]): Promise<number>
   // Before the session, its extensions or any request exist (#385).
   assertSubagentProviderCredential(agentDir);
   const plan = planPrintPayload(argv);
+  const gate = readPiToolExecutionGate();
   const sessionManager = plan.sessionFile
     ? SessionManager.open(plan.sessionFile, plan.sessionDir)
     : SessionManager.create(plan.cwd, plan.sessionDir);
@@ -78,7 +80,7 @@ export async function runSubagentPrint(argv: readonly string[]): Promise<number>
     cwd: plan.cwd,
     agentDir,
     modelRuntimeSignal: AbortSignal.timeout(15_000),
-    resourceLoaderOptions: { extensionFactories: [subagentsExtension] },
+    resourceLoaderOptions: { extensionFactories: [subagentsExtension, ...(gate === undefined ? [] : [createPiToolExecutionHook(gate)])] },
   });
   const errors = [
     ...services.diagnostics.filter((diagnostic) => diagnostic.type === 'error').map((diagnostic) => diagnostic.message),

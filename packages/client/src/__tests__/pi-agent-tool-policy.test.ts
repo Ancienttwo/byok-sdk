@@ -41,7 +41,7 @@ describe('Pi Agent tool policy (#1061 S1)', () => {
       });
       sessions.push(session);
     }
-    expect(configs.map(config=>config.version)).toEqual([6,6]);
+    expect(configs.map(config=>config.version)).toEqual([7,7]);
     expect(configs[0]?.agentToolPolicy).toEqual({builtinTools:'inherit',userContext:'inherit',extensions:'inherit'});
     expect(configs[1]?.agentToolPolicy).toEqual({builtinTools:options.agentBuiltinTools,userContext:options.agentUserContext,extensions:options.agentExtensions});
   });
@@ -51,7 +51,7 @@ describe('Pi Agent tool policy (#1061 S1)', () => {
     const policy = parsePiAgentToolPolicy({builtinTools:tools,userContext:'excluded',extensions:[]});
     tools.push('bash');
     expect(policy.builtinTools).toEqual(['read']);
-    const base = {format:'byok.pi.rpc-launch',version:6,agentToolPolicy:policy};
+    const base = {format:'byok.pi.rpc-launch',version:7,agentToolPolicy:policy};
     expect(serializePiHostConfig(base).digest).not.toBe(serializePiHostConfig({...base,agentToolPolicy:{...policy,builtinTools:['bash']}}).digest);
   });
 

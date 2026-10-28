@@ -1,3 +1,4 @@
+import { readPiToolExecutionGate } from '../adapters/pi/tool-execution-hook';
 /**
  * The in-bundle execution of the vendored background runner, in place of the
  * upstream `node jiti subagent-runner.ts <cfg>` child. Like the print host,
@@ -17,6 +18,7 @@ export async function runSubagentRunner(configPath: string): Promise<void> {
   try {
     // Before the vendored runner reads its config or starts a child (#385).
     assertSubagentProviderCredential(getAgentDir());
+    readPiToolExecutionGate();
     await runSubagentRunnerEntry([configPath]);
   } catch (error: unknown) {
     process.stderr.write(`pi-subagent-runner: ${(error as Error).message}\n`);

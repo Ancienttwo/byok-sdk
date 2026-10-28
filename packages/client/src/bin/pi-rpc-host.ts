@@ -1,3 +1,5 @@
+import { parseToolExecutionGateConfig, type ToolExecutionGateConfig } from '../tool-execution-hook';
+import { createPiToolExecutionHook, setPiToolExecutionGate } from '../adapters/pi/tool-execution-hook';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -17,7 +19,7 @@ const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 6;
+  readonly version: 7;
   /**
    * `keys-profile`: the keys launcher parents this host, and the provider key
    * arrives over its private IPC channel. `pi-auth-store`: the device's own
@@ -27,6 +29,7 @@ export interface PiRpcHostConfig {
   /** The session cwd. */
   readonly cwd: string;
   readonly agentToolPolicy: PiAgentToolPolicy;
+  readonly beforeTool: ToolExecutionGateConfig | null;
   readonly mcp: TaskScopedMcpConfig;
 }
 
@@ -53,11 +56,11 @@ function failUsage(message: string): never {
 export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('config must be an object');
   const raw = value as Record<string, unknown>;
-  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp', 'agentToolPolicy'];
+  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp', 'agentToolPolicy', 'beforeTool'];
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
-    fail('config must contain exactly format, version, credentialSource, cwd, mcp, agentToolPolicy');
+    fail('config must contain exactly format, version, credentialSource, cwd, mcp, agentToolPolicy, beforeTool');
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 6) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 7) fail('unsupported config format/version');
   const credentialSource = raw.credentialSource;
   if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
     fail(`config.credentialSource must be one of [${CREDENTIAL_SOURCES.join(', ')}]`);
@@ -67,9 +70,10 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   return {
-    format: 'byok.pi.rpc-launch', version: 6,
+    format: 'byok.pi.rpc-launch', version: 7,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
     agentToolPolicy: parsePiAgentToolPolicy(raw.agentToolPolicy),
+    beforeTool: raw.beforeTool === null ? null : parseToolExecutionGateConfig(raw.beforeTool),
   };
 }
 
@@ -177,6 +181,9 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     const { createTodoExtension } = await import('#byok-pi-todo-runtime');
     extensionFactories.push(createTodoExtension(localeAnchor));
   }
+  // Register last: earlier extension handlers may rewrite the tool input.
+  setPiToolExecutionGate(config.beforeTool);
+  if (config.beforeTool !== null) extensionFactories.push(createPiToolExecutionHook(config.beforeTool));
   let resourceAgentDir: string | undefined;
   if (policy.userContext === 'excluded') {
     resourceAgentDir = join(dirname(args.configPath), 'pi-agent-resources');
