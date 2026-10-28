@@ -439,8 +439,9 @@ nine public manifests and their lock records move to 0.31.0.
 - **Feature (client; #1061)** — `DaemonConfig.toolAuthorization` is a local
   resolver, called once per offer, that returns `auto` or `all` for the task
   (`ToolAuthorizationMode`; `parseToolAuthorizationMode`,
-  `TOOL_AUTHORIZATION_MODES`). It replaces the tool approval that Claude and
-  Codex `nativeInteractions` gave in 0.30.2 (see the Breaking entry above). No
+  `TOOL_AUTHORIZATION_MODES`). It replaces the tool approval that Claude
+  `nativeInteractions` gave in 0.30.2; Codex has no replacement gate in 0.31.0
+  (see the Breaking entry above). No
   adapter owns a separate permission policy, and no remote offer selects the
   mode. Without a resolver every task runs in
   `all`. `all` keeps tool execution and emits a local high-risk reminder
