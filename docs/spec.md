@@ -300,9 +300,9 @@ and `@byok-sdk/keys`. Before 1.0, PATCH is limited to corrections with no new
 public behavior, API, persistence, or security authority; MINOR covers additive
 public API/features, new forward migrations/authority, and any pre-1.0
 breaking cut. A version bump does not authorize publish. The current
-aligned release is `0.30.2`; publication requires separate release
+aligned release is `0.31.0`; publication requires separate release
 authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.30.2`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.31.0`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -313,7 +313,15 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.30.2 uses a one-release exception. The owner's release decisions, recorded
+0.31.0 is a MINOR under the general policy above, with no exception. It adds
+public API and Postgres migration 0030, and it has pre-1.0 breaking cuts: the
+wire v4 cutover in protocol, client, server and cloud, the SQLite store schema
+v6 in server, and in client the removal of tool approval from Claude and Codex
+`nativeInteractions`, which `DaemonConfig.toolAuthorization` replaces for Claude
+and Pi but not for Codex. See the
+[0.31.0 candidate notes](releases/v0.31.0.md).
+
+0.30.2 used a one-release exception. The owner's release decisions, recorded
 on issues #978 and #977 on 2026-10-25 and 2026-10-26, selected PATCH (0.30.2
 instead of 0.31.0) despite the new public API, the pre-1.0 breaking public API
 changes in client, core, cloud and protocol, and Postgres migration 0029.
