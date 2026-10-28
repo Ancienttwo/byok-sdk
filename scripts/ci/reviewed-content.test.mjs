@@ -8,7 +8,7 @@ import test from 'node:test';
 import { selectImpact, knownFamilies, reviewedScripts } from './select-impact.mjs';
 import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
-import { publicManifests, PI_LOCK, PI_PACKAGES, PROTOCOL_ORACLE_LOCK } from './reviewed-content.mjs';
+import { publicManifests, EXTENSION_LOCK, PI_LOCK, PI_PACKAGES, PROTOCOL_ORACLE_LOCK } from './reviewed-content.mjs';
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-reviewed-content-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -450,6 +450,47 @@ test('reviewed Pi 1.4.0 move admits only all nine exact pins and the reviewed lo
     ['overrides left behind', moved(s => { s.lock.overrides = pins(PI_PACKAGES, '1.3.0'); }), 'bun.lock', refused.together],
     ['partial workspace move', moved(s => { s.lock.workspaces['packages/cloud-do'].dependencies = pins(CLOUD_DO, '1.3.0'); }), 'bun.lock', refused.together],
     ['rows without a pin move', (s => { s.lock.packages = { ...rows('1.4.0'), x: ['x@1.0.0'] }; return s; })(state('1.3.0')), 'bun.lock', refused.lock],
+  ]) {
+    apply(candidate);
+    assert.throws(() => selectImpact([path], context), pattern, reason);
+  }
+});
+
+test('reviewed Pi extension move admits only the exact client edges and every reviewed extension lock row', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-extension-move-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const write = (path, value) => { mkdirSync(dirname(join(cwd, path)), { recursive: true }); writeFileSync(join(cwd, path), JSON.stringify(value)); };
+  const OLD = { 'pi-web-access': '0.24.1', '@juicesharp/rpiv-i18n': '2.8.0', '@juicesharp/rpiv-config': '2.8.0', '@mozilla/readability': '0.6.0',
+    linkedom: '0.16.11', 'p-limit': '6.2.0', 'promise.try': '2.0.1', turndown: '7.2.4', unpdf: '1.8.1', x: '1.0.0' };
+  const NEW = { 'pi-web-access': '0.45.0', '@juicesharp/rpiv-i18n': '2.15.0', '@juicesharp/rpiv-config': '2.15.0', x: '1.0.0' };
+  const changed = side => Object.fromEntries(Object.entries(EXTENSION_LOCK.changed).map(([name, rows]) => [name, rows[side]]));
+  const state = moved => ({
+    client: { name: '@byok-sdk/client', version: '0.30.0', dependencies: { ...(moved ? NEW : OLD) } },
+    lock: { lockfileVersion: 1, workspaces: { '': { name: 'workspace' },
+      'packages/client': { name: '@byok-sdk/client', version: '0.30.0', dependencies: { ...(moved ? NEW : OLD) } } },
+    packages: { ...changed(moved ? 'to' : 'from'), ...(moved ? EXTENSION_LOCK.added : {}), x: ['x@1.0.0'] } },
+  });
+  const apply = ({ client, lock }) => { write('packages/client/package.json', client); write('bun.lock', lock); };
+  apply(state(false));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  apply(state(true));
+  const plan = selectImpact(['bun.lock', 'packages/client/package.json'], context);
+  assert.ok(plan.dirs.includes('packages/client'));
+  assert.ok(plan.families.includes('npm-release-pack'));
+  const moved = mutate => { const s = state(true); mutate(s); return s; };
+  const refused = { client: /packages\/client\/package\.json changes more than/, lock: /bun\.lock changes more than/,
+    together: /bun\.lock must move the Pi extension pins and every reviewed extension lock row together/ };
+  for (const [reason, candidate, path, pattern] of [
+    ['a removed pin kept', moved(s => { s.client.dependencies.unpdf = '1.8.1'; }), 'packages/client/package.json', refused.client],
+    ['a partial move', moved(s => { s.client.dependencies['@juicesharp/rpiv-config'] = '2.8.0'; }), 'packages/client/package.json', refused.client],
+    ['another version', moved(s => { s.client.dependencies['pi-web-access'] = '0.45.1'; }), 'packages/client/package.json', refused.client],
+    ['another dependency next to the move', moved(s => { s.client.dependencies.x = '2.0.0'; }), 'packages/client/package.json', refused.client],
+    ['an added row missing', moved(s => { delete s.lock.packages.express; }), 'bun.lock', refused.together],
+    ['another integrity', moved(s => { s.lock.packages['pi-web-access'] = [...EXTENSION_LOCK.changed['pi-web-access'].to.slice(0, 3), 'sha512-other']; }), 'bun.lock', refused.together],
+    ['an unreviewed added row', moved(s => { s.lock.packages.extra = ['extra@1.0.0', '', {}, 'sha512-extra']; }), 'bun.lock', refused.lock],
+    ['rows without an edge move', (s => { s.lock.packages = { ...changed('to'), ...EXTENSION_LOCK.added, x: ['x@1.0.0'] }; return s; })(state(false)), 'bun.lock', refused.lock],
   ]) {
     apply(candidate);
     assert.throws(() => selectImpact([path], context), pattern, reason);

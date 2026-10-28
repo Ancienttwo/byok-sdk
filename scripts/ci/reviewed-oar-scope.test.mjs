@@ -21,3 +21,14 @@ test('an OAR snapshot path is reviewed only when its source manifest lists it', 
   assert.throws(() => selectImpact(['packages/client/vendor/oar/51b83c9/contracts/unreviewed.ts']));
   assert.throws(() => selectImpact(['packages/client/vendor/oar/aaaaaaa/contracts/login.ts']));
 });
+
+test('an rpiv-todo snapshot path is reviewed only when its source manifest lists it', () => {
+  for (const file of ['index.ts', 'tool/normalize-params.ts', 'locales/zh.json', 'LICENSE', 'PROVENANCE.md', 'source-manifest.json']) {
+    const plan = selectImpact([`packages/client/vendor/rpiv-todo/2.15.0/${file}`]);
+    assert.ok(plan.dirs.includes('packages/client'), file);
+    assert.ok(plan.families.includes('npm-release-pack'), file);
+  }
+  assert.throws(() => selectImpact(['packages/client/vendor/rpiv-todo/2.15.0/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/rpiv-todo/9.9.9/index.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/rpiv-todo/latest/index.ts']));
+});

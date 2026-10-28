@@ -271,6 +271,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/release/execution-submit-smoke.mjs',
     'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',
+    'scripts/release/pi-launcher-smoke.mjs',
     'scripts/release/publish.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
     'scripts/release/upgrade-manifest/snapshot.mjs',
