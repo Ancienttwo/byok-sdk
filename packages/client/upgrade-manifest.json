@@ -1,0 +1,2007 @@
+{
+  "schemaVersion": 1,
+  "package": "@byok-sdk/client",
+  "from": {
+    "version": "0.30.2",
+    "snapshotSha256": "8ed50f4a140115f28bfe9647555095a694a64a16a4adeda07f98e8eb144f09ed"
+  },
+  "to": {
+    "version": "0.30.2",
+    "snapshotSha256": "4c1d6e321bf106b7f0529dcb1c81bcc54a44382a0163ae70d0dd516d39160fc8"
+  },
+  "configFields": {
+    "status": "pending",
+    "owner": "#1094"
+  },
+  "entries": [
+    {
+      "id": "wire-v4-envelope-types",
+      "impact": "breaking",
+      "summary": "Wire major 4 (#925). A v3 envelope is rejected; there is no v3 reader and no negotiation. conn.ack, the runtime-only and Agent offer variants (task.offer_for_agent*, task.offer_with_toolsets*, task.offer_prepared, task.offer_sealed) and every *_sealed envelope type are removed: an Agent offer is one task.offer, and sealed is a payload branch of the plain type. Drain the v3 deployment and start v4 server side and daemons together on a new store.",
+      "migration": "docs/releases/925-wire-v4.md#what-changes-on-the-wire",
+      "items": [
+        "union:wire#conn.ack",
+        "union:wire#task.artifact_sealed",
+        "union:wire#task.await_approval_sealed",
+        "union:wire#task.cancelled_sealed",
+        "union:wire#task.complete_sealed",
+        "union:wire#task.decline_sealed",
+        "union:wire#task.fail_sealed",
+        "union:wire#task.offer_for_agent",
+        "union:wire#task.offer_for_agent_sealed",
+        "union:wire#task.offer_for_agent_with_egress",
+        "union:wire#task.offer_for_agent_with_egress_fresh",
+        "union:wire#task.offer_for_agent_with_egress_fresh_sealed",
+        "union:wire#task.offer_for_agent_with_egress_sealed",
+        "union:wire#task.offer_prepared",
+        "union:wire#task.offer_sealed",
+        "union:wire#task.offer_with_toolsets",
+        "union:wire#task.offer_with_toolsets_sealed",
+        "union:wire#task.progress_sealed",
+        "union:wire#task.steer_sealed"
+      ]
+    },
+    {
+      "id": "wire-v4-protocol-api",
+      "impact": "breaking",
+      "summary": "Wire major 4 (#925) in @byok-sdk/protocol. The removed offer and sealed type names (TaskOfferForAgent*, TaskOfferWithToolsets*, TaskOfferPrepared*, ConnAck*, TASK_OFFER_TYPES, isTaskOfferType, SealedMessageType, isSealedMessageType, STRICT_AGENT_ONLY_CAPABILITY) have no replacement alias: use TaskOfferPayload / TaskOfferPlainPayload with session, SealableMessageType, isSealableMessageType and isSealedPayload. PROTOCOL_VERSION, CAPABILITY_FLAGS, the payload schema registry and the approval payloads (approvalId required) change with it.",
+      "migration": "docs/releases/925-wire-v4.md#host-code-offer-and-sealed-types",
+      "items": [
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#ConnAckPayload",
+        "export:@byok-sdk/protocol#ConnAckPayloadSchema",
+        "export:@byok-sdk/protocol#CreateEnvelopeOptions",
+        "export:@byok-sdk/protocol#DAEMON_TO_SERVER_TYPES",
+        "export:@byok-sdk/protocol#EnvelopeSchema",
+        "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
+        "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+        "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+        "export:@byok-sdk/protocol#SERVER_TO_DAEMON_TYPES",
+        "export:@byok-sdk/protocol#STRICT_AGENT_ONLY_CAPABILITY",
+        "export:@byok-sdk/protocol#SealableMessageType",
+        "export:@byok-sdk/protocol#SealedMessageType",
+        "export:@byok-sdk/protocol#SealedSplitEntry",
+        "export:@byok-sdk/protocol#SessionSelection",
+        "export:@byok-sdk/protocol#SessionSelectionSchema",
+        "export:@byok-sdk/protocol#TASK_OFFER_TYPES",
+        "export:@byok-sdk/protocol#TaskApprovePayloadSchema",
+        "export:@byok-sdk/protocol#TaskArtifactPayloadSchema",
+        "export:@byok-sdk/protocol#TaskAwaitApprovalPayloadSchema",
+        "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+        "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferForAgentPayload",
+        "export:@byok-sdk/protocol#TaskOfferForAgentPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferForAgentSealedPayload",
+        "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressFreshPayload",
+        "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressFreshPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressFreshSealedPayload",
+        "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressPayload",
+        "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressSealedPayload",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayload",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPreparedPayload",
+        "export:@byok-sdk/protocol#TaskOfferPreparedPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayload",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferType",
+        "export:@byok-sdk/protocol#TaskOfferWithToolsetsPayload",
+        "export:@byok-sdk/protocol#TaskOfferWithToolsetsPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferWithToolsetsSealedPayload",
+        "export:@byok-sdk/protocol#TaskProgressPayloadSchema",
+        "export:@byok-sdk/protocol#TaskRejectPayloadSchema",
+        "export:@byok-sdk/protocol#TaskSteerPayloadSchema",
+        "export:@byok-sdk/protocol#TaskSteerSealedPayload",
+        "export:@byok-sdk/protocol#TaskSteerSealedPayloadSchema",
+        "export:@byok-sdk/protocol#createEnvelope",
+        "export:@byok-sdk/protocol#isSealableMessageType",
+        "export:@byok-sdk/protocol#isSealedMessageType",
+        "export:@byok-sdk/protocol#isSealedPayload",
+        "export:@byok-sdk/protocol#isTaskOfferType",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
+        "export:@byok-sdk/protocol/constants#STRICT_AGENT_ONLY_CAPABILITY"
+      ]
+    },
+    {
+      "id": "wire-v4-host-api",
+      "impact": "breaking",
+      "summary": "Wire major 4 (#925) in the client, cloud and server APIs. Git workspace mode and the daemon task workspace root are removed (ADR-034): every task runs in its Agent home; delete DaemonConfig.gitWorkspace, DaemonOverrides.gitWorkspace and DaemonConfig.workspaceRoot (they raise DaemonConfigFieldRemovedError), and the GitWorkspace* exports and the git-workspace daemon event are gone. DaemonConfig.strictAgentOnly is removed. Runtime adapters take RuntimeTaskInput instead of a wire offer payload. Daemon.approve/reject and ByokServer approvals require approvalId; ByokServer.tasks.approve/reject and tasks.events are new. cloud Enqueue*OfferInput and server LegacyDispatchInput are removed: dispatch Agent executions. DaemonConfig.toolAuthorization (#1061) and DaemonEvent claimed.admission (#1014) also land on these types.",
+      "migration": "docs/releases/925-wire-v4.md#host-and-daemon-api",
+      "items": [
+        "export:@byok-sdk/client#Daemon",
+        "export:@byok-sdk/client#DaemonConfig",
+        "export:@byok-sdk/client#DaemonEvent",
+        "export:@byok-sdk/client#DaemonObserver",
+        "export:@byok-sdk/client#DaemonOverrides",
+        "export:@byok-sdk/client#DaemonRecord",
+        "export:@byok-sdk/client#DiagnosticCheck",
+        "export:@byok-sdk/client#DiagnosticsSnapshot",
+        "export:@byok-sdk/client#GitErrorCategory",
+        "export:@byok-sdk/client#GitWorkspaceConfig",
+        "export:@byok-sdk/client#GitWorkspaceError",
+        "export:@byok-sdk/client#GitWorkspaceLease",
+        "export:@byok-sdk/client#GitWorkspaceLedger",
+        "export:@byok-sdk/client#GitWorkspaceLedgerRecord",
+        "export:@byok-sdk/client#GitWorkspaceManager",
+        "export:@byok-sdk/client#GitWorkspaceObservation",
+        "export:@byok-sdk/client#GitWorkspaceOptions",
+        "export:@byok-sdk/client#GitWorkspacePhase",
+        "export:@byok-sdk/client#GitWorkspaceStore",
+        "export:@byok-sdk/client#ProtectedClassId",
+        "export:@byok-sdk/client#RuntimeAdapterPrepareInput",
+        "export:@byok-sdk/client#RuntimeOperationManifest",
+        "export:@byok-sdk/client#RuntimeTaskInput",
+        "export:@byok-sdk/client#isGitWorkspaceConfig",
+        "export:@byok-sdk/client#prependGitWorkspaceGuidance",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterPrepareInput",
+        "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+        "export:@byok-sdk/cloud#AgentDispatchInput",
+        "export:@byok-sdk/cloud#AgentEgressDispatchInput",
+        "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#DeviceTerminal",
+        "export:@byok-sdk/cloud#EnqueueOfferInput",
+        "export:@byok-sdk/cloud#EnqueueSealedOfferInput",
+        "export:@byok-sdk/cloud#EnqueueSealedToolsetOfferInput",
+        "export:@byok-sdk/cloud#EnqueueToolsetOfferInput",
+        "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+        "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#TaskOfferReadback",
+        "export:@byok-sdk/server#ByokServer",
+        "export:@byok-sdk/server#ByokServerEvent",
+        "export:@byok-sdk/server#DispatchInput",
+        "export:@byok-sdk/server#LegacyDispatchInput",
+        "union:daemon-event#git-workspace"
+      ]
+    },
+    {
+      "id": "wire-v4-vendored-examples",
+      "impact": "breaking",
+      "summary": "K4 (examples/host-execution-core) and K8 (examples/bot-collaboration) source changed for wire v4 (#925), the approval channel (#1036) and the pre-launch compatibility cut (#1037; K8 drops promoteReplyReceipts). Their package version stays 0.0.1, so compare the src-sha256 in this entry: re-vendor both from this release, add session: { mode: \"fresh\" } wherever the Host builds an execution payload, and start the K4 ledger afresh.",
+      "migration": "docs/releases/925-wire-v4.md#coordinated-upgrade",
+      "items": [
+        "example:bot-collaboration",
+        "example:host-execution-core"
+      ]
+    },
+    {
+      "id": "approval-channel",
+      "impact": "breaking",
+      "summary": "One approval entry and one resolution point (#1036). The needs_approval AgentEvent and Session.resolveApproval are removed; an adapter that declares approvalInteractive asks through the ApprovalChannel it is handed. An exhaustive switch over AgentEvent loses the needs_approval case; activity and timeline schemas follow the AgentEvent union.",
+      "migration": "docs/spec.md#bounded-approval-lifecycle-authority",
+      "items": [
+        "export:@byok-sdk/client#DaemonTurnRecord",
+        "export:@byok-sdk/client#RuntimeOperationStartInput",
+        "export:@byok-sdk/client#Session",
+        "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+        "export:@byok-sdk/cloud#ActivityAppendRequestSchema",
+        "export:@byok-sdk/cloud#TimelineEventSchema",
+        "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
+        "export:@byok-sdk/protocol#AgentEventSchema",
+        "union:agent-event#needs_approval"
+      ]
+    },
+    {
+      "id": "input-preparation-retirement-removed",
+      "impact": "breaking",
+      "summary": "byok-agent retire-input-preparation and retireInputPreparation are removed with the five InputPreparationRetirement* errors and the retirement types (#1037). A daemon whose input-preparation record log holds an older record still refuses that lane at open: with the daemon stopped, move <storeDir>/input-preparation/ aside and start it again.",
+      "migration": "docs/spec.md#the-prepared-offer-and-the-moment-a-record-is-consumed",
+      "items": [
+        "export:@byok-sdk/client#InputPreparationNamespaceInspection",
+        "export:@byok-sdk/client#InputPreparationRetirementConfirmationRequiredError",
+        "export:@byok-sdk/client#InputPreparationRetirementDaemonRunningError",
+        "export:@byok-sdk/client#InputPreparationRetirementIncompleteError",
+        "export:@byok-sdk/client#InputPreparationRetirementManifest",
+        "export:@byok-sdk/client#InputPreparationRetirementRefusalReason",
+        "export:@byok-sdk/client#InputPreparationRetirementRefusedError",
+        "export:@byok-sdk/client#InputPreparationRetirementResult",
+        "export:@byok-sdk/client#InputPreparationRetirementStoreBusyError",
+        "export:@byok-sdk/client#RetireInputPreparationInput",
+        "export:@byok-sdk/client#RetireInputPreparationResult",
+        "export:@byok-sdk/client#RetireInputPreparationTarget",
+        "export:@byok-sdk/client#RetirementFileDigest",
+        "export:@byok-sdk/client#retireInputPreparation"
+      ]
+    },
+    {
+      "id": "pre-launch-compat-paths-removed",
+      "impact": "breaking",
+      "summary": "Pre-launch compatibility paths are removed (#1037). cloud-do tables declare every column in CREATE TABLE and no longer backfill older storage: RunRow.membershipPending, CloudState.pendingBackfills and applyBackfill are gone; clear local development state. The server SQLite storage migration option is removed (SqliteEmbeddedStoreOptions.migration).",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/pull/1037",
+      "items": [
+        "export:@byok-sdk/cloud-do#AgentDO",
+        "export:@byok-sdk/cloud-do#RunRow",
+        "export:@byok-sdk/server#ByokServerStorage"
+      ]
+    },
+    {
+      "id": "client-journal-withheld-bytes",
+      "impact": "breaking",
+      "acceptance": "reject",
+      "summary": "The daemon journal (daemon.db) declares withheld_bytes in CREATE TABLE and no longer adds it to an older file (#1037). A journal written without the column is refused at open with JournalUnavailableError and left unchanged: preserve or export it and resolve it before starting this build.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/pull/1037",
+      "items": [
+        "store:client-journal"
+      ]
+    },
+    {
+      "id": "server-sqlite-v6",
+      "impact": "breaking",
+      "acceptance": "new-path-repair",
+      "summary": "The embedded server SQLite store moves to schema 6 to persist approval timelines across restarts (#1049), and no longer adopts older files or migration selectors (#1037). An older file is refused with SqliteSchemaError (SQLITE_SCHEMA_UNSUPPORTED) and left unchanged: start on a new state path and pair the daemons again.",
+      "migration": "docs/spec.md#embedded-sqlite-device-and-receipt-authority",
+      "items": [
+        "store:server-sqlite"
+      ]
+    },
+    {
+      "id": "task-attempt-phase-times",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "TaskAttempt records offeredAt, claimedAt, firstOutputAt and terminalAt (#980). TaskAttemptStore gains the required recordFirstOutput: a Host that implements its own TaskAttemptStore or TenantStores must add it. Postgres adds migration 0030; apply it (migrate) before deploying the new stores. Older rows are accepted and not backfilled.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+        "export:@byok-sdk/cloud#TaskAttempt",
+        "export:@byok-sdk/cloud#TaskAttemptStore",
+        "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+        "store:cloud-dataplane-postgres"
+      ]
+    },
+    {
+      "id": "offer-admission-timings",
+      "impact": "additive",
+      "summary": "task.claim and task.decline may carry the device admission timings (OfferAdmissionTimings, bounded by OFFER_ADMISSION_MAX_DURATION_MS), and the terminal inference usage may name the provider model (TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH) (#1014). All fields are optional.",
+      "migration": "docs/spec.md#offer-admission-timings",
+      "items": [
+        "export:@byok-sdk/protocol#OFFER_ADMISSION_MAX_DURATION_MS",
+        "export:@byok-sdk/protocol#OfferAdmissionTimings",
+        "export:@byok-sdk/protocol#OfferAdmissionTimingsSchema",
+        "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+        "export:@byok-sdk/protocol/constants#TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH"
+      ]
+    },
+    {
+      "id": "tool-authorization-auto-all",
+      "impact": "breaking",
+      "summary": "Tool authorization is hard-cut to auto | all (#1061). DaemonConfig.toolAuthorization takes a ToolAuthorizationResolver; auto routes high-risk calls through awaiting-approval, all reports them with the new tool-reminder daemon event. RuntimeCapabilities and the Pi adapter options change with it (Agent-scoped Pi tools and resources, #1067/#1076). An exhaustive switch over DaemonEvent must handle tool-reminder.",
+      "migration": "docs/spec.md#tool-authorization-auto-and-all-1061",
+      "items": [
+        "export:@byok-sdk/client#PiAdapter",
+        "export:@byok-sdk/client#PiAdapterOptions",
+        "export:@byok-sdk/client#RuntimeCapabilities",
+        "export:@byok-sdk/client#SENSITIVE_HOME_PATHS",
+        "export:@byok-sdk/client#TOOL_AUTHORIZATION_MODES",
+        "export:@byok-sdk/client#ToolAuthorizationDenialCode",
+        "export:@byok-sdk/client#ToolAuthorizationGate",
+        "export:@byok-sdk/client#ToolAuthorizationMode",
+        "export:@byok-sdk/client#ToolAuthorizationResolver",
+        "export:@byok-sdk/client#ToolAuthorizationTask",
+        "export:@byok-sdk/client#ToolAuthorizationVerdict",
+        "export:@byok-sdk/client#ToolCall",
+        "export:@byok-sdk/client#ToolReminder",
+        "export:@byok-sdk/client#ToolRisk",
+        "export:@byok-sdk/client#ToolRiskReason",
+        "export:@byok-sdk/client#classifyToolCall",
+        "export:@byok-sdk/client#createAutoToolAuthorizationGate",
+        "export:@byok-sdk/client#parseToolAuthorizationMode",
+        "export:@byok-sdk/client/adapters#PiAdapter",
+        "export:@byok-sdk/client/adapters#PiAdapterOptions",
+        "export:@byok-sdk/client/adapters#RuntimeCapabilities",
+        "union:daemon-event#tool-reminder"
+      ]
+    },
+    {
+      "id": "host-mcp-tool-approvals",
+      "impact": "additive",
+      "summary": "A Host MCP toolset may pre-approve named tools (mcpServers[].approveTools, mcpToolApprovals), and an adapter descriptor may declare mcpToolApprovals (#1072). All fields are optional.",
+      "migration": "docs/spec.md#task-scoped-host-mcp-toolsets",
+      "items": [
+        "export:@byok-sdk/client#McpToolsetConfig",
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor"
+      ]
+    },
+    {
+      "id": "agent-result-retention",
+      "impact": "breaking",
+      "summary": "ExpiringClassId and RetentionClassId gain agent-result, so an exhaustive switch over them must handle it (#1009). ClassUsage.truncated is required. storage.retention.ttlMs[\"agent-result\"] defaults to 7 days.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client#ClassUsage",
+        "export:@byok-sdk/client#ExpiringClassId",
+        "export:@byok-sdk/client#resolveStorageConfig"
+      ]
+    },
+    {
+      "id": "server-task-events",
+      "impact": "breaking",
+      "summary": "ByokServer.tasks.events(taskId) follows one task feed with resumable cursors (#1022); TaskEventEntry and TaskEventsUnavailableError are new. TaskHandle.events() reads the same feed: a read after the terminal feed is reclaimed throws TaskEventsUnavailableError (feed_expired) where it used to complete empty, and the await_approval ServerTaskEvent requires approvalId.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/server#ServerTaskEvent",
+        "export:@byok-sdk/server#TaskEventEntry",
+        "export:@byok-sdk/server#TaskEventsUnavailableError"
+      ]
+    },
+    {
+      "id": "keys-model-route",
+      "impact": "additive",
+      "summary": "New browser-safe entry @byok-sdk/keys/model-route: the headless logic of a Pi model route page (#988). Nothing existing changes.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "entry:@byok-sdk/keys/model-route",
+        "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDORS",
+        "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDOR_IDS",
+        "export:@byok-sdk/keys/model-route#MODEL_ROUTE_ERROR_CODES",
+        "export:@byok-sdk/keys/model-route#MODEL_ROUTE_FIELDS",
+        "export:@byok-sdk/keys/model-route#ModelProviderAdapter",
+        "export:@byok-sdk/keys/model-route#ModelProviderKind",
+        "export:@byok-sdk/keys/model-route#ModelProviderVendor",
+        "export:@byok-sdk/keys/model-route#ModelProviderVendorId",
+        "export:@byok-sdk/keys/model-route#ModelRouteChange",
+        "export:@byok-sdk/keys/model-route#ModelRouteChoice",
+        "export:@byok-sdk/keys/model-route#ModelRouteContext",
+        "export:@byok-sdk/keys/model-route#ModelRouteDraft",
+        "export:@byok-sdk/keys/model-route#ModelRouteErrorCode",
+        "export:@byok-sdk/keys/model-route#ModelRouteErrors",
+        "export:@byok-sdk/keys/model-route#ModelRouteField",
+        "export:@byok-sdk/keys/model-route#ModelRouteFieldError",
+        "export:@byok-sdk/keys/model-route#ModelRouteFieldView",
+        "export:@byok-sdk/keys/model-route#ModelRouteHostEntry",
+        "export:@byok-sdk/keys/model-route#ModelRouteModelChoice",
+        "export:@byok-sdk/keys/model-route#ModelRouteModelSource",
+        "export:@byok-sdk/keys/model-route#ModelRoutePolicy",
+        "export:@byok-sdk/keys/model-route#ModelRouteProfileInput",
+        "export:@byok-sdk/keys/model-route#ModelRouteSecret",
+        "export:@byok-sdk/keys/model-route#ModelRouteStoredProfile",
+        "export:@byok-sdk/keys/model-route#ModelRouteSubmission",
+        "export:@byok-sdk/keys/model-route#ModelRouteView",
+        "export:@byok-sdk/keys/model-route#PI_DEFAULT_THINKING_LEVEL",
+        "export:@byok-sdk/keys/model-route#PI_THINKING_LEVELS",
+        "export:@byok-sdk/keys/model-route#PiCatalogModelInput",
+        "export:@byok-sdk/keys/model-route#PiCatalogModelListing",
+        "export:@byok-sdk/keys/model-route#PiModelApi",
+        "export:@byok-sdk/keys/model-route#PiModelCatalogTable",
+        "export:@byok-sdk/keys/model-route#PiModelConfig",
+        "export:@byok-sdk/keys/model-route#PiThinkingLevel",
+        "export:@byok-sdk/keys/model-route#ProviderAuthMode",
+        "export:@byok-sdk/keys/model-route#ProviderModelCapability",
+        "export:@byok-sdk/keys/model-route#ProviderSecretIdentity",
+        "export:@byok-sdk/keys/model-route#applyModelRouteChange",
+        "export:@byok-sdk/keys/model-route#createModelRouteDraft",
+        "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+        "export:@byok-sdk/keys/model-route#modelRouteContext",
+        "export:@byok-sdk/keys/model-route#modelRouteSubmission",
+        "export:@byok-sdk/keys/model-route#modelRouteView",
+        "export:@byok-sdk/keys/model-route#piSupportedThinkingLevels",
+        "export:@byok-sdk/keys/model-route#providerSecretReusable",
+        "export:@byok-sdk/keys/model-route#validateModelRoute"
+      ]
+    },
+    {
+      "id": "keys-pi-model-compat",
+      "impact": "additive",
+      "summary": "PiModelConfigSchema.compat accepts sendSessionAffinityHeaders and allowEmptySignature as pinned pi-ai 1.4.0 reads them (#987); the provider profile schema accepts the wider compat object.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/keys#ModelProviderProfileSchema",
+        "export:@byok-sdk/keys#PiCompatKey",
+        "export:@byok-sdk/keys#PiModelConfigSchema"
+      ]
+    },
+    {
+      "id": "cloud-dataplane-byok-pool",
+      "impact": "breaking",
+      "summary": "The Postgres stores accept only a pool from createByokPool, which returns the new ByokPool type (#1040). The option types and positional store constructors take pool: ByokPool, and the compositions throw TypeError for a bare pg.Pool. Build every pool with createByokPool.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/pull/1043",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#ByokPool",
+        "export:@byok-sdk/cloud-dataplane#PostgresActivityStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresAgentMemoryProjectionStoreOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresAgentMessageDraftStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresBoardStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresCloudCleanupOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresCloudMaintenanceOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresCoreStoreOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresDeviceAssertionReplayAuthority",
+        "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresInboundDedupStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresObjectStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresProofReceiptRetentionAuthority",
+        "export:@byok-sdk/cloud-dataplane#PostgresProofRequestReceiptStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresQuotaStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresRequestReceiptStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresRetentionPolicyStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresSkillPackStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskAttemptStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskCancellationStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskRedactionStoreOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureCompositionOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresTruthCommitterOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresTruthStore",
+        "export:@byok-sdk/cloud-dataplane#createByokPool",
+        "export:@byok-sdk/cloud-dataplane/runtime#ByokPool",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresActivityStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStoreOptions",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMessageDraftStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresBoardStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresCoreStoreOptions",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceAssertionReplayAuthority",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresObjectStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresProofReceiptRetentionAuthority",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresProofRequestReceiptStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresQuotaStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresRequestReceiptStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresSkillPackStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskAttemptStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskCancellationStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskRedactionStoreOptions",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTruthCommitterOptions",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTruthStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#createByokPool"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "entry:@byok-sdk/keys/model-route",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=336dad0c1f72885f",
+      "after": "K8 0.0.1 src-sha256=494803d4d57d5fbd",
+      "entry": "wire-v4-vendored-examples"
+    },
+    {
+      "item": "example:host-execution-core",
+      "change": "changed",
+      "before": "K4 0.0.1 src-sha256=56c55ada16254525",
+      "after": "K4 0.0.1 src-sha256=af951f5752164745",
+      "entry": "wire-v4-vendored-examples"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClassUsage",
+      "change": "changed",
+      "entry": "agent-result-retention"
+    },
+    {
+      "item": "export:@byok-sdk/client#Daemon",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfig",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEvent",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonObserver",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonOverrides",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonRecord",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonTurnRecord",
+      "change": "changed",
+      "entry": "approval-channel"
+    },
+    {
+      "item": "export:@byok-sdk/client#DiagnosticCheck",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ExpiringClassId",
+      "change": "changed",
+      "entry": "agent-result-retention"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitErrorCategory",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspaceConfig",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspaceError",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspaceLease",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspaceLedger",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspaceLedgerRecord",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspaceManager",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspaceObservation",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspaceOptions",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspacePhase",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#GitWorkspaceStore",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#InputPreparationNamespaceInspection",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#InputPreparationRetirementConfirmationRequiredError",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#InputPreparationRetirementDaemonRunningError",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#InputPreparationRetirementIncompleteError",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#InputPreparationRetirementManifest",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#InputPreparationRetirementRefusalReason",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#InputPreparationRetirementRefusedError",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#InputPreparationRetirementResult",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#InputPreparationRetirementStoreBusyError",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#McpToolsetConfig",
+      "change": "changed",
+      "entry": "host-mcp-tool-approvals"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapter",
+      "change": "changed",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapterOptions",
+      "change": "changed",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ProtectedClassId",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#RetireInputPreparationInput",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#RetireInputPreparationResult",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#RetireInputPreparationTarget",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#RetirementFileDigest",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "host-mcp-tool-approvals"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterPrepareInput",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeCapabilities",
+      "change": "changed",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "approval-channel"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeTaskInput",
+      "change": "added",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#SENSITIVE_HOME_PATHS",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#Session",
+      "change": "changed",
+      "entry": "approval-channel"
+    },
+    {
+      "item": "export:@byok-sdk/client#TOOL_AUTHORIZATION_MODES",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolAuthorizationDenialCode",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolAuthorizationGate",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolAuthorizationMode",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolAuthorizationResolver",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolAuthorizationTask",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolAuthorizationVerdict",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolCall",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolReminder",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolRisk",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolRiskReason",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#classifyToolCall",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#createAutoToolAuthorizationGate",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#isGitWorkspaceConfig",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#parseToolAuthorizationMode",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client#prependGitWorkspaceGuidance",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveStorageConfig",
+      "change": "changed",
+      "entry": "agent-result-retention"
+    },
+    {
+      "item": "export:@byok-sdk/client#retireInputPreparation",
+      "change": "removed",
+      "entry": "input-preparation-retirement-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapter",
+      "change": "changed",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
+      "change": "changed",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "host-mcp-tool-approvals"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterPrepareInput",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeCapabilities",
+      "change": "changed",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "approval-channel"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ActivityAppendRequestSchema",
+      "change": "changed",
+      "entry": "approval-channel"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentDispatchInput",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentEgressDispatchInput",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#DeviceTerminal",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#EnqueueOfferInput",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#EnqueueSealedOfferInput",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#EnqueueSealedToolsetOfferInput",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#EnqueueToolsetOfferInput",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+      "change": "changed",
+      "entry": "task-attempt-phase-times"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttempt",
+      "change": "changed",
+      "entry": "task-attempt-phase-times"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttemptStore",
+      "change": "changed",
+      "entry": "task-attempt-phase-times"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskOfferReadback",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+      "change": "changed",
+      "entry": "task-attempt-phase-times"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TimelineEventSchema",
+      "change": "changed",
+      "entry": "approval-channel"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#ByokPool",
+      "change": "added",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresActivityStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresAgentMemoryProjectionStoreOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresAgentMessageDraftStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresBoardStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudCleanupOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudMaintenanceOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCoreStoreOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresDeviceAssertionReplayAuthority",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresInboundDedupStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresObjectStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresProofReceiptRetentionAuthority",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresProofRequestReceiptStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresQuotaStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresRequestReceiptStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresRetentionPolicyStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresSkillPackStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskAttemptStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskCancellationStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskRedactionStoreOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureCompositionOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTruthCommitterOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTruthStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createByokPool",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#ByokPool",
+      "change": "added",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresActivityStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStoreOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMessageDraftStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresBoardStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCoreStoreOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceAssertionReplayAuthority",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresObjectStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresProofReceiptRetentionAuthority",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresProofRequestReceiptStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresQuotaStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresRequestReceiptStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresSkillPackStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskAttemptStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskCancellationStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskRedactionStoreOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTruthCommitterOptions",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTruthStore",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#createByokPool",
+      "change": "changed",
+      "entry": "cloud-dataplane-byok-pool"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#AgentDO",
+      "change": "changed",
+      "entry": "pre-launch-compat-paths-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-do#RunRow",
+      "change": "changed",
+      "entry": "pre-launch-compat-paths-removed"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ModelProviderProfileSchema",
+      "change": "changed",
+      "entry": "keys-pi-model-compat"
+    },
+    {
+      "item": "export:@byok-sdk/keys#PiCompatKey",
+      "change": "changed",
+      "entry": "keys-pi-model-compat"
+    },
+    {
+      "item": "export:@byok-sdk/keys#PiModelConfigSchema",
+      "change": "changed",
+      "entry": "keys-pi-model-compat"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDORS",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#MODEL_PROVIDER_VENDOR_IDS",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#MODEL_ROUTE_ERROR_CODES",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#MODEL_ROUTE_FIELDS",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelProviderAdapter",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelProviderKind",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelProviderVendor",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelProviderVendorId",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteChange",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteChoice",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteContext",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteDraft",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteErrorCode",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteErrors",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteField",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteFieldError",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteFieldView",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteHostEntry",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteModelChoice",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteModelSource",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRoutePolicy",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteProfileInput",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteSecret",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteStoredProfile",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteSubmission",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ModelRouteView",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#PI_DEFAULT_THINKING_LEVEL",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#PI_THINKING_LEVELS",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#PiCatalogModelInput",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#PiCatalogModelListing",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#PiModelApi",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#PiModelCatalogTable",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#PiModelConfig",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#PiThinkingLevel",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ProviderAuthMode",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ProviderModelCapability",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#ProviderSecretIdentity",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#applyModelRouteChange",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#createModelRouteDraft",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#modelRouteContext",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#modelRouteSubmission",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#modelRouteView",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#piSupportedThinkingLevels",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#providerSecretReusable",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#validateModelRoute",
+      "change": "added",
+      "entry": "keys-model-route"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
+      "change": "changed",
+      "entry": "approval-channel"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEventSchema",
+      "change": "changed",
+      "entry": "approval-channel"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ConnAckPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ConnAckPayloadSchema",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CreateEnvelopeOptions",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DAEMON_TO_SERVER_TYPES",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#EnvelopeSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OFFER_ADMISSION_MAX_DURATION_MS",
+      "change": "added",
+      "entry": "offer-admission-timings"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OfferAdmissionTimings",
+      "change": "added",
+      "entry": "offer-admission-timings"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OfferAdmissionTimingsSchema",
+      "change": "added",
+      "entry": "offer-admission-timings"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SERVER_TO_DAEMON_TYPES",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#STRICT_AGENT_ONLY_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SealableMessageType",
+      "change": "added",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SealedMessageType",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SealedSplitEntry",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SessionSelection",
+      "change": "added",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SessionSelectionSchema",
+      "change": "added",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TASK_OFFER_TYPES",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskApprovePayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskArtifactPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskAwaitApprovalPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+      "change": "changed",
+      "entry": "offer-admission-timings"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+      "change": "changed",
+      "entry": "offer-admission-timings"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferForAgentPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferForAgentPayloadSchema",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferForAgentSealedPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressFreshPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressFreshPayloadSchema",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressFreshSealedPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressPayloadSchema",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferForAgentWithEgressSealedPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayload",
+      "change": "added",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+      "change": "added",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPreparedPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPreparedPayloadSchema",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayload",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "added",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferType",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferWithToolsetsPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferWithToolsetsPayloadSchema",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferWithToolsetsSealedPayload",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskProgressPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskRejectPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSteerPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSteerSealedPayload",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSteerSealedPayloadSchema",
+      "change": "added",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#createEnvelope",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#isSealableMessageType",
+      "change": "added",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#isSealedMessageType",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#isSealedPayload",
+      "change": "added",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#isTaskOfferType",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#STRICT_AGENT_ONLY_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v4-protocol-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH",
+      "change": "added",
+      "entry": "offer-admission-timings"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServerEvent",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServerStorage",
+      "change": "changed",
+      "entry": "pre-launch-compat-paths-removed"
+    },
+    {
+      "item": "export:@byok-sdk/server#DispatchInput",
+      "change": "changed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/server#LegacyDispatchInput",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "export:@byok-sdk/server#ServerTaskEvent",
+      "change": "changed",
+      "entry": "server-task-events"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskEventEntry",
+      "change": "added",
+      "entry": "server-task-events"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskEventsUnavailableError",
+      "change": "added",
+      "entry": "server-task-events"
+    },
+    {
+      "item": "store:client-journal",
+      "change": "changed",
+      "before": "ddl-sha256=6fc71fa28df63833",
+      "after": "ddl-sha256=dc9f3290dd91055a",
+      "entry": "client-journal-withheld-bytes"
+    },
+    {
+      "item": "store:cloud-dataplane-postgres",
+      "change": "changed",
+      "before": "migrations=29 last=0029_e2ee_member_kem_floor.sql sha256=b5427637fb38730b",
+      "after": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
+      "entry": "task-attempt-phase-times"
+    },
+    {
+      "item": "store:server-sqlite",
+      "change": "changed",
+      "before": "schema_version=5",
+      "after": "schema_version=6",
+      "entry": "server-sqlite-v6"
+    },
+    {
+      "item": "union:agent-event#needs_approval",
+      "change": "removed",
+      "entry": "approval-channel"
+    },
+    {
+      "item": "union:daemon-event#git-workspace",
+      "change": "removed",
+      "entry": "wire-v4-host-api"
+    },
+    {
+      "item": "union:daemon-event#tool-reminder",
+      "change": "added",
+      "entry": "tool-authorization-auto-all"
+    },
+    {
+      "item": "union:wire#conn.ack",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.artifact_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.await_approval_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.cancelled_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.complete_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.decline_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.fail_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_for_agent",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_for_agent_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_for_agent_with_egress",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_for_agent_with_egress_fresh",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_for_agent_with_egress_fresh_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_for_agent_with_egress_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_prepared",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_with_toolsets",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.offer_with_toolsets_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.progress_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    },
+    {
+      "item": "union:wire#task.steer_sealed",
+      "change": "removed",
+      "entry": "wire-v4-envelope-types"
+    }
+  ]
+}

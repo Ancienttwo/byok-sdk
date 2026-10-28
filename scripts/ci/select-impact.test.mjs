@@ -266,10 +266,14 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   const scripts = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).scripts;
   assert.deepEqual(Object.keys(reviewedScripts).sort(), [
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
-    'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/execution-submit-smoke.mjs',
+    'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs',
+    'scripts/release/check-upgrade-manifest.mjs', 'scripts/release/check-upgrade-manifest.test.mjs',
+    'scripts/release/execution-submit-smoke.mjs',
     'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/publish.mjs', 'scripts/release/registry-readback.mjs',
+    'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
+    'scripts/release/upgrade-manifest/snapshot.mjs',
   ]);
   for (const [path, { tests, families = [] }] of Object.entries(reviewedScripts)) {
     assert.ok(tracked.has(path), `reviewed path is not tracked: ${path}`);
@@ -293,6 +297,17 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   });
   assert.deepEqual(selectImpact(['scripts/release/pack-and-smoke.mjs']).families, sorted(runners));
   assert.ok(runners.includes('npm-release-pack'));
+});
+
+// #1102: the upgrade-manifest data files run the root script checks; the shipped manifest also packs.
+test('upgrade-manifest data files select the script checks', () => {
+  assert.deepEqual(selectImpact(['scripts/release/upgrade-manifest/baseline.json']), {
+    dirs: [], files: ['scripts/release/upgrade-manifest/baseline.json'], families: [], reason: 'root-ci-scripts',
+  });
+  assert.deepEqual(selectImpact(['packages/client/upgrade-manifest.json']), {
+    dirs: [], files: ['packages/client/upgrade-manifest.json'], families: ['npm-release-pack'], reason: 'impacted',
+  });
+  assert.throws(() => selectImpact(['scripts/release/upgrade-manifest/other.json']), /reviewed CI mapping required/i);
 });
 
 test('release script siblings outside the reviewed list still fail closed', () => {

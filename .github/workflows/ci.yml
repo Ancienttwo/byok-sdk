@@ -92,6 +92,8 @@ jobs:
         run: node --test scripts/ci/*.test.mjs
       - name: Version authority
         run: node scripts/api-surface/check-version-authority.mjs
+      - name: Upgrade manifest
+        run: node scripts/release/check-upgrade-manifest.mjs
       - name: Install dependencies
         if: needs.select.outputs.build == 'true'
         run: bun ci
@@ -198,6 +200,9 @@ jobs:
 
       - name: Check version authority
         run: bun run check:version-authority
+
+      - name: Check upgrade manifest
+        run: bun run check:upgrade-manifest
 
       - name: Test root scripts
         run: bun run test:scripts && node --test scripts/ci/*.test.mjs

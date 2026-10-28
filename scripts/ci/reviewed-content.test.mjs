@@ -67,6 +67,31 @@ test('root package.json admits only repo-harness script additions, removals and 
     assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields|Unreviewed|Only existing/);
   }
 });
+// #1102: the gate script, its test in test:scripts, and the client files entry, each exactly.
+test('the upgrade-manifest gate admits only its exact script, test and client files entry', t => {
+  const f = fixture(t), old = f.rootManifest.scripts['test:scripts'];
+  f.write('scripts/release/check-upgrade-manifest.test.mjs', '');
+  const gate = 'node scripts/release/check-upgrade-manifest.mjs';
+  const withTest = old + ' scripts/release/check-upgrade-manifest.test.mjs';
+  f.write('package.json', { scripts: { 'test:scripts': withTest, 'check:upgrade-manifest': gate } });
+  assert.deepEqual(selectImpact(['package.json'], f), { dirs: [], files: ['package.json'], families: [], reason: 'root-ci-scripts' });
+  for (const scripts of [
+    { 'test:scripts': old, 'check:upgrade-manifest': gate + ' --write' },
+    { 'test:scripts': old + ' scripts/release/other.test.mjs' },
+  ]) {
+    f.write('package.json', { scripts });
+    assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields|Only existing/);
+  }
+  const files = ['dist', 'README.md', 'LICENSE'];
+  execFileSync('git', ['checkout', '--', 'package.json'], { cwd: f.cwd });
+  f.write('packages/client/package.json', { ...f.manifest, files });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'files'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-manifest.json'] });
+  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
+  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-manifest.json', 'src'] });
+  assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+});
 test('API entry changes select only owner and dependents; unmapped entry is refused', t => {
   const f = fixture(t);
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 2 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } } });

@@ -299,6 +299,12 @@ export const reviewedScripts = Object.freeze({
     install: true,
   },
   'scripts/release/registry-readback.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
+  // #1102: the upgrade-manifest gate. Every targeted run also runs the gate itself.
+  'scripts/release/check-upgrade-manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
+  'scripts/release/check-upgrade-manifest.test.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
+  'scripts/release/upgrade-manifest/dts-surface.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
+  'scripts/release/upgrade-manifest/manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
+  'scripts/release/upgrade-manifest/snapshot.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
 });
 // An OAR re-vendor adds one snapshot directory and deletes the previous one.
 // A snapshot path is reviewed only when that snapshot's source-manifest.json
@@ -474,6 +480,10 @@ export function selectImpact(paths, context = {}) {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     if (/^scripts\/release\/registry-(?:contract\.test\.mjs|expectations\.json)$/.test(path)) { scripts = true; continue; }
+    // #1102: the released baseline snapshot, and the manifest the client
+    // tarball ships. The targeted job's gate step reads both.
+    if (path === 'scripts/release/upgrade-manifest/baseline.json') { scripts = true; continue; }
+    if (path === 'packages/client/upgrade-manifest.json') { scripts = true; families.add('npm-release-pack'); continue; }
     if (Object.hasOwn(reviewedScripts, path)) {
       scripts = true;
       for (const id of reviewedScripts[path].families ?? []) families.add(id);
