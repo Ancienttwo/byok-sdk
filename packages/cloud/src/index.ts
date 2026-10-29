@@ -330,7 +330,6 @@ export {
   TASK_ATTEMPT_STATUSES,
   TASK_ATTEMPT_ACTIVE_STATUSES,
   TASK_ATTEMPT_UNFINISHED_STATUSES,
-  isTaskAbandonCause,
 } from './stores/ports';
 // The port method inventory. Contract data, shipped so `@byok-sdk/conformance` and
 // durable adapters read the same table; `ports.ts` itself is untouched.
