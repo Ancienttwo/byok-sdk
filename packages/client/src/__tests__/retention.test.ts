@@ -16,7 +16,7 @@ import { createRetentionRegistry } from '../daemon/retention/producers';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { StoragePressure } from '../daemon/retention/pressure';
 import { resolveStorageConfig, type StorageBudgetInput } from '../daemon/retention/config';
-import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type SweepBudget, type RetentionClassId, type ClassUsage, type ClassAuthority } from '../daemon/retention/registry';
+import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type SweepBudget, type RetentionClassId, type ClassUsage, type ClassAuthority, type ExpiringClassId, type ProtectedClassId } from '../daemon/retention/registry';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { createSupportBundle } from '../diagnostics/support-bundle';
 import { testScratchRoot, testExecutionScratch } from './fixtures/execution-scratch';
@@ -26,16 +26,19 @@ const cleanups: (()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse())await cleanup();vi.restoreAllMocks();});
 const DAY=86_400_000;
 const identity:JournalIdentity={productId:'retention',tenantId:'tenant',deviceId:'device'};
-async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number}={}) {
+async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number;piSessionDir?:string}={}) {
  const store=input.store??testScratchRoot();let time=Date.parse('2026-10-14T00:00:00.000Z');const clock=()=>new Date(time);
  const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256},...(input.budget?{budget:input.budget}:{})});
  const scratch=new ScratchRoot(config.scratchRoot,clock);await scratch.open(store);
  const registry=createRetentionRegistry({storeDir:store,scratch,config,clock,journal:()=>input.journal,identity:()=>identity,preparation:()=>undefined,
-  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit})});
+  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit}),...(input.piSessionDir===undefined?{}:{piSessionDir:input.piSessionDir})});
  const pressure=new StoragePressure(config.budget),failures:string[]=[];
  const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code)=>{failures.push(`${id}:${code}`);}});
  cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,registry,pressure,failures,config,clock,advance:(ms:number)=>{time+=ms;}};
 }
+const fakeAuthority=(id:RetentionClassId):ClassAuthority=>({roots:[],owner:'sdk',scope:'store',bound:PROTECTED_CLASS_IDS.includes(id as ProtectedClassId)?PROTECTED_CLASS_BOUNDS[id as ProtectedClassId]:{kind:'ttl',ttlMs:DAY}});
+const fakeRegistry=(measure:(id:RetentionClassId)=>Promise<ClassUsage>,...rest:ConstructorParameters<typeof RetentionRegistry> extends [unknown,...infer R]?R:never)=>
+ new RetentionRegistry([...EXPIRING_CLASS_IDS.map(id=>({id,authority:fakeAuthority(id),measure:()=>measure(id),sweep:async()=>{}})),...PROTECTED_CLASS_IDS.map(id=>({id,authority:fakeAuthority(id),measure:()=>measure(id)}))],...rest);
 const usage=(f:{sweeper:RetentionSweeper},id:RetentionClassId)=>f.sweeper.snapshot().classes.find(entry=>entry.classId===id)!;
 const resultName=(n:number)=>`result-${n.toString(16).padStart(64,'0')}.json`;
 async function stamp(file:string,iso:string){const when=new Date(iso);await fs.utimes(file,when,when);}
@@ -143,7 +146,7 @@ it('idle homes lose result records past the TTL or the 256-record bound; a lease
  for(const [index,file] of fresh.entries()){await fs.writeFile(file,'{}');await stamp(file,new Date(Date.parse('2026-10-13T00:00:00Z')+index*1000).toISOString());}
  await stamp(freshTemp,'2026-10-13T00:00:00Z');
  const f=await fixture({home});
- expect(f.registry.classes.find(entry=>entry.id==='agent-result')!.authority).toMatchObject({owner:'sdk',scope:'agent-home',ttlMs:7*DAY,maxEntries:256});
+ expect(f.registry.classes.find(entry=>entry.id==='agent-result')!.authority).toMatchObject({owner:'sdk',scope:'agent-home',bound:{kind:'ttl',ttlMs:7*DAY,maxEntries:256}});
  await f.sweeper.runPass('periodic');expect(usage(f,'agent-result')).toMatchObject({measured:true,truncated:false,entries:261});
  for(const file of [expired,expiredTemp,fresh[0]!])expect(await exists(file)).toBe(true);
  await binding.lease.release();for(let pass=0;pass<3;pass++)await f.sweeper.runPass('periodic');
@@ -218,8 +221,7 @@ it('a daemon runs a jittered retention timer and reports path-free classes in st
 });
 it('uses newly measured pressure for maintenance even when the timer fired as periodic',async()=>{
  const prepare=vi.fn(async()=>{}),measure=async(id:RetentionClassId):Promise<ClassUsage>=>({classId:id,protected:PROTECTED_CLASS_IDS.includes(id as never),measured:true,truncated:false,bytes:0,entries:0,oldestAgeMs:null});
- const authority:ClassAuthority={roots:[],owner:'sdk',scope:'store'};
- const registry=new RetentionRegistry([...EXPIRING_CLASS_IDS.map(id=>({id,authority,measure:()=>measure(id),sweep:async()=>{}})),...PROTECTED_CLASS_IDS.map(id=>({id,authority,measure:()=>measure(id)}))],async()=>{},()=>{},prepare);
+ const registry=fakeRegistry(measure,async()=>{},()=>{},prepare);
  const config=resolveStorageConfig(testScratchRoot(),{budget:{maxStoreBytes:1_000_000,minFreeBytes:100_000,ackCriticalReserveBytes:10_000}});
  const sweeper=new RetentionSweeper({registry,config,pressure:new StoragePressure(config.budget),freeBytes:async()=>50_000,jitter:(_s,ms)=>ms});
  await sweeper.runPass('periodic');expect(prepare).toHaveBeenCalledWith(expect.objectContaining({trigger:'periodic'}),true);await sweeper.stop();
@@ -227,8 +229,7 @@ it('uses newly measured pressure for maintenance even when the timer fired as pe
 it('passes serialize and stop waits for an in-flight pass before releasing maintenance resources',async()=>{
  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});const order:string[]=[];
  const measure=async(id:RetentionClassId):Promise<ClassUsage>=>{await gate;return {classId:id,protected:PROTECTED_CLASS_IDS.includes(id as never),measured:true,truncated:false,bytes:0,entries:0,oldestAgeMs:null};};
- const authority: ClassAuthority={roots:[],owner:'sdk',scope:'store'};
- const registry=new RetentionRegistry([...EXPIRING_CLASS_IDS.map(id=>({id,authority,measure:()=>measure(id),sweep:async()=>{}})),...PROTECTED_CLASS_IDS.map(id=>({id,authority,measure:()=>measure(id)}))],async()=>{order.push('closed');});
+ const registry=fakeRegistry(measure,async()=>{order.push('closed');});
  const sweeper=new RetentionSweeper({registry,config:resolveStorageConfig(testScratchRoot()),pressure:new StoragePressure(),freeBytes:async()=>1_000_000,jitter:(_s,ms)=>ms});
  const pass=sweeper.runPass('periodic');expect(sweeper.runPass('pressure')).toBe(pass);let stopped=false;const stop=sweeper.stop().then(()=>{stopped=true;});await Promise.resolve();expect(stopped).toBe(false);
  release();await pass;await stop;expect(order).toEqual(['closed']);
@@ -425,7 +426,7 @@ async function sessionLedgers(directory:string,files:Record<string,string>){
  return root;
 }
 const EXPIRED='2026-09-01T00:00:00Z',FRESH='2026-10-13T00:00:00Z';
-it('session ledgers expire by last append; task evidence, task-suffixed names, directories and symlinks stay',async()=>{
+it('session ledgers and terminal evidence expire by last append; other names, directories and symlinks stay',async()=>{
  const {home,binding,directory}=await idleHome();await binding.lease.release();
  const root=await sessionLedgers(directory,{[`pi-${ledgerHex('a')}.jsonl`]:EXPIRED,[`pi-${ledgerHex('b')}.jsonl`]:FRESH,[`my-task-runner-${ledgerHex('c')}.jsonl`]:EXPIRED,
   [`pi-task-${ledgerHex('d')}.jsonl`]:EXPIRED,[`x-task-${ledgerHex('e')}.jsonl`]:EXPIRED,['notes.txt']:EXPIRED});
@@ -434,17 +435,16 @@ it('session ledgers expire by last append; task evidence, task-suffixed names, d
  const outside=path.join(testScratchRoot(),'outside.jsonl');await fs.writeFile(outside,'keep');
  if(process.platform!=='win32')await fs.symlink(outside,path.join(root,`link-${ledgerHex('2')}.jsonl`));
  const f=await fixture({home});
- expect(f.registry.classes.find(entry=>entry.id==='session-ledger')!.authority).toEqual(expect.objectContaining({owner:'sdk',scope:'agent-home',ttlMs:30*DAY}));
- expect(f.registry.classes.find(entry=>entry.id==='session-ledger')!.authority).not.toHaveProperty('maxEntries');
+ for(const id of ['session-ledger','terminal-evidence'] as const)expect(f.registry.classes.find(entry=>entry.id===id)!.authority).toEqual(expect.objectContaining({owner:'sdk',scope:'agent-home',bound:{kind:'ttl',ttlMs:30*DAY}}));
  const report=await f.sweeper.runPass('periodic');
  expect(usage(f,'session-ledger')).toMatchObject({measured:true,entries:4});
- expect(usage(f,'terminal-evidence')).toMatchObject({entries:2});
- const removed=[`pi-${ledgerHex('a')}.jsonl`,`my-task-runner-${ledgerHex('c')}.jsonl`,`corrupt-${ledgerHex('f')}.jsonl`];
+ expect(usage(f,'terminal-evidence')).toMatchObject({measured:true,entries:2});
+ const removed=[`pi-${ledgerHex('a')}.jsonl`,`my-task-runner-${ledgerHex('c')}.jsonl`,`corrupt-${ledgerHex('f')}.jsonl`,`pi-task-${ledgerHex('d')}.jsonl`,`x-task-${ledgerHex('e')}.jsonl`];
  for(const name of removed)expect(await exists(path.join(root,name))).toBe(false);
- for(const name of [`pi-${ledgerHex('b')}.jsonl`,`pi-task-${ledgerHex('d')}.jsonl`,`x-task-${ledgerHex('e')}.jsonl`,'notes.txt',`dir-${ledgerHex('1')}.jsonl`])expect(await exists(path.join(root,name))).toBe(true);
+ for(const name of [`pi-${ledgerHex('b')}.jsonl`,'notes.txt',`dir-${ledgerHex('1')}.jsonl`])expect(await exists(path.join(root,name))).toBe(true);
  expect(await fs.readFile(outside,'utf8')).toBe('keep');
  if(process.platform!=='win32')expect((await fs.lstat(path.join(root,`link-${ledgerHex('2')}.jsonl`))).isSymbolicLink()).toBe(true);
- expect(report.deleted).toBe(3);expect(report.bytesReclaimed).toBe(removed.reduce((sum,name)=>sum+(name.startsWith('corrupt')?9:`{"entry":"${name}"}\n`.length),0));
+ expect(report.deleted).toBe(5);expect(report.bytesReclaimed).toBe(removed.reduce((sum,name)=>sum+(name.startsWith('corrupt')?9:`{"entry":"${name}"}\n`.length),0));
  // These fixtures are not valid handoff records, so reader-run reports them; session-ledger never parses them.
  expect(f.failures.filter(failure=>failure.startsWith('session-ledger:'))).toEqual([]);
 });
@@ -477,4 +477,49 @@ it('session-ledger TTL defaults to thirty days and accepts any non-negative inte
  const store=testScratchRoot();expect(resolveStorageConfig(store).ttlMs['session-ledger']).toBe(30*DAY);
  expect(resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':0}}}).ttlMs['session-ledger']).toBe(0);
  for(const value of [-1,1.5])expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':value}}})).toThrow('DaemonConfig.storage.retention.ttlMs.session-ledger is invalid');
+});
+it('every retention class declares a bound, and a registry with an undeclared or mismatched class is refused',async()=>{
+ const f=await fixture();
+ for(const entry of f.registry.classes){
+  const bound=entry.authority.bound;
+  if(EXPIRING_CLASS_IDS.includes(entry.id as ExpiringClassId))expect(bound).toMatchObject({kind:'ttl',ttlMs:f.config.ttlMs[entry.id as ExpiringClassId]});
+  else expect(bound).toBe(PROTECTED_CLASS_BOUNDS[entry.id as ProtectedClassId]);
+  if(bound.kind==='exempt'){expect(bound.reason.trim()).not.toBe('');expect(bound.api.trim()).not.toBe('');}
+ }
+ const measure=async(id:RetentionClassId):Promise<ClassUsage>=>({classId:id,protected:false,measured:true,truncated:false,bytes:0,entries:0,oldestAgeMs:null});
+ const build=(target:RetentionClassId,authority:ClassAuthority)=>()=>new RetentionRegistry([
+  ...EXPIRING_CLASS_IDS.map(id=>({id,authority:id===target?authority:fakeAuthority(id),measure:()=>measure(id),sweep:async()=>{}})),
+  ...PROTECTED_CLASS_IDS.map(id=>({id,authority:id===target?authority:fakeAuthority(id),measure:()=>measure(id)}))]);
+ const undeclared={roots:[],owner:'sdk',scope:'store'} as unknown as ClassAuthority;
+ for(const id of ['pi-session-dir','journal'] as const)expect(build(id,undeclared)).toThrow(`retention class ${id} does not declare its bound`);
+ expect(build('terminal-evidence',{...fakeAuthority('terminal-evidence'),bound:PROTECTED_CLASS_BOUNDS.journal})).toThrow('retention class terminal-evidence does not declare its bound');
+ expect(build('journal',{...fakeAuthority('journal'),bound:{kind:'ttl',ttlMs:DAY}})).toThrow('retention class journal does not declare its bound');
+ expect(build('quarantine',{...fakeAuthority('quarantine'),bound:{kind:'exempt',reason:' ',cleanedBy:'operator',api:'x'}})).toThrow('retention class quarantine does not declare its bound');
+});
+const piSession=(c:string)=>`2026-09-01T00-00-00-000Z_0192f0c4-0000-7000-8000-${c.repeat(12)}.jsonl`;
+it('Pi BYOK session files expire by last write; other names, folders and symlinks in the session folder stay',async()=>{
+ const dir=testScratchRoot(),files={old:piSession('a'),fresh:piSession('b'),host:'host-notes.jsonl',odd:'2026-09-01_session.jsonl'};
+ for(const name of Object.values(files)){await fs.writeFile(path.join(dir,name),'{}\n');await stamp(path.join(dir,name),EXPIRED);}
+ await stamp(path.join(dir,files.fresh),FRESH);await fs.mkdir(path.join(dir,piSession('c')));
+ const outside=path.join(testScratchRoot(),'outside.jsonl');await fs.writeFile(outside,'keep');
+ if(process.platform!=='win32')await fs.symlink(outside,path.join(dir,piSession('d')));
+ const f=await fixture({piSessionDir:dir});
+ expect(f.registry.classes.find(entry=>entry.id==='pi-session-dir')!.authority).toEqual({roots:[dir],owner:'sdk',scope:'host',bound:{kind:'ttl',ttlMs:31*DAY}});
+ const report=await f.sweeper.runPass('periodic');
+ expect(await exists(path.join(dir,files.old))).toBe(false);
+ for(const name of [files.fresh,files.host,files.odd,piSession('c')])expect(await exists(path.join(dir,name))).toBe(true);
+ expect(await fs.readFile(outside,'utf8')).toBe('keep');
+ expect(report.deleted).toBe(1);expect(f.failures).toEqual([]);
+ expect(usage(f,'pi-session-dir')).toMatchObject({protected:false,measured:true});
+ // Without a Pi BYOK launcher the class is empty and measured, not an unknown Host scope.
+ const g=await fixture();await g.sweeper.runPass('periodic');expect(usage(g,'pi-session-dir')).toMatchObject({measured:true,entries:0});
+ expect(usage(g,'runtime-session-external')).toMatchObject({protected:true,measured:false});
+});
+it('Pi session TTL defaults to 31 days and must outlive the session-ledger TTL by a day; terminal evidence defaults to 30 days',()=>{
+ const store=testScratchRoot(),config=resolveStorageConfig(store);
+ expect([config.ttlMs['pi-session-dir'],config.ttlMs['terminal-evidence']]).toEqual([31*DAY,30*DAY]);
+ expect(resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':0,'pi-session-dir':DAY}}}).ttlMs['pi-session-dir']).toBe(DAY);
+ expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'pi-session-dir':30*DAY}}})).toThrow("DaemonConfig.storage.retention.ttlMs.pi-session-dir must be at least retention.ttlMs['session-ledger'] plus one day");
+ expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':60*DAY}}})).toThrow('DaemonConfig.storage.retention.ttlMs.pi-session-dir');
+ expect(resolveStorageConfig(store,{retention:{ttlMs:{'terminal-evidence':0}}}).ttlMs['terminal-evidence']).toBe(0);
 });

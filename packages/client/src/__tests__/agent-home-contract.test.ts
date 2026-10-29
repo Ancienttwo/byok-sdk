@@ -16,7 +16,7 @@ import {
   validateAgentRef,
 } from '../agent-home';
 import { AgentSessionHandoffStore, AgentSessionHandoffMismatchError } from '../daemon/agent-session-handoff-store';
-import { isAgentSessionLedgerName } from '../daemon/retention/session-ledgers';
+import { isAgentSessionLedgerName, isAgentTaskTerminalName } from '../daemon/retention/session-ledgers';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentReliableSpool } from '../daemon/agent-egress-spool';
@@ -409,8 +409,8 @@ describe('SDK-owned Agent home contract', () => {
     const terminals = kinds.filter((entry) => entry.terminal).map((entry) => entry.name);
     expect(ledgers).toHaveLength(runtimes.length);
     expect(terminals).toHaveLength(runtimes.length);
-    for (const name of terminals) expect(isAgentSessionLedgerName(name)).toBe(false);
-    // A runtime id ending in `-task` makes a ledger name that reads as terminal evidence, so retention keeps it.
+    for (const name of terminals) expect([isAgentSessionLedgerName(name), isAgentTaskTerminalName(name)]).toEqual([false, true]);
+    // A runtime id ending in `-task` makes a ledger name that reads as terminal evidence; both expire after 30 days.
     for (const name of ledgers) expect(isAgentSessionLedgerName(name)).toBe(!name.startsWith('custom-task-'));
     expect(ledgers.filter((name) => name.startsWith('custom-task-'))).toHaveLength(1);
   });

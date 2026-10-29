@@ -11,13 +11,13 @@ import type { JournalIdentity, LocalTaskJournal } from '../journal/journal';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../path-mutation-gate';
 import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer';
 import type { ResolvedStorageConfig } from './config';
-import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry';
+import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry';
 import type { ScratchRoot } from './scratch';
 import { authorityBudget, classBudget } from './runtime-accounting';
 import { TreeCleanup } from './tree-cleanup';
 import { selectReaderRuns } from '../../agent-home-reader-retention';
 import { RuntimeCleanup } from './runtime-cleanup';
-import { isAgentSessionLedgerName, pruneSessionLedgers } from './session-ledgers';
+import { isAgentSessionLedgerName, isAgentTaskTerminalName, isPiSessionFileName, pruneByLastWrite } from './session-ledgers';
 import { existingDirectory, measureTree, removeOwnedPath } from './usage';
 
 interface ProducerOptions {
@@ -29,6 +29,7 @@ interface ProducerOptions {
   readonly preparation: () => InputPreparationService | undefined;
   readonly home?: AgentHomeManager;
   readonly handoffs?: AgentSessionHandoffStore;
+  /** Folded `DaemonConfig.piByokLauncher.sessionDir`: the SDK expires Pi's own session files in it. */
   readonly piSessionDir?: string;
   readonly clock: () => Date;
   /** Entries one usage walk visits before it stops and reports truncated classes. */
@@ -41,6 +42,7 @@ const HOME_TEMP = /^\.byok-(?:memory|agent-memory)-[a-f0-9-]{36}\.tmp$/u;
 /** Concrete producers, not a table that a Host must remember to populate. */
 export function createRetentionRegistry(options: ProducerOptions): RetentionRegistry {
   const { storeDir, scratch, config, clock } = options;
+  const { piSessionDir } = options;
   const execRoot = path.join(scratch.root, 'exec');
   const daemonRoot = path.join(storeDir, 'tmp', 'daemon');
   const replicas = path.join(storeDir, 'durable-replicas');
@@ -218,7 +220,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     const result = await service.collectExpired(budget.now.getTime(), budget.remaining());
     for (let index = 0; index < result.artifactsRemoved + result.recordsRemoved; index++) budget.removed(index === 0 ? result.bytesReclaimed : 0);
   }
-  async function sweepHome(id: 'reader-run' | 'agent-result' | 'home-temp' | 'session-ledger', budget: SweepBudget): Promise<void> {
+  async function sweepHome(id: 'reader-run' | 'agent-result' | 'home-temp' | 'session-ledger' | 'terminal-evidence', budget: SweepBudget): Promise<void> {
     const manager = options.home;
     if (manager === undefined) return;
     const root = path.join(manager.layout.hostRootInput(), 'agents');
@@ -253,11 +255,12 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
             nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['agent-result'],
             remove: async file => { if (!homeBudget.available()) return false; await remove(home, file, budget); return true; },
           });
-        } else if (id === 'session-ledger') {
-          // Every ledger append holds an execution lease, so the idle-home lease rules out a concurrent writer.
+        } else if (id === 'session-ledger' || id === 'terminal-evidence') {
+          // Every ledger and terminal append holds an execution lease, so the idle-home lease rules out a concurrent writer.
           const ledgers = path.join(home, '.byok', 'runtime-sessions');
-          await pruneSessionLedgers({ directory: ledgers, entries: entries('session-ledger', ledgers, homeBudget),
-            nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['session-ledger'],
+          await pruneByLastWrite({ directory: ledgers, entries: entries(id, ledgers, homeBudget),
+            match: id === 'session-ledger' ? isAgentSessionLedgerName : isAgentTaskTerminalName,
+            nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs[id],
             remove: async file => { if (!homeBudget.available()) return false; await remove(home, file, budget); return true; },
           });
         } else {
@@ -298,11 +301,21 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       } finally { await gate.release(); }
     }
   }
+  async function sweepPiSessions(budget: SweepBudget): Promise<void> {
+    if (piSessionDir === undefined) return;
+    // Pi appends to a session file on every turn, so an old mtime means no launch is writing it, and the
+    // config keeps this TTL a day past the session-ledger TTL: no live ledger names an expired session.
+    await pruneByLastWrite({ directory: piSessionDir, entries: entries('pi-session-dir', piSessionDir, budget), match: isPiSessionFileName,
+      nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['pi-session-dir'],
+      remove: async file => { await remove(piSessionDir, file, budget); return true; },
+    });
+  }
   const sweep: Record<ExpiringClassId, (budget: SweepBudget) => Promise<void>> = {
     'exec-sdk': sweepExecSdk, 'exec-runtime': sweepRuntime, 'daemon-temp': sweepDaemon, 'durable-replica': sweepReplicas,
     'confirmed-journal': sweepJournal, 'input-preparation': sweepPreparation, 'skill-pack-old': sweepSkills,
     'reader-run': budget => sweepHome('reader-run', budget), 'agent-result': budget => sweepHome('agent-result', budget),
     'home-temp': budget => sweepHome('home-temp', budget), 'session-ledger': budget => sweepHome('session-ledger', budget),
+    'terminal-evidence': budget => sweepHome('terminal-evidence', budget), 'pi-session-dir': sweepPiSessions,
   };
 
   let measurement: Promise<Map<RetentionClassId, ClassUsage>> | undefined;
@@ -328,11 +341,11 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       }
     }
     const homes = options.home === undefined ? undefined : path.join(options.home.layout.hostRootInput(), 'agents');
-    const roots = [...new Set([storeDir, scratch.root, ...config.skillPackDataDirs.map(skillPacksRoot), homes, options.piSessionDir].filter((root): root is string => root !== undefined))];
+    const roots = [...new Set([storeDir, scratch.root, ...config.skillPackDataDirs.map(skillPacksRoot), homes, piSessionDir].filter((root): root is string => root !== undefined))];
     const topRoots = roots.filter(root => !roots.some(other => other !== root && inside(other, root)));
     const replicaStates = new Map<string, Promise<boolean>>();
     async function classify(file: string, stat: Stats): Promise<RetentionClassId> {
-      if (options.piSessionDir !== undefined && inside(options.piSessionDir, file)) return 'pi-session-dir';
+      if (piSessionDir !== undefined && inside(piSessionDir, file)) return 'pi-session-dir';
       if (inside(execRoot, file)) return file.includes(`${path.sep}sdk${path.sep}`) ? 'exec-sdk' : file.includes(`${path.sep}runtime${path.sep}`) ? 'exec-runtime' : 'store-authority';
       if (inside(daemonRoot, file)) return 'daemon-temp';
       if (inside(replicas, file)) {
@@ -364,7 +377,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         if (stat.isFile() && relative === `.byok/results/${name}` && (AGENT_RESULT_RECORD_NAME.test(name) || AGENT_RESULT_TEMP_NAME.test(name))) return 'agent-result';
         if (relative === '.byok/agent-home.lease') return 'agent-home-lease';
         if (stat.isFile() && relative === `.byok/runtime-sessions/${name}` && isAgentSessionLedgerName(name)) return 'session-ledger';
-        if (relative.startsWith('.byok/runtime-sessions/') && path.basename(file).includes('-task-')) return 'terminal-evidence';
+        if (stat.isFile() && relative === `.byok/runtime-sessions/${name}` && isAgentTaskTerminalName(name)) return 'terminal-evidence';
         if (HOME_TEMP.test(path.basename(file)) && !relative.startsWith('.byok/runtime-sessions/')) return 'home-temp';
         return relative.startsWith('.byok/') ? 'byok-authority' : 'agent-content';
       }
@@ -398,7 +411,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       const unreached = truncated && related.every(root => unfinished.get(root) === false);
       // Empty SDK-owned classes were measured too; external unconfigured scopes and unreached roots stay explicit.
       const previous = result.get(id)!;
-      result.set(id, { ...previous, truncated, measured: !unreached && (previous.measured || !['pi-session-dir', 'agent-content', 'byok-authority', 'agent-home-lease', 'terminal-evidence', 'retired-namespace', 'confirmed-journal'].includes(id)) });
+      result.set(id, { ...previous, truncated, measured: !unreached && (previous.measured || !['agent-content', 'byok-authority', 'agent-home-lease', 'runtime-session-external', 'confirmed-journal'].includes(id)) });
     }
     const journal = options.journal();
     if (journal !== undefined) { const usage = await journal.measureUsage();
@@ -412,20 +425,23 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   function authority(id: RetentionClassId): ClassAuthority {
     const expiring = EXPIRING_CLASS_IDS.includes(id as ExpiringClassId);
     const homeScoped = ['reader-run','agent-result','home-temp','session-ledger','agent-content','byok-authority','agent-home-lease','terminal-evidence'].includes(id);
+    const ttlMs = expiring ? config.ttlMs[id as ExpiringClassId] : undefined;
     const replicaScoped = id === 'durable-replica' || id === 'durable-replica-live';
     const skillScoped = id === 'skill-pack-old' || id === 'skill-pack-current';
     const roots = id === 'exec-sdk' || id === 'exec-runtime' ? [execRoot]
       : id === 'daemon-temp' ? [daemonRoot] : replicaScoped ? [replicas]
       : homeScoped ? (options.home === undefined ? [] : [path.join(options.home.layout.hostRootInput(), 'agents')])
       : skillScoped ? config.skillPackDataDirs.map(skillPacksRoot)
-      : id === 'pi-session-dir' ? (options.piSessionDir === undefined ? [] : [options.piSessionDir])
+      : id === 'pi-session-dir' ? (piSessionDir === undefined ? [] : [piSessionDir])
+      : id === 'runtime-session-external' ? []
       : id === 'input-preparation' ? [path.join(storeDir, 'input-preparation')]
       : id === 'quarantine' ? [path.join(storeDir, 'quarantine')]
       : id === 'owned-processes' ? [path.join(storeDir, 'owned-processes')] : [storeDir];
-    return Object.freeze({ roots: Object.freeze(roots), owner: ['pi-session-dir','agent-content'].includes(id) ? 'host' : 'sdk',
-      scope: homeScoped ? 'agent-home' : replicaScoped ? 'replica' : id === 'pi-session-dir' ? 'host' : 'store',
-      ...(expiring ? { ttlMs: config.ttlMs[id as ExpiringClassId] } : {}), ...(id === 'reader-run' ? { maxEntries: AGENT_HOME_READER_RUN_MAX_RETAINED } : {}),
-      ...(id === 'agent-result' ? { maxEntries: AGENT_RESULT_MAX_RETAINED } : {}) });
+    const maxEntries = id === 'reader-run' ? AGENT_HOME_READER_RUN_MAX_RETAINED : id === 'agent-result' ? AGENT_RESULT_MAX_RETAINED : undefined;
+    return Object.freeze({ roots: Object.freeze(roots), owner: ['agent-content', 'runtime-session-external'].includes(id) ? 'host' : 'sdk',
+      scope: homeScoped ? 'agent-home' : replicaScoped ? 'replica' : ['pi-session-dir', 'runtime-session-external'].includes(id) ? 'host' : 'store',
+      bound: ttlMs === undefined ? PROTECTED_CLASS_BOUNDS[id as ProtectedClassId]
+        : Object.freeze({ kind: 'ttl' as const, ttlMs, ...(maxEntries === undefined ? {} : { maxEntries }) }) });
   }
   let lastCompactionMs: number | undefined;
   const registry = new RetentionRegistry([
