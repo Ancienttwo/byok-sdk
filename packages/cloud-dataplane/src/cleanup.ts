@@ -257,32 +257,28 @@ export class PostgresCloudCleanup {
    * letter: that row is the `recoverableFrom` floor, so the guard sits in the
    * same statement as the DELETE. A dead letter leaves `expired` only by
    * deletion, so the true highest row has no higher sibling in any snapshot.
+   * The probe after a refused DELETE only picks the error; it decides nothing.
    */
   async discardDeadLetter(tenant: TenantId, ref: DeadLetterRef): Promise<MailboxMessage> {
     assertDeadLetterRef(ref);
-    const result = await this.#pool.query<
-      (OutboxRow | { readonly [K in keyof OutboxRow]: null }) & { readonly found: boolean }
-    >(
-      `WITH target AS MATERIALIZED (
-         SELECT o.ctid,
-                EXISTS (SELECT 1 FROM outbox h
-                         WHERE h.tenant_id = o.tenant_id AND h.device_id = o.device_id
-                           AND h.state = 'expired' AND h.seq > o.seq) AS below_floor
-           FROM outbox o
-          WHERE o.tenant_id = $1 AND o.device_id = $2 AND o.seq = $3::bigint
-            AND o.state = 'expired'
-          FOR UPDATE
-       ), removed AS (
-         DELETE FROM outbox WHERE ctid IN (SELECT ctid FROM target WHERE below_floor)
-         RETURNING ${OUTBOX_COLUMNS}
-       )
-       SELECT removed.*, EXISTS (SELECT 1 FROM target) AS found
-         FROM (SELECT 1) AS one LEFT JOIN removed ON true`,
+    const removed = await this.#pool.query<OutboxRow>(
+      `DELETE FROM outbox o
+        WHERE o.tenant_id = $1 AND o.device_id = $2 AND o.seq = $3::bigint
+          AND o.state = 'expired'
+          AND EXISTS (SELECT 1 FROM outbox h
+                       WHERE h.tenant_id = o.tenant_id AND h.device_id = o.device_id
+                         AND h.state = 'expired' AND h.seq > o.seq)
+        RETURNING ${OUTBOX_COLUMNS}`,
       [tenant, ref.deviceId, ref.seq],
     );
-    const row = result.rows[0]!;
-    if (row.seq !== null) return toMailboxMessage(row as OutboxRow);
-    if (!row.found) throw deadLetterMissing(ref);
+    const row = removed.rows[0];
+    if (row !== undefined) return toMailboxMessage(row);
+    const present = await this.#pool.query(
+      `SELECT 1 FROM outbox
+        WHERE tenant_id = $1 AND device_id = $2 AND seq = $3::bigint AND state = 'expired'`,
+      [tenant, ref.deviceId, ref.seq],
+    );
+    if (present.rows.length === 0) throw deadLetterMissing(ref);
     throw new CloudCleanupError(
       'cleanup_dead_letter_is_recovery_floor',
       `Expired mailbox row ${ref.deviceId}/${String(ref.seq)} is the device's recoverableFrom floor and cannot be discarded.`,

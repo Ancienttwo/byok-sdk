@@ -332,18 +332,18 @@ Current behavior:
 - `PostgresRequestReceiptStore.collectExpired` returns at once and removes no row, because the request prefix list is empty
   (`packages/cloud-dataplane/src/stores/receipts.ts:45-48`).
 - `runMaintenance` takes a complete retention policy from the caller
-  (`packages/cloud/src/maintenance.ts:52`, `packages/cloud/src/maintenance.ts:93-95`).
-  It calls `collectExpired` in its `receipts` step (`packages/cloud/src/maintenance.ts:111`).
+  (`packages/cloud/src/maintenance.ts:97`, `packages/cloud/src/maintenance.ts:141-144`).
+  It calls `collectExpired` in its `receipts` step (`packages/cloud/src/maintenance.ts:163`).
   So `requestReceiptRetentionMs` removes no receipt.
-- With `DEFAULT_RETENTION_POLICY` (`packages/cloud/src/maintenance.ts:15-20`), the `mailbox` step deletes acked rows after 1 day.
+- With `DEFAULT_RETENTION_POLICY` (`packages/cloud/src/maintenance.ts:23-29`), the `mailbox` step deletes acked rows after 1 day.
   It marks pending rows older than 7 days as `expired`. An expired row keeps its body
-  (`packages/cloud/src/maintenance.ts:104-105`, `packages/cloud/src/maintenance.ts:110`,
-  `packages/cloud-dataplane/src/stores/core/mailbox.ts:322-332`).
+  (`packages/cloud/src/maintenance.ts:153-155`, `packages/cloud/src/maintenance.ts:162`,
+  `packages/cloud-dataplane/src/stores/core/mailbox.ts:320-371`).
 - Automatic retention deletes an expired row (a dead letter) once it is older than
   `mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs` (7 + 30 days by default), except the
   highest-seq dead letter of each device, which stays as its `recoverableFrom` floor (#1115).
   Before that, only the operator call `discardDeadLetter` or tenant erasure deletes it
-  (`packages/cloud-dataplane/src/cleanup.ts`, `packages/cloud-dataplane/src/tenant-erasure.ts:42`).
+  (`packages/cloud-dataplane/src/cleanup.ts:262-286`, `packages/cloud-dataplane/src/tenant-erasure.ts:44`).
   `discardDeadLetter` refuses the floor row with `cleanup_dead_letter_is_recovery_floor`; tenant erasure removes it with the rest of the tenant.
   `PostgresCloudCleanup` ships from the package root, not from `./runtime`
   (`packages/cloud-dataplane/src/index.ts:56-59`, `packages/cloud-dataplane/README.md:94-97`).
@@ -356,7 +356,7 @@ Current behavior:
   (`packages/cloud/src/cloud.ts:311`, `packages/cloud-dataplane/src/stores/proof-receipts.ts:104`).
   Without it the step reports `not-configured` and the table keeps every row.
   With it the step deletes rows recorded more than `proofReceiptRetentionMs` before `now`: 24 hours by default,
-  at least 15 minutes, checked at construction (`packages/cloud/src/maintenance.ts:46-61`).
+  at least 15 minutes, checked at construction (`packages/cloud/src/maintenance.ts:48-70`).
   Within the retention a `requestId` stays single-use.
 
 What the kept rows hold:

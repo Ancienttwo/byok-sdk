@@ -1722,7 +1722,7 @@ interface TenantStorageUsage {
 }
 ```
 
-mailbox bytes 不在 `TenantStorageUsage` 里。它只有一个权威：保留的 mailbox 行。用量由 `MailboxStore.readUsage(tenant)` 对租户的 `pending` 行求 `SUM(byteSize)`；`acked` 与 `expired` 行仍保留，但不占配额，丢弃死信也不释放配额（#1115）；`limited` 追加在插入行的同一个串行单元里检查 `mailboxLimitBytes`，超限返回 `storage_quota_exceeded`，没有 entitlement 返回 `storage_entitlement_missing`。只有任务的取消行（`cancellation`）豁免限额，但仍计入用量。删除行不做任何记账（#411）。
+mailbox bytes 不在 `TenantStorageUsage` 里。它只有一个权威：保留的 mailbox 行。用量由 `MailboxStore.readUsage(tenant)` 对租户的 `pending` 行求 `SUM(byteSize)`；`acked` 行与 dead-letter 窗口内的 `expired` 行仍保留，但不占配额，丢弃或回收死信也不释放配额（#1115）；`limited` 追加在插入行的同一个串行单元里检查 `mailboxLimitBytes`，超限返回 `storage_quota_exceeded`，没有 entitlement 返回 `storage_entitlement_missing`。只有任务的取消行（`cancellation`）豁免限额，但仍计入用量。删除行不做任何记账（#411）。
 
 Host 侧的 offer 追加被拒时，attempt 已经先于追加打开（`offered`），设备还看不到它。cloud 抛 `TaskOfferAppendRefusedError`（code `task_offer_append_refused`），`taskId` 指向这个 attempt，`cause` 保留存储层原错误（如 `storage_quota_exceeded`）。Host 没传 `taskId` 时也能拿到 cloud 分配的 id：用同一 `taskId` 和同一 payload 重试，会收敛到同一个 offer 和同一个 message id；也可以直接 `cancelTask`，取消不受限额约束（#387）。
 
@@ -1774,7 +1774,7 @@ task admission 必须按 `limits.maxOutputBytes` 或产品给定预算预留 ter
 | 达 hard limit | 拒绝新的 durable object/inline write；允许读、删、导出、usage 查询、套餐更新与已预留的提交 |
 | 套餐降级后超限 | 进入配置的 grace；不删现有数据；grace 结束后阻止新写，直到用户删除或扩容 |
 
-自动 cleanup 只回收：expired hints/nonces、分类表中的 request receipts（当前为空）、已 ack mailbox、expired reservation、R2 orphan，以及明确过期的 cache/temporary object。用户的 durable truth、board、memory、profile 与 terminal 不因为 quota 满而被自动删除。
+自动 cleanup 只回收：expired hints/nonces、分类表中的 request receipts（当前为空）、已 ack mailbox、超过 dead-letter 窗口的 mailbox 死信（每个 device seq 最高的一条除外）、expired reservation、R2 orphan，以及明确过期的 cache/temporary object。用户的 durable truth、board、memory、profile 与 terminal 不因为 quota 满而被自动删除。
 
 R2 GC 使用 tombstone 加 reconcile：
 

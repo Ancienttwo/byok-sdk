@@ -221,8 +221,11 @@ Migration `0031_mailbox_dead_letter_retention.sql` replaces 0023's covering
 index over every retained row with `outbox_tenant_pending_bytes_idx`, a partial
 covering index on `(tenant_id) INCLUDE (byte_size) WHERE state = 'pending'`
 that matches that sum. Like 0023, it runs inside the migration transaction (no
-`CONCURRENTLY`), so outbox writes block while it builds; the build time grows
-with the pending rows. 0031 also adds
+`CONCURRENTLY`). The build scans the whole outbox heap, every row in every
+state, and dead letters were never deleted before this release, so its time
+grows with the retained outbox, not the pending rows. Outbox writes wait for
+the build (SHARE lock); reads continue. The old index is dropped after the new
+one is built, so reads block only briefly at that final drop. 0031 also adds
 `tenant_retention_policy.mailbox_dead_letter_retention_ms`; existing policies
 take 30 days.
 

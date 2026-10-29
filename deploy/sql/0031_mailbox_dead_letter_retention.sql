@@ -19,8 +19,12 @@
 --    `outbox_retention_idx` (0002).
 --
 -- `CONCURRENTLY` is not available here: the runner applies each file in one
--- transaction (packages/cloud-dataplane `src/migrate.ts`). Outbox writes wait
--- while the index builds, in time proportional to the pending rows.
+-- transaction (packages/cloud-dataplane `src/migrate.ts`). The build scans the
+-- whole outbox heap, every row in every state, and no release before this one
+-- deleted dead letters, so it takes time proportional to the retained outbox.
+-- It holds a SHARE lock: outbox writes wait for it, reads continue. The old
+-- index is dropped last, so the ACCESS EXCLUSIVE lock that DROP INDEX takes
+-- blocks reads only from the drop to the commit right after it.
 -- Migrations are forward-only. Roll back the application; this stays.
 
 ALTER TABLE tenant_retention_policy
@@ -38,8 +42,8 @@ ALTER TABLE tenant_retention_policy
     AND object_orphan_grace_ms >= 0
   );
 
-DROP INDEX outbox_tenant_bytes_idx;
-
 CREATE INDEX outbox_tenant_pending_bytes_idx
   ON outbox (tenant_id) INCLUDE (byte_size)
   WHERE state = 'pending';
+
+DROP INDEX outbox_tenant_bytes_idx;
