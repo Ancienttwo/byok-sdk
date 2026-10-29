@@ -12556,7 +12556,7 @@ declare const ERROR_MESSAGES: {
     readonly service_unit_unmarked: 'A service unit this SDK did not generate exists at the unit path. Re-run install with replaceUnmarked (CLI: --replace-unmarked) to replace it, or remove it with the tool that installed it.';
     readonly lifecycle_owner_conflict: 'Another lifecycle owner of this product manages autostart. Uninstall through that owner first.';
     readonly lifecycle_owner_unreadable: 'The lifecycle owner record in the store cannot be read; preserve it for inspection.';
-    readonly lifecycle_owner_busy: 'Another lifecycle operation or store relocation for this product store is in progress. Run it again when that one has finished.';
+    readonly lifecycle_owner_busy: 'Another service lifecycle operation or local-state relocation is in progress. Run it again when that one has finished.';
     readonly invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.';
 };
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
@@ -12604,21 +12604,25 @@ export declare function readServiceLifecycleOwner(storeDir: string, fs?: Service
     service: string;
 } | undefined>;
 /**
- * Runs `operation` holding the store's cross-process mutation gate
- * (`util/path-mutation-gate.ts`, scope `store`, which store relocation also
- * holds). Every owner-record mutation reads, compares and writes inside one
- * hold, so a remove or replace acts on the record this process read and never
- * on a successor's. A held gate fails at once with `lifecycle_owner_busy`; the
- * gate frees itself when its holder process exits.
+ * Runs `operation` holding the cross-process `service-lifecycle` mutation
+ * gate (`util/path-mutation-gate.ts`): one per user, with no target path,
+ * like the per-user namespace of the service manager it guards. Every
+ * owner-record mutation reads, compares and writes inside one hold, so a
+ * remove or replace acts on the record this process read and never on a
+ * successor's. It is never the `store` gate: a managed install holds this one
+ * while it waits for the daemon it starts, and that daemon takes `store`.
+ * Local-state relocation takes this gate before `store`, so the order is
+ * always `service-lifecycle` then `store`. A held gate fails at once with
+ * `lifecycle_owner_busy`; the gate frees itself when its holder process exits.
  *
  * @internal
  */
-export declare function withServiceOwnerGate<T>(storeDir: string, operation: () => Promise<T>): Promise<T>;
+export declare function withServiceOwnerGate<T>(operation: () => Promise<T>): Promise<T>;
 /**
  * Records `owner` as the product's lifecycle owner. Idempotent for the same
  * owner; throws `lifecycle_owner_conflict` when another owner holds it and
- * `lifecycle_owner_busy` while another lifecycle operation on the store is in
- * progress. An App that sets autostart through its own mechanism (a login
+ * `lifecycle_owner_busy` while another service lifecycle operation or a
+ * local-state relocation is in progress. An App that sets autostart through its own mechanism (a login
  * item) claims here too, so the CLI's `install` refuses instead of adding a
  * second one.
  */
@@ -12633,7 +12637,8 @@ export declare function claimHeldServiceLifecycleOwner(input: ServiceLifecycleOw
 /**
  * Removes the owner record when `owner` holds it; throws
  * `lifecycle_owner_conflict` when another owner does and `lifecycle_owner_busy`
- * while another lifecycle operation on the store is in progress.
+ * while another service lifecycle operation or a local-state relocation is in
+ * progress.
  */
 export declare function releaseServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs?: ServiceOwnerFs): Promise<void>;
 /**

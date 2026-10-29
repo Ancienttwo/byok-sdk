@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1857205,
+      "budgetBytes": 1869854,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -105,7 +105,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 341858,
+      "budgetBytes": 341926,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -369,7 +369,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 332269,
+      "budgetBytes": 332337,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -527,7 +527,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 436216,
+      "budgetBytes": 436284,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -800,7 +800,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 394955,
+      "budgetBytes": 395023,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2215,7 +2215,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1805221,
+      "budgetBytes": 1818454,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

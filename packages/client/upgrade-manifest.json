@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "6dafd90f5cb71f37cf2b7e6d6b4172ee7977f2c4a96f8d49ef297270676dee76"
+    "snapshotSha256": "4fe69ac882400c498b6f6db73629a776c37fe32a556f0fbaeacc935ef9cb18e7"
   },
   "configFields": {
     "status": "tracked",
@@ -450,7 +450,7 @@
     {
       "id": "service-units-library-api",
       "impact": "breaking",
-      "summary": "Service units are one library API for the CLI and embedded Hosts (#1097). ServiceDefinition requires storeDir and owner; agentServiceDefinition builds the byok-agent definition that `byok-agent install` uses. A unit names only a stable launcher (<storeDir>/service/<name>.launcher.sh on macOS/Linux; the installed WinSW <name>.exe on Windows) and carries an SDK marker. ServiceLifecycle gains inspect() (absent/exact/repairable/foreign) and repair(); status() adds unit and logs. A foreign (marker-less) unit is never changed: install/repair/uninstall/start/stop throw ServiceUnitError service_unit_unmarked unless install({ replaceUnmarked: true }) (CLI --replace-unmarked). ServiceInstallOptions.program is removed; pass the program in the definition. One lifecycle owner per store (claim/read/releaseServiceLifecycleOwner, lifecycle_owner_conflict). Exit-code contract EXIT_CODE_CONTRACT: only exit 0 stops a service; systemd units now use Restart=always with RestartPreventExitStatus=0. Under --service the daemon writes its own rotated <logDir>/daemon.log (DAEMON_LOG_LIMITS); the redirect files are renamed service-stdout.log/service-stderr.log and bounded (SERVICE_REDIRECT_LIMITS); WinSW rolls by size. generateLaunchdPlist/generateSystemdUnit take launcherPath and workingDirectory instead of program. DiagnosticsSnapshot and support bundles gain log sizes (no paths); exportDeviceSupportBundle and `support-bundle` refuse an output inside the store. Migration: a unit installed by 0.31 or earlier has no marker; replace it once with `byok-agent install --replace-unmarked`, or remove it with the 0.31 CLI's `uninstall` first. A Host that built ServiceDefinition adds storeDir and owner.",
+      "summary": "Service units are one library API for the CLI and embedded Hosts (#1097). ServiceDefinition requires storeDir and owner; agentServiceDefinition builds the byok-agent definition that `byok-agent install` uses. A unit names only a stable launcher (<storeDir>/service/<name>.launcher.sh on macOS/Linux; the installed WinSW <name>.exe on Windows) and carries an SDK marker. ServiceLifecycle gains inspect() (absent/exact/repairable/foreign) and repair(); status() adds unit and logs. A foreign (marker-less) unit is never changed: install/repair/uninstall/start/stop throw ServiceUnitError service_unit_unmarked unless install({ replaceUnmarked: true }) (CLI --replace-unmarked). ServiceInstallOptions.program is removed; pass the program in the definition. One lifecycle owner per store (claim/read/releaseServiceLifecycleOwner, lifecycle_owner_conflict); every owner-record change, and install/repair/uninstall for their whole run, holds a cross-process service-lifecycle gate (one per user, one per machine on Windows; relocation takes it before its store gates), and a held gate fails at once with lifecycle_owner_busy. Exit-code contract EXIT_CODE_CONTRACT: only exit 0 stops a service; systemd units now use Restart=always with RestartPreventExitStatus=0. Under --service the daemon writes its own rotated <logDir>/daemon.log (DAEMON_LOG_LIMITS); the redirect files are renamed service-stdout.log/service-stderr.log and bounded (SERVICE_REDIRECT_LIMITS); WinSW rolls by size. generateLaunchdPlist/generateSystemdUnit take launcherPath and workingDirectory instead of program. DiagnosticsSnapshot and support bundles gain log sizes (no paths); exportDeviceSupportBundle and `support-bundle` refuse an output inside the store. Migration: a unit installed by 0.31 or earlier has no marker; replace it once with `byok-agent install --replace-unmarked`, or remove it with the 0.31 CLI's `uninstall` first. A Host that built ServiceDefinition adds storeDir and owner.",
       "migration": "docs/device-setup.md#background-service",
       "items": [
         "export:@byok-sdk/client#AgentServiceDefinitionInput",
@@ -813,6 +813,11 @@
       "entry": "agent-memory-contract-in-protocol"
     },
     {
+      "item": "export:@byok-sdk/client#AgentServiceDefinitionInput",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#ApprovalKind",
       "change": "added",
       "entry": "local-tool-approval-host-only"
@@ -828,6 +833,11 @@
       "entry": "device-store-default-dir-removed"
     },
     {
+      "item": "export:@byok-sdk/client#CreateServiceLifecycleOptions",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
       "change": "added",
       "entry": "daemon-config-schema"
@@ -836,6 +846,11 @@
       "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
       "change": "changed",
       "entry": "device-store-pairing-binding"
+    },
+    {
+      "item": "export:@byok-sdk/client#DAEMON_LOG_LIMITS",
+      "change": "added",
+      "entry": "service-units-library-api"
     },
     {
       "item": "export:@byok-sdk/client#Daemon",
@@ -903,6 +918,16 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonLog",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonLogOptions",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonMemoryHelperResolution",
       "change": "added",
       "entry": "daemon-config-schema"
@@ -931,6 +956,16 @@
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
       "change": "changed",
       "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#EXIT_CODE_CONTRACT",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ExitCode",
+      "change": "added",
+      "entry": "service-units-library-api"
     },
     {
       "item": "export:@byok-sdk/client#ExpiringClassId",
@@ -993,14 +1028,124 @@
       "entry": "pi-session-retention-lifecycle"
     },
     {
+      "item": "export:@byok-sdk/client#SERVICE_REDIRECT_LIMITS",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceDefinition",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceExitDisposition",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallOptions",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceLifecycle",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceLifecycleOwnerInput",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceLogReport",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceRepairResult",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceStatusResult",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitError",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitErrorCode",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitInspection",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitState",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#agentServiceDefinition",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#checkDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
     },
     {
+      "item": "export:@byok-sdk/client#claimServiceLifecycleOwner",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#generateLaunchdPlist",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#generateServiceLauncher",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#generateSystemdUnit",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#inspectDaemonStores",
       "change": "added",
       "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/client#inspectServiceLogs",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#openDaemonLog",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#readServiceLifecycleOwner",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#releaseServiceLifecycleOwner",
+      "change": "added",
+      "entry": "service-units-library-api"
     },
     {
       "item": "export:@byok-sdk/client#resolveHostLayout",
@@ -1016,6 +1161,11 @@
       "item": "export:@byok-sdk/client#sdkDistributionManifest",
       "change": "changed",
       "entry": "pi-subagents-installed-dependency"
+    },
+    {
+      "item": "export:@byok-sdk/client#serviceExitDisposition",
+      "change": "added",
+      "entry": "service-units-library-api"
     },
     {
       "item": "export:@byok-sdk/client#validateDaemonConfig",
