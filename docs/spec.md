@@ -2967,12 +2967,20 @@ terminal receipts, Agent message admission, acked and expired mailbox
 bodies), fences an absent terminal receipt, clears the free-text cause and
 cancel reason, deletes the ephemeral rows and the task's object references,
 and sets `archived_at`. Orphan GC then reclaims the objects. The board item is
-removed after the transaction; a task archived but not yet settled is listed
-again until it is. Archived tasks leave the board. The task row and the
+removed after the transaction, then `settle` deletes any task rows the store
+keeps outside that transaction (the embedded server's in-memory activity and
+draft rows, which a rollback could not restore) and records settlement; a task
+archived but not yet settled is listed again until it is. Archived tasks leave
+the board. The task row and the
 tombstoned receipts are the task's identity fence and are never deleted;
 only tenant deletion removes them. A replay of a stored body compares equal to
 its tombstone and a different body is still a conflict, so every device and
-Host answer stays what it was. Content reads of an archived task fail with
+Host answer stays what it was. A claim or `daemon_interrupted` recovery report
+needs the offer, which is now a tombstone; the inbound gate answers it from
+the retained fence instead: a claimed task's immutable claim snapshot, or for
+an unclaimed task the terminal receipt, which only an exact replay of the
+recorded recovery matches. An explicitly redacted task, which holds a redaction
+receipt, still refuses both. Content reads of an archived task fail with
 `task_content_redacted`; status reads stay. The step reports `archived`,
 `settled`, `refused` and `more`.
 

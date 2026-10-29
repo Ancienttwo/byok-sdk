@@ -4964,15 +4964,20 @@ export type TaskArchiveStoreResult = {
  * `codec.absent` under an absent `terminalReceiptKey`, replaces each body that
  * is not a tombstone yet (receipts in `receiptKeys`, Agent message admission
  * payload and terminal, acked and expired mailbox rows), clears the task's
- * free-text terminal cause and cancel reason, deletes its ephemeral rows and
- * the listed object references, and sets `archived_at`. It never deletes a
+ * free-text terminal cause and cancel reason, deletes the ephemeral rows the
+ * transaction holds and the listed object references, and sets `archived_at`.
+ * Rows outside the transaction go in `settle`. It never deletes a
  * mailbox row, so a device's recovery-floor dead letter stays (#1115).
  */
 export interface TaskArchiveStore {
     /** Up to `limit` units: archived tasks not yet settled first, then archivable tasks by `archive_after` ascending. */
     listWork(tenant: TenantId, input: TaskArchiveListInput): Promise<readonly TaskArchiveWork[]>;
     archive(tenant: TenantId, input: TaskArchiveStoreInput): Promise<TaskArchiveStoreResult>;
-    /** Records that the post-transaction steps are done. Idempotent. */
+    /**
+     * Runs after the board item is gone. Removes any task row the store keeps
+     * outside the archive transaction, which a rollback could not restore, then
+     * records settlement. Idempotent, and a no-op for a task not archived.
+     */
     settle(tenant: TenantId, taskId: string, settledAt: string): Promise<void>;
 }
 /** Counts in the maintenance report's `tasks` step. */

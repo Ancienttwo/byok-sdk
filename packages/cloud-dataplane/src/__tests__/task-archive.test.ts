@@ -145,19 +145,74 @@ describe.skipIf(SKIP_DATAPLANE)(`terminal-task archive on Postgres — ${SKIP_RE
       expect(await rowsMarkedBy(scope.pool, [canaryC.core, taskC])).toEqual(rowsC);
       expect(await host.core.board.get(TENANT, taskB)).toBeDefined();
 
-      // Every answer is what it was before the archive, and nothing new is stored.
-      // A replayed winning claim is refused once the offer receipt is a
-      // tombstone, exactly as after redaction (`claim_offer_mismatch`).
+      // Every answer is what it was before the archive, and nothing new is
+      // stored. The winning claim is answered from the task's claim snapshot.
       expect(before[3]).toMatchObject({ accepted: 1 });
-      expect(await replays()).toEqual([
-        ...before.slice(0, 3),
-        { status: 200, accepted: 0, rejected: 1, outcomes: [{ outcome: 'rejected', reason: 'not_permitted' }] },
-      ]);
+      expect(await replays()).toEqual(before);
       expect(await resubmit()).toBe(resubmitBefore);
       expect(await rowsMarkedBy(scope.pool, [canaryA.core])).toEqual([]);
 
       // A second run finds no work.
       expect(await maintain(host)).toEqual({ step: 'tasks', status: 'ok', archived: 0, settled: 0, refused: 0, more: false });
+    } finally {
+      await scope.dispose();
+    }
+  }, 120_000);
+
+  it('answers an unclaimed daemon_interrupted recovery replay as before the archive', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      const { host, device } = await setUp(scope);
+      const taskId = `task-recovery-${randomUUID()}`;
+      await host.cloud.submitAgentExecution(TENANT, executionInput(taskId, device.deviceId, 'instruction'));
+      const offer = (await device.poll()).find((event) => event.type === 'task.offer' && event.task_id === taskId)!;
+      const recovery = createEnvelope('task.fail', { reason: 'daemon_interrupted', retryable: false, agentRef: AGENT_REF,
+        recovery: { kind: 'daemon_interrupted', offerId: offer.id } }, { taskId });
+      expect((await device.send(recovery)).body).toMatchObject({ accepted: 1 });
+      await device.poll();
+      const before = await device.send(recovery);
+      expect(before.body).toMatchObject({ outcomes: [{ outcome: 'duplicate' }] });
+      await age(scope.pool, taskId, 91);
+
+      expect(await maintain(host)).toEqual({ step: 'tasks', status: 'ok', archived: 1, settled: 1, refused: 0, more: false });
+      expect(await archiveColumns(scope.pool, taskId)).toEqual({ archived: true, settled: true });
+      expect(await device.send(recovery)).toEqual(before);
+      // A new envelope with the same report no longer matches anything the task kept.
+      expect((await device.send(createEnvelope('task.fail', recovery.payload, { taskId }))).body)
+        .toMatchObject({ rejected: 1, outcomes: [{ outcome: 'rejected', reason: 'not_permitted' }] });
+    } finally {
+      await scope.dispose();
+    }
+  }, 120_000);
+
+  it.each(['redaction then archive', 'archive then redaction'] as const)('refuses a claim once an explicit redaction ran: %s', async (order) => {
+    const scope = await createDataplaneScope();
+    try {
+      const { host, device } = await setUp(scope);
+      const taskId = `task-redacted-${randomUUID()}`;
+      await runTask(host, device, taskId, createCanary('redacted'));
+      const claim = async () => {
+        const { outcomes, ...counts } = (await device.send(createEnvelope('task.claim',
+          { deviceId: device.deviceId, agentRef: AGENT_REF, runtime: 'codex' }, { taskId }))).body as { outcomes: { id: string }[] };
+        return { ...counts, outcomes: outcomes.map(({ id: _id, ...outcome }) => outcome) };
+      };
+      const refused = { accepted: 0, rejected: 1, outcomes: [{ outcome: 'rejected', reason: 'not_permitted' }] };
+      expect(await claim()).toMatchObject({ accepted: 1 });
+      const redact = async () => { await host.cloud.redactTasks(TENANT, { taskIds: [taskId] }); };
+      const archive = async () => {
+        await age(scope.pool, taskId, 91);
+        expect(await maintain(host)).toEqual({ step: 'tasks', status: 'ok', archived: 1, settled: 1, refused: 0, more: false });
+      };
+      if (order === 'redaction then archive') {
+        await redact();
+        expect(await claim()).toEqual(refused);
+        await archive();
+      } else {
+        await archive();
+        expect(await claim()).toMatchObject({ accepted: 1 });
+        await redact();
+      }
+      expect(await claim()).toEqual(refused);
     } finally {
       await scope.dispose();
     }
