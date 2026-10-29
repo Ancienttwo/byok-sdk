@@ -8,7 +8,7 @@ import test from 'node:test';
 import { selectImpact, knownFamilies, reviewedScripts } from './select-impact.mjs';
 import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
-import { publicManifests, EXTENSION_LOCK, PI_LOCK, PI_PACKAGES, PROTOCOL_ORACLE_LOCK } from './reviewed-content.mjs';
+import { publicManifests, EXTENSION_LOCK, PI_LOCK, PI_PACKAGES, PROTOCOL_ORACLE_LOCK, RUNTIME_CONTRACT_SCRIPT } from './reviewed-content.mjs';
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-reviewed-content-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -91,6 +91,19 @@ test('the upgrade-manifest gate admits only its exact script, test and client fi
   assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
   f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-manifest.json', 'src'] });
   assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+});
+// #1103: the client runtime contract script, exactly.
+test('the client manifest admits only the exact runtime contract script', t => {
+  const f = fixture(t), scripts = { test: 'vitest run' };
+  f.write('packages/client/package.json', { ...f.manifest, scripts });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'scripts'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  f.write('packages/client/package.json', { ...f.manifest, scripts: { ...scripts, 'test:runtime-contract': RUNTIME_CONTRACT_SCRIPT } });
+  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
+  for (const command of [`${RUNTIME_CONTRACT_SCRIPT} --passWithNoTests`, 'vitest run']) {
+    f.write('packages/client/package.json', { ...f.manifest, scripts: { ...scripts, 'test:runtime-contract': command } });
+    assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+  }
 });
 test('API entry changes select only owner and dependents; unmapped entry is refused', t => {
   const f = fixture(t);
