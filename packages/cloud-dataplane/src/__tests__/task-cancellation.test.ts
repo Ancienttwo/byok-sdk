@@ -230,6 +230,57 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
     }
   });
 
+  // #1116: a claimed task stays cancel_requested after its delivered cancel row
+  // ages out; a repeat cancel must not throw (a Host 500) or enqueue again.
+  it('replays a claimed cancellation after its acknowledged delivery is retention-deleted', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const clock = createMutableClock();
+      const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
+      const cancellations = new PostgresTaskCancellationStore(scope.pool, clock);
+      await tasks.open(TENANT, { taskId: 'task-claimed-retained', deviceId: 'device-claimed-retained' });
+      await tasks.claim(TENANT, { taskId: 'task-claimed-retained', deviceId: 'device-claimed-retained' });
+      await tasks.recordStatus(TENANT, { taskId: 'task-claimed-retained', status: 'running' });
+      const first = await cancellations.request(TENANT, {
+        taskId: 'task-claimed-retained',
+        proposedMessageId: randomUUID(),
+        reason: 'stuck runtime',
+        materialize: materializeCancellation('task-claimed-retained', 'stuck runtime'),
+      });
+      expect(first?.attempt.status).toBe('cancel_requested');
+      await scope.pool.query(
+        "UPDATE outbox SET state = 'acked' WHERE tenant_id = $1 AND device_id = $2",
+        [TENANT, 'device-claimed-retained'],
+      );
+      await scope.pool.query(
+        "DELETE FROM outbox WHERE tenant_id = $1 AND device_id = $2 AND state = 'acked'",
+        [TENANT, 'device-claimed-retained'],
+      );
+
+      let materializations = 0;
+      const replay = await cancellations.request(TENANT, {
+        taskId: 'task-claimed-retained',
+        proposedMessageId: randomUUID(),
+        reason: 'ignored retry',
+        materialize: materializeCancellation('task-claimed-retained', 'ignored retry', () => {
+          materializations += 1;
+        }),
+      });
+
+      expect(replay?.attempt).toEqual(first?.attempt);
+      expect(replay?.message).toBeUndefined();
+      expect(materializations).toBe(0);
+      const rows = await scope.pool.query<{ readonly count: string }>(
+        'SELECT count(*)::text AS count FROM outbox WHERE tenant_id = $1 AND device_id = $2',
+        [TENANT, 'device-claimed-retained'],
+      );
+      expect(rows.rows[0]?.count).toBe('0');
+    } finally {
+      await scope.dispose();
+    }
+  });
+
   it('keeps a success accepted before cancellation terminal and does not enqueue a cancel delivery', async () => {
     const scope = await createDataplaneScope();
     try {
