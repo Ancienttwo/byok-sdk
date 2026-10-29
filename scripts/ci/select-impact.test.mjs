@@ -120,6 +120,20 @@ test('client source/deleted tests select reverse dependents and only the datapla
   }
 });
 
+test('#1106: the moved K4 source still selects the example memory jobs and the K4 Windows qualification', () => {
+  for (const path of ['packages/server/src/execution-core/memory.ts', 'packages/server/src/execution-core/memory-restore.ts']) {
+    const impact = selectImpact([path]);
+    assert.ok(impact.dirs.includes('packages/server'), path);
+    assert.ok(impact.dirs.includes('examples/host-execution-core'), path);
+    assert.ok(impact.families.includes('agent-memory-export-linux'), path);
+    assert.ok(impact.families.includes('adapter-lifecycle-smoke'), path);
+  }
+  const ledger = selectImpact(['packages/server/src/execution-core/ledger.ts']);
+  assert.ok(ledger.dirs.includes('examples/host-execution-core'));
+  assert.ok(ledger.families.includes('adapter-lifecycle-smoke'));
+  assert.ok(!ledger.families.includes('agent-memory-export-linux'));
+});
+
 test('a platform family is selected only by a path it owns', () => {
   const owned = {
     'agent-memory-export-linux': 'packages/client/src/daemon/agent-memory-export.ts',
