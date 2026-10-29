@@ -12104,7 +12104,7 @@ export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: La
 import { promises as fsp } from 'node:fs';
 import { type ServiceUnitFile } from './service-unit';
 import type { ServiceDefinition, ServiceLifecycle, ServiceStatusResult } from './service-types';
-export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod' | 'link'>;
+export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
 /** The platform half of a lifecycle: where its files go and how its manager loads them. */
 export interface PlatformUnit {
     serviceName: string;
@@ -12128,7 +12128,9 @@ export interface PlatformUnit {
  * The install, repair, uninstall and status rules all three platforms share
  * (#1097): a `foreign` unit is never changed (`install` replaces it only
  * with `replaceUnmarked`), one lifecycle owner per product store, and the
- * unit and launcher are written whole on every install or repair.
+ * unit and launcher are written whole on every install or repair. install,
+ * repair and uninstall run whole inside the store's owner gate, so the owner
+ * they checked is still the owner when they write, deactivate or release.
  */
 export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs): ServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/service-environment.d.ts ====
@@ -12554,6 +12556,7 @@ declare const ERROR_MESSAGES: {
     readonly service_unit_unmarked: 'A service unit this SDK did not generate exists at the unit path. Re-run install with replaceUnmarked (CLI: --replace-unmarked) to replace it, or remove it with the tool that installed it.';
     readonly lifecycle_owner_conflict: 'Another lifecycle owner of this product manages autostart. Uninstall through that owner first.';
     readonly lifecycle_owner_unreadable: 'The lifecycle owner record in the store cannot be read; preserve it for inspection.';
+    readonly lifecycle_owner_busy: 'Another lifecycle operation or store relocation for this product store is in progress. Run it again when that one has finished.';
     readonly invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.';
 };
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
@@ -12590,7 +12593,7 @@ export interface ServiceLifecycleOwnerInput {
     /** The service name the owner registers. */
     service: string;
 }
-export type ServiceOwnerFs = Pick<typeof fsp, 'readFile' | 'writeFile' | 'rename' | 'rm' | 'mkdir' | 'link'>;
+export type ServiceOwnerFs = Pick<typeof fsp, 'readFile' | 'writeFile' | 'rename' | 'rm' | 'mkdir'>;
 /**
  * The lifecycle owner recorded for this product's store (#1097): the one
  * party (the CLI, or the product's App) that sets autostart. Undefined when
@@ -12601,16 +12604,45 @@ export declare function readServiceLifecycleOwner(storeDir: string, fs?: Service
     service: string;
 } | undefined>;
 /**
+ * Runs `operation` holding the store's cross-process mutation gate
+ * (`util/path-mutation-gate.ts`, scope `store`, which store relocation also
+ * holds). Every owner-record mutation reads, compares and writes inside one
+ * hold, so a remove or replace acts on the record this process read and never
+ * on a successor's. A held gate fails at once with `lifecycle_owner_busy`; the
+ * gate frees itself when its holder process exits.
+ *
+ * @internal
+ */
+export declare function withServiceOwnerGate<T>(storeDir: string, operation: () => Promise<T>): Promise<T>;
+/**
  * Records `owner` as the product's lifecycle owner. Idempotent for the same
- * owner; throws `lifecycle_owner_conflict` when another owner holds it. An
- * App that sets autostart through its own mechanism (a login item) claims
- * here too, so the CLI's `install` refuses instead of adding a second one.
- * A first claim publishes the record with a hard link, which fails when the
- * record exists, so of two concurrent claimants only one wins.
+ * owner; throws `lifecycle_owner_conflict` when another owner holds it and
+ * `lifecycle_owner_busy` while another lifecycle operation on the store is in
+ * progress. An App that sets autostart through its own mechanism (a login
+ * item) claims here too, so the CLI's `install` refuses instead of adding a
+ * second one.
  */
 export declare function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs?: ServiceOwnerFs): Promise<void>;
-/** Removes the owner record when `owner` holds it; throws `lifecycle_owner_conflict` when another owner does. */
+/**
+ * {@link claimServiceLifecycleOwner} for a caller already inside
+ * {@link withServiceOwnerGate}.
+ *
+ * @internal
+ */
+export declare function claimHeldServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs: ServiceOwnerFs): Promise<void>;
+/**
+ * Removes the owner record when `owner` holds it; throws
+ * `lifecycle_owner_conflict` when another owner does and `lifecycle_owner_busy`
+ * while another lifecycle operation on the store is in progress.
+ */
 export declare function releaseServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs?: ServiceOwnerFs): Promise<void>;
+/**
+ * {@link releaseServiceLifecycleOwner} for a caller already inside
+ * {@link withServiceOwnerGate}.
+ *
+ * @internal
+ */
+export declare function releaseHeldServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs: ServiceOwnerFs): Promise<void>;
 export {};
 // ==== @byok-sdk/client dist/lifecycle/systemd.d.ts ====
 import { type Runner } from './exec-runner';
