@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { DAEMON_OWNER_FILENAME } from '../daemon/daemon-owner';
+import { AuthManager } from '../daemon/auth-manager';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
 import { runUnpairCommand } from '../bin/commands/unpair';
 import type { RuntimeDetectResult } from '../types';
@@ -95,7 +96,12 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
   }
   /** Runs queued lifecycle work to the end, then proves nothing took the lease again. */
   async function expectStoppedForGood(current: Daemon): Promise<void> {
-    await current.stop();
+    // Observe the requested shutdown without a second stop, which could hide a queued restart.
+    await new Promise((resolve) => setImmediate(resolve));
+    await vi.waitFor(async () => {
+      expect(leaseHeld()).toBe(false);
+      expect(await gone()).toBe(true);
+    }, { timeout: 5_000 });
     expect(leaseHeld()).toBe(false);
     expect(await gone()).toBe(true);
     expect(current.status().lifecycle.phase).not.toBe('running');
@@ -137,6 +143,9 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     expect(await violations).toBe(0);
     expect(await client.request('approvals.list', {})).toEqual({ approvals: [] });
     expect(await fs.readFile(controlTokenPath(storeDir), 'utf8')).toBe(token);
+    const newer = await connect();
+    expect(await newer.request('approvals.list', {})).toEqual({ approvals: [] });
+    newer.close();
     client.close();
   }, 15_000);
 
@@ -200,7 +209,10 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     client.close();
     await vi.waitFor(async () => expect(await gone()).toBe(true), { timeout: 5_000 });
     expect(leaseHeld()).toBe(false);
+    const resume = vi.spyOn(AuthManager.prototype, 'resume');
     deferred[0]!();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(resume).not.toHaveBeenCalled();
     await expectStoppedForGood(current);
   }, 15_000);
 
