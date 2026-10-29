@@ -35,10 +35,11 @@ OS boundary the Host supplies.
 
 ### Cross-cutting facts that apply to all three
 
-- **The full environment is inherited.** `buildRuntimeEnv` removes only
-  `CLAUDECODE` and `BYOK_*`; provider keys and other secrets in the daemon's
-  environment reach every agent child (*Environment inheritance*). A spawned
-  agent can read anything its OS identity allows.
+- **The user's login-shell environment is inherited** (#1095).
+  `buildRuntimeEnvironment` removes only `CLAUDECODE` and `BYOK_*`; provider
+  keys and other secrets the user's shell exports reach every agent child,
+  while a variable the Host sets reaches it only through `pass` (*Runtime
+  environment*). A spawned agent can read anything its OS identity allows.
 - **Proxy variables pass through by default**, including any credential
   embedded in a proxy URL — a deliberate, explicitly-costed trade-off
   (*Proxy variables pass through, deliberately*).
