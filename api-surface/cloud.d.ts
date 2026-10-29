@@ -3755,7 +3755,11 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  *
  * A removed device is retired through the task state and the mailbox the
  * composition hands in: its unfinished attempts are settled and its pending
- * rows dead-lettered (see `DeviceDirectory` in `../ports`).
+ * rows dead-lettered (see `DeviceDirectory` in `../ports`). Registration and
+ * revocation run one at a time, so a retirement never overlaps a later
+ * registration of the same device id, and a failed mailbox expiry puts the
+ * registrations back before anything else moved: the in-memory stand-in for
+ * the SQL stores' one transaction (#1119).
  */
 import { type MailboxStore, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports';
