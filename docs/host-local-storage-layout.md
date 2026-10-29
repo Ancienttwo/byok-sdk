@@ -2,8 +2,9 @@
 
 ## Canonical layout
 
-An embedding product supplies one absolute `hostStorageRoot`. BYOK SDK owns
-the only Agent-home composition rule:
+For configuration, directory ownership and operator setup, use the
+[device setup guide](device-setup.md#directory-ownership). The contract below
+defines the SDK-owned contents and containment rules.
 
 ```text
 <hostStorageRoot>/
@@ -27,9 +28,7 @@ the only Agent-home composition rule:
       ...                             opaque Agent files
 ```
 
-For Salesko, `hostStorageRoot` may be `~/.salesko` after the host expands it to
-an absolute path. Salesko must not join `agents/<agentId>` itself. The SDK
-validates the typed `AgentRef`, composes that suffix, creates missing
+The SDK validates the typed `AgentRef`, composes that suffix, creates missing
 directories and seed assets, resolves existing ancestors and real paths,
 rejects symlink/traversal/cross-Agent escape, and seals the canonical Agent
 home as the writer's runtime cwd. A `homeAccess: 'memory-reader'` Attempt runs

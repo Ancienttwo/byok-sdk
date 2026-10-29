@@ -483,6 +483,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     // #1102: the upgrade-manifest gate command, exactly.
     if (before.scripts?.['check:upgrade-manifest'] === undefined
       && after.scripts?.['check:upgrade-manifest'] === UPGRADE_MANIFEST_GATE) delete after.scripts['check:upgrade-manifest'];
+    // #1094: admit only the exact additive setup-doc generator/check commands.
+    for (const [name, command] of Object.entries({
+      'docs:device-setup': 'node scripts/docs/device-setup.mjs --write',
+      'check:device-setup': 'node scripts/docs/device-setup.mjs',
+    })) {
+      if (before.scripts?.[name] === undefined && after.scripts?.[name] === command) delete after.scripts[name];
+    }
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
     if (!oldCommand?.startsWith(prefix) || !newCommand?.startsWith(prefix)) throw new Error('Unreviewed test command');
@@ -490,7 +497,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     let index = 0;
     for (const test of newTests) {
       if (test === oldTests[index]) { index++; continue; }
-      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || test === UPGRADE_MANIFEST_TEST)
+      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || test === UPGRADE_MANIFEST_TEST || test === 'scripts/docs/device-setup.test.mjs')
         || oldTests.includes(test) || !existsSync(resolve(cwd, test))) throw new Error('Only existing CI contract tests may be added');
     }
     if (index !== oldTests.length || new Set(newTests).size !== newTests.length) throw new Error('Existing tests must remain in order without duplicates');
