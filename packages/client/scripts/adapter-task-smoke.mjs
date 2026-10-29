@@ -156,20 +156,22 @@ async function smokeNpmShimDetection(client, shimBin, hostPath) {
   const adapters = { claude: client.ClaudeAdapter, codex: client.CodexAdapter };
   const overrides = { claude: 'BYOK_CLAUDE_BIN', codex: 'BYOK_CODEX_BIN' };
   const shimFile = (runtime) => path.join(shimBin, process.platform === 'win32' ? `${runtime}.cmd` : runtime);
+  // The shim directory joins the live PATH below, so detection reads PATH through the public policy.
+  const runtimeEnvironment = { pass: ['PATH'] };
   const failures = [];
   for (const runtime of ['claude', 'codex']) {
     process.env.PATH = `${shimBin}${path.delimiter}${hostPath}`;
     if (process.platform === 'win32') {
       console.log(`npm shim ${runtime}: raw execFile by name -> ${rawExecFileCode(runtime)}; by .cmd path -> ${rawExecFileCode(shimFile(runtime))}`);
     }
-    const viaPath = await new adapters[runtime]().detect();
+    const viaPath = await new adapters[runtime]({ runtimeEnvironment }).detect();
     if (viaPath.kind !== 'available' || viaPath.version !== npmShimVersion) {
       failures.push(`${runtime} npm shim on PATH: ${JSON.stringify(viaPath)}`);
     }
     process.env.PATH = hostPath;
     process.env[overrides[runtime]] = shimFile(runtime);
     try {
-      const viaOverride = await new adapters[runtime]().detect();
+      const viaOverride = await new adapters[runtime]({ runtimeEnvironment }).detect();
       if (viaOverride.kind !== 'available' || viaOverride.version !== npmShimVersion) {
         failures.push(`${runtime} npm shim as ${overrides[runtime]}: ${JSON.stringify(viaOverride)}`);
       }
@@ -297,13 +299,17 @@ try {
           descriptor: adapter.descriptor,
           detect: async () => ({ kind: 'available', version: 'fixture' }),
           prepare: (input) => adapter.prepare(input),
+          runtimeEnvironment: () => adapter.runtimeEnvironment(),
         }
       : adapter;
   let piSpawnCount = 0;
+  // Each fake reads its lifecycle variables, set on the live environment below, from its child environment.
+  const fakeEnvironment = (runtime) => ({ pass: ['PATH', `FAKE_${runtime.toUpperCase()}_*`] });
   const adapters = [
-    new client.ClaudeAdapter({ resolveBin: () => ({ command: runtimeShim('claude'), source: 'path' }) }),
-    new client.CodexAdapter({ resolveBin: () => ({ command: runtimeShim('codex'), source: 'path' }) }),
+    new client.ClaudeAdapter({ runtimeEnvironment: fakeEnvironment('claude'), resolveBin: () => ({ command: runtimeShim('claude'), source: 'path' }) }),
+    new client.CodexAdapter({ runtimeEnvironment: fakeEnvironment('codex'), resolveBin: () => ({ command: runtimeShim('codex'), source: 'path' }) }),
     lifecycleAdapter(new client.PiAdapter({
+      runtimeEnvironment: fakeEnvironment('pi'),
       resolveBin: () => ({ command: fake('pi'), source: 'path' }),
       spawnFn: (command, args, options) => {
         piSpawnCount += 1;

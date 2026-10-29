@@ -72,7 +72,7 @@ async function setup(env: NodeJS.ProcessEnv = {}, options: Partial<HermesAdapter
   const root = await tempDir('bh-');
   const workspaceDir = await tempDir('bw-');
   const receipt = path.join(await tempDir('br-'), 'receipt.jsonl');
-  const adapter = new HermesAdapter({ home: root, resolveBin: () => ({ command, source: 'path' }), ...options });
+  const adapter = new HermesAdapter({ home: root, resolveBin: () => ({ command, source: 'path' }), runtimeEnvironment: { pass: ['FAKE_HERMES_*'] }, ...options });
   const resources = { workspaceDir, env: { PATH: process.env.PATH, HOME: os.homedir(), ...platformEnv, FAKE_HERMES_RECEIPT: receipt, ...env } };
   const open = (offer: RuntimeTaskInput = task, extra: Partial<typeof resources> & Record<string, unknown> = {}) => {
     const opening = startPreparedOperation(adapter, offer, { ...resources, ...extra }).then((session) => {
