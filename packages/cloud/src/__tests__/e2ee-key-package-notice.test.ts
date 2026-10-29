@@ -114,6 +114,29 @@ describe('e2ee.key_package.available after a key package put', () => {
     expect(await env.notices(TENANT_A, 'device-revoked')).toEqual([]);
   });
 
+  it('skips a recipient retired after the device list was read and still notifies the others (#1160)', async () => {
+    const env = setup();
+    const sender = await newMember();
+    const retiring = await env.device(TENANT_A, 'device-retiring', [SEALED_PAYLOAD_CAPABILITY]);
+    const kept = await env.device(TENANT_A, 'device-kept', [SEALED_PAYLOAD_CAPABILITY]);
+    const key = generateScopeKey();
+    const packages = [await keyPackage(TENANT_A, sender, retiring, 1, key), await keyPackage(TENANT_A, sender, kept, 1, key)];
+    // The revoke lands after the notice's capability check, as the first notice reaches the mailbox.
+    const append = env.base.core.mailbox.append.bind(env.base.core.mailbox);
+    env.base.core.mailbox.append = async (tenant, input) => {
+      if (input.deviceId === 'device-retiring') {
+        env.base.core.mailbox.append = append;
+        await env.cloud.revokeDevice(TENANT_A, 'device-retiring');
+      }
+      return append(tenant, input);
+    };
+
+    expect(await env.cloud.putScopeKeyPackages(TENANT_A, { packages })).toEqual({ stored: 2, skippedDeviceIds: [] });
+    expect(env.base.core.mailbox.append).toBe(append);
+    expect(await env.notices(TENANT_A, 'device-retiring')).toEqual([]);
+    expect((await env.notices(TENANT_A, 'device-kept')).map(row => row.envelope.payload)).toEqual([{ scopeId: 'scope-1', epoch: 1 }]);
+  });
+
   it('enqueues again on a replayed put and gets the same mailbox row back', async () => {
     const env = setup();
     const sender = await newMember();
