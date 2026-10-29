@@ -12353,8 +12353,8 @@ export {};
  * missing.
  *
  * #1095: this capture is also the base of every runtime environment
- * (`runtime/environment.ts`). {@link loginShellSnapshot} runs the passwd login
- * shell (`os.userInfo().shell`, never `$SHELL`) once per process as
+ * (`runtime/environment.ts`). {@link loginShellSnapshot} runs the account's
+ * login shell once per process as
  * `<shell> -i -l -c 'printf %s B; /usr/bin/env -0; printf %s E'`, with B and
  * E random per-run nonces, and keeps the NUL-separated entries found between
  * them. Bytes outside the frame — rc chatter on stdout — are ignored. The
@@ -12364,10 +12364,18 @@ export {};
  * {@link LOGIN_SHELL_ENV_MAX_BYTES}. However the capture ends, the shell's
  * whole process group is SIGKILLed.
  *
+ * The shell is read from the account database by uid, never from `$SHELL`
+ * (Bun's `os.userInfo().shell` returns `$SHELL`, so a Host variable would
+ * choose the shell): `/usr/bin/id -P <uid>` on darwin (Open Directory),
+ * `/usr/bin/getent passwd <uid>` on linux (NSS). The entry's uid field must be
+ * this process's uid and its last field an absolute path; anything else,
+ * including another platform, fails closed as `account-shell-unavailable`.
+ *
  * The shell does not start from this process's environment: an embedding
  * Host's own variables would come back out of `env -0`. It starts from
- * {@link LOGIN_SHELL_SEED_NAMES} copied from this process and `PATH` set to
- * {@link LOGIN_SHELL_SEED_PATH}, what launchd and login(1) give a session;
+ * {@link LOGIN_SHELL_SEED_NAMES} copied from this process, `PATH` set to
+ * {@link LOGIN_SHELL_SEED_PATH} and `SHELL` set to the account shell, what
+ * launchd and login(1) give a session;
  * everything else in the snapshot is what the user's rc files produced.
  * `BYOK_*` names found in the capture are dropped: rc files never set SDK
  * control variables. The snapshot never changes `process.env`.
@@ -12392,7 +12400,7 @@ export declare const LOGIN_SHELL_ENV_MAX_BYTES: number;
 export declare const LOGIN_SHELL_SEED_NAMES: readonly string[];
 /** The login shell's starting `PATH`; `/etc/zprofile` (path_helper) and `/etc/profile` build the rest. */
 export declare const LOGIN_SHELL_SEED_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
-export declare const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES: readonly ['unsupported-shell', 'spawn-failed', 'timeout', 'output-too-large', 'bad-frame', 'shell-exit-nonzero'];
+export declare const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES: readonly ['account-shell-unavailable', 'unsupported-shell', 'spawn-failed', 'timeout', 'output-too-large', 'bad-frame', 'shell-exit-nonzero'];
 export type ServiceEnvironmentUnavailableCode = (typeof SERVICE_ENVIRONMENT_UNAVAILABLE_CODES)[number];
 /**
  * Where the runtime environment base came from. `inherited`: no snapshot has
@@ -12428,8 +12436,10 @@ export interface ServiceEnvironmentRecord {
  * @internal
  */
 export interface ApplyLoginShellEnvironmentOptions {
-    /** Test seam: an absolute shell path instead of the passwd shell. */
+    /** Test seam: an absolute shell path instead of the account shell, past the supported-shell gate. */
     shell?: string;
+    /** Test seam: the account-database command (absolute path, then arguments) instead of the platform's. */
+    accountCommand?: readonly [string, ...string[]];
     /** Test seam: the environment the seed is copied from (and, for `captureAndApply`, the one replaced). Defaults to `process.env`. */
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
@@ -13310,7 +13320,8 @@ export type RuntimeEnvironmentPolicy = {
 };
 /**
  * An adapter's conflict rule: given the names `pass` actually supplied, the
- * names (or `*` prefixes) to remove from the base.
+ * names (or `*` prefixes) to remove from the base. On win32 the supplied
+ * names arrive in upper case and the removed names match case-insensitively.
  */
 export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => readonly string[];
 /** The login-shell capture failed, so no `login-shell` runtime environment exists in this process. */
