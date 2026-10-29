@@ -300,6 +300,17 @@ observability data, but FAIL-CLOSED for control/security data:
   likewise just ignored, not rejected. An unknown top-level envelope field is stripped, not rejected
   (§1). This tolerance exists because this data only ever informs a UI or a
   log line — silently ignoring what you don't understand yet is safe.
+- **Tolerated (open device vocabularies, #1121):** a device -> Host
+  vocabulary a newer device may extend — `task.fail.failure.class`,
+  `task.decline.code` and a denied `agent.content.receipt` `reason` — accepts
+  any well-formed token (`[a-z][a-z0-9_-]{0,63}`) it does not know and keeps
+  it verbatim, so the report is still recorded. Hosts read it as `unknown`
+  with the raw token beside it (`readTaskFailure` → `reportedClass`,
+  `readDeclineCode` → `reportedCode`); cloud `readTaskResult` and embedded
+  task results carry those readings. A failure class it does not know may
+  carry fields this version does not know either; they are kept too.
+  Message types, decisions and outcomes that select a payload shape stay
+  closed.
 - **Fail-closed (control/security):** `instruction` rejects any shape it
   doesn't recognize outright — there is no passthrough-unknown fallback,
   unlike `AgentEventSchema`. A payload that would change what a runtime is
@@ -424,10 +435,13 @@ paths name one shared field in `WIRE_ADDITIONS`. See the
 
 **Landed additive minor: `task.fail.failure` (#869).** `task.fail`, and so
 its sealed branch, gains an OPTIONAL strict `failure: { class, resetsAt? }`.
-`class` is a closed `RuntimeFailureClass` value: the vendored OAR
+`class` is a `RuntimeFailureClass` value: the vendored OAR
 `FailureClass` (`auth`, `quota`, `rate_limited`, `billing`,
 `model_unavailable`, `input_too_large`, `invalid_request`, `overloaded`,
 `provider`, `runtime_exited`, `limit_reached`, `output_schema`, `unknown`).
+The class is open (#1121): a well-formed class a Host does not know is
+accepted and read as `unknown` with `reportedClass`; see the
+observability-vs-control rule above.
 `resetsAt` is an ISO 8601 UTC time, only on `quota`, and only when the runtime
 reported when the limit resets. Adapters classify from structured runtime
 fields only and never parse `reason`, which stays display text. `unknown`
@@ -2008,14 +2022,15 @@ state would fork every terminal-state consumer (dashboards, retry logic,
 for no behavioral gain. Keeping the state machine at 7 states (not 8) was the
 deciding factor.
 
-Home-busy declines carry optional `code`, a closed enum:
-`agent_home_writer_busy` or `agent_home_reader_busy`, selected by the rejected
+Home-busy declines carry optional `code`: `agent_home_writer_busy` or
+`agent_home_reader_busy` (open since #1121: a code a Host does not know is
+read as `unknown` with `reportedCode`), selected by the rejected
 Attempt's requested home access. This includes capacity, lease acquisition,
 reader resume/run-directory and home initialization conflicts reported as
 `AgentHomeBusyError`. Other declines omit `code`. Hosts classify busy by
-`code`; `reason` is display text only. Cloud `readTaskResult` copies the code
-verbatim, and `readDeviceTerminal` / embedded `tasks.deviceTerminal` preserve
-it in the canonical envelope.
+`code`; `reason` is display text only. Cloud `readTaskResult` reads the code
+(`readDeclineCode`), and `readDeviceTerminal` / embedded `tasks.deviceTerminal`
+preserve it verbatim in the canonical envelope.
 
 Landed additive minor: `task.decline.code` (#471) was an optional v2 field,
 registered as strip-safe in `WIRE_ADDITIONS`. It is part of the v3 baseline.

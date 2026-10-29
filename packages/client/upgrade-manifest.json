@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "c9a65fded4d898e3967511f70884b941a2f0cb79e633a19a31fe2cc2b7374204"
+    "snapshotSha256": "f554be25fb9acfb4e83784bc3156c02a80da9360681c73ab85441c17210924ca"
   },
   "configFields": {
     "status": "tracked",
@@ -446,6 +446,36 @@
       "items": [
         "export:@byok-sdk/client#DiagnosticCheck",
         "export:@byok-sdk/protocol#WireAddition"
+      ]
+    },
+    {
+      "id": "messages-per-envelope-decode",
+      "impact": "breaking",
+      "summary": "POST /byok/messages decodes each entry on its own (#1121). An entry that is not a valid Envelope is answered rejected with reason payload_invalid and the rest of the batch applies; only a broken frame (not { messages: [...] }, an entry whose v is not this wire major, an entry without a UUID id, or more than 256 entries) still fails the whole request with 400. MessagesSendRequestSchema now validates that frame only: its messages entries are typed { v, id } plus unvalidated fields, so code that read decoded envelopes from it must decode each entry with parseMessage. A terminal whose task already holds a stored receipt the Host cannot read back is refused for that envelope with state_conflict (internal reason terminal_receipt_not_canonical in INBOUND_REFUSAL_REASONS) instead of a 500 for the batch. Devices need no change: a rejected outcome was already final for them.",
+      "migration": "docs/protocol.md#82-send--post-byokmessages",
+      "items": [
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#MessagesSendRequestSchema"
+      ]
+    },
+    {
+      "id": "open-device-vocabularies",
+      "impact": "breaking",
+      "summary": "Device -> Host vocabularies a newer device may extend are open (#1121): task.fail.failure.class, task.decline.code and a denied agent.content.receipt reason accept any well-formed token ([a-z][a-z0-9_-]{0,63}) this version does not know and keep it verbatim, so the report is recorded instead of rejected; a failure class it does not know may carry extra fields, which are kept too. The wire types widen accordingly (TaskFailure, the decline code and the denial reason admit unrecognized tokens). Hosts read them with readTaskFailure and readDeclineCode: a value this version does not know reads as class/code 'unknown' with the raw token in reportedClass/reportedCode. Cloud TerminalResult and embedded TaskResult now carry these readings: failure is a TaskFailureReading, code is a TaskDeclineCodeReading code, and a new reportedCode field holds an unknown code's raw token. Switch on failure.class and code as before and handle 'unknown'.",
+      "migration": "docs/protocol.md#freeze-rule",
+      "items": [
+        "export:@byok-sdk/cloud#TerminalResult",
+        "export:@byok-sdk/protocol#AgentContentReceiptPayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineCode",
+        "export:@byok-sdk/protocol#TaskDeclineCodeReading",
+        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailureReading",
+        "export:@byok-sdk/protocol#TaskFailureSchema",
+        "export:@byok-sdk/protocol#readDeclineCode",
+        "export:@byok-sdk/protocol#readTaskFailure",
+        "export:@byok-sdk/server#TaskResult"
       ]
     }
   ],
@@ -1046,6 +1076,11 @@
       "entry": "capability-ports-two-way"
     },
     {
+      "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "messages-per-envelope-decode"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
       "change": "changed",
       "entry": "device-route-rate-admission"
@@ -1089,6 +1124,11 @@
       "item": "export:@byok-sdk/cloud#TenantBoundRateLimiter",
       "change": "changed",
       "entry": "device-route-rate-admission"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TerminalResult",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
     },
     {
       "item": "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
@@ -1151,6 +1191,11 @@
       "entry": "store-compatibility-precheck"
     },
     {
+      "item": "export:@byok-sdk/protocol#AgentContentReceiptPayloadSchema",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
       "item": "export:@byok-sdk/protocol#DEVICE_NOT_REGISTERED_CODE",
       "change": "added",
       "entry": "auth-revocation-typed-keychain-deadline"
@@ -1166,6 +1211,11 @@
       "entry": "auth-revocation-typed-keychain-deadline"
     },
     {
+      "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+      "change": "changed",
+      "entry": "messages-per-envelope-decode"
+    },
+    {
       "item": "export:@byok-sdk/protocol#PairResponseSchema",
       "change": "changed",
       "entry": "token-expires-in"
@@ -1176,9 +1226,44 @@
       "entry": "task-fail-reason-bound"
     },
     {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCode",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCodeReading",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
       "change": "changed",
       "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureReading",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureSchema",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
     },
     {
       "item": "export:@byok-sdk/protocol#TokenResponseSchema",
@@ -1194,6 +1279,16 @@
       "item": "export:@byok-sdk/protocol#boundFailureReason",
       "change": "added",
       "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#readDeclineCode",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#readTaskFailure",
+      "change": "added",
+      "entry": "open-device-vocabularies"
     },
     {
       "item": "export:@byok-sdk/protocol/agent-memory#AgentMemoryError",
@@ -1254,6 +1349,11 @@
       "item": "export:@byok-sdk/server#SqliteSchemaErrorCode",
       "change": "changed",
       "entry": "capability-ports-two-way"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskResult",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
     },
     {
       "item": "export:@byok-sdk/server#inspectSqliteStore",

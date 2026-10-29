@@ -187,6 +187,23 @@ describe('POST /byok/messages', () => {
     ]);
   });
 
+  it('records a task.fail whose failure class this Host does not know (#1121)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await send(harness, device.authorization, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId })]);
+    const fail = { ...createEnvelope('task.fail', { reason: 'capacity', agentRef: TEST_AGENT_REF }, { taskId }) };
+    const newer = { ...fail, payload: { ...fail.payload, retryable: true, failure: { class: 'provider_capacity', retryAfterMs: 30_000 } } };
+
+    const response = await send(harness, device.authorization, [newer]);
+
+    expect(MessagesSendResponseSchema.parse(await response.json()).outcomes).toEqual([{ id: newer.id, outcome: 'accepted' }]);
+    expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).toMatchObject({
+      state: 'failed', reason: 'capacity', failure: { class: 'unknown', reportedClass: 'provider_capacity' },
+    });
+  });
+
   it('accepts a full-sized batch', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
