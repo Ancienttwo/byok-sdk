@@ -39,10 +39,12 @@
   is already within a minute of its expiry, which happened when the device
   clock ran ahead of the server or the server TTL was under 60 seconds. Each
   renewal re-armed itself at once and rewrote the OS credential entry every
-  time. Renewals that no server 401 forced are now at least 30 seconds apart,
-  and the gap doubles for each consecutive renewal that returns such a token,
+  time. Proactive renewals and renewals started by `getValidAccessToken()` are
+  now at least 30 seconds apart. The gap stays at 30 seconds after the first
+  renewal that returns such a token and doubles from the second one in a row,
   up to 30 minutes. Inside that gap `getValidAccessToken()` returns the token
-  the server issued last. A 401 still renews at once.
+  the server issued last. A server 401 still renews at once and is not
+  throttled.
 
 ## 0.31.0 — 2026-10-29 (published)
 

@@ -6,7 +6,7 @@ import { createTestDeviceStore } from './fixtures/device-credentials';
  * re-scheduled itself with delay 0 and every `getValidAccessToken()` call
  * renewed again, so the loop never ended and each lap rewrote the OS
  * credential entry. Renewals that a server 401 did not force are now spaced by
- * a floor that doubles across consecutive short-lived renewals.
+ * a 30s floor that doubles from the second consecutive short-lived renewal.
  */
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -90,7 +90,7 @@ describe('token renewal is rate-limited when the fresh token is already near exp
     }
   });
 
-  it('a server token TTL under the renewal margin keeps a minimum interval between renewals', async () => {
+  it('a server token TTL under the renewal margin does not loop proactive or getValidAccessToken renewals', async () => {
     const { auth, replace, tokenRequests } = await pairedWithSkewedClock(0, 10 * 1000);
     try {
       await auth.loadExisting();
