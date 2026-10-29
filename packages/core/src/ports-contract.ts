@@ -50,6 +50,8 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
     'readCursor',
     'collectExpired',
     'expirePending',
+    'closeStream',
+    'reopenStream',
   ],
   board: ['create', 'get', 'list', 'claim', 'unclaim', 'updateStatus', 'remove'],
   truth: ['writeTerminal', 'writeSnapshot', 'getRecord', 'listManifest'],

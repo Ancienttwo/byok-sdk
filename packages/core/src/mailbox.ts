@@ -15,6 +15,7 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention';
  * `@byok-sdk/protocol`, and core must not grow an edge to it (§12.1 invariant).
  */
 import type { ContentHash } from './blob';
+import { ByokCoreError } from './errors';
 import type { TenantId } from './tenant';
 
 /**
@@ -84,7 +85,8 @@ export interface MailboxAppendInput {
   readonly materialize: (seq: number) => MailboxBody | Promise<MailboxBody>;
   /**
    * Limit admission for a NEW row. An existing `messageId` returns its row
-   * before any check, so a retry is never refused for capacity.
+   * before any capacity check, so a retry is never refused for capacity. A
+   * closed stream refuses before even that (see {@link MailboxStore.closeStream}).
    */
   readonly admission: MailboxAdmission;
 }
@@ -183,15 +185,39 @@ export interface MailboxCollectExpiredInput extends CollectExpiredInput {
 
 /**
  * Which of one device's `pending` rows {@link MailboxStore.expirePending}
- * dead-letters: every one, or exactly the listed sequences. A listed seq that
- * is not `pending` (acked, already expired, or never written) is skipped.
+ * dead-letters. A listed seq that is not `pending` (acked, already expired, or
+ * never written) is skipped.
  */
 export interface MailboxExpirePendingInput {
   readonly deviceId: string;
-  readonly seqs: 'all' | readonly number[];
+  readonly seqs: readonly number[];
 }
 
+/** Why a device's stream was closed: the device it addressed was retired. */
+export const MAILBOX_STREAM_CLOSE_CAUSES = ['device_revoked', 'device_superseded'] as const;
+export type MailboxStreamCloseCause = (typeof MAILBOX_STREAM_CLOSE_CAUSES)[number];
 
+/** An append refused because its device's stream was closed when the device was retired. */
+export class MailboxStreamClosedError extends ByokCoreError {
+  public readonly deviceId: string;
+  public readonly closeCause: MailboxStreamCloseCause;
+
+  constructor(deviceId: string, closeCause: MailboxStreamCloseCause, options?: ErrorOptions) {
+    super('mailbox_stream_closed', `The mailbox stream of device ${deviceId} is closed (${closeCause}).`, options);
+    this.name = 'MailboxStreamClosedError';
+    this.deviceId = deviceId;
+    this.closeCause = closeCause;
+  }
+}
+
+export interface MailboxCloseStreamInput {
+  readonly deviceId: string;
+  readonly cause: MailboxStreamCloseCause;
+}
+
+export interface MailboxReopenStreamInput {
+  readonly deviceId: string;
+}
 
 /**
  * Mailbox port. Tenant-first, async.
@@ -202,7 +228,9 @@ export interface MailboxExpirePendingInput {
  * server has returned to that device),
  * `timestamp_not_canonical` (a retention cutoff that is not a canonical
  * ISO-8601 UTC instant), `storage_quota_exceeded` and
- * `storage_entitlement_missing` (a `limited` append refused at admission).
+ * `storage_entitlement_missing` (a `limited` append refused at admission), and
+ * `mailbox_stream_closed` ({@link MailboxStreamClosedError}, any append to a
+ * closed stream).
  */
 export interface MailboxStore {
   append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
@@ -227,14 +255,29 @@ export interface MailboxStore {
     input: MailboxCollectExpiredInput,
   ): Promise<CollectExpiredResult>;
   /**
-   * Dead-letters undelivered rows nobody will ever ack — the rows of a retired
-   * device, or of a task the Host abandoned — without waiting for retention.
-   * Only `pending` rows move, and only to `expired`: nothing is deleted, no row
-   * returns to `pending`, the cursor is untouched, and the device's `seq`
-   * allocator keeps counting. The moved rows stop holding mailbox quota and
-   * raise `recoverableFrom` exactly as a retention sweep would. Serialized with
-   * the device's appends and acks, so a row appended before this call is
-   * either moved or already acked.
+   * Dead-letters the listed undelivered rows of a task the Host abandoned,
+   * without waiting for retention. Only `pending` rows move, and only to
+   * `expired`: nothing is deleted, no row returns to `pending`, the cursor is
+   * untouched, and the device's `seq` allocator keeps counting. The moved rows
+   * stop holding mailbox quota and raise `recoverableFrom` exactly as a
+   * retention sweep would. Serialized with the device's appends and acks.
    */
   expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{ readonly expired: number }>;
+  /**
+   * Closes a retired device's stream and dead-letters every `pending` row on
+   * it, as one step serialized with the device's appends: an append ordered
+   * before it has its row expired here, and every append ordered after it is
+   * refused with `mailbox_stream_closed`, whatever its admission and even for
+   * a known `messageId`. The stream need not exist yet; closing creates it
+   * closed. Closing a closed stream keeps its first close instant, records the
+   * new cause and still expires pending rows. Cursor, `seq` and
+   * `recoverableFrom` move exactly as {@link expirePending} moves them.
+   */
+  closeStream(tenant: TenantId, input: MailboxCloseStreamInput): Promise<{ readonly expired: number }>;
+  /**
+   * Reopens a stream for a device registered again under the same id. Rows,
+   * cursor, `seq` and `recoverableFrom` are untouched, so delivery stays
+   * monotonic across the close. A no-op on an open or absent stream.
+   */
+  reopenStream(tenant: TenantId, input: MailboxReopenStreamInput): Promise<void>;
 }

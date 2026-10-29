@@ -432,26 +432,94 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         expect(page.recoverableFrom).toBe(3);
         expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(third.byteSize + other.byteSize);
 
-        await expect(
-          stores.mailbox.expirePending(TENANT_A, { deviceId: DEVICE, seqs: 'all' }),
-        ).resolves.toEqual({ expired: 1 });
-        await expect(
-          stores.mailbox.expirePending(TENANT_A, { deviceId: DEVICE, seqs: 'all' }),
-        ).resolves.toEqual({ expired: 0 });
-        page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
-        expect(page.messages).toHaveLength(0);
-        expect(page.recoverableFrom).toBe(4);
         // The cursor is untouched, the other device keeps its row, and the
         // allocator keeps counting: nothing expired comes back as pending.
         await expect(stores.mailbox.readCursor(TENANT_A, DEVICE)).resolves.toMatchObject({ ackedSeq: 1, deliveredSeq: 1 });
-        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(other.byteSize);
         const next = await stores.mailbox.append(TENANT_A, offer(5));
         expect(next).toMatchObject({ seq: 4, state: 'pending' });
-        page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
-        expect(page.messages.map((message) => message.seq)).toEqual([4]);
         await expect(
-          stores.mailbox.expirePending(TENANT_B, { deviceId: DEVICE, seqs: 'all' }),
+          stores.mailbox.expirePending(TENANT_B, { deviceId: DEVICE, seqs: [3] }),
         ).resolves.toEqual({ expired: 0 });
+      });
+    });
+
+    it('closeStream dead-letters every pending row and refuses every later append', async () => {
+      await withMailbox(factory, async ({ stores }) => {
+        await stores.mailbox.append(TENANT_A, offer(1));
+        const second = await stores.mailbox.append(TENANT_A, offer(2));
+        const other = await stores.mailbox.append(TENANT_A, { ...offer(3), deviceId: 'device-2' });
+        await stores.mailbox.recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: 1 });
+        await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 1 });
+
+        await expect(
+          stores.mailbox.closeStream(TENANT_A, { deviceId: DEVICE, cause: 'device_revoked' }),
+        ).resolves.toEqual({ expired: 1 });
+        const page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
+        expect(page.messages).toHaveLength(0);
+        expect(page.recoverableFrom).toBe(3);
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(other.byteSize);
+
+        // Every admission, and a known messageId too: the retry learns of the
+        // retirement instead of getting its old row back.
+        for (const input of [offer(4), { ...offer(5), admission: 'cancellation' as const }, offer(2)]) {
+          const refused = await captureError(stores.mailbox.append(TENANT_A, input));
+          expect(isCoreError(refused, 'mailbox_stream_closed')).toBe(true);
+          expect(refused).toMatchObject({ deviceId: DEVICE, closeCause: 'device_revoked' });
+        }
+        expect(second.seq).toBe(2);
+        // Closing again keeps the stream closed under the latest cause and moves nothing.
+        await expect(
+          stores.mailbox.closeStream(TENANT_A, { deviceId: DEVICE, cause: 'device_superseded' }),
+        ).resolves.toEqual({ expired: 0 });
+        await expect(captureError(stores.mailbox.append(TENANT_A, offer(6)))).resolves.toMatchObject({
+          code: 'mailbox_stream_closed', closeCause: 'device_superseded',
+        });
+        // Another device, and the same id in another tenant, are unaffected.
+        await expect(stores.mailbox.append(TENANT_A, { ...offer(7), deviceId: 'device-2' })).resolves.toMatchObject({ seq: 2 });
+        await stores.quota.writeEntitlement(TENANT_B, MAILBOX_ENTITLEMENT);
+        await expect(stores.mailbox.append(TENANT_B, offer(8))).resolves.toMatchObject({ seq: 1 });
+      });
+    });
+
+    it('closeStream closes a stream that never had mail', async () => {
+      await withMailbox(factory, async ({ stores }) => {
+        await expect(
+          stores.mailbox.closeStream(TENANT_A, { deviceId: DEVICE, cause: 'device_superseded' }),
+        ).resolves.toEqual({ expired: 0 });
+        await expect(captureError(stores.mailbox.append(TENANT_A, offer(1)))).resolves.toMatchObject({
+          code: 'mailbox_stream_closed', closeCause: 'device_superseded',
+        });
+      });
+    });
+
+    it('reopenStream resumes appends with seq, cursor and recoverableFrom monotonic across the close', async () => {
+      await withMailbox(factory, async ({ stores }) => {
+        await stores.mailbox.append(TENANT_A, offer(1));
+        await stores.mailbox.append(TENANT_A, offer(2));
+        await stores.mailbox.recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: 1 });
+        await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 1 });
+        await stores.mailbox.closeStream(TENANT_A, { deviceId: DEVICE, cause: 'device_revoked' });
+        const closed = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
+
+        await stores.mailbox.reopenStream(TENANT_A, { deviceId: DEVICE });
+        // A no-op on an open stream and on one that does not exist.
+        await stores.mailbox.reopenStream(TENANT_A, { deviceId: DEVICE });
+        await stores.mailbox.reopenStream(TENANT_A, { deviceId: 'never-seen' });
+
+        const next = await stores.mailbox.append(TENANT_A, offer(3));
+        expect(next).toMatchObject({ seq: 3, state: 'pending' });
+        await expect(stores.mailbox.readCursor(TENANT_A, DEVICE)).resolves.toMatchObject({ ackedSeq: 1, deliveredSeq: 1 });
+        const reopened = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
+        expect(reopened.messages.map((message) => message.seq)).toEqual([3]);
+        expect(reopened.recoverableFrom).toBeGreaterThanOrEqual(closed.recoverableFrom);
+        // The expired row stays expired; its messageId is not admitted again as new.
+        await expect(stores.mailbox.append(TENANT_A, offer(2))).resolves.toMatchObject({ seq: 2, state: 'expired' });
+      });
+    });
+
+    it('an append to a never-closed id that no directory knows is unaffected', async () => {
+      await withMailbox(factory, async ({ stores }) => {
+        await expect(stores.mailbox.append(TENANT_A, { ...offer(1), deviceId: 'unregistered' })).resolves.toMatchObject({ seq: 1 });
       });
     });
   });

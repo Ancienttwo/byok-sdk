@@ -17,6 +17,7 @@ import { ByokCoreError, CoreConflictError } from '../errors';
 import type {
   MailboxAdvanceCursorInput,
   MailboxAppendInput,
+  MailboxCloseStreamInput,
   MailboxCursorState,
   MailboxMessage,
   MailboxPage,
@@ -24,9 +25,12 @@ import type {
   MailboxRecordDeliveryInput,
   MailboxCollectExpiredInput,
   MailboxExpirePendingInput,
+  MailboxReopenStreamInput,
   MailboxStore,
+  MailboxStreamCloseCause,
   MailboxUsage,
 } from '../mailbox';
+import { MailboxStreamClosedError } from '../mailbox';
 import type { QuotaStore } from '../quota';
 import type { Clock } from '../stores';
 import { tenantKey, type TenantId } from '../tenant';
@@ -40,6 +44,7 @@ interface DeviceMailbox {
   deliveredSeq: number;
   ackedSeq: number;
   cursorUpdatedAt: string;
+  closed: { readonly at: string; readonly cause: MailboxStreamCloseCause } | undefined;
   mutationTail: Promise<void>;
   readonly messages: MailboxMessage[];
   readonly byMessageId: Map<string, MailboxMessage>;
@@ -70,6 +75,7 @@ export class InMemoryMailboxStore implements MailboxStore {
   async append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage> {
     const device = this.#device(tenant, input.deviceId);
     const appended = device.mutationTail.then(async () => {
+      if (device.closed !== undefined) throw new MailboxStreamClosedError(input.deviceId, device.closed.cause);
       const existing = device.byMessageId.get(input.messageId);
       if (existing !== undefined) return existing;
 
@@ -265,20 +271,31 @@ export class InMemoryMailboxStore implements MailboxStore {
   async expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{ readonly expired: number }> {
     const device = this.#devices.get(tenantKey(tenant, input.deviceId));
     if (device === undefined) return { expired: 0 };
-    const selected = input.seqs === 'all' ? undefined : new Set(input.seqs);
-    const retired = device.mutationTail.then(() => {
-      let expired = 0;
-      for (const [index, message] of device.messages.entries()) {
-        if (message.state !== 'pending' || (selected !== undefined && !selected.has(message.seq))) continue;
-        const dead: MailboxMessage = { ...message, state: 'expired' };
-        device.messages[index] = dead;
-        device.byMessageId.set(dead.messageId, dead);
-        expired++;
-      }
-      return { expired };
+    const selected = new Set(input.seqs);
+    return this.#serialize(device, () => expirePendingMessages(device, (message) => selected.has(message.seq)));
+  }
+
+  async closeStream(tenant: TenantId, input: MailboxCloseStreamInput): Promise<{ readonly expired: number }> {
+    const device = this.#device(tenant, input.deviceId);
+    return this.#serialize(device, () => {
+      device.closed = { at: device.closed?.at ?? this.#now(), cause: input.cause };
+      return expirePendingMessages(device, () => true);
     });
-    device.mutationTail = retired.then(() => undefined, () => undefined);
-    return retired;
+  }
+
+  async reopenStream(tenant: TenantId, input: MailboxReopenStreamInput): Promise<void> {
+    const device = this.#devices.get(tenantKey(tenant, input.deviceId));
+    if (device === undefined) return;
+    await this.#serialize(device, () => {
+      device.closed = undefined;
+    });
+  }
+
+  /** Runs one synchronous step on the device's chain, whatever the previous step's outcome. */
+  #serialize<T>(device: DeviceMailbox, step: () => T): Promise<T> {
+    const run = device.mutationTail.then(step);
+    device.mutationTail = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   async #mailboxLimit(tenant: TenantId): Promise<bigint> {
@@ -320,6 +337,7 @@ export class InMemoryMailboxStore implements MailboxStore {
       deliveredSeq: 0,
       ackedSeq: 0,
       cursorUpdatedAt: this.#now(),
+      closed: undefined,
       mutationTail: Promise.resolve(),
       messages: [],
       byMessageId: new Map(),
@@ -362,4 +380,17 @@ export class InMemoryMailboxStore implements MailboxStore {
   #now(): string {
     return this.#clock.now().toISOString();
   }
+}
+
+/** Moves the selected `pending` rows to `expired`; nothing else changes. */
+function expirePendingMessages(device: DeviceMailbox, selected: (message: MailboxMessage) => boolean): { readonly expired: number } {
+  let expired = 0;
+  for (const [index, message] of device.messages.entries()) {
+    if (message.state !== 'pending' || !selected(message)) continue;
+    const dead: MailboxMessage = { ...message, state: 'expired' };
+    device.messages[index] = dead;
+    device.byMessageId.set(dead.messageId, dead);
+    expired++;
+  }
+  return { expired };
 }

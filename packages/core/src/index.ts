@@ -48,7 +48,7 @@ export {
 } from './time';
 
 // Mailbox (§12.7.3)
-export { MAILBOX_MESSAGE_STATES } from './mailbox';
+export { MAILBOX_MESSAGE_STATES, MAILBOX_STREAM_CLOSE_CAUSES, MailboxStreamClosedError } from './mailbox';
 export type {
   MailboxAdmission,
   MailboxAdvanceCursorInput,
@@ -60,8 +60,11 @@ export type {
   MailboxPage,
   MailboxReadQuery,
   MailboxRecordDeliveryInput,
+  MailboxCloseStreamInput,
   MailboxCollectExpiredInput,
   MailboxExpirePendingInput,
+  MailboxReopenStreamInput,
+  MailboxStreamCloseCause,
   MailboxStore,
   MailboxUsage,
 } from './mailbox';
