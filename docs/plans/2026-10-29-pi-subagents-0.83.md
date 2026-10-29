@@ -37,7 +37,7 @@
 - [x] 测试：删除 vendor/重入相关测试，新增 gate 注入、keys-profile 不装载、打包形态不装载、external runner 拒绝的回归。
 - [x] spec、client README、CHANGELOG、upgrade-manifest、THIRD-PARTY；api-surface golden 与预算。
 - [x] CI 登记；build / typecheck / test / api-surface / version-authority / release-pack；PR。
-- [ ] 上游：向 nicobailon/pi-subagents 提议宿主 runner 命令扩展点（方案 a）。
+- [x] 上游：向 nicobailon/pi-subagents 提议宿主 runner 命令扩展点（方案 a）：https://github.com/nicobailon/pi-subagents/issues/3105
 
 ## 实施记录
 
