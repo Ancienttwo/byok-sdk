@@ -1,18 +1,11 @@
 import { createHash } from 'node:crypto';
+
+import { AgentMemoryValidationError, type AgentMemoryExport } from '@byok-sdk/protocol';
 import type { AgentHomeManager, AgentRef } from '../agent-home';
-import { captureAgentMemoryHomeSnapshot, AgentMemoryValidationError, type AgentMemorySnapshot } from './agent-memory';
+import { captureAgentMemoryHomeSnapshot } from './agent-memory';
 import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 
-/** Raw local-only Host result. Never send this through the redacted projection port. */
-export interface AgentMemoryExport extends AgentMemorySnapshot {
-  /** Validated Host request, not proof of a globally current profile revision. */
-  readonly requestedAgentRef: AgentRef;
-  /** Present only when the home has a durable applied profile projection. */
-  readonly appliedProfileRevision?: string;
-  /** sha256 of UTF-8 JSON ["byok-agent-memory-export.v1", [[path, revision, byteCount], ...]]. */
-  readonly snapshotDigest: string;
-}
 export interface AgentMemoryExportOptions { readonly signal?: AbortSignal; }
 
 /** Internal composition: only the daemon's explicit opt-in exposes this operation. */

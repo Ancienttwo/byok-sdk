@@ -137,7 +137,11 @@ export type {
   AgentMemoryIntentFetchRequest,
   AgentMemoryIntentFetchDisposition,
   AgentMemoryIntentFetchResponse,
+  AgentMemoryIntentFetchInput,
+  AgentMemoryIntentTransport,
 } from './agent-memory-intent';
+export { AgentMemoryError, AgentMemoryValidationError, validateAgentMemoryPath } from './agent-memory-files';
+export type { AgentMemoryFile, AgentMemorySnapshot, AgentMemoryExport } from './agent-memory-files';
 
 export {
   AgentEventSchema,
@@ -281,6 +285,7 @@ export type {
   AgentMemoryProjectionMutation,
   AgentMemoryProjectionReceipt,
   AgentMemoryProjectionEraseResult,
+  AgentMemoryProjectionPort,
 } from './agent-memory-projection';
 
 

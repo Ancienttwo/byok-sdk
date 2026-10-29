@@ -21,21 +21,22 @@ import {
   type AgentMemoryIntentRejectionCode,
   type AgentMemoryIntentReservation,
   type AgentMemoryIntentV1,
+  type AgentMemoryIntentTransport,
   type AgentRef,
+  AgentMemoryValidationError,
+  validateAgentMemoryPath,
 } from '@byok-sdk/protocol';
 
 import { AgentHomeBusyError, type AgentHomeBinding, type AgentHomeLease, type AgentHomeManager } from '../agent-home';
 import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AgentMemoryRevisionConflictError,
-  AgentMemoryValidationError,
   agentMemoryHomeBinding,
   appendAgentMemoryHomeAudit,
   compareAndSwapAgentMemoryHomeFile,
   observeAgentMemoryHomeFile,
   readAgentMemoryHomeInternalFile,
   replaceAgentMemoryHomeInternalFileStrict,
-  validateAgentMemoryPath,
   type AgentMemoryHomeBinding,
 } from './agent-memory';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
@@ -123,32 +124,6 @@ export class AgentMemoryIntentNoticeError extends Error {
   get intentId(): string {
     return this.#intentId;
   }
-}
-
-/** Exactly what the daemon hands the Host transport for one fetch. */
-export interface AgentMemoryIntentFetchInput {
-  readonly intentId: string;
-  readonly agentRef: AgentRef;
-  /** `held`: a ledger slot is reserved; `none`: the Host must not release or change state. */
-  readonly reservation: AgentMemoryIntentReservation;
-}
-
-/**
- * Host-injected transport for Host-approved Agent memory intents. The Host
- * authenticates the device on its own routes; the SDK never sees an assertion.
- *
- * - `fetch` resolves with the Host's fetch answer (release / withheld /
- *   terminal / deferred) for exactly this intent and reservation.
- * - `complete` delivers one terminal completion and resolves with the Host's
- *   DURABLE readback for it.
- *
- * Both answers are copied into inert plain data and strictly parsed. A throw
- * from either is a transport failure: the notice is not acknowledged and a
- * redelivery retries. Neither is ever called while the Agent home is leased.
- */
-export interface AgentMemoryIntentTransport {
-  fetch(request: AgentMemoryIntentFetchInput): Promise<unknown>;
-  complete(completion: AgentMemoryIntentCompletion): Promise<unknown>;
 }
 
 /**

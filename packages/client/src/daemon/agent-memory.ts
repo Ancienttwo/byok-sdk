@@ -6,8 +6,14 @@ import {
   AGENT_MEMORY_PROJECTION_CAPABILITY,
   AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
+  AgentMemoryError,
   AgentMemoryProjectionMutationSchema,
+  AgentMemoryValidationError,
+  validateAgentMemoryPath,
+  type AgentMemoryFile,
   type AgentMemoryProjectionMutation,
+  type AgentMemoryProjectionPort,
+  type AgentMemorySnapshot,
 } from '@byok-sdk/protocol';
 import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES as PROTOCOL_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES as PROTOCOL_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
 import { AGENT_HOME_INTERNAL_DIRECTORY, type AgentHomeLease, type AgentRef } from '../agent-home';
@@ -32,17 +38,6 @@ const SECRET_LIKE = /(?:^|[-_.])(secret|token|credential|password|passwd|api[-_]
 const encoder = new TextEncoder();
 const AGENT_MEMORY_PROJECTION_PUBLISH_TIMEOUT_MS = 10_000;
 
-export class AgentMemoryError extends Error {
-  constructor(message: string) { super(message); this.name = 'AgentMemoryError'; }
-}
-/**
- * Deterministic refusal: the same input against the same home state fails the
- * same way on every retry (an invalid path, a forbidden delete, an oversized or
- * non-UTF-8 file, a non-regular leaf, a platform without a secure backend).
- */
-export class AgentMemoryValidationError extends AgentMemoryError {
-  constructor(message: string) { super(message); this.name = 'AgentMemoryValidationError'; }
-}
 /** A complete snapshot cannot fit the bounded export contract. No partial result is returned. */
 export class AgentMemorySnapshotLimitError extends AgentMemoryValidationError {
   constructor(message: string) { super(message); this.name = 'AgentMemorySnapshotLimitError'; }
@@ -87,8 +82,6 @@ export interface AgentMemoryTaskContext {
   /** Optional task-scoped external root handle; omission selects the native Linux backend. */
   readonly filesystem?: AgentMemoryFilesystem;
 }
-export interface AgentMemoryFile { readonly path: string; readonly revision: string; readonly byteCount: number; readonly content: string; }
-export interface AgentMemorySnapshot { readonly files: readonly AgentMemoryFile[]; readonly totalBytes: number; }
 /**
  * Embedder-owned redaction authority. Its output is opaque bytes: the local
  * relative paths, source revisions, and raw source content never enter the
@@ -107,14 +100,6 @@ export interface AgentMemoryRedactedOutboxRecord {
   readonly version: 2;
   readonly mutation: AgentMemoryProjectionMutation;
   readonly createdAt: string;
-}
-/**
- * Optional bridge to a complete hosted client. It receives the canonical,
- * already-redacted protocol mutation only; this package intentionally owns no
- * consent, cloud transport, or raw-source upload fallback.
- */
-export interface AgentMemoryProjectionPort {
-  publish(input: Readonly<{ mutation: AgentMemoryProjectionMutation }>): Promise<{ readonly accepted: boolean }>;
 }
 /**
  * Replay exposes only ordering metadata. The redacted mutation body remains in
@@ -154,18 +139,6 @@ function taskContext(value: AgentMemoryTaskContext): AgentMemoryTaskContext {
     throw new AgentMemoryValidationError('Agent memory requires an exact active Agent task context');
   }
   return Object.freeze({ ...value, agentRef: Object.freeze({ ...value.agentRef }), homeIdentity: Object.freeze({ ...value.homeIdentity }), canonicalHome: path.resolve(value.canonicalHome) });
-}
-
-/** Model input can name one allowed file, never a root, directory, glob, or internal SDK state. */
-export function validateAgentMemoryPath(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 1024 || /[\u0000\\]/u.test(value)) throw new AgentMemoryValidationError('memory path is invalid');
-  if (value === 'MEMORY.md') return value;
-  if (path.posix.isAbsolute(value) || /[*?\[{]/u.test(value)) throw new AgentMemoryValidationError('memory path must name exactly one file');
-  const parts = value.split('/');
-  if (parts.length < 2 || parts[0] !== 'notes' || !value.endsWith('.md') || parts.some((part) => part === '' || part === '.' || part === '..' || part === '.byok' || !safeSegment(part) || SECRET_LIKE.test(part))) {
-    throw new AgentMemoryValidationError('memory path must be MEMORY.md or notes/<safe-relative>.md');
-  }
-  return value;
 }
 
 /**

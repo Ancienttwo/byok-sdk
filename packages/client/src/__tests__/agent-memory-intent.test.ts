@@ -17,6 +17,10 @@ import {
   type AgentMemoryIntentReadbackDisposition,
   type AgentMemoryIntentV1,
   type AgentRef,
+  AgentMemoryValidationError,
+  validateAgentMemoryPath,
+  type AgentMemoryIntentFetchInput,
+  type AgentMemoryIntentTransport,
 } from '@byok-sdk/protocol';
 
 import { AgentHomeManager, type AgentHomeLease } from '../agent-home';
@@ -25,13 +29,11 @@ import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AgentMemoryIoError,
   AgentMemoryRevisionConflictError,
-  AgentMemoryValidationError,
   agentMemoryHomeBinding,
   appendAgentMemoryHomeAudit,
   compareAndSwapAgentMemoryHomeFile,
   isAgentMemorySecureFilesystemAvailable,
   replaceAgentMemoryHomeInternalFileStrict,
-  validateAgentMemoryPath,
 } from '../daemon/agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
@@ -50,10 +52,8 @@ import {
   parseAgentMemoryIntentLedger,
   serializeAgentMemoryIntentLedger,
   type AgentMemoryIntentBackend,
-  type AgentMemoryIntentFetchInput,
   type AgentMemoryIntentLedgerRecord,
   type AgentMemoryIntentNoticeFailureReason,
-  type AgentMemoryIntentTransport,
 } from '../daemon/agent-memory-intent';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';

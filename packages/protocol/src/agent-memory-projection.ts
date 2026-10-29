@@ -140,3 +140,12 @@ export const AgentMemoryProjectionEraseResultSchema = z
   .object({ nextWriterEpoch: AgentMemoryProjectionWriterEpochSchema })
   .strict();
 export type AgentMemoryProjectionEraseResult = z.infer<typeof AgentMemoryProjectionEraseResultSchema>;
+
+/**
+ * Optional bridge to a complete hosted client. It receives the canonical,
+ * already-redacted protocol mutation only; the SDK intentionally owns no
+ * consent, cloud transport, or raw-source upload fallback.
+ */
+export interface AgentMemoryProjectionPort {
+  publish(input: Readonly<{ mutation: AgentMemoryProjectionMutation }>): Promise<{ readonly accepted: boolean }>;
+}

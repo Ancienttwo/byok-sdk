@@ -51,21 +51,13 @@
 export { AgentMemoryService } from '../daemon/agent-memory';
 /** Bounded, audited snapshot of the Agent's local memory files, taken after `Session.close()` while the home lease still exists. */
 export { captureAgentMemorySnapshot } from '../daemon/agent-memory';
-/** The single source of truth for which relative path a model may name: `MEMORY.md` or `notes/<safe-relative>.md`. */
-export { validateAgentMemoryPath } from '../daemon/agent-memory';
 /** The sole platform gate for the memory write authority: native Linux, macOS and Windows x64 only with the host's helper. */
 export { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
-/** Base failure for every rejected memory operation. */
-export { AgentMemoryError } from '../daemon/agent-memory';
 /** Compare-and-swap failure carrying the expected and actual content revisions. */
 export { AgentMemoryRevisionConflictError } from '../daemon/agent-memory';
 
 /** The exact active-task binding required to construct the service; every field is validated on each call. */
 export type { AgentMemoryTaskContext } from '../daemon/agent-memory';
-/** One memory file as the snapshot sees it: relative path, sha256 revision, byte count, content. */
-export type { AgentMemoryFile } from '../daemon/agent-memory';
-/** A bounded set of memory files plus their total byte count. */
-export type { AgentMemorySnapshot } from '../daemon/agent-memory';
 /** Result of `recall`, including the metadata-only audit warning when the audit write failed but the read did not. */
 export type { AgentMemoryRecallResult } from '../daemon/agent-memory';
 /** Result of `save`, distinguishing a replace (with new revision) from a delete. */

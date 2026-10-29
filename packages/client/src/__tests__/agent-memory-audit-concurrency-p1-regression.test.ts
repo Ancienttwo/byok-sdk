@@ -2,17 +2,15 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { AGENT_MEMORY_PROJECTION_CAPABILITY } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_PROJECTION_CAPABILITY, AgentMemoryError, type AgentMemoryProjectionPort } from '@byok-sdk/protocol';
 
 import {
   AGENT_MEMORY_AUDIT_FILENAME,
   AGENT_MEMORY_OUTBOX_FILENAME,
-  AgentMemoryError,
   AgentMemoryRevisionConflictError,
   AgentMemoryService,
   captureAgentMemorySnapshot,
   snapshotAndProjectAgentMemory,
-  type AgentMemoryProjectionPort,
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
 import type {

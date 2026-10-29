@@ -8,9 +8,9 @@ import type {
   AgentMemoryIntentV1,
   AgentRef,
 } from '@byok-sdk/protocol';
-import type { AgentMemoryIntentFetchInput } from '../../daemon/agent-memory-intent';
 import { POWERCUT_DEVICE_ID, POWERCUT_TENANT_ID } from './protocol';
 import { EMPTY_REVISION } from './snapshot';
+import { type AgentMemoryIntentFetchInput } from '@byok-sdk/protocol';
 
 /** What the Host issued, without the content (the content is a function of `seq`). */
 export interface IssuedIntent {

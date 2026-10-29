@@ -6,7 +6,6 @@ import {
   helperAgentMemoryIntentBackend,
   NATIVE_AGENT_MEMORY_INTENT_BACKEND,
   type AgentMemoryIntentBackend,
-  type AgentMemoryIntentTransport,
 } from '../../daemon/agent-memory-intent';
 import { resolveAgentMemoryFilesystemHelper } from '../../daemon/agent-memory-helper-release';
 import {
@@ -18,6 +17,7 @@ import {
   type PowercutLink,
 } from './protocol';
 import { takeDeviceSnapshot } from './snapshot';
+import { type AgentMemoryIntentTransport } from '@byok-sdk/protocol';
 
 /**
  * The backend the production daemon would pick, with one test-only seam: on

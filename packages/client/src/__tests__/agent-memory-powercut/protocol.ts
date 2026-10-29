@@ -4,8 +4,8 @@ import type {
   AgentMemoryIntentAvailablePayload,
   AgentMemoryIntentCompletion,
 } from '@byok-sdk/protocol';
-import type { AgentMemoryIntentFetchInput } from '../../daemon/agent-memory-intent';
 import type { DeviceSnapshot } from './snapshot';
+import { type AgentMemoryIntentFetchInput } from '@byok-sdk/protocol';
 
 /**
  * Wire between the device program and the independent Host (#605 W5).

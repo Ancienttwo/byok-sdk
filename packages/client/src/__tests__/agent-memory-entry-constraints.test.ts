@@ -27,6 +27,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { AgentMemoryError } from '@byok-sdk/protocol';
 import * as agentMemoryEntry from '../agent-memory/index';
 
 const SRC_ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -169,7 +170,6 @@ describe('the embedded agent-memory public surface', () => {
       'AGENT_MEMORY_GUIDANCE',
       'AGENT_MEMORY_RECALL_TOOL_NAME',
       'AGENT_MEMORY_SAVE_TOOL_NAME',
-      'AgentMemoryError',
       'AgentMemoryRevisionConflictError',
       'AgentMemoryService',
       'captureAgentMemorySnapshot',
@@ -178,7 +178,6 @@ describe('the embedded agent-memory public surface', () => {
       'openAgentMemoryFilesystemHelper',
       'prependAgentMemoryGuidance',
       'serveAgentMemoryMcpOverStdio',
-      'validateAgentMemoryPath',
     ]);
   });
 
@@ -238,6 +237,6 @@ describe('the embedded agent-memory public surface', () => {
       leaseId: 'lease',
       homeIdentity: { dev: 1n, ino: 2n },
     });
-    return expect(service.recall({ path: 'MEMORY.md' })).rejects.toBeInstanceOf(agentMemoryEntry.AgentMemoryError);
+    return expect(service.recall({ path: 'MEMORY.md' })).rejects.toBeInstanceOf(AgentMemoryError);
   });
 });

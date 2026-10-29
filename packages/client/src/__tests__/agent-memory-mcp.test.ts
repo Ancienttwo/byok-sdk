@@ -5,19 +5,16 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AGENT_MEMORY_PROJECTION_CAPABILITY, createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_PROJECTION_CAPABILITY, createEnvelope, type Envelope, AgentMemoryError, AgentMemoryValidationError, validateAgentMemoryPath } from '@byok-sdk/protocol';
 
 import { AgentHomeManager } from '../agent-home';
 import {
-  AgentMemoryError,
   AgentMemoryRedactedOutbox,
   AgentMemoryRevisionConflictError,
   AgentMemoryService,
   captureAgentMemorySnapshot,
   snapshotAndProjectAgentMemory,
   type AgentMemoryTaskContext,
-  AgentMemoryValidationError,
-  validateAgentMemoryPath,
 } from '../daemon/agent-memory';
 import { AGENT_MEMORY_TOOLS, handleAgentMemoryToolCall } from '../bin/agent-memory-mcp-server';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';

@@ -10,7 +10,6 @@ import {
   AGENT_MEMORY_AUDIT_FILENAME,
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AGENT_MEMORY_OUTBOX_FILENAME,
-  AgentMemoryError,
   AgentMemoryRedactedOutbox,
   AgentMemoryService,
   isAgentMemorySecureFilesystemAvailable,
@@ -18,6 +17,7 @@ import {
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
+import { AgentMemoryError } from '@byok-sdk/protocol';
 
 const MAX_LOCAL_LOG_BYTES = AGENT_MEMORY_MAX_LOCAL_LOG_BYTES;
 const roots: string[] = [];
