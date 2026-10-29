@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Breaking (client)** — Pi subagents move from a vendored, patched
+  pi-subagents 0.60.0 to the upstream `pi-subagents` 0.83.1 package, an exact
+  client dependency loaded from its installed package. Foreground children are
+  in-process Pi sessions and background runs use pi-subagents' own Node runner,
+  so subagent children no longer re-enter the SDK: the `pi-subagent-print` and
+  `pi-subagent-runner` helper kinds, `sdkPiSubagentHelperKinds` and
+  `sdkDistributionManifest.piSubagentHelperKinds` are removed.
+  Under the `auto` gate every native child loads
+  `dist/bin/pi-subagent-gate.js` as a pi-subagents required child extension,
+  and pi-subagents refuses external-cli, external-job and machine runners before
+  they start. The `keys-profile` lane no longer loads pi-subagents, so it offers
+  no `subagent` tool (it used to refuse each call with
+  `byok_subagent_credential_unavailable`). A single-file product's bundled
+  re-entry and the sealed host offer no Pi subagents until pi-subagents can ship
+  as an asset package. The client no longer pins `jiti` or `yaml`, and neither
+  host imports `typebox/compile`.
 - **Change (client)** — the Pi web extension moves from pi-web-access 0.24.1
   to 0.45.0, and the private todo extension from rpiv-todo 2.8.0 to 2.15.0
   (`@juicesharp/rpiv-i18n` and `@juicesharp/rpiv-config` 2.15.0).

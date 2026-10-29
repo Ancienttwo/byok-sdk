@@ -1214,8 +1214,9 @@ tool schemas do not freeze memory file contents. This cut adds no automatic snap
 Host UI or native tools. SDK source is now v9 (see the v9 cut); downstream paired upgrade and deployment
 remain separate actions. No v7 reader, mode default or fallback is retained.
 
-Fresh Pi execution keeps Pi's default native tools, the SDK web/subagent/todo
-extensions and the user's own extensions and skills. For Agent tasks on the
+Fresh Pi execution keeps Pi's default native tools, the SDK web and todo
+extensions, the installed pi-subagents extension (see "Pi subagents") and the
+user's own extensions and skills. For Agent tasks on the
 ordinary RPC lane, local `PiAdapterOptions.agentUserContext: 'excluded'`
 removes user extensions, skills, templates, themes, instruction files and
 session resource settings; it isolates context and never removes a tool. The
@@ -1673,9 +1674,7 @@ Official coding-agent 1.4.0, like 1.0.4, ships no npm shrinkwrap. The npm
 physical root count has not been re-measured for 1.4.0. The local Bun install
 has eleven resolved physical roots across nine official package names.
 The release check verifies all direct instances; no singleton guarantee is claimed.
-The scripted workflow probe covers the vendored arbiter's built-in
-Agent/compat stream path. It does not prove cross-instance
-registration visibility: pi-ai/compat owns a module-local apiProviderRegistry,
+Cross-instance registration visibility is not proven: pi-ai/compat owns a module-local apiProviderRegistry,
 so a future extension calling registerApiProvider on one copy cannot make that
 registration visible to another copy. This boundary is deferred in tasks/todos.md
 and must be addressed before such an extension is admitted.
@@ -3328,7 +3327,7 @@ Pi custody consumes the client-decided runtime launch: `--pi-bin`, optional `--p
 
 The bundled launcher executable reads the platform OS store with its default storage options. `@byok-sdk/keys` also exports `runPiProviderLauncher(options, { createSecretStore })`, the same launcher with a host-built `SecretStore`, so a host with its own storage options supplies one launcher executable without a second store definition. Both apply the same exact profile, binding, runtime-entry and custody checks. The provider projection keeps the profile URL convention of the direct clients: for the `anthropic` adapter it projects the keys endpoint `modelApiUrl(base_url, 'messages')` without its `/v1/messages` suffix, because Pi appends that suffix, and it refuses an endpoint without that suffix with `PROVIDER_URL_INVALID`. For `auth_mode: 'none'` the `pi-rpc` projection sets the fixed non-secret `apiKey` `byok-sdk-auth-none`, because Pi refuses a request without a key; the `pi-prepared` and `pi-durable` entries require a launcher-delivered key and refuse a keyless profile with `PROVIDER_PROFILE_INVALID` at admission.
 
-The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` receives its key the same way as the durable worker below (#385): over the launcher's private one-shot JSON IPC channel bound to the config digest, never in its environment, argv or stdio RPC. Its digest-bound launch config (`byok.pi.rpc-launch` version 8) states `credentialSource`; under `keys-profile` the host refuses a launch environment that carries a provider key, disconnects IPC before any extension, tool or session exists, and registers the key only in Pi's in-memory runtime credential overlay (`ModelRuntime.setRuntimeApiKey`). Its projection carries the non-secret `apiKey` marker `byok:rpc-ipc`; under `pi-auth-store` the host refuses an IPC channel it was not configured for. Conformance tests require no key in the output of Pi's real built-in bash tool running `env` and none in the host's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). Pi subagents are unavailable in this lane: the vendored subagents extension spawns each child with a copy of the host environment and its own stdio, which gives the SDK no private channel for the key, so a subagent print or runner child whose projection carries `byok:rpc-ipc` MUST refuse with `byok_subagent_credential_unavailable` before any session or provider request, and MUST NEVER send the marker as a key. Only `byok-pi-prepared`, which registers MCP tools only, receives the key as `PI_PROVIDER_API_KEY` in its environment.
+The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` receives its key the same way as the durable worker below (#385): over the launcher's private one-shot JSON IPC channel bound to the config digest, never in its environment, argv or stdio RPC. Its digest-bound launch config (`byok.pi.rpc-launch` version 8) states `credentialSource`; under `keys-profile` the host refuses a launch environment that carries a provider key, disconnects IPC before any extension, tool or session exists, and registers the key only in Pi's in-memory runtime credential overlay (`ModelRuntime.setRuntimeApiKey`). Its projection carries the non-secret `apiKey` marker `byok:rpc-ipc`; under `pi-auth-store` the host refuses an IPC channel it was not configured for. Conformance tests require no key in the output of Pi's real built-in bash tool running `env` and none in the host's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). Pi subagents are unavailable in this lane: a pi-subagents child session opens its own model runtime from the projection, whose `apiKey` is the `byok:rpc-ipc` marker, and never sees the key held in the parent's memory, so the host does not load pi-subagents under `keys-profile`. No `subagent` tool is offered and the marker is never sent as a key. Only `byok-pi-prepared`, which registers MCP tools only, receives the key as `PI_PROVIDER_API_KEY` in its environment.
 
 The durable Pi lane runs in a separate `byok-pi-durable` executable launched through the same credential launcher contract as `byok-pi-prepared`. The credential launcher transfers the provider key over a private, one-shot JSON IPC channel bound to the launch config digest; it MUST NEVER place the key in the durable child's environment, argv, stdio RPC or replica files. The worker consumes it into model/provider memory and disconnects IPC before constructing tools or MCP children. Deleting process.env is not an isolation mechanism. Tool exec MUST force `inheritEnv: false` and an explicit allowlist. Conformance tests require no key in both inherited tool env and the worker's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). The daemon communicates with it over stdio RPC, does not depend on `@byok-sdk/keys`, and never reads, proxies or forwards credentials. Its environment is rebuilt by the same EnvironmentBuilder allowlist with the `BYOK_*` deny. One child exclusively owns one durable storage; because upstream pi-durable provides no cross-process lock, the child MUST acquire an OS exclusive lock (flock or sidecar lockfile) bound to the current leaseId before opening storage, and MUST fail closed if it cannot. The child exists only while its daemon holds the home's single-writer lease; lease release requires the child's disposal receipt or confirmed process-tree death (wait after KILL).
 
@@ -3496,13 +3495,35 @@ poll the cloud read API. With no draft producer, only a terminal marker appears.
 
 ## Pi subagents
 
-ADR-037 removed the SDK custody dispatcher, its launch records and slot caps,
-and the external-CLI custody (`pi-subagent-runner -> official-external-cli`).
-A Pi subagent child re-enters the SDK bundle that runs the parent:
-`<runtime> [<entry>] __byok_sdk_helper <pi-subagent-print|pi-subagent-runner>`
-(`packages/client/src/subagents/spawn.ts`). The vendored subagents extension
-keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`) and concurrency limits, as in OAR.
-The SDK adds no second limit and no money or token spend cap.
+Pi subagents are the upstream `pi-subagents` package (exact client dependency,
+0.83.1), loaded by the ordinary RPC host from its installed package. The SDK
+vendors and patches none of it. pi-subagents reads its own package files at run
+time, so the host imports it through opaque specifiers that a product bundler
+cannot inline, and loads it only when the host is installed (not a single-file
+product's bundled re-entry, and never in the sealed host) and the credential
+source is `pi-auth-store` (see the `keys-profile` lane above).
+
+Foreground children are in-process Pi sessions inside the parent host; background
+runs use pi-subagents' detached Node runner from the installed package. Neither
+re-enters the SDK: there is no `pi-subagent-print` or `pi-subagent-runner` helper
+kind. pi-subagents keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`), concurrency and
+fan-out limits. The SDK adds no second limit and no money or token spend cap.
+
+Under the `auto` tool authorization gate, the parent session registers
+`dist/bin/pi-subagent-gate.js` through
+`registerRequiredChildExtensions({ requireForAllRunners: true })` on each
+`session_start` and disposes it on `session_shutdown`. Every native child
+(foreground, background, nested, resumed, workflow) loads it and sends its tool
+calls to the same loopback gate, read from `BYOK_TOOL_AUTHORIZATION_GATE`, with
+`nativeAgentId` `pi-subagent:<child session id>`. A child without the gate fails
+to bind its extensions and the launch is rejected. pi-subagents refuses an
+external-cli, external-job or machine placement before it starts, because those
+runners cannot load the gate. Under `all` the host registers nothing.
+
+A single-file product has no pi-subagents: its bundled re-entry offers no
+`subagent` tool. Restoring foreground subagents there needs pi-subagents shipped
+as an asset Pi package; background subagents there need an upstream host runner
+command seam. Both are deferred (tasks/todos.md).
 
 ## Local native interaction contract
 
@@ -3684,7 +3705,7 @@ Legacy shared-temp prefixes are an operator-invoked migration: doctor inventorie
 `copySdkNativeAssets` is a build-time API. For Windows x64 it copies the pinned
 and integrity-verified official Koffi addon; it never downloads in a runtime.
 `sdkDistributionManifest` describes Pi pin, reserved helper kinds and native target
-files. `reservedHelperKinds` plus `piSubagentHelperKinds` is exactly the set that
+files. `reservedHelperKinds` is exactly the set that
 `runSdkReservedHelperCommand` accepts. A product passes an absolute `nativeAssetRoot` to SDK-created adapters via
 `DaemonConfig`, or to each custom adapter constructor. An explicit root is scoped
 to that adapter's owned process trees and fails closed on missing or modified
@@ -3762,7 +3783,7 @@ it never runs ungated, and no third mode exists. Current coverage:
 
 | Runtime | `auto` | How |
 | --- | --- | --- |
-| Pi, ordinary RPC lane | Supported | Digest-bound loopback gate in the v8 launch; a Pi `tool_call` hook registered after every other extension judges the final input; SDK native Pi subagents (scheduler and print children) inherit the same gate; external-cli/external-job subagent runners refuse to start while it is present |
+| Pi, ordinary RPC lane | Supported | Digest-bound loopback gate in the v8 launch; a Pi `tool_call` hook registered after every other extension judges the final input; every native pi-subagents child loads the same gate as a required child extension; pi-subagents refuses external-cli, external-job and machine runners while it is present |
 | Pi, prepared and durable lanes | Declined before claim | No native tools (prepared) / unverified worker (durable) |
 | Claude | Supported | SDK `PreToolUse` callback hook registered at `initialize`; the prompt is sent only after the CLI confirms `hooks_applied`. It covers native tools, MCP tools and native subagents and is not skipped by bypass mode, allow rules or `disableAllHooks` (qualified with Claude 2.1.312 against a loopback provider) |
 | Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |

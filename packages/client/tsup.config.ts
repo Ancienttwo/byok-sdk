@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'tsup';
-import { subagentsBuild } from './scripts/subagents-build';
 import { workspaceExternals } from './scripts/workspace-externals';
 
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown };
@@ -23,6 +22,7 @@ export default defineConfig({
     'src/bin/byok-pi-durable.ts',
     'src/bin/byok-pi-rpc.ts',
     'src/bin/pi-runtime-host.ts',
+    'src/bin/pi-subagent-gate.ts',
     'src/runtime/acp-session-runtime.js',
     'src/bin/byok-agent-message-mcp.ts',
     'src/bin/byok-agent-result-mcp.ts',
@@ -45,7 +45,7 @@ export default defineConfig({
   },
   // Let our plugin annotate these external edges before tsup short-circuits them.
   noExternal: [/^@byok-sdk\//],
-  esbuildPlugins: [workspaceExternals(), subagentsBuild(false), {
+  esbuildPlugins: [workspaceExternals(), {
     name: 'mcp-http-core-entry',
     setup(build) {
       // Both public entries must use the same error class and method core.
@@ -65,9 +65,11 @@ export default defineConfig({
   external: [
     'koffi', '#byok-hermes-session', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-runtime-host-sealed', '#byok-pi-todo-runtime',
     'typebox', 'typebox/compile',
-    'undici', 'jiti', 'yaml',
+    'undici',
   ],
   define: {
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
+    // Only the installed host loads the pi-subagents dependency; the sealed host never references it.
+    __BYOK_PI_SUBAGENTS__: 'true',
   },
 });

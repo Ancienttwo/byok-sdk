@@ -1,7 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSdkReservedHelper } from './bin/sdk-reserved-helper-runners';
-import { piSubagentChildren } from './subagents/spawn';
 
 export const BYOK_SDK_HELPER_SUBCOMMAND = '__byok_sdk_helper';
 
@@ -37,17 +36,9 @@ const DIST_SCRIPT_BY_KIND: Readonly<Record<SdkReservedHelperKind, string>> = Obj
   'pi-durable': 'byok-pi-durable.js',
 });
 
-/** With `sdkPiSubagentHelperKinds`, the exact kinds that `runSdkReservedHelperCommand` accepts. */
+/** The exact kinds that `runSdkReservedHelperCommand` accepts. */
 export const sdkReservedHelperKinds: readonly SdkReservedHelperKind[] = Object.freeze(Object.keys(DIST_SCRIPT_BY_KIND) as SdkReservedHelperKind[]);
 const RESERVED_HELPER_KIND_SET: ReadonlySet<string> = new Set(sdkReservedHelperKinds);
-
-/**
- * Kinds that only a Pi subagent child re-enters with (`subagents/spawn.ts`).
- * They carry a tail argv and have no dist script, so `resolveSdkReservedHelperBin`
- * does not launch them. A product entrypoint still routes them through
- * {@link runSdkReservedHelperCommand}.
- */
-export const sdkPiSubagentHelperKinds = piSubagentChildren;
 
 function assertExecutable(executable: string): void {
   if (!path.isAbsolute(executable) || /[\u0000\r\n]/u.test(executable)) {
@@ -136,25 +127,6 @@ export async function runSdkReservedHelperCommand(
 ): Promise<boolean> {
   if (argv[0] !== BYOK_SDK_HELPER_SUBCOMMAND) return false;
   declareBundledPiRuntime();
-  if (argv[1] === 'pi-subagent-runner') {
-    // A Pi subagent runner child (`subagents/spawn.ts`). The tail is the
-    // runner config path. The runtime host is an external-dynamic import so
-    // the library root never loads the vendored runner closure.
-    if (argv.length !== 3) throw new Error('invalid SDK-reserved helper command');
-    loadNodeUndici();
-    const host = await import('#byok-pi-runtime-host');
-    await host.runSubagentRunner(argv[2]!);
-    return true;
-  }
-  if (argv[1] === 'pi-subagent-print') {
-    // A Pi subagent print child (`subagents/spawn.ts`). The tail is the
-    // vendor's pi-style print argv.
-    loadNodeUndici();
-    const host = await import('#byok-pi-runtime-host');
-    const exitCode = await host.runSubagentPrint(argv.slice(2));
-    if (exitCode !== 0) throw new Error(`pi-subagent-print exited ${exitCode}`);
-    return true;
-  }
   if (!isHelperKind(argv[1]) || (argv[1] !== 'pi-rpc' && argv[1] !== 'pi-prepared' && argv[1] !== 'pi-durable' && argv.length !== 2)) {
     throw new Error('invalid SDK-reserved helper command');
   }

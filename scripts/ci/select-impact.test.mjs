@@ -404,15 +404,15 @@ test('SQLite packaging fixtures select only their reviewed packaging owner', () 
   }
 });
 
-test('vendored pi-subagents 0.60.0 factory files select only the client closure (#701)', () => {
+test('the retired vendored pi-subagents 0.60.0 snapshot selects only the client closure (#701)', () => {
   const client = selectImpact(['packages/client/src/daemon/task-runner.ts']).dirs;
   const vendor = 'packages/client/vendor/pi-subagents/0.60.0';
-  for (const path of [`${vendor}/index.ts`, `${vendor}/PROVENANCE.md`, `${vendor}/source-manifest.json`,
+  for (const path of [`${vendor}/index.ts`, `${vendor}/LICENSE`, `${vendor}/package.json`, `${vendor}/PROVENANCE.md`, `${vendor}/source-manifest.json`,
     `${vendor}/src/extension/index.ts`]) {
     assert.deepEqual(selectImpact([path]), { dirs: client, files: [path], families: ['dataplane'], reason: 'impacted' });
   }
-  for (const path of ['packages/client/vendor/pi-subagents/0.61.0/index.ts', `${vendor}/src/extension/notes.md`,
-    `${vendor}/src/extension/data.json`, `${vendor}/LICENSE`, `${vendor}/package.json`, `${vendor}/index.js`,
+  for (const path of ['packages/client/vendor/pi-subagents/0.61.0/index.ts', 'packages/client/vendor/pi-subagents/0.83.1/index.ts', `${vendor}/src/extension/notes.md`,
+    `${vendor}/src/extension/data.json`, `${vendor}/index.js`,
     'packages/client/vendor/other/0.60.0/index.ts']) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
   }
