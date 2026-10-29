@@ -69,10 +69,10 @@ function isPortableSegment(value: unknown): value is string {
     && !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu.test(value);
 }
 
-/** Absolute on `platform`. On Windows a drive (`C:\\`) or UNC (`\\\\server`) root: a rooted `\\x` depends on the current drive. */
+/** Absolute on `platform`. Windows requires a drive (`C:\\`) or complete UNC (`\\\\server\\share`) root; incomplete roots depend on the current drive. */
 function isAbsoluteFor(platform: HostLayoutPlatform, value: unknown): value is string {
   if (typeof value !== 'string' || /[\0\r\n]/u.test(value)) return false;
-  return platform === 'win32' ? /^(?:[a-zA-Z]:[\\/]|[\\/]{2}[^\\/])/u.test(value) : path.posix.isAbsolute(value);
+  return platform === 'win32' ? /^(?:[a-zA-Z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))/u.test(value) : path.posix.isAbsolute(value);
 }
 
 /**
