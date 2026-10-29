@@ -92,17 +92,16 @@ describe('the embedded agent-memory entry module graph', () => {
     // to grow, say why in the same commit.
     //
     // `agent-home-readers.ts` joined that inert tail with #317: `agent-home.ts`
-    // imports the reader run-directory name check and retention from it. It
-    // adds no external import, and nothing on this entry calls it.
+    // imports the reader run-directory name check from it. It adds no
+    // external import, and nothing on this entry calls it.
     // #603 adds a data-only release pin: embedded helper verification must bind
     // copied assets to the same SDK build without importing daemon composition.
-    // #1034 shares reader-run eligibility with bounded retention in this inert
-    // tail; the extracted policy adds no dependency or embedded runtime export.
+    // #1105 deleted `pruneReaderRuns`, so the reader-run retention policy
+    // (`agent-home-reader-retention.ts`) left this tail.
     // #1058 reuses canonical memory tool names from `sdk-reserved-mcp.ts`
     // in the MCP server and adapter grants. That import-free name authority
     // adds no runtime dependency, I/O, or embedded public export.
     expect(GRAPH.modules).toEqual([
-      'agent-home-reader-retention.ts',
       'agent-home-readers.ts',
       'agent-home.ts',
       'agent-memory/index.ts',
