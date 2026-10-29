@@ -59,7 +59,9 @@ export declare class PostgresCloudCleanup {
      *
      * The clone is a `limited` mailbox append: it goes through the one outbox
      * writer, so it is admitted against `mailboxLimitBytes` like any other new
-     * row and is ordered with live offers by the same locks.
+     * row and is ordered with live offers by the same locks. A retired device's
+     * stream is closed, so its rows replay only after the id is registered
+     * again; until then the replay throws `mailbox_stream_closed`.
      */
     replayDeadLetter(tenant: TenantId, input: DeadLetterReplayInput): Promise<MailboxMessage>;
     /**
@@ -558,7 +560,7 @@ export declare function createPostgresCoreStores(options: PostgresCoreStoreOptio
  * the SQL expression of §12.6.2 layer 3: there is no bare device index to
  * accidentally query.
  */
-import { type Clock, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type MailboxCollectExpiredInput, type MailboxExpirePendingInput, type CollectExpiredResult, type MailboxStore, type MailboxUsage, type TenantId } from '@byok-sdk/core';
+import { type Clock, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCloseStreamInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type MailboxCollectExpiredInput, type MailboxExpirePendingInput, type MailboxReopenStreamInput, type CollectExpiredResult, type MailboxStore, type MailboxUsage, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from '../../pool';
 export declare const OUTBOX_COLUMNS = "tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at";
 export interface OutboxRow {
@@ -585,6 +587,10 @@ export declare class PostgresMailboxStore implements MailboxStore {
     expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{
         readonly expired: number;
     }>;
+    closeStream(tenant: TenantId, input: MailboxCloseStreamInput): Promise<{
+        readonly expired: number;
+    }>;
+    reopenStream(tenant: TenantId, input: MailboxReopenStreamInput): Promise<void>;
     collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/core/objects.d.ts ====

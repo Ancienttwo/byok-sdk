@@ -888,6 +888,24 @@
         "export:@byok-sdk/client#readPayloadManifest",
         "export:@byok-sdk/client#readServiceInstallationRecord"
       ]
+    },
+    {
+      "id": "retired-device-stream-closed",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "A retired device's mailbox stream is now closed (#1160). Revoking or superseding a device closes its stream in the retirement's transaction, and every later append for that device id is refused, whatever its admission and even for a known messageId: core raises mailbox_stream_closed (MailboxStreamClosedError, with deviceId and closeCause), and ByokCloud raises device_retired (DeviceRetiredError, with deviceId and retirementCause). Before, a writer whose check ran before the retirement (offers, agent controls, scope-key notices, approve/reject, steer, inbound acks, dead-letter replay) could still commit a pending row for the retired device. An offer refused this way settles its attempt cancelled with the retirement cause in the same call and names its taskId; a scope-key notice skips a recipient retired after the list was read; a /byok/messages batch whose reply is refused answers 401. Registering the same device id again reopens the stream; rows, cursor, seq and recoverableFrom are kept. Custom stores must implement MailboxStore.closeStream and reopenStream, refuse appends on a closed stream, and close on revoke and supersede and reopen on register; MailboxStore.expirePending no longer takes seqs 'all'. Postgres: migration 0033 adds device_stream.closed_at and closed_cause and closes, as device_revoked, the stream of every device whose row is already gone, expiring its pending rows (a supersede before the upgrade reads as a revoke). Embedded SQLite: a schema 6 file is upgraded in place to 7 when it opens, with the same backfill, keeping its pairings and rows; older versions are refused as before, and a v7 file cannot be opened by an earlier build.",
+      "migration": "docs/hosted-host-contract.md#revokedevice",
+      "items": [
+        "export:@byok-sdk/cloud#DeviceRetiredError",
+        "export:@byok-sdk/core#CORE_ERROR_CODES",
+        "export:@byok-sdk/core#MAILBOX_STREAM_CLOSE_CAUSES",
+        "export:@byok-sdk/core#MailboxCloseStreamInput",
+        "export:@byok-sdk/core#MailboxReopenStreamInput",
+        "export:@byok-sdk/core#MailboxStreamCloseCause",
+        "export:@byok-sdk/core#MailboxStreamClosedError",
+        "store:cloud-dataplane-postgres",
+        "store:server-sqlite"
+      ]
     }
   ],
   "changes": [

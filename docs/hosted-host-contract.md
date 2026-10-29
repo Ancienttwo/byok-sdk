@@ -133,8 +133,11 @@ The Postgres directory does this in one transaction (`PostgresDeviceDirectory.re
 - It retires the device (#1119, `retireDevices` in `packages/cloud-dataplane/src/stores/task-retirement.ts`).
   Every unfinished task of the device (`offered`, `claimed`, `running` or `cancel_requested`, as target or owner)
   becomes `cancelled` with `terminalCause: 'device_revoked'` and a `terminalAt`. A terminal task does not change.
-  A cancellation marker stays as it was. Every `pending` mailbox row of the device becomes `expired`, so it no longer
-  counts against `mailboxLimitBytes`. The device's `recoverableFrom` rises past those rows.
+  A cancellation marker stays as it was.
+- It closes the device's mailbox stream (#1160, `closeDeviceStreams` in
+  `packages/cloud-dataplane/src/stores/core/outbox-writer.ts`): `device_stream.closed_cause` records the retirement
+  cause, and every `pending` mailbox row of the device becomes `expired`, so it no longer counts against
+  `mailboxLimitBytes`. The device's `recoverableFrom` rises past those rows.
 - It keeps the `task`, `agent_egress_event`, `proof_request_receipt`, `outbox` and `device_stream` rows. It deletes no
   mailbox row and moves no row back to `pending`.
 
@@ -147,15 +150,29 @@ So the device cannot send a terminal for its tasks.
 `readTaskResult` returns a retired task as `state: 'cancelled'` with that `terminalCause` and the attempt's
 `terminalAt` as `recordedAt`, unless a cancellation marker or a device terminal receipt already answers it.
 
-Known gap (#1160, older than #1119): only `cancelTask` orders its append against the retirement. Every other mailbox
-writer (offers, agent controls, scope-key notices, approve/reject, steer, inbound acks, Postgres dead-letter replay)
-checks the device or task in a separate read, so one whose check ran before the retirement can still commit a
-`pending` row for the retired device after it. Such a row is never delivered. It holds quota until the maintenance
-`mailbox` step expires it: every `pending` row older than `mailboxUnackedRetentionMs` (7 days in
-`DEFAULT_RETENTION_POLICY`, `packages/cloud/src/maintenance.ts:18`) becomes `expired` whatever its device
-(`packages/cloud/src/maintenance.ts:146,153`; Postgres `packages/cloud-dataplane/src/stores/core/mailbox.ts:352-357`,
-SQLite `packages/server/src/stores/sqlite/index.ts:948-950`, in-memory `packages/core/src/in-memory/mailbox.ts:205-219`).
-`ByokServer` runs maintenance every 5 minutes by default; a hosted Host runs `runMaintenance` on its own schedule.
+A closed stream refuses every later append for that device id, whatever the writer checked before
+(`MailboxStore.closeStream` in `packages/core/src/mailbox.ts`). Each store reads the close where it appends: Postgres
+from the `device_stream` row version the append's own upsert locked, SQLite inside the one coordinator transaction, the
+in-memory store on the device's mutation chain. So an offer, agent control, scope-key notice, approve/reject, steer,
+inbound ack or dead-letter replay whose check ran before the retirement commits no `pending` row after it. The refusal
+is `mailbox_stream_closed` in core and `device_retired` (`DeviceRetiredError`, with `deviceId` and
+`retirementCause`) at the `ByokCloud` surface, and it refuses a known `messageId` too:
+
+- An offer whose attempt was reserved after the retirement settles that attempt `cancelled` with the retirement cause
+  in the same call; the error names the `taskId`, and `readTaskResult` reports it.
+- A scope-key notice skips a recipient device that was retired after the recipient list was read.
+- A `/byok/messages` batch whose reply append is refused answers `401 unauthorized`, as the device's authentication
+  now would.
+- `replayDeadLetter` (Postgres) refuses with `mailbox_stream_closed` until the id is registered again.
+
+Registering the same device id again reopens its stream (`MailboxStore.reopenStream`) in the registration's
+transaction. Rows, cursor, `seq` and `recoverableFrom` are kept across the close and the reopen.
+
+Upgrade: Postgres migration `0033_device_stream_closed.sql` adds the two columns. It closes the stream of every
+device whose `device` row is already gone, and expires that stream's `pending` rows. Those streams read
+`closed_cause: 'device_revoked'`: a supersede before the upgrade was not stored apart from a revoke, so that
+provenance is lost. The embedded SQLite store upgrades a schema 6 file to 7 in place when it opens, with the same
+backfill, and keeps its pairings and rows. It refuses every other older version as before.
 
 ### abandonTask
 
