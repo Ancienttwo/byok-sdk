@@ -32,7 +32,7 @@ import {
   fullCapabilityDeclaration,
 } from '@byok-sdk/cloud';
 import { decodeEnvelope } from '@byok-sdk/protocol';
-import { ackAndCollectMailbox, runCloudConformance, type CloudCompositionFactory } from '@byok-sdk/conformance';
+import { ackAndCollectMailbox, conformanceMailbox, runCloudConformance, type CloudCompositionFactory } from '@byok-sdk/conformance';
 import { migrate } from '../migrate';
 import { createPostgresCloudStores } from '../stores/index';
 import { createPostgresCoreStores } from '../stores/core/index';
@@ -93,6 +93,7 @@ const postgresFactory: CloudCompositionFactory = {
         });
       },
       retireCancellationDelivery: (tenant, deviceId) => ackAndCollectMailbox(core.mailbox, tenant, deviceId),
+      mailbox: conformanceMailbox(core),
       dispose: () => scope.dispose(),
     };
   },

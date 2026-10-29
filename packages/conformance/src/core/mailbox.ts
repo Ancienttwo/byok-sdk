@@ -410,6 +410,47 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         expect(page.recoverableFrom).toBe(1);
       });
     });
+
+    it('expirePending dead-letters only the named pending rows of one device', async () => {
+      await withMailbox(factory, async ({ stores }) => {
+        await stores.mailbox.append(TENANT_A, offer(1));
+        await stores.mailbox.append(TENANT_A, offer(2));
+        const third = await stores.mailbox.append(TENANT_A, offer(3));
+        const other = await stores.mailbox.append(TENANT_A, { ...offer(4), deviceId: 'device-2' });
+        await stores.mailbox.recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: 1 });
+        await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 1 });
+
+        // An acked seq and an unknown seq are skipped; only pending row 2 moves.
+        await expect(
+          stores.mailbox.expirePending(TENANT_A, { deviceId: DEVICE, seqs: [1, 2, 99] }),
+        ).resolves.toEqual({ expired: 1 });
+        let page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
+        expect(page.messages.map((message) => message.seq)).toEqual([3]);
+        expect(page.recoverableFrom).toBe(3);
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(third.byteSize + other.byteSize);
+
+        await expect(
+          stores.mailbox.expirePending(TENANT_A, { deviceId: DEVICE, seqs: 'all' }),
+        ).resolves.toEqual({ expired: 1 });
+        await expect(
+          stores.mailbox.expirePending(TENANT_A, { deviceId: DEVICE, seqs: 'all' }),
+        ).resolves.toEqual({ expired: 0 });
+        page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
+        expect(page.messages).toHaveLength(0);
+        expect(page.recoverableFrom).toBe(4);
+        // The cursor is untouched, the other device keeps its row, and the
+        // allocator keeps counting: nothing expired comes back as pending.
+        await expect(stores.mailbox.readCursor(TENANT_A, DEVICE)).resolves.toMatchObject({ ackedSeq: 1, deliveredSeq: 1 });
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(other.byteSize);
+        const next = await stores.mailbox.append(TENANT_A, offer(5));
+        expect(next).toMatchObject({ seq: 4, state: 'pending' });
+        page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
+        expect(page.messages.map((message) => message.seq)).toEqual([4]);
+        await expect(
+          stores.mailbox.expirePending(TENANT_B, { deviceId: DEVICE, seqs: 'all' }),
+        ).resolves.toEqual({ expired: 0 });
+      });
+    });
   });
 
   describe('mailbox admission', () => {

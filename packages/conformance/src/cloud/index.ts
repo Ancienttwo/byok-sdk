@@ -7,6 +7,7 @@
  */
 export {
   ackAndCollectMailbox,
+  conformanceMailbox,
   CLOUD_CONFORMANCE_PORTS,
   runCloudConformance,
   withCloudComposition,
@@ -14,6 +15,7 @@ export {
 export type {
   CloudCompositionFactory,
   CloudCompositionHandle,
+  CloudConformanceMailbox,
   CloudConformancePortName,
   CloudConformanceStores,
 } from './harness';
