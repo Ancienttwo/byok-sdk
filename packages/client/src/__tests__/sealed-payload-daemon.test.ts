@@ -500,10 +500,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const { server, adapter, deviceId, member } = await start({ policy: ['task-output'] });
     // The sealed input comes first: it makes the epoch fresh for the output-only task.
     server.send(await sealedOffer(member, 'sealed-input', server.nextSeq(), deviceId, 'run sealed-input'));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    // Session creation precedes durable activation; controls require task.started.
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'sealed-input', BUDGET_MS);
     server.send(await sealedOffer(member, 'output-only-steer', server.nextSeq(), deviceId, 'run output-only-steer', OUTPUT_ONLY));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
-    // The two offers may start in either order; each start call records its instruction.
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'output-only-steer', BUDGET_MS);
     const sessionOf = (taskId: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === prependAgentMemoryGuidance(`run ${taskId}`))]!;
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -522,7 +522,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'fresh', server.nextSeq(), deviceId, 'run fresh'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.send(await sealedOffer(member, 'output-only-sealed-steer', server.nextSeq(), deviceId, 'run', OUTPUT_ONLY));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'output-only-sealed-steer', BUDGET_MS);
     const steerId = randomUUID();
     const { header, ciphertext } = await sealedMember(member, { text: 'go left' },
       binding('task.steer', 'server-to-daemon', { taskId: 'output-only-sealed-steer', steerId }, deviceId, BOTH));
@@ -540,7 +540,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   it('applies a sealed steer once per steerId', async () => {
     const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'steered', server.nextSeq(), deviceId, 'run'));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'steered', BUDGET_MS);
 
     const steerId = randomUUID();
     const { header, ciphertext } = await sealedMember(member, { text: 'go left' }, binding('task.steer', 'server-to-daemon', { taskId: 'steered', steerId }, deviceId, BOTH));
@@ -560,7 +560,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   it('applies the redelivery of a sealed steer whose first apply failed', async () => {
     const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'steer-retry', server.nextSeq(), deviceId, 'run'));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'steer-retry', BUDGET_MS);
     const session = adapter.sessions[0]!;
 
     const steerId = randomUUID();
@@ -578,7 +578,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   it('applies a sealed steer past a harmless chain advance, and drops one after a scope policy adds another device', async () => {
     const { server, adapter, deviceId, member, device } = await start();
     server.send(await sealedOffer(member, 'steer-shared', server.nextSeq(), deviceId, 'run'));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'steer-shared', BUDGET_MS);
     const session = adapter.sessions[0]!;
     const steer = async (text: string) => {
       const steerId = randomUUID();
