@@ -225,4 +225,30 @@ describe('presigned upload claims (#1118)', () => {
     expect((await aborted)?.status ?? 500).toBeGreaterThanOrEqual(400);
     expect((await harness.request(grant.uploadUrl, { method: 'PUT', body: bytes })).status).toBe(204);
   });
+
+  it('releases the claim when the request is aborted while its body is pending', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const bytes = new TextEncoder().encode('aborted by its signal');
+    const grant = await createBlob(harness, device, bytes, 'claim-signal-abort');
+
+    // A peer that sends a few bytes and then goes silent: the body never
+    // errors or closes on its own, only the request's signal ends it.
+    const silent = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(bytes.subarray(0, 4)); },
+    });
+    const controller = new AbortController();
+    const pending = Promise.resolve(harness.cloud.fetch(new Request(`${CLOUD_ORIGIN}${grant.uploadUrl}`, {
+      method: 'PUT', body: silent, duplex: 'half', signal: controller.signal,
+    } as RequestInit))).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await harness.request(grant.uploadUrl, { method: 'PUT', body: bytes })).status).toBe(409);
+
+    controller.abort();
+    // Let the aborted request unwind, then retry; never wait on the aborted
+    // response itself, which a stuck read would never produce.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await harness.request(grant.uploadUrl, { method: 'PUT', body: bytes })).status).toBe(204);
+    expect((await pending)?.status ?? 400).toBeGreaterThanOrEqual(400);
+  });
 });

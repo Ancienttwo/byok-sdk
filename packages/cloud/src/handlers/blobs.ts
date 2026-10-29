@@ -188,8 +188,11 @@ export function blobUploadContentHandler(deps: BlobContentRouteDeps) {
       return c.json({ error: 'upload_in_progress' }, 409);
     }
     try {
-      const body = await readBoundedBody(c.req.raw.body, Number(expectedBytes));
-      if (body.tooLarge) return c.json({ error: 'upload exceeds declared size' }, 413);
+      // The request's own abort signal ends the read, so a client that goes
+      // away mid-body releases the claim below like any other exit.
+      const body = await readBoundedBody(c.req.raw.body, Number(expectedBytes), c.req.raw.signal);
+      if (body.outcome === 'too_large') return c.json({ error: 'upload exceeds declared size' }, 413);
+      if (body.outcome === 'aborted') return c.json({ error: 'upload_aborted' }, 400);
       const result = await deps.contentProxy.writeContent(blobId, body.data);
       if (!result.ok) return c.json({ error: result.reason }, 422);
       return c.body(null, 204);
@@ -199,12 +202,25 @@ export function blobUploadContentHandler(deps: BlobContentRouteDeps) {
   };
 }
 
+type BoundedBody =
+  | { readonly outcome: 'too_large' }
+  | { readonly outcome: 'aborted' }
+  | { readonly outcome: 'complete'; readonly data: Uint8Array };
+
 async function readBoundedBody(
   body: ReadableStream<Uint8Array> | null,
   ceiling: number,
-): Promise<{ readonly tooLarge: true } | { readonly tooLarge: false; readonly data: Uint8Array }> {
-  if (body === null) return { tooLarge: false, data: new Uint8Array() };
+  signal: AbortSignal,
+): Promise<BoundedBody> {
+  if (signal.aborted) {
+    cancelBody(body);
+    return { outcome: 'aborted' };
+  }
+  if (body === null) return { outcome: 'complete', data: new Uint8Array() };
   const reader = body.getReader();
+  // Cancelling the reader settles a read that is waiting on a silent peer.
+  const onAbort = (): void => { void reader.cancel(signal.reason).catch(() => undefined); };
+  signal.addEventListener('abort', onAbort, { once: true });
   // The reservation's authoritative size is already bounded by the deployment
   // ceiling. Retaining chunks and later joining them would briefly hold a
   // second attacker-sized copy at the moment memory pressure is highest. The
@@ -215,11 +231,12 @@ async function readBoundedBody(
   try {
     for (;;) {
       const next = await reader.read();
+      if (signal.aborted) return { outcome: 'aborted' };
       if (next.done) break;
       const chunk = next.value;
       if (chunk.byteLength > ceiling - offset) {
         void reader.cancel().catch(() => undefined);
-        return { tooLarge: true };
+        return { outcome: 'too_large' };
       }
       if (chunk.byteLength === 0) continue;
       data ??= new Uint8Array(ceiling);
@@ -227,11 +244,12 @@ async function readBoundedBody(
       offset += chunk.byteLength;
     }
   } finally {
+    signal.removeEventListener('abort', onAbort);
     reader.releaseLock();
   }
   // A subarray is a view of the one buffer. The content proxy retains
   // exact-size validation without a second allocation.
-  return { tooLarge: false, data: data === undefined ? new Uint8Array() : data.subarray(0, offset) };
+  return { outcome: 'complete', data: data === undefined ? new Uint8Array() : data.subarray(0, offset) };
 }
 
 export function blobDownloadContentHandler(deps: BlobContentRouteDeps) {
