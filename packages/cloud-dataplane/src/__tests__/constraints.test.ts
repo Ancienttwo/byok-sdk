@@ -113,7 +113,7 @@ describe('the CI dataplane job', () => {
   });
 
   it('uses the repository Node pin except for the explicit forward-compatible leg', () => {
-    const setups = workflow.match(/actions\/setup-node@v7/g) ?? [];
+    const setups = workflow.match(/^\s+(?:- )?uses: actions\/setup-node@[0-9a-f]{40} # v7\.\d+\.\d+$/gm) ?? [];
     const versionFiles = workflow.match(/node-version-file: \.node-version/g) ?? [];
     expect(repoFile('.node-version').trim()).toBe('24.22.1');
     expect(setups.length).toBeGreaterThan(0);
@@ -138,7 +138,7 @@ describe('the CI bun toolchain', () => {
   });
 
   it('pairs every Bun setup with one frozen install', () => {
-    const setups = workflow.match(/oven-sh\/setup-bun@v2/g) ?? [];
+    const setups = workflow.match(/^\s+(?:- )?uses: oven-sh\/setup-bun@[0-9a-f]{40} # v2\.\d+\.\d+$/gm) ?? [];
     const installs = workflow.match(/run: bun ci/g) ?? [];
     expect(setups.length).toBeGreaterThan(0);
     expect(installs).toHaveLength(setups.length);
