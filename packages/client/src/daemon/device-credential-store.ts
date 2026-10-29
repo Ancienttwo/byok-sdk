@@ -8,6 +8,11 @@ import { isTenantId } from '@byok-sdk/core';
 /** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {
   readonly accessToken: string;
+  /**
+   * Device-local expiry of `accessToken` (#1114): this device's receipt time
+   * plus the server's relative `expiresIn`. It is compared only with this
+   * device's clock, never with a server timestamp.
+   */
   readonly expiresAt: string;
   readonly devicePrivateKeyPem: string;
 }

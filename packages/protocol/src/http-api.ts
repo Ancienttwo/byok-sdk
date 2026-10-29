@@ -86,6 +86,13 @@ export const PairResponseSchema = z.object({
   accessToken: z.string(),
   /** Opaque hint for when/how to renew (e.g. an ISO timestamp); not itself a credential. */
   refreshHint: z.string().optional(),
+  /**
+   * Lifetime of `accessToken` in seconds, relative to when the device receives
+   * this response. The device-side lifetime authority (#1114): a device never
+   * compares a server timestamp with its own clock. Optional on the wire
+   * because published v4 hosts omit it; the client requires it.
+   */
+  expiresIn: z.number().int().positive().optional(),
   /** Exact opaque, non-secret tenant binding from the authenticated device row. */
   tenantId: PairResponseTenantIdSchema,
 });
@@ -120,7 +127,14 @@ export type TokenRequest = z.infer<typeof TokenRequestSchema>;
 
 export const TokenResponseSchema = z.object({
   accessToken: z.string(),
+  /** Absolute server-clock expiry. Kept for published devices; current devices derive lifetime from `expiresIn`. */
   expiresAt: z.iso.datetime({ offset: true }),
+  /**
+   * Lifetime of `accessToken` in seconds, relative to when the device receives
+   * this response (#1114). Optional on the wire because published v4 hosts
+   * omit it; the client requires it.
+   */
+  expiresIn: z.number().int().positive().optional(),
 });
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 

@@ -3105,13 +3105,14 @@ export declare class AuthRequestAbortedError extends Error {
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
  * truncated body, a missing field, or a token `expiresAt` that is not an ISO
- * timestamp with an offset. The renewal fails and the prior credential is kept
- * unchanged; nothing is inferred from the malformed body. The JSON
+ * timestamp with an offset — and when a token or pair response carries no
+ * `expiresIn` (#1114). The renewal or pairing fails and the prior credential
+ * is kept unchanged; nothing is inferred from the malformed body. The JSON
  * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
  */
 export declare class AuthResponseInvalidError extends Error {
-    readonly route: 'challenge' | 'token';
-    constructor(route: 'challenge' | 'token', options: {
+    readonly route: 'challenge' | 'token' | 'pair';
+    constructor(route: 'challenge' | 'token' | 'pair', options: {
         cause: unknown;
     });
 }
@@ -5722,6 +5723,11 @@ export declare function createFleetJitter(productId: string, deviceId: string): 
 /** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {
     readonly accessToken: string;
+    /**
+     * Device-local expiry of `accessToken` (#1114): this device's receipt time
+     * plus the server's relative `expiresIn`. It is compared only with this
+     * device's clock, never with a server timestamp.
+     */
     readonly expiresAt: string;
     readonly devicePrivateKeyPem: string;
 }

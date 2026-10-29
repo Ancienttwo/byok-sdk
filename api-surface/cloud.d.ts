@@ -1148,7 +1148,10 @@ export interface PairInput {
 }
 export interface MintedAccessToken {
     readonly accessToken: string;
+    /** Absolute server-clock expiry, kept on the wire for published devices. */
     readonly expiresAt: string;
+    /** The same lifetime in seconds, relative to the response (#1114): the device's lifetime authority. */
+    readonly expiresIn: number;
 }
 export interface AuthPlane {
     /** Host control plane: mint a single-use code carrying the tenant/product a device will land in. */
