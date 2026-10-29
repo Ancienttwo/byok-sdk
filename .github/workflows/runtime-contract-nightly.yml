@@ -29,13 +29,62 @@ jobs:
     env:
       BYOK_RUNTIME_CONTRACT: latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
-      - uses: oven-sh/setup-bun@v2
+      - name: Verify pinned Bun archive
+        shell: node {0}
+        run: &verify-bun |
+          const { createHash } = require('node:crypto');
+          const { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, chmodSync, rmSync } = require('node:fs');
+          const { homedir } = require('node:os');
+          const { join } = require('node:path');
+          const { execFileSync } = require('node:child_process');
+          (async () => {
+            // setup-bun executes existing/cached binaries without checking their digest.
+            // Seed its pinned install path only from a verified release archive.
+            const version = '1.4.2';
+            if (JSON.parse(readFileSync('package.json', 'utf8')).packageManager !== `bun@${version}`) {
+              throw new Error('Update the pinned Bun archive checksums with packageManager');
+            }
+            const platform = { linux: 'linux', darwin: 'darwin', win32: 'windows' }[process.platform];
+            const arch = { x64: 'x64', arm64: 'aarch64' }[process.arch];
+            const baseline = platform === 'linux' && arch === 'x64' && !readFileSync('/proc/cpuinfo', 'utf8').includes('avx2');
+            const asset = `bun-${platform}-${arch}${baseline ? '-baseline' : ''}`;
+            // oven-sh/bun bun-v1.4.2 release asset SHA256 values.
+            const checksums = {
+              'bun-linux-x64': '36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913',
+              'bun-linux-x64-baseline': 'c678040f14fe0440eb839d37cbd0ce4c051a32da72806ac97de6a6aab6bf728f',
+              'bun-darwin-aarch64': '90987a3a16d7db556d886ac3d551e7b6d3edf0a1cf43acaed622e8676be1d12f',
+              'bun-darwin-x64': '80520d7e17526308c9185d261679ac6d27798d3803a0e9f7ff9121ab8affb012',
+              'bun-windows-x64': 'ce4c17497b2f29712a99d3d53f028de28cd42e3bacb8589599e7f000e49b6405',
+            };
+            if (!checksums[asset]) throw new Error(`No pinned Bun checksum for ${asset}`);
+            const response = await fetch(`https://github.com/oven-sh/bun/releases/download/bun-v${version}/${asset}.zip`);
+            if (!response.ok) throw new Error(`Bun download failed: ${response.status}`);
+            const bytes = Buffer.from(await response.arrayBuffer());
+            if (createHash('sha256').update(bytes).digest('hex') !== checksums[asset]) {
+              throw new Error(`Bun SHA256 mismatch: ${asset}`);
+            }
+            const temp = mkdtempSync(join(process.env.RUNNER_TEMP, 'verified-bun-'));
+            try {
+              const archive = join(temp, 'bun.zip');
+              writeFileSync(archive, bytes);
+              if (process.platform === 'win32') execFileSync('tar', ['-xf', archive, '-C', temp]);
+              else execFileSync('unzip', ['-q', archive, '-d', temp]);
+              const bin = join(homedir(), '.bun', 'bin');
+              const exe = process.platform === 'win32' ? 'bun.exe' : 'bun';
+              mkdirSync(bin, { recursive: true });
+              copyFileSync(join(temp, asset, exe), join(bin, exe));
+              chmodSync(join(bin, exe), 0o755);
+            } finally {
+              rmSync(temp, { recursive: true, force: true });
+            }
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun ci
       - run: bun run build
       - name: Install the latest runtime CLI
