@@ -2,8 +2,10 @@
 
 ## Canonical layout
 
-An embedding product supplies one absolute `hostStorageRoot`. BYOK SDK owns
-the only Agent-home composition rule:
+An embedding product supplies one absolute `hostStorageRoot`. To choose it
+and `storeDir`, call `resolveHostLayout`; the per-platform table and the
+ownership rules are in [the spec](spec.md#recommended-host-layout). BYOK SDK
+owns the only Agent-home composition rule:
 
 ```text
 <hostStorageRoot>/
@@ -85,11 +87,9 @@ SDK-reserved namespace in the Agent home.
 ```
 
 Runtime Unix sockets bind under `exec/<token>/runtime`, so the scratch root
-is at most 61 bytes on macOS and 65 bytes on Linux. When canonical `<storeDir>/tmp` is
-longer, the default moves to `/private/tmp/byok-scratch-<storeDir hash>` on
-macOS and `/tmp/byok-scratch-<storeDir hash>` on Linux. The hash is the first
-16 hexadecimal characters of SHA-256 of the canonical store path. Otherwise,
-the default keeps the lexical `<storeDir>/tmp` and checks its length. An explicit
+has a byte budget. The default root and its short-root fallback follow
+[the spec rule](spec.md#client-intermediate-retention-399) (#493);
+`resolveHostLayout` and `config check` report the result. An explicit
 `storage.scratchRoot` moves exec scratch to one short private root with no
 symbolic-link ancestors; daemon temps remain in the store. A shared external
 root is refused. A root owned by another user is refused before permission changes. Each
