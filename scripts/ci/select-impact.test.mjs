@@ -166,6 +166,23 @@ test('shared Windows filesystem helpers select their real Windows consumers', ()
   assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-client']);
 });
 
+test('service enrollment handover paths select the WinSW control socket check and the Windows client suite (#1165)', () => {
+  for (const path of [
+    'packages/client/src/daemon/control-server.ts',
+    'packages/client/src/daemon/create-daemon/control-methods.ts',
+    'packages/client/src/daemon/create-daemon/lifecycle.ts',
+    'packages/client/src/daemon/create-daemon/start-run.ts',
+    'packages/client/src/daemon/create-daemon/start.ts',
+  ]) {
+    const { families } = selectImpact([path]);
+    assert.ok(families.includes('windows-service-smoke') && families.includes('windows-client'), path);
+  }
+  for (const path of ['packages/client/src/bin/control-client.ts', 'packages/client/src/bin/commands/unpair.ts', 'packages/client/scripts/control-socket-check.mjs']) {
+    assert.ok(selectImpact([path]).families.includes('windows-service-smoke'), path);
+  }
+  assert.ok(selectImpact(['packages/client/src/__tests__/service-enrollment-handover.test.ts']).families.includes('windows-client'));
+});
+
 test('Hermes adapter, fake and custody launcher paths select the Windows Hermes suites', () => {
   for (const path of [
     'packages/client/src/adapters/hermes/gateway-pipe-win32.ts',

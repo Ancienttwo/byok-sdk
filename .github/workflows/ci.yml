@@ -937,7 +937,8 @@ jobs:
             src/__tests__/diagnostics.test.ts `
             src/__tests__/support-bundle.test.ts `
             src/__tests__/daemon-auth.test.ts `
-            src/__tests__/daemon-stop-shutdown-parity.test.ts
+            src/__tests__/daemon-stop-shutdown-parity.test.ts `
+            src/__tests__/service-enrollment-handover.test.ts
 
       # #738: writeHomeFile on NTFS. A child process is killed at five points
       # of a three-file projection apply; each file must keep its old or new bytes.
