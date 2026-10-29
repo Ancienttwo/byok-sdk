@@ -23,7 +23,7 @@ import {
 } from './commands/service';
 import { formatStartErrorReason, runStartCommand, type StartOutcome } from './commands/start';
 import { daemonExitCode, EXIT_FAILURE } from '../lifecycle/exit-codes';
-import { boundServiceRedirectLogs, openDaemonLog } from '../lifecycle/service-log';
+import { boundServiceRedirectLogs, routeProcessOutputToDaemonLog } from '../lifecycle/service-log';
 import { serviceLogDir } from '../daemon/host-layout';
 import { runStatusCommand } from './commands/status';
 import { runSupportBundleCommand } from './commands/support-bundle';
@@ -132,9 +132,10 @@ function usage(): never {
 
 /**
  * A configuration that cannot load is the `config_invalid` halt: restarting
- * with it fails the same way. Under `--service` the daemon writes its own
- * rotated log (#1097, `lifecycle/service-log.ts`); the service manager's
- * redirect keeps only output from before it opens, such as a config error.
+ * with it fails the same way. Under `--service` everything the process
+ * writes to stdout/stderr goes to its own rotated log (#1097,
+ * `lifecycle/service-log.ts`); the service manager's redirect keeps only
+ * output from before it opens, such as a config error.
  */
 async function startOutcome(rest: string[], service: boolean): Promise<StartOutcome> {
   const configPath = configPathFrom(rest);
@@ -152,9 +153,9 @@ async function startOutcome(rest: string[], service: boolean): Promise<StartOutc
   if (!service) return runStartCommand(config, { signal: controller.signal });
   const logDir = serviceLogDir(resolveStoreDir(config));
   boundServiceRedirectLogs(logDir);
-  const daemonLog = openDaemonLog({ logDir });
+  const daemonLog = routeProcessOutputToDaemonLog({ logDir });
   try {
-    return await runStartCommand(config, { signal: controller.signal, log: daemonLog.write, error: daemonLog.write });
+    return await runStartCommand(config, { signal: controller.signal });
   } finally {
     daemonLog.close();
   }

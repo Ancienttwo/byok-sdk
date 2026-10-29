@@ -922,10 +922,11 @@ another owner's `install`, `repair` or `uninstall` throws
 `lifecycle_owner_conflict`. A Host that sets autostart with its own mechanism
 claims it with `claimServiceLifecycleOwner`.
 
-Under `--service` the daemon writes its own log, `<logDir>/daemon.log`,
-rotated at `DAEMON_LOG_LIMITS` (10 MiB, 5 files). The service manager's
+Under `--service` everything the daemon writes to stdout and stderr goes to its
+own log, `<logDir>/daemon.log`, rotated by size while it runs at
+`DAEMON_LOG_LIMITS` (10 MiB, 5 files). The service manager's
 `service-stdout.log`/`service-stderr.log` receive only output from before that
-log opens; each service start rotates one over 1 MiB to a single `.1` copy, and
+log opens and a fatal error Node prints itself; each service start rotates one over 1 MiB to a single `.1` copy, and
 WinSW rolls its redirect by the same limit (`SERVICE_REDIRECT_LIMITS`).
 `ServiceLifecycle.status()` and `inspectServiceLogs` report the log directory
 and every log file's size; the diagnostics snapshot and support bundle carry

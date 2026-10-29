@@ -11,9 +11,9 @@ export const DAEMON_LOG_LIMITS = Object.freeze({ maxBytes: 10 * 1024 * 1024, max
 
 /**
  * The service manager's stdout/stderr redirect (launchd `StandardOutPath`,
- * systemd `append:`). After the daemon log opens nothing writes there but an
- * early-boot crash, and each service start rotates a file over this size to
- * one `.1` copy. WinSW rolls its own redirect by the same limit
+ * systemd `append:`). Once {@link routeProcessOutputToDaemonLog} runs only a
+ * fatal error Node writes to fd 2 itself still lands there, and each service
+ * start rotates a file over this size to one `.1` copy. WinSW rolls its own redirect by the same limit
  * (`roll-by-size`).
  */
 export const SERVICE_REDIRECT_STDOUT_FILENAME = 'service-stdout.log';
@@ -51,12 +51,7 @@ function limit(value: number | undefined, fallback: number, minimum: number, nam
   return resolved;
 }
 
-/**
- * Opens the daemon log in `logDir`. Writes are synchronous so lines keep
- * their order and survive a crash right after them. A single line longer
- * than `maxBytes` is still written whole, into a fresh file.
- */
-export function openDaemonLog(options: DaemonLogOptions): DaemonLog {
+function openRotatingFile(options: DaemonLogOptions): { path: string; append(bytes: Uint8Array): void; close(): void } {
   const maxBytes = limit(options.maxBytes, DAEMON_LOG_LIMITS.maxBytes, 1, 'maxBytes');
   const maxFiles = limit(options.maxFiles, DAEMON_LOG_LIMITS.maxFiles, 1, 'maxFiles');
   const file = path.join(options.logDir, DAEMON_LOG_FILENAME);
@@ -65,8 +60,7 @@ export function openDaemonLog(options: DaemonLogOptions): DaemonLog {
   let size = fstatSync(fd).size;
   return {
     path: file,
-    write(line: string): void {
-      const bytes = Buffer.from(`${line}\n`, 'utf8');
+    append(bytes: Uint8Array): void {
       if (size > 0 && size + bytes.length > maxBytes) {
         closeSync(fd);
         rotate(file, maxFiles);
@@ -78,6 +72,51 @@ export function openDaemonLog(options: DaemonLogOptions): DaemonLog {
     },
     close(): void {
       closeSync(fd);
+    },
+  };
+}
+
+/**
+ * Opens the daemon log in `logDir`. Writes are synchronous so lines keep
+ * their order and survive a crash right after them. A single line longer
+ * than `maxBytes` is still written whole, into a fresh file.
+ */
+export function openDaemonLog(options: DaemonLogOptions): DaemonLog {
+  const file = openRotatingFile(options);
+  return {
+    path: file.path,
+    write: (line: string): void => file.append(Buffer.from(`${line}\n`, 'utf8')),
+    close: file.close,
+  };
+}
+
+type StreamWrite = typeof process.stdout.write;
+
+/**
+ * Routes everything this process writes to `process.stdout` and
+ * `process.stderr` (every `console.*` call included) into the daemon log
+ * until `close()`, so no runtime path can grow the service manager's
+ * redirect while the daemon runs (#1097). Only output Node writes to fd 2
+ * itself, such as a fatal error, still reaches the redirect, once per
+ * process; {@link boundServiceRedirectLogs} bounds it at the next start.
+ * Child processes are spawned with piped stdio and never share fd 1 or 2.
+ */
+export function routeProcessOutputToDaemonLog(options: DaemonLogOptions): { readonly path: string; close(): void } {
+  const file = openRotatingFile(options);
+  const streams = [process.stdout, process.stderr] as const;
+  const originals = streams.map((stream) => stream.write);
+  const write = function (this: unknown, chunk: string | Uint8Array, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void): boolean {
+    const done = typeof encoding === 'function' ? encoding : callback;
+    file.append(typeof chunk === 'string' ? Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8') : chunk);
+    if (done) process.nextTick(done);
+    return true;
+  } as StreamWrite;
+  for (const stream of streams) stream.write = write;
+  return {
+    path: file.path,
+    close(): void {
+      streams.forEach((stream, index) => { stream.write = originals[index]!; });
+      file.close();
     },
   };
 }

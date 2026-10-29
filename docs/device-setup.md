@@ -172,10 +172,11 @@ revocation) and 1 to be restarted (a crash). The units encode this as launchd
 Outside `--service`, a halt exits 78.
 
 Logs live in `resolveHostLayout(...).logDir` (`<storeDir>/service-logs`). The
-daemon writes `daemon.log` itself and rotates it at 10 MiB, keeping 5 files.
-The service manager's `service-stdout.log` and `service-stderr.log` keep only
-output from before the daemon log opens, such as a config error or an early
-crash; each start rotates one over 1 MiB to a single `.1` copy, and WinSW rolls
+daemon routes everything it writes to stdout and stderr into `daemon.log` and
+rotates it by size while it runs, at 10 MiB, keeping 5 files. The service
+manager's `service-stdout.log` and `service-stderr.log` keep only output from
+before the daemon log opens, such as a config error, and a fatal error Node
+prints itself; each start rotates one over 1 MiB to a single `.1` copy, and WinSW rolls
 its own at the same size. `service-status` lists each log file and its size;
 `doctor` reports the directory and the total.
 
