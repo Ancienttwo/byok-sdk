@@ -176,10 +176,16 @@ describe('skill pack routes', () => {
 });
 
 describe('skills.pack capability x composition', () => {
-  it('mounts nothing when the store is supplied but the capability is withheld', () => {
+  it('refuses to construct a deployment that supplies the store but withholds the capability', () => {
+    expect(() => createHarness({ skillPacks: new InMemorySkillPackStore(), capabilities: fullCapabilityDeclaration() }))
+      .toThrowError(expect.objectContaining({ code: 'capability_port_undeclared', message: expect.stringContaining('skillPacks (skills.pack)') }));
+  });
+
+  it('derives skills.pack into the in-memory default declaration from a supplied store', () => {
     const harness = createHarness({ skillPacks: new InMemorySkillPackStore() });
     const mounted = new Set(harness.cloud.mountedRoutes.map(routeKey));
-    expect(SKILL_PACK_ROUTES.some((route) => mounted.has(route))).toBe(false);
+    for (const route of SKILL_PACK_ROUTES) expect(mounted.has(route)).toBe(true);
+    expect(harness.cloud.capabilities.capabilities).toContain(CLOUD_CAPABILITIES.skillPacks);
   });
 
   it('mounts nothing when neither is present — the default deployment', () => {

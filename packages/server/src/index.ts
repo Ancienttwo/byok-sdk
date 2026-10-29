@@ -14,9 +14,9 @@ import { Hono } from 'hono';
 import {
   AgentExecutionInputSchema,
   agentHomeProjectionRequestKey,
+  capabilityDeclarationForPorts,
   createByokCloud,
   createHmacTokenSigner,
-  fullCapabilityDeclaration,
   INBOUND_REFUSAL_REASONS,
   TASK_ATTEMPT_ACTIVE_STATUSES,
   TASK_ATTEMPT_STATUSES,
@@ -406,16 +406,17 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     );
 
   const projectionWaiters = new ProjectionWaiters();
+  // The declaration is derived from the ports passed, so the two cannot drift (#1096).
+  const ports = { blobContentProxy: composition.blobContentProxy };
   const cloud: ByokCloud = createByokCloud({
     core: composition.core,
     cloud: composition.cloud,
-    blobContentProxy: composition.blobContentProxy,
-    e2eeMemberStore: composition.e2eeMember,
+    ...ports,
     ...(composition.proofReceiptAuthority === undefined ? {} : { proofReceiptRetention: { authority: composition.proofReceiptAuthority } }),
     crypto: composition.crypto,
     tokenSigner,
     clock: composition.clock,
-    capabilities: fullCapabilityDeclaration(),
+    capabilities: capabilityDeclarationForPorts(ports),
     // S1: the product this instance serves is part of every bearer-authed
     // route's decision, not just of the pairing claims.
     instanceProductId: opts.productId,

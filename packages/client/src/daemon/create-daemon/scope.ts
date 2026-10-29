@@ -16,6 +16,7 @@ import type { DaemonFunctions } from './functions';
 import type { DaemonState } from './state';
 import type { DaemonStoreScope } from './stores';
 import type { DaemonWorkspaceScope } from './workspaces';
+import type { DaemonEffectiveConfig } from '../config-schema/effective';
 
 /** `buildDaemonWithAdapters`' own parameters, as its stages receive them (#926). */
 export interface DaemonInputs {
@@ -40,6 +41,7 @@ interface DaemonBodyValues {
   readonly daemonState: DaemonState;
   readonly controlMethods: ControlMethods;
   readonly reliableEnvelopes: WeakMap<AgentReliableEgressRecord, Envelope>;
+  readonly effectiveConfig: DaemonEffectiveConfig;
 }
 
 /**

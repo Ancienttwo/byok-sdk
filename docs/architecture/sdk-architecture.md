@@ -1905,7 +1905,7 @@ SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态�
 | `GET /byok/skill-packs` | device bearer | 本 tenant 的 manifest 列表 |
 | `GET /byok/skill-packs/:name/files/:path` | device bearer | 单文件内容；`:path` 是单段 percent-encoded 值，handler 不做任何路径归一化 |
 
-两条路由与 `blobs.contentproxy` 是同一副非对称形状：**声明了却没供 `SkillPackStore`，`createByokCloud` 构造期即失败**（`capability_over_declared`）；供了却没声明则静默不挂载。`fullCapabilityDeclaration()` 默认不含 `skills.pack`（与 `truth.records` 一样是 composition-bound），否则既有 in-memory 部署会全部构造失败。device 面只有读，没有 publish 路由：device bearer 授权的写会让同 tenant 任一设备向其余设备投内容，发布是 host control-plane 直接调 port 的动作。
+两条路由与 `blobs.contentproxy` 同形：**声明了却没供 `SkillPackStore`，`createByokCloud` 构造期即失败**（`capability_over_declared`）；供了却没声明也构造失败（`capability_port_undeclared`，#1096）。`fullCapabilityDeclaration()` 默认不含 `skills.pack`（与 `truth.records` 一样是 composition-bound），否则既有 in-memory 部署会全部构造失败。device 面只有读，没有 publish 路由：device bearer 授权的写会让同 tenant 任一设备向其余设备投内容，发布是 host control-plane 直接调 port 的动作。
 
 **凭证隔离。** `SkillPackManifestSchema` 是 `strictObject`，`SKILL_PACK_FORBIDDEN_FIELDS`（exec/command/entrypoint/env/credential/hooks/allowed-tools 等）另给具名拒绝；`SKILL.md` frontmatter 只认 `name` 与 `description`，其余键一律拒绝而非忽略。格式本身表达不出可执行语义，下游宿主也就不必判断要不要执行——这是 §9.1 凭证隔离铁律在第二处的落点，由 `packages/core/src/__tests__/skill-pack.test.ts` 从正反两侧钉死。
 

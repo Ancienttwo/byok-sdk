@@ -16,7 +16,12 @@
 export { runCoreConformance, withComposition } from './core/index';
 export type { CoreCompositionFactory, CoreCompositionHandle } from './core/index';
 
-export { CLOUD_CONFORMANCE_PORTS, runCloudConformance, withCloudComposition } from './cloud/index';
+export {
+  ackAndCollectMailbox,
+  CLOUD_CONFORMANCE_PORTS,
+  runCloudConformance,
+  withCloudComposition,
+} from './cloud/index';
 export type {
   CloudCompositionFactory,
   CloudCompositionHandle,

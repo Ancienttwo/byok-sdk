@@ -105,6 +105,21 @@ test('the client manifest admits only the exact runtime contract script', t => {
     assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
   }
 });
+
+// #1094: the generated DaemonConfig schema is appended after the upgrade manifest, exactly.
+test('the client files list admits exactly the appended DaemonConfig schema', t => {
+  const f = fixture(t);
+  const files = ['dist', 'README.md', 'LICENSE', 'upgrade-manifest.json'];
+  f.write('packages/client/package.json', { ...f.manifest, files });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'files'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'daemon-config.schema.json'] });
+  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
+  for (const changed of [[...files, 'daemon-config.schema.json', 'src'], ['dist', 'README.md', 'LICENSE', 'daemon-config.schema.json']]) {
+    f.write('packages/client/package.json', { ...f.manifest, files: changed });
+    assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+  }
+});
 test('API entry changes select only owner and dependents; unmapped entry is refused', t => {
   const f = fixture(t);
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 2 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } } });
@@ -911,5 +926,23 @@ test('reviewed protocol oracle move admits only the exact edges and both lock ro
   ]) {
     apply(candidate);
     assert.throws(() => selectImpact([path], context), pattern, reason);
+  }
+});
+
+
+test('setup documentation admits only exact additive generator commands and its test', t => {
+  const f = fixture(t);
+  f.write('scripts/docs/device-setup.test.mjs', '');
+  const scripts = {
+    ...f.rootManifest.scripts,
+    'docs:device-setup': 'node scripts/docs/device-setup.mjs --write',
+    'check:device-setup': 'node scripts/docs/device-setup.mjs',
+    'test:scripts': f.rootManifest.scripts['test:scripts'] + ' scripts/docs/device-setup.test.mjs',
+  };
+  f.write('package.json', { ...f.rootManifest, scripts });
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const name of ['docs:device-setup', 'check:device-setup']) {
+    f.write('package.json', { ...f.rootManifest, scripts: { ...scripts, [name]: scripts[name] + ' ; echo bypass' } });
+    assert.throws(() => selectImpact(['package.json'], f));
   }
 });

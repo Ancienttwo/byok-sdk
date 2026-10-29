@@ -46,7 +46,7 @@ async function config(mode: unknown) {
 
 it.each(['disabled', false, null, 1])('rejects malformed memory MCP admission %s', async mode => {
   const input = await config(mode);
-  expect(() => createDaemonWithAdapters(input, [])).toThrow('agentMemoryMcp must be auto or off');
+  expect(() => createDaemonWithAdapters(input, [])).toThrow('DaemonConfig.agentMemoryMcp must be one of "auto", "off"');
 });
 
 // Supported admission backends: native Linux and the helper resolver seam above.

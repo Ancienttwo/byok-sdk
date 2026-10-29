@@ -32,7 +32,7 @@ function setup(withStore = true, makeStore = (receipts: RequestReceiptStore) => 
     crypto: base.crypto,
     tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock),
     clock,
-    capabilities: fullCapabilityDeclaration(),
+    capabilities: fullCapabilityDeclaration(1, { includeE2eeMember: withStore }),
     ...(withStore ? { e2eeMemberStore: store } : {}),
   });
   const registerDevice = (tenant: TenantId, deviceId: string, machineId?: string) => base.stores.devices.register(tenant, {

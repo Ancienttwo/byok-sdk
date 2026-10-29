@@ -8,7 +8,7 @@
  */
 import { createInMemoryCoreStores, createMutableClock } from '@byok-sdk/core';
 import { createInMemoryCloudStores, createInMemoryBlobBytes, createWebCrypto } from '@byok-sdk/cloud';
-import { runCloudConformance, type CloudCompositionFactory } from '../cloud/harness';
+import { ackAndCollectMailbox, runCloudConformance, type CloudCompositionFactory } from '../cloud/harness';
 
 const inMemoryFactory: CloudCompositionFactory = {
   create() {
@@ -60,6 +60,7 @@ const inMemoryFactory: CloudCompositionFactory = {
           ...observation,
         });
       },
+      retireCancellationDelivery: (tenant, deviceId) => ackAndCollectMailbox(core.mailbox, tenant, deviceId),
     };
   },
 };

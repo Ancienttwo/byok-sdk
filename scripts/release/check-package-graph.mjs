@@ -1,3 +1,4 @@
+import { checkDependencyDirection } from '../architecture/dependency-graph.mjs';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -420,6 +421,8 @@ for (const relativePath of scanFiles) {
     errors.push(`${relativePath}: contains retired @byok/ package identity`);
   }
 }
+
+errors.push(...checkDependencyDirection(repoRoot));
 
 if (errors.length > 0) {
   for (const error of errors) console.error(`[release-graph] ${error}`);
