@@ -1,10 +1,13 @@
 import { tenantKey, type MailboxStore, type TenantId } from '@byok-sdk/core';
 import type {
+  TaskAbandonRequest,
+  TaskAttempt,
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskCancellationStore,
 } from '../ports';
 import { InMemoryTaskAttemptState } from './task-attempts';
+import { abandonTask } from './task-retirement';
 
 const COLLECTED = new Error('Cancellation delivery was collected.');
 
@@ -32,6 +35,10 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
     });
     this.#inFlight.set(key, operation);
     return operation;
+  }
+
+  abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined> {
+    return abandonTask(this.#state, this.#mailbox, tenant, tenantKey(tenant, input.taskId), input.cause);
   }
 
   async #request(

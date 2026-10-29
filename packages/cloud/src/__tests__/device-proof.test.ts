@@ -1,6 +1,7 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
 import {
   DEVICE_PROOF_SCHEMA_ID,
+  InMemoryMailboxStore,
   createMutableClock,
   deviceProofSigningInput,
   tenantId,
@@ -16,6 +17,7 @@ import {
 import { PROOF_RECEIPT_RETENTION_FLOOR_MS } from '../maintenance';
 import { createWebCrypto } from '../crypto/web-crypto';
 import { InMemoryDeviceDirectory } from '../stores/in-memory/device-directory';
+import { InMemoryTaskAttemptState } from '../stores/in-memory/task-attempts';
 
 const TENANT = tenantId('tenant-a');
 const BODY = new TextEncoder().encode('{"value":"truth"}');
@@ -39,7 +41,7 @@ describe('device proof authentication (I3)', () => {
   beforeEach(async () => {
     clock.set(new Date(NOW));
     bodyHash = await crypto.sha256(BODY);
-    devices = new InMemoryDeviceDirectory();
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
     await devices.register(TENANT, {
       productId: 'product-a',
       deviceId: 'device-a',
@@ -143,7 +145,7 @@ describe('device proof authentication (I3)', () => {
     await devices.revoke(TENANT, 'device-a');
     await expect(verify(valid)).resolves.toBeUndefined();
 
-    devices = new InMemoryDeviceDirectory();
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
     await devices.register(TENANT, {
       productId: 'product-a',
       deviceId: 'device-a',

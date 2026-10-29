@@ -13,20 +13,34 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * path already reads, but no record this store writes ever carries `true`:
  * revocation and machine supersession remove the record outright, so "revoked"
  * and "never registered" are one indistinguishable answer rather than two.
+ *
+ * A removed device is retired through the task state and the mailbox the
+ * composition hands in: its unfinished attempts are settled and its pending
+ * rows dead-lettered (see `DeviceDirectory` in `../ports`).
  */
 import {
   PRESENCE_LEVELS,
   tenantKey,
+  type MailboxStore,
   type PresenceStore,
   type TenantId,
   type TenantReadinessDevice,
   type TenantReadiness,
 } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports';
+import type { InMemoryTaskAttemptState } from './task-attempts';
+import { retireDevice } from './task-retirement';
 
 export class InMemoryDeviceDirectory implements DeviceDirectory {
   readonly #byTenant = new Map<string, DeviceRecord>();
   readonly #byDeviceId = new Map<string, string>();
+  readonly #tasks: InMemoryTaskAttemptState;
+  readonly #mailbox: MailboxStore;
+
+  constructor(tasks: InMemoryTaskAttemptState, mailbox: MailboxStore) {
+    this.#tasks = tasks;
+    this.#mailbox = mailbox;
+  }
 
   async register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
     const record: DeviceRecord = {
@@ -53,6 +67,7 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     //
     // The device being registered is skipped: re-pairing the SAME deviceId is
     // an in-place replacement below, not a supersession of itself.
+    const superseded: string[] = [];
     if (input.machineId !== undefined) {
       for (const [key, existing] of [...this.#byTenant]) {
         if (existing.deviceId === record.deviceId) continue;
@@ -60,11 +75,15 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
         if (existing.productId !== input.productId) continue;
         if (existing.machineId !== input.machineId) continue;
         this.#forget(key, existing.deviceId);
+        superseded.push(existing.deviceId);
       }
     }
     const key = tenantKey(tenant, record.deviceId);
     this.#byTenant.set(key, record);
     this.#byDeviceId.set(record.deviceId, key);
+    for (const deviceId of superseded) {
+      await retireDevice(this.#tasks, this.#mailbox, tenant, deviceId, 'device_superseded');
+    }
     return record;
   }
 
@@ -80,6 +99,7 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     const key = tenantKey(tenant, deviceId);
     if (!this.#byTenant.has(key)) return;
     this.#forget(key, deviceId);
+    await retireDevice(this.#tasks, this.#mailbox, tenant, deviceId, 'device_revoked');
   }
 
   /**

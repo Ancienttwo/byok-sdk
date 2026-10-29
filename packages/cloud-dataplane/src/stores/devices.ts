@@ -17,6 +17,11 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * was never registered. `device_active_machine_key` (0015) is still the
  * invariant — its `NOT revoked` predicate simply never has a false row left to
  * exclude.
+ *
+ * Every removed device is also retired in the same transaction
+ * (`task-retirement.ts`): its unfinished attempts are settled and its pending
+ * mailbox rows dead-lettered. Both transactions therefore open with
+ * `BEGIN_OUTBOX_WRITE`, as every mailbox writer does.
  */
 import {
   type Clock,
@@ -29,6 +34,8 @@ import {
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
 import type { ByokPool } from '../pool';
+import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer';
+import { retireDevices } from './task-retirement';
 
 interface DeviceRow {
   readonly tenant_id: string;
@@ -78,11 +85,14 @@ const SELECT_COLUMNS =
  *
  * - `task`, `agent_egress_event`, `proof_request_receipt` — history keyed by a
  *   device_id STRING, with no foreign key. What a device did stays true after
- *   the grant that let it is gone.
+ *   the grant that let it is gone; retirement only settles its unfinished
+ *   `task` rows (`retireDevices`), it deletes none.
  * - `outbox` and `device_stream` — core's mailbox, whose rows carry message
- *   bodies and are retired through `collectExpired`/tenant erasure. A device
- *   directory that deleted them would be a second authority over core state,
- *   and an unbounded body delete on the pairing path is an availability risk.
+ *   bodies and are deleted only through `collectExpired`/tenant erasure. A
+ *   device directory that deleted them would be a second authority over core
+ *   state, and an unbounded body delete on the pairing path is an
+ *   availability risk. Retirement moves the pending rows to `expired` and
+ *   leaves the stream row, so the dead-letter floor keeps its meaning.
  * - `agent_memory_projection_head` / `…_metering_receipt` — keyed by
  *   `(tenant_id, agent_id)`; `device_id` is provenance, not identity. Erasing
  *   a head has its OWN protocol (0014's epoch fence), and bypassing it would
@@ -142,12 +152,13 @@ async function rollback(client: PoolClient): Promise<void> {
  * The client-scoped registration mutation shared by standalone device
  * registration and pairing enrollment. Its caller owns the transaction so the
  * guarded pairing-code update, machine supersession cleanup, and insert can
- * commit or roll back together.
+ * commit or roll back together, and opens it with `BEGIN_OUTBOX_WRITE`.
  */
 export async function registerDeviceOnClient(
   client: PoolClient,
   tenant: TenantId,
   input: DeviceRegistration,
+  now: string,
 ): Promise<DeviceRecord> {
   // Re-pairing an existing device replaces its registration in place rather
   // than creating a second row, matching the in-memory reference. `revoked`
@@ -180,11 +191,9 @@ export async function registerDeviceOnClient(
       RETURNING device_id`,
       [tenant, input.productId, input.machineId, input.deviceId],
     );
-    await deleteDeviceState(
-      client,
-      tenant,
-      superseded.rows.map((row) => row.device_id),
-    );
+    const supersededIds = superseded.rows.map((row) => row.device_id);
+    await deleteDeviceState(client, tenant, supersededIds);
+    await retireDevices(client, tenant, supersededIds, 'device_superseded', now);
   }
   const result = await client.query<DeviceRow>(
     `INSERT INTO device (
@@ -232,9 +241,9 @@ export async function getDeviceOnClient(
 
 export class PostgresDeviceDirectory implements DeviceDirectory {
   readonly #pool: Pool;
-  readonly #clock: Clock | undefined;
+  readonly #clock: Clock;
 
-  constructor(pool: ByokPool, clock?: Clock) {
+  constructor(pool: ByokPool, clock: Clock) {
     this.#pool = pool;
     this.#clock = clock;
   }
@@ -242,8 +251,8 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
   async register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
     const client = await this.#pool.connect();
     try {
-      await client.query('BEGIN');
-      const record = await registerDeviceOnClient(client, tenant, input);
+      await client.query(BEGIN_OUTBOX_WRITE);
+      const record = await registerDeviceOnClient(client, tenant, input, this.#clock.now().toISOString());
       await client.query('COMMIT');
       return record;
     } catch (cause) {
@@ -265,9 +274,10 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
 
   /**
    * Revocation removes the registration and the device-scoped state that only
-   * existed to serve it, in one transaction: a half-applied revoke that left
-   * live presence or an unspent challenge nonce behind would be state for a
-   * device the directory can no longer name.
+   * existed to serve it, and retires the device, in one transaction: a
+   * half-applied revoke that left live presence, an unspent challenge nonce
+   * or a running attempt behind would be state for a device the directory can
+   * no longer name.
    *
    * A no-op for a device this tenant does not own: revoking what you cannot
    * address deletes nothing and reports nothing back.
@@ -275,16 +285,14 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
   async revoke(tenant: TenantId, deviceId: string): Promise<void> {
     const client = await this.#pool.connect();
     try {
-      await client.query('BEGIN');
+      await client.query(BEGIN_OUTBOX_WRITE);
       const removed = await client.query<{ device_id: string }>(
         'DELETE FROM device WHERE tenant_id = $1 AND device_id = $2 RETURNING device_id',
         [tenant, deviceId],
       );
-      await deleteDeviceState(
-        client,
-        tenant,
-        removed.rows.map((row) => row.device_id),
-      );
+      const removedIds = removed.rows.map((row) => row.device_id);
+      await deleteDeviceState(client, tenant, removedIds);
+      await retireDevices(client, tenant, removedIds, 'device_revoked', this.#clock.now().toISOString());
       await client.query('COMMIT');
     } catch (cause) {
       await rollback(client);
@@ -371,7 +379,7 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
         AND p.expires_at > $2
        WHERE d.tenant_id = $1
        ORDER BY d.device_id`,
-      [tenant, this.#clock?.now().toISOString() ?? new Date().toISOString()],
+      [tenant, this.#clock.now().toISOString()],
     );
     const row = result.rows[0];
     const count = (value: number | string): number => Number(value);

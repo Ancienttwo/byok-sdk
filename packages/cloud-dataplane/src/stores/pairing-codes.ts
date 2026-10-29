@@ -25,6 +25,7 @@ import type {
 } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
 import type { ByokPool } from '../pool';
+import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer';
 import { getDeviceOnClient, registerDeviceOnClient } from './devices';
 
 interface PairingCodeRow {
@@ -186,7 +187,7 @@ export class PostgresPairingCodeStore implements PairingCodeStore {
     const now = this.#clock.now();
     const client = await this.#pool.connect();
     try {
-      await client.query('BEGIN');
+      await client.query(BEGIN_OUTBOX_WRITE);
       const selected = await client.query<PairingCodeRow>(
         `SELECT tenant_id, product_id, expires_at, redeemed_at
            FROM pairing_code WHERE code = $1 FOR UPDATE`,
@@ -229,7 +230,7 @@ export class PostgresPairingCodeStore implements PairingCodeStore {
         proofKeyId: input.proofKeyId,
         proofKeyEpoch: input.proofKeyEpoch,
         ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
-      });
+      }, now.toISOString());
       const completion: PairingCompletion = { deviceId: device.deviceId, binding };
       await client.query(
         `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at)

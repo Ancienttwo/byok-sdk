@@ -103,35 +103,56 @@ export interface DeviceRegistration {
    * Optional client-hashed physical machine identity from `PairRequest`. When
    * present, `register` DELETES this tenant/product's prior rows carrying the
    * same value — and the device-scoped state those rows were the only reason
-   * to keep — before inserting, so one physical machine holds one device row
-   * per product. It names no tenant and no product of
+   * to keep — and retires each one as {@link DeviceDirectory.revoke} does,
+   * under `device_superseded`, before inserting, so one physical machine holds
+   * one device row per product. It names no tenant and no product of
    * its own — both still come from the redeemed pairing code's claims — so it
    * can only ever supersede rows the caller already addressed.
    */
   readonly machineId?: string;
 }
 
+/**
+ * Device retirement — revocation, and the supersession of a machine's prior
+ * rows on re-pairing — is ONE transaction with the registration change, and
+ * every composition, a custom one included, must finalize the retired device
+ * in it:
+ *
+ * 1. Every unfinished attempt of that device ({@link
+ *    TASK_ATTEMPT_UNFINISHED_STATUSES}, matched on `deviceId` OR
+ *    `ownerDeviceId`) becomes `cancelled` with `terminalCause`
+ *    `device_revoked` or `device_superseded` and, when it has none,
+ *    `terminalAt`. A terminal attempt is never touched; a cancellation
+ *    tombstone stays as it was.
+ * 2. Every `pending` mailbox row addressed to that device becomes `expired`
+ *    (see `MailboxStore.expirePending`): the rows stop holding mailbox quota
+ *    and raise the device's `recoverableFrom`, and nothing is deleted.
+ *
+ * Neither the task history nor the mailbox rows go away: what the device did
+ * and what it was sent stay readable after its grant is gone.
+ */
 export interface DeviceDirectory {
-  /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row. */
+  /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. */
   register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
   /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
   /**
    * Deletes the registration and the device-scoped state it owned (presence,
-   * challenge nonces, assertion-replay entries, inbound dedup) — never the
-   * history keyed by the device_id string. A no-op for a device this tenant
-   * cannot address. Afterwards every read answers exactly as it does for a
-   * device that was never registered.
+   * challenge nonces, assertion-replay entries, inbound dedup), and retires
+   * the device under `device_revoked` in the same transaction (see above). A
+   * no-op for a device this tenant cannot address. Afterwards every read
+   * answers exactly as it does for a device that was never registered.
    *
-   * How far the deletion physically reaches is driver-scoped. The durable
-   * (Postgres) driver deletes the registration and every dependent
-   * device-scoped row in the same transaction, so the state is gone the moment
-   * `revoke` resolves. The in-memory reference directory deletes only the
-   * registration: its sibling stores are separate maps it does not own, so a
-   * presence hint expires on its own `expiresAt` TTL and, until then, is
-   * excluded from every projection by the readiness active-device filter
-   * (`activeDeviceIds`, built from the surviving rows). The observable contract
-   * above holds either way — no read path can see a revoked device.
+   * How far the device-state deletion physically reaches is driver-scoped.
+   * The durable (Postgres) driver deletes the registration and every
+   * dependent device-scoped row in the same transaction, so the state is gone
+   * the moment `revoke` resolves. The in-memory reference directory deletes
+   * only the registration: presence, nonces and dedup are separate maps it
+   * does not own, so a presence hint expires on its own `expiresAt` TTL and,
+   * until then, is excluded from every projection by the readiness
+   * active-device filter (`activeDeviceIds`, built from the surviving rows).
+   * The observable contract above holds either way — no read path can see a
+   * revoked device. Retirement of tasks and mailbox rows is not driver-scoped.
    */
   revoke(tenant: TenantId, deviceId: string): Promise<void>;
   list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -264,6 +285,29 @@ export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
 
 /** Attempts that can still be in flight, provided no host cancellation is recorded. */
 export const TASK_ATTEMPT_ACTIVE_STATUSES = ['offered', 'claimed', 'running'] as const satisfies readonly TaskAttemptStatus[];
+
+/** Every non-terminal status, `cancel_requested` included: the attempts device retirement and abandonment settle. */
+export const TASK_ATTEMPT_UNFINISHED_STATUSES = [
+  'offered',
+  'claimed',
+  'running',
+  'cancel_requested',
+] as const satisfies readonly TaskAttemptStatus[];
+
+/**
+ * The `terminalCause` cloud itself writes when it settles an attempt no device
+ * will ever finish: `device_revoked` and `device_superseded` from device
+ * retirement ({@link DeviceDirectory.revoke}, machine supersession in
+ * {@link DeviceDirectory.register}), and any of the three from
+ * `ByokCloud.abandonTask`. An attempt settled this way is `cancelled` and
+ * carries no device terminal receipt.
+ */
+export const TASK_ABANDON_CAUSES = ['operator', 'device_revoked', 'device_superseded'] as const;
+export type TaskAbandonCause = (typeof TASK_ABANDON_CAUSES)[number];
+
+export function isTaskAbandonCause(value: unknown): value is TaskAbandonCause {
+  return (TASK_ABANDON_CAUSES as readonly unknown[]).includes(value);
+}
 
 /** One store aggregate; host cancellation is counted separately because it outranks status. */
 export interface TaskAttemptCounts {
@@ -536,12 +580,29 @@ export interface TaskCancellationMutation {
   readonly message?: MailboxMessage;
 }
 
+export interface TaskAbandonRequest {
+  readonly taskId: string;
+  readonly cause: TaskAbandonCause;
+}
+
 /**
- * One atomic authority for the cancellation tombstone plus its durable device
- * delivery. Implementations must commit both or neither.
+ * One atomic authority for Host-side task termination plus its mailbox
+ * effect. Implementations must commit both halves or neither.
  */
 export interface TaskCancellationStore {
+  /** The cancellation tombstone plus its durable device delivery. */
   request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
+  /**
+   * Settles an attempt no device will finish, in one transaction: an
+   * unfinished attempt becomes `cancelled` with `terminalCause = cause` (and
+   * `terminalAt` when it has none), and every `pending` mailbox row of the
+   * task on its target and owner devices — a row whose envelope's top-level
+   * `task_id` names it — becomes `expired`. The same transition device
+   * retirement applies ({@link DeviceDirectory}). A terminal attempt is
+   * returned unchanged and nothing is written; a cancellation tombstone stays
+   * as it was. `undefined` for a task this tenant never offered.
+   */
+  abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined>;
 }
 
 // ---------------------------------------------------------------------------

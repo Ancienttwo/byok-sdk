@@ -72,7 +72,7 @@ export function createInMemoryCloudStores(
   const blobs = createInMemoryBlobs(objects, objectBytes);
   const taskState = new InMemoryTaskAttemptState(clock);
   const tasks = new InMemoryTaskAttemptStore(clock, taskState);
-  const devices = new InMemoryDeviceDirectory();
+  const devices = new InMemoryDeviceDirectory(taskState, mailbox);
   const pairing = new InMemoryPairingCodeStore(clock, devices);
   return {
     stores: {

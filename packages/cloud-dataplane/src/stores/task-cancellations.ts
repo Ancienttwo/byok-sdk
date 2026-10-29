@@ -1,4 +1,6 @@
 import type {
+  TaskAbandonRequest,
+  TaskAttempt,
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskCancellationStore,
@@ -17,8 +19,11 @@ import {
   type TaskRow,
   taskRowToAttempt,
 } from './task-attempts';
+import { abandonTask } from './task-retirement';
 
-/** PostgreSQL atomic authority for host cancellation state plus mailbox delivery. */
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
+
+/** PostgreSQL atomic authority for Host task termination plus its mailbox effect. */
 export class PostgresTaskCancellationStore implements TaskCancellationStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
@@ -101,6 +106,37 @@ export class PostgresTaskCancellationStore implements TaskCancellationStore {
         attempt: taskRowToAttempt(updated.rows[0]!),
         message: toMailboxMessage(written.row),
       };
+    } catch (cause) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw cause;
+    } finally {
+      client.release();
+    }
+  }
+
+  async abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined> {
+    const client = await this.#pool.connect();
+    try {
+      // Same opening and task row lock as `request`, so the two serialize.
+      await client.query(BEGIN_OUTBOX_WRITE);
+      const selected = await client.query<TaskRow>(
+        `SELECT ${TASK_SELECT_COLUMNS} FROM task
+          WHERE tenant_id = $1 AND task_id = $2
+          FOR UPDATE`,
+        [tenant, input.taskId],
+      );
+      const current = selected.rows[0];
+      if (current === undefined || TERMINAL_STATUSES.has(current.status)) {
+        await client.query('COMMIT');
+        return current === undefined ? undefined : taskRowToAttempt(current);
+      }
+      await abandonTask(client, tenant, current, input.cause, this.#clock.now().toISOString());
+      const settled = await client.query<TaskRow>(
+        `SELECT ${TASK_SELECT_COLUMNS} FROM task WHERE tenant_id = $1 AND task_id = $2`,
+        [tenant, input.taskId],
+      );
+      await client.query('COMMIT');
+      return taskRowToAttempt(settled.rows[0]!);
     } catch (cause) {
       await client.query('ROLLBACK').catch(() => {});
       throw cause;

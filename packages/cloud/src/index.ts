@@ -326,8 +326,11 @@ export type { TruthCommitErrorCode } from './truth/errors';
 export {
   BLOB_READ_ERROR_CODES,
   CLOUD_STORE_NAMES,
+  TASK_ABANDON_CAUSES,
   TASK_ATTEMPT_STATUSES,
   TASK_ATTEMPT_ACTIVE_STATUSES,
+  TASK_ATTEMPT_UNFINISHED_STATUSES,
+  isTaskAbandonCause,
 } from './stores/ports';
 // The port method inventory. Contract data, shipped so `@byok-sdk/conformance` and
 // durable adapters read the same table; `ports.ts` itself is untouched.
@@ -372,6 +375,8 @@ export type {
   AgentEgressRecord,
   AgentEgressStore,
   AgentMessageAdmission,
+  TaskAbandonCause,
+  TaskAbandonRequest,
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskCancellationStore,
