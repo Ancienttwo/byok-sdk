@@ -14,9 +14,8 @@ export default defineConfig({
     options.legalComments = 'inline';
   },
   esbuildPlugins: [workspaceExternals(), subagentsBuild(true)],
-  noExternal: ['pi-web-access', /^@byok-sdk\//],
+  noExternal: [/^@byok-sdk\//],
   external: ['koffi', '#byok-pi-todo-runtime', 'typebox', 'typebox/compile',
-    '@mozilla/readability', 'linkedom', 'p-limit', 'promise.try', 'turndown',
-    'unpdf', 'undici', 'jiti', 'yaml'],
+    'undici', 'jiti', 'yaml'],
   define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version) },
 });

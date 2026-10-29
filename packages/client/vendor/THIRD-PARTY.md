@@ -63,9 +63,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## @juicesharp/rpiv-config@2.8.0
+## @juicesharp/rpiv-config@2.15.0
 
-licenseSource: same repository/same2.8.0 sibling rpiv-i18n LICENSE; rpiv-config package declares MIT but omits license file
+licenseSource: same repository/same2.15.0 sibling rpiv-i18n LICENSE; rpiv-config package declares MIT but omits license file
 
 MIT License
 
@@ -90,7 +90,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-## @juicesharp/rpiv-i18n@2.8.0
+## @juicesharp/rpiv-i18n@2.15.0
 
 MIT License
 

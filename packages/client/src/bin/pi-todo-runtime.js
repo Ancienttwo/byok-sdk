@@ -1,6 +1,6 @@
 // Loaded only after host usage, binding and all locale assets are verified.
-import todoExtension from '../../vendor/rpiv-todo/2.8.0/index.js';
-import { I18N_NAMESPACE } from '../../vendor/rpiv-todo/2.8.0/state/i18n-bridge.js';
+import todoExtension from '../../vendor/rpiv-todo/2.15.0/index.js';
+import { I18N_NAMESPACE } from '../../vendor/rpiv-todo/2.15.0/state/i18n-bridge.js';
 import { registerLocalesFromDir } from '@juicesharp/rpiv-i18n/loader';
 
 /**

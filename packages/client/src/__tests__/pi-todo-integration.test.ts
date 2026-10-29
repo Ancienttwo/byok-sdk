@@ -11,7 +11,7 @@ afterEach(() => homes.splice(0).forEach(home => rmSync(home, {recursive:true,for
 it('loads the real bundled todo library and preserves live non-English translations', () => {
   const root = path.resolve(import.meta.dirname, '../../');
   const entry = pathToFileURL(path.join(root, 'dist/bin/pi-todo-runtime.js')).href;
-  const anchor = pathToFileURL(path.join(root, 'dist/assets/extensions/rpiv-todo/2.8.0') + path.sep).href;
+  const anchor = pathToFileURL(path.join(root, 'dist/assets/extensions/rpiv-todo/2.15.0') + path.sep).href;
   // Both library copies share its documented Symbol.for registry. This public
   // API check therefore exercises translations registered by the shipped bundle.
   const script = `import {createTodoExtension} from ${JSON.stringify(entry)};
@@ -32,7 +32,7 @@ it('loads the real bundled todo library and preserves live non-English translati
   expect(result.stderr).toBe('');
   const actual = JSON.parse(result.stdout);
   for (const locale of ['de', 'zh']) {
-    const source = JSON.parse(readFileSync(path.join(root, `dist/assets/extensions/rpiv-todo/2.8.0/locales/${locale}.json`), 'utf8'));
+    const source = JSON.parse(readFileSync(path.join(root, `dist/assets/extensions/rpiv-todo/2.15.0/locales/${locale}.json`), 'utf8'));
     expect(actual[locale]).toBe(source['status.pending']);
     expect(actual[locale]).not.toBe('pending');
   }
@@ -43,7 +43,7 @@ it('matches upstream Text, truncate and StringEnum through the minified producti
   const root = path.resolve(import.meta.dirname, '../../');
   const home = mkdtempSync(path.join(tmpdir(), 'todo-ui-')); homes.push(home);
   const entry = pathToFileURL(path.join(root, 'dist/bin/pi-todo-runtime.js')).href;
-  const anchor = pathToFileURL(path.join(root, 'dist/assets/extensions/rpiv-todo/2.8.0') + path.sep).href;
+  const anchor = pathToFileURL(path.join(root, 'dist/assets/extensions/rpiv-todo/2.15.0') + path.sep).href;
   const script = `
     import assert from 'node:assert/strict';
     import {createRequire} from 'node:module';

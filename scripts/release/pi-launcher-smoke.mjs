@@ -248,7 +248,7 @@ await runtime.dispose();
   assert.equal(requests, 0);
   console.log('[release-pack] installed Node private sealed host reached exact usage refusal; sessions=0; requests=0');
   const todoEntry = pathToFileURL(path.join(clientRoot, 'dist/bin/pi-todo-runtime.js')).href;
-  const todoAnchor = pathToFileURL(path.join(clientRoot, 'dist/assets/extensions/rpiv-todo/2.8.0') + path.sep).href;
+  const todoAnchor = pathToFileURL(path.join(clientRoot, 'dist/assets/extensions/rpiv-todo/2.15.0') + path.sep).href;
   const todoStartup = spawnSync(process.execPath, ['--input-type=module', '-e',
     `import {createTodoExtension} from ${JSON.stringify(todoEntry)}; console.log(typeof createTodoExtension(${JSON.stringify(todoAnchor)}));`],
     {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
