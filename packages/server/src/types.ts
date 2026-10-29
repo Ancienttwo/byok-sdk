@@ -24,7 +24,7 @@ import type {
   AgentHomeAccess,
   AgentMemorySelection,
 } from '@byok-sdk/protocol';
-import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types';
 import type { RateLimiterOptions } from './rate-limiter';
@@ -373,6 +373,8 @@ export interface TaskHandle {
    */
   events(): AsyncIterable<ServerTaskEvent>;
   cancel(reason?: string): Promise<void>;
+  /** Settle this task as one no device will finish (`ByokCloud.abandonTask`); a terminal task is left as it is. */
+  abandon(cause: TaskAbandonCause): Promise<void>;
   /**
    * M5 (approval targeting, docs/protocol.md §5.3): `opts.approvalId`
    * targets a SPECIFIC pending approval rather than "whichever one is
