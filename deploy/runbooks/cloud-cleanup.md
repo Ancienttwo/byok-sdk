@@ -151,9 +151,9 @@ sequence, binds the new row to the exact source via `replay_source_seq`, and
 keeps the original as evidence. The clone is a limited mailbox append: it is
 refused with `storage_quota_exceeded` when it does not fit `mailboxLimitBytes`,
 and with `storage_entitlement_missing` when the tenant has no entitlement.
-`discardDeadLetter` is the only explicit delete; it removes one expired row,
-which is all it takes to free its bytes. Automatic cleanup never calls discard.
-A dead letter counts toward the mailbox limit until it is discarded.
+`discardDeadLetter` is the only explicit delete; it removes one expired row.
+Automatic cleanup never calls discard. A dead letter holds no mailbox quota
+(#1115), so discarding it frees no quota; only stored rows go away.
 
 ## Rollback and usage rebuild
 
@@ -179,13 +179,15 @@ Before re-enabling writes after suspected accounting drift:
 4. read usage and entitlement back, then resume admission.
 
 R2 LIST is never billing authority. Rebuild does not touch inline usage, and
-mailbox usage has nothing to rebuild: it is read from the retained rows.
+mailbox usage has nothing to rebuild: it is read from the `pending` rows.
 
 ## Mailbox usage authority and upgrade check (#411)
 
-From this release, mailbox bytes have one authority: the retained `outbox`
-rows. Usage is `SUM(byte_size)` over every retained row of the tenant in any
-state (`pending`, `acked`, `expired`), read with `MailboxStore.readUsage`. Every
+Mailbox bytes have one authority: the retained `outbox` rows. Usage is
+`SUM(byte_size)` over the tenant's `pending` rows, read with
+`MailboxStore.readUsage`. `acked` and `expired` rows stay retained but hold no
+quota (#1115): an ack releases a row's bytes, and so does dead-lettering it.
+Every
 `limited` append — offers, approvals, steering, server replies such as egress
 acknowledgements and dispositions, and dead-letter replay — is admitted only
 while `used + new <= mailbox_limit_bytes`, in the same serialized unit that
@@ -211,6 +213,7 @@ issue its missing entitlement, or drain its mailbox first:
 WITH usage AS (
   SELECT tenant_id, SUM(byte_size)::bigint AS mailbox_bytes, count(*) AS rows
     FROM outbox
+   WHERE state = 'pending'
    GROUP BY tenant_id
 )
 SELECT u.tenant_id,
@@ -229,7 +232,7 @@ SELECT u.tenant_id,
 A tenant at exactly its limit is not returned but will refuse its next limited
 append too; compare `mailbox_bytes` with `mailbox_limit_bytes` for headroom.
 
-The query above only sees tenants that already hold retained rows. A tenant with
+The query above only sees tenants that already hold pending rows. A tenant with
 paired devices but no entitlement and an empty mailbox is not in it, yet its
 first limited append is refused with `storage_entitlement_missing` too. Audit
 those separately:

@@ -230,7 +230,7 @@ export class InMemoryMailboxStore implements MailboxStore {
     } catch (cause) {
       throw new CollectExpiredFailure({ removed, expired, releasedBytes: 0n }, 0, undefined, { cause });
     }
-    // Mailbox usage is the retained rows, never a mutable accounting counter.
+    // Mailbox usage is the pending rows, never a mutable accounting counter, so neither phase moves it.
     return { removed, expired, releasedBytes: 0n, more };
   }
 
