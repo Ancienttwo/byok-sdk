@@ -263,10 +263,11 @@ describe('#1117 keychain command deadline and cancellation', () => {
       { deviceCredentials: new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: keyring.run }) },
     );
     await daemon.pair('pairing-code');
+    // Armed before start: under load the first renewal can fire before open.
+    keyring.state.hangWrites = true;
     await daemon.start();
     await waitForDaemonOpen(daemon);
     expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
-    keyring.state.hangWrites = true;
     await keyring.hung;
 
     const stoppedAt = performance.now();
