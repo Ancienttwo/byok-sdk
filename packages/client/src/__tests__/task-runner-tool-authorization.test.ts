@@ -342,7 +342,7 @@ describe('control-socket decisions on tool authorization', () => {
       serverUrl: 'http://127.0.0.1:1', storeDir: path.join(os.tmpdir(), 'byok-tool-auth-config-unused'), agentMemoryMcp: 'off',
       agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       storage: { scratchRoot: testScratchRoot() }, localToolApproval: 'deny' as unknown as 'allow',
-    }, [new GateCapturingAdapter(AUTO_CAPABLE)])).toThrow(/localToolApproval must be 'allow' or omitted/);
+    }, [new GateCapturingAdapter(AUTO_CAPABLE)])).toThrow('DaemonConfig.localToolApproval must be "allow"');
   });
 
   async function controlResolve(storeDir: string, params: { approvalId: string; decision: 'approve' | 'reject'; reason?: string }) {

@@ -123,10 +123,11 @@ flowchart TB
 
 检查覆盖：
 
-- 发布的 package 的 `dependencies` 与上表的实测边一一对应。私有的 `conformance` 是例外：`src/simulator/harness.ts:37` 值导入 `@byok-sdk/testkit`，而 `testkit` 只声明为 devDependency。
-- `scripts/release/check-package-graph.mjs` 检查发布集合与版本对齐（`:7-29`），并在 manifest 层守住两条方向：训练线 package 的运行时依赖图不得到达 `keys`（`:286-300`）；`keys` 只能依赖 `core`、不得依赖 `protocol`（`:302-322`）。它还检查 client 依赖的纯度（`:324-375`）。除这两条外，它不检查层与层之间的方向。
-- `scripts/api-surface/check-api-surface.mjs` 与 `entry-closure.mjs` 锁公开 API 和入口闭包，不检查 package 内部目录方向。
-- 没有检查的部分：上述两条以外的 package 级方向（靠 `package.json` 与 review 维持）、源码 import 与 manifest 是否一致、package 内部的目录方向与文件级环（R-L1、R-L2）。仓库没有 eslint、dependency-cruiser、madge 或 biome 配置。
+- `bun run check:release-graph` 调用 [`scripts/architecture/dependency-graph.mjs`](../../scripts/architecture/dependency-graph.mjs)：使用已安装 TypeScript 7 的 AST API 区分类型边和值边，解析 workspace export 到源码，保留 barrel re-export 边以检测文件级环；同时检查 workspace manifest 的运行时依赖方向与源码值导入的 `dependencies` 声明。
+- client 目录层级为入口（`bin`、`lifecycle`、`diagnostics`、`testing`）→ `daemon` → runtime 适配 → 共享；cloud 为 `composition` → `cloud.ts` → `api` / `handlers` / `router` → `stores` → 根领域文件 → 叶子目录。同层允许，纯 re-export 入口不计逆层边，但仍参与环检测。
+- [`dependency-baseline.json`](../../scripts/architecture/dependency-baseline.json) 记录当前 client/cloud 的逆层边、环内每条边，以及 conformance → testkit 的 manifest 缺口。当前 main 已有 23 条 client 直接逆层边（上表和 R-L1 的 24 条为旧快照）。新违规或已消失但未删除的基线项均失败；CI 还用精确 `CI_BASE` 检查基线不得增加。基线清空后可删除文件，检查等同零容忍。首次引入基线由本 PR review 确认。
+- `node --test scripts/architecture/dependency-graph.test.mjs` 以合成 fixture 锁定 AST API 口径、动态 import、barrel 环、分层与基线单调性。检查只扫描上述非测试 TypeScript 源码；JS/vendor 及非字面量动态模块表达式不属于该静态图。
+- release checker 继续检查发布集合、版本、client 安装纯度及训练线不得到达 keys；api-surface 检查公开 API 和入口闭包。examples K4/K8 的平台闭包与 timeline schema 迁移不在此 checker 的首批范围内，仍需独立完成 #1098 的相应验收项。
 
 ## 3. 模块视图
 

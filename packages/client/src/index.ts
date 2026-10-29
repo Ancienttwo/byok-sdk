@@ -118,10 +118,33 @@ export type {
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export {
+  DAEMON_CONFIG_SCHEMA_VERSION,
+  DaemonConfigInvalidError,
+  checkDaemonConfig,
+  validateDaemonConfig,
+  type DaemonConfigCheck,
+  type DaemonConfigCheckOptions,
+  type DaemonConfigIssue,
+  type DaemonConfigIssueCode,
+  type DaemonConfigSource,
+  type DaemonConfigValidation,
+  type DaemonEffectiveConfig,
+  type DaemonEffectiveMcpServer,
+  type DaemonEffectiveRuntime,
+  type DaemonMemoryHelperResolution,
+} from './daemon/config-schema';
+export {
   DaemonConfigFieldRemovedError,
   DaemonJournalProtocolUnsupportedError,
+  HostLayoutInputError,
   type DaemonJournalProtocolRecord,
 } from './daemon/daemon-errors';
+export {
+  resolveHostLayout,
+  type HostLayout,
+  type HostLayoutOptions,
+  type HostLayoutPlatform,
+} from './daemon/host-layout';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals';

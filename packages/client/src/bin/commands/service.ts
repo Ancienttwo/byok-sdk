@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { createServiceLifecycle, nodeAgentProgram, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index';
 import { readLastLifecycleRecord } from '../audit-log';
+import { serviceLogDir } from '../../daemon/host-layout';
 import { argValue, resolveStoreDir } from '../config';
 import { formatLifecycle, formatLifecycleRemedy } from '../format';
 
@@ -53,7 +54,7 @@ export function buildServiceDefinition(
   const agentBin = argValue(rest, '--agent-bin') ?? process.argv[1] ?? 'byok-agent';
   const nodeBin = argValue(rest, '--node-bin') ?? process.execPath;
   const absoluteConfigPath = path.resolve(configPath);
-  const logDir = path.join(resolveStoreDir(config), 'service-logs');
+  const logDir = serviceLogDir(resolveStoreDir(config));
 
   const definition: ServiceDefinition = {
     name,

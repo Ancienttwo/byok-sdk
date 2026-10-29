@@ -7,7 +7,6 @@ import {
   promises as fs,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { atomicWriteFile } from '../util/atomic-write';
@@ -21,6 +20,7 @@ import {
 } from './device-credential-store';
 import { createDeviceCredentialStore } from './device-credential-provider';
 import { foldNameAliases } from '../util/fold-name-aliases';
+import { defaultStoreDir } from './host-layout';
 
 export type { DeviceMetadata, DeviceRecord } from './device-credential-store';
 
@@ -206,10 +206,6 @@ export class DeviceStore {
     this.filePath = path.join(storeDir, 'device.json');
   }
 
-  static defaultDir(productId: string): string {
-    return path.join(os.homedir(), '.byok', productId);
-  }
-
   /**
    * Resolve the one store pathname every daemon/CLI component must share.
    * A configured relative path is anchored once at process entry rather than
@@ -220,7 +216,7 @@ export class DeviceStore {
    * roots from one spelling.
    */
   static resolveDir(productId: string, configured?: string): string {
-    return foldNameAliases(configured ?? DeviceStore.defaultDir(productId));
+    return foldNameAliases(configured ?? defaultStoreDir(productId));
   }
 
   async load(): Promise<DeviceMetadata | undefined> {

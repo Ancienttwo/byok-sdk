@@ -12,9 +12,30 @@ export class DaemonConfigFieldRemovedError extends Error {
     /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
     readonly field: string,
     message: string,
+    /** Repo-relative `.md#anchor` of the migration note (#1094). */
+    readonly migration: string,
   ) {
     super(message);
     this.name = 'DaemonConfigFieldRemovedError';
+  }
+}
+
+/**
+ * `resolveHostLayout` got an input it cannot build a layout from: a product
+ * identifier that is not one portable path segment, a home directory that is
+ * not absolute, or a platform without a layout. Fix the named `field` and
+ * call it again; the call has no side effects.
+ */
+export class HostLayoutInputError extends Error {
+  readonly code = 'host_layout_input_invalid' as const;
+
+  constructor(
+    /** The `HostLayoutOptions` field: `productId`, `productName`, `homeDir` or `platform`. */
+    readonly field: 'productId' | 'productName' | 'homeDir' | 'platform',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HostLayoutInputError';
   }
 }
 

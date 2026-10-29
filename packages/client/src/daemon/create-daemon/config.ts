@@ -1,4 +1,5 @@
-import { DaemonConfigFieldRemovedError } from '../daemon-errors';
+import { assertDaemonConfigValid, removedFieldError } from '../config-schema/errors';
+import type { DaemonMemoryHelperResolution } from '../config-schema/effective';
 import { resolveAgentMemoryFilesystemHelper } from '../agent-memory-helper-release';
 import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
 import { isAgentMemoryFilesystemHelperSupported } from '../agent-memory-fs-helper';
@@ -26,38 +27,11 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (overrides.deviceCredentials !== undefined && config.deviceCredentials !== undefined) {
     throw new TypeError('configure OS deviceCredentials or inject a credential backend, not both');
   }
-  if (Object.hasOwn(config, 'permissionDefaults')) {
-    throw new DaemonConfigFieldRemovedError('permissionDefaults', 'DaemonConfig.permissionDefaults was removed: the local agent\'s own permission settings apply');
-  }
-  if (config.agentEgress !== undefined && Object.hasOwn(config.agentEgress, 'sanitizer')) {
-    throw new DaemonConfigFieldRemovedError('agentEgress.sanitizer', 'DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is');
-  }
-  if (Object.hasOwn(config, 'mcpLaunchCwd')) {
-    throw new DaemonConfigFieldRemovedError('mcpLaunchCwd', 'DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
-  }
-  if (Object.hasOwn(config, 'toolImplementationAuthority')) {
-    throw new DaemonConfigFieldRemovedError('toolImplementationAuthority', 'DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
-  }
-  if (Object.hasOwn(config, 'hostedJournal') || Object.hasOwn(overrides, 'hostedJournal')) {
-    throw new DaemonConfigFieldRemovedError('hostedJournal', 'DaemonConfig.hostedJournal was removed: every daemon journals; tune it under storage.journal and inject a journal as overrides.journal');
-  }
-  if (Object.hasOwn(config, 'strictAgentOnly')) {
-    throw new DaemonConfigFieldRemovedError('strictAgentOnly', 'DaemonConfig.strictAgentOnly was removed: since wire v4 every offer is an Agent offer, so every daemon runs Agent offers only');
-  }
-  if (Object.hasOwn(config, 'gitWorkspace') || Object.hasOwn(overrides, 'gitWorkspace')) {
-    throw new DaemonConfigFieldRemovedError('gitWorkspace', 'DaemonConfig.gitWorkspace was removed: since wire v4 every offer is an Agent offer and runs in its SDK-owned Agent home, so there are no Git task workspaces (overrides.gitWorkspace is gone too); configure agentHome');
-  }
-  if (Object.hasOwn(config, 'workspaceRoot')) {
-    throw new DaemonConfigFieldRemovedError('workspaceRoot', 'DaemonConfig.workspaceRoot was removed: since wire v4 every offer runs in its SDK-owned Agent home, never in a workspaceRoot/<taskId> directory; configure agentHome');
-  }
-  if (Object.hasOwn(config, 'resultDocument')) {
-    throw new DaemonConfigFieldRemovedError('resultDocument', 'DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool');
-  }
+  const configWarnings = assertDaemonConfigValid(config);
+  if (Object.hasOwn(overrides, 'hostedJournal')) throw removedFieldError('hostedJournal');
+  if (Object.hasOwn(overrides, 'gitWorkspace')) throw removedFieldError('gitWorkspace');
   if (config.toolAuthorization !== undefined && typeof config.toolAuthorization !== 'function') {
     throw new Error('toolAuthorization must be a function returning auto or all');
-  }
-  if (config.localToolApproval !== undefined && config.localToolApproval !== 'allow') {
-    throw new Error(`DaemonConfig.localToolApproval must be 'allow' or omitted — got ${JSON.stringify(config.localToolApproval)}`);
   }
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
@@ -71,12 +45,6 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   ) {
     throw new Error('DaemonConfig.agentMemoryIntents must be a transport with fetch and complete functions when present');
   }
-  if (config.agentMemoryMcp !== undefined && config.agentMemoryMcp !== 'auto' && config.agentMemoryMcp !== 'off') {
-    throw new Error('DaemonConfig.agentMemoryMcp must be auto or off when present');
-  }
-  if (config.agentMemoryExport !== undefined && config.agentMemoryExport !== true) {
-    throw new Error('DaemonConfig.agentMemoryExport must be true when present');
-  }
   if (config.agentMemoryExport === true && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentMemoryExport requires agentHome');
   }
@@ -89,23 +57,29 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
     // Explicit configuration must fail closed even without projection or intent transport.
     resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
   }
-  if (Object.hasOwn(config, 'agentMemoryFilesystem')) {
-    throw new Error('DaemonConfig.agentMemoryFilesystem is removed; an arbitrary helper is not admitted on this platform. Use the SDK release artifact.');
-  }
   if (config.sdkHelperHost !== undefined) {
     resolveSdkReservedHelperBin('agent-message-mcp', config.sdkHelperHost);
   }
   // Platform support alone cannot admit memory. Compiled products and ordinary
   // JS builds can have Agent homes without the SDK native release assets.
   let resolveAgentMemoryFilesystemHelperBin: (() => string) | undefined;
-  if (config.agentHome !== undefined && (agentMemoryMcpEnabled || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined || config.agentMemoryExport === true)
-    && isAgentMemoryFilesystemHelperSupported()) {
+  // What the effective-config report says about the helper (#603, #614).
+  let memoryHelper: DaemonMemoryHelperResolution;
+  const memoryWanted = config.agentHome !== undefined
+    && (agentMemoryMcpEnabled || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined || config.agentMemoryExport === true);
+  if (!memoryWanted) {
+    memoryHelper = { state: 'not-needed' };
+  } else if (isAgentMemoryFilesystemHelperSupported()) {
     try {
-      resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
+      const helperPath = resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
       resolveAgentMemoryFilesystemHelperBin = () => resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
+      memoryHelper = { state: 'resolved', path: helperPath };
     } catch (error) {
       if (config.agentMemoryHelperAssetRoot !== undefined || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined || config.agentMemoryExport === true) throw error;
+      memoryHelper = { state: 'missing', reason: error instanceof Error ? error.message : String(error) };
     }
+  } else {
+    memoryHelper = isAgentMemorySecureFilesystemAvailable(false) ? { state: 'native' } : { state: 'unsupported-platform' };
   }
   const externalAgentMemoryFilesystem = resolveAgentMemoryFilesystemHelperBin !== undefined;
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
@@ -134,7 +108,6 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   // The launcher writes sessions here and retention sweeps it; both use this spelling.
   const piByokLauncher = config.piByokLauncher === undefined ? undefined
     : Object.freeze({ ...config.piByokLauncher, sessionDir: foldNameAliases(config.piByokLauncher.sessionDir) });
-  if (config.durablePi !== undefined && typeof config.durablePi !== 'boolean') throw new Error('durablePi must be boolean');
   if (config.durablePi === true && (!config.agentHome || !config.piByokLauncher)) throw new Error('durablePi requires Agent home and Pi custody launcher');
   if (config.durablePi === true && process.platform === 'win32') throw new Error('durablePi is unavailable on Windows until parent-death Job Object recovery is validated');
   // M5 batch-3 (workstream 2): validated synchronously, up front — see
@@ -178,12 +151,6 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   // something the first offer discovers — and there is no
   // `Number.POSITIVE_INFINITY` opt-out here: "no cap" is exactly the
   // co-writing state this exists to prevent.
-  if (Object.prototype.hasOwnProperty.call(config, 'maxConcurrentMutableSessionsPerAgentHome')) {
-    throw new DaemonConfigFieldRemovedError(
-      'maxConcurrentMutableSessionsPerAgentHome',
-      'DaemonConfig.maxConcurrentMutableSessionsPerAgentHome was removed. A home has one writer Attempt; send concurrent tasks as homeAccess: \'memory-reader\' offers and set maxConcurrentReaderAttemptsPerAgentHome to limit them.',
-    );
-  }
   if (
     config.maxConcurrentReaderAttemptsPerAgentHome !== undefined
     && !(Number.isSafeInteger(config.maxConcurrentReaderAttemptsPerAgentHome)
@@ -196,6 +163,7 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   return {
     agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,
     agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, piByokLauncher,
+    memoryHelper, configWarnings,
   };
 }
 

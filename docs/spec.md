@@ -3768,3 +3768,111 @@ still reach any file, network or local resource the OS user can. File-scope
 grants (additional workspaces, canonical-path enforcement) remain open under
 #1061. The loopback gate token is inherited by SDK child sessions and does not
 isolate against same-user code.
+
+## Daemon configuration contract (#1094)
+
+`DaemonConfig` is the one source of the daemon configuration. The schema
+`packages/client/daemon-config.schema.json` (shipped beside the client
+`package.json`, like `upgrade-manifest.json`; `x-byok-schemaVersion` 1) is
+generated from that interface by
+`packages/client/src/daemon/config-schema/generate-schema.mjs` and checked in;
+a client test fails when it is stale. A field that JSON cannot express (a
+function, a transport, an object that requires one) is
+`x-byok-surface: "embedded-only"`. `localAgentRelease` is
+`x-byok-surface: "distribution-owned"`: the `byok-agent` bin supplies it, and
+a config file must not. Both carry `not: {}`, so a config file that sets them
+fails any JSON Schema validator. Objects stay open in the schema.
+
+One validator, `validateDaemonConfig(input, { source: 'cli' | 'embedded' })`,
+serves `byok-agent` (every config load and `config check`) and daemon
+construction (`createDaemon`, `createDaemonWithAdapters`):
+
+- A missing required field, or a value of the wrong JSON type or literal, is
+  an error: `ConfigError` in the bin, `DaemonConfigInvalidError` at
+  construction.
+- An unknown field is a warning and never stops a daemon (Q4'). Config files
+  are written by the Host installer and the SDK upgrades and rolls back on
+  its own, so a field a newer release wrote must not take an older daemon
+  offline. The daemon logs each warning once and reports it in
+  `Daemon.status().config.warnings`. `byok-agent config check --strict`
+  fails on warnings, for CI.
+- A removed field is `DaemonConfigFieldRemovedError` with `field` and
+  `migration` (the section below).
+- On the `cli` source an embedded-only or distribution-owned field is an
+  error. On the `embedded` source construction checks those fields itself.
+
+Value ranges and cross-field rules (positive integers, `agentEgress` requires
+`agentHome`, the scratch-root socket budget) remain construction errors.
+
+`byok-agent config check [--strict] [--json] [--config <path>]` validates the
+file as `start` would load it and, when it would construct, prints its
+effective values. `checkDaemonConfig` is the library form. `Daemon.status().config`
+is the same `DaemonEffectiveConfig`, built by the same function once at
+construction:
+
+- directories: `storeDir` (config or default), `agentHome.hostStorageRoot`
+  and its `agents` directory, and the execution scratch root with its source
+  (`config`, `store` = `<storeDir>/tmp`, or `short-root` when the store path
+  is too long for runtime Unix sockets) and socket-path byte budget (#493);
+- memory: the memory MCP admission and how the SDK memory helper resolved
+  (`resolved`, `missing` with the reason, `native` on Linux, `not-needed`,
+  `unsupported-platform`) (#603, #614);
+- MCP servers: each SDK-reserved server and each `mcpToolsets` server, with
+  which tasks get it or why none does;
+- runtimes: each adapter, whether `createDaemon` built it or the Host
+  injected it, whether it supports `auto`, and the isolation options
+  `createDaemon` gives the adapters it builds;
+- tool authorization: `all` without a resolver (the only mode a config file
+  can express) or `host-resolver`, and `localToolApproval`.
+
+Each top-level schema field is a `config:<field>` item of the upgrade
+manifest (`docs/upgrade-manifest.md`), so adding, removing or retyping a
+field needs a manifest entry.
+
+### Recommended host layout
+
+`resolveHostLayout({ productId, productName, platform?, homeDir?, env? })`
+returns the recommended local directories of a Host product. It is pure (no
+file is read or created), so an installer can call it for any of `darwin`,
+`linux` and `win32`. It is the only definition of these paths:
+`DeviceStore.resolveDir`, `byok-agent service install` and
+`DaemonEffectiveConfig.directories` use the same functions.
+
+| Directory | Owner | darwin | linux | win32 |
+| --- | --- | --- | --- | --- |
+| `storeDir` (`DaemonConfig.storeDir`; unset means this path) | SDK | `~/.byok/<productId>` | `~/.byok/<productId>` | `%USERPROFILE%\.byok\<productId>` |
+| `hostStorageRoot` (`agentHome.hostStorageRoot`) | Host | `~/Library/Application Support/<productName>` | `$XDG_DATA_HOME/<productId>` (default `~/.local/share/<productId>`) | `%LOCALAPPDATA%\<productName>` (default `~\AppData\Local\<productName>`) |
+| `agentHomes` = `<hostStorageRoot>/agents` | SDK | | | |
+| `logDir` = `<storeDir>/service-logs` | SDK (service manager output) | | | |
+
+The Host keeps its config file and its own state outside `storeDir`. The
+store stays short on purpose: an application-data path is often too long for
+runtime Unix sockets under `<storeDir>/tmp`. The result reports where execution
+scratch goes with that store (`scratchRoot.source` `store` or `short-root`)
+and its socket-path byte budget, by the same rule the daemon applies (#493),
+on the lexical path; `config check` reports the value a daemon resolves.
+`productId` and `productName` must each be one portable path segment and
+`homeDir` must be absolute for the platform; otherwise the helper throws
+`HostLayoutInputError` (`code: 'host_layout_input_invalid'`, `field`).
+Existing stores are not moved. `DeviceStore.defaultDir` is removed; a Host
+that called it uses `resolveHostLayout(...).storeDir`.
+
+### Removed DaemonConfig fields
+
+Supplying one of these raises `DaemonConfigFieldRemovedError` on every
+surface. The table is `REMOVED_DAEMON_CONFIG_FIELDS` in
+`packages/client/src/daemon/config-schema/removed-fields.ts`.
+
+| Field | Migration |
+| --- | --- |
+| `permissionDefaults` | Remove it; the local agent's own permission settings apply. |
+| `agentEgress.sanitizer` | Remove it; Agent egress goes to the Host as is. |
+| `mcpLaunchCwd` | Remove it; MCP servers start in the session cwd. |
+| `toolImplementationAuthority` | Remove it; the SDK does not attest tool or runtime executables. |
+| `hostedJournal` | Remove it; tune the journal under `storage.journal`, inject one as `overrides.journal`. |
+| `strictAgentOnly` | Remove it; every daemon runs Agent offers only (wire v4). |
+| `gitWorkspace` | Remove it (and `overrides.gitWorkspace`); configure `agentHome`. |
+| `workspaceRoot` | Remove it (#925); every offer runs in its SDK-owned Agent home; configure `agentHome`. |
+| `resultDocument` | Remove it; a result-document offer carries its schema and the runtime calls `submit_result`. |
+| `maxConcurrentMutableSessionsPerAgentHome` | Remove it; send concurrent tasks as `memory-reader` offers and set `maxConcurrentReaderAttemptsPerAgentHome`. |
+| `agentMemoryFilesystem` | Remove it; only the SDK release helper is admitted (`agentMemoryHelperAssetRoot`). |

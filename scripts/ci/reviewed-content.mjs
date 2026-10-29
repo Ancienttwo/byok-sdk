@@ -490,7 +490,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     let index = 0;
     for (const test of newTests) {
       if (test === oldTests[index]) { index++; continue; }
-      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || test === UPGRADE_MANIFEST_TEST)
+      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || test === UPGRADE_MANIFEST_TEST || test === 'scripts/architecture/dependency-graph.test.mjs')
         || oldTests.includes(test) || !existsSync(resolve(cwd, test))) throw new Error('Only existing CI contract tests may be added');
     }
     if (index !== oldTests.length || new Set(newTests).size !== newTests.length) throw new Error('Existing tests must remain in order without duplicates');
@@ -511,6 +511,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
       // #1102 ships the upgrade manifest in the client tarball: exactly one appended files entry.
       if (isDeepStrictEqual(before.files, CLIENT_FILES) && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json'])) {
+        after.files = before.files;
+      }
+      // #1094 ships the generated DaemonConfig schema beside the upgrade manifest: exactly one appended files entry.
+      if (isDeepStrictEqual(before.files, [...CLIENT_FILES, 'upgrade-manifest.json'])
+        && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json'])) {
         after.files = before.files;
       }
       // #635 adds the public transport-free test-double entry; its bundle is checked by check-adapters-entry.mjs.
