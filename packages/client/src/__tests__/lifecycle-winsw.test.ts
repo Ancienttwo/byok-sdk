@@ -74,11 +74,14 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
   }
 
   const XML = 'C:\\acme\\logs/Acme-Agent-.xml';
+  const EXE = 'C:\\acme\\logs/Acme-Agent-.exe';
+  const WINSW_BIN = 'C:\\bundled\\WinSW.exe';
+  // The product-bundled WinSW binary always exists.
   function fakeFs() {
-    return memoryServiceFs();
+    return memoryServiceFs({ [WINSW_BIN]: 'winsw v2.12.0' });
   }
   function installedFs() {
-    return memoryServiceFs({ [XML]: DRIFTED_MARKED_UNIT });
+    return memoryServiceFs({ [WINSW_BIN]: 'winsw v2.12.0', [XML]: DRIFTED_MARKED_UNIT });
   }
 
   // The image-lock retry tests below fake the timer queue instead of paying
@@ -142,14 +145,52 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(fs.files.get(XML)).toContain('<argument>C:\\agent.json</argument>\n  <argument>--service</argument>');
   });
 
-  it('a re-install stops the running service before copying over its exe, and keeps an existing SCM registration (1073)', async () => {
+  it('a re-install waits for the running service to stop before writing, and keeps an existing SCM registration (1073)', async () => {
     const calls: string[] = [];
     const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
       calls.push(`${cmd} ${args.join(' ')}`);
       return args[0] === 'install' ? fail(1073, '', 'The specified service already exists.') : ok();
     });
     await createWinswLifecycle(def(), { run, fs: installedFs() }).install();
-    expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe stop', 'C:\\acme\\logs/Acme-Agent-.exe install', 'C:\\acme\\logs/Acme-Agent-.exe start']);
+    expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe stopwait', 'C:\\acme\\logs/Acme-Agent-.exe install', 'C:\\acme\\logs/Acme-Agent-.exe start']);
+  });
+
+  it('repair() of a drifted descriptor rewrites the XML and leaves an identical wrapper exe untouched', async () => {
+    const calls: string[] = [];
+    const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
+      calls.push(`${cmd} ${args.join(' ')}`);
+      return args[0] === 'install' ? fail(1073, '', 'The specified service already exists.') : ok();
+    });
+    const fs = memoryServiceFs({ [XML]: DRIFTED_MARKED_UNIT, [EXE]: 'winsw v2.12.0', [WINSW_BIN]: 'winsw v2.12.0' });
+
+    await expect(createWinswLifecycle(def(), { run, fs }).repair()).resolves.toEqual({ status: 'repaired' });
+
+    expect(fs.copyFile).not.toHaveBeenCalled();
+    expect(fs.files.get(XML)).toContain('<id>Acme-Agent-</id>');
+    expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe stopwait', 'C:\\acme\\logs/Acme-Agent-.exe install', 'C:\\acme\\logs/Acme-Agent-.exe start']);
+  });
+
+  it('a re-install replaces a wrapper exe whose bytes differ from winswBin, after stopwait', async () => {
+    const calls: string[] = [];
+    const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
+      calls.push(`${cmd} ${args.join(' ')}`);
+      return args[0] === 'install' ? fail(1073, '', 'The specified service already exists.') : ok();
+    });
+    const fs = memoryServiceFs({ [XML]: DRIFTED_MARKED_UNIT, [EXE]: 'winsw v2.11.0', [WINSW_BIN]: 'winsw v2.12.0' });
+    fs.copyFile.mockImplementation(async (from: string, to: string) => {
+      calls.push(`copy ${from} -> ${to}`);
+      fs.files.set(to, fs.files.get(from) ?? '');
+    });
+
+    await createWinswLifecycle(def(), { run, fs }).install();
+
+    expect(fs.files.get(EXE)).toBe('winsw v2.12.0');
+    expect(calls).toEqual([
+      'C:\\acme\\logs/Acme-Agent-.exe stopwait',
+      `copy ${WINSW_BIN} -> ${EXE}`,
+      'C:\\acme\\logs/Acme-Agent-.exe install',
+      'C:\\acme\\logs/Acme-Agent-.exe start',
+    ]);
   });
 
   it('install() uses windows.installDir when given instead of logDir', async () => {

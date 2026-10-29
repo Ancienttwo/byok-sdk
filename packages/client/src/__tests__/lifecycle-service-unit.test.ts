@@ -13,6 +13,8 @@ import {
 import { DRIFTED_MARKED_UNIT, memoryServiceFs, UNMARKED_UNIT, type MemoryServiceFs } from './support/service-fs';
 
 const OWNER_RECORD = '/store/service/lifecycle-owner.json';
+/** The product-bundled WinSW binary `def().windows.winswBin` names. */
+const WINSW_BIN = { 'C:\\WinSW.exe': 'winsw v2.12.0' };
 
 function def(overrides: Partial<ServiceDefinition> = {}): ServiceDefinition {
   return {
@@ -53,7 +55,7 @@ async function codeOf(promise: Promise<unknown>): Promise<string | undefined> {
 
 describe.each(PLATFORMS)('lifecycle (#1097) unit classification on $platform', ({ platform, unitPath, launcherPath }) => {
   it('absent before install, exact after, repairable after a hand edit, exact again after repair', async () => {
-    const fs = memoryServiceFs();
+    const fs = memoryServiceFs(WINSW_BIN);
     const run = okRunner();
     const lifecycle = lifecycleFor(platform, fs, run);
     expect(await lifecycle.inspect()).toEqual({ state: 'absent', unitPath, launcherPath });
@@ -103,7 +105,7 @@ describe.each(PLATFORMS)('lifecycle (#1097) unit classification on $platform', (
   });
 
   it('a different launcher target is repairable; the unit itself stays byte-identical', async () => {
-    const fs = memoryServiceFs();
+    const fs = memoryServiceFs(WINSW_BIN);
     await lifecycleFor(platform, fs, okRunner()).install();
     const unit = fs.files.get(unitPath);
     const moved = lifecycleFor(platform, fs, okRunner(), { program: { command: '/new/node', args: ['/new/agent.js', 'start'] } });

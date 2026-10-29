@@ -222,16 +222,30 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
     }
   }
 
+  async function sameBytes(source: string, target: string): Promise<boolean> {
+    let installed;
+    try {
+      installed = await fs.readFile(target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return false;
+      throw error;
+    }
+    return Buffer.from(await fs.readFile(source)).equals(Buffer.from(installed));
+  }
+
   return createManagedLifecycle(def, {
     serviceName: id,
     unitPath: xmlPath,
     launcherPath: exePath,
     files: () => [{ path: xmlPath, content: generateWinswXml({ id, displayName: def.displayName ?? def.name, program: def.program, logDir: def.logDir }) }],
     async prepare() {
-      // A running service holds `<id>.exe`; stop it before the copy.
-      if (await fileExists(xmlPath)) await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_ALREADY_STOPPED);
+      // `<id>.exe` is the running service's own image. `stopwait`, unlike
+      // `stop`, returns only once the SCM reports the service stopped, and
+      // the image is rewritten only when its bytes differ, so a descriptor
+      // repair never writes over the wrapper.
+      if (await fileExists(xmlPath)) await runIdempotent(run, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
       await fs.mkdir(installDir, { recursive: true });
-      await fs.copyFile(winswBin, exePath);
+      if (!(await sameBytes(winswBin, exePath))) await fs.copyFile(winswBin, exePath);
     },
     async activate() {
       await runIdempotent(run, exePath, ['install'], 'winsw install', WINSW_ALREADY_INSTALLED);
