@@ -532,11 +532,7 @@ export interface TaskCancellationRequest {
 
 export interface TaskCancellationMutation {
   readonly attempt: TaskAttempt;
-  /**
-   * Absent when the task was already terminal before cancellation, or when the
-   * delivery row is gone (acked and retention-collected, or discarded as a
-   * dead letter). A gone delivery is settled and is never enqueued again.
-   */
+  /** Absent when the task was terminal before cancellation, or once the delivery row is gone. */
   readonly message?: MailboxMessage;
 }
 

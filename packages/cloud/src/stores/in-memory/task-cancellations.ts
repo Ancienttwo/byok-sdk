@@ -1,10 +1,12 @@
-import { tenantKey, type MailboxMessage, type MailboxStore, type TenantId } from '@byok-sdk/core';
+import { tenantKey, type MailboxStore, type TenantId } from '@byok-sdk/core';
 import type {
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskCancellationStore,
 } from '../ports';
 import { InMemoryTaskAttemptState } from './task-attempts';
+
+const COLLECTED = new Error('Cancellation delivery was collected.');
 
 /** Failure-free reference composition of the atomic cancellation port. */
 export class InMemoryTaskCancellationStore implements TaskCancellationStore {
@@ -41,11 +43,20 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
       const existing = this.#state.attempts.get(key);
       if (existing === undefined) return undefined;
       if (existing.cancellation !== undefined) {
-        const messageId = this.#messageIds.get(key);
-        if (messageId === undefined) {
-          throw new Error(`Task ${input.taskId} has a cancellation tombstone without its delivery id.`);
-        }
-        const message = await this.#retainedDelivery(tenant, existing.deviceId, messageId);
+        // Append is the mailbox's only lookup by id. It materializes only a new
+        // row, so a call means retention collected the acked row: the delivery
+        // is settled and the throw keeps it from being enqueued again.
+        const message = await this.#mailbox.append(tenant, {
+          deviceId: existing.deviceId,
+          messageId: this.#messageIds.get(key) ?? input.proposedMessageId,
+          materialize: () => {
+            throw COLLECTED;
+          },
+          admission: 'cancellation',
+        }).catch((cause: unknown) => {
+          if (cause === COLLECTED) return undefined;
+          throw cause;
+        });
         return message === undefined ? { attempt: existing } : { attempt: existing, message };
       }
       if (existing.status === 'complete' || existing.status === 'failed' || existing.status === 'cancelled') {
@@ -76,33 +87,5 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
       this.#messageIds.set(key, messageId);
       return { attempt, message };
     });
-  }
-
-  /**
-   * The delivery row while retention keeps it, read through append's
-   * idempotency: the mailbox materializes only a new row, so a call to
-   * materialize means the row was collected, and throwing there aborts the
-   * append before it takes a seq. Retention collects only acked rows, so a
-   * collected delivery counts as delivered and nothing is enqueued again.
-   */
-  async #retainedDelivery(
-    tenant: TenantId,
-    deviceId: string,
-    messageId: string,
-  ): Promise<MailboxMessage | undefined> {
-    const collected = new Error(`Cancellation delivery ${messageId} was collected.`);
-    try {
-      return await this.#mailbox.append(tenant, {
-        deviceId,
-        messageId,
-        materialize: () => {
-          throw collected;
-        },
-        admission: 'cancellation',
-      });
-    } catch (cause) {
-      if (cause === collected) return undefined;
-      throw cause;
-    }
   }
 }
