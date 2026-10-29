@@ -69,6 +69,7 @@ export declare class PostgresCloudCleanup {
      * letter: that row is the `recoverableFrom` floor, so the guard sits in the
      * same statement as the DELETE. A dead letter leaves `expired` only by
      * deletion, so the true highest row has no higher sibling in any snapshot.
+     * The probe after a refused DELETE only picks the error; it decides nothing.
      */
     discardDeadLetter(tenant: TenantId, ref: DeadLetterRef): Promise<MailboxMessage>;
     /**
