@@ -418,6 +418,15 @@ test('SQLite packaging fixtures select only their reviewed packaging owner', () 
   }
 });
 
+test('gate packaging fixtures select only their reviewed packaging owner (#1149)', () => {
+  for (const path of ['examples/packaging/gate-fixture.ts', 'examples/packaging/gate-smoke.mjs']) {
+    assert.deepEqual(selectImpact([path]), {
+      dirs: ['examples/packaging'], files: [path], families: ['packageability-smoke'], reason: 'impacted',
+    });
+  }
+  assert.throws(() => selectImpact(['examples/packaging/gate-unknown.ts']), /reviewed CI mapping required/i);
+});
+
 test('the retired vendored pi-subagents 0.60.0 snapshot selects only the client closure (#701)', () => {
   const client = selectImpact(['packages/client/src/daemon/task-runner.ts']).dirs;
   const vendor = 'packages/client/vendor/pi-subagents/0.60.0';
