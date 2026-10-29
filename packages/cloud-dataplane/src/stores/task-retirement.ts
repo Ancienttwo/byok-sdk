@@ -13,7 +13,7 @@
  * transaction is either expired here or already acked, and an ack never waits
  * on an outbox row this transaction holds while this one waits on its stream.
  * No tenant mailbox lock is taken: expiring only lowers the `pending` sum a
- * limited append is checked against.
+ * limited append is checked against (`outbox-writer.ts`).
  */
 import {
   TASK_ATTEMPT_UNFINISHED_STATUSES,
@@ -21,47 +21,12 @@ import {
 } from '@byok-sdk/cloud';
 import type { TenantId } from '@byok-sdk/core';
 import type { PoolClient } from 'pg';
+import { expirePendingRows, lockDeviceStreams } from './core/outbox-writer';
 import { readOutbox } from './task-redaction';
 
 type Querier = Pick<PoolClient, 'query'>;
 
 const UNFINISHED = [...TASK_ATTEMPT_UNFINISHED_STATUSES];
-
-async function lockStreams(client: Querier, tenant: TenantId, deviceIds: readonly string[]): Promise<void> {
-  await client.query(
-    `SELECT 1 FROM device_stream WHERE tenant_id = $1 AND device_id = ANY($2::text[])
-      ORDER BY device_id FOR UPDATE`,
-    [tenant, [...deviceIds]],
-  );
-}
-
-/** Dead-letters a device's `pending` rows: every one, or exactly the listed seqs. Nothing else moves. */
-export async function expirePendingOutbox(
-  client: Querier,
-  tenant: TenantId,
-  deviceId: string,
-  seqs: 'all' | readonly (number | string)[],
-): Promise<number> {
-  if (seqs !== 'all' && seqs.length === 0) return 0;
-  await lockStreams(client, tenant, [deviceId]);
-  return expireLocked(client, tenant, deviceId, seqs);
-}
-
-async function expireLocked(
-  client: Querier,
-  tenant: TenantId,
-  deviceId: string,
-  seqs: 'all' | readonly (number | string)[],
-): Promise<number> {
-  if (seqs !== 'all' && seqs.length === 0) return 0;
-  const expired = await client.query(
-    `UPDATE outbox SET state = 'expired'
-      WHERE tenant_id = $1 AND device_id = $2 AND state = 'pending'
-        AND ($3::bigint[] IS NULL OR seq = ANY($3::bigint[]))`,
-    [tenant, deviceId, seqs === 'all' ? null : seqs.map(String)],
-  );
-  return expired.rowCount ?? 0;
-}
 
 /**
  * Device retirement: every unfinished attempt the devices were offered or own,
@@ -90,8 +55,8 @@ export async function retireDevices(
       WHERE t.tenant_id = $1 AND t.task_id = locked.task_id AND t.status = ANY($2::text[])`,
     [tenant, UNFINISHED, ids, cause, now],
   );
-  await lockStreams(client, tenant, ids);
-  for (const deviceId of ids) await expireLocked(client, tenant, deviceId, 'all');
+  await lockDeviceStreams(client, tenant, ids);
+  for (const deviceId of ids) await expirePendingRows(client, tenant, deviceId, 'all');
 }
 
 /**
@@ -115,9 +80,9 @@ export async function abandonTask(
   const devices = task.owner_device_id === null || task.owner_device_id === task.device_id
     ? [task.device_id]
     : [task.device_id, task.owner_device_id];
-  await lockStreams(client, tenant, devices);
+  await lockDeviceStreams(client, tenant, devices);
   const rows = await readOutbox(client, tenant, task.task_id, task, false, true);
   for (const deviceId of [...devices].sort()) {
-    await expireLocked(client, tenant, deviceId, rows.filter((row) => row.device_id === deviceId).map((row) => row.seq));
+    await expirePendingRows(client, tenant, deviceId, rows.filter((row) => row.device_id === deviceId).map((row) => row.seq));
   }
 }
