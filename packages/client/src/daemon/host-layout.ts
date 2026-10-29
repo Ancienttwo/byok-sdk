@@ -77,8 +77,8 @@ function isAbsoluteFor(platform: HostLayoutPlatform, value: unknown): value is s
 
 /**
  * The SDK store directory a daemon uses when `DaemonConfig.storeDir` is
- * unset: `<homeDir>/.byok/<productId>` on every platform. `DeviceStore.defaultDir`
- * and `resolveHostLayout` both return this; it is the only definition.
+ * unset: `<homeDir>/.byok/<productId>` on every platform. `DeviceStore.resolveDir`
+ * and `resolveHostLayout` both use it; it is the only definition.
  */
 export function defaultStoreDir(productId: string, homeDir: string = os.homedir(), platform: NodeJS.Platform = process.platform): string {
   return (platform === 'win32' ? path.win32 : path.posix).join(homeDir, '.byok', productId);

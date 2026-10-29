@@ -58,7 +58,6 @@ describe('resolveHostLayout (#1094)', () => {
 
   it('is the only storeDir default and the only service log directory', () => {
     const layout = resolveHostLayout(product);
-    expect(DeviceStore.defaultDir(product.productId)).toBe(layout.storeDir);
     expect(DeviceStore.resolveDir(product.productId)).toBe(layout.storeDir);
     const config = { ...product, serverUrl: 'https://byok.example' } as DaemonConfig;
     expect(buildServiceDefinition(config, '/etc/salesko.json', []).logDir).toBe(layout.logDir);

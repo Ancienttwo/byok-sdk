@@ -3835,7 +3835,7 @@ field needs a manifest entry.
 returns the recommended local directories of a Host product. It is pure (no
 file is read or created), so an installer can call it for any of `darwin`,
 `linux` and `win32`. It is the only definition of these paths:
-`DeviceStore.defaultDir`, `byok-agent service install` and
+`DeviceStore.resolveDir`, `byok-agent service install` and
 `DaemonEffectiveConfig.directories` use the same functions.
 
 | Directory | Owner | darwin | linux | win32 |
@@ -3854,7 +3854,8 @@ on the lexical path; `config check` reports the value a daemon resolves.
 `productId` and `productName` must each be one portable path segment and
 `homeDir` must be absolute for the platform; otherwise the helper throws
 `HostLayoutInputError` (`code: 'host_layout_input_invalid'`, `field`).
-Existing stores are not moved.
+Existing stores are not moved. `DeviceStore.defaultDir` is removed; a Host
+that called it uses `resolveHostLayout(...).storeDir`.
 
 ### Removed DaemonConfig fields
 

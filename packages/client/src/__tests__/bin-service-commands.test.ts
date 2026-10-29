@@ -104,7 +104,7 @@ describe('bin/commands/service: buildServiceDefinition', () => {
     expect(withInstallDir.windows).toEqual({ winswBin: 'C:\\bundled\\WinSW.exe', installDir: 'C:\\svc' });
   });
 
-  it('falls back to DeviceStore.defaultDir(productId) for logDir when config.storeDir is unset', () => {
+  it('falls back to the default storeDir (defaultStoreDir(productId)) for logDir when config.storeDir is unset', () => {
     const def = buildServiceDefinition(baseConfig({ storeDir: undefined }), '/c.json', []);
     expect(def.logDir.endsWith(path.join('acme-product', 'service-logs'))).toBe(true);
   });

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "b4426511671627ed2a8085870acb073948c3843e8594b53ed8b3f586c9d4962e"
+    "snapshotSha256": "3c2ce229c2373955bb6ad53729bfaadf7816888af836609b087c14bbe720d136"
   },
   "configFields": {
     "status": "tracked",
@@ -113,6 +113,16 @@
         "export:@byok-sdk/client#HostLayoutOptions",
         "export:@byok-sdk/client#HostLayoutPlatform",
         "export:@byok-sdk/client#resolveHostLayout"
+      ]
+    },
+    {
+      "id": "device-store-default-dir-removed",
+      "impact": "breaking",
+      "summary": "The static DeviceStore.defaultDir(productId) is removed; it duplicated the default store path. The class is reachable through BlobClient and InstallSkillPacksOptions. The default storeDir is still <home>/.byok/<productId> and no store moves. A Host that called DeviceStore.defaultDir uses resolveHostLayout({ productId, productName }).storeDir.",
+      "migration": "docs/spec.md#recommended-host-layout",
+      "items": [
+        "export:@byok-sdk/client#BlobClient",
+        "export:@byok-sdk/client#InstallSkillPacksOptions"
       ]
     }
   ],
@@ -379,6 +389,11 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#BlobClient",
+      "change": "changed",
+      "entry": "device-store-default-dir-removed"
+    },
+    {
       "item": "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
       "change": "added",
       "entry": "daemon-config-schema"
@@ -477,6 +492,11 @@
       "item": "export:@byok-sdk/client#HostLayoutPlatform",
       "change": "added",
       "entry": "host-layout-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
+      "change": "changed",
+      "entry": "device-store-default-dir-removed"
     },
     {
       "item": "export:@byok-sdk/client#LocalToolApprovalPolicy",
