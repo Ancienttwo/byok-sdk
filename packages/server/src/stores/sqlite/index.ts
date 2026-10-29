@@ -980,11 +980,8 @@ export class SqliteTaskCancellationStore implements TaskCancellationStore {
         const row = db.prepare(
           `SELECT * FROM mailbox_message WHERE tenant_id = ? AND device_id = ? AND message_id = ?`,
         ).get(tenant, existing.deviceId, existingMessageId) as MailboxRow | undefined;
-        if (row === undefined) {
-          if (existing.status === 'cancelled') return { attempt: existing };
-          throw new Error(`Cancellation delivery ${existingMessageId} is missing for task ${input.taskId}`);
-        }
-        return { attempt: existing, message: mailboxMessage(row) };
+        // Only retention deletes a row, and only once acked: a missing row was delivered.
+        return row === undefined ? { attempt: existing } : { attempt: existing, message: mailboxMessage(row) };
       }
 
       const message = await appendMailbox(db, this.clock, this.quota, tenant, {

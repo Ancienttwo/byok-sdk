@@ -104,8 +104,8 @@ Do not guess a state. Keep the intent unsettled and tell an operator.
   (`packages/cloud-dataplane/src/stores/task-cancellations.ts:81-90`).
 - A repeat call returns the same marker and mailbox row while the mailbox keeps that row
   (`packages/cloud-dataplane/src/stores/task-cancellations.ts:57-77`).
-  After retention deletes the row, a `cancelled` attempt returns with no row, and a `cancel_requested` attempt throws
-  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:64-73`).
+  After retention deletes the row, the attempt returns as it stands, in any status, with no row; nothing is enqueued again
+  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:64-72`). The SQLite and in-memory stores behave the same.
 - The call returns the attempt after the commit (`packages/cloud/src/cloud.ts:2314`, `packages/cloud-dataplane/src/stores/task-cancellations.ts:102-106`).
   Embedded `tasks.cancel` returns void (`docs/host-execution-core.md:144`).
 
