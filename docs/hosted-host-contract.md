@@ -99,14 +99,14 @@ Do not guess a state. Keep the intent unsettled and tell an operator.
   The store writes no marker and no mailbox row (`packages/cloud-dataplane/src/stores/task-cancellations.ts:49-55`).
 - Otherwise the store appends `task.cancel` and records the marker.
   The status becomes `cancelled` when no device owns the task. Otherwise it becomes `cancel_requested`
-  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:79-101`).
+  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:74-96`).
 - The cancel row is exempt from the mailbox limit. A full mailbox does not block it
-  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:81-90`).
+  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:76-85`).
 - A repeat call returns the same marker and mailbox row while the mailbox keeps that row
-  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:57-77`).
+  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:57-72`).
   After retention deletes the row, the attempt returns as it stands, in any status, with no row; nothing is enqueued again
   (`packages/cloud-dataplane/src/stores/task-cancellations.ts:64-72`). The SQLite and in-memory stores behave the same.
-- The call returns the attempt after the commit (`packages/cloud/src/cloud.ts:2314`, `packages/cloud-dataplane/src/stores/task-cancellations.ts:102-106`).
+- The call returns the attempt after the commit (`packages/cloud/src/cloud.ts:2314`, `packages/cloud-dataplane/src/stores/task-cancellations.ts:97-101`).
   Embedded `tasks.cancel` returns void (`docs/host-execution-core.md:144`).
 
 After the marker, no claim can win (`packages/cloud-dataplane/src/stores/task-attempts.ts:377-378`).
