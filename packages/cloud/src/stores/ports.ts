@@ -754,10 +754,11 @@ export interface BlobContentProxy {
 // ---------------------------------------------------------------------------
 
 /**
- * What one debit spends: an inbound envelope at step 0 of the inbound gate
- * (before the type-allow check, so a flood of garbage-typed envelopes costs
- * the same as a flood of well-formed ones), or one authenticated device-class
- * request at route admission. `POST /byok/messages` spends only its envelopes.
+ * What a debit spends: the envelopes of one `POST /byok/messages` batch,
+ * charged together before the first one reaches the inbound gate (so a flood
+ * of garbage-typed envelopes costs the same as a flood of well-formed ones),
+ * or one authenticated device-class request at route admission.
+ * `POST /byok/messages` spends only its envelopes.
  */
 export type RateLimitUnit = 'envelope' | 'request';
 
@@ -772,9 +773,17 @@ export type RateLimitDecision =
  * answers 429 with `Retry-After` derived from `retryAfterMs`. The in-memory
  * reference is allow-all; the Postgres composition and the embedded server
  * compose token buckets.
+ *
+ * `count` is how many units one admission charges: 1 for a request, the batch
+ * length (0 to `MAX_MESSAGES_PER_BATCH`) for envelopes. A token bucket admits
+ * while it holds at least one token and then charges the full `count`, even
+ * past zero, so a batch larger than the burst is still admissible and the
+ * debt it leaves is repaid before the device's next admission. Requiring
+ * `count` tokens up front instead would refuse every batch larger than the
+ * burst forever.
  */
 export interface InboundRateLimiter {
-  consume(tenant: TenantId, deviceId: string, unit: RateLimitUnit): Promise<RateLimitDecision>;
+  consume(tenant: TenantId, deviceId: string, unit: RateLimitUnit, count: number): Promise<RateLimitDecision>;
 }
 
 // ---------------------------------------------------------------------------

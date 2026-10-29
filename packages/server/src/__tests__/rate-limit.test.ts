@@ -166,9 +166,8 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
   it("long-poll device gets an HTTP 429 (not a silent 200) once its budget is exhausted, matching the transport's existing {error} response shape", async () => {
     const started = await start({ messagesPerSecond: 5, burst: 3 });
-    // No conn.hello at all — the gate's rate-limit step runs before any task
-    // lookup, so a bogus taskId is enough to exercise it purely over
-    // POST /byok/messages.
+    // No conn.hello at all — batch admission runs before any task lookup, so
+    // a bogus taskId is enough to exercise it purely over POST /byok/messages.
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       announce: false,
@@ -178,12 +177,16 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
       createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: 'unused' }, { taskId: 'task_bogus' }),
     );
 
-    const res = await fetch(`${started.baseUrl}/byok/messages`, {
+    const post = () => fetch(`${started.baseUrl}/byok/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.accessToken}` },
       body: JSON.stringify({ messages: envelopes }),
     });
 
+    // A batch is admitted while one token remains and charged in full, so six
+    // envelopes against a burst of 3 go through and leave the bucket owing 3.
+    expect((await post()).status).toBe(200);
+    const res = await post();
     expect(res.status).toBe(429);
     const body = (await res.json()) as { error: string };
     expect(body).toHaveProperty('error');
@@ -305,8 +308,8 @@ describe('RateLimiter: constructor option validation (fail-fast)', () => {
 
   it('finding R5: a burst of exactly 1 actually lets messages through (proving >= 1 is the correct boundary, not merely "no longer throws")', () => {
     const limiter = new RateLimiter({ messagesPerSecond: 1, burst: 1 });
-    expect(limiter.consume('device-burst-one')).toBe(true);
-    expect(limiter.consume('device-burst-one')).toBe(false); // exactly 1 token, no more until refill
+    expect(limiter.consume('device-burst-one', 1)).toBe(true);
+    expect(limiter.consume('device-burst-one', 1)).toBe(false); // exactly 1 token, no more until refill
   });
 });
 
@@ -340,7 +343,7 @@ describe('RateLimiter: idle bucket eviction bounds memory', () => {
     // created at the same instant t0 -> nothing is idle yet, so the sweep
     // that fires on the wave's last call finds nothing to evict.
     for (let i = 0; i < 1000; i++) {
-      limiter.consume(`device-wave1-${i}`);
+      limiter.consume(`device-wave1-${i}`, 1);
     }
     expect(bucketsMap(limiter).size).toBe(1000);
 
@@ -351,7 +354,7 @@ describe('RateLimiter: idle bucket eviction bounds memory', () => {
     const t1 = t0 + 1000;
     vi.setSystemTime(t1);
     for (let i = 0; i < 1000; i++) {
-      limiter.consume(`device-wave2-${i}`);
+      limiter.consume(`device-wave2-${i}`, 1);
     }
 
     // Bounded to wave 2 alone (1000 entries), not the full historical 2000
@@ -370,31 +373,53 @@ describe('RateLimiter: idle bucket eviction bounds memory', () => {
     const t0 = new Date('2026-01-01T00:00:00.000Z').getTime();
     vi.setSystemTime(t0);
 
-    const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 3 }); // idle-to-full threshold = 30ms
+    const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 3 }); // 0 -> full in 30ms
     const key = 'device-evicted';
 
     // Exhaust this key's burst completely (calls #1-4 of this instance).
-    expect(limiter.consume(key)).toBe(true);
-    expect(limiter.consume(key)).toBe(true);
-    expect(limiter.consume(key)).toBe(true);
-    expect(limiter.consume(key)).toBe(false); // over budget — 0 tokens left
+    expect(limiter.consume(key, 1)).toBe(true);
+    expect(limiter.consume(key, 1)).toBe(true);
+    expect(limiter.consume(key, 1)).toBe(true);
+    expect(limiter.consume(key, 1)).toBe(false); // over budget — 0 tokens left
 
     // Go idle long enough to be trivially full again, then drive the call
     // count the rest of the way to the next sweep boundary (1000 total)
     // with other keys so the periodic sweep actually runs and evicts `key`.
     vi.setSystemTime(t0 + 1000);
     for (let i = 0; i < 999; i++) {
-      limiter.consume(`device-filler-${i}`);
+      limiter.consume(`device-filler-${i}`, 1);
     }
     expect(bucketsMap(limiter).has(key)).toBe(false); // confirms the sweep evicted it
 
     // The next consume() for the evicted key must behave EXACTLY like a
     // fresh full bucket (burst=3) — not remember it was just exhausted, and
     // not come back only partially refilled either.
-    expect(limiter.consume(key)).toBe(true);
-    expect(limiter.consume(key)).toBe(true);
-    expect(limiter.consume(key)).toBe(true);
-    expect(limiter.consume(key)).toBe(false); // exactly burst=3 tokens, no more
+    expect(limiter.consume(key, 1)).toBe(true);
+    expect(limiter.consume(key, 1)).toBe(true);
+    expect(limiter.consume(key, 1)).toBe(true);
+    expect(limiter.consume(key, 1)).toBe(false); // exactly burst=3 tokens, no more
+  });
+
+  it('a batch larger than the burst is admitted while a token remains, and the sweep keeps its debt until repaid', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const t0 = new Date('2026-01-01T00:00:00.000Z').getTime();
+    vi.setSystemTime(t0);
+
+    const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 3 });
+    const key = 'device-overdrawn';
+    expect(limiter.consume(key, 256)).toBe(true); // 3 tokens, 256 charged: 253 owed
+    expect(limiter.consume(key, 1)).toBe(false);
+    expect(limiter.retryAfterMs(key)).toBe(2_540);
+
+    // Idle far past the 30ms a non-negative bucket needs to refill, but short
+    // of repaying the debt: the sweep must not forgive it.
+    vi.setSystemTime(t0 + 1_000);
+    for (let i = 0; i < 998; i++) limiter.consume(`device-filler-${i}`, 1);
+    expect(bucketsMap(limiter).has(key)).toBe(true);
+    expect(limiter.consume(key, 1)).toBe(false);
+
+    vi.setSystemTime(t0 + 2_540);
+    expect(limiter.consume(key, 1)).toBe(true);
   });
 });
 
@@ -418,7 +443,7 @@ describe('RateLimiter: hard cap on tracked devices (finding R5)', () => {
     const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 10, maxTrackedDevices: 50 });
 
     for (let i = 0; i < 500; i++) {
-      limiter.consume(`device-${i}`);
+      limiter.consume(`device-${i}`, 1);
       expect(bucketsMap(limiter).size).toBeLessThanOrEqual(50); // true after EVERY single insert, not just at the end
     }
     expect(bucketsMap(limiter).size).toBe(50);
@@ -430,16 +455,16 @@ describe('RateLimiter: hard cap on tracked devices (finding R5)', () => {
     vi.setSystemTime(t0);
 
     const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 10, maxTrackedDevices: 3 });
-    limiter.consume('oldest'); // touched at t0
+    limiter.consume('oldest', 1); // touched at t0
     vi.setSystemTime(t0 + 10);
-    limiter.consume('middle'); // touched at t0+10
+    limiter.consume('middle', 1); // touched at t0+10
     vi.setSystemTime(t0 + 20);
-    limiter.consume('newest'); // touched at t0+20
+    limiter.consume('newest', 1); // touched at t0+20
     expect(bucketsMap(limiter).size).toBe(3);
 
     // A 4th distinct key forces an eviction — must drop "oldest" specifically.
     vi.setSystemTime(t0 + 30);
-    limiter.consume('fourth');
+    limiter.consume('fourth', 1);
 
     const remaining = bucketsMap(limiter);
     expect(remaining.size).toBe(3);
@@ -453,21 +478,21 @@ describe('RateLimiter: hard cap on tracked devices (finding R5)', () => {
     const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 3, maxTrackedDevices: 2 });
 
     // Exhaust "victim"'s entire burst before it gets evicted.
-    expect(limiter.consume('victim')).toBe(true);
-    expect(limiter.consume('victim')).toBe(true);
-    expect(limiter.consume('victim')).toBe(true);
-    expect(limiter.consume('victim')).toBe(false); // 0 tokens left
+    expect(limiter.consume('victim', 1)).toBe(true);
+    expect(limiter.consume('victim', 1)).toBe(true);
+    expect(limiter.consume('victim', 1)).toBe(true);
+    expect(limiter.consume('victim', 1)).toBe(false); // 0 tokens left
 
-    limiter.consume('other'); // fills the cap (maxTrackedDevices=2: victim + other)
-    limiter.consume('forces-eviction'); // 3rd distinct key -> evicts the least-recently-refilled entry (victim, untouched since its own exhausting calls)
+    limiter.consume('other', 1); // fills the cap (maxTrackedDevices=2: victim + other)
+    limiter.consume('forces-eviction', 1); // 3rd distinct key -> evicts the least-recently-refilled entry (victim, untouched since its own exhausting calls)
     expect(bucketsMap(limiter).has('victim')).toBe(false);
 
     // "victim" reappearing must get a FULL fresh burst — not remember it
     // was just exhausted moments ago.
-    expect(limiter.consume('victim')).toBe(true);
-    expect(limiter.consume('victim')).toBe(true);
-    expect(limiter.consume('victim')).toBe(true);
-    expect(limiter.consume('victim')).toBe(false); // exactly burst=3 tokens again, no more
+    expect(limiter.consume('victim', 1)).toBe(true);
+    expect(limiter.consume('victim', 1)).toBe(true);
+    expect(limiter.consume('victim', 1)).toBe(true);
+    expect(limiter.consume('victim', 1)).toBe(false); // exactly burst=3 tokens again, no more
   });
 
   it('the idle sweep and the hard cap compose correctly: idle keys are swept first, so a slow-but-steady stream of distinct keys never needlessly hits the cap-eviction path', () => {
@@ -479,7 +504,7 @@ describe('RateLimiter: hard cap on tracked devices (finding R5)', () => {
     const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 10, maxTrackedDevices: 1000 });
 
     for (let i = 0; i < 1000; i++) {
-      limiter.consume(`wave1-${i}`);
+      limiter.consume(`wave1-${i}`, 1);
     }
     expect(bucketsMap(limiter).size).toBe(1000); // at the cap, but via genuinely distinct active keys, not eviction yet
 
@@ -489,7 +514,7 @@ describe('RateLimiter: hard cap on tracked devices (finding R5)', () => {
     // exceeding the cap.
     vi.setSystemTime(t0 + 1000);
     for (let i = 0; i < 1000; i++) {
-      limiter.consume(`wave2-${i}`);
+      limiter.consume(`wave2-${i}`, 1);
       expect(bucketsMap(limiter).size).toBeLessThanOrEqual(1000);
     }
 

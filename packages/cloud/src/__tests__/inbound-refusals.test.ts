@@ -9,7 +9,7 @@
  *   a rejection path names one; the table below proves the names are the ones
  *   operators will see);
  * - **it observes, it does not decide** — a throwing observer changes nothing,
- *   and `accepted` / `duplicate` / `rate_limited` never reach it;
+ *   and `accepted` / `duplicate` never reach it;
  * - **the wire reports the same authoritative result** — `POST /byok/messages` still answers
  *   `{ accepted, rejected }` and nothing about the reason.
  */
@@ -22,7 +22,6 @@ import {
   type InboundRefusalReason,
   type InboundRefused,
 } from '../inbound';
-import type { InboundRateLimiter } from '../stores/ports';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
 import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
@@ -141,7 +140,7 @@ describe('observer.onInboundRefused', () => {
     }
   });
 
-  it('is not told about accepted, duplicate or rate_limited envelopes', async () => {
+  it('is not told about accepted or duplicate envelopes', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const stores = storesFor(harness, device.deviceId);
@@ -152,15 +151,6 @@ describe('observer.onInboundRefused', () => {
 
     expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('accepted');
     expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('duplicate');
-    const limiter: InboundRateLimiter = { async consume() { return { allowed: false, retryAfterMs: 1_000 }; } };
-    const limited = tenantStoresFor(
-      { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId },
-      { core: harness.core, mailboxWake: harness.mailboxWake, cloud: { ...harness.stores, rateLimiter: limiter } },
-    );
-    expect(await handleInboundEnvelope(limited, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe(
-      'rate_limited',
-    );
-
     expect(refused).toEqual([]);
   });
 

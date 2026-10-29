@@ -11,7 +11,7 @@
  */
 import { createHash } from 'node:crypto';
 import { InMemorySkillPackStore, type TenantId } from '@byok-sdk/core';
-import { createEnvelope, type CreateBlobResponse, type PairResponse } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type CreateBlobResponse, type Envelope, type MessagesSendResponse, type PairResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { createHmacTokenSigner } from '../auth/tokens';
 import { CAPABILITY_PORTS, capabilityDeclarationForPorts, type CapabilityPorts } from '../capabilities';
@@ -142,14 +142,14 @@ function oversizedStream(): { readonly body: ReadableStream<Uint8Array>; pulled(
 }
 
 describe('device route rate admission (#1118)', () => {
-  it('every device route except POST /byok/messages spends exactly one request unit and answers 429 + Retry-After', async () => {
+  it('every device route spends one admission, POST /byok/messages its whole batch, and answers 429 + Retry-After', async () => {
     const harness = createFullHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const debits: RateLimitUnit[] = [];
+    const debits: string[] = [];
     const deny: InboundRateLimiter = {
-      async consume(_tenant, deviceId, unit) {
+      async consume(_tenant, deviceId, unit, count) {
         expect(deviceId).toBe(device.deviceId);
-        debits.push(unit);
+        debits.push(`${unit}:${count}`);
         return { allowed: false, retryAfterMs: 1_500 };
       },
     };
@@ -161,8 +161,13 @@ describe('device route rate admission (#1118)', () => {
       debits.length = 0;
       const key = routeKey(route);
       const isMessages = key === MESSAGES_ROUTE;
+      // A wrong-direction type costs the same as any other envelope.
       const body = isMessages
-        ? JSON.stringify({ messages: [createEnvelope('task.started', {}, { taskId: 'task-1' })] })
+        ? JSON.stringify({ messages: [
+          createEnvelope('task.started', {}, { taskId: 'task-1' }),
+          createEnvelope('task.cancel', {}, { taskId: 'task-1', seq: 1 }),
+          createEnvelope('task.started', {}, { taskId: 'task-2' }),
+        ] })
         : route.method === 'GET' ? undefined : '{}';
       const response = await harness.request(concretePath(route.path), {
         method: route.method,
@@ -172,15 +177,40 @@ describe('device route rate admission (#1118)', () => {
       expect(response.status, key).toBe(429);
       expect(response.headers.get('retry-after'), key).toBe('2');
       expect(await response.json(), key).toEqual({ error: 'rate limit exceeded' });
-      expect(debits, key).toEqual([isMessages ? 'envelope' : 'request']);
+      expect(debits, key).toEqual([isMessages ? 'envelope:3' : 'request:1']);
     }
+  });
+
+  it('a refused message batch applies none of its envelopes', async () => {
+    const harness = createFullHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    let allowed = false;
+    Object.assign(harness.stores, {
+      rateLimiter: { async consume() { return allowed ? { allowed: true } : { allowed: false, retryAfterMs: 1_000 }; } } satisfies InboundRateLimiter,
+    });
+    const hello: Envelope = createEnvelope('conn.hello', {
+      deviceId: device.deviceId, productId: PRODUCT_ID, clientVersion: '0.0.0-test',
+      protocolVersions: [PROTOCOL_VERSION], runtimes: [], capabilities: [],
+    });
+    const send = () => harness.request('/byok/messages', {
+      method: 'POST',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [hello] }),
+    });
+
+    expect((await send()).status).toBe(429);
+    allowed = true;
+    const resent = await send();
+    expect(resent.status).toBe(200);
+    // `accepted`, not `duplicate`: the refused attempt left nothing behind.
+    expect(((await resent.json()) as MessagesSendResponse).outcomes).toEqual([{ id: hello.id, outcome: 'accepted' }]);
   });
 
   it('an unauthenticated device request spends nothing', async () => {
     const harness = createFullHarness();
     const debits: RateLimitUnit[] = [];
     Object.assign(harness.stores, {
-      rateLimiter: { async consume(_t: unknown, _d: unknown, unit: RateLimitUnit) { debits.push(unit); return { allowed: true }; } },
+      rateLimiter: { async consume(_t: unknown, _d: unknown, unit: RateLimitUnit) { debits.push(unit); return { allowed: true }; } } satisfies InboundRateLimiter,
     });
     const response = await harness.request('/byok/events');
     expect(response.status).toBe(401);

@@ -1,9 +1,9 @@
 /**
  * The inbound gate, one negative per step.
  *
- * The gate's ORDER is as load-bearing as its steps: a rate-limited device must
- * not get a free type check, an unowned task must not be rejected, and a
- * duplicate must not be counted a rejection. Each test below fixes one of
+ * The gate's ORDER is as load-bearing as its steps: an unowned task must not
+ * be rejected, and a duplicate must not be counted a rejection. Rate admission
+ * happens before the gate, on the whole batch (`device-route-admission`). Each test below fixes one of
  * those, and `handleInboundEnvelope` is exercised directly (rather than only
  * through `POST /byok/messages`) so the outcome — not just the HTTP status it
  * maps to — is what is asserted.
@@ -15,7 +15,6 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
 import { agentReliabilityKey } from '../agent-reliability';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
-import type { InboundRateLimiter } from '../stores/ports';
 import { TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
@@ -45,28 +44,6 @@ describe('the inbound gate', () => {
     deviceId = device.deviceId;
     await grantAgentHome(harness, TENANT_A, deviceId);
     stores = tenantStoresFor(devicePrincipal(TENANT_A, deviceId), { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake });
-  });
-
-  it('step 0: a rate-limited envelope never reaches the type check', async () => {
-    const seen: string[] = [];
-    const limiter: InboundRateLimiter = {
-      async consume(_tenant, device, unit) {
-        seen.push(`${unit}:${device}`);
-        return { allowed: false, retryAfterMs: 1_000 };
-      },
-    };
-    const limited = createHarness();
-    const device = await limited.pairDevice(TENANT_A);
-    const limitedStores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
-      core: limited.core,
-      mailboxWake: limited.mailboxWake, cloud: { ...limited.stores, rateLimiter: limiter },
-    });
-
-    // A type the allow-list would reject anyway: it must still cost a token,
-    // and the answer must be `rate_limited`, not `rejected`.
-    const wrongDirection = createEnvelope('task.approve', { approvalId: 'approval-1' }, { taskId: 'task-1', seq: 1 });
-    expect(await handleInboundEnvelope(limitedStores, device.deviceId, wrongDirection).then((result) => result.outcome)).toBe('rate_limited');
-    expect(seen).toEqual([`envelope:${device.deviceId}`]);
   });
 
   it('step 1: rejects every server -> daemon type arriving inbound', async () => {
@@ -136,7 +113,7 @@ describe('the inbound gate', () => {
       expect(await handleInboundEnvelope(stores, deviceId, sealed).then((result) => result.outcome), type).toBe('rejected');
     }
     // `agent.message.publish` has its own exact task/Agent binding and product
-    // consumer contract; its common rate/dedup admission is covered by the
+    // consumer contract; its common dedup admission is covered by the
     // issue regression rather than this generic lifecycle fixture.
     expect(accepted).toEqual([...DAEMON_TO_SERVER_TYPES].filter((type) => type !== 'agent.message.publish' && type !== 'agent.message.draft'));
   });

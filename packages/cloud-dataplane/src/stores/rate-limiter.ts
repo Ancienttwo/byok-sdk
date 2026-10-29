@@ -1,7 +1,10 @@
 /**
  * The Postgres composition's `InboundRateLimiter`: one in-process token bucket
  * per `(tenant, device)`. Every inbound envelope and every admitted device
- * route request spends one token from the same bucket.
+ * route request spends one token from the same bucket. An admission needs one
+ * token and then charges its whole count, so a message batch larger than the
+ * burst overdraws the bucket instead of never fitting; the next admission
+ * waits until that debt is repaid.
  *
  * In-process on purpose: a per-request Postgres write would cost more than the
  * flood it refuses. Each replica therefore enforces its own budget, so a fleet
@@ -10,8 +13,8 @@
  *
  * Memory is bounded by `maxTrackedDevices`: buckets are kept in recency order
  * and the least recently used one is dropped when a new device arrives at the
- * cap. A dropped bucket comes back full, which only ever admits more, never
- * less, than keeping it would have.
+ * cap. A dropped bucket comes back full (debt included), which only ever
+ * admits more, never less, than keeping it would have.
  */
 import type { InboundRateLimiter, RateLimitDecision, RateLimitUnit } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
@@ -55,7 +58,7 @@ export class TokenBucketRateLimiter implements InboundRateLimiter {
     this.#maxTrackedDevices = maxTrackedDevices;
   }
 
-  async consume(tenant: TenantId, deviceId: string, _unit: RateLimitUnit): Promise<RateLimitDecision> {
+  async consume(tenant: TenantId, deviceId: string, _unit: RateLimitUnit, count: number): Promise<RateLimitDecision> {
     const key = `${tenant}\0${deviceId}`;
     const now = this.clock.now().getTime();
     const bucket = this.#touch(key, now);
@@ -65,7 +68,7 @@ export class TokenBucketRateLimiter implements InboundRateLimiter {
     );
     bucket.refilledAtMs = now;
     if (bucket.tokens >= 1) {
-      bucket.tokens -= 1;
+      bucket.tokens -= count;
       return { allowed: true };
     }
     return { allowed: false, retryAfterMs: Math.ceil(((1 - bucket.tokens) / this.#tokensPerSecond) * 1000) };

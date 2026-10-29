@@ -90,12 +90,12 @@ describe('POST /byok/messages', () => {
     expect(body).toMatchObject({ accepted: 1, rejected: 1 });
   });
 
-  it('answers the WHOLE request 429 the moment one envelope is rate limited', async () => {
-    let budget = 1;
+  it('admits or refuses the WHOLE batch before any envelope applies', async () => {
+    const charged: number[] = [];
     const limiter: InboundRateLimiter = {
-      async consume() {
-        budget -= 1;
-        return budget >= 0 ? { allowed: true } : { allowed: false, retryAfterMs: 1_500 };
+      async consume(_tenant, _deviceId, _unit, count) {
+        charged.push(count);
+        return { allowed: false, retryAfterMs: 1_500 };
       },
     };
     const harness = createHarness();
@@ -113,9 +113,10 @@ describe('POST /byok/messages', () => {
     expect(response.status).toBe(429);
     expect(response.headers.get('retry-after')).toBe('2');
     expect(await response.json()).toEqual({ error: 'rate limit exceeded' });
-    // The envelope processed before the limit hit still took effect — there
-    // are no rollback semantics, and every task.* type is idempotent.
-    expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.ownerDeviceId).toBe(device.deviceId);
+    expect(charged).toEqual([2]);
+    // Nothing applied: a resend is the batch's first application, so it can
+    // never spend the budget on duplicates of an earlier partial attempt.
+    expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.ownerDeviceId).toBeUndefined();
   });
 
   it('400s a structurally invalid batch and an oversized one', async () => {

@@ -8,10 +8,11 @@ import { taskOfferMessageId, hashOfferBytes } from './offer-identity';
  * is a pure function over a tenant-closed facade, so the same order holds with
  * no connection, no session, and no cross-request state:
  *
- * 0. **rate limit** — one token per inbound envelope, debited BEFORE anything
- *    else, so a flood of garbage-typed envelopes costs the same budget as a
- *    flood of well-formed ones. S3a's reference limiter allows everything; the
- *    seam is what matters at this position.
+ * Rate admission is not a gate step. `POST /byok/messages` charges its whole
+ * batch, one token per envelope, before the first envelope reaches this gate
+ * (`handlers/messages.ts`), so a refused batch applies nothing and a flood of
+ * garbage-typed envelopes costs the same budget as well-formed ones.
+ *
  * 1. **type-allow** — only `DAEMON_TO_SERVER_TYPES` may pass, plus the
  *    authenticated long-poll `conn.hello` capability snapshot handled below.
  *    A server -> daemon type arriving inbound, or anything unrecognized, is
@@ -29,7 +30,7 @@ import { taskOfferMessageId, hashOfferBytes } from './offer-identity';
  *    mark the envelope complete. The next retry is then a no-op.
  *
  * A duplicate is still a wire-level success (§8.2): it just did not re-run
- * anything. Only `rejected`/`rate_limited` are excluded from `accepted`.
+ * anything. Only `rejected` is excluded from `accepted`.
  *
  * 5. **observe** — an optional {@link ByokCloudObserver} is told, once, about
  *    each envelope whose write committed (`onInboundCommitted`) and about each
@@ -89,7 +90,7 @@ import {
   sealedCiphertextRef,
 } from './sealed-ciphertext';
 
-export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
+export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected';
 
 /**
  * Why the gate answered `rejected`. Closed on purpose: every rejection path in
@@ -100,8 +101,7 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limit
  *
  * Internal observation vocabulary. `POST /byok/messages` maps these names
  * exhaustively to coarse wire codes; the internal names never reach the wire
- * and may be refined without a protocol revision. `rate_limited` is a separate outcome,
- * not a refusal reason.
+ * and may be refined without a protocol revision.
  */
 export const INBOUND_REFUSAL_REASONS = [
   // envelope-level
@@ -168,7 +168,7 @@ function refuse(reason: InboundRefusalReason): Refused {
 }
 
 /** The gate's internal result. `rejected` cannot be expressed without a reason. */
-export type InboundResult = Refused | { readonly outcome: 'accepted' | 'duplicate' } | { readonly outcome: 'rate_limited'; readonly retryAfterMs: number };
+export type InboundResult = Refused | { readonly outcome: 'accepted' | 'duplicate' };
 
 /**
  * One envelope whose write COMMITTED, handed to {@link ByokCloudObserver}.
@@ -176,8 +176,8 @@ export type InboundResult = Refused | { readonly outcome: 'accepted' | 'duplicat
  * `outcome` is constant by construction — `accepted` is the only outcome that
  * committed anything — and is carried anyway because it names the fact in the
  * gate's own vocabulary rather than leaving the reader to infer it from the
- * hook's name. A `duplicate` re-ran nothing, a `rejected` and a `rate_limited`
- * wrote nothing; none of them appear here.
+ * hook's name. A `duplicate` re-ran nothing and a `rejected` wrote nothing;
+ * neither appears here.
  */
 export interface InboundCommitted {
   readonly tenantId: TenantId;
@@ -208,9 +208,8 @@ export interface ByokCloudObserver {
    * One envelope the gate refused, with the reason. Same rules as
    * {@link onInboundCommitted}: synchronous, called inside a `try`, a throw is
    * swallowed, and it can never change the response (`rejected` is already
-   * counted on the wire). `rate_limited` is not a refusal and is not reported
-   * here. `envelopeId` and `type` come from the device's own envelope, so they
-   * are claims, not authority.
+   * counted on the wire). `envelopeId` and `type` come from the device's own
+   * envelope, so they are claims, not authority.
    */
   onInboundRefused?(input: InboundRefused): void;
 }
@@ -553,8 +552,6 @@ async function applyInboundGate(
   agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
   now: string,
 ): Promise<InboundResult> {
-  const admission = await stores.rateLimiter.consume(deviceId, 'envelope'); if (!admission.allowed) return { outcome: 'rate_limited', retryAfterMs: admission.retryAfterMs };
-
   // Long-poll has no live WS handshake. A bearer-authenticated conn.hello is
   // therefore accepted only as a capability snapshot for the same device
   // principal, and is persisted in the durable device row. This is the sole

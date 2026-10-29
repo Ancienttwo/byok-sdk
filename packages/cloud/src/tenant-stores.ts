@@ -220,7 +220,7 @@ export interface TenantBoundQuota {
 }
 
 export interface TenantBoundRateLimiter {
-  consume(deviceId: string, unit: RateLimitUnit): Promise<RateLimitDecision>;
+  consume(deviceId: string, unit: RateLimitUnit, count: number): Promise<RateLimitDecision>;
 }
 
 export interface TenantStores {
@@ -366,7 +366,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       abortReservation: (reservationId) => core.quota.abortReservation(tenant, reservationId),
     },
     rateLimiter: {
-      consume: (deviceId, unit) => cloud.rateLimiter.consume(tenant, deviceId, unit),
+      consume: (deviceId, unit, count) => cloud.rateLimiter.consume(tenant, deviceId, unit, count),
     },
   };
 }

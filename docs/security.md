@@ -334,9 +334,14 @@ Transport: authenticated long-poll HTTP only (`GET /byok/events` and
 `POST /byok/messages`); at-least-once delivery with a redelivery cursor and
 dedup on both sides (`docs/protocol.md` §9); per-device rate limiting
 through the cloud store port `InboundRateLimiter`, keyed and isolated by
-tenant and `deviceId`: every inbound envelope at the cloud-kernel inbound
-gate, and every other authenticated device route request at admission, spend
-one token of the same budget, and a refusal answers 429 with `Retry-After`.
+tenant and `deviceId`: a `POST /byok/messages` batch spends one token per
+envelope, charged as one admission before any envelope applies, and every
+other authenticated device route request spends one token of the same budget.
+An admission needs one token and then charges its whole count, so a batch
+larger than the burst overdraws the bucket and the device's next admission
+waits for that debt to be repaid; a refused batch applies nothing, so its
+resend never spends the budget on duplicates of an earlier attempt. A
+refusal answers 429 with `Retry-After`.
 The embedded server composes `packages/server/src/rate-limiter.ts`; the
 Postgres data plane composes a per-process token bucket from its required
 `rateLimit` option. Every JSON route reads its body under its own byte

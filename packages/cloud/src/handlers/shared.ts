@@ -150,7 +150,7 @@ export async function admitDeviceRequest(
 ): Promise<AuthenticatedDeviceContext | Response> {
   const authenticated = await authenticateDevice(c, deps);
   if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
-  const admission = await authenticated.stores.rateLimiter.consume(authenticated.device.deviceId, 'request');
+  const admission = await authenticated.stores.rateLimiter.consume(authenticated.device.deviceId, 'request', 1);
   if (!admission.allowed) return rateLimited(c, admission.retryAfterMs);
   return authenticated;
 }

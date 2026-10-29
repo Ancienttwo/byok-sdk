@@ -101,15 +101,17 @@ export interface CreateByokServerOptions {
   taskEventRetentionMs?: number;
   /**
    * M4 Phase 4 (part A): the one per-device token bucket. The cloud kernel
-   * debits one token per inbound envelope at step 0 of its inbound gate
-   * (`@byok-sdk/cloud`'s `inbound.ts`), BEFORE the type-allow check so a flood
-   * of garbage-typed envelopes costs the same budget as a flood of well-formed
-   * ones, and one token per authenticated device route request other than
-   * `POST /byok/messages` (each `GET /byok/events` poll, presence, board, blob
-   * grant, ...). Defaults: 50 tokens/s sustained, burst 100 (see `rate-limiter.ts`).
+   * charges a `POST /byok/messages` batch one token per envelope before the
+   * first one reaches its inbound gate, so a flood of garbage-typed envelopes
+   * costs the same budget as a flood of well-formed ones and a refused batch
+   * applies nothing, and one token per authenticated device route request
+   * (each `GET /byok/events` poll, presence, board, blob grant, ...). An
+   * admission needs one token and then charges its whole count, so a batch
+   * larger than `burst` overdraws the bucket rather than never fitting.
+   * Defaults: 50 tokens/s sustained, burst 100 (see `rate-limiter.ts`).
    *
    * Exceeding it never drops silently: the occurrence counts in
-   * {@link HubStats.rateLimitEvents} (per REFUSED debit), and the first
+   * {@link HubStats.rateLimitEvents} (per REFUSED admission), and the first
    * refusal of an episode emits a `device.rate_limited`
    * {@link ByokServerEvent} — coalesced per episode, re-armed only by a later
    * successful consume by the same device. Enforcement on the wire is a
@@ -555,15 +557,14 @@ export type ByokServerEvent =
       at: string;
     } & Pick<TaskApprovalResolvedPayload, 'approvalId' | 'decision' | 'resolvedBy'>)
   /**
-   * M4 Phase 4 (part A): `deviceId` exceeded its inbound-envelope rate limit
-   * (`CreateByokServerOptions.rateLimit`, enforced at step 0 of the cloud
-   * kernel's inbound gate) — fired ONCE PER EPISODE, not once per refused
-   * envelope: the first refusal emits it, and only a later successful consume
+   * M4 Phase 4 (part A): `deviceId` exceeded its rate limit
+   * (`CreateByokServerOptions.rateLimit`, enforced at the cloud kernel's
+   * device route admission) — fired ONCE PER EPISODE, not once per refused
+   * admission: the first refusal emits it, and only a later successful consume
    * by the same device re-arms it, so a flood is one event and a device that
    * recovers and floods again is a second, distinct one. Never a silent drop
-   * either way: every refused envelope counts in
-   * {@link HubStats.rateLimitEvents}, and the request that carried it is
-   * answered `429` by `POST /byok/messages`.
+   * either way: every refused admission counts in
+   * {@link HubStats.rateLimitEvents}, and its request is answered `429`.
    */
   | { kind: 'device.rate_limited'; deviceId: string; at: string };
 
@@ -591,11 +592,11 @@ export interface HubStats {
    * and approval timelines; unexpired approvals survive reopen without extending TTL.
    */
   taskCountsByState: Record<TaskState, number>;
-  /** Total inbound daemon->server envelopes since this server instance was created (every outcome, including rejected/rate-limited), counted at the gate's own step 0. Resets on SQLite reopen. */
+  /** Total inbound daemon->server envelopes since this server instance was created (every outcome, including rejected and rate-limited batches), counted at batch admission. Resets on SQLite reopen. */
   envelopesIn: number;
   /** Inbound dedup hits since this server instance was created; a no-op wire-level success. Resets on SQLite reopen. */
   dedupDrops: number;
-  /** Refused rate-limit debits since this server instance was created: rate-limited envelopes plus rate-limited device route requests — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
+  /** Refused rate-limit admissions since this server instance was created: rate-limited message batches plus rate-limited device route requests — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
   rateLimitEvents: number;
   /** Every closed refusal reason, zero-filled; counted since this server instance was created. Rate limiting is separate. */
   inboundRefusals: Record<InboundRefusalReason, number>;

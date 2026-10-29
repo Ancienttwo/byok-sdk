@@ -1390,7 +1390,10 @@ export declare class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
 /**
  * The Postgres composition's `InboundRateLimiter`: one in-process token bucket
  * per `(tenant, device)`. Every inbound envelope and every admitted device
- * route request spends one token from the same bucket.
+ * route request spends one token from the same bucket. An admission needs one
+ * token and then charges its whole count, so a message batch larger than the
+ * burst overdraws the bucket instead of never fitting; the next admission
+ * waits until that debt is repaid.
  *
  * In-process on purpose: a per-request Postgres write would cost more than the
  * flood it refuses. Each replica therefore enforces its own budget, so a fleet
@@ -1399,8 +1402,8 @@ export declare class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
  *
  * Memory is bounded by `maxTrackedDevices`: buckets are kept in recency order
  * and the least recently used one is dropped when a new device arrives at the
- * cap. A dropped bucket comes back full, which only ever admits more, never
- * less, than keeping it would have.
+ * cap. A dropped bucket comes back full (debt included), which only ever
+ * admits more, never less, than keeping it would have.
  */
 import type { InboundRateLimiter, RateLimitDecision, RateLimitUnit } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
@@ -1417,7 +1420,7 @@ export declare class TokenBucketRateLimiter implements InboundRateLimiter {
     #private;
     private readonly clock;
     constructor(options: PostgresRateLimitOptions, clock: Clock);
-    consume(tenant: TenantId, deviceId: string, _unit: RateLimitUnit): Promise<RateLimitDecision>;
+    consume(tenant: TenantId, deviceId: string, _unit: RateLimitUnit, count: number): Promise<RateLimitDecision>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/receipts.d.ts ====
 import { type ReceiptCollectExpiredInput } from '@byok-sdk/cloud';

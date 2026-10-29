@@ -1,8 +1,8 @@
 /**
  * M4 Phase 4 (part A): per-key token bucket that rate-limits each device's
  * inbound envelopes and authenticated route requests (one shared budget).
- * `stores.ts` composes it into the cloud kernel, which debits it at step 0 of
- * the inbound gate and at device route admission. The bucket itself is
+ * `stores.ts` composes it into the cloud kernel, which debits it at device
+ * route admission (a message batch is charged per envelope). The bucket itself is
  * framework-agnostic on purpose (only the adapter below names the cloud port)
  * so it stays unit-testable in isolation, mirroring `event-queue.ts`'s own
  * transport-agnostic split.
@@ -54,7 +54,7 @@ const DEFAULT_BURST = 100;
  * `RateLimiter.buckets`' size — see {@link RateLimiter.evictOldestIfAtCapacity}
  * for the eviction policy this backs. Without a HARD cap, the existing idle
  * sweep (`evictIdleBucketsIfDue`) only ever reclaims a bucket once it's
- * been quiet for `idleEvictionThresholdMs` — a flood of many THOUSANDS of
+ * been quiet long enough to refill to `burst` — a flood of many THOUSANDS of
  * genuinely-distinct, ACTIVELY-used keys arriving faster than they ever go
  * idle (a legitimately huge fleet, or a same-shape Sybil-style attack
  * registering many fake device ids) would otherwise grow `buckets` without
@@ -85,18 +85,6 @@ export class RateLimiter {
   private readonly messagesPerSecond: number;
   private readonly burst: number;
   private readonly buckets = new Map<string, Bucket>();
-  /**
-   * Wall-clock idle duration (ms) after which a bucket is GUARANTEED to
-   * already be refilled to `burst`, regardless of its actual token count at
-   * last touch — i.e. the time to go from 0 tokens to `burst` at this
-   * instance's configured rate. `evictIdleBucketsIfDue` uses this as the
-   * eviction threshold: dropping an entry idle at least this long and
-   * recreating it fresh (tokens = burst) on the next `consume()` is
-   * therefore behaviorally IDENTICAL to refilling it in place would have
-   * been — both cap at `burst` — so eviction is semantically invisible to
-   * the caller.
-   */
-  private readonly idleEvictionThresholdMs: number;
   /** Finding R5: hard cap on `buckets.size` — see {@link DEFAULT_MAX_TRACKED_DEVICES}'s own doc comment. */
   private readonly maxTrackedDevices: number;
   /** Calls to `consume()` since the last sweep — see `EVICTION_SWEEP_EVERY_N_CALLS`. */
@@ -121,16 +109,17 @@ export class RateLimiter {
     this.messagesPerSecond = messagesPerSecond;
     this.burst = burst;
     this.maxTrackedDevices = maxTrackedDevices;
-    this.idleEvictionThresholdMs = (burst / messagesPerSecond) * 1000;
   }
 
   /**
-   * Debit one token from `key`'s bucket, refilling first for however much
-   * wall-clock time has elapsed since its last refill. Returns `false`
-   * (and debits nothing) when the bucket is currently empty — the caller is
-   * over budget right now.
+   * Charge `cost` tokens to `key`'s bucket, refilling first for however much
+   * wall-clock time has elapsed since its last refill. Admits while the bucket
+   * holds at least one token and then charges the whole `cost`, even below
+   * zero: a message batch larger than `burst` is admissible, and its debt is
+   * repaid before the key's next admission. Returns `false` (and charges
+   * nothing) when the bucket holds less than one token.
    */
-  consume(key: string): boolean {
+  consume(key: string, cost: number): boolean {
     const now = Date.now();
     this.evictIdleBucketsIfDue(now);
 
@@ -152,7 +141,7 @@ export class RateLimiter {
     }
 
     if (bucket.tokens < 1) return false;
-    bucket.tokens -= 1;
+    bucket.tokens -= cost;
     return true;
   }
 
@@ -169,8 +158,10 @@ export class RateLimiter {
 
   /**
    * Every `EVICTION_SWEEP_EVERY_N_CALLS` calls to `consume()`, drops every
-   * bucket idle for at least `idleEvictionThresholdMs` (see that field's doc
-   * comment for why this is safe). Without this, `buckets` would hold one
+   * bucket that has been idle long enough to have refilled to `burst`, debt
+   * included. Recreating it fresh (tokens = burst) on its next `consume()` is
+   * then identical to refilling it in place, so eviction is invisible to the
+   * caller. Without this, `buckets` would hold one
    * permanent entry per historical key forever — every device that ever
    * connected, even long after it disconnected for good — growing without
    * bound over a long-lived server's lifetime.
@@ -180,7 +171,7 @@ export class RateLimiter {
     if (this.callsSinceSweep < EVICTION_SWEEP_EVERY_N_CALLS) return;
     this.callsSinceSweep = 0;
     for (const [key, bucket] of this.buckets) {
-      if (now - bucket.lastRefillMs >= this.idleEvictionThresholdMs) {
+      if (bucket.tokens + ((now - bucket.lastRefillMs) / 1000) * this.messagesPerSecond >= this.burst) {
         this.buckets.delete(key);
       }
     }
@@ -197,14 +188,12 @@ export class RateLimiter {
    * `audit-log.ts`'s `compactPreservingLiveTasks` during rotation).
    *
    * Equivalence split (stated explicitly, not left implied):
-   * - For any evicted bucket that was ALREADY idle for at least
-   *   `idleEvictionThresholdMs` (i.e. `evictIdleBucketsIfDue` would have
-   *   reclaimed it anyway, just not yet — sweeps only run every
-   *   `EVICTION_SWEEP_EVERY_N_CALLS` calls, not continuously), eviction is
-   *   PROVABLY equivalent to an in-place refill: both cap at `burst`, so a
-   *   caller can never observe the difference (see `idleEvictionThresholdMs`'s
-   *   own doc comment for the identical reasoning `evictIdleBucketsIfDue`
-   *   already relies on).
+   * - For any evicted bucket that was ALREADY idle long enough to refill to
+   *   `burst` (i.e. `evictIdleBucketsIfDue` would have reclaimed it anyway,
+   *   just not yet — sweeps only run every `EVICTION_SWEEP_EVERY_N_CALLS`
+   *   calls, not continuously), eviction is PROVABLY equivalent to an
+   *   in-place refill: both cap at `burst`, so a caller can never observe the
+   *   difference (the same reasoning `evictIdleBucketsIfDue` relies on).
    * - For a bucket evicted EARLY — still within its idle threshold, forced
    *   out only because `buckets` is at capacity (many thousands of
    *   genuinely-distinct, actively-used keys, not a quiet one) — this is
@@ -235,13 +224,13 @@ export class RateLimiter {
  * The counting `InboundRateLimiter` (`@byok-sdk/cloud`'s store port) this
  * package composes the kernel with.
  *
- * Position matters and is not this adapter's choice: the kernel debits one
- * `envelope` token at step 0 of its inbound gate, BEFORE the type-allow check,
- * for every envelope that reaches it, and one `request` token when it admits
- * an authenticated device route other than `POST /byok/messages`. Both spend
- * the same bucket. `envelopesIn` (one per envelope, every outcome) and
- * `rateLimitEvents` (one per REFUSED debit of either unit, never coalesced)
- * are counted here and nowhere else.
+ * Position matters and is not this adapter's choice: the kernel charges a
+ * `POST /byok/messages` batch one `envelope` token per envelope before the
+ * first one reaches its inbound gate, and one `request` token when it admits
+ * any other authenticated device route. Both spend the same bucket.
+ * `envelopesIn` (one per received envelope, admitted or refused) and
+ * `rateLimitEvents` (one per REFUSED admission of either unit, never
+ * coalesced) are counted here and nowhere else.
  *
  * The `device.rate_limited` embedder event is the one thing that IS coalesced,
  * matching the pre-fold rule: an episode fires exactly one event, and only a
@@ -250,9 +239,9 @@ export class RateLimiter {
  * again produces a second, distinct event.
  */
 export interface InboundRateLimiterCounters {
-  /** Every envelope handed to the kernel's inbound gate, whatever the gate then decides. Device route requests are not envelopes and are not counted. */
+  /** Every envelope a `POST /byok/messages` batch carried, whether the batch was admitted or refused and whatever the gate then decided. Device route requests are not envelopes and are not counted. */
   envelopesIn: number;
-  /** Debits the bucket refused: per envelope and per device route request — see the episode rule above. */
+  /** Admissions the bucket refused: per message batch and per device route request — see the episode rule above. */
   rateLimitEvents: number;
 }
 
@@ -280,10 +269,10 @@ export function createCountingInboundRateLimiter(
   return {
     counters,
     limiter: {
-      async consume(tenant: string, deviceId: string, unit: RateLimitUnit): Promise<RateLimitDecision> {
-        if (unit === 'envelope') counters.envelopesIn += 1;
+      async consume(tenant: string, deviceId: string, unit: RateLimitUnit, count: number): Promise<RateLimitDecision> {
+        if (unit === 'envelope') counters.envelopesIn += count;
         const key = `${tenant}:${deviceId}`;
-        if (limiter.consume(key)) {
+        if (limiter.consume(key, count)) {
           episodes.delete(key);
           return { allowed: true };
         }
