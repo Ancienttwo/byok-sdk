@@ -131,6 +131,7 @@ export {
 
 export { SqliteProviderProfileStore } from './sqlite-profile-store';
 export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
+export { inspectProviderProfileStore } from './store-compatibility';
 
 export {
   PROVIDER_PROFILE_TRUTH_RECORD_KEY,

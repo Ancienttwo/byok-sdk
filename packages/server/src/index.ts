@@ -127,6 +127,7 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
+export { inspectSqliteStore } from './store-compatibility';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 

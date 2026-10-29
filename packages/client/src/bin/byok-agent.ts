@@ -28,6 +28,7 @@ import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runToolsetsReloadCommand } from './commands/toolsets';
 import { runTeamCreateCommand, runTeamJoinCommand, runTeamListCommand, runTeamOpenCommand, runTeamWatchCommand } from './commands/team';
 import { runUnpairCommand } from './commands/unpair';
+import { runUpgradeStoreCheckCommand } from './commands/upgrade';
 import { runVersionCommand } from './version';
 
 /**
@@ -109,6 +110,7 @@ function usage(): never {
       '  byok-agent team watch <workspace> --config <path>',
       '  byok-agent team open <workspace> --tmux-bin <absolute> [--session <name>] --config <path>',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
+      '  byok-agent upgrade check --store [--json] [--config <path>]   (read-only; exit 2 when a store would be refused)',
       '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
       '  byok-agent approve <approvalId> [--config <path>]',
       '  byok-agent reject <approvalId> [--reason <text>] [--config <path>]',
@@ -318,6 +320,14 @@ async function main(): Promise<void> {
       storeDir: resolveStoreDir(config),
       productId: config.productId,
     });
+  }
+
+  if (command === 'upgrade') {
+    const [action, ...flags] = positionalArgs(rest, ['--config']);
+    if (action !== 'check' || !flags.includes('--store') || flags.some((flag) => flag !== '--store' && flag !== '--json')) usage();
+    const config = loadConfig(configPathFrom(rest));
+    process.exitCode = await runUpgradeStoreCheckCommand({ storeDir: resolveStoreDir(config), json: hasFlag(rest, '--json') });
+    return;
   }
 
   if (command === 'approvals') {

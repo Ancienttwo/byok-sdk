@@ -303,8 +303,15 @@ breaking cut. Breaking changes ship only in a MINOR: there is no PATCH
 exception (Q8, owner 2026-10-29). Every Host-visible change since the last
 release is an entry in the upgrade manifest that `@byok-sdk/client` ships, and
 `bun run check:upgrade-manifest` fails a PATCH that carries a breaking entry
-([upgrade manifest](upgrade-manifest.md)). A version bump does not authorize
-publish. The current aligned release is `0.31.0`; publication requires separate
+([upgrade manifest](upgrade-manifest.md)). Before a Host switches versions,
+the candidate build checks the existing local stores read-only and reports
+each one as accepted, new-path-repair or rejected. Each package checks the
+store it owns: `inspectDaemonStores` in client (also
+`byok-agent upgrade check --store`), `inspectSqliteStore` in server and
+`inspectProviderProfileStore` in keys. All three return core's
+`StoreCompatibility`. Checked-in stores written by recent releases pin the
+verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
+A version bump does not authorize publish. The current aligned release is `0.31.0`; publication requires separate
 release authorization and registry readback. The packed and published keys
 `@byok-sdk/core` edge must be the exact current release, `0.31.0`, proven from
 an isolated standard npm install rather than the workspace graph.

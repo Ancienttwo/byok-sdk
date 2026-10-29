@@ -596,6 +596,7 @@ export type { ProviderProfileStore } from './profile-store';
 export { isSqliteAvailable, loadSqliteModule, openSqliteDatabase, secureSqliteFilePermissions, } from './sqlite-support';
 export { SqliteProviderProfileStore } from './sqlite-profile-store';
 export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
+export { inspectProviderProfileStore } from './store-compatibility';
 export { PROVIDER_PROFILE_TRUTH_RECORD_KEY, TruthStoreProviderProfileStore, } from './truth-profile-store';
 export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store';
 export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, withConfigurationLock, } from './custody';
@@ -2475,6 +2476,23 @@ export declare function openSqliteDatabase(path: string, options?: DatabaseSyncO
  */
 export declare function secureSqliteFilePermissions(databasePath: string): void;
 export {};
+// ==== @byok-sdk/keys dist/store-compatibility.d.ts ====
+import type { StoreCompatibility } from '@byok-sdk/core';
+/**
+ * Store compatibility precheck for the provider profile store (#1102).
+ *
+ * Reports what this `@byok-sdk/keys` does when a writable
+ * `SqliteProviderProfileStore` opens `path`. The files are copied to a private
+ * temporary directory and the store's own open runs on the copy, so the schema
+ * rules stay in one place and the original files are only read. Close the
+ * process that writes the store first: a file that changes while it is copied
+ * fails the check rather than yielding a verdict about a torn copy.
+ *
+ * A store created by a different schema (`PROVIDER_STORE_SCHEMA_STALE`) is
+ * `new-path-repair`: provision a separate current-schema store. Any other
+ * refusal is `rejected`.
+ */
+export declare function inspectProviderProfileStore(path: string): Promise<StoreCompatibility>;
 // ==== @byok-sdk/keys dist/truth-profile-store.d.ts ====
 import { type TenantId, type TruthStore } from '@byok-sdk/core';
 import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody';

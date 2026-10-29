@@ -126,6 +126,7 @@ describe('public API surface', () => {
     './sealed-provider-secret',
     './agent-memory-intent',
     './retention',
+    './store-compatibility',
     './in-memory/index',
     './in-memory/storage-ledger',
     './in-memory/blob',
