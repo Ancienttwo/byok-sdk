@@ -9,7 +9,7 @@
  * slice exists to make impossible.
  */
 import { createMutableClock, tenantId, type Clock } from '@byok-sdk/core';
-import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
+import type { ChallengeResponse, PairResponse, TokenResponse } from '@byok-sdk/protocol';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthPlane } from '../auth/plane';
@@ -184,6 +184,37 @@ describe('token renewal (§6.2)', () => {
     const body = (await response.json()) as TokenResponse;
     expect(body.accessToken).toBeTypeOf('string');
     expect(Date.parse(body.expiresAt)).toBeGreaterThan(Date.now());
+    expect(body.expiresIn).toBe(ACCESS_TOKEN_TTL_SECONDS);
+  });
+
+  it('pair and token responses carry the configured TTL as expiresIn, from the same clock read as the absolute expiry (#1114)', async () => {
+    const ttlSeconds = 900;
+    const clock = createMutableClock();
+    const configured = createHarness({ clock, accessTokenTtlSeconds: ttlSeconds });
+    const pairing = await configured.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
+    const keys = createDeviceKeys();
+    const pairResponse = await configured.request('/byok/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'relative-ttl', devicePublicKey: keys.publicKeyBase64Url }),
+    });
+    expect(pairResponse.status).toBe(200);
+    const paired = (await pairResponse.json()) as PairResponse;
+    expect(paired.expiresIn).toBe(ttlSeconds);
+    // Published devices still read refreshHint as the first token's expiry.
+    expect(paired.refreshHint).toBe(new Date(clock.now().getTime() + ttlSeconds * 1000).toISOString());
+
+    clock.advance(5_000);
+    const { nonce } = await challenge(configured, paired.deviceId);
+    const response = await token(configured, { deviceId: paired.deviceId, nonce, signature: keys.signNonce(nonce ?? '') });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as TokenResponse;
+    expect(body.expiresIn).toBe(ttlSeconds);
+    expect(body.expiresAt).toBe(new Date(clock.now().getTime() + ttlSeconds * 1000).toISOString());
+  });
+
+  it.each([0, -60, 0.5])('refuses to compose with an access-token TTL of %s seconds, which expiresIn cannot carry', (accessTokenTtlSeconds) => {
+    expect(() => createHarness({ accessTokenTtlSeconds })).toThrow('accessTokenTtlSeconds must be a positive safe integer');
   });
 
   it('rejects a raw, undomained signature over the bare nonce', async () => {
@@ -265,7 +296,7 @@ describe('token renewal (§6.2)', () => {
         consumed = true;
         return true;
       },
-      mintAccessToken: async () => ({ accessToken: `token-${++minted}`, expiresAt: new Date().toISOString() }),
+      mintAccessToken: async () => ({ accessToken: `token-${++minted}`, expiresAt: new Date().toISOString(), expiresIn: 3600 }),
     };
     const app = new Hono();
     app.post('/byok/token', tokenHandler({ auth }));

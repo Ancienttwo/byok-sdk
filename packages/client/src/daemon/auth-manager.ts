@@ -7,7 +7,6 @@ import {
   DeviceNotRegisteredResponseSchema,
   PairResponseSchema,
   TokenResponseSchema,
-  type TokenResponse,
 } from '@byok-sdk/protocol';
 import {
   assertStoreBound,
@@ -53,19 +52,30 @@ export class AuthRequestAbortedError extends Error {
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
  * truncated body, a missing field, or a token `expiresAt` that is not an ISO
- * timestamp with an offset. The renewal fails and the prior credential is kept
- * unchanged; nothing is inferred from the malformed body. The JSON
+ * timestamp with an offset — and when a token or pair response carries no
+ * `expiresIn` (#1114). The renewal or pairing fails and the prior credential
+ * is kept unchanged; nothing is inferred from the malformed body. The JSON
  * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
  */
 export class AuthResponseInvalidError extends Error {
   constructor(
-    readonly route: 'challenge' | 'token',
+    readonly route: 'challenge' | 'token' | 'pair',
     options: { cause: unknown },
   ) {
-    super(`token renewal (${route}) failed: the server response does not match the protocol schema`, options);
+    super(`${route === 'pair' ? 'pairing' : `token renewal (${route})`} failed: the server response does not match the protocol schema`, options);
     this.name = 'AuthResponseInvalidError';
   }
 }
+
+/**
+ * The device reads token lifetime only from `expiresIn` (#1114). The wire
+ * schemas keep it optional because published v4 hosts omit it; this boundary
+ * requires it, so a response without it fails closed instead of falling back
+ * to a server timestamp read against this device's clock.
+ */
+const DeviceTokenResponseSchema = TokenResponseSchema.required({ expiresIn: true });
+const DevicePairResponseSchema = PairResponseSchema.required({ expiresIn: true });
+type RenewedToken = Pick<DeviceRecord, 'accessToken' | 'expiresAt'>;
 
 /**
  * Reads a successful renewal body as JSON. A body read failure (abort,
@@ -81,22 +91,13 @@ async function readAuthResponseJson(response: Response, route: 'challenge' | 'to
   }
 }
 
-/**
- * Conservative assumed lifetime for the token minted directly by
- * `/byok/pair`, which — unlike `/byok/token` — reports no explicit
- * `expiresAt` (only an opaque `refreshHint`). docs/protocol.md §6.1
- * documents a "~1h lifetime"; renewing proactively well before that leaves a
- * comfortable margin regardless of what `refreshHint` turns out to mean.
- */
-const ASSUMED_PAIR_TOKEN_TTL_MS = 45 * 60 * 1000;
 /** Renew this long before a token's recorded expiry — both proactively (background timer) and as the "already close enough to expiry, renew now" reactive threshold. */
 const RENEW_MARGIN_MS = 60 * 1000;
 /**
  * Floor between two renewals that no server 401 forced (#1114). A fresh token
- * can already sit inside {@link RENEW_MARGIN_MS} when this device's clock runs
- * ahead of the server or the server TTL is shorter than the margin; without a
- * floor every such renewal re-armed itself at delay 0 and rewrote the OS
- * credential entry in a tight loop. The floor stays at 30s after the first
+ * can already sit inside {@link RENEW_MARGIN_MS} when the server TTL is
+ * shorter than the margin; without a floor every such renewal re-armed itself
+ * at delay 0 and rewrote the OS credential entry in a tight loop. The floor stays at 30s after the first
  * such renewal and doubles from the second consecutive one, up to
  * {@link MAX_RENEW_INTERVAL_MS}.
  */
@@ -280,6 +281,7 @@ export class AuthManager {
             }),
             signal: requestSignal,
           });
+          const receivedAt = Date.now();
           if (!res.ok) {
             throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
           }
@@ -287,7 +289,9 @@ export class AuthManager {
           // local state. Parse the required wire contract before building the
           // one atomic DeviceRecord; no token claim or host configuration is an
           // alternate tenant authority.
-          return PairResponseSchema.parse(await res.json());
+          const paired = DevicePairResponseSchema.safeParse(await res.json());
+          if (!paired.success) throw new AuthResponseInvalidError('pair', { cause: paired.error });
+          return { ...paired.data, expiresAt: deviceLocalExpiry(receivedAt, paired.data.expiresIn) };
         });
 
         const metadata: DeviceMetadata = {
@@ -298,7 +302,7 @@ export class AuthManager {
         const record: DeviceRecord = {
           ...metadata,
           accessToken: body.accessToken,
-          expiresAt: resolvePairExpiry(body.refreshHint),
+          expiresAt: body.expiresAt,
           devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
         };
         // device.json is this store's pair-time binding and a non-secret
@@ -395,7 +399,7 @@ export class AuthManager {
    * One challenge → token exchange. Resolves `undefined` when either step
    * answered an untyped 401; a typed revocation 401 halts inside.
    */
-  private async exchangeToken(record: DeviceRecord, signal: AbortSignal): Promise<TokenResponse | undefined> {
+  private async exchangeToken(record: DeviceRecord, signal: AbortSignal): Promise<RenewedToken | undefined> {
     const base = toHttpBase(this.opts.serverUrl);
     const challenge = await this.runRequest(signal, async (requestSignal) => {
       const challengeRes = await fetch(new URL(BYOK_CHALLENGE_PATH, base), {
@@ -424,13 +428,14 @@ export class AuthManager {
         body: JSON.stringify({ deviceId: record.deviceId, nonce: challenge.nonce, signature }),
         signal: requestSignal,
       });
+      const receivedAt = Date.now();
       if (tokenRes.status === 401) return this.readUnauthorized(tokenRes);
       if (!tokenRes.ok) {
         throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
       }
-      const token = TokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
+      const token = DeviceTokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
       if (!token.success) throw new AuthResponseInvalidError('token', { cause: token.error });
-      return token.data;
+      return { accessToken: token.data.accessToken, expiresAt: deviceLocalExpiry(receivedAt, token.data.expiresIn) };
     });
   }
 
@@ -570,12 +575,14 @@ function msUntilExpiry(expiresAt: string): number {
   return new Date(expiresAt).getTime() - Date.now();
 }
 
-function resolvePairExpiry(refreshHint: string | undefined): string {
-  if (refreshHint) {
-    const parsed = new Date(refreshHint);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
-  }
-  return new Date(Date.now() + ASSUMED_PAIR_TOKEN_TTL_MS).toISOString();
+/**
+ * The stored `expiresAt` is device-local (#1114): this device's receipt time
+ * plus the server's relative `expiresIn`, so {@link msUntilExpiry} compares it
+ * only with the same device clock. The server's absolute `expiresAt` and
+ * `refreshHint` are never read for lifetime.
+ */
+function deviceLocalExpiry(receivedAt: number, expiresInSeconds: number): string {
+  return new Date(receivedAt + expiresInSeconds * 1000).toISOString();
 }
 
 function resolveRequestDeadlineMs(value: number | undefined): number {

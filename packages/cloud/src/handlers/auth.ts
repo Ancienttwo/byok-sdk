@@ -55,7 +55,7 @@ export function pairHandler(deps: AuthRouteDeps) {
     const device = await deps.auth.redeemAndRegister(parsed.data);
     if (device === undefined) return c.json({ error: 'invalid pairing code' }, 401);
 
-    const { accessToken, expiresAt } = await deps.auth.mintAccessToken(device);
+    const { accessToken, expiresAt, expiresIn } = await deps.auth.mintAccessToken(device);
     // The authenticated device row is the only tenant authority after
     // redemption. Validate the projection at the wire boundary so a malformed
     // custom store cannot emit an unbounded or otherwise invalid tenant shape.
@@ -63,6 +63,7 @@ export function pairHandler(deps: AuthRouteDeps) {
       deviceId: device.deviceId,
       accessToken,
       refreshHint: expiresAt,
+      expiresIn,
       tenantId: device.tenantId,
     });
     return c.json(response, 200);
@@ -110,8 +111,8 @@ export function tokenHandler(deps: AuthRouteDeps) {
       return c.json({ error: 'invalid, expired, or already-used nonce' }, 401);
     }
 
-    const { accessToken, expiresAt } = await deps.auth.mintAccessToken(device);
-    const response: TokenResponse = { accessToken, expiresAt };
+    const { accessToken, expiresAt, expiresIn } = await deps.auth.mintAccessToken(device);
+    const response: TokenResponse = { accessToken, expiresAt, expiresIn };
     return c.json(response, 200);
   };
 }

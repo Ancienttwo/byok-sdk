@@ -62,6 +62,21 @@
   the server issued last. A server 401 still renews at once and is not
   throttled.
 
+- **Fix (protocol, cloud, client; #1114)** — the device no longer reads token
+  lifetime from the server's absolute timestamps, so a device clock hours fast
+  or slow renews on the same schedule. `POST /byok/token` and `POST /byok/pair`
+  responses carry `expiresIn`, the token lifetime in whole seconds, derived
+  from the same TTL as `expiresAt` / `refreshHint`. The client stores receipt
+  time + `expiresIn` as a device-local expiry. It refuses a token or pair
+  response without `expiresIn` with `AuthResponseInvalidError` (new route
+  `'pair'`) and keeps the prior credential; the assumed 45-minute pair-token
+  lifetime is gone. `expiresIn` is optional in `TokenResponseSchema` and
+  `PairResponseSchema` and a strip-safe HTTP addition, so 0.31.0 devices keep
+  reading `expiresAt` and `refreshHint`, which the Host still sends. Upgrade
+  the Host before its devices. `createAuthPlane` now rejects an
+  `accessTokenTtlSeconds` that is not a positive safe integer, and
+  `MintedAccessToken` gains `expiresIn`.
+
 - **Fix (cloud-dataplane, server, cloud; #1116)** — `cancelTask` on a claimed
   task no longer throws after retention collects its acked `task.cancel` row.
   The Postgres and SQLite stores threw a plain `Error`, which a Host surfaced

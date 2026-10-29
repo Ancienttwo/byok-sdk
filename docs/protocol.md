@@ -2292,7 +2292,7 @@ generated device keypair register the device and mint its first token.
 
 ```
 Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey, machineId? }
-Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint? }
+Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, expiresIn? }
 ```
 
 - `devicePublicKey`: Ed25519 public key, base64url-encoded.
@@ -2318,18 +2318,20 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint? }
   envelope corpus is unchanged; the frozen HTTP schema fingerprint records
   this required field explicitly.
 - `refreshHint`: opaque hint for when/how to renew; not itself a credential.
-  **Pinned semantics (resolves a carried-forward pin): the reference server
-  always sets `refreshHint` to the freshly-minted token's own ISO-8601
-  `expiresAt`** — the exact same value `/byok/token` reports explicitly on
-  every subsequent renewal (§6.2). The schema keeps `refreshHint` typed as a
-  bare opaque `string` (not narrowed to an ISO datetime) so a client is never
-  *required* to parse it as a date to be spec-compliant, but a client MAY
-  treat it as `expiresAt` and schedule proactive renewal accordingly — the
-  reference client does exactly this (`AuthManager.resolvePairExpiry`),
-  falling back to a conservative assumed TTL only if the value doesn't parse
-  as a date at all. This is additive clarification of existing behavior, not
-  a schema change: `refreshHint` was always allowed to contain this value,
-  and always will be.
+  **Pinned semantics: the reference server always sets `refreshHint` to the
+  freshly-minted token's own ISO-8601 `expiresAt`** — the same value
+  `/byok/token` reports on every renewal (§6.2). It is kept for published
+  devices (0.31.0 and earlier read it as the first token's expiry). The
+  current reference client does not read it.
+- `expiresIn`: lifetime of `accessToken` in whole seconds (positive integer),
+  relative to when the device receives the response (#1114). It is the
+  device's only lifetime authority: the client stores receipt time +
+  `expiresIn` as a device-local expiry and never compares a server timestamp
+  with its own clock, so a device clock that is hours fast or slow renews on
+  the same schedule. The schema keeps it optional because published v4 hosts
+  omit it; the current client refuses a pair response without it, so a Host
+  must be upgraded before its devices. The server derives `expiresIn` and
+  `refreshHint` from the same TTL.
 
 **Claims flow (S1, 2026-08-07).** A pairing code is not an anonymous ticket:
 the server mints it already bound to a `{tenantId, productId}` pair
@@ -2360,13 +2362,25 @@ POST /byok/challenge
 
 POST /byok/token
   Request  (TokenRequestSchema):  { deviceId, nonce, signature }
-  Response (TokenResponseSchema): { accessToken, expiresAt }
+  Response (TokenResponseSchema): { accessToken, expiresAt, expiresIn? }
 ```
 
 The reference client decodes both responses with these schemas (#386).
 `expiresAt` must be an ISO 8601 timestamp with `Z` or a numeric UTC offset. A
 response that fails its schema fails the renewal and leaves the prior
 credential unchanged; it is not treated as a revocation.
+
+`expiresIn` is the token lifetime in whole seconds (positive integer),
+relative to when the device receives the response (#1114). It is the device's
+lifetime authority: the client records receipt time + `expiresIn` as a
+device-local expiry and never reads `expiresAt` for lifetime, so device clock
+skew does not move its renewal point. The server derives both fields from one
+TTL and one clock read, and keeps sending `expiresAt` because published
+devices (0.31.0) read it. The field is a strip-safe HTTP addition in
+`WIRE_ADDITIONS` and optional in the schema, since published v4 hosts omit
+it; the current client fails a token response without it with
+`AuthResponseInvalidError` and keeps the prior credential. Upgrade the Host
+before its devices.
 
 `signature` is the Ed25519 signature over the **domain-separated** nonce,
 base64url-encoded. **Pinned encoding (changed 2026-08-07, S1 — this replaces
