@@ -2813,6 +2813,15 @@ enrollment this storeDir's `device.json` does not name; only `pair
 replaces it, with a fresh key, after which the other store reads as not
 bound. Unpair from a store that is not bound fails closed and deletes nothing.
 
+A replacement attempt stages its new key and request facts alongside the
+current enrollment in that same OS entry. A rejected request, network error
+or invalid response preserves both the current authority and the durable
+retry key; renewal of the current enrollment preserves the pending attempt.
+Only an authenticated successful replacement promotes the new enrollment.
+Injected credential backends must preserve these semantics. The existing
+2,400-byte encoded bound still applies before any provider write; older
+clients fail closed while a replacement attempt is staged.
+
 macOS custody may select an explicit absolute keychain file through
 `deviceCredentials.macosKeychainPath`; the daemon, cold enrollment reads,
 stored proof signer and repair use the same selection. Without it the OS

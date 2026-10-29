@@ -3170,9 +3170,8 @@ export declare class AuthManager {
      */
     readCurrent(): Promise<DeviceRecord | undefined>;
     /**
-     * Re-arm after {@link stop}. The daemon calls it when a start or pair is
-     * requested, so a stop requested after that cancels the operation's own
-     * credential calls instead of being undone by them.
+     * Re-arm after {@link stop}. The daemon calls it inside a start or pair's
+     * lifecycle slot, after checking that no later stop cancelled the request.
      */
     resume(): void;
     /**
@@ -5752,6 +5751,10 @@ export declare class DeviceCredentialCommandAbortedError extends DeviceCredentia
  * Complete enrollment custody. An injected implementation owns secret storage
  * and its lifetime. `signal` cancels the operation (daemon shutdown); an
  * implementation must stop and reject once it aborts.
+ * Staging an attempt preserves the current enrollment returned by `read()`.
+ * `replace()` retains that attempt when renewing the same deviceId, tenantId
+ * and devicePublicKey; a different authenticated enrollment promotes the
+ * replacement and discards the attempt. `clear()` removes both authorities.
  */
 export interface DeviceCredentialBackend {
     read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;

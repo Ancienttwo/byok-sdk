@@ -60,7 +60,7 @@ export async function pair(
   pairingCode: string,
   options?: { readonly verificationSecret?: string; readonly replaceOtherStore?: boolean },
 ): Promise<DeviceEnrollment> {
-  const { checkServerUrl, memberRecords, runLifecycleMutation, pairUnderLease } = daemonScope;
+  const { checkServerUrl, memberRecords, pairUnderLease } = daemonScope;
   checkServerUrl();
   const verificationSecret = options?.verificationSecret === undefined ? undefined : checkVerificationSecret(options.verificationSecret);
   if (verificationSecret !== undefined && memberRecords === undefined) {
@@ -71,7 +71,7 @@ export async function pair(
   // start, stop, control shutdown and unpair must never decide independently
   // who releases that shared lease.
   const replaceOtherStore = options?.replaceOtherStore === true;
-  const record = await runAuthOperation(daemonScope, () => runLifecycleMutation(() => pairUnderLease(pairingCode, verificationSecret, replaceOtherStore)));
+  const record = await runAuthOperation(daemonScope, () => pairUnderLease(pairingCode, verificationSecret, replaceOtherStore));
   return Object.freeze({ deviceId: record.deviceId });
 }
 

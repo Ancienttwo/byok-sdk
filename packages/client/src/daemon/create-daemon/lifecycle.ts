@@ -3,7 +3,7 @@ import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError } from '..
 import { InsecureServerUrlError } from '../url';
 import { DeviceRecordRePairRequiredError } from '../store';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors';
-import { DeviceRevokedError } from '../auth-manager';
+import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager';
 import type { DaemonScope } from './scope';
 
 /** The daemon lifecycle: the serialized mutation slot, lifecycle phases, start and stop (#926). */
@@ -76,26 +76,31 @@ export function crashed(daemonScope: DaemonScope): void {
 }
 
 export async function start(daemonScope: DaemonScope): Promise<void> {
-  const { checkServerUrl, runLifecycleMutation, startUnderLease } = daemonScope;
+  const { checkServerUrl, startUnderLease } = daemonScope;
   try {
     checkServerUrl();
   } catch (err) {
     if (err instanceof InsecureServerUrlError) throw new DaemonHaltError('config_invalid', { cause: err });
     throw err;
   }
-  await runAuthOperation(daemonScope, () => runLifecycleMutation(startUnderLease));
+  await runAuthOperation(daemonScope, startUnderLease);
 }
 
 /**
- * A start or pair: it re-arms the auth manager synchronously, so a stop()
- * requested after it cancels the operation's credential calls (see stop()).
+ * Resume only in the operation's lifecycle slot: an earlier shutdown must
+ * finish before auth is re-armed. A later stop invalidates the queued request
+ * synchronously, so entering its slot cannot undo that cancellation.
  */
 export async function runAuthOperation<T>(daemonScope: DaemonScope, operation: () => Promise<T>): Promise<T> {
   const { daemonState } = daemonScope;
-  daemonState.auth.resume();
+  const cancellationEpoch = daemonState.authCancellationEpoch;
   daemonState.pendingAuthOperations += 1;
   try {
-    return await operation();
+    return await daemonScope.runLifecycleMutation(async () => {
+      if (cancellationEpoch !== daemonState.authCancellationEpoch) throw new AuthRequestAbortedError('stopped');
+      daemonState.auth.resume();
+      return operation();
+    });
   } finally {
     daemonState.pendingAuthOperations -= 1;
   }
@@ -145,6 +150,7 @@ export async function stop(daemonScope: DaemonScope, opts: { drainTimeoutMs?: nu
   // `shuttingDown === false` for the whole duration of that predecessor.
   // Setting it here, synchronously, before the first await, closes that gap.
   daemonState.shuttingDown = true;
+  daemonState.authCancellationEpoch += 1;
   // A start or pair may be blocked in an OS credential call (a locked
   // keychain) and the teardown below queues behind it. Signal first: the
   // auth manager's stop is the one cancellation for those calls; then await
