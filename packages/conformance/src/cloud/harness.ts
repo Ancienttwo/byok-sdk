@@ -115,8 +115,10 @@ export interface CloudCompositionHandle {
     observation: BlobObservation,
   ): Promise<void>;
   /**
-   * Acks every row the device's mailbox holds and lets retention collect it,
-   * returning how many rows were removed. Same reason as `landBlobBytes`: the
+   * Acks the device's first page of pending mailbox rows, then runs one
+   * tenant-wide retention pass that deletes up to 500 acked rows, and returns
+   * that pass's tenant-wide `removed` count. Suites call it on a tenant whose
+   * only rows belong to the one device. Same reason as `landBlobBytes`: the
    * mailbox is not a certified port, yet what a cancellation does after its
    * delivery row is gone is contract behavior (#1116).
    */
@@ -125,7 +127,7 @@ export interface CloudCompositionHandle {
   dispose?(): void | Promise<void>;
 }
 
-/** {@link CloudCompositionHandle.retireCancellationDelivery} through the real ack and retention path. */
+/** {@link CloudCompositionHandle.retireCancellationDelivery} through the real ack and retention path; unacked rows are left alone. */
 export async function ackAndCollectMailbox(
   mailbox: MailboxStore,
   tenant: TenantId,
@@ -140,7 +142,7 @@ export async function ackAndCollectMailbox(
     now: farFuture,
     limit: 500,
     ackedBefore: farFuture,
-    expireUnackedBefore: farFuture,
+    expireUnackedBefore: '1970-01-01T00:00:00.000Z',
   });
   return collected.removed;
 }
