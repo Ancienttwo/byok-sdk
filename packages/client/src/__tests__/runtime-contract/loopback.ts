@@ -132,6 +132,29 @@ export function mcpTool(server: string, tool: string): (tools: readonly Provider
   return tools => tools.find(candidate => candidate.namespace === `mcp__${server}` ? candidate.name === tool : flat.test(candidate.name));
 }
 
+/**
+ * A runtime that defers MCP tools behind its own search: the model searches,
+ * reads the qualified name of `tool` from the search result, then invokes it
+ * through the runtime's call bridge. The search query never spells the name,
+ * so the name can only come from the result.
+ */
+export function searchThenCall(bridge: {
+  readonly search: string;
+  readonly searchArgs: Record<string, unknown>;
+  readonly call: string;
+  readonly callArgs: (name: string) => Record<string, unknown>;
+}, tool: string): ProviderScript {
+  const found = new RegExp(`\\\\?"([A-Za-z0-9_-]+_${tool})\\\\?"`);
+  return request => {
+    const search = request.tools.find(candidate => candidate.name === bridge.search);
+    const call = request.tools.find(candidate => candidate.name === bridge.call);
+    if (search !== undefined && request.toolResults === 0) return { kind: 'tool', tool: search, args: bridge.searchArgs };
+    const name = found.exec(request.text)?.[1];
+    if (call !== undefined && request.toolResults === 1 && name !== undefined) return { kind: 'tool', tool: call, args: bridge.callArgs(name) };
+    return { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS };
+  };
+}
+
 type Json = Record<string, unknown>;
 const records = (value: unknown): Json[] => Array.isArray(value) ? value.filter((item): item is Json => item !== null && typeof item === 'object') : [];
 

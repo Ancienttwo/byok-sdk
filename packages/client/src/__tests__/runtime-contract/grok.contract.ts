@@ -7,7 +7,7 @@ import {
   baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, draftText, egressCheck, expectAuth,
   expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer,
 } from './contract';
-import { CONTRACT_REPLY_CHUNKS, startLoopbackProvider, type ProviderScript } from './loopback';
+import { searchThenCall, startLoopbackProvider } from './loopback';
 
 const target = contractTarget('grok', QUALIFIED_GROK_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
@@ -27,20 +27,11 @@ async function detectEnv(label: string, files: Record<string, string> = {}) {
   return { ...baseEnv(box.home), GROK_HOME: grokHome };
 }
 
-/**
- * Grok defers MCP tools: the model finds one with `search_tool`, then calls
- * the name the search returned through `use_tool`.
- */
-const submitThroughSearchTool: ProviderScript = request => {
-  const search = request.tools.find(tool => tool.name === 'search_tool');
-  const use = request.tools.find(tool => tool.name === 'use_tool');
-  if (search !== undefined && request.toolResults === 0) return { kind: 'tool', tool: search, args: { query: 'host submit_result' } };
-  const found = /tool_name\\?"\s*:\s*\\?"([A-Za-z0-9_-]*submit_result)\\?"/.exec(request.text)?.[1];
-  if (use !== undefined && request.toolResults === 1 && found !== undefined) {
-    return { kind: 'tool', tool: use, args: { tool_name: found, tool_input: { summary: 'runtime contract' } } };
-  }
-  return { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS };
-};
+/** Grok defers MCP tools: `search_tool` finds one, `use_tool` calls the name the search returned. */
+const submitThroughSearchTool = searchThenCall({
+  search: 'search_tool', searchArgs: { query: 'host submit result' },
+  call: 'use_tool', callArgs: name => ({ tool_name: name, tool_input: { summary: 'runtime contract' } }),
+}, 'submit_result');
 
 /**
  * One contract turn as an Agent task: a loopback chat-completions model in
