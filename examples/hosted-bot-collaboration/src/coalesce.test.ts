@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { hash, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { hash, type FrozenInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { coalescePolicy, type CoalescePolicy } from '@byok-sdk/example-bot-collaboration/coalesce';
 import { coalesceVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type CoalesceSubject, type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';

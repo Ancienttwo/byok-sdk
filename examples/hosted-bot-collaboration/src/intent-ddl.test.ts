@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { taskId } from '@byok-sdk/example-host-execution-core';
+import { taskId } from '@byok-sdk/server/execution-core';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;

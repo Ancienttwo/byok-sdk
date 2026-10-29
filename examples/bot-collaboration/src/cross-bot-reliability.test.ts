@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ByokServer } from '@byok-sdk/server';
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { hash } from '@byok-sdk/server/execution-core';
 import { openTeam, type TestTeam } from './team.test-support';
 import { crossBot } from './cross-bot.test-support';
 import { stateOf } from './model';

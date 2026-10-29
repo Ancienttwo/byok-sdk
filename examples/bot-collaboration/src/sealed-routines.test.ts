@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { hash, promoteOccurrence, recordOccurrence, routineCommands, routineTemplateBinding, sealRoutineTemplate, type LedgerState,
-  type Routine } from '@byok-sdk/example-host-execution-core';
+  type Routine } from '@byok-sdk/server/execution-core';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BOT_ROUTINE, botRoutines, resealDefinition, routineCalendar, routineTurn, sealedDefinition, sealedRoutineInstruction, sealedTemplate,

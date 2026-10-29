@@ -1,5 +1,5 @@
 import type { RoutineScheduleFields } from '@byok-sdk/protocol';
-import { hash, type Routine, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
+import { hash, type Routine, type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import type { BotCollaboration } from './host';
 import { botRoutines, createDefinition, type BotRoutine } from './routines';
 

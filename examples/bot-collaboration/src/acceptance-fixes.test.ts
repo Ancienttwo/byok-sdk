@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { validateResultOutcome } from '@byok-sdk/protocol';
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { hash } from '@byok-sdk/server/execution-core';
 import { openTeam, type TestTeam } from './team.test-support';
 import { projectionRequestId } from './team';
 

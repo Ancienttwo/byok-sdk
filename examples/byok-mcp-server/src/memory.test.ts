@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import { HostLedger, HostMemoryPage, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/example-host-execution-core';
+import { HostLedger, HostMemoryPage, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/server/execution-core';
 import type { AgentMemoryProjectionMutation, AgentRef } from '@byok-sdk/protocol';
 import { afterEach, expect, it, vi } from 'vitest';
 import { BetaLedger, createBetaMcpServer, createMemoryTools, type KeySpec } from './index';

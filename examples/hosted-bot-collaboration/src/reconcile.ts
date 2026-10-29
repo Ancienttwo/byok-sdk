@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, type FrozenExecutionInput, type FrozenSubmitPort,
-  type Json } from '@byok-sdk/example-host-execution-core';
+  type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
+import type { FrozenInput } from '@byok-sdk/server/execution-core';
 import { ROOM_GRACE_MS, roomVectors, seedCollaboration, seedRoom, SYNC_OPTIONS, VECTOR_NOW, type RoomSubject,
   type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';

@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { validateJson, type Json } from '@byok-sdk/example-host-execution-core';
+import { validateJson, type Json } from '@byok-sdk/server/execution-core';
 import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
 import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';

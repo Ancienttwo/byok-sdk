@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { createByokServer } from '@byok-sdk/server';
-import { enqueue, hash, HostLedger, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { enqueue, hash, HostLedger, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { addTurn, stateOf, type CollaborationState, type Turn } from './model';

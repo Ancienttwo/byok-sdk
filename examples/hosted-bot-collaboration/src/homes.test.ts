@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
+import type { FrozenInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { homeVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type HomeCalls, type HomeSubject,

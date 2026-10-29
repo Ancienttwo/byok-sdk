@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sameFrozenOffer, taskId, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
+import { sameFrozenOffer, taskId, type FrozenSubmitPort } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { openHostedCloud, SKIP_HOSTED_CLOUD, type HostedCloud } from './hosted-cloud.test-support';
 import { freezeIntent, HostedSubmitter, type SubmitterOptions } from './intents';

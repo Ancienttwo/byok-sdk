@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { hash, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId, type FrozenInput } from '@byok-sdk/server/execution-core';
 import { openHost, template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { OFFER_WAIT_MS } from '@byok-sdk/example-bot-collaboration/rules/commands';

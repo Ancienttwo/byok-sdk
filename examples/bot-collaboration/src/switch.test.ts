@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import path from 'node:path';
-import { agentKey, hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, taskId, type IntentInput, type LedgerDump } from '@byok-sdk/example-host-execution-core';
+import { agentKey, hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, taskId, type IntentInput, type LedgerDump } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';

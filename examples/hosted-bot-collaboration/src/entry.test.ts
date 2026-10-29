@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { hash } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
 import { DeviceBindingError } from './binding';

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import * as protocol from '@byok-sdk/protocol';
-import { canonical, HostLedger, type ExecutionServer } from '@byok-sdk/example-host-execution-core';
+import { canonical, HostLedger, type ExecutionServer } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { addTurn, stateOf, type CollaborationState } from './model';
 import { CONFIRMABLE_MAX, DEFAULT_CONFIRMABLE, outcomeOffer, outcomeSchema, TIME_ZONES_MAX, type OutcomeOffer } from './schema';
