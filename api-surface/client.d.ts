@@ -10406,6 +10406,29 @@ export declare function exportDeviceSupportBundle(config: DaemonConfig, input: E
 /** Archive refused/revoked evidence for one Agent under device and Agent single-writer leases. */
 export declare function archiveAgentTerminalMessages(config: DaemonConfig, input: ArchiveAgentTerminalMessagesInput): Promise<AgentTerminalMessagesArchiveResult>;
 export {};
+// ==== @byok-sdk/client dist/diagnostics/store-compatibility.d.ts ====
+import type { StoreCompatibility } from '@byok-sdk/core';
+export interface InspectDaemonStoresInput {
+    /** The daemon's resolved store directory (`DaemonConfig.storeDir` or its default). */
+    readonly storeDir: string;
+}
+/**
+ * Store compatibility precheck for the stores a daemon owns (#1102): the
+ * local task journal (`<storeDir>/daemon.db`) and every pi-durable replica
+ * under `<storeDir>/durable-replicas/`.
+ *
+ * Reports what this build does when it opens each one. The files are copied to
+ * a private temporary directory and this build's own open runs on the copy, so
+ * the format rules stay in the store code and the originals are only read.
+ * Stop the daemon first: a file that changes while it is copied fails the
+ * check rather than yielding a verdict about a torn copy.
+ *
+ * The journal comes first and is `absent` when there is none; one result
+ * follows per replica. The server SQLite store and the provider profile store
+ * are checked by `inspectSqliteStore` (`@byok-sdk/server`) and
+ * `inspectProviderProfileStore` (`@byok-sdk/keys`).
+ */
+export declare function inspectDaemonStores(input: InspectDaemonStoresInput): Promise<readonly StoreCompatibility[]>;
 // ==== @byok-sdk/client dist/diagnostics/types.d.ts ====
 import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
 import type { ControlStatusResult } from '../daemon/control-protocol';
@@ -10598,8 +10621,8 @@ export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecor
 export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, WithheldOfferRecord, WithheldOfferTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, CompactOptions, CompactResult, } from './daemon/journal/journal';
 export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
 export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
-export { inspectDaemonStores } from './upgrade-check/store-compatibility';
-export type { InspectDaemonStoresInput } from './upgrade-check/store-compatibility';
+export { inspectDaemonStores } from './diagnostics/store-compatibility';
+export type { InspectDaemonStoresInput } from './diagnostics/store-compatibility';
 export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config';
 export type { StorageConfig, StorageBudgetInput } from './daemon/retention/config';
 export { LocalStorageEmergencyError } from './daemon/retention/pressure';
@@ -13899,29 +13922,6 @@ export declare class SteerUnsupportedError extends Error {
     readonly runtimeId: string;
     constructor(runtimeId: string, message: string);
 }
-// ==== @byok-sdk/client dist/upgrade-check/store-compatibility.d.ts ====
-import type { StoreCompatibility } from '@byok-sdk/core';
-export interface InspectDaemonStoresInput {
-    /** The daemon's resolved store directory (`DaemonConfig.storeDir` or its default). */
-    readonly storeDir: string;
-}
-/**
- * Store compatibility precheck for the stores a daemon owns (#1102): the
- * local task journal (`<storeDir>/daemon.db`) and every pi-durable replica
- * under `<storeDir>/durable-replicas/`.
- *
- * Reports what this build does when it opens each one. The files are copied to
- * a private temporary directory and this build's own open runs on the copy, so
- * the format rules stay in the store code and the originals are only read.
- * Stop the daemon first: a file that changes while it is copied fails the
- * check rather than yielding a verdict about a torn copy.
- *
- * The journal comes first and is `absent` when there is none; one result
- * follows per replica. The server SQLite store and the provider profile store
- * are checked by `inspectSqliteStore` (`@byok-sdk/server`) and
- * `inspectProviderProfileStore` (`@byok-sdk/keys`).
- */
-export declare function inspectDaemonStores(input: InspectDaemonStoresInput): Promise<readonly StoreCompatibility[]>;
 // ==== @byok-sdk/client dist/util/secure-dir.d.ts ====
 import { type Runner } from '../lifecycle/exec-runner';
 /**
