@@ -48,7 +48,7 @@ export function extractModuleEdges(file) {
 
 /** One virtual project avoids changing package tsconfigs or depending on dist output. */
 export function parseSources(root, files) {
-  const config = path.join(root, '.dependency-graph.tsconfig.json');
+  const config = path.join(root, '.dependency-graph.tsconfig.json').split(path.sep).join('/');
   const api = new API({ cwd: root, fs: {
     readFile: file => file === config ? JSON.stringify({ compilerOptions: { noResolve: true, noLib: true }, files }) : undefined,
     fileExists: file => file === config ? true : undefined,
@@ -124,37 +124,47 @@ function exportTarget(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   return exportTarget(value.import ?? value.default);
 }
+/** Convert native filesystem paths once, before they enter the rule graph. */
+export function graphSourcePath(root, file, nativePath = path) {
+  return nativePath.relative(root, file).split(nativePath.sep).join('/');
+}
+export function sourceOwner(file, packages) {
+  return [...packages.values()].find(pkg => file.startsWith(`${pkg.root}/src/`));
+}
+function packageSourcePath(pkg, file) {
+  return path.posix.relative(`${pkg.root}/src`, file);
+}
 export function inspectRepository(root) {
   const packages = new Map();
   for (const dir of readdirSync(path.join(root, 'packages'))) {
     const manifestFile = path.join(root, 'packages', dir, 'package.json');
     if (!existsSync(manifestFile)) continue;
     const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
-    packages.set(manifest.name, { dir, manifest, root: path.dirname(manifestFile) });
+    packages.set(manifest.name, { dir, manifest, root: graphSourcePath(root, path.dirname(manifestFile)) });
   }
-  const files = [...packages.values()].flatMap(p => sourceFiles(path.join(p.root, 'src')));
-  const sources = parseSources(root, files), violations = new Set(), graph = new Map();
+  const files = [...packages.values()].flatMap(p => sourceFiles(path.join(root, p.root, 'src')));
+  const sources = new Map([...parseSources(root, files)].map(([file, parsed]) => [graphSourcePath(root, file), parsed]));
+  const violations = new Set(), graph = new Map();
   const publicEntries = new Set();
   for (const pkg of packages.values()) for (const value of Object.values(pkg.manifest.exports ?? {})) {
     const entry = exportTarget(value);
     if (entry?.startsWith('./dist/')) {
-      const source = resolveSource(path.join(pkg.root, 'src', entry.slice(7)), sources);
+      const source = resolveSource(path.posix.join(pkg.root, 'src', entry.slice(7)), sources);
       if (source) publicEntries.add(source);
     }
   }
-  const relative = file => path.relative(root, file).split(path.sep).join('/');
-  const owner = file => [...packages.values()].find(p => file.startsWith(`${p.root}/src/`));
+  const owner = file => sourceOwner(file, packages);
   const report = (rule, from, to) => violations.add(`${rule}: ${from} -> ${to}`);
   for (const pkg of packages.values()) {
     for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
       for (const name of Object.keys(pkg.manifest[field] ?? {})) {
         const target = packages.get(name);
-        if (target && !packageDirection(pkg.dir, target.dir)) report('package', `${relative(pkg.root)}/package.json#${field}`, name);
+        if (target && !packageDirection(pkg.dir, target.dir)) report('package', `${pkg.root}/package.json#${field}`, name);
       }
     }
   }
   for (const [file, parsed] of sources) {
-    const pkg = owner(file), from = relative(file);
+    const pkg = owner(file), from = file;
     graph.set(file, new Set());
     for (const edge of parsed.edges) {
       if (edge.kind !== 'value') continue;
@@ -162,16 +172,16 @@ export function inspectRepository(root) {
       const targetPackage = packages.get(name);
       let target;
       if (edge.specifier.startsWith('.')) {
-        target = resolveSource(path.resolve(path.dirname(file), edge.specifier), sources);
+        target = resolveSource(path.posix.join(path.posix.dirname(file), edge.specifier), sources);
         // Local JSON and JS assets are outside the documented TS graph.
-        if (!target && !['', '.js', '.mjs', '.cjs', '.json'].some(ext => existsSync(path.resolve(path.dirname(file), edge.specifier + ext)))) throw new Error(`${from}: unresolved source ${edge.specifier}`);
+        if (!target && !['', '.js', '.mjs', '.cjs', '.json'].some(ext => existsSync(path.resolve(root, path.posix.dirname(file), edge.specifier + ext)))) throw new Error(`${from}: unresolved source ${edge.specifier}`);
       } else if (targetPackage) {
         if (pkg !== targetPackage && !pkg.manifest.dependencies?.[name]) report('manifest', from, name);
         if (!packageDirection(pkg.dir, targetPackage.dir)) report('source-package', from, name);
         const subpath = edge.specifier.slice(name.length);
         const entry = exportTarget(targetPackage.manifest.exports?.[subpath ? `.${subpath}` : '.']);
-        if (entry?.startsWith('./dist/')) target = resolveSource(path.join(targetPackage.root, 'src', entry.slice(7)), sources);
-        else if (entry) target = resolveSource(path.resolve(targetPackage.root, entry), sources);
+        if (entry?.startsWith('./dist/')) target = resolveSource(path.posix.join(targetPackage.root, 'src', entry.slice(7)), sources);
+        else if (entry) target = resolveSource(path.posix.join(targetPackage.root, entry), sources);
         if (!target && !entry?.endsWith('.json')) throw new Error(`${from}: unresolved workspace export ${edge.specifier}`);
       } else if (name.startsWith('@byok-sdk/')) throw new Error(`${from}: unknown workspace package ${name}`);
       if (!target) continue;
@@ -194,15 +204,15 @@ export function inspectRepository(root) {
   for (const [file, targets] of graph) {
     if (publicEntries.has(file) && sources.get(file).barrel) continue;
     const pkg = owner(file);
-    const sourceLayer = directoryLayer(pkg.dir, path.relative(`${pkg.root}/src`, file));
+    const sourceLayer = directoryLayer(pkg.dir, packageSourcePath(pkg, file));
     for (const target of targets) for (const resolved of destinations(target)) {
       if (owner(resolved) !== pkg) continue;
-      const targetLayer = directoryLayer(pkg.dir, path.relative(`${pkg.root}/src`, resolved));
-      if (sourceLayer < targetLayer) report('directory', relative(file), relative(resolved));
+      const targetLayer = directoryLayer(pkg.dir, packageSourcePath(pkg, resolved));
+      if (sourceLayer < targetLayer) report('directory', file, resolved);
     }
   }
   for (const [from, to] of cycleEdges(graph)) {
-    if (['client', 'cloud'].includes(owner(from).dir)) report('cycle', relative(from), relative(to));
+    if (['client', 'cloud'].includes(owner(from).dir)) report('cycle', from, to);
   }
   return [...violations].sort();
 }

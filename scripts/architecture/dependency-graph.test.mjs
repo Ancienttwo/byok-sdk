@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parseSources, inspectRepository, compareBaseline, compareBaselineHistory, cycleEdges, checkDependencyDirection } from './dependency-graph.mjs';
+import { parseSources, inspectRepository, compareBaseline, compareBaselineHistory, cycleEdges, checkDependencyDirection, graphSourcePath, sourceOwner, directoryLayer } from './dependency-graph.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'byok-direction-'));
@@ -128,4 +128,25 @@ test('CI comparison rejects baseline expansion even when the candidate source ma
   const actual = inspectRepository(f.root);
   f.write('scripts/architecture/dependency-baseline.json', JSON.stringify(actual));
   assert.deepEqual(checkDependencyDirection(f.root), actual.map(edge => `baseline must shrink: ${edge}`));
+});
+
+
+test('native Windows paths enter the rule graph as POSIX repo-relative paths', () => {
+  const root = path.win32.join('C:\\', 'repo');
+  const packages = new Map(['client', 'cloud'].map(dir => [dir, {
+    dir, root: graphSourcePath(root, path.win32.join(root, 'packages', dir), path.win32),
+  }]));
+  for (const [pkg, source, layer] of [
+    ['client', ['daemon', 'runner.ts'], 2],
+    ['client', ['adapters', 'a.ts'], 1],
+    ['cloud', ['cloud.ts'], 4],
+    ['cloud', ['api', 'entry.ts'], 3],
+  ]) {
+    const file = graphSourcePath(root, path.win32.join(root, 'packages', pkg, 'src', ...source), path.win32);
+    const owner = sourceOwner(file, packages);
+    assert.equal(file, `packages/${pkg}/src/${source.join('/')}`);
+    assert.equal(owner, packages.get(pkg));
+    assert.equal(directoryLayer(owner.dir, path.posix.relative(`${owner.root}/src`, file)), layer);
+  }
+  assert.equal(sourceOwner('packages/client-extra/src/x.ts', packages), undefined);
 });
