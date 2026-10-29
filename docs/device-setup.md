@@ -114,8 +114,9 @@ pair a device, write state or prove runtime credentials/server acceptance.
 `checkDaemonConfig` is the embedded API; `Daemon.status().config` exposes the
 same effective report for a constructed daemon.
 
-Read `directories` for the resolved store, optional Host root, Agent-home parent
-and scratch root (including its source and socket byte budget); `memory` for
+Read `directories` for the resolved store, optional Host root, Agent-home parent,
+service log directory (`logDir`) and scratch root (including its source and
+socket byte budget); `memory` for
 helper resolution/admission; `mcpServers` for mount availability; `runtimes` for
 adapter source, auto-authorization support and inherited isolation settings;
 and `toolAuthorization` for the resolver mode and local approval policy.
