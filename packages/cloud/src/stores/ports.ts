@@ -532,7 +532,7 @@ export interface TaskCancellationRequest {
 
 export interface TaskCancellationMutation {
   readonly attempt: TaskAttempt;
-  /** Absent only when the task was already complete or failed before cancellation. */
+  /** Absent when the task was terminal before cancellation, or once the delivery row is gone. */
   readonly message?: MailboxMessage;
 }
 

@@ -62,19 +62,14 @@ export class PostgresTaskCancellationStore implements TaskCancellationStore {
           [tenant, current.device_id, current.cancel_message_id],
         );
         const message = replayed.rows[0];
-        if (message === undefined) {
-          // Acked mailbox rows are retention-deletable. Once the attempt is
-          // cancelled, the tombstone remains the durable idempotency outcome
-          // even after that delivery evidence ages out. A still-requested
-          // attempt with no row is corruption and must continue to fail closed.
-          if (current.status === 'cancelled') {
-            await client.query('COMMIT');
-            return { attempt: taskRowToAttempt(current) };
-          }
-          throw new Error(`Cancellation delivery ${current.cancel_message_id} is missing for task ${input.taskId}`);
-        }
         await client.query('COMMIT');
-        return { attempt: taskRowToAttempt(current), message: toMailboxMessage(message) };
+        // The row is gone only after retention collected it once acked, or an
+        // operator discarded it as a dead letter. Either way the delivery is
+        // settled: the tombstone alone answers the repeat, whatever the
+        // attempt's status, and nothing is enqueued again.
+        return message === undefined
+          ? { attempt: taskRowToAttempt(current) }
+          : { attempt: taskRowToAttempt(current), message: toMailboxMessage(message) };
       }
 
       const now = this.#clock.now().toISOString();
