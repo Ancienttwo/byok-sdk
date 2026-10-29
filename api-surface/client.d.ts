@@ -12104,7 +12104,7 @@ export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: La
 import { promises as fsp } from 'node:fs';
 import { type ServiceUnitFile } from './service-unit';
 import type { ServiceDefinition, ServiceLifecycle, ServiceStatusResult } from './service-types';
-export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
+export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod' | 'link'>;
 /** The platform half of a lifecycle: where its files go and how its manager loads them. */
 export interface PlatformUnit {
     serviceName: string;
@@ -12235,9 +12235,9 @@ export declare const DAEMON_LOG_LIMITS: Readonly<{
 }>;
 /**
  * The service manager's stdout/stderr redirect (launchd `StandardOutPath`,
- * systemd `append:`). After the daemon log opens nothing writes there but an
- * early-boot crash, and each service start rotates a file over this size to
- * one `.1` copy. WinSW rolls its own redirect by the same limit
+ * systemd `append:`). Once {@link routeProcessOutputToDaemonLog} runs only a
+ * fatal error Node writes to fd 2 itself still lands there, and each service
+ * start rotates a file over this size to one `.1` copy. WinSW rolls its own redirect by the same limit
  * (`roll-by-size`).
  */
 export declare const SERVICE_REDIRECT_STDOUT_FILENAME = "service-stdout.log";
@@ -12265,6 +12265,19 @@ export interface DaemonLog {
  * than `maxBytes` is still written whole, into a fresh file.
  */
 export declare function openDaemonLog(options: DaemonLogOptions): DaemonLog;
+/**
+ * Routes everything this process writes to `process.stdout` and
+ * `process.stderr` (every `console.*` call included) into the daemon log
+ * until `close()`, so no runtime path can grow the service manager's
+ * redirect while the daemon runs (#1097). Only output Node writes to fd 2
+ * itself, such as a fatal error, still reaches the redirect, once per
+ * process; {@link boundServiceRedirectLogs} bounds it at the next start.
+ * Child processes are spawned with piped stdio and never share fd 1 or 2.
+ */
+export declare function routeProcessOutputToDaemonLog(options: DaemonLogOptions): {
+    readonly path: string;
+    close(): void;
+};
 /**
  * Bounds the service manager's redirect files at service start: each file
  * over {@link SERVICE_REDIRECT_LIMITS}.maxBytes becomes its single `.1` copy.
@@ -12577,7 +12590,7 @@ export interface ServiceLifecycleOwnerInput {
     /** The service name the owner registers. */
     service: string;
 }
-export type ServiceOwnerFs = Pick<typeof fsp, 'readFile' | 'writeFile' | 'rename' | 'rm' | 'mkdir'>;
+export type ServiceOwnerFs = Pick<typeof fsp, 'readFile' | 'writeFile' | 'rename' | 'rm' | 'mkdir' | 'link'>;
 /**
  * The lifecycle owner recorded for this product's store (#1097): the one
  * party (the CLI, or the product's App) that sets autostart. Undefined when
@@ -12592,6 +12605,8 @@ export declare function readServiceLifecycleOwner(storeDir: string, fs?: Service
  * owner; throws `lifecycle_owner_conflict` when another owner holds it. An
  * App that sets autostart through its own mechanism (a login item) claims
  * here too, so the CLI's `install` refuses instead of adding a second one.
+ * A first claim publishes the record with a hard link, which fails when the
+ * record exists, so of two concurrent claimants only one wins.
  */
 export declare function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs?: ServiceOwnerFs): Promise<void>;
 /** Removes the owner record when `owner` holds it; throws `lifecycle_owner_conflict` when another owner does. */
