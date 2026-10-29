@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "b16ed5abb9bb659c3eb51d7c7b8803261d7a266f7ecf22a989562d4464197030"
+    "snapshotSha256": "3c40928c92a6236d6a5a66358c590285a84bf372d999962029849da1b310cb54"
   },
   "configFields": {
     "status": "pending",
@@ -25,6 +25,17 @@
         "export:@byok-sdk/client#DaemonConfig",
         "export:@byok-sdk/client#DiagnosticsSnapshot",
         "export:@byok-sdk/client#LocalToolApprovalPolicy"
+      ]
+    },
+    {
+      "id": "storage-retention-bounds",
+      "impact": "breaking",
+      "summary": "Every retention class declares a bound (#1105). The SDK now expires Pi's own session files in DaemonConfig.piByokLauncher.sessionDir (class pi-session-dir, 31 days by last write) and -task- terminal evidence in each Agent home (class terminal-evidence, 30 days); both moved from ProtectedClassId to ExpiringClassId, and the never-populated retired-namespace class is gone. New protected class runtime-session-external registers runtime session records outside the Agent home. storage.retention.ttlMs['pi-session-dir'] must be at least ttlMs['session-ledger'] plus one day, else LocalStorageConfigError. A Host that trimmed the Pi session folder itself deletes that code; a Host that raised the session-ledger TTL raises the pi-session-dir TTL too.",
+      "migration": "docs/host-local-storage-layout.md#retention-bounds",
+      "items": [
+        "export:@byok-sdk/client#ExpiringClassId",
+        "export:@byok-sdk/client#ProtectedClassId",
+        "export:@byok-sdk/client#resolveStorageConfig"
       ]
     }
   ],
@@ -50,9 +61,24 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#ExpiringClassId",
+      "change": "changed",
+      "entry": "storage-retention-bounds"
+    },
+    {
       "item": "export:@byok-sdk/client#LocalToolApprovalPolicy",
       "change": "added",
       "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#ProtectedClassId",
+      "change": "changed",
+      "entry": "storage-retention-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveStorageConfig",
+      "change": "changed",
+      "entry": "storage-retention-bounds"
     }
   ]
 }
