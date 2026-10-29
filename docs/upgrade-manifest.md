@@ -1,5 +1,7 @@
 # Upgrade manifest
 
+For the device operator workflow, see [Device setup: upgrade](device-setup.md#upgrade).
+
 `@byok-sdk/client` ships `upgrade-manifest.json`: a machine-readable list of
 every Host-visible change between the previous release and this one (#1102).
 A Host reads it before upgrading to learn which changes need code, config or
