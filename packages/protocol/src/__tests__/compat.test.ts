@@ -104,7 +104,7 @@ function corpusOf(lines: readonly string[]): CorpusLine[] {
 }
 
 type HttpSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse'
-  | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
+  | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
 
 interface HttpCorpusLine {
   readonly index: number;
@@ -501,6 +501,7 @@ describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
       { kind: 'http', rule: 'strip-safe', surface: 'TokenResponse', field: 'expiresIn' },
+      { kind: 'http', rule: 'strip-safe', surface: 'PairResponse', field: 'expiresIn' },
     ]);
   });
 });
@@ -528,9 +529,9 @@ function assertCurrentHttp(line: HttpCorpusLine): void {
 }
 
 describe('compat v4: HTTP corpus (self-consistency; no published v4 decoder yet)', () => {
-  it('covers all eight scoped HTTP route schemas with owned bodies and independent expected values', () => {
+  it('covers all ten scoped HTTP route schemas with owned bodies and independent expected values', () => {
     const surfaces: readonly HttpSurface[] = ['ChallengeRequest', 'ChallengeResponse', 'TokenRequest', 'TokenResponse',
-      'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse'];
+      'PairRequest', 'PairResponse', 'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse'];
     expect([...new Set(v4HttpCorpus.map((line) => line.surface))].sort()).toEqual([...surfaces].sort());
     expect(v4HttpText.endsWith('\n'), 'literal corpus lines must be newline terminated').toBe(true);
     for (const line of v4HttpCorpus) {
