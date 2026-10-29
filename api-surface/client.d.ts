@@ -13320,7 +13320,6 @@ export declare const sdkDistributionManifest: Readonly<{
     version: 1;
     piRuntimePin: string;
     reservedHelperKinds: readonly import("./sdk-reserved-helper-host").SdkReservedHelperKind[];
-    piSubagentHelperKinds: readonly ["pi-subagent-print", "pi-subagent-runner"];
     nativeTargets: Readonly<{
         'win32-x64': Readonly<{
             package: "@koromix/koffi-win32-x64";
@@ -13361,15 +13360,8 @@ export interface ResolvedSdkReservedHelperBin {
     readonly args: readonly string[];
     readonly source: 'dist-script' | 'self-executable';
 }
-/** With `sdkPiSubagentHelperKinds`, the exact kinds that `runSdkReservedHelperCommand` accepts. */
+/** The exact kinds that `runSdkReservedHelperCommand` accepts. */
 export declare const sdkReservedHelperKinds: readonly SdkReservedHelperKind[];
-/**
- * Kinds that only a Pi subagent child re-enters with (`subagents/spawn.ts`).
- * They carry a tail argv and have no dist script, so `resolveSdkReservedHelperBin`
- * does not launch them. A product entrypoint still routes them through
- * {@link runSdkReservedHelperCommand}.
- */
-export declare const sdkPiSubagentHelperKinds: readonly ["pi-subagent-print", "pi-subagent-runner"];
 /** SDK-owned launcher shape used by every reserved stdio helper. */
 export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind, host?: SdkHelperHostConfig): ResolvedSdkReservedHelperBin;
 /**

@@ -493,8 +493,11 @@ export function selectImpact(paths, context = {}) {
     if (Object.hasOwn(reviewedBuildConfigOwners, path)) {
       dirs.add(reviewedBuildConfigOwners[path]); families.add('npm-release-pack'); continue;
     }
+    // Client build inputs: the entry checks, the main build config, the sealed
+    // host build check and the retired vendored-subagents build plugin.
     if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/scripts/check-adapters-entry.mjs'
-      || path === 'packages/client/tsup.config.ts') {
+      || path === 'packages/client/tsup.config.ts' || path === 'packages/client/scripts/build-sealed-host.mjs'
+      || path === 'packages/client/scripts/subagents-build.ts') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     // #636: the keys pi-catalog subpath entry, and the generator that keys
@@ -555,10 +558,9 @@ export function selectImpact(paths, context = {}) {
     // Opt-in Codex probes select their client runtime owner; CI does not invoke the probes.
     if (path === 'packages/client/scripts/codex-app-server-real.mjs'
       || path === 'packages/client/scripts/codex-reserved-mcp-loopback.mjs') { dirs.add('packages/client'); continue; }
-    // #701: the vendored pi-subagents factory and its provenance. Both Pi host
-    // flavors inline it; the client suite binds every vendored byte and runs
-    // the CommonJS single-file fixture.
-    if (/^packages\/client\/vendor\/pi-subagents\/0\.60\.0\/(?:index\.ts|PROVENANCE\.md|source-manifest\.json|src\/.+\.ts)$/.test(path)) {
+    // #701: the retired vendored pi-subagents 0.60.0 snapshot. The client now
+    // depends on the installed package; only this snapshot's deletion remains.
+    if (/^packages\/client\/vendor\/pi-subagents\/0\.60\.0\/(?:index\.ts|LICENSE|package\.json|PROVENANCE\.md|source-manifest\.json|src\/.+\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (path === 'examples/host-execution-core/VALIDATION.md'

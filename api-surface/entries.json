@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1857548,
+      "budgetBytes": 1856905,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -339,7 +339,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4915,
+      "budgetBytes": 4873,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -525,7 +525,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 3496587,
+      "budgetBytes": 437270,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -546,9 +546,7 @@
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
         "@earendil-works/chord/context",
-        "@earendil-works/pi-agent-core",
         "@earendil-works/pi-ai/api/openai-completions",
-        "@earendil-works/pi-ai/compat",
         "@earendil-works/pi-ai/models",
         "@earendil-works/pi-ai/providers/model-schema",
         "@earendil-works/pi-coding-agent",
@@ -558,9 +556,7 @@
         "@earendil-works/pi-durable/tools",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
-        "assert/strict",
         "async_hooks",
-        "buffer",
         "child_process",
         "crypto",
         "events",
@@ -570,17 +566,12 @@
         "net",
         "os",
         "path",
-        "perf_hooks",
         "pi-web-access/dist/index.js",
         "process",
         "readline",
         "stream/promises",
         "string_decoder",
-        "typebox",
-        "typebox/compile",
         "url",
-        "worker_threads",
-        "yaml",
         "zod"
       ],
       "lazyImports": [
@@ -590,309 +581,6 @@
         "@earendil-works/pi-ai/api/anthropic-messages",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-ai/api/openai-responses",
-        "@earendil-works/pi-coding-agent",
-        "@earendil-works/pi-durable/storage/sqlite/node",
-        "typebox/compile"
-      ],
-      "thirdParty": [
-        "@cfworker/json-schema",
-        "@earendil-works/chord",
-        "@earendil-works/pi-agent-core",
-        "@earendil-works/pi-ai",
-        "@earendil-works/pi-codemode",
-        "@earendil-works/pi-coding-agent",
-        "@earendil-works/pi-durable",
-        "@earendil-works/pi-mcp",
-        "@earendil-works/pi-telemetry",
-        "@earendil-works/pi-tui",
-        "@modelcontextprotocol/client",
-        "@modelcontextprotocol/core",
-        "balanced-match",
-        "brace-expansion",
-        "chalk",
-        "cross-spawn",
-        "diff",
-        "eventsource",
-        "eventsource-parser",
-        "get-east-asian-width",
-        "graceful-fs",
-        "grok-mermaid",
-        "highlight.js",
-        "hosted-git-info",
-        "ignore",
-        "isexe",
-        "lru-cache",
-        "marked",
-        "marked-cjk-friendly",
-        "minimatch",
-        "openai",
-        "p-limit",
-        "partial-json",
-        "path-key",
-        "pi-web-access",
-        "pkce-challenge",
-        "proper-lockfile",
-        "retry",
-        "semver",
-        "shebang-command",
-        "shebang-regex",
-        "signal-exit",
-        "typebox",
-        "undici",
-        "which",
-        "yaml",
-        "yocto-queue",
-        "zod"
-      ],
-      "unavailableOptional": [],
-      "opaqueImports": [],
-      "nodeBuiltins": {
-        "workspace": [
-          "assert/strict",
-          "async_hooks",
-          "buffer",
-          "child_process",
-          "crypto",
-          "events",
-          "fs",
-          "fs/promises",
-          "module",
-          "net",
-          "os",
-          "path",
-          "perf_hooks",
-          "process",
-          "readline",
-          "stream/promises",
-          "string_decoder",
-          "url",
-          "worker_threads"
-        ],
-        "thirdParty": [
-          "assert",
-          "buffer",
-          "child_process",
-          "constants",
-          "crypto",
-          "events",
-          "fs",
-          "fs/promises",
-          "module",
-          "node:assert",
-          "node:async_hooks",
-          "node:buffer",
-          "node:child_process",
-          "node:console",
-          "node:crypto",
-          "node:diagnostics_channel",
-          "node:dns",
-          "node:dns/promises",
-          "node:events",
-          "node:fs",
-          "node:fs/promises",
-          "node:http",
-          "node:http2",
-          "node:module",
-          "node:net",
-          "node:os",
-          "node:path",
-          "node:perf_hooks",
-          "node:process",
-          "node:querystring",
-          "node:readline",
-          "node:sqlite",
-          "node:stream",
-          "node:stream/web",
-          "node:string_decoder",
-          "node:timers",
-          "node:timers/promises",
-          "node:tls",
-          "node:tty",
-          "node:url",
-          "node:util",
-          "node:util/types",
-          "node:worker_threads",
-          "node:zlib",
-          "os",
-          "path",
-          "process",
-          "readline",
-          "stream",
-          "stream/promises",
-          "string_decoder",
-          "timers/promises",
-          "url",
-          "util"
-        ]
-      },
-      "codegen": [
-        {
-          "file": "@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
-          "line": 18,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
-          "line": 18,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/auth/context.js",
-          "line": 10,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/auth/context.js",
-          "line": 10,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/auth/oauth/load.js",
-          "line": 17,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/auth/oauth/load.js",
-          "line": 17,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/env-api-keys.js",
-          "line": 13,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/env-api-keys.js",
-          "line": 13,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@modelcontextprotocol/client/dist/ajvProvider-97rDpkRx.mjs",
-          "line": 2594,
-          "rule": "Function constructor"
-        },
-        {
-          "file": "openai/lib/EventStream.mjs",
-          "line": 36,
-          "rule": "Function reference"
-        },
-        {
-          "file": "openai/lib/EventStream.mjs",
-          "line": 123,
-          "rule": "Function reference"
-        },
-        {
-          "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 129,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 1386,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "pi-web-access/dist/index.js",
-          "line": 26512,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "typebox/build/type/types/function.mjs",
-          "line": 11,
-          "rule": "Function reference"
-        },
-        {
-          "file": "typebox/build/typebox.mjs",
-          "line": 59,
-          "rule": "Function reference"
-        },
-        {
-          "file": "undici/lib/web/webidl/index.js",
-          "line": 16,
-          "rule": "Function reference"
-        },
-        {
-          "file": "zod/v4/core/doc.js",
-          "line": 28,
-          "rule": "Function reference"
-        },
-        {
-          "file": "zod/v4/core/util.js",
-          "line": 156,
-          "rule": "Function reference"
-        }
-      ]
-    }
-  },
-  "@byok-sdk/client#byok-pi-runtime-host-sealed": {
-    "kind": "imports",
-    "policy": {
-      "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 3452656,
-      "zod": true,
-      "codegen": true,
-      "nodeBuiltins": {
-        "workspace": true,
-        "thirdParty": true
-      }
-    },
-    "facts": {
-      "target": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-      "conditions": [
-        "default"
-      ],
-      "types": [
-        "packages/client/dist/bin/pi-runtime-host-sealed.d.ts"
-      ],
-      "bareImports": [
-        "@byok-sdk/protocol",
-        "@byok-sdk/protocol/constants",
-        "@cfworker/json-schema",
-        "@earendil-works/chord/context",
-        "@earendil-works/pi-agent-core",
-        "@earendil-works/pi-ai/api/openai-completions",
-        "@earendil-works/pi-ai/compat",
-        "@earendil-works/pi-ai/models",
-        "@earendil-works/pi-ai/providers/model-schema",
-        "@earendil-works/pi-coding-agent",
-        "@earendil-works/pi-durable",
-        "@earendil-works/pi-durable/env",
-        "@earendil-works/pi-durable/env/node",
-        "@earendil-works/pi-durable/tools",
-        "@modelcontextprotocol/client",
-        "@modelcontextprotocol/client/validators/cf-worker",
-        "assert/strict",
-        "async_hooks",
-        "buffer",
-        "child_process",
-        "crypto",
-        "events",
-        "fs",
-        "fs/promises",
-        "module",
-        "net",
-        "os",
-        "path",
-        "perf_hooks",
-        "pi-web-access/dist/index.js",
-        "process",
-        "readline",
-        "stream/promises",
-        "string_decoder",
-        "typebox",
-        "typebox/compile",
-        "url",
-        "worker_threads",
-        "yaml",
-        "zod"
-      ],
-      "lazyImports": [
-        "#byok-pi-todo-runtime",
-        "@earendil-works/pi-ai",
-        "@earendil-works/pi-ai/api/anthropic-messages",
-        "@earendil-works/pi-ai/api/openai-completions",
-        "@earendil-works/pi-ai/api/openai-responses",
-        "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite/node"
       ],
       "thirdParty": [
@@ -949,9 +637,7 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "assert/strict",
           "async_hooks",
-          "buffer",
           "child_process",
           "crypto",
           "events",
@@ -961,13 +647,11 @@
           "net",
           "os",
           "path",
-          "perf_hooks",
           "process",
           "readline",
           "stream/promises",
           "string_decoder",
-          "url",
-          "worker_threads"
+          "url"
         ],
         "thirdParty": [
           "assert",
@@ -1033,11 +717,6 @@
           "rule": "opaque import()"
         },
         {
-          "file": "@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
-          "line": 18,
-          "rule": "opaque import()"
-        },
-        {
           "file": "@earendil-works/pi-ai/dist/auth/context.js",
           "line": 10,
           "rule": "opaque import()"
@@ -1050,16 +729,6 @@
         {
           "file": "@earendil-works/pi-ai/dist/auth/oauth/load.js",
           "line": 17,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/auth/oauth/load.js",
-          "line": 17,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/env-api-keys.js",
-          "line": 13,
           "rule": "opaque import()"
         },
         {
@@ -1083,9 +752,276 @@
           "rule": "Function reference"
         },
         {
-          "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 1384,
+          "file": "packages/client/dist/bin/pi-runtime-host.js",
+          "line": 33,
           "rule": "opaque import()"
+        },
+        {
+          "file": "packages/client/dist/bin/pi-runtime-host.js",
+          "line": 33,
+          "rule": "opaque import()"
+        },
+        {
+          "file": "pi-web-access/dist/index.js",
+          "line": 26512,
+          "rule": "opaque import()"
+        },
+        {
+          "file": "typebox/build/type/types/function.mjs",
+          "line": 11,
+          "rule": "Function reference"
+        },
+        {
+          "file": "typebox/build/typebox.mjs",
+          "line": 59,
+          "rule": "Function reference"
+        },
+        {
+          "file": "undici/lib/web/webidl/index.js",
+          "line": 16,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 28,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 156,
+          "rule": "Function reference"
+        }
+      ]
+    }
+  },
+  "@byok-sdk/client#byok-pi-runtime-host-sealed": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private sealed Pi runtime host",
+      "budgetBytes": 396009,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/bin/pi-runtime-host-sealed.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/bin/pi-runtime-host-sealed.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/protocol",
+        "@byok-sdk/protocol/constants",
+        "@cfworker/json-schema",
+        "@earendil-works/chord/context",
+        "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/models",
+        "@earendil-works/pi-ai/providers/model-schema",
+        "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable",
+        "@earendil-works/pi-durable/env",
+        "@earendil-works/pi-durable/env/node",
+        "@earendil-works/pi-durable/tools",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/client/validators/cf-worker",
+        "async_hooks",
+        "child_process",
+        "crypto",
+        "events",
+        "fs",
+        "fs/promises",
+        "module",
+        "net",
+        "os",
+        "path",
+        "pi-web-access/dist/index.js",
+        "process",
+        "readline",
+        "stream/promises",
+        "string_decoder",
+        "url",
+        "zod"
+      ],
+      "lazyImports": [
+        "#byok-pi-todo-runtime",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-ai/api/anthropic-messages",
+        "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/api/openai-responses",
+        "@earendil-works/pi-durable/storage/sqlite/node"
+      ],
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@earendil-works/chord",
+        "@earendil-works/pi-agent-core",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-codemode",
+        "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable",
+        "@earendil-works/pi-mcp",
+        "@earendil-works/pi-telemetry",
+        "@earendil-works/pi-tui",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "balanced-match",
+        "brace-expansion",
+        "chalk",
+        "cross-spawn",
+        "diff",
+        "eventsource",
+        "eventsource-parser",
+        "get-east-asian-width",
+        "graceful-fs",
+        "grok-mermaid",
+        "highlight.js",
+        "hosted-git-info",
+        "ignore",
+        "isexe",
+        "lru-cache",
+        "marked",
+        "marked-cjk-friendly",
+        "minimatch",
+        "openai",
+        "p-limit",
+        "partial-json",
+        "path-key",
+        "pi-web-access",
+        "pkce-challenge",
+        "proper-lockfile",
+        "retry",
+        "semver",
+        "shebang-command",
+        "shebang-regex",
+        "signal-exit",
+        "typebox",
+        "undici",
+        "which",
+        "yaml",
+        "yocto-queue",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "async_hooks",
+          "child_process",
+          "crypto",
+          "events",
+          "fs",
+          "fs/promises",
+          "module",
+          "net",
+          "os",
+          "path",
+          "process",
+          "readline",
+          "stream/promises",
+          "string_decoder",
+          "url"
+        ],
+        "thirdParty": [
+          "assert",
+          "buffer",
+          "child_process",
+          "constants",
+          "crypto",
+          "events",
+          "fs",
+          "fs/promises",
+          "module",
+          "node:assert",
+          "node:async_hooks",
+          "node:buffer",
+          "node:child_process",
+          "node:console",
+          "node:crypto",
+          "node:diagnostics_channel",
+          "node:dns",
+          "node:dns/promises",
+          "node:events",
+          "node:fs",
+          "node:fs/promises",
+          "node:http",
+          "node:http2",
+          "node:module",
+          "node:net",
+          "node:os",
+          "node:path",
+          "node:perf_hooks",
+          "node:process",
+          "node:querystring",
+          "node:readline",
+          "node:sqlite",
+          "node:stream",
+          "node:stream/web",
+          "node:string_decoder",
+          "node:timers",
+          "node:timers/promises",
+          "node:tls",
+          "node:tty",
+          "node:url",
+          "node:util",
+          "node:util/types",
+          "node:worker_threads",
+          "node:zlib",
+          "os",
+          "path",
+          "process",
+          "readline",
+          "stream",
+          "stream/promises",
+          "string_decoder",
+          "timers/promises",
+          "url",
+          "util"
+        ]
+      },
+      "codegen": [
+        {
+          "file": "@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
+          "line": 18,
+          "rule": "opaque import()"
+        },
+        {
+          "file": "@earendil-works/pi-ai/dist/auth/context.js",
+          "line": 10,
+          "rule": "opaque import()"
+        },
+        {
+          "file": "@earendil-works/pi-ai/dist/auth/context.js",
+          "line": 10,
+          "rule": "opaque import()"
+        },
+        {
+          "file": "@earendil-works/pi-ai/dist/auth/oauth/load.js",
+          "line": 17,
+          "rule": "opaque import()"
+        },
+        {
+          "file": "@earendil-works/pi-ai/dist/env-api-keys.js",
+          "line": 13,
+          "rule": "opaque import()"
+        },
+        {
+          "file": "@modelcontextprotocol/client/dist/ajvProvider-97rDpkRx.mjs",
+          "line": 2594,
+          "rule": "Function constructor"
+        },
+        {
+          "file": "openai/lib/EventStream.mjs",
+          "line": 36,
+          "rule": "Function reference"
+        },
+        {
+          "file": "openai/lib/EventStream.mjs",
+          "line": 123,
+          "rule": "Function reference"
         },
         {
           "file": "pi-web-access/dist/index.js",

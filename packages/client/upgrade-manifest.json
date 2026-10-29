@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "2050c7e36b8764a568383e4b55b2fefa763d683a81c0072dc65b5d4feb7c4a57"
+    "snapshotSha256": "604a1f6d9344cb8c2da2804ef0e0636dd5086e4c9a2859800e324f34c67c6b50"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "pi-subagents-installed-dependency",
+      "impact": "breaking",
+      "summary": "Pi subagents are the upstream pi-subagents 0.83.1 package loaded from its installed copy. Children run in-process or in pi-subagents' own runner and never re-enter the SDK, so the pi-subagent-print and pi-subagent-runner helper kinds and sdkDistributionManifest.piSubagentHelperKinds are removed; route only reservedHelperKinds through runSdkReservedHelperCommand. A single-file product's bundled re-entry, the sealed host and the keys-profile lane offer no subagent tool.",
+      "migration": "docs/spec.md#pi-subagents",
+      "items": [
+        "export:@byok-sdk/client#sdkDistributionManifest"
+      ]
+    },
     {
       "id": "local-tool-approval-host-only",
       "impact": "breaking",
@@ -695,6 +704,11 @@
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "storage-retention-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkDistributionManifest",
+      "change": "changed",
+      "entry": "pi-subagents-installed-dependency"
     },
     {
       "item": "export:@byok-sdk/client#validateDaemonConfig",

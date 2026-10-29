@@ -2,8 +2,11 @@ import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { formatToolAuthorizationDenial } from '../../tool-authorization';
 import { requestToolAuthorization, type ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
 
-/** Pi's `tool_call` hook runs before execution; a block becomes the tool's error result. */
-export function createPiToolAuthorizationHook(config: ToolAuthorizationIpcConfig): ExtensionFactory {
+/**
+ * Pi's `tool_call` hook runs before execution; a block becomes the tool's error
+ * result. In a native subagent child it names the child session as the agent.
+ */
+export function createPiToolAuthorizationHook(config: ToolAuthorizationIpcConfig, options: { subagentChild?: boolean } = {}): ExtensionFactory {
   return (pi) => {
     pi.on('tool_call', async (event, context) => {
       const verdict = await requestToolAuthorization(config, {
@@ -12,7 +15,7 @@ export function createPiToolAuthorizationHook(config: ToolAuthorizationIpcConfig
         input: event.input as Record<string, unknown>,
         cwd: context.cwd,
         ...(event.parentToolCallId === undefined ? {} : { parentToolCallId: event.parentToolCallId }),
-        ...(process.env.PI_SUBAGENT_CHILD === '1' ? { nativeAgentId: `pi-subagent:${process.pid}` } : {}),
+        ...(options.subagentChild ? { nativeAgentId: `pi-subagent:${context.sessionManager.getSessionId()}` } : {}),
       });
       if (verdict.decision === 'deny') return { block: true, reason: formatToolAuthorizationDenial(verdict) };
       return undefined;

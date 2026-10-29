@@ -280,60 +280,19 @@ describe('SDK-reserved helper host composition', () => {
   });
 });
 
-// A Pi subagent child re-enters the bundle through the helper host
-// (`subagents/spawn.ts`). The host routes the argv to the runtime-host payload
-// without a dispatcher or custody record.
-it('routes pi-subagent-runner to the runtime-host runner with exactly one config path', async () => {
-  const runner = vi.spyOn(rpcHost, 'runSubagentRunner').mockResolvedValue();
-  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-runner', '/tmp/run config.json'])).resolves.toBe(true);
-  expect(runner).toHaveBeenCalledWith('/tmp/run config.json');
-  for (const argv of [[], ['/a.json', '/b.json']]) {
-    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-runner', ...argv])).rejects.toThrow('invalid SDK-reserved helper command');
-  }
-  expect(runner).toHaveBeenCalledTimes(1);
-});
-
-// A product exits once the helper call resolves (README seam), so the runner
-// branch must not resolve before the subagent run has finished.
-it('resolves pi-subagent-runner only after the runner work has finished', async () => {
-  let finish!: () => void;
-  const work = new Promise<void>((resolve) => { finish = resolve; });
-  vi.spyOn(rpcHost, 'runSubagentRunner').mockReturnValue(work);
-  let settled = false;
-  const call = runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-runner', '/tmp/run.json']).then((value) => { settled = true; return value; });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(settled).toBe(false);
-  finish();
-  await expect(call).resolves.toBe(true);
-});
-
-it('routes pi-subagent-print to the runtime-host print child with its tail argv and maps a failed exit', async () => {
-  const print = vi.spyOn(rpcHost, 'runSubagentPrint').mockResolvedValueOnce(0).mockResolvedValueOnce(2);
-  const tail = ['-p', '--model', 'provider/model', 'Reply with exactly "OK".'];
-  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-print', ...tail])).resolves.toBe(true);
-  expect(print).toHaveBeenCalledWith(tail);
-  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-print', ...tail])).rejects.toThrow('pi-subagent-print exited 2');
-});
-
 // The published manifest is the dispatcher's contract: every listed kind is
 // routed, and every other second argument is refused before any helper runs.
 it('accepts exactly the manifest helper kinds and rejects every other kind', async () => {
   const runner = vi.spyOn(runners, 'runSdkReservedHelper').mockResolvedValue();
-  const subagentRunner = vi.spyOn(rpcHost, 'runSubagentRunner').mockResolvedValue();
-  const subagentPrint = vi.spyOn(rpcHost, 'runSubagentPrint').mockResolvedValue(0);
-  const { reservedHelperKinds, piSubagentHelperKinds } = sdkDistributionManifest;
-  expect(reservedHelperKinds.filter(kind => (piSubagentHelperKinds as readonly string[]).includes(kind))).toEqual([]);
+  const { reservedHelperKinds } = sdkDistributionManifest;
+  expect(Object.keys(sdkDistributionManifest)).not.toContain('piSubagentHelperKinds');
   for (const kind of reservedHelperKinds) {
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind])).resolves.toBe(true);
   }
   expect(runner.mock.calls.map(([kind]) => kind)).toEqual([...reservedHelperKinds]);
-  for (const kind of piSubagentHelperKinds) {
-    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, '/tmp/run.json'])).resolves.toBe(true);
-  }
-  expect(subagentRunner).toHaveBeenCalledTimes(1);
-  expect(subagentPrint).toHaveBeenCalledTimes(1);
+  // Pi subagent children run inside pi-subagents; nothing re-enters the helper host for them.
   for (const kind of [undefined, '', 'unknown', '__proto__', 'constructor', 'toString', 'hasOwnProperty',
-    'agent-memory', 'pi-subagent', 'Agent-message-mcp', 'agent-message-mcp ', 'pi-rpc\n']) {
+    'agent-memory', 'pi-subagent', 'pi-subagent-print', 'pi-subagent-runner', 'Agent-message-mcp', 'agent-message-mcp ', 'pi-rpc\n']) {
     await expect(runSdkReservedHelperCommand(kind === undefined ? [BYOK_SDK_HELPER_SUBCOMMAND] : [BYOK_SDK_HELPER_SUBCOMMAND, kind]))
       .rejects.toThrow('invalid SDK-reserved helper command');
   }

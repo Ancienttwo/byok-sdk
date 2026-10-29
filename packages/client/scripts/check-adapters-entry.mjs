@@ -59,8 +59,8 @@ assert.match(manifest.dependencies?.['@earendil-works/pi-coding-agent'] ?? '', E
 assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], nativeManifest.version);
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
 assert.equal(manifest.dependencies?.['pi-web-access'], '0.45.0');
-assert.equal(manifest.dependencies?.['pi-subagents'], undefined);
-assert.equal(manifest.devDependencies?.['pi-subagents'], '0.60.0');
+assert.equal(manifest.dependencies?.['pi-subagents'], '0.83.1');
+assert.equal(manifest.devDependencies?.['pi-subagents'], undefined);
 // The MCP client this package's own core is built on. `pi-mcp-adapter` is
 // retired: the SDK owns its MCP connection, observation and tool projection
 // (`src/mcp/`), so there is no second MCP authority in the graph to pin.

@@ -1,14 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolCall } from '../tool-authorization';
-import { readToolAuthorizationGateEnv, requestToolAuthorization, startToolAuthorizationIpc, TOOL_AUTHORIZATION_GATE_ENV } from '../tool-authorization-ipc';
-import { assertSubagentRunnerAuthorized } from '../subagents/tool-authorization-runner';
+import { readToolAuthorizationGateEnv, requestToolAuthorization, TOOL_AUTHORIZATION_GATE_ENV } from '../tool-authorization-ipc';
 import type { Session } from '../types';
 
 const roots: string[] = [];
@@ -18,10 +16,11 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   await Promise.all(sessions.splice(0).map(session => session.close()));
   await Promise.all(servers.splice(0).map(server => new Promise<void>((done, reject) => server.close(error => error ? reject(error) : done()))));
-  await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
+  // A pi-subagents session start runs `npm root -g`; its child can outlive the host briefly.
+  await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
-async function fixture(delegated = false) {
+async function fixture(delegated = false, childAgent = 'hook-child', background = false) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-tool-auth-')));
   roots.push(root);
   const agentDir = path.join(root, 'agent');
@@ -36,6 +35,8 @@ async function fixture(delegated = false) {
   if (delegated) {
     await fs.mkdir(path.join(agentDir, 'agents'));
     await fs.writeFile(path.join(agentDir, 'agents', 'hook-child.md'), '---\nname: hook-child\ndescription: Loopback child for execution-hook propagation\nmodel: hook-loopback/probe\ntools: write\n---\nComplete the delegated file operation.');
+    // An external CLI runner executes outside Pi's tool pipeline; the command does not exist.
+    await fs.writeFile(path.join(agentDir, 'agents', 'external-child.md'), '---\nname: external-child\ndescription: External CLI child the auto gate cannot see\nrunner:\n  type: external-cli\n  adapter: codex-exec\n  command: byok-absent-external-cli\n  promptDelivery: stdin\n---\nComplete the delegated file operation.');
   }
   const server = createServer(async (request, response) => {
     let bytes = '';
@@ -47,7 +48,10 @@ async function fixture(delegated = false) {
     const rootFirst = delegated && parent && ++parentRequests === 1;
     const childFirst = delegated && !parent && ++childRequests === 1;
     const tool = rootFirst
-      ? { name: 'subagent', arguments: JSON.stringify({ agent: 'hook-child', task: 'Write the target file', model: 'hook-loopback/probe', async: false, context: 'fresh', output: false, artifacts: false, timeoutMs: 20000 }) }
+      // An external CLI runner takes no model override and runs only in the background.
+      ? { name: 'subagent', arguments: JSON.stringify(childAgent === 'hook-child'
+        ? { agent: childAgent, task: 'Write the target file', model: 'hook-loopback/probe', async: background, context: 'fresh', output: false, artifacts: false, timeoutMs: 20000 }
+        : { agent: childAgent, task: 'Write the target file' }) }
       : childFirst || (!delegated && turn % 2 === 1)
         ? { name: 'write', arguments: JSON.stringify({ path: target, content: 'actual file content' }) }
         : undefined;
@@ -188,26 +192,20 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
   }, 45_000);
 
-  it('routes an SDK print child through the same parent gate', async () => {
-    const f = await fixture();
+  it('carries the parent gate into a background child in the pi-subagents runner process', async () => {
+    const f = await fixture(true, 'hook-child', true);
     const g = gate(f.cwd);
-    const ipc = await startToolAuthorizationIpc(g.toolAuthorization);
-    try {
-      const gatePath = path.join(f.root, 'tool-authorization.json');
-      await fs.writeFile(gatePath, JSON.stringify(ipc.config), { mode: 0o600, flag: 'wx' });
-      const child = spawn(process.execPath, [path.resolve(import.meta.dirname, '../../dist/bin/byok-pi-rpc.js'), '__byok_sdk_helper', 'pi-subagent-print',
-        '--model', 'hook-loopback/probe', '--mode', 'json', '-p', 'write the file'], {
-        cwd: f.cwd, env: { ...f.env, PI_SUBAGENT_CHILD: '1', [TOOL_AUTHORIZATION_GATE_ENV]: gatePath }, stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let stdout = ''; let stderr = '';
-      child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
-      const code = await new Promise<number | null>((done, reject) => { child.once('error', reject); child.once('close', done); });
-      expect(code, stderr).toBe(0);
-      expect(stdout).toContain('tool_authorization_denied');
-      expect(g.calls[0]?.nativeAgentId).toMatch(/^pi-subagent:/);
-      await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
-    } finally { await ipc.close(); }
-  }, 30_000);
+    const session = await startPreparedOperation(adapter(), { instruction: 'Delegate the file operation to hook-child in the background' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    sessions.push(session);
+    await finish(session);
+    // The background runner outlives the parent turn; wait for its gated write.
+    const deadline = Date.now() + 30_000;
+    while (!g.calls.some(call => call.toolName === 'write') && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+    const childCall = g.calls.find(call => call.toolName === 'write');
+    expect(childCall).toMatchObject({ input: { path: f.target } });
+    expect(childCall?.nativeAgentId).toMatch(/^pi-subagent:/);
+    await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 60_000);
 
   it('rejects malformed gate files and the replaced inline environment format', async () => {
     const f = await fixture();
@@ -219,12 +217,17 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     expect(readToolAuthorizationGateEnv).toThrow();
   });
 
-  it('refuses external subagent runners while a parent gate is present', () => {
-    vi.stubEnv(TOOL_AUTHORIZATION_GATE_ENV, '{}');
-    expect(assertSubagentRunnerAuthorized).toThrow(/^tool_authorization_unsupported: external-cli and external-job/);
-    vi.stubEnv(TOOL_AUTHORIZATION_GATE_ENV, undefined);
-    expect(assertSubagentRunnerAuthorized).not.toThrow();
-  });
+  it('refuses an external CLI subagent runner before it starts while the parent gate is present', async () => {
+    const f = await fixture(true, 'external-child');
+    const g = gate(f.cwd);
+    const session = await startPreparedOperation(adapter(), { instruction: 'Delegate the file operation to external-child' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
+    sessions.push(session);
+    await finish(session);
+    expect(g.calls.some(call => call.toolName === 'subagent')).toBe(true);
+    // pi-subagents refuses the launch from the SDK's required-for-all-runners registration.
+    expect(JSON.stringify(f.requests)).toMatch(/cannot run on runner\.type='external-cli': the host requires child extensions \(byok-tool-authorization\)/);
+    expect(g.calls.some(call => call.toolName === 'write')).toBe(false);
+  }, 45_000);
 
   it('declares no auto support on the durable lane', () => {
     expect(new PiAdapter({ durablePi: true }).descriptor.capabilities.toolAuthorizationAuto).toBe(false);
