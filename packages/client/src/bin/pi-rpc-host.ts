@@ -181,7 +181,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   const extensionFactories = [webExtension, createByokMcpExtension(config.mcp), subagentsExtension, createTodoExtension(localeAnchor)];
   // Register last: earlier handlers may rewrite the input the gate must judge.
   // The environment hands the same gate to SDK-owned native Pi subagents.
-  setToolAuthorizationGateEnv(config.toolAuthorization);
+  setToolAuthorizationGateEnv(config.toolAuthorization, join(dirname(args.configPath), 'tool-authorization.json'));
   if (config.toolAuthorization !== null) extensionFactories.push(createPiToolAuthorizationHook(config.toolAuthorization));
   let resourceAgentDir: string | undefined;
   if (config.agentUserContext === 'excluded') {

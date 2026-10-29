@@ -1,11 +1,12 @@
 import { randomBytes } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { isAbsolute } from 'node:path';
 import type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationVerdict, ToolCall } from './tool-authorization';
 
 /**
- * Private loopback address of one runtime's `auto` gate. The token is
- * inherited by SDK-owned child sessions, so it authenticates the channel, not
+ * Private loopback address of one runtime's `auto` gate. SDK-owned child sessions
+ * read the token from a private launch file, so it authenticates the channel, not
  * a boundary against same-user code.
  */
 export interface ToolAuthorizationIpcConfig {
@@ -35,15 +36,18 @@ export function parseToolAuthorizationIpcConfig(value: unknown): ToolAuthorizati
   return Object.freeze({ url: value.url, token: value.token, timeoutMs: value.timeoutMs as number });
 }
 
-export function setToolAuthorizationGateEnv(config: ToolAuthorizationIpcConfig | null): void {
+export function setToolAuthorizationGateEnv(config: ToolAuthorizationIpcConfig | null, filePath: string): void {
   if (config === null) delete process.env[TOOL_AUTHORIZATION_GATE_ENV];
-  else process.env[TOOL_AUTHORIZATION_GATE_ENV] = JSON.stringify(config);
+  else {
+    writeFileSync(filePath, JSON.stringify(config), { mode: 0o600, flag: 'wx' });
+    process.env[TOOL_AUTHORIZATION_GATE_ENV] = filePath;
+  }
 }
 
 /** Malformed inherited configuration must never turn a gated child into an ungated session. */
 export function readToolAuthorizationGateEnv(): ToolAuthorizationIpcConfig | undefined {
-  const encoded = process.env[TOOL_AUTHORIZATION_GATE_ENV];
-  return encoded === undefined ? undefined : parseToolAuthorizationIpcConfig(JSON.parse(encoded));
+  const filePath = process.env[TOOL_AUTHORIZATION_GATE_ENV];
+  return filePath === undefined ? undefined : parseToolAuthorizationIpcConfig(JSON.parse(readFileSync(filePath, 'utf8')));
 }
 
 function parseCall(value: unknown): ToolCall {

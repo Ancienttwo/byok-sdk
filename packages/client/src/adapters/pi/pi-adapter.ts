@@ -527,9 +527,9 @@ export class PiAdapter implements RuntimeAdapter {
               await gate.close();
               await startInput.scratch.release();
             } });
-            // mkdtemp creates the directory 0700. The one file in it is
+            // mkdtemp creates the directory 0700. Launch files in it are
             // created 0600 ('wx': a new file, so the mode applies at creation)
-            // and is removed on every start failure and on close. It holds
+            // and removed on every start failure and on close. The host config holds
             // `mcpEnv`, which already has no provider credential names
             // (`projectPiMcpEnvironment`).
             mcpConfigDir = startInput.scratch.sdkDir;

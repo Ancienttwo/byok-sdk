@@ -5545,8 +5545,9 @@ export {};
  *   it so that a child agent starts as its own top-level session.
  * - `BYOK_*`: this SDK's own control-plane variables (key custody).
  *
- * {@link buildAllowlistedEnv} is the narrow form. Only two Pi lanes use it:
- * the durable Pi tool shell and the prepared Pi lane on the Pi auth store.
+ * {@link buildAllowlistedEnv} is the narrow form. It is used by the durable
+ * Pi tool shell, the prepared Pi lane on the Pi auth store, and Hermes launcher
+ * or custody paths.
  *
  * Every name in every list may be an exact match or a `*`-suffixed prefix
  * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
