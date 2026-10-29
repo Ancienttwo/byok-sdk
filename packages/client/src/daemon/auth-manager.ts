@@ -172,9 +172,8 @@ export class AuthManager {
   }
 
   /**
-   * Re-arm after {@link stop}. The daemon calls it when a start or pair is
-   * requested, so a stop requested after that cancels the operation's own
-   * credential calls instead of being undone by them.
+   * Re-arm after {@link stop}. The daemon calls it inside a start or pair's
+   * lifecycle slot, after checking that no later stop cancelled the request.
    */
   resume(): void {
     this.stopped = false;

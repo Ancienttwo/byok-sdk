@@ -55,7 +55,7 @@ export function checkServerUrl(daemonScope: DaemonScope): void {
 }
 
 export async function pair(daemonScope: DaemonScope, pairingCode: string, options?: { readonly verificationSecret?: string }): Promise<DeviceEnrollment> {
-  const { checkServerUrl, memberRecords, runLifecycleMutation, pairUnderLease } = daemonScope;
+  const { checkServerUrl, memberRecords, pairUnderLease } = daemonScope;
   checkServerUrl();
   const verificationSecret = options?.verificationSecret === undefined ? undefined : checkVerificationSecret(options.verificationSecret);
   if (verificationSecret !== undefined && memberRecords === undefined) {
@@ -65,7 +65,7 @@ export async function pair(daemonScope: DaemonScope, pairingCode: string, option
   // operation may borrow the daemon's retained cross-process lease, so pair,
   // start, stop, control shutdown and unpair must never decide independently
   // who releases that shared lease.
-  const record = await runAuthOperation(daemonScope, () => runLifecycleMutation(() => pairUnderLease(pairingCode, verificationSecret)));
+  const record = await runAuthOperation(daemonScope, () => pairUnderLease(pairingCode, verificationSecret));
   return Object.freeze({ deviceId: record.deviceId });
 }
 

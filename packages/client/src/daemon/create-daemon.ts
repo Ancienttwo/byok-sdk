@@ -901,6 +901,7 @@ function buildDaemon(
     sealedUploads: undefined,
     startInProgress: false,
     pendingAuthOperations: 0,
+    authCancellationEpoch: 0,
     latestSealedTasks: undefined,
     latestSealIdentity: undefined,
     retireSealedMember: undefined,

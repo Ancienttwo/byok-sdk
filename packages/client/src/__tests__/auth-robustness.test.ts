@@ -253,6 +253,44 @@ describe('#1117 keychain command deadline and cancellation', () => {
     expect(await renewal).toMatchObject({ name: 'DeviceCredentialCommandAbortedError', reason: 'cancelled' });
   });
 
+  it.each(['pair', 'start'] as const)('a %s requested after stop starts with active auth', async (operation) => {
+    const keyring = linuxKeyring();
+    const storeDir = await tmpDir('byok-auth-after-stop-');
+    const config = { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir };
+    const makeDaemon = () => createDaemonWithAdapters(config, [new StubRuntimeAdapter()], {
+      deviceCredentials: new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: keyring.run }),
+    });
+    daemon = makeDaemon();
+    await daemon.pair('pairing-code');
+    // A fresh instance must read the stored credential during start.
+    daemon = makeDaemon();
+    const stopped = daemon.stop();
+    const next = operation === 'pair' ? daemon.pair('pairing-code') : daemon.start();
+    const outcome = next.then(() => undefined, (error: unknown) => error);
+    await stopped;
+    expect(await outcome).toBeUndefined();
+    if (operation === 'start') await waitForDaemonOpen(daemon);
+  });
+
+  it.each(['pair', 'start'] as const)('a later coalesced stop cancels a queued %s before credential access', async (operation) => {
+    const keyring = linuxKeyring();
+    const storeDir = await tmpDir('byok-auth-queued-stop-');
+    daemon = createDaemonWithAdapters(
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
+      [new StubRuntimeAdapter()],
+      { deviceCredentials: new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: keyring.run }) },
+    );
+    await daemon.pair('pairing-code');
+    server.httpRequests.length = 0;
+    const firstStop = daemon.stop();
+    const next = operation === 'pair' ? daemon.pair('pairing-code') : daemon.start();
+    const outcome = next.then(() => undefined, (error: unknown) => error);
+    const laterStop = daemon.stop();
+    await Promise.all([firstStop, laterStop]);
+    expect(await outcome).toMatchObject({ name: 'AuthRequestAbortedError', reason: 'stopped' });
+    expect(server.httpRequests.some((request) => request.pathname === '/byok/pair')).toBe(false);
+  });
+
   it('daemon.stop() cancels a start hung in its startup keychain read and kills the child', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
     const keyring = linuxKeyring();
