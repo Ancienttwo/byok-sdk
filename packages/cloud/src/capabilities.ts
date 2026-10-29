@@ -16,6 +16,7 @@
  * routes, so the declaration and the surface cannot disagree.
  */
 import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok-sdk/core';
+import type { ByokCloudOptions } from './cloud';
 
 /** The hosted capability vocabulary this package knows how to serve. */
 export const CLOUD_CAPABILITIES = {
@@ -104,8 +105,8 @@ export const CLOUD_CAPABILITIES = {
    * The E2EE member device routes (#654): register a member key bundle,
    * append and read the member chain, put and read scope key packages, and
    * read the relayed client pairing MAC. Composition-bound like
-   * `truth.records`: declaring it without an `e2eeMemberStore` is refused at
-   * construction.
+   * `truth.records`: declaring it without an `e2eeMemberStore`, or passing one
+   * without declaring it, is refused at construction.
    */
   e2eeMember: 'e2ee.member',
   /**
@@ -151,6 +152,49 @@ export interface FullCapabilityDeclarationOptions {
   readonly includeHostMcpTaskContext?: boolean;
   /** `e2ee.member` is default-off: the composition must supply an `e2eeMemberStore`. */
   readonly includeE2eeMember?: boolean;
+}
+
+/**
+ * Each port-bound capability and the `createByokCloud` ports that serve it.
+ * The declaration and the ports agree in both directions (#1096):
+ * `createByokCloud` refuses a capability declared without all of its ports and
+ * a port passed without its capability, and `capabilityDeclarationForPorts`
+ * declares exactly the capabilities whose ports are all present.
+ */
+export const CAPABILITY_PORTS = {
+  [CLOUD_CAPABILITIES.blobsContentProxy]: ['blobContentProxy'],
+  [CLOUD_CAPABILITIES.truthRecords]: ['truthCommitter', 'truthObjectDownloads'],
+  [CLOUD_CAPABILITIES.skillPacks]: ['skillPacks'],
+  [CLOUD_CAPABILITIES.agentMemoryProjection]: ['agentMemoryProjectionAuthorizer', 'agentMemoryProjectionStore'],
+  [CLOUD_CAPABILITIES.e2eeMember]: ['e2eeMemberStore'],
+} as const satisfies Partial<Record<CloudCapability, readonly (keyof ByokCloudOptions)[]>>;
+
+/** The `createByokCloud` ports a capability is bound to. */
+export type CapabilityPorts = Pick<
+  ByokCloudOptions,
+  (typeof CAPABILITY_PORTS)[keyof typeof CAPABILITY_PORTS][number]
+>;
+
+/** Whether every port `capability` is bound to is present. */
+function portsServe(ports: CapabilityPorts, capability: keyof typeof CAPABILITY_PORTS): boolean {
+  return CAPABILITY_PORTS[capability].every((port) => ports[port] !== undefined);
+}
+
+/**
+ * The declaration a composition's ports back: every standard capability, each
+ * port-bound capability exactly when all of its ports are present, and never
+ * `host-mcp-task-context`, which no port can prove (§8.2(1)).
+ */
+export function capabilityDeclarationForPorts(ports: CapabilityPorts, version = 1): CapabilityDeclaration {
+  const full = fullCapabilityDeclaration(version, {
+    includeTruthRecords: portsServe(ports, CLOUD_CAPABILITIES.truthRecords),
+    includeSkillPacks: portsServe(ports, CLOUD_CAPABILITIES.skillPacks),
+    includeAgentMemoryProjection: portsServe(ports, CLOUD_CAPABILITIES.agentMemoryProjection),
+    includeE2eeMember: portsServe(ports, CLOUD_CAPABILITIES.e2eeMember),
+  });
+  return portsServe(ports, CLOUD_CAPABILITIES.blobsContentProxy)
+    ? full
+    : { ...full, capabilities: full.capabilities.filter((capability) => capability !== CLOUD_CAPABILITIES.blobsContentProxy) };
 }
 
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */

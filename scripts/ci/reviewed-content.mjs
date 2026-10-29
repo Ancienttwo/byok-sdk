@@ -31,6 +31,8 @@ function revertUndiciMove(before, after, field) {
 const UPGRADE_MANIFEST_GATE = 'node scripts/release/check-upgrade-manifest.mjs';
 const UPGRADE_MANIFEST_TEST = 'scripts/release/check-upgrade-manifest.test.mjs';
 const CLIENT_FILES = Object.freeze(['dist', 'README.md', 'LICENSE']);
+// #1103: the runtime contract suite's own run, exactly; the runtime-contract CI family invokes it.
+export const RUNTIME_CONTRACT_SCRIPT = 'vitest run --config src/__tests__/runtime-contract/vitest.config.ts';
 
 // #925 wire v4: the protocol compatibility oracle moves to 0.30.2, the last
 // v3 release, and the 0.27.0 floor alias goes. Only these exact edges and
@@ -483,6 +485,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     // #1102: the upgrade-manifest gate command, exactly.
     if (before.scripts?.['check:upgrade-manifest'] === undefined
       && after.scripts?.['check:upgrade-manifest'] === UPGRADE_MANIFEST_GATE) delete after.scripts['check:upgrade-manifest'];
+    // #1094: admit only the exact additive setup-doc generator/check commands.
+    for (const [name, command] of Object.entries({
+      'docs:device-setup': 'node scripts/docs/device-setup.mjs --write',
+      'check:device-setup': 'node scripts/docs/device-setup.mjs',
+    })) {
+      if (before.scripts?.[name] === undefined && after.scripts?.[name] === command) delete after.scripts[name];
+    }
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
     if (!oldCommand?.startsWith(prefix) || !newCommand?.startsWith(prefix)) throw new Error('Unreviewed test command');
@@ -490,7 +499,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     let index = 0;
     for (const test of newTests) {
       if (test === oldTests[index]) { index++; continue; }
-      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || test === UPGRADE_MANIFEST_TEST)
+      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || test === UPGRADE_MANIFEST_TEST || test === 'scripts/architecture/dependency-graph.test.mjs' || test === 'scripts/docs/device-setup.test.mjs')
         || oldTests.includes(test) || !existsSync(resolve(cwd, test))) throw new Error('Only existing CI contract tests may be added');
     }
     if (index !== oldTests.length || new Set(newTests).size !== newTests.length) throw new Error('Existing tests must remain in order without duplicates');
@@ -509,8 +518,16 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       if (before.imports?.[key] === undefined && isDeepStrictEqual(after.imports?.[key], entry)) delete after.imports[key];
       const smoke = ' && node scripts/check-hermes-session-entry.mjs';
       if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
+      if (before.scripts?.['test:runtime-contract'] === undefined && after.scripts?.['test:runtime-contract'] === RUNTIME_CONTRACT_SCRIPT) {
+        delete after.scripts['test:runtime-contract'];
+      }
       // #1102 ships the upgrade manifest in the client tarball: exactly one appended files entry.
       if (isDeepStrictEqual(before.files, CLIENT_FILES) && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json'])) {
+        after.files = before.files;
+      }
+      // #1094 ships the generated DaemonConfig schema beside the upgrade manifest: exactly one appended files entry.
+      if (isDeepStrictEqual(before.files, [...CLIENT_FILES, 'upgrade-manifest.json'])
+        && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json'])) {
         after.files = before.files;
       }
       // #635 adds the public transport-free test-double entry; its bundle is checked by check-adapters-entry.mjs.

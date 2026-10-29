@@ -123,10 +123,11 @@ flowchart TB
 
 检查覆盖：
 
-- 发布的 package 的 `dependencies` 与上表的实测边一一对应。私有的 `conformance` 是例外：`src/simulator/harness.ts:37` 值导入 `@byok-sdk/testkit`，而 `testkit` 只声明为 devDependency。
-- `scripts/release/check-package-graph.mjs` 检查发布集合与版本对齐（`:7-29`），并在 manifest 层守住两条方向：训练线 package 的运行时依赖图不得到达 `keys`（`:286-300`）；`keys` 只能依赖 `core`、不得依赖 `protocol`（`:302-322`）。它还检查 client 依赖的纯度（`:324-375`）。除这两条外，它不检查层与层之间的方向。
-- `scripts/api-surface/check-api-surface.mjs` 与 `entry-closure.mjs` 锁公开 API 和入口闭包，不检查 package 内部目录方向。
-- 没有检查的部分：上述两条以外的 package 级方向（靠 `package.json` 与 review 维持）、源码 import 与 manifest 是否一致、package 内部的目录方向与文件级环（R-L1、R-L2）。仓库没有 eslint、dependency-cruiser、madge 或 biome 配置。
+- `bun run check:release-graph` 调用 [`scripts/architecture/dependency-graph.mjs`](../../scripts/architecture/dependency-graph.mjs)：使用已安装 TypeScript 7 的 AST API 区分类型边和值边，解析 workspace export 到源码，保留 barrel re-export 边以检测文件级环；同时检查 workspace manifest 的运行时依赖方向与源码值导入的 `dependencies` 声明。
+- client 目录层级为入口（`bin`、`lifecycle`、`diagnostics`、`testing`）→ `daemon` → runtime 适配 → 共享；cloud 为 `composition` → `cloud.ts` → `api` / `handlers` / `router` → `stores` → 根领域文件 → 叶子目录。同层允许，纯 re-export 入口不计逆层边，但仍参与环检测。
+- [`dependency-baseline.json`](../../scripts/architecture/dependency-baseline.json) 记录当前 client/cloud 的逆层边、环内每条边，以及 conformance → testkit 的 manifest 缺口。当前 main 已有 23 条 client 直接逆层边（上表和 R-L1 的 24 条为旧快照）。新违规或已消失但未删除的基线项均失败；CI 还用精确 `CI_BASE` 检查基线不得增加。基线清空后可删除文件，检查等同零容忍。首次引入基线由本 PR review 确认。
+- `node --test scripts/architecture/dependency-graph.test.mjs` 以合成 fixture 锁定 AST API 口径、动态 import、barrel 环、分层与基线单调性。检查只扫描上述非测试 TypeScript 源码；JS/vendor 及非字面量动态模块表达式不属于该静态图。
+- release checker 继续检查发布集合、版本、client 安装纯度及训练线不得到达 keys；api-surface 检查公开 API 和入口闭包。examples K4/K8 的平台闭包与 timeline schema 迁移不在此 checker 的首批范围内，仍需独立完成 #1098 的相应验收项。
 
 ## 3. 模块视图
 
@@ -249,7 +250,7 @@ flowchart LR
 
 | 模块 | 职责 | 关键锚点 |
 | --- | --- | --- |
-| `cloud.ts` | 校验 capability 声明与 ports，登记路由，组装 `ByokCloud` 的全部方法。 | `packages/cloud/src/cloud.ts:1021`（入口）、`:1025`（`assertNoOverDeclaration`）、`:1077-1340`（路由表）、`:1893-1916`（steer 闸门）、`:2303`（`submitAgentExecution`） |
+| `cloud.ts` | 校验 capability 声明与 ports，登记路由，组装 `ByokCloud` 的全部方法。 | `packages/cloud/src/cloud.ts:1021`（入口）、`:1024`（`assertDeclarationMatchesPorts`，双向）、`:1077-1340`（路由表）、`:1893-1916`（steer 闸门）、`:2303`（`submitAgentExecution`） |
 | `api/` | 从 `cloud.ts` 拆出的 Host API：`enqueueAgentOffer`、`cancelTask`、`readTaskResult` 等。 | `packages/cloud/src/cloud.ts:2390-2462` 处挂接 |
 | `inbound.ts` | 设备上行消息的唯一闸门：`conn.hello` 能力快照、claim CAS、终态 first-terminal-wins、cancellation 标记优先。 | `packages/cloud/src/inbound.ts:585-602`、`:838-851`、`:950-965`、`:1000` |
 | `handlers/` | HTTP 路由处理器，按 `public`、`device`、`proof`、`presigned` 四类凭据登记。 | `packages/cloud/src/router/registry.ts:32`；`handlers/auth.ts:51-57`；cursor ack 见 `handlers/events.ts:134-150` |
@@ -260,7 +261,7 @@ flowchart LR
 
 | 组合 | 用到的内核 | 附加的东西 |
 | --- | --- | --- |
-| `server`（Topology L） | `createByokCloud`，固定 `fullCapabilityDeclaration()`（`packages/server/src/index.ts:418`） | `TaskEventRelay`、`WakeScheduler`、`ProjectionWaiters`、`TaskHandle`、`tasks.events`；memory 或 SQLite stores（`packages/server/src/stores/sqlite/`）；`hono.all('*')` 整体转发（`:449`） |
+| `server`（Topology L） | `createByokCloud`，声明由 ports 推导：`capabilityDeclarationForPorts`（`packages/server/src/index.ts:410,419`） | `TaskEventRelay`、`WakeScheduler`、`ProjectionWaiters`、`TaskHandle`、`tasks.events`；memory 或 SQLite stores（`packages/server/src/stores/sqlite/`）；`hono.all('*')` 整体转发（`:449`） |
 | `cloud-dataplane`（Topology H） | Host 自己调 `createByokCloud` | Postgres stores 与迁移（`deploy/sql/` 下 30 个有序迁移）、R2 blob、`LISTEN byok_mailbox_wake`（`packages/cloud-dataplane/src/mailbox-wake.ts:10,99`） |
 | `ui-runtime` | 只读 `ActivityTail` 与审批 timeline | `projectTimeline`、`replayTimeline` 的纯函数投影 |
 
@@ -491,7 +492,7 @@ sequenceDiagram
 | ID | 级别 | 问题 | 证据 | 方向与跟踪 |
 | --- | --- | --- | --- | --- |
 | R-L1 | 中 | client 内部目录没有方向规则。按 §3.1 的四层与口径，逆层值导入有 24 条：adapters → daemon 11（其中 8 条指向 `daemon/environment.ts`）、根模块 → daemon 4、daemon → lifecycle 3、agent-memory → bin 2、daemon → bin 1、根模块 → bin 1、根模块 → subagents 1、util → lifecycle 1。同层互指：diagnostics ↔ bin（7 / 3）、runtime ↔ adapters（2 / 4）。文件级环 3 个：`daemon/task-runner.ts` 与 `task-runner/` 下 14 个阶段文件；经公开入口 `index.ts` 的 `bin/runtime-probe.ts` 与 `diagnostics/` 的 4 个文件；`agent-home-readers.ts` ↔ `agent-home-reader-retention.ts`。 | §3.1 图；`packages/client/src/daemon/assertion-client.ts` → `bin/control-client.ts`；`packages/client/src/agent-memory/prepared-capability.ts` → `bin/agent-memory-mcp-server.ts`；`packages/client/src/daemon/task-runner/approvals.ts:9`；`packages/client/src/bin/runtime-probe.ts:2` | `bin/` 只留 argv 外壳，库代码移出；`environment.ts`、`service-environment.ts` 等被下层使用的原语下沉；TaskRunner 抽成纯 reducer。[#1099](https://github.com/Ancienttwo/byok-sdk/issues/1099)；检查由 [#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098) 提供，以只减不增的基线上线。 |
-| R-L2 | 低 | `cloud.ts` 仍是 2,565 行的组合点，`steerTask` 与 `submitAgentExecution` 还在其中。子目录对它没有值导入，§3.2 图里的双向依赖来自同目录的领域文件。文件级只有 `inbound.ts ↔ task-agent-message.ts` 一个环。 | `packages/cloud/src/cloud.ts:1814,2303`；`packages/cloud/src/api/offers.ts:1-7`（`import type`）；`packages/cloud/src/inbound.ts:1`；`packages/cloud/src/task-agent-message.ts:7` | steer 与 submit 移入 `api/`；`parseAgentMessageDisposition` 移到叶子文件以拆环；目录检查把 `cloud.ts` 与领域文件分开计算。[#1100](https://github.com/Ancienttwo/byok-sdk/issues/1100)。 |
-| R-L3 | 中 | 内嵌 `server` 把 `e2eeMemberStore` 传给 `createByokCloud`，但用不带参数的 `fullCapabilityDeclaration()`，它默认不含 `e2ee.member`、`truth.records`、`skills.pack`、`agent.memory.projection`、`host-mcp-task-context`，所以这些路由在 Topology L 永远不挂载，Host 看到的是 404。目前没有下游报告。 | `packages/server/src/index.ts:413,418`；`packages/cloud/src/capabilities.ts:157-178`；`packages/cloud/src/cloud.ts:1260` | owner 已定（Q1）：删掉传入的 store，能力声明与 ports 双向校验，声明由 ports 推导。`SqliteE2eeMemberStore` 还承担 proof receipt 的保留（`packages/server/src/stores/sqlite/index.ts:1438-1444`），删除前先拆出。[#1096](https://github.com/Ancienttwo/byok-sdk/issues/1096)。 |
+| R-L2 | 低 | 已收口（[#1100](https://github.com/Ancienttwo/byok-sdk/issues/1100)）。`createByokCloud` 只剩能力声明校验、路由登记和 `ByokCloud` 组装；`steerTask`、`submitAgentExecution` 与其余 Host API 按 #1012 的命名空间方式移到 `api/`，共享的入队闸门在 `api/enqueue.ts`。`parseAgentMessageDisposition` 移到叶子文件 `agent-message-disposition.ts`，cloud 的文件级值导入环为 0。`cloud.ts` 其余行数是公开类型 `ByokCloudOptions` 与 `ByokCloud`。 | `packages/cloud/src/cloud.ts`（`createByokCloud`）；`packages/cloud/src/api/steering.ts`；`packages/cloud/src/api/agent-executions.ts`；`packages/cloud/src/agent-message-disposition.ts` | 剩余：#1098 的目录检查把 `cloud.ts` 与领域文件分开计算。 |
+| R-L3 | 中 | 内嵌 `server` 把 `e2eeMemberStore` 传给 `createByokCloud`，但用不带参数的 `fullCapabilityDeclaration()`，它默认不含 `e2ee.member`、`truth.records`、`skills.pack`、`agent.memory.projection`、`host-mcp-task-context`，所以这些路由在 Topology L 永远不挂载，Host 看到的是 404。目前没有下游报告。 | `packages/server/src/index.ts:413,418`；`packages/cloud/src/capabilities.ts:157-178`；`packages/cloud/src/cloud.ts:1260` | 已修（#1096）：server 不再传 `e2eeMemberStore`，SQLite 的 E2EE 存储已删除；能力声明与 ports 双向校验，server 的声明由 ports 推导。proof receipt 的保留拆成独立的 `SqliteProofRequestReceiptStore` 与 `SqliteProofReceiptRetentionAuthority`（`packages/server/src/stores/sqlite/proof-receipts.ts`）。见[迁移说明](process-namespace-topology.md#capability-ports-migration)。 |
 | R-L4 | 低 | `ui-runtime` 有 2 条对 `cloud` 的值导入（`TimelineEventSchema` 等），浏览器端打包会带入这部分 cloud 代码。 | `packages/ui-runtime/src/timeline.ts:1-5`；`packages/ui-runtime/src/approval-timeline.ts:5` | 若 schema 属于契约，移到 `protocol`；否则在 api-surface 里锁定并写明理由。[#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098)。 |
 | R-L5 | 低 | package 级方向没有 checker，目前靠 `package.json` 与 review 维持；`check-package-graph.mjs` 只查发布集合、依赖纯度和两条 manifest 方向。源码导入与 manifest 也可能不一致（`conformance` → `testkit`）。 | §2 检查覆盖 | `check:release-graph` 加方向规则，并核对源码值导入都已在 manifest 声明；被下游复制的示例纳入检查。[#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098)。 |

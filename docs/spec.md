@@ -303,8 +303,15 @@ breaking cut. Breaking changes ship only in a MINOR: there is no PATCH
 exception (Q8, owner 2026-10-29). Every Host-visible change since the last
 release is an entry in the upgrade manifest that `@byok-sdk/client` ships, and
 `bun run check:upgrade-manifest` fails a PATCH that carries a breaking entry
-([upgrade manifest](upgrade-manifest.md)). A version bump does not authorize
-publish. The current aligned release is `0.31.0`; publication requires separate
+([upgrade manifest](upgrade-manifest.md)). Before a Host switches versions,
+the candidate build checks the existing local stores read-only and reports
+each one as accepted, new-path-repair or rejected. Each package checks the
+store it owns: `inspectDaemonStores` in client (also
+`byok-agent upgrade check --store`), `inspectSqliteStore` in server and
+`inspectProviderProfileStore` in keys. All three return core's
+`StoreCompatibility`. Checked-in stores written by recent releases pin the
+verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
+A version bump does not authorize publish. The current aligned release is `0.31.0`; publication requires separate
 release authorization and registry readback. The packed and published keys
 `@byok-sdk/core` edge must be the exact current release, `0.31.0`, proven from
 an isolated standard npm install rather than the workspace graph.
@@ -3768,3 +3775,43 @@ still reach any file, network or local resource the OS user can. File-scope
 grants (additional workspaces, canonical-path enforcement) remain open under
 #1061. The loopback gate token is inherited by SDK child sessions and does not
 isolate against same-user code.
+
+## Daemon configuration contract (#1094)
+
+The [device setup guide](device-setup.md#configuration) owns configuration
+validation, effective-value readback, field tiers and operator workflows.
+`DaemonConfig` remains the field authority; its generated JSON schema and
+upgrade manifest track the public contract.
+
+### Recommended host layout
+
+`resolveHostLayout({ productId, productName, platform?, homeDir?, env? })`
+returns the recommended local directories of a Host product. It is pure (no
+file is read or created), so an installer can call it for any of `darwin`,
+`linux` and `win32`. It is the only definition of these paths:
+`DeviceStore.resolveDir`, `byok-agent service install` and
+`DaemonEffectiveConfig.directories` use the same functions.
+
+| Directory | Owner | darwin | linux | win32 |
+| --- | --- | --- | --- | --- |
+| `storeDir` (`DaemonConfig.storeDir`; unset means this path) | SDK | `~/.byok/<productId>` | `~/.byok/<productId>` | `%USERPROFILE%\.byok\<productId>` |
+| `hostStorageRoot` (`agentHome.hostStorageRoot`) | Host | `~/Library/Application Support/<productName>` | `$XDG_DATA_HOME/<productId>` (default `~/.local/share/<productId>`) | `%LOCALAPPDATA%\<productName>` (default `~\AppData\Local\<productName>`) |
+| `agentHomes` = `<hostStorageRoot>/agents` | SDK | | | |
+| `logDir` = `<storeDir>/service-logs` | SDK (service manager output) | | | |
+
+The Host keeps its config file and its own state outside `storeDir`. The
+store stays short on purpose: an application-data path is often too long for
+runtime Unix sockets under `<storeDir>/tmp`. The result reports where execution
+scratch goes with that store (`scratchRoot.source` `store` or `short-root`)
+and its socket-path byte budget, by the same rule the daemon applies (#493),
+on the lexical path; `config check` reports the value a daemon resolves.
+`productId` and `productName` must each be one portable path segment and
+`homeDir` must be absolute for the platform; otherwise the helper throws
+`HostLayoutInputError` (`code: 'host_layout_input_invalid'`, `field`).
+Existing stores are not moved. `DeviceStore.defaultDir` is removed; a Host
+that called it uses `resolveHostLayout(...).storeDir`.
+
+### Removed DaemonConfig fields
+
+See the [generated removed-field migration table](device-setup.md#removed-fields).
+This anchor remains the target of typed removed-field errors.

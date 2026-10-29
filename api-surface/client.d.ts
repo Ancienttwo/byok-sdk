@@ -2045,7 +2045,14 @@ export interface AgentEgressStatus {
  */
 export declare const DEFAULT_AGENT_EGRESS_POLICY: Readonly<AgentEgressPolicy>;
 export declare class AgentEgressPolicyError extends Error {
-    constructor(message: string);
+    readonly issues: readonly {
+        path: readonly (string | number)[];
+        message: string;
+    }[];
+    constructor(message: string, issues: readonly {
+        path: readonly (string | number)[];
+        message: string;
+    }[]);
 }
 /** Resolve/validate once at construction; unknown policy shapes never become an implicit default. */
 export declare function resolveAgentEgressPolicy(policy: AgentEgressPolicy | undefined): Readonly<AgentEgressPolicy>;
@@ -3144,6 +3151,8 @@ export declare class AuthManager {
     private credentialMutationTail;
     /** The sole cancellation authority for the request currently inside the serialized credential mutation. */
     private activeRequest;
+    private lastRenewedAt;
+    private nearExpiryRenewals;
     private readonly credentials;
     private readonly requestDeadlineMs;
     constructor(opts: AuthManagerOptions);
@@ -3165,6 +3174,7 @@ export declare class AuthManager {
     /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */
     private markRevoked;
     private scheduleProactiveRenewal;
+    private msUntilRenewAllowed;
     /**
      * Bounds one complete auth exchange rather than fetch alone. Keeping the
      * controller active through `json()`/`text()` makes a non-cooperative or
@@ -3222,6 +3232,280 @@ export declare class BlobClient implements BlobResolver {
         readonly idempotencyKey?: string;
     }): Promise<BlobRef>;
 }
+// ==== @byok-sdk/client dist/daemon/config-schema/check.d.ts ====
+import type { LocalAgentReleaseIdentity } from '../../release-identity';
+import type { RuntimeAdapter } from '../../types';
+import { type DaemonEffectiveConfig } from './effective';
+import { type DaemonConfigIssue, type DaemonConfigSource } from './validate';
+export interface DaemonConfigCheckOptions {
+    readonly source: DaemonConfigSource;
+    /**
+     * `cli`: the distribution's release identity, added after validation,
+     * because a config file must not carry `localAgentRelease`.
+     */
+    readonly localAgentRelease?: LocalAgentReleaseIdentity;
+    /** The adapters a Host passes to `createDaemonWithAdapters`. Absent: the set `createDaemon` builds. */
+    readonly adapters?: readonly RuntimeAdapter[];
+}
+export interface DaemonConfigCheck {
+    /** No `error` issue. A caller that treats warnings as failures (`config check --strict`) checks `issues`. */
+    readonly ok: boolean;
+    readonly issues: readonly DaemonConfigIssue[];
+    /** The effective values, when the config would construct a daemon. */
+    readonly effective?: DaemonEffectiveConfig;
+}
+/**
+ * Validates a `DaemonConfig` without constructing a daemon and, when it
+ * would construct, reports its effective values (#1094). Literal problems
+ * come from {@link validateDaemonConfig}; a value daemon construction would
+ * refuse (a range, a cross-field rule, a scratch root past the socket budget)
+ * is an `invalid_value` error. Reads the filesystem (helper assets, store
+ * path canonicalization) but writes nothing and starts no process.
+ */
+export declare function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOptions): DaemonConfigCheck;
+// ==== @byok-sdk/client dist/daemon/config-schema/effective.d.ts ====
+import type { RuntimeAdapter } from '../../types';
+import type { DaemonConfig, DaemonStatus } from '../create-daemon';
+import type { DaemonConfigIssue } from './validate';
+/**
+ * How daemon construction resolved the SDK Agent memory filesystem helper
+ * (#603, #614).
+ *
+ * - `not-needed`: no Agent home, or memory is off and no memory feature is configured.
+ * - `native`: Linux; the descriptor backend needs no helper.
+ * - `resolved`: macOS or Windows x64; the SDK release helper at `path` passed its digest check.
+ * - `missing`: macOS or Windows x64, but the helper did not resolve; memory is
+ *   silently unavailable (#603). `reason` says why.
+ * - `unsupported-platform`: no secure memory backend on this platform.
+ */
+export type DaemonMemoryHelperResolution = {
+    readonly state: 'not-needed' | 'native' | 'unsupported-platform';
+} | {
+    readonly state: 'resolved';
+    readonly path: string;
+} | {
+    readonly state: 'missing';
+    readonly reason: string;
+};
+/** One MCP server a task of this daemon may get. */
+export interface DaemonEffectiveMcpServer {
+    readonly name: string;
+    /** `sdk-reserved`: an SDK helper. `host-toolset`: a server of `DaemonConfig.mcpToolsets`. */
+    readonly kind: 'sdk-reserved' | 'host-toolset';
+    /** `per-task`: mounted for each task that `when` describes. `off` / `unavailable`: never mounted. */
+    readonly mount: 'per-task' | 'off' | 'unavailable';
+    /** Which tasks get it (`per-task`), or why it is never mounted. */
+    readonly detail: string;
+}
+/** One runtime adapter of this daemon. */
+export interface DaemonEffectiveRuntime {
+    readonly id: string;
+    /** `sdk-built`: `createDaemon` built it from config. `injected`: passed to `createDaemonWithAdapters`. */
+    readonly source: 'sdk-built' | 'injected';
+    /** Whether an `auto` tool-authorization offer can run on it. */
+    readonly toolAuthorizationAuto: boolean;
+    /**
+     * The isolation options `createDaemon` gives an SDK-built adapter. Absent
+     * for an injected adapter, whose options the Host set when it built it.
+     */
+    readonly isolation?: Readonly<Record<string, string>>;
+}
+/**
+ * Effective values of one daemon's configuration (#1094): what it resolved
+ * from `DaemonConfig`, beyond the literal fields. `byok-agent config check`
+ * and `Daemon.status().config` both return this, from the same function.
+ */
+export interface DaemonEffectiveConfig {
+    /** Version of the generated `daemon-config.schema.json` this daemon validates against. */
+    readonly schemaVersion: number;
+    /** Unknown-field warnings; a daemon starts with them (Q4'). */
+    readonly warnings: readonly DaemonConfigIssue[];
+    readonly directories: {
+        readonly storeDir: {
+            readonly path: string;
+            readonly source: 'config' | 'default';
+        };
+        /** `agentHome.hostStorageRoot`, resolved. Absent without an Agent home. */
+        readonly hostStorageRoot?: string;
+        /** `<hostStorageRoot>/agents`, the SDK-owned parent of every Agent home. */
+        readonly agentHomes?: string;
+        /** `<storeDir>/service-logs`, where `byok-agent service install` sends the daemon's stdout and stderr. */
+        readonly logDir: string;
+        /**
+         * Execution scratch root (#493). `config`: `storage.scratchRoot`. `store`:
+         * `<storeDir>/tmp`. `short-root`: the store path is too long for runtime
+         * Unix sockets, so scratch moved to a fixed short root.
+         */
+        readonly scratchRoot: {
+            readonly path: string;
+            readonly source: 'config' | 'store' | 'short-root';
+            /** Byte length of `path`, and the longest root runtime sockets allow on this platform (absent: unbounded). */
+            readonly socketPathBytes: number;
+            readonly socketPathMaximumBytes?: number;
+        };
+    };
+    readonly memory: {
+        /** Same value as `DaemonStatus.agentMemoryMcp`. */
+        readonly mcp: DaemonStatus['agentMemoryMcp'];
+        readonly helper: DaemonMemoryHelperResolution;
+    };
+    readonly mcpServers: readonly DaemonEffectiveMcpServer[];
+    readonly runtimes: readonly DaemonEffectiveRuntime[];
+    readonly toolAuthorization: {
+        /** `all`: no resolver, every task runs `all` (the only mode a config file can express). `host-resolver`: `DaemonConfig.toolAuthorization` decides per offer. */
+        readonly mode: 'all' | 'host-resolver';
+        /** Who may approve a `tool-authorization` approval: `host-only` (default) or `allow` (the control socket too). */
+        readonly localToolApproval: 'host-only' | 'allow';
+    };
+}
+export interface EffectiveDaemonConfigInput {
+    readonly config: DaemonConfig;
+    readonly warnings: readonly DaemonConfigIssue[];
+    readonly memoryHelper: DaemonMemoryHelperResolution;
+    readonly agentMemoryMcpAdmission: DaemonStatus['agentMemoryMcp'];
+    /** Resolved `storeDir`. */
+    readonly storeDir: string;
+    /** Resolved scratch root. */
+    readonly scratchRoot: string;
+    readonly adapters: readonly RuntimeAdapter[];
+    readonly runtimeSource: 'sdk-built' | 'injected';
+    readonly platform?: NodeJS.Platform;
+}
+export declare function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput): DaemonEffectiveConfig;
+// ==== @byok-sdk/client dist/daemon/config-schema/errors.d.ts ====
+import { DaemonConfigFieldRemovedError } from '../daemon-errors';
+import { type DaemonConfigIssue } from './validate';
+/**
+ * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:
+ * a missing required field, or a value of the wrong JSON type or literal.
+ * A removed field throws {@link DaemonConfigFieldRemovedError} instead.
+ */
+export declare class DaemonConfigInvalidError extends Error {
+    readonly issues: readonly DaemonConfigIssue[];
+    readonly code: 'daemon_config_invalid';
+    constructor(issues: readonly DaemonConfigIssue[]);
+}
+/** The typed error for a removed field `path` (config or overrides). */
+export declare function removedFieldError(path: string): DaemonConfigFieldRemovedError;
+/**
+ * Construction-time validation (#1094): throws on the first removed field,
+ * then on any other error, and returns the unknown-field warnings (Q4':
+ * never rejected). Daemon construction logs them once and reports them in
+ * `Daemon.status().config`; `checkDaemonConfig` only reports them.
+ */
+export declare function assertDaemonConfigValid(config: unknown): readonly DaemonConfigIssue[];
+// ==== @byok-sdk/client dist/daemon/config-schema/index.d.ts ====
+/** #1094: the DaemonConfig schema, its one validator and the effective-values report. */
+export { DAEMON_CONFIG_SCHEMA_VERSION } from './schema.generated';
+export { validateDaemonConfig } from './validate';
+export type { DaemonConfigIssue, DaemonConfigIssueCode, DaemonConfigSource, DaemonConfigValidation } from './validate';
+export { checkDaemonConfig } from './check';
+export type { DaemonConfigCheck, DaemonConfigCheckOptions } from './check';
+export { DaemonConfigInvalidError } from './errors';
+export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonMemoryHelperResolution } from './effective';
+// ==== @byok-sdk/client dist/daemon/config-schema/removed-fields.d.ts ====
+/**
+ * `DaemonConfig` fields that no longer exist (#1094). The one table both the
+ * validator and the generated schema (`x-byok-removedFields`) read: supplying
+ * one of these is a typed {@link DaemonConfigFieldRemovedError} on every
+ * surface, never an unknown-field warning, because the Host relied on it and
+ * must change its config or code.
+ *
+ * Every entry points at the migration note in `docs/spec.md`.
+ *
+ * This module has no imports so the schema generator can load it with Node's
+ * type stripping.
+ */
+export interface RemovedDaemonConfigField {
+    /** Dotted path from the config root, e.g. `workspaceRoot` or `agentEgress.sanitizer`. */
+    readonly path: string;
+    /** What replaced it; the error message. */
+    readonly message: string;
+    /** Repo-relative `.md#anchor` of the migration note. */
+    readonly migration: string;
+}
+export declare const REMOVED_DAEMON_CONFIG_FIELDS_MIGRATION = "docs/spec.md#removed-daemonconfig-fields";
+export declare const REMOVED_DAEMON_CONFIG_FIELDS: readonly RemovedDaemonConfigField[];
+// ==== @byok-sdk/client dist/daemon/config-schema/schema-types.d.ts ====
+/**
+ * The JSON Schema subset `generate-schema.mjs` emits for `DaemonConfig`, and
+ * the only subset the validator interprets (#1094).
+ */
+export type DaemonConfigSurface = 'embedded-only' | 'distribution-owned';
+export interface DaemonConfigJsonSchema {
+    readonly type?: 'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
+    readonly const?: string | number | boolean;
+    readonly enum?: readonly (string | number | boolean)[];
+    readonly anyOf?: readonly DaemonConfigJsonSchema[];
+    readonly properties?: Readonly<Record<string, DaemonConfigJsonSchema>>;
+    readonly required?: readonly string[];
+    readonly additionalProperties?: DaemonConfigJsonSchema;
+    readonly items?: DaemonConfigJsonSchema;
+    readonly prefixItems?: readonly DaemonConfigJsonSchema[];
+    readonly minItems?: number;
+    readonly maxItems?: number;
+    /** Always `{}` here: set only on a surface-restricted property, so any value fails a JSON Schema validator. */
+    readonly not?: Readonly<Record<string, never>>;
+    readonly 'x-byok-surface'?: DaemonConfigSurface;
+    readonly 'x-byok-schemaVersion'?: number;
+    readonly 'x-byok-removedFields'?: readonly {
+        readonly path: string;
+        readonly migration: string;
+    }[];
+}
+// ==== @byok-sdk/client dist/daemon/config-schema/schema.generated.d.ts ====
+import type { DaemonConfigJsonSchema } from './schema-types';
+export declare const DAEMON_CONFIG_SCHEMA_VERSION = 1;
+export declare const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema;
+// ==== @byok-sdk/client dist/daemon/config-schema/validate.d.ts ====
+import { type RemovedDaemonConfigField } from './removed-fields';
+/**
+ * Where a `DaemonConfig` comes from (#1094).
+ *
+ * - `cli`: a `byok-agent` JSON config file. Embedded-only fields (functions,
+ *   transports) and the distribution-owned `localAgentRelease` are errors.
+ * - `embedded`: an object a Host passes to `createDaemon` or
+ *   `createDaemonWithAdapters`. Embedded-only fields are allowed and checked
+ *   by daemon construction.
+ */
+export type DaemonConfigSource = 'cli' | 'embedded';
+export type DaemonConfigIssueCode = 'not_an_object' | 'missing_required' | 'invalid_type' | 'invalid_value' | 'unknown_field' | 'removed_field' | 'embedded_only' | 'distribution_owned';
+/**
+ * One finding of {@link validateDaemonConfig}. Messages name the field path
+ * and the expected type, never the supplied value.
+ */
+export interface DaemonConfigIssue {
+    /** `warning` never stops a daemon (Q4'); `byok-agent config check --strict` fails on it. */
+    readonly severity: 'error' | 'warning';
+    readonly code: DaemonConfigIssueCode;
+    /** Dotted path from the config root; `''` for the root itself. */
+    readonly path: string;
+    readonly message: string;
+    /** Repo-relative `.md#anchor` of the migration note, for `removed_field`. */
+    readonly migration?: string;
+}
+export interface DaemonConfigValidation {
+    /** No `error` issue. Warnings do not affect it. */
+    readonly ok: boolean;
+    readonly issues: readonly DaemonConfigIssue[];
+}
+/** The removed-field entry for `path`, if `path` names a removed `DaemonConfig` field. */
+export declare function removedDaemonConfigField(path: string): RemovedDaemonConfigField | undefined;
+/**
+ * The one `DaemonConfig` validator, shared by `byok-agent` (config files) and
+ * daemon construction (#1094). It checks what the generated schema
+ * (`daemon-config.schema.json`) expresses: required fields, JSON types and
+ * literal values, unknown fields and removed fields. Value ranges and
+ * cross-field rules stay with daemon construction, which reports them as
+ * construction errors.
+ *
+ * An unknown field is a `warning`: a config written by a newer Host or SDK
+ * must still start an older daemon after a rollback (Q4'). A removed field is
+ * an `error` with its migration note, because the Host relied on it.
+ */
+export declare function validateDaemonConfig(input: unknown, options: {
+    readonly source: DaemonConfigSource;
+}): DaemonConfigValidation;
 // ==== @byok-sdk/client dist/daemon/connection-manager.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import { type OutboundRefusalReason, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
@@ -4253,6 +4537,7 @@ import { type AgentMemoryHostedProjection } from './agent-memory';
 import { type AgentMemoryIntentTransport } from './agent-memory-intent';
 import { type AgentContentReadRoot } from './agent-content-read';
 import type { ToolAuthorizationResolver } from '../tool-authorization';
+import { type DaemonEffectiveConfig } from './config-schema/effective';
 /**
  * Optional white-label product display info — purely opaque passthrough
  * (never interpreted, validated, or rendered by the daemon itself). Carried
@@ -4639,8 +4924,11 @@ export interface InputPreparationDaemonConfig {
     counter?: InputPreparationCounterAdapter;
 }
 export interface AgentEgressConfig {
-    /** Exact policy the daemon is willing to consume from an Agent offer. */
-    policy: AgentEgressPolicy;
+    /**
+     * Exact policy the daemon is willing to consume from an Agent offer.
+     * Absent: the client default policy, as a config file's `"agentEgress": {}`.
+     */
+    policy?: AgentEgressPolicy;
     /**
      * Device-local additions required to make one server-selected transfer
      * policy executable. These values only supplement `policy.transfers`: a
@@ -4767,6 +5055,15 @@ export interface DaemonStatus {
      * macOS or Windows x64 without the SDK release helper, or Windows arm64).
      */
     agentMemoryMcp: 'admitted' | 'off' | 'unavailable';
+    /**
+     * Effective values of this daemon's configuration (#1094): resolved
+     * directories (store, Agent homes, execution scratch root and its socket
+     * budget), the MCP servers tasks may get, the memory helper resolution,
+     * each runtime's isolation options and the tool-authorization mode, plus
+     * unknown-field warnings. Resolved once at construction; the same report
+     * `byok-agent config check` prints.
+     */
+    config: DaemonEffectiveConfig;
 }
 export interface Daemon {
     /** Present only with agentMemoryExport: true. Holds the home writer lease; AgentHomeBusyError is retryable. Raw contents remain Host-owned. */
@@ -4971,10 +5268,28 @@ export declare class CursorStore {
 export declare class DaemonConfigFieldRemovedError extends Error {
     /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
     readonly field: string;
+    /** Repo-relative `.md#anchor` of the migration note (#1094). */
+    readonly migration: string;
     readonly code: 'daemon_config_field_removed';
     constructor(
     /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
-    field: string, message: string);
+    field: string, message: string, 
+    /** Repo-relative `.md#anchor` of the migration note (#1094). */
+    migration: string);
+}
+/**
+ * `resolveHostLayout` got an input it cannot build a layout from: a product
+ * identifier that is not one portable path segment, a home directory that is
+ * not absolute, or a platform without a layout. Fix the named `field` and
+ * call it again; the call has no side effects.
+ */
+export declare class HostLayoutInputError extends Error {
+    /** The `HostLayoutOptions` field: `productId`, `productName`, `homeDir` or `platform`. */
+    readonly field: 'productId' | 'productName' | 'homeDir' | 'platform';
+    readonly code: 'host_layout_input_invalid';
+    constructor(
+    /** The `HostLayoutOptions` field: `productId`, `productName`, `homeDir` or `platform`. */
+    field: 'productId' | 'productName' | 'homeDir' | 'platform', message: string);
 }
 export type DaemonJournalProtocolRecord = 'recovery-offer' | 'pending-terminal';
 /**
@@ -5637,6 +5952,86 @@ export declare class ExecutionRecordAccumulator {
     private openCall;
     private answerCall;
 }
+// ==== @byok-sdk/client dist/daemon/host-layout.d.ts ====
+/** Platforms `resolveHostLayout` has a layout for. */
+export type HostLayoutPlatform = 'darwin' | 'linux' | 'win32';
+export interface HostLayoutOptions {
+    /** `DaemonConfig.productId`. Names the SDK store: `<home>/.byok/<productId>`; on Linux also the Host root. */
+    readonly productId: string;
+    /** `DaemonConfig.productName`. Names the Host root on macOS and Windows, e.g. `Salesko`. */
+    readonly productName: string;
+    /** Default: `process.platform`. */
+    readonly platform?: NodeJS.Platform;
+    /** The user's home directory. Default: `os.homedir()`. */
+    readonly homeDir?: string;
+    /** Reads `XDG_DATA_HOME` (Linux) and `LOCALAPPDATA` (Windows). Default: `process.env`. */
+    readonly env?: Readonly<Record<string, string | undefined>>;
+}
+/**
+ * The recommended local directories of one Host product on one platform
+ * (#1094). Who owns what:
+ *
+ * - `storeDir` is the SDK's. Pass it as `DaemonConfig.storeDir`, or leave
+ *   that field unset: the default is the same path.
+ * - `hostStorageRoot` is the Host's. Pass it as `agentHome.hostStorageRoot`;
+ *   the SDK composes `agentHomes` (`<hostStorageRoot>/agents`) and every
+ *   `agents/<agentId>` under it. Keep Host files beside `agents/`, not in it.
+ * - `logDir` is where `byok-agent service install` sends the daemon's stdout
+ *   and stderr.
+ * - The Host keeps its config file and its own state outside `storeDir`.
+ */
+export interface HostLayout {
+    readonly platform: HostLayoutPlatform;
+    readonly storeDir: string;
+    /**
+     * Where execution scratch goes with this `storeDir` and no
+     * `storage.scratchRoot` (#493). `store`: `<storeDir>/tmp` fits the runtime
+     * Unix socket budget. `short-root`: it does not, so the daemon moves
+     * scratch to a fixed short root keyed by the store path. Computed from the
+     * lexical path; a symbolic link in an existing ancestor can change it, and
+     * `byok-agent config check` reports the value a daemon resolves.
+     */
+    readonly scratchRoot: {
+        readonly path: string;
+        readonly source: 'store' | 'short-root';
+        readonly socketPathBytes: number;
+        /** Absent on Windows, which has no socket path limit. */
+        readonly socketPathMaximumBytes?: number;
+    };
+    readonly hostStorageRoot: string;
+    readonly agentHomes: string;
+    readonly logDir: string;
+}
+/**
+ * The SDK store directory a daemon uses when `DaemonConfig.storeDir` is
+ * unset: `<homeDir>/.byok/<productId>` on every platform. `DeviceStore.resolveDir`
+ * and `resolveHostLayout` both use it; it is the only definition.
+ */
+export declare function defaultStoreDir(productId: string, homeDir?: string, platform?: NodeJS.Platform): string;
+/** Where `byok-agent service install` sends the daemon's stdout and stderr. */
+export declare function serviceLogDir(storeDir: string, platform?: NodeJS.Platform): string;
+/**
+ * The recommended `storeDir`, `hostStorageRoot` and log directory for a Host
+ * product (#1094), with the #493 scratch placement of that `storeDir`.
+ * Pure: it reads no file and creates nothing, so a Host can call it for any
+ * platform, e.g. in an installer or a test.
+ *
+ * `hostStorageRoot` follows each platform's convention for per-user
+ * application data:
+ *
+ * - macOS: `~/Library/Application Support/<productName>`
+ * - Linux: `$XDG_DATA_HOME/<productId>`, default `~/.local/share/<productId>`
+ * - Windows: `%LOCALAPPDATA%\<productName>`, default `~\AppData\Local\<productName>`
+ *
+ * `storeDir` is the SDK default, `~/.byok/<productId>`, on every platform. It
+ * is short on purpose: an application-data path is often too long for
+ * runtime Unix sockets under `<storeDir>/tmp` (#493).
+ *
+ * @throws {HostLayoutInputError} `productId` or `productName` is not one
+ * portable path segment, `homeDir` is not absolute, or the platform is not
+ * macOS, Linux or Windows.
+ */
+export declare function resolveHostLayout(options: HostLayoutOptions): HostLayout;
 // ==== @byok-sdk/client dist/daemon/input-preparation-store.d.ts ====
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_VERSION, type InputPreparationBindingV1, type InputPreparationArtifactSummaryV1, type InputPreparationCounterEvidenceV1, type InputPreparationModelV1, type InputPreparationPinV1, type InputPreparationProjectionV1, type InputPreparationResidualKeyV1, type InputPreparationStateV1 } from '../input-preparation';
 /**
@@ -7780,6 +8175,14 @@ export interface ExecutionScratch {
     }>;
     release(): Promise<void>;
 }
+/**
+ * The runtime Unix socket budget of a scratch root (#493): its byte length
+ * and, where the platform bounds `sun_path`, the longest root that still fits.
+ */
+export declare function scratchRootSocketBudget(root: string, platform?: NodeJS.Platform): {
+    readonly bytes: number;
+    readonly maximumBytes?: number;
+};
 export declare function validateScratchRoot(root: string, platform?: NodeJS.Platform): string;
 /**
  * The root used when the Host configures none. `<storeDir>/tmp` keeps scratch
@@ -7791,6 +8194,14 @@ export declare function validateScratchRoot(root: string, platform?: NodeJS.Plat
  * symlink there and {@link privateDirectory} rejects symbolic-link ancestors.
  */
 export declare function defaultScratchRoot(storeDir: string, platform?: NodeJS.Platform): string;
+/**
+ * The #493 placement rule, without filesystem access: the fixed short root
+ * for a store whose `<store>/tmp` exceeds the runtime socket budget, or
+ * `undefined` when `<store>/tmp` fits or the platform has no limit.
+ * {@link defaultScratchRoot} passes the canonical store; `resolveHostLayout`
+ * passes the lexical recommended store.
+ */
+export declare function shortScratchRoot(store: string, platform: NodeJS.Platform): string | undefined;
 /**
  * Reject aliases before changing permissions or deleting anything. With
  * `ownedLeaf`, a leaf another user created first (a root in a shared directory
@@ -8230,7 +8641,6 @@ export declare class DeviceStore {
      * CI/dev machine, not just asserted.
      */
     constructor(storeDir: string, credentials: DeviceCredentialBackend, secureDirOptions?: EnsureSecureDirOptions | undefined);
-    static defaultDir(productId: string): string;
     /**
      * Resolve the one store pathname every daemon/CLI component must share.
      * A configured relative path is anchored once at process entry rather than
@@ -9993,6 +10403,29 @@ export declare function exportDeviceSupportBundle(config: DaemonConfig, input: E
 /** Archive refused/revoked evidence for one Agent under device and Agent single-writer leases. */
 export declare function archiveAgentTerminalMessages(config: DaemonConfig, input: ArchiveAgentTerminalMessagesInput): Promise<AgentTerminalMessagesArchiveResult>;
 export {};
+// ==== @byok-sdk/client dist/diagnostics/store-compatibility.d.ts ====
+import type { StoreCompatibility } from '@byok-sdk/core';
+export interface InspectDaemonStoresInput {
+    /** The daemon's resolved store directory (`DaemonConfig.storeDir` or its default). */
+    readonly storeDir: string;
+}
+/**
+ * Store compatibility precheck for the stores a daemon owns (#1102): the
+ * local task journal (`<storeDir>/daemon.db`) and every pi-durable replica
+ * under `<storeDir>/durable-replicas/`.
+ *
+ * Reports what this build does when it opens each one. The files are copied to
+ * a private temporary directory and this build's own open runs on the copy, so
+ * the format rules stay in the store code and the originals are only read.
+ * Stop the daemon first: a file that changes while it is copied fails the
+ * check rather than yielding a verdict about a torn copy.
+ *
+ * The journal comes first and is `absent` when there is none; one result
+ * follows per replica. The server SQLite store and the provider profile store
+ * are checked by `inspectSqliteStore` (`@byok-sdk/server`) and
+ * `inspectProviderProfileStore` (`@byok-sdk/keys`).
+ */
+export declare function inspectDaemonStores(input: InspectDaemonStoresInput): Promise<readonly StoreCompatibility[]>;
 // ==== @byok-sdk/client dist/diagnostics/types.d.ts ====
 import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
 import type { ControlStatusResult } from '../daemon/control-protocol';
@@ -10116,7 +10549,9 @@ export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHel
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
+export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonMemoryHelperResolution, } from './daemon/config-schema';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
+export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals';
@@ -10183,6 +10618,8 @@ export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecor
 export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, WithheldOfferRecord, WithheldOfferTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, CompactOptions, CompactResult, } from './daemon/journal/journal';
 export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
 export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
+export { inspectDaemonStores } from './diagnostics/store-compatibility';
+export type { InspectDaemonStoresInput } from './diagnostics/store-compatibility';
 export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config';
 export type { StorageConfig, StorageBudgetInput } from './daemon/retention/config';
 export { LocalStorageEmergencyError } from './daemon/retention/pressure';

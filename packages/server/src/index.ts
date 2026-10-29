@@ -14,9 +14,9 @@ import { Hono } from 'hono';
 import {
   AgentExecutionInputSchema,
   agentHomeProjectionRequestKey,
+  capabilityDeclarationForPorts,
   createByokCloud,
   createHmacTokenSigner,
-  fullCapabilityDeclaration,
   INBOUND_REFUSAL_REASONS,
   TASK_ATTEMPT_ACTIVE_STATUSES,
   TASK_ATTEMPT_STATUSES,
@@ -127,6 +127,7 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
+export { inspectSqliteStore } from './store-compatibility';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 
@@ -406,16 +407,17 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     );
 
   const projectionWaiters = new ProjectionWaiters();
+  // The declaration is derived from the ports passed, so the two cannot drift (#1096).
+  const ports = { blobContentProxy: composition.blobContentProxy };
   const cloud: ByokCloud = createByokCloud({
     core: composition.core,
     cloud: composition.cloud,
-    blobContentProxy: composition.blobContentProxy,
-    e2eeMemberStore: composition.e2eeMember,
+    ...ports,
     ...(composition.proofReceiptAuthority === undefined ? {} : { proofReceiptRetention: { authority: composition.proofReceiptAuthority } }),
     crypto: composition.crypto,
     tokenSigner,
     clock: composition.clock,
-    capabilities: fullCapabilityDeclaration(),
+    capabilities: capabilityDeclarationForPorts(ports),
     // S1: the product this instance serves is part of every bearer-authed
     // route's decision, not just of the pairing claims.
     instanceProductId: opts.productId,

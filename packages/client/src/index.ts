@@ -119,10 +119,33 @@ export type {
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export {
+  DAEMON_CONFIG_SCHEMA_VERSION,
+  DaemonConfigInvalidError,
+  checkDaemonConfig,
+  validateDaemonConfig,
+  type DaemonConfigCheck,
+  type DaemonConfigCheckOptions,
+  type DaemonConfigIssue,
+  type DaemonConfigIssueCode,
+  type DaemonConfigSource,
+  type DaemonConfigValidation,
+  type DaemonEffectiveConfig,
+  type DaemonEffectiveMcpServer,
+  type DaemonEffectiveRuntime,
+  type DaemonMemoryHelperResolution,
+} from './daemon/config-schema';
+export {
   DaemonConfigFieldRemovedError,
   DaemonJournalProtocolUnsupportedError,
+  HostLayoutInputError,
   type DaemonJournalProtocolRecord,
 } from './daemon/daemon-errors';
+export {
+  resolveHostLayout,
+  type HostLayout,
+  type HostLayoutOptions,
+  type HostLayoutPlatform,
+} from './daemon/host-layout';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals';
@@ -381,6 +404,8 @@ export type {
 } from './daemon/journal/journal';
 export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
 export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
+export { inspectDaemonStores } from './diagnostics/store-compatibility';
+export type { InspectDaemonStoresInput } from './diagnostics/store-compatibility';
 
 export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config';
 export type { StorageConfig, StorageBudgetInput } from './daemon/retention/config';

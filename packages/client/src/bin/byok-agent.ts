@@ -11,6 +11,7 @@ import { runApprovalsCommand } from './commands/approvals';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
 import { readPairInput, runPairCommand } from './commands/pair';
 import { runDoctorCommand } from './commands/doctor';
+import { runConfigCheckCommand } from './commands/config-check';
 import { runRuntimesCommand } from './commands/runtimes';
 import {
   buildServiceDefinition,
@@ -27,6 +28,7 @@ import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runToolsetsReloadCommand } from './commands/toolsets';
 import { runTeamCreateCommand, runTeamJoinCommand, runTeamListCommand, runTeamOpenCommand, runTeamWatchCommand } from './commands/team';
 import { runUnpairCommand } from './commands/unpair';
+import { runUpgradeStoreCheckCommand } from './commands/upgrade';
 import { runVersionCommand } from './version';
 
 /**
@@ -92,6 +94,7 @@ function usage(): never {
       '  byok-agent pair <code> --server <url> [--e2ee] [--config <path>]   (--e2ee: <code> is the <pairing code>.<verification secret> the web client shows)',
       '  byok-agent start [--config <path>] [--service]            (or BYOK_CONFIG env var; launchd/systemd pass --service)',
       '  byok-agent status [--config <path>]',
+      '  byok-agent config check [--strict] [--json] [--config <path>]   (validate a config file and print its effective values; --strict fails on warnings)',
       '  byok-agent doctor [--json] [--fix --yes] [--config <path>]',
       '  byok-agent doctor --repair restore-enrollment-metadata --expected-device-id <id> --expected-tenant-id <id> --yes [--json] [--config <path>]',
       '  byok-agent support-bundle --output <path> [--config <path>]',
@@ -107,6 +110,7 @@ function usage(): never {
       '  byok-agent team watch <workspace> --config <path>',
       '  byok-agent team open <workspace> --tmux-bin <absolute> [--session <name>] --config <path>',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
+      '  byok-agent upgrade check --store [--json] [--config <path>]   (read-only; exit 2 when a store would be refused)',
       '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
       '  byok-agent approve <approvalId> [--config <path>]',
       '  byok-agent reject <approvalId> [--reason <text>] [--config <path>]',
@@ -190,6 +194,15 @@ async function main(): Promise<void> {
       console.error(formatStartErrorReason(error));
       process.exitCode = 1;
     }
+    return;
+  }
+
+  if (command === 'config') {
+    const [action, ...extra] = positionalArgs(rest, ['--config']).filter((arg) => arg !== '--strict' && arg !== '--json');
+    if (action !== 'check' || extra.length > 0) usage();
+    const configPath = configPathFrom(rest);
+    if (!configPath) throw new ConfigError('config check requires --config <path> or a BYOK_CONFIG env var');
+    process.exitCode = runConfigCheckCommand(configPath, { strict: hasFlag(rest, '--strict'), json: hasFlag(rest, '--json') });
     return;
   }
 
@@ -307,6 +320,14 @@ async function main(): Promise<void> {
       storeDir: resolveStoreDir(config),
       productId: config.productId,
     });
+  }
+
+  if (command === 'upgrade') {
+    const [action, ...flags] = positionalArgs(rest, ['--config']);
+    if (action !== 'check' || !flags.includes('--store') || flags.some((flag) => flag !== '--store' && flag !== '--json')) usage();
+    const config = loadConfig(configPathFrom(rest));
+    process.exitCode = await runUpgradeStoreCheckCommand({ storeDir: resolveStoreDir(config), json: hasFlag(rest, '--json') });
+    return;
   }
 
   if (command === 'approvals') {

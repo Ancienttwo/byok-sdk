@@ -5,6 +5,7 @@ import type { ApprovalKind } from '../approvals';
 import { observePreparedMemory, type PreparedAgentMemoryState } from '../prepared-agent-memory';
 import { InputPreparationRequestError } from '../input-preparation-service';
 import type { PiRuntimeLaunchResources } from '../../adapters/pi/runtime-launch';
+import { DURABLE_REPLICA_DIRNAME } from '../../adapters/pi-durable/replica';
 import { terminalIdentity } from '../terminal-identity';
 import { abortedStartOf, startOwnedRuntime } from '../runtime-start';
 import path from 'node:path';
@@ -395,7 +396,7 @@ async function startAndActivateRuntime(
     scratch,
     ...(input.sessionLease === undefined ? {} : { sessionLease: input.sessionLease }),
     ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {
-      tenantId: this['deps'].tenantId!, replicaRoot: path.join(this['deps'].storeDir, 'durable-replicas'), lifecycle: {
+      tenantId: this['deps'].tenantId!, replicaRoot: path.join(this['deps'].storeDir, DURABLE_REPLICA_DIRNAME), lifecycle: {
         ownsLease: () => !blobAbort.signal.aborted && !this['pendingCancelled'].has(taskId),
         record: async (kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number) => {
           if (!this['deps'].recordDurableTransition || !this['deps'].tenantId) throw new Error('durable parent authority unavailable');

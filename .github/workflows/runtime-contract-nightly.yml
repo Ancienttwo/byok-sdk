@@ -1,0 +1,87 @@
+name: Runtime contract nightly
+
+# #1103: the runtime contract suite against each runtime CLI's latest release.
+# PR CI runs the same suite against the qualified versions (ci.yml
+# runtime-contract). A failure here updates one tracking issue; it never gates
+# a PR. Pi is bundled at byok.piRuntimePin, so its leg reports every case as
+# skipped with that reason. See docs/runtime-contract.md.
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: runtime-contract-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  latest:
+    name: runtime contract (${{ matrix.runtime }}, latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [pi, claude, codex, grok, hermes]
+    env:
+      BYOK_RUNTIME_CONTRACT: latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+      - run: bun ci
+      - run: bun run build
+      - name: Install the latest runtime CLI
+        run: >-
+          node scripts/ci/runtime-contract-install.mjs
+          ${{ matrix.runtime }} latest
+      - name: Run the runtime contract suite
+        env:
+          SUITE: src/__tests__/runtime-contract
+        run: >-
+          bun run --filter @byok-sdk/client test:runtime-contract --
+          "$SUITE/${{ matrix.runtime }}.contract.ts"
+
+  report:
+    name: Update the runtime contract tracking issue
+    needs: latest
+    if: ${{ always() && needs.latest.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: Create or update the one tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: >-
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+            github.run_id }}
+          TITLE: 'Runtime contract nightly: latest runtime CLI failed'
+        run: |
+          failed=$(gh run view "$GITHUB_RUN_ID" --json jobs \
+            --jq '[.jobs[] | select(.conclusion == "failure") | .name]
+              | join(", ")')
+          body="The runtime contract suite failed against the latest CLI.
+
+          - Run: $RUN_URL
+          - Failed legs: $failed
+          - Commit: $GITHUB_SHA
+
+          See docs/runtime-contract.md. Refs #1103."
+          number=$(gh issue list --state open --json number,title \
+            --search "\"$TITLE\" in:title" \
+            --jq "[.[] | select(.title == env.TITLE)][0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi

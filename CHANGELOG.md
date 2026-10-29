@@ -35,6 +35,26 @@
   dead letters; deleting them after a grace period is the follow-up on #1115.
   No migration.
 
+- **Fix (client; #1114)** — token renewal no longer loops when a fresh token
+  is already within a minute of its expiry, which happened when the device
+  clock ran ahead of the server or the server TTL was under 60 seconds. Each
+  renewal re-armed itself at once and rewrote the OS credential entry every
+  time. Proactive renewals and renewals started by `getValidAccessToken()` are
+  now at least 30 seconds apart. The gap stays at 30 seconds after the first
+  renewal that returns such a token and doubles from the second one in a row,
+  up to 30 minutes. Inside that gap `getValidAccessToken()` returns the token
+  the server issued last. A server 401 still renews at once and is not
+  throttled.
+
+- **Fix (cloud-dataplane, server, cloud; #1116)** — `cancelTask` on a claimed
+  task no longer throws after retention collects its acked `task.cancel` row.
+  The Postgres and SQLite stores threw a plain `Error`, which a Host surfaced
+  as a 500 on every later cancel. A repeat cancel now returns the attempt as
+  it stands (still `cancel_requested` until the device reports a terminal),
+  without a mailbox row, in all three stores. The in-memory store no longer
+  enqueues a second `task.cancel` in that case. Ending a task whose device
+  never reports a terminal is #1119.
+
 ## 0.31.0 — 2026-10-29 (published)
 
 0.31.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

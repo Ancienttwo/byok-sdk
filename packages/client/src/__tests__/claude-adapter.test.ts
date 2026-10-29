@@ -9,7 +9,8 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/process-client';
 import { SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, projectRuntimeBoundaryFailure } from '../runtime-failure';
+import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
@@ -245,6 +246,23 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
     expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', retry: 'retryable' });
     expect(failure).toHaveProperty('message', expect.stringMatching(/simulated crash for stderr-capture test/));
+  });
+
+  it('keeps the stderr tail on the local failure but redacts a credential out of the wire reason (#1124)', async () => {
+    const key = ['sk', 'ant', 'api03', 'Zx9qW3eR5tY7uI1oP2aS4dF6gH8jK0lM'].join('-');
+    const stderr = `proxy: Authorization: Bearer opaqueBearerValue0123 rejected; ANTHROPIC_API_KEY=${key}`;
+    const adapter = fakeClaudeAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_CRASH_WITH_STDERR: stderr });
+    const failure = await startAdapter(adapter, baseTask, ctx).then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toHaveProperty('message', expect.stringContaining(key));
+    const projection = projectRuntimeBoundaryFailure(failure, 'start');
+    const wire = encodeEnvelope(createEnvelope('task.fail', { reason: projection.reason, retryable: projection.retryable },
+      { taskId: '7c5b6b0e-7d0b-4d5f-9b0a-2b9f8b4f0c11' }));
+    expect(wire).not.toContain(key);
+    expect(wire).not.toContain('opaqueBearerValue0123');
+    expect((decodeEnvelope(wire).payload as { reason: string }).reason)
+      .toMatch(/stderr: proxy: Authorization: \[redacted\] rejected; ANTHROPIC_API_KEY=\[redacted\]/);
   });
 
   it('surfaces task-scoped MCP cleanup failure as typed disposal evidence and permits a clean retry', async () => {
