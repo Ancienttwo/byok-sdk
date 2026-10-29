@@ -2,7 +2,7 @@ import { testScratchRoot } from './fixtures/execution-scratch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME } from '../daemon/journal/sqlite-journal';
@@ -31,16 +31,25 @@ describe('#1119 a halted daemon ends its active tasks', () => {
   let storeDir: string;
   let adapter: StubRuntimeAdapter;
 
-  beforeEach(async () => {
-    server = await TestServer.start();
-    storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-halt-tasks-store-'));
-    const hostStorageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-halt-tasks-home-'));
-    adapter = new StubRuntimeAdapter('pi');
+  let shutdownGraceMs: number | undefined;
+
+  function createTestDaemon(): void {
     daemon = createDaemonWithAdapters({
       storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Halt test',
       productId: `halt-${path.basename(storeDir)}`, serverUrl: server.url, storeDir,
       agentHome: { hostStorageRoot }, agentEgress: FRESH_DAEMON_EGRESS,
+      ...(shutdownGraceMs === undefined ? {} : { shutdownGraceMs }),
     }, [adapter], { longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+  }
+
+  let hostStorageRoot: string;
+
+  beforeEach(async () => {
+    shutdownGraceMs = undefined;
+    server = await TestServer.start();
+    storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-halt-tasks-store-'));
+    hostStorageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-halt-tasks-home-'));
+    adapter = new StubRuntimeAdapter('pi');
   });
 
   afterEach(async () => {
@@ -49,6 +58,7 @@ describe('#1119 a halted daemon ends its active tasks', () => {
   });
 
   async function runningTask(taskId: string): Promise<{ deviceId: string }> {
+    createTestDaemon();
     const record = await daemon!.pair('pairing-code');
     await daemon!.start();
     server.send(createEnvelope('task.offer', {
@@ -75,5 +85,24 @@ describe('#1119 a halted daemon ends its active tasks', () => {
     expect(adapter.sessions).toHaveLength(1);
     expect(terminalRows(storeDir, 'revoked-mid-task')).toEqual([{ truth_state: 'pending' }]);
     expect(daemon!.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'device_revoked' });
+  });
+
+  it('bounds the halt teardown by shutdownGraceMs even when the runtime never answers the interrupt', async () => {
+    shutdownGraceMs = 50;
+    const { deviceId } = await runningTask('hung-interrupt');
+    const session = adapter.sessions[0]!;
+    let interruptAt: number | undefined;
+    vi.spyOn(session, 'interrupt').mockImplementation(() => {
+      interruptAt = Date.now();
+      return new Promise<void>(() => undefined);
+    });
+
+    server.revokeDevice(deviceId);
+
+    await expect.poll(() => interruptAt, { timeout: 5000 }).toBeDefined();
+    // Well inside the 5 s interrupt bound a plain shutdown would wait out.
+    await expect.poll(() => session.closeCalled, { timeout: 1000, interval: 10 }).toBe(true);
+    await expect.poll(() => terminalRows(storeDir, 'hung-interrupt'), { timeout: 1000, interval: 10 }).toEqual([{ truth_state: 'pending' }]);
+    expect(Date.now() - interruptAt!).toBeLessThan(1000);
   });
 });

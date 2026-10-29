@@ -1005,12 +1005,16 @@ export class TaskRunner {
    * own `stop()` call has already resolved), so it can no longer race
    * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
    * regression test for the exact scenario.
+   *
+   * `interruptTimeoutMs` caps each soft interrupt below the configured
+   * bound: a halted run passes its shutdown grace, so its tasks reach close
+   * and their `task.fail` is journaled within that grace (#1119).
    */
-  async shutdownActiveTasks(reason: string): Promise<void> {
+  async shutdownActiveTasks(reason: string, interruptTimeoutMs?: number): Promise<void> {
     const offers = offerSettlements.get(this);
     if (offers?.size) await Promise.all(offers);
     const active = [...this.tasks.values()];
-    await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
+    await Promise.all(active.map((task) => this.shutdownTask(task, reason, interruptTimeoutMs)));
     await this.startupOwnership.disposeAll();
   }
 
@@ -1052,17 +1056,19 @@ export class TaskRunner {
    * a genuine protocol bug, not a benign race — mirrors `pump()`'s own
    * identity-check guard for the same class of race.
    */
-  private interruptBounded(active: ActiveTask, drainEvents?: boolean): Promise<void> {
-    return interruptBounded.call(this, active, drainEvents);
+  private interruptBounded(active: ActiveTask, drainEvents?: boolean, interruptTimeoutMs?: number): Promise<void> {
+    return interruptBounded.call(this, active, drainEvents, interruptTimeoutMs);
   }
 
-  private teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean, drainEvents?: boolean): Promise<boolean> {
-    return teardownActiveTask.call(this, active, reason, retryable, drainEvents);
+  private teardownActiveTask(
+    active: ActiveTask, reason: string, retryable: boolean, drainEvents?: boolean, interruptTimeoutMs?: number,
+  ): Promise<boolean> {
+    return teardownActiveTask.call(this, active, reason, retryable, drainEvents, interruptTimeoutMs);
   }
 
   /** Graceful-shutdown caller of {@link teardownActiveTask} — see `shutdownActiveTasks`'s own doc comment. `retryable: true`: nothing about the task/policy itself was ever at fault, only this device's own availability right now. */
-  private shutdownTask(active: ActiveTask, reason: string): Promise<void> {
-    return shutdownTask.call(this, active, reason);
+  private shutdownTask(active: ActiveTask, reason: string, interruptTimeoutMs?: number): Promise<void> {
+    return shutdownTask.call(this, active, reason, interruptTimeoutMs);
   }
 
   /**

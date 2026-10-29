@@ -9635,8 +9635,12 @@ export declare class TaskRunner {
      * own `stop()` call has already resolved), so it can no longer race
      * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
      * regression test for the exact scenario.
+     *
+     * `interruptTimeoutMs` caps each soft interrupt below the configured
+     * bound: a halted run passes its shutdown grace, so its tasks reach close
+     * and their `task.fail` is journaled within that grace (#1119).
      */
-    shutdownActiveTasks(reason: string): Promise<void>;
+    shutdownActiveTasks(reason: string, interruptTimeoutMs?: number): Promise<void>;
     private closeActiveSession;
     private awaitActiveSessionClose;
     /**
