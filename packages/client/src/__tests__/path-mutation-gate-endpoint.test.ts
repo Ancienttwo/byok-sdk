@@ -1,168 +1,238 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { promises as nodeFs } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { promises as nodeFs, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acquirePathMutationGate, type PathMutationGate } from '../util/path-mutation-gate';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { acquirePathMutationGate, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
 import { resolveBunBin } from './support/test-bun-bin';
 
 /**
- * #1149 review: no path unlink may remove another holder's gate endpoint.
- * Each acquisition binds its own server, so two acquisitions in this process
- * contend exactly as two processes do. The barriers pause `fs.rm` of the
- * endpoint path, the only point where the gate unlinks by path.
+ * #1149: the gate is an OS lock owned by one open handle, so no process can
+ * remove another holder's lock and a dead holder frees it at once. Each
+ * acquisition takes its own handle, so two in this process contend exactly as
+ * two processes do; the child-process cases run the bundled gate under Node
+ * and under Bun.
  */
-const posix = process.platform !== 'win32';
+const supported = process.platform === 'darwin' || process.platform === 'linux';
+const GATE_SOURCE = fileURLToPath(new URL('../util/path-mutation-gate.ts', import.meta.url));
+const BUN = resolveBunBin();
+const RUNTIMES: Array<[string, string | undefined]> = [['node', process.execPath], ['bun', BUN]];
 
-/** A pause the test opens: `wait()` marks it reached, then blocks until `open()`. */
-function barrier() {
-  let open!: () => void;
-  let reached!: () => void;
-  const opened = new Promise<void>((resolve) => { open = resolve; });
-  const hit = new Promise<void>((resolve) => { reached = resolve; });
-  return { open, hit, async wait() { reached(); await opened; } };
-}
+let work = '';
+let bundle = '';
 
-/** Pauses the next `count` `fs.rm` calls on `endpoint` at their own barrier, in call order. */
-function pauseEndpointRm(endpoint: string, count: number): Array<ReturnType<typeof barrier>> {
-  const barriers = Array.from({ length: count }, () => barrier());
-  const rm = nodeFs.rm;
-  let next = 0;
-  vi.spyOn(nodeFs, 'rm').mockImplementation(async (file, options) => {
-    if (String(file) === endpoint && next < barriers.length) await barriers[next++]!.wait();
-    return rm(file, options);
+const WORKERS = {
+  // Loops `rounds` times: acquire, create the inside marker exclusively (EEXIST = overlap), leave it, release.
+  'stress.mjs': `
+    import { openSync, closeSync, unlinkSync } from 'node:fs';
+    const [bundle, targetPath, marker, rounds] = process.argv.slice(2);
+    const { acquirePathMutationGate } = await import(bundle);
+    let overlaps = 0;
+    for (let round = 0; round < Number(rounds); round += 1) {
+      const gate = await acquirePathMutationGate({ scope: 'store', targetPath }, { waitMs: 30000 });
+      try { closeSync(openSync(marker, 'wx')); } catch (error) { if (error.code === 'EEXIST') overlaps += 1; else throw error; }
+      await new Promise((resolve) => setImmediate(resolve));
+      unlinkSync(marker);
+      await gate.release();
+    }
+    process.stdout.write(JSON.stringify({ rounds: Number(rounds), overlaps }) + '\\n');
+  `,
+  // Acquires once with waitMs 0; prints held or busy; a holder optionally starts a long-lived grandchild,
+  // optionally blocks its event loop for blockMs, then releases on its first stdin line.
+  'holder.mjs': `
+    import { spawn } from 'node:child_process';
+    const [bundle, targetPath, mode, blockMs] = process.argv.slice(2);
+    const { acquirePathMutationGate } = await import(bundle);
+    let gate;
+    try { gate = await acquirePathMutationGate({ scope: 'store', targetPath }, { waitMs: 0 }); }
+    catch (error) { process.stdout.write(error.name === 'PathMutationGateBusyError' ? 'busy\\n' : 'error ' + error.message + '\\n'); process.exit(0); }
+    if (mode === 'grandchild') {
+      const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+      process.stdout.write('grandchild ' + grandchild.pid + '\\n');
+    }
+    process.stdout.write('held\\n');
+    if (mode === 'block') {
+      const until = Date.now() + Number(blockMs);
+      while (Date.now() < until) {}
+      process.stdout.write('unblocked\\n');
+    }
+    process.stdin.once('data', async () => { await gate.release(); process.stdout.write('released\\n'); process.exit(0); });
+  `,
+};
+
+interface Child { child: ChildProcess; output: () => string; line: (text: string) => Promise<void>; send: () => void }
+const children: ChildProcess[] = [];
+
+function run(runtime: string, worker: keyof typeof WORKERS, args: string[]): Child {
+  const child = spawn(runtime, [path.join(work, worker), bundle, ...args], { stdio: ['pipe', 'pipe', 'inherit'] });
+  children.push(child);
+  let stdout = '';
+  let closed = false;
+  const waiters: Array<() => void> = [];
+  const wake = () => waiters.splice(0).forEach((check) => check());
+  child.stdout!.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); wake(); });
+  // 'close' comes after the last stdout chunk; 'exit' can come before it.
+  child.once('close', () => { closed = true; wake(); });
+  const line = (text: string) => new Promise<void>((resolve, reject) => {
+    const check = () => {
+      if (stdout.split('\n').includes(text)) resolve();
+      else if (closed) reject(new Error(`${worker} exited before "${text}": ${stdout}`));
+      else waiters.push(check);
+    };
+    check();
   });
-  return barriers;
+  return { child, output: () => stdout, line, send: () => child.stdin!.write('next\n') };
 }
 
-async function settle(promise: Promise<PathMutationGate>): Promise<PathMutationGate | Error> {
-  return promise.catch((error: unknown) => error as Error);
+/** `held` or `busy`, whichever line a holder process prints first. */
+function outcome(holder: Child): Promise<string> {
+  return Promise.any([holder.line('held').then(() => 'held'), holder.line('busy').then(() => 'busy')]);
+}
+
+function exited(child: ChildProcess): Promise<void> {
+  return child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise((resolve) => child.once('exit', () => resolve()));
 }
 
 const held: PathMutationGate[] = [];
 const dirs: string[] = [];
 
-afterEach(async () => {
-  vi.restoreAllMocks();
-  await Promise.allSettled(held.splice(0).map((gate) => gate.release()));
-  await Promise.all(dirs.splice(0).map((dir) => nodeFs.rm(dir, { recursive: true, force: true })));
-});
-
-async function target(): Promise<{ input: { scope: 'store'; targetPath: string }; endpoint: string }> {
-  const dir = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'byok-gate-ep-'));
+async function target(): Promise<string> {
+  const dir = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'byok-gate-'));
   dirs.push(dir);
-  const input = { scope: 'store' as const, targetPath: dir };
-  const probe = await acquirePathMutationGate(input);
-  await probe.release();
-  return { input, endpoint: path.join(`/tmp/byok-pm-${process.getuid!()}`, `${probe.identity}.sock`) };
+  return dir;
 }
 
-function keep(result: PathMutationGate | Error): PathMutationGate | Error {
+async function settle(promise: Promise<PathMutationGate>): Promise<PathMutationGate | Error> {
+  const result = await promise.catch((error: unknown) => error as Error);
   if (!(result instanceof Error)) held.push(result);
   return result;
 }
 
-const BUN = resolveBunBin();
-const GATE_MODULE = new URL('../util/path-mutation-gate.ts', import.meta.url).href;
+beforeAll(async () => {
+  work = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'byok-gate-work-'));
+  bundle = path.join(work, 'gate.mjs');
+  await build({ entryPoints: [GATE_SOURCE], bundle: true, platform: 'node', format: 'esm', outfile: bundle, logLevel: 'silent' });
+  for (const [name, source] of Object.entries(WORKERS)) await nodeFs.writeFile(path.join(work, name), source);
+});
 
-/**
- * A separate process running the gate from source under Bun. It acquires the
- * gate for `targetPath`, prints `held` (or `busy`), and with `pauseRelease`
- * releases on its first stdin line with its endpoint rm paused until a second
- * line, printing `paused` there and `released` after.
- */
-function gateProcess(targetPath: string, endpoint: string, pauseRelease: boolean): { child: ChildProcess; line: (text: string) => Promise<void>; send: () => void } {
-  const source = `
-    const fs = (await import('node:fs')).promises;
-    const lines = [];
-    let wake;
-    process.stdin.on('data', (chunk) => { for (const _ of String(chunk).split('\\n').slice(0, -1)) lines.push(1); wake?.(); });
-    const nextLine = async () => { while (lines.length === 0) await new Promise((resolve) => { wake = resolve; }); lines.shift(); };
-    const rm = fs.rm;
-    fs.rm = async (file, options) => {
-      if (${pauseRelease} && String(file) === ${JSON.stringify(endpoint)}) { process.stdout.write('paused\\n'); await nextLine(); }
-      return rm(file, options);
-    };
-    const { acquirePathMutationGate } = await import(${JSON.stringify(GATE_MODULE)});
-    let gate;
-    try { gate = await acquirePathMutationGate({ scope: 'store', targetPath: ${JSON.stringify(targetPath)} }); }
-    catch (error) { process.stdout.write(error.name === 'PathMutationGateBusyError' ? 'busy\\n' : 'error ' + error.message + '\\n'); process.exit(0); }
-    process.stdout.write('held\\n');
-    await nextLine();
-    await gate.release();
-    process.stdout.write('released\\n');
-    process.exit(0);
-  `;
-  const child = spawn(BUN!, ['-e', source], { stdio: ['pipe', 'pipe', 'inherit'] });
-  let stdout = '';
-  const waiters: Array<() => void> = [];
-  child.stdout!.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); waiters.splice(0).forEach((check) => check()); });
-  const line = (text: string) => new Promise<void>((resolve, reject) => {
-    const check = () => { if (stdout.includes(`${text}\n`)) resolve(); else if (child.exitCode !== null) reject(new Error(`gate process exited before "${text}": ${stdout}`)); else waiters.push(check); };
-    child.once('exit', () => check());
-    check();
+afterEach(async () => {
+  vi.restoreAllMocks();
+  for (const child of children.splice(0)) child.kill('SIGKILL');
+  await Promise.allSettled(held.splice(0).map((gate) => gate.release()));
+  await Promise.all(dirs.splice(0).map((dir) => nodeFs.rm(dir, { recursive: true, force: true })));
+});
+
+afterAll(async () => {
+  await nodeFs.rm(work, { recursive: true, force: true });
+});
+
+describe.runIf(supported)('path-mutation gate: one OS lock per handle (#1149)', () => {
+  it('a second acquisition in the same process is busy, and the gate is free again after release', async () => {
+    const targetPath = await target();
+    const first = await settle(acquirePathMutationGate({ scope: 'store', targetPath }));
+    expect(first).not.toBeInstanceOf(Error);
+    expect(await settle(acquirePathMutationGate({ scope: 'store', targetPath }))).toBeInstanceOf(PathMutationGateBusyError);
+    await (first as PathMutationGate).release();
+    expect(await settle(acquirePathMutationGate({ scope: 'store', targetPath }))).not.toBeInstanceOf(Error);
   });
-  return { child, line, send: () => child.stdin!.write('next\n') };
-}
 
-describe.runIf(posix)('path-mutation gate endpoint ownership (#1149)', () => {
-  it('a releaser paused before its endpoint rm cannot remove the next holder\'s endpoint', async () => {
-    const { input, endpoint } = await target();
-    const first = await acquirePathMutationGate(input);
-    const [pause] = pauseEndpointRm(endpoint, 1);
-    const releasing = first.release();
-    await pause!.hit;
-    const second = keep(await settle(acquirePathMutationGate(input)));
+  it('replays the release ABA: after a release and a new holder, a third acquisition is busy, and no gate operation removes a path', async () => {
+    const targetPath = await target();
+    const rm = vi.spyOn(nodeFs, 'rm');
+    const first = await acquirePathMutationGate({ scope: 'store', targetPath });
+    await first.release();
+    const second = await settle(acquirePathMutationGate({ scope: 'store', targetPath }));
     expect(second).not.toBeInstanceOf(Error);
-    pause!.open();
-    await releasing;
-    // `second` still holds the gate, so a third acquisition must be refused.
-    const third = keep(await settle(acquirePathMutationGate(input)));
-    expect(third).toBeInstanceOf(Error);
-    expect((third as Error).name).toBe('PathMutationGateBusyError');
+    expect(await settle(acquirePathMutationGate({ scope: 'store', targetPath }))).toBeInstanceOf(PathMutationGateBusyError);
+    expect(rm).not.toHaveBeenCalled();
   });
 
-  it.skipIf(BUN === undefined)('across three OS processes: a releaser paused before its endpoint rm cannot let a third process in beside the next holder', async () => {
-    const { input, endpoint } = await target();
-    const first = gateProcess(input.targetPath, endpoint, true);
-    const children = [first.child];
-    try {
-      await first.line('held');
-      first.send();
-      await first.line('paused');
-      const second = gateProcess(input.targetPath, endpoint, false);
-      children.push(second.child);
-      await second.line('held');
-      first.send();
-      await first.line('released');
-      // The second process still holds the gate, so a third must be refused.
-      const third = gateProcess(input.targetPath, endpoint, false);
-      children.push(third.child);
-      const outcome = await Promise.race([third.line('held').then(() => 'held'), third.line('busy').then(() => 'busy')]);
-      expect(outcome).toBe('busy');
-    } finally {
-      for (const child of children) child.kill('SIGKILL');
+  it('waitMs 0: a held gate gives a typed busy error at once', async () => {
+    const targetPath = await target();
+    await settle(acquirePathMutationGate({ scope: 'store', targetPath }));
+    const started = performance.now();
+    const result = await settle(acquirePathMutationGate({ scope: 'store', targetPath }, { waitMs: 0 }));
+    expect(performance.now() - started).toBeLessThan(50);
+    expect(result).toBeInstanceOf(PathMutationGateBusyError);
+    expect(result).toMatchObject({ scope: 'store', targetPath: await nodeFs.realpath(targetPath) });
+  });
+
+  it.runIf(process.platform === 'darwin')('darwin: the lock file keeps its inode over 100 acquire/release cycles', async () => {
+    const targetPath = await target();
+    const inodes = new Set<number>();
+    for (let cycle = 0; cycle < 100; cycle += 1) {
+      const gate = await acquirePathMutationGate({ scope: 'store', targetPath });
+      inodes.add(statSync(path.join(`/tmp/byok-pm-${process.getuid!()}`, `${gate.identity}.lock`)).ino);
+      await gate.release();
     }
+    expect(inodes.size).toBe(1);
   });
 
-  it('two acquirers that both proved a crashed holder\'s endpoint unbound: exactly one holds the gate', async () => {
-    const { input, endpoint } = await target();
-    // A crashed holder: a process that bound the endpoint and was killed, leaving the socket file.
-    const crash = spawnSync(process.execPath, ['-e', `require('node:net').createServer().listen(${JSON.stringify(endpoint)}, () => process.kill(process.pid, 'SIGKILL'))`]);
-    expect(crash.signal).toBe('SIGKILL');
-    expect((await nodeFs.lstat(endpoint)).isSocket()).toBe(true);
-    const [firstRm, secondRm] = pauseEndpointRm(endpoint, 2);
-    const acquirers = [settle(acquirePathMutationGate(input)), settle(acquirePathMutationGate(input))];
-    await firstRm!.hit;
-    await secondRm!.hit;
-    // Both have proved the leftover unbound and wait at their rm; the first to reach it binds first.
-    firstRm!.open();
-    const winner = keep(await Promise.race(acquirers));
-    expect(winner).not.toBeInstanceOf(Error);
-    secondRm!.open();
-    const [first, second] = await Promise.all(acquirers);
-    const other = keep(first === winner ? second! : first!);
-    expect(other).toBeInstanceOf(Error);
-    expect((other as Error).name).toBe('PathMutationGateBusyError');
+  it('the module never removes a path', () => {
+    const source = readFileSync(GATE_SOURCE, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gmu, '');
+    expect(source).not.toMatch(/\b(rm|rmSync|unlink|unlinkSync|rmdir|rmdirSync)\s*\(/u);
+  });
+
+  describe.each(RUNTIMES)('child processes under %s', (_name, runtime) => {
+    it.skipIf(runtime === undefined)('16 workers x 200 rounds: no two are ever inside at once', async () => {
+      const targetPath = await target();
+      const marker = path.join(targetPath, 'inside');
+      const workers = Array.from({ length: 16 }, () => run(runtime!, 'stress.mjs', [targetPath, marker, '200']));
+      await Promise.all(workers.map(({ child }) => exited(child)));
+      const results = workers.map(({ child, output }) => {
+        expect(child.exitCode, output()).toBe(0);
+        return JSON.parse(output()) as { rounds: number; overlaps: number };
+      });
+      expect(results.reduce((sum, result) => sum + result.rounds, 0)).toBe(3200);
+      expect(results.reduce((sum, result) => sum + result.overlaps, 0)).toBe(0);
+    }, 180_000);
+
+    it.skipIf(runtime === undefined)('a SIGKILLed holder with a live grandchild frees the gate at once; then 8 racers: exactly one holds', async () => {
+      const targetPath = await target();
+      const holder = run(runtime!, 'holder.mjs', [targetPath, 'grandchild', '0']);
+      await holder.line('held');
+      const grandchild = Number(/grandchild (\d+)/u.exec(holder.output())![1]);
+      try {
+        holder.child.kill('SIGKILL');
+        await exited(holder.child);
+        expect(() => process.kill(grandchild, 0)).not.toThrow();
+        const next = await settle(acquirePathMutationGate({ scope: 'store', targetPath }, { waitMs: 0 }));
+        expect(next).not.toBeInstanceOf(Error);
+        await (next as PathMutationGate).release();
+
+        const killed = run(runtime!, 'holder.mjs', [targetPath, 'hold', '0']);
+        await killed.line('held');
+        killed.child.kill('SIGKILL');
+        await exited(killed.child);
+        const racers = Array.from({ length: 8 }, () => run(runtime!, 'holder.mjs', [targetPath, 'hold', '0']));
+        const outcomes = await Promise.all(racers.map((racer) => outcome(racer)));
+        expect(outcomes.filter((outcome) => outcome === 'held')).toHaveLength(1);
+        expect(outcomes.filter((outcome) => outcome === 'busy')).toHaveLength(7);
+      } finally {
+        process.kill(grandchild, 'SIGKILL');
+      }
+    }, 60_000);
+
+    it.skipIf(runtime === undefined)('a holder whose event loop is blocked for 2 s: 200 contenders are all busy', async () => {
+      const targetPath = await target();
+      const holder = run(runtime!, 'holder.mjs', [targetPath, 'block', '2000']);
+      await holder.line('held');
+      const contenders = await Promise.all(Array.from({ length: 200 }, () => settle(acquirePathMutationGate({ scope: 'store', targetPath }, { waitMs: 0 }))));
+      expect(holder.output()).not.toContain('unblocked');
+      expect(contenders.every((result) => result instanceof PathMutationGateBusyError)).toBe(true);
+      await holder.line('unblocked');
+      holder.send();
+      await holder.line('released');
+    }, 60_000);
+  });
+});
+
+describe.runIf(!supported && process.platform !== 'win32')('path-mutation gate on an unsupported platform', () => {
+  it('refuses with a non-busy error', async () => {
+    const result = await settle(acquirePathMutationGate({ scope: 'store', targetPath: await target() }));
+    expect(result).toBeInstanceOf(Error);
+    expect(result).not.toBeInstanceOf(PathMutationGateBusyError);
   });
 });

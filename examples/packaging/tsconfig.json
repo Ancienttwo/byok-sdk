@@ -1,4 +1,4 @@
 {
   "extends": "../../tsconfig.json",
-  "include": ["launcher.ts", "sqlite-fixture.ts", "native-assets-fixture.ts"]
+  "include": ["launcher.ts", "sqlite-fixture.ts", "native-assets-fixture.ts", "gate-fixture.ts"]
 }

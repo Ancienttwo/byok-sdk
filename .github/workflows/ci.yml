@@ -1048,6 +1048,10 @@ jobs:
         if: matrix.recipe == 'sea'
         run: node examples/packaging/sqlite-smoke.mjs --sea
 
+      - name: Path-mutation gate ESM, CJS and relocated SEA smoke
+        if: matrix.recipe == 'sea'
+        run: node examples/packaging/gate-smoke.mjs --sea
+
       - name: Run packaging smoke
         run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
 

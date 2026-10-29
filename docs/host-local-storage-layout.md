@@ -202,6 +202,26 @@ owner publication and Agent-home directory/lease publication contend with the
 same path-scoped gates held by relocation. A writer that wins first is observed
 and rejected; a relocation that wins first prevents publication until release.
 
+### Path-mutation gates
+
+A path-scoped gate is an OS lock that belongs to one open handle (#1149): on
+macOS an `O_EXLOCK` open of `/tmp/byok-pm-<uid>/<identity>.lock`, on Linux an
+abstract unix socket `\0byok-pm-<uid>-<identity>`, on Windows a named pipe. The
+OS releases it when the handle closes or the holding process dies; the SDK never
+removes a lock path, so no process can remove another holder's gate. A held
+gate fails at once as busy. The macOS lock files stay on disk, one per gated
+path. A Linux abstract socket name has no file permissions, so another local
+user in the same network namespace could hold a name and keep that gate busy;
+it can never become a second holder.
+
+#### Upgrading from 0.31 or earlier
+
+On macOS and Linux the gates of 0.31 and earlier (a unix socket file under
+`/tmp/byok-pm-<uid>`) and the new OS locks do not exclude each other. Stop every
+SDK process on a store (the daemon, the CLI, and an App that embeds the SDK)
+before you upgrade any of them, and start them again only on the new release.
+Windows is unaffected.
+
 Relocation acquisition canonicalizes intended paths without creating them and
 must leave an absent destination absent. Active, unknown or corrupt owner/lease
 state fails closed. The SDK lease does not move bytes or choose product mapping,
