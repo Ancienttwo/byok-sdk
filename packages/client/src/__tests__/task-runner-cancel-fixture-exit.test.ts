@@ -61,7 +61,9 @@ it('the cancellation fixture reaps its tree when its test worker is SIGKILLed be
       output.close();
       child.stdout.destroy();
       child.stdin.destroy();
-      if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      // A detached POSIX group can outlive its root, including before receipt
+      // publication. Root exit is not evidence that the owned group is empty.
+      if (child.pid !== undefined) {
         if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
         else {
           try { process.kill(-child.pid, 'SIGKILL'); }
