@@ -33,6 +33,17 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
+test('shared device credential fixtures select client consumers and native smoke owners', () => {
+  const impact = selectImpact(['scripts/testing/device-credentials.mjs']);
+  for (const dir of ['packages/client', 'examples/basic', 'examples/host-execution-core',
+    'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/hosted-bot-collaboration',
+    'examples/hosted-bot-collaboration-worker', 'examples/packaging']) {
+    assert.ok(impact.dirs.includes(dir), dir);
+  }
+  assert.deepEqual(impact.families, ['adapter-lifecycle-smoke', 'dataplane', 'packageability-smoke']);
+  assert.throws(() => selectImpact(['scripts/testing/unreviewed-backend.mjs']), /Reviewed CI mapping required/);
+});
+
 test('the W5 runner probe workflow selects only the CI script checks (#605)', () => {
   assert.deepEqual(selectImpact(['.github/workflows/w5-runner-probe.yml']), {
     dirs: [], files: ['.github/workflows/w5-runner-probe.yml'], families: [], reason: 'root-ci-scripts',
