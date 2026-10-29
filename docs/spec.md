@@ -883,6 +883,17 @@ is a crash too: the connection stops, the same health failure is recorded,
 and `lifecycle` becomes `crashed` (it stays so, also after `stop()`, until the
 next `start()`); it is never an unhandled rejection.
 
+A halted or crashed run stops working at once; the Host does not have to call
+`stop()` for that. It takes no further `task.offer`, ends every active task
+(an interrupt bounded at 5 s, then close) and records
+each one's retryable `task.fail` in the journal, which the next `start()`
+reports. The ended connection queues nothing more, so its outbox cannot grow.
+An embedded Host and `byok-agent` behave the same; the Host still calls
+`stop()` to release the store, and `stop()` waits for that teardown (bounded by
+`shutdownGraceMs`) before it does. A revoked or superseded device's tasks are
+also ended on the server side (`cancelled`, `terminalCause` `device_revoked`
+or `device_superseded`), so the journaled fail of such a task is refused there.
+
 `byok-agent start` maps the run's end to its exit code: 0 for a normal stop,
 78 for a halt, 1 for a crash (a `crashed` lifecycle included). Under `--service` a halt exits 0, the one status
 launchd, systemd and WinSW all leave stopped; a crash still exits 1 and is

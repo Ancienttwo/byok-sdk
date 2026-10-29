@@ -3769,6 +3769,8 @@ export declare class ConnectionManager {
      * `drainOutbox`.
      * An id still queued or in flight is not queued again, so a timer retry
      * during an outage keeps one copy in its original place (#693).
+     * An ended session (halted, crashed or stopped) queues nothing, so its
+     * outbox cannot grow; a terminal is journaled before it is sent (#1119).
      */
     send(envelope: Envelope): void;
     /** Publish a fresh local configuration snapshot while this daemon is running. */
@@ -3918,8 +3920,8 @@ export declare class ConnectionManager {
     private advanceCursor;
     /**
      * Ends the session for good: stops the loop, the poll and the drain, then
-     * reports the reason once. The outbox keeps whatever it held, so
-     * `outboxLength()` stays an honest count of what never left.
+     * reports the reason once. The outbox keeps whatever it held and takes
+     * nothing more, so `outboxLength()` stays an honest count of what never left.
      */
     private halt;
     /** The defined end for an unexpected error: stop like a halt, then report it once. */
