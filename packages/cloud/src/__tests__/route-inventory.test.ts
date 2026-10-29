@@ -317,21 +317,9 @@ describe('capability x composition route matrix', () => {
       expected: [],
     },
     {
-      name: 'no blob capability, proxy supplied — a proxy is not a declaration',
-      capabilities: declaration(),
-      withProxy: true,
-      expected: [],
-    },
-    {
       name: 'grants only, no proxy — the object-storage composition',
       capabilities: declaration(CLOUD_CAPABILITIES.blobsPresigned),
       withProxy: false,
-      expected: GRANT_ROUTES,
-    },
-    {
-      name: 'grants only, proxy supplied but undeclared',
-      capabilities: declaration(CLOUD_CAPABILITIES.blobsPresigned),
-      withProxy: true,
       expected: GRANT_ROUTES,
     },
     {
@@ -381,14 +369,16 @@ describe('capability x composition route matrix', () => {
     ).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
   });
 
-  it('accepts a proxy that the declaration does not name, and mounts nothing for it', () => {
-    // The other direction, and deliberately not symmetric. Declaring more than
-    // the composition can serve tells a client something false; supplying more
-    // than the declaration names tells it less than the whole truth, which is
-    // what withholding a capability IS.
-    const cloud = cloudWith({ capabilities: declaration(CLOUD_CAPABILITIES.blobsPresigned), withProxy: true });
-    const mounted = new Set(cloud.mountedRoutes.map(routeKey));
-    expect(CONTENT_ROUTES.some((route) => mounted.has(route))).toBe(false);
+  it('refuses to construct a deployment that was given a byte proxy the declaration does not name', () => {
+    // The other direction (#1096): the proxy would never be mounted, so the
+    // host wired a port that silently does nothing. Withholding the capability
+    // means not passing the proxy.
+    for (const capabilities of [declaration(), declaration(CLOUD_CAPABILITIES.blobsPresigned)]) {
+      expect(() => cloudWith({ capabilities, withProxy: true })).toThrowError(expect.objectContaining({
+        code: 'capability_port_undeclared',
+        message: expect.stringContaining('blobContentProxy (blobs.contentproxy)'),
+      }));
+    }
   });
 
   it('serves every route in the reviewed inventory when everything is declared and supplied', () => {

@@ -148,7 +148,7 @@ import {
 import { SteerRejectedError } from './steer-control';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
 import type { TokenSigner } from './auth/tokens';
-import { CLOUD_CAPABILITIES, declares } from './capabilities';
+import { CAPABILITY_PORTS, CLOUD_CAPABILITIES, declares, type CapabilityPorts, type CloudCapability } from './capabilities';
 import {
   DEFAULT_ACTIVITY_BOUNDS,
   DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
@@ -312,9 +312,9 @@ export interface ByokCloudOptions {
    * Byte proxying for the two `/byok/blobs/:id/content` routes. OPTIONAL, and
    * absent is a first-class answer: a composition backed by object storage
    * hands the device a presigned URL to the object store and never carries a
-   * byte, so it has nothing to supply here. Supplying it is necessary but not
-   * sufficient for the routes to exist — the deployment must also declare
-   * `blobs.contentproxy` (ADR-010).
+   * byte, so it has nothing to supply here. Supplied exactly when the
+   * deployment declares `blobs.contentproxy` (ADR-010); either without the
+   * other is refused at construction.
    */
   readonly blobContentProxy?: BlobContentProxy;
   /** Atomic proof receipt + truth/reference/accounting authority for S6 routes. */
@@ -324,9 +324,8 @@ export interface ByokCloudOptions {
   /**
    * Tenant-scoped skill pack catalogue. OPTIONAL, and absent is a first-class
    * answer: a deployment that distributes no declarative content supplies
-   * nothing here and declares no `skills.pack`. Supplying it is necessary but
-   * not sufficient for the routes to exist — the deployment must also declare
-   * the capability (ADR-010), the same asymmetry the byte proxy above has.
+   * nothing here and declares no `skills.pack`. Supplied exactly when the
+   * deployment declares the capability (ADR-010), like the byte proxy above.
    */
   readonly skillPacks?: SkillPackStore;
   readonly crypto: CloudCrypto;
@@ -1022,16 +1021,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   if (options.mailboxWake === undefined) throw new TypeError('mailboxWake is required');
   const proofReceiptRetention = options.proofReceiptRetention === undefined ? undefined : resolveProofReceiptRetention(options.proofReceiptRetention);
   const declaration = parseDeclaration(options.capabilities);
-  assertNoOverDeclaration(
-    declaration,
-    options.blobContentProxy,
-    options.truthCommitter,
-    options.truthObjectDownloads,
-    options.skillPacks,
-    options.agentMemoryProjectionAuthorizer,
-    options.agentMemoryProjectionStore,
-    options.e2eeMemberStore,
-  );
+  assertDeclarationMatchesPorts(declaration, options);
   const root: CloudRootStores = { core: options.core, cloud: options.cloud, mailboxWake: options.mailboxWake };
   const auth: AuthPlane = createAuthPlane({
     stores: options.cloud,
@@ -1272,10 +1262,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     registry.register({ method: 'GET', path: BYOK_E2EE_PAIRING_MAC_PATH, class: 'device' }, e2eePairingMacReadHandler(e2eeDeps));
   }
 
-  // Skill packs: both conditions, same asymmetry as the byte proxy below.
-  // Declared-without-a-store is fatal (above); supplied-without-a-declaration
-  // is a silent no-mount, which is how a deployment rolls the channel out or
-  // back without ever telling a client something false.
+  // Skill packs: the store and the declaration come together; either without
+  // the other is refused at construction (`assertDeclarationMatchesPorts`).
   const skillPacks = options.skillPacks;
   if (skillPacks !== undefined && declares(declaration, CLOUD_CAPABILITIES.skillPacks)) {
     const skillPackDeps = {
@@ -1303,25 +1291,18 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     registry.register({ method: 'GET', path: BYOK_BLOB_URL_ROUTE, class: 'device' }, blobDownloadUrlHandler(blobDeps));
   }
 
-  // Byte proxying: BOTH conditions, and neither is inferred from the other.
-  // There is no third state: a composition either carries bytes or it does not.
-  //
-  // The two halves fail differently, and the asymmetry is the point.
+  // Byte proxying: the proxy and `blobs.contentproxy` come together. There is
+  // no third state: a composition either carries bytes or it does not.
   //
   // DECLARED WITHOUT A PROXY is fatal, above. A declaration is the ONE thing a
   // client is entitled to trust without probing (ADR-010), so a deployment
   // publishing `blobs.contentproxy` it cannot serve does not degrade to "two
   // missing routes" — it tells every client something false and then answers
-  // 404 to the client that believed it. Not mounting the routes is what an
-  // honest composition does with a capability it lacks; the dishonesty is in
-  // still announcing it, and the announcement is unconditional.
+  // 404 to the client that believed it.
   //
-  // SUPPLIED WITHOUT A DECLARATION is not fatal, and stays a silent no-mount.
-  // The deployment's declaration is then merely narrower than its parts, which
-  // is how a capability gets rolled out or rolled back: a host with a proxy
-  // wired up but the capability withheld serves exactly what it declares. The
-  // client is told less than the truth, never more, and no route exists that a
-  // client could only discover by probing.
+  // SUPPLIED WITHOUT A DECLARATION is fatal too (#1096): the proxy would never
+  // be mounted, so the host wired a port that silently does nothing. A host
+  // that withholds the capability stops passing the proxy.
   const contentProxy = options.blobContentProxy;
   if (contentProxy !== undefined && declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) {
     const contentDeps = {
@@ -2488,7 +2469,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 }
 
 /**
- * Fail closed on a declaration this composition's parts cannot back.
+ * Fail closed when the declaration and this composition's ports disagree, in
+ * either direction (#1096).
  *
  * Route mounting alone cannot enforce this: `GET /byok/capabilities` serves the
  * declaration verbatim and is mounted unconditionally, so a deployment that
@@ -2496,18 +2478,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
  * 404s both routes. Refusing at construction is the only placement where the
  * deployment cannot exist in that state — the alternative, sanitizing the
  * declaration down to what got mounted, would make the running surface a second
- * authority over what the host said it was deploying.
+ * authority over what the host said it was deploying. A port passed without its
+ * capability is refused for the same reason seen from the other side: it would
+ * never be mounted, so the host would wire a store and then see 404s.
  */
-function assertNoOverDeclaration(
-  declaration: CapabilityDeclaration,
-  contentProxy: BlobContentProxy | undefined,
-  truthCommitter: TruthCommitter | undefined,
-  truthObjectDownloads: TruthObjectDownloads | undefined,
-  skillPacks: SkillPackStore | undefined,
-  agentMemoryProjectionAuthorizer: AgentMemoryProjectionAuthorizer | undefined,
-  agentMemoryProjectionStore: AgentMemoryProjectionStore | undefined,
-  e2eeMemberStore: E2eeMemberStore | undefined,
-): void {
+function assertDeclarationMatchesPorts(declaration: CapabilityDeclaration, ports: CapabilityPorts): void {
   if (
     declares(declaration, CLOUD_CAPABILITIES.boardSse) &&
     !declares(declaration, CLOUD_CAPABILITIES.boardCoordination)
@@ -2517,43 +2492,24 @@ function assertNoOverDeclaration(
       `${CLOUD_CAPABILITIES.boardSse} requires ${CLOUD_CAPABILITIES.boardCoordination}; without polling, reconciliation and declared fallback cannot be served.`,
     );
   }
-  if (contentProxy === undefined && declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) {
-    throw new ByokCloudError(
-      'capability_over_declared',
-      `This deployment declares ${CLOUD_CAPABILITIES.blobsContentProxy} but was given no BlobContentProxy, so both /byok/blobs/:id/content routes would be published and unserved.`,
-    );
+  const undeclared: string[] = [];
+  for (const [capability, names] of Object.entries(CAPABILITY_PORTS) as [CloudCapability, readonly (keyof CapabilityPorts)[]][]) {
+    if (declares(declaration, capability)) {
+      const missing = names.filter((name) => ports[name] === undefined);
+      if (missing.length > 0) {
+        throw new ByokCloudError(
+          'capability_over_declared',
+          `This deployment declares ${capability} but was given no ${missing.join(' or ')}, so its routes would be published and unserved.`,
+        );
+      }
+    } else {
+      for (const name of names) if (ports[name] !== undefined) undeclared.push(`${name} (${capability})`);
+    }
   }
-  if (truthCommitter === undefined && declares(declaration, CLOUD_CAPABILITIES.truthRecords)) {
+  if (undeclared.length > 0) {
     throw new ByokCloudError(
-      'capability_over_declared',
-      `This deployment declares ${CLOUD_CAPABILITIES.truthRecords} but was given no atomic TruthCommitter.`,
-    );
-  }
-  if (truthObjectDownloads === undefined && declares(declaration, CLOUD_CAPABILITIES.truthRecords)) {
-    throw new ByokCloudError(
-      'capability_over_declared',
-      `This deployment declares ${CLOUD_CAPABILITIES.truthRecords} but was given no content-hash keyed TruthObjectDownloads authority.`,
-    );
-  }
-  if (skillPacks === undefined && declares(declaration, CLOUD_CAPABILITIES.skillPacks)) {
-    throw new ByokCloudError(
-      'capability_over_declared',
-      `This deployment declares ${CLOUD_CAPABILITIES.skillPacks} but was given no SkillPackStore, so both /byok/skill-packs routes would be published and unserved.`,
-    );
-  }
-  if (
-    declares(declaration, CLOUD_CAPABILITIES.agentMemoryProjection) &&
-    (agentMemoryProjectionAuthorizer === undefined || agentMemoryProjectionStore === undefined)
-  ) {
-    throw new ByokCloudError(
-      'capability_over_declared',
-      `This deployment declares ${CLOUD_CAPABILITIES.agentMemoryProjection} but was given no complete AgentMemoryProjectionAuthorizer/AgentMemoryProjectionStore pair.`,
-    );
-  }
-  if (e2eeMemberStore === undefined && declares(declaration, CLOUD_CAPABILITIES.e2eeMember)) {
-    throw new ByokCloudError(
-      'capability_over_declared',
-      `This deployment declares ${CLOUD_CAPABILITIES.e2eeMember} but was given no E2eeMemberStore, so the /byok/e2ee routes would be published and unserved.`,
+      'capability_port_undeclared',
+      `This deployment was given ${undeclared.join(', ')} without declaring the capability; declare it or stop passing the port.`,
     );
   }
 }

@@ -259,9 +259,9 @@ flowchart TB
   classDef kernel fill:#5b21b6,stroke:#ddd6fe,stroke-width:2px,color:#fff
   classDef out fill:#1e40af,stroke:#bfdbfe,stroke-width:2px,color:#fff
 
-  Decl["capability 声明<br/>server 固定用 fullCapabilityDeclaration()"]:::in
+  Decl["capability 声明<br/>server 由 ports 推导：capabilityDeclarationForPorts"]:::in
   Ports["注入的 ports<br/>blobContentProxy · truthCommitter<br/>skillPacks · e2eeMemberStore 等"]:::in
-  Check["assertNoOverDeclaration<br/>声明了但缺 port：构造失败<br/>有 port 但未声明：不挂载"]:::kernel
+  Check["assertDeclarationMatchesPorts<br/>声明了但缺 port：构造失败<br/>有 port 但未声明：构造失败"]:::kernel
   Reg["CloudRouteRegistry.register<br/>public · device · proof · presigned"]:::kernel
   App["私有 Hono app<br/>mounted 读回 app.routes"]:::kernel
   Fetch["ByokCloud.fetch"]:::out
@@ -293,7 +293,12 @@ flowchart TB
 | Agent memory 投影 | `POST /byok/agent-memory-projections` | `agent.memory.projection` 加 store 与 authorizer | device |
 
 - 路由表在 `packages/cloud/src/cloud.ts:1077-1340`，登记与读回在 `packages/cloud/src/router/registry.ts:50-81`。Host 的控制面操作（取消、审批、steer 等）没有 HTTP 路由，是 `ByokCloud` 上的方法（`cloud.ts:1341-1345`）。
-- `createByokServer` 用不带参数的 `fullCapabilityDeclaration()`（`packages/server/src/index.ts:418`），默认声明不含 `truth.records`、`skills.pack`、`agent.memory.projection`、`host-mcp-task-context`、`e2ee.member`（`packages/cloud/src/capabilities.ts:157-178`），所以内嵌 server 不挂这几组路由，即便它传入了 `e2eeMemberStore`（R-L3）。
+- 能力声明与 ports 双向校验（`packages/cloud/src/cloud.ts:2485`）：声明了能力却缺它的 port，错误码 `capability_over_declared`；传了 port 却没声明它的能力，错误码 `capability_port_undeclared`，错误信息列出每个多传的 port 与对应能力。能力与 port 的对应表是 `CAPABILITY_PORTS`（`packages/cloud/src/capabilities.ts:164`）。
+- `createByokServer` 只传 `blobContentProxy`，声明由 `capabilityDeclarationForPorts` 按传入的 ports 推导（`packages/server/src/index.ts:410,419`），所以只含标准能力与 `blobs.contentproxy`，不含 `truth.records`、`skills.pack`、`agent.memory.projection`、`host-mcp-task-context`、`e2ee.member`。内嵌 server 不再传 `e2eeMemberStore`，也不再有 E2EE 存储：Topology L 走本机回环，端到端加密不增加安全性（R-L3，#1096）。SQLite 组合里的 `proof_request_receipt` 由独立的 `SqliteProofRequestReceiptStore` 与 `SqliteProofReceiptRetentionAuthority` 承担（`packages/server/src/stores/sqlite/proof-receipts.ts`；`stores/sqlite/index.ts:1430,1438`）。
+
+<a id="capability-ports-migration"></a>
+
+**迁移（#1096，breaking）**：`createByokCloud` 收到没声明能力的 port 时构造失败（`capability_port_undeclared`），不再静默不挂载。Host 要么在声明里加上该能力，要么不再传这个 port；暂停某个能力也是不传它的 port。`createInMemoryByokCloud` 的默认声明改为由它持有的 ports 推导。0.31.x 的 SQLite 文件里遗留的 `e2ee_*` 表不再被读写，可以留着；`SqliteSchemaErrorCode` 去掉了只由 E2EE KEM floor 检查产生的 `SQLITE_MIGRATION_REFUSED`。
 - server 把整个 cloud app 挂成兜底路由，不逐条重新声明（`packages/server/src/index.ts:440-449`）。
 
 ## Remarks

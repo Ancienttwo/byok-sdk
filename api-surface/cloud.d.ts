@@ -1241,6 +1241,7 @@ export declare function verifyNonceSignature(crypto: CloudCrypto, devicePublicKe
  * routes, so the declaration and the surface cannot disagree.
  */
 import { type CapabilityDeclaration } from '@byok-sdk/core';
+import type { ByokCloudOptions } from './cloud';
 /** The hosted capability vocabulary this package knows how to serve. */
 export declare const CLOUD_CAPABILITIES: {
     /** `GET /byok/events` long-poll receive (§8). */
@@ -1328,8 +1329,8 @@ export declare const CLOUD_CAPABILITIES: {
      * The E2EE member device routes (#654): register a member key bundle,
      * append and read the member chain, put and read scope key packages, and
      * read the relayed client pairing MAC. Composition-bound like
-     * `truth.records`: declaring it without an `e2eeMemberStore` is refused at
-     * construction.
+     * `truth.records`: declaring it without an `e2eeMemberStore`, or passing one
+     * without declaring it, is refused at construction.
      */
     readonly e2eeMember: 'e2ee.member';
     /**
@@ -1377,6 +1378,28 @@ export interface FullCapabilityDeclarationOptions {
     /** `e2ee.member` is default-off: the composition must supply an `e2eeMemberStore`. */
     readonly includeE2eeMember?: boolean;
 }
+/**
+ * Each port-bound capability and the `createByokCloud` ports that serve it.
+ * The declaration and the ports agree in both directions (#1096):
+ * `createByokCloud` refuses a capability declared without all of its ports and
+ * a port passed without its capability, and `capabilityDeclarationForPorts`
+ * declares exactly the capabilities whose ports are all present.
+ */
+export declare const CAPABILITY_PORTS: {
+    readonly "blobs.contentproxy": readonly ["blobContentProxy"];
+    readonly "truth.records": readonly ["truthCommitter", "truthObjectDownloads"];
+    readonly "skills.pack": readonly ["skillPacks"];
+    readonly "agent.memory.projection": readonly ["agentMemoryProjectionAuthorizer", "agentMemoryProjectionStore"];
+    readonly "e2ee.member": readonly ["e2eeMemberStore"];
+};
+/** The `createByokCloud` ports a capability is bound to. */
+export type CapabilityPorts = Pick<ByokCloudOptions, (typeof CAPABILITY_PORTS)[keyof typeof CAPABILITY_PORTS][number]>;
+/**
+ * The declaration a composition's ports back: every standard capability, each
+ * port-bound capability exactly when all of its ports are present, and never
+ * `host-mcp-task-context`, which no port can prove (§8.2(1)).
+ */
+export declare function capabilityDeclarationForPorts(ports: CapabilityPorts, version?: number): CapabilityDeclaration;
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
@@ -1443,9 +1466,9 @@ export interface ByokCloudOptions {
      * Byte proxying for the two `/byok/blobs/:id/content` routes. OPTIONAL, and
      * absent is a first-class answer: a composition backed by object storage
      * hands the device a presigned URL to the object store and never carries a
-     * byte, so it has nothing to supply here. Supplying it is necessary but not
-     * sufficient for the routes to exist — the deployment must also declare
-     * `blobs.contentproxy` (ADR-010).
+     * byte, so it has nothing to supply here. Supplied exactly when the
+     * deployment declares `blobs.contentproxy` (ADR-010); either without the
+     * other is refused at construction.
      */
     readonly blobContentProxy?: BlobContentProxy;
     /** Atomic proof receipt + truth/reference/accounting authority for S6 routes. */
@@ -1455,9 +1478,8 @@ export interface ByokCloudOptions {
     /**
      * Tenant-scoped skill pack catalogue. OPTIONAL, and absent is a first-class
      * answer: a deployment that distributes no declarative content supplies
-     * nothing here and declares no `skills.pack`. Supplying it is necessary but
-     * not sufficient for the routes to exist — the deployment must also declare
-     * the capability (ADR-010), the same asymmetry the byte proxy above has.
+     * nothing here and declares no `skills.pack`. Supplied exactly when the
+     * deployment declares the capability (ADR-010), like the byte proxy above.
      */
     readonly skillPacks?: SkillPackStore;
     readonly crypto: CloudCrypto;
@@ -2098,10 +2120,8 @@ export interface InMemoryByokCloudOptions {
     readonly truthObjectDownloads?: TruthObjectDownloads;
     readonly maxTruthRequestBytes?: number;
     /**
-     * Host/test supplied skill pack catalogue. Absent by default, and
-     * `fullCapabilityDeclaration()` withholds `skills.pack` to match — a
-     * composition that declared a channel it has no store for would be refused at
-     * construction, which would break every existing in-memory deployment.
+     * Host/test supplied skill pack catalogue. Absent by default; the default
+     * declaration names `skills.pack` exactly when it is supplied.
      */
     readonly skillPacks?: SkillPackStore;
     readonly skillPackPageLimit?: number;
@@ -2699,6 +2719,13 @@ export declare const CLOUD_ERROR_CODES: {
      * deployment whose one honest interface lies.
      */
     readonly capability_over_declared: 'capability_over_declared';
+    /**
+     * The composition was given a port whose capability the declaration does not
+     * name (#1096). Construction-time and fatal: the port would never be mounted,
+     * so passing it is a wiring mistake, not a rollout switch. Declare the
+     * capability or stop passing the port.
+     */
+    readonly capability_port_undeclared: 'capability_port_undeclared';
     /** Host-supplied board labels or coordination input exceeded the explicit contract. */
     readonly coordination_input_invalid: 'coordination_input_invalid';
     /**
@@ -3129,8 +3156,8 @@ export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
 export { parseRecordedWriteResult } from './e2ee-member';
 export type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeProofRequest, E2eeProvenWrite, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, E2eeScopeShred, } from './e2ee-member';
-export { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, declares, fullCapabilityDeclaration, } from './capabilities';
-export type { CapabilitiesResponse, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities';
+export { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, capabilityDeclarationForPorts, declares, fullCapabilityDeclaration, } from './capabilities';
+export type { CapabilitiesResponse, CapabilityPorts, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities';
 export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry';
 export type { CloudRouteHandler, RouteClass, RouteDescriptor, RouteMethod } from './router/registry';
 export { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from './auth/tokens';
