@@ -22,6 +22,7 @@ import {
 } from '../daemon/provider-provisioning';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { resetTestDeviceCredentials } from './fixtures/credential-backend';
 
 const TENANT = 'tenant-provisioning';
 const DEVICE = 'device-provisioning';
@@ -180,6 +181,8 @@ type Identity = { tenantId: string; deviceId: string };
 async function startDaemon(options: {
   handler?: (identity: Identity) => ProviderProvisioningHandler;
 } = {}) {
+  // Each daemon is its own machine: one productId's OS entry belongs to one storeDir (#1094).
+  await resetTestDeviceCredentials();
   const server = await TestServer.start();
   servers.push(server);
   const storeDir = await tmpDir('byok-provisioning-store-');

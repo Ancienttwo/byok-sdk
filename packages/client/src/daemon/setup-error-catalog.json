@@ -93,5 +93,15 @@
     "retryable": false,
     "nextStep": "Fix the named HostLayoutOptions field, then call resolveHostLayout again.",
     "anchor": "#directory-ownership"
+  },
+  "device_store_not_bound": {
+    "retryable": false,
+    "nextStep": "If this store owns the enrollment, run doctor --repair restore-enrollment-metadata with the expected device and tenant ids; otherwise pair this store under its own productId, or pair --replace-other-store to replace the other store's enrollment.",
+    "anchor": "#troubleshooting"
+  },
+  "store_not_bound": {
+    "retryable": false,
+    "nextStep": "If this store owns the enrollment, run doctor --repair restore-enrollment-metadata with the expected device and tenant ids; otherwise pair this store under its own productId, or pair --replace-other-store to replace the other store's enrollment.",
+    "anchor": "#troubleshooting"
   }
 }

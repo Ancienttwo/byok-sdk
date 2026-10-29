@@ -867,8 +867,9 @@ network. Whether the server accepted this device is reported through one
 lifecycle model, `status().lifecycle` and the `{kind:'lifecycle'}` event:
 `stopped`, `awaiting-enrollment`, `running` with `connection` `connecting` or
 `open`, or `halted` with a reason from one closed set (`DaemonHaltReason`:
-`unpaired`, `re_pair_required`, `store_owned`, `device_revoked`,
-`handshake_rejected`, `replay_cursor_too_old`, `config_invalid`). `open` means
+`unpaired`, `re_pair_required`, `store_not_bound`, `store_owned`,
+`device_revoked`, `handshake_rejected`, `replay_cursor_too_old`,
+`config_invalid`). `open` means
 the server accepted this session's `conn.hello` (protocol §8.1). Network
 failures never fail `start()` or end the run: the daemon's one reconnect loop
 retries with deterministic fleet jitter. A condition a restart cannot fix ends
@@ -1001,8 +1002,9 @@ expectedTenantId })` is an explicit operator action. It requires a matching
 existing OS enrollment authority and the same exclusive store lease used by
 daemon startup/pairing. Reachable authenticated control refuses; unreachable
 control is not quiescence proof. It restores only missing or valid-stale
-non-secret `device.json` through the same reconciliation method as startup,
-then reads back the metadata. Invalid/legacy/special-file projections,
+non-secret `device.json` from the OS authority, then reads back the
+metadata. It is the only path that writes the projection outside pairing:
+startup never self-heals it (#1094). Invalid/legacy/special-file projections,
 missing/unavailable authority and mismatched identity fail closed. It never
 renews/replaces credentials, creates a daemon, starts a task, or rebuilds a
 journal. Closed error codes and the result omit OS error details and secret
@@ -2796,6 +2798,20 @@ fallback. `<storeDir>/device.json` is only a bounded non-secret projection
 `{deviceId, tenantId, devicePublicKey}`. A legacy secret-bearing JSON record is
 never imported, parsed as a JWT, or dual-read: normal load/start/status reports
 `re_pair_required`, and explicit re-pair is the default recovery.
+
+The OS entry is keyed by productId alone, so `device.json` is also the
+storeDir's pair-time binding (#1094). Load, start, status, identity and
+signer reads require it to name exactly the stored enrollment's
+`{deviceId, tenantId, devicePublicKey}`. A missing or different `device.json`
+is the typed `DeviceStoreBindingMismatchError` (`device_store_not_bound`;
+start halts as `store_not_bound`). Nothing adopts the stored enrollment.
+Recovery is explicit: the doctor `restore-enrollment-metadata` action when
+this store owns the enrollment, otherwise a pair of this store under its own
+productId. Pairing refuses with the same error while the OS entry holds an
+enrollment this storeDir's `device.json` does not name; only `pair
+--replace-other-store` (`Daemon.pair(code, { replaceOtherStore: true })`)
+replaces it, with a fresh key, after which the other store reads as not
+bound. Unpair from a store that is not bound fails closed and deletes nothing.
 
 macOS custody may select an explicit absolute keychain file through
 `deviceCredentials.macosKeychainPath`; the daemon, cold enrollment reads,

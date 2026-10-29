@@ -73,6 +73,8 @@ export function formatHaltRemedy(reason: DaemonHaltReason): string {
       return 'this device is not paired: run `byok-agent pair <code> --server <url>`, then start again';
     case 're_pair_required':
       return 'the device record is unusable: run `byok-agent pair <code> --server <url>`, then start again';
+    case 'store_not_bound':
+      return 'the OS credential entry holds an enrollment this storeDir did not pair: if this store owns it, run `byok-agent doctor --repair restore-enrollment-metadata --expected-device-id <id> --expected-tenant-id <tenant> --yes`; otherwise pair this store under its own productId (or `byok-agent pair <code> --server <url> --replace-other-store` to replace the other store\'s enrollment), then start again';
     case 'store_owned':
       return 'another daemon owns this store: stop it first (`byok-agent service-stop`, or end the other `start`)';
     case 'device_revoked':

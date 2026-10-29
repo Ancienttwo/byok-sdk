@@ -233,13 +233,18 @@ describe('authenticated enrollment tenant projection', () => {
     vi.spyOn(store.credentials, 'replace').mockRejectedValueOnce(new Error('injected OS replace failure'));
 
     await expect(auth.pair('atomic-replacement-code')).rejects.toThrow('injected OS replace failure');
-    const recovered = await auth.readCurrent();
-    expect(recovered).toEqual(first);
-    expect(await store.load()).toEqual({
-      deviceId: first.deviceId,
-      tenantId: first.tenantId,
-      devicePublicKey: first.devicePublicKey,
+    // #1094: device.json already names the replacement while the OS entry
+    // still holds the first enrollment. That is a typed binding error, never
+    // a silent self-heal; the OS authority stays complete and unchanged.
+    await expect(auth.readCurrent()).rejects.toMatchObject({
+      code: 'device_store_not_bound',
+      stored: { deviceId: first.deviceId, tenantId: 'tenant-atomic-first' },
+      bound: { tenantId: 'tenant-atomic-replacement' },
     });
+    expect(await store.credentials.read()).toEqual(first);
+    // The operator-confirmed doctor action's primitive restores the binding.
+    await store.reconcileMetadata(first);
+    expect(await auth.readCurrent()).toEqual(first);
     await auth.stop();
   });
 
@@ -257,13 +262,19 @@ describe('authenticated enrollment tenant projection', () => {
     await auth.stop();
   });
 
-  it('repairs a missing non-secret projection from the complete OS authority on restart', async () => {
+  it('a restart without the projection is a typed binding error; only the doctor primitive restores it', async () => {
     server = await TestServer.start();
     server.setPairingTenantId('projection-repair-code', 'tenant-projection-repair');
     const store = createTestDeviceStore(await tmpDir('byok-enrollment-projection-repair-'));
     const paired = await new AuthManager({ serverUrl: server.url, store }).pair('projection-repair-code');
     await store.remove();
 
+    await expect(new AuthManager({ serverUrl: server.url, store }).loadExisting()).rejects.toMatchObject({
+      code: 'device_store_not_bound', stored: { deviceId: paired.deviceId }, bound: undefined,
+    });
+    expect(await store.load()).toBeUndefined();
+
+    await store.reconcileMetadata(paired);
     const restarted = await new AuthManager({ serverUrl: server.url, store }).loadExisting();
     expect(restarted).toEqual(paired);
     expect(await store.load()).toEqual({

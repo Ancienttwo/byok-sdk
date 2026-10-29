@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "1a071c666ace9f6bb2bf362d20b5f913fcbf2b57d940bab655b241fc14cb69a2"
+    "snapshotSha256": "3ce72c542a05958c84d082168387a862d5a1a4d9004319497ef31aa150b15c2a"
   },
   "configFields": {
     "status": "tracked",
@@ -201,6 +201,17 @@
         "export:@byok-sdk/protocol#DEVICE_NOT_REGISTERED_CODE",
         "export:@byok-sdk/protocol#DeviceNotRegisteredResponse",
         "export:@byok-sdk/protocol#DeviceNotRegisteredResponseSchema"
+      ]
+    },
+    {
+      "id": "device-store-pairing-binding",
+      "impact": "breaking",
+      "summary": "A storeDir only uses the OS enrollment its own pair-time device.json names (#1094). Startup, status, identity and the stored signer no longer self-heal a missing or different device.json from the productId-keyed OS entry: they throw DeviceStoreBindingMismatchError (code device_store_not_bound), and start halts as the new DaemonHaltReason 'store_not_bound'. Pairing refuses while the OS entry holds an enrollment this storeDir did not pair, unless Daemon.pair(code, { replaceOtherStore: true }) / byok-agent pair --replace-other-store. Unpair from such a store fails closed.",
+      "migration": "docs/device-setup.md#troubleshooting",
+      "items": [
+        "export:@byok-sdk/client#DAEMON_HALT_REASONS",
+        "export:@byok-sdk/client#Daemon",
+        "export:@byok-sdk/client#DeviceStoreBindingMismatchError"
       ]
     }
   ],
@@ -477,6 +488,16 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
+      "change": "changed",
+      "entry": "device-store-pairing-binding"
+    },
+    {
+      "item": "export:@byok-sdk/client#Daemon",
+      "change": "changed",
+      "entry": "device-store-pairing-binding"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonConfig",
       "change": "changed",
       "entry": "local-tool-approval-host-only"
@@ -555,6 +576,11 @@
       "item": "export:@byok-sdk/client#DeviceCredentialCommandAbortedError",
       "change": "added",
       "entry": "auth-revocation-typed-keychain-deadline"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceStoreBindingMismatchError",
+      "change": "added",
+      "entry": "device-store-pairing-binding"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",

@@ -9,8 +9,15 @@ import {
   TokenResponseSchema,
   type TokenResponse,
 } from '@byok-sdk/protocol';
-import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceMetadata, type DeviceRecord } from './store';
+import {
+  assertStoreBound,
+  DeviceRecordRePairRequiredError,
+  DeviceStore,
+  type DeviceMetadata,
+  type DeviceRecord,
+} from './store';
 import type { DeviceCredentialBackend } from './device-credential-store';
+import { DeviceStoreBindingMismatchError } from './daemon-errors';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
 import { toHttpBase } from './url';
 import { MAX_TIMER_DELAY_MS } from '../util/timer-delay';
@@ -181,20 +188,28 @@ export class AuthManager {
   }
 
   /**
-   * Load a previously-paired device record, if any (idempotent — a second
-   * call is a no-op once loaded). The OS read runs as a credential mutation,
+   * Load the paired device record for a daemon run. Every call rereads the
+   * OS authority and revalidates this storeDir's binding (#1094), including
+   * on an instance that already holds a record: another store may have
+   * replaced the enrollment since. The read runs as a credential mutation,
    * so {@link stop} cancels a read hung on a locked keychain.
    */
   async loadExisting(): Promise<DeviceRecord | undefined> {
-    if (!this.record) {
-      this.record = await this.runCredentialMutation((signal) => this.loadRecord(signal));
-    }
+    this.record = undefined;
+    this.record = await this.runCredentialMutation((signal) => this.loadRecord(signal));
     if (this.record) this.scheduleProactiveRenewal();
     return this.record;
   }
 
-  /** `POST /byok/pair` (v2): generates a device keypair on first pair, reuses it on any subsequent (e.g. post-revocation) re-pair. */
-  async pair(pairingCode: string): Promise<DeviceRecord> {
+  /**
+   * `POST /byok/pair` (v2): generates a device keypair on first pair, reuses
+   * it on any subsequent (e.g. post-revocation) re-pair of this store. It
+   * refuses with {@link DeviceStoreBindingMismatchError} while the OS entry
+   * holds an enrollment this storeDir did not pair, unless
+   * `replaceOtherStore` states the operator's intent to replace it; the
+   * replacement never reuses that enrollment's key.
+   */
+  async pair(pairingCode: string, options?: { readonly replaceOtherStore?: boolean }): Promise<DeviceRecord> {
     this.pairing = true;
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
     this.proactiveTimer = undefined;
@@ -208,8 +223,11 @@ export class AuthManager {
             // Explicit pairing is the one authorized replacement path for a
             // legacy/tampered enrollment file. It never reads through it: a
             // fresh keypair and complete authenticated PairResponse replace
-            // the record atomically below.
-            if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+            // the record atomically below. Another store's enrollment is
+            // replaced only on the operator's explicit request.
+            const replaceable = error instanceof DeviceRecordRePairRequiredError ||
+              (error instanceof DeviceStoreBindingMismatchError && options?.replaceOtherStore === true);
+            if (!replaceable) throw error;
           }
         }
         // These request facts join the key as one immutable first-pair
@@ -284,10 +302,11 @@ export class AuthManager {
           expiresAt: resolvePairExpiry(body.refreshHint),
           devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
         };
-        // device.json is a deterministic non-secret projection. Write it
-        // first, then atomically replace the complete OS enrollment authority.
-        // If the authoritative replace fails, a restart repairs the projection
-        // from the still-current OS record; no mixed identity/key can load.
+        // device.json is this store's pair-time binding and a non-secret
+        // projection. Write it first, then atomically replace the complete OS
+        // enrollment authority. If the authoritative replace fails, the next
+        // load reports the binding mismatch; no mixed identity/key can load,
+        // and recovery is re-running pair or the doctor repair action.
         await this.opts.store.save(metadata);
         await this.credentials.replace(record, signal);
         this.record = record;
@@ -530,16 +549,20 @@ export class AuthManager {
     }
   }
 
-  /** Read the current paired authority afresh; metadata without its OS secret is re-pair required. */
+  /**
+   * Read the current paired authority afresh; metadata without its OS secret
+   * is re-pair required, and an OS enrollment this storeDir's `device.json`
+   * does not name is never adopted.
+   */
   private async loadRecord(signal?: AbortSignal): Promise<DeviceRecord | undefined> {
     const authority = await this.credentials.read(signal);
+    const projection = await this.opts.store.load();
     if (authority === undefined) {
       // Distinguish a genuinely unpaired machine from a partial/legacy file.
-      if ((await this.opts.store.load()) === undefined) return undefined;
+      if (projection === undefined) return undefined;
       throw new DeviceRecordRePairRequiredError();
     }
-
-    await this.opts.store.reconcileMetadata(authority);
+    assertStoreBound(projection, authority);
     return Object.freeze({ ...authority });
   }
 }

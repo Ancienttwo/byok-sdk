@@ -85,13 +85,14 @@ import { runVersionCommand } from './version';
 
 /** `pair --e2ee`: the input is `<pairing code>.<verification secret>` (#654 §7.2, owner §50c). */
 const E2EE_PAIR_FLAG = '--e2ee';
+const REPLACE_OTHER_STORE_FLAG = '--replace-other-store';
 
 function usage(): never {
   console.error(
     [
       'Usage:',
       '  byok-agent --version',
-      '  byok-agent pair <code> --server <url> [--e2ee] [--config <path>]   (--e2ee: <code> is the <pairing code>.<verification secret> the web client shows)',
+      '  byok-agent pair <code> --server <url> [--e2ee] [--replace-other-store] [--config <path>]   (--e2ee: <code> is the <pairing code>.<verification secret> the web client shows; --replace-other-store: replace an enrollment another storeDir of this productId paired)',
       '  byok-agent start [--config <path>] [--service]            (or BYOK_CONFIG env var; launchd/systemd pass --service)',
       '  byok-agent status [--config <path>]',
       '  byok-agent config check [--strict] [--json] [--config <path>]   (validate a config file and print its effective values; --strict fails on warnings)',
@@ -172,12 +173,12 @@ async function main(): Promise<void> {
   }
 
   if (command === 'pair') {
-    const [input] = positionalArgs(rest, ['--server', '--config']).filter((arg) => arg !== E2EE_PAIR_FLAG);
+    const [input] = positionalArgs(rest, ['--server', '--config']).filter((arg) => arg !== E2EE_PAIR_FLAG && arg !== REPLACE_OTHER_STORE_FLAG);
     const server = argValue(rest, '--server');
     if (!input || !server) usage();
     const config = loadConfig(argValue(rest, '--config'), { serverUrl: server });
     const { code, verificationSecret } = readPairInput(input, hasFlag(rest, E2EE_PAIR_FLAG));
-    return runPairCommand(config, code, {}, verificationSecret);
+    return runPairCommand(config, code, {}, verificationSecret, hasFlag(rest, REPLACE_OTHER_STORE_FLAG));
   }
 
   if (command === 'start') {

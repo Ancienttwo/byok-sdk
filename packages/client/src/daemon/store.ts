@@ -19,6 +19,7 @@ import {
   type DeviceRecord,
 } from './device-credential-store';
 import { createDeviceCredentialStore } from './device-credential-provider';
+import { DeviceStoreBindingMismatchError } from './daemon-errors';
 import { foldNameAliases } from '../util/fold-name-aliases';
 import { defaultStoreDir } from './host-layout';
 
@@ -118,6 +119,21 @@ export class DeviceRecordRePairRequiredError extends Error {
   constructor() {
     super(REPAIR_REQUIRED_MESSAGE);
     this.name = 'DeviceRecordRePairRequiredError';
+  }
+}
+
+/**
+ * The one binding check between a storeDir and the shared OS enrollment: the
+ * `device.json` that pairing wrote must name exactly the stored enrollment.
+ */
+export function assertStoreBound(projection: DeviceMetadata | undefined, authority: DeviceMetadata): void {
+  if (
+    projection === undefined ||
+    projection.deviceId !== authority.deviceId ||
+    projection.tenantId !== authority.tenantId ||
+    projection.devicePublicKey !== authority.devicePublicKey
+  ) {
+    throw new DeviceStoreBindingMismatchError(authority, projection);
   }
 }
 
@@ -259,7 +275,11 @@ export class DeviceStore {
     }
   }
 
-  /** Rebuild only the non-secret projection, while the caller owns the store lease. */
+  /**
+   * Rebuild only the non-secret projection, while the caller owns the store
+   * lease. Only the operator-confirmed doctor `restore-enrollment-metadata`
+   * action calls this; startup and reads never adopt an enrollment.
+   */
   async reconcileMetadata(authority: DeviceMetadata): Promise<boolean> {
     const projection: DeviceMetadata = {
       deviceId: authority.deviceId,
@@ -365,7 +385,9 @@ export class DeviceStore {
  * Read and classify the canonical device store without writing anything.
  * A legacy/tampered record remains distinct from an absent record so hosts can
  * require explicit re-pair instead of silently changing semantics. Filesystem,
- * pathname-safety and credential-provider failures intentionally remain errors.
+ * pathname-safety and credential-provider failures intentionally remain errors,
+ * and so does an OS enrollment this storeDir did not pair
+ * ({@link DeviceStoreBindingMismatchError}).
  */
 export async function readEnrollmentAuthority(
   options: DeviceEnrollmentStatusOptions,
@@ -379,7 +401,10 @@ export async function readEnrollmentAuthority(
     // re-pair-required state; steady-state reads must never hide or repair it.
     const projection = await store.load();
     const authority = await store.credentials.read();
-    if (authority !== undefined) return { state: 'paired', record: authority };
+    if (authority !== undefined) {
+      assertStoreBound(projection, authority);
+      return { state: 'paired', record: authority };
+    }
 
     // An enrollment projection without its OS authority is not an unpaired
     // machine: it is a partial/legacy state that requires explicit recovery.

@@ -218,6 +218,16 @@ interaction; the next renewal then succeeds. Do not re-pair for this: the
 device record is intact. Only a `device_revoked` halt means the server
 confirmed the device is no longer registered.
 
+**Store not bound.** The OS credential entry is keyed by productId alone, and a
+storeDir only uses the enrollment its own pair-time `device.json` names. A
+missing or different `device.json` is `device_store_not_bound` (start halts as
+`store_not_bound`); nothing adopts the stored enrollment. If this store owns
+it, run `byok-agent doctor --repair restore-enrollment-metadata
+--expected-device-id <id> --expected-tenant-id <tenant> --yes`; the device id
+and mailbox are kept. Otherwise give this store its own productId. `byok-agent
+pair --replace-other-store` replaces the other store's enrollment, and that
+store then reads as not bound.
+
 ## Directory ownership
 
 | Datum / directory | Authority | Host responsibility |
@@ -406,6 +416,7 @@ still need correction. Codes do not replace the reported field/path or cause.
 | `daemon_config_invalid` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `daemon_journal_protocol_unsupported` | no | Drain the journal with the release that wrote it before upgrading. | [guide](#upgrade) |
 | `device_revoked` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |
+| `device_store_not_bound` | no | If this store owns the enrollment, run doctor --repair restore-enrollment-metadata with the expected device and tenant ids; otherwise pair this store under its own productId, or pair --replace-other-store to replace the other store's enrollment. | [guide](#troubleshooting) |
 | `distribution_owned` | no | Remove localAgentRelease from CLI JSON; the distribution supplies it. | [guide](#cli-path) |
 | `embedded_only` | no | Assemble this value in embedded code; omit it from CLI JSON. | [guide](#embedded-path) |
 | `handshake_rejected` | no | Check productId and SDK compatibility with the server, or pair again. | [guide](#troubleshooting) |
@@ -417,6 +428,7 @@ still need correction. Codes do not replace the reported field/path or cause.
 | `re_pair_required` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |
 | `removed_field` | no | Remove the field and follow its migration; do not rename it to an unknown field. | [guide](#removed-fields) |
 | `replay_cursor_too_old` | no | Pair again or use the Host operator recovery procedure for expired history. | [guide](#reset) |
+| `store_not_bound` | no | If this store owns the enrollment, run doctor --repair restore-enrollment-metadata with the expected device and tenant ids; otherwise pair this store under its own productId, or pair --replace-other-store to replace the other store's enrollment. | [guide](#troubleshooting) |
 | `store_owned` | no | Stop the daemon that owns this store before starting another. | [guide](#troubleshooting) |
 | `unknown_field` | no | Remove or correct the unknown field; startup warns, while --strict rejects warnings. | [guide](#configuration) |
 | `unpaired` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |

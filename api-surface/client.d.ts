@@ -3176,13 +3176,24 @@ export declare class AuthManager {
      */
     resume(): void;
     /**
-     * Load a previously-paired device record, if any (idempotent — a second
-     * call is a no-op once loaded). The OS read runs as a credential mutation,
+     * Load the paired device record for a daemon run. Every call rereads the
+     * OS authority and revalidates this storeDir's binding (#1094), including
+     * on an instance that already holds a record: another store may have
+     * replaced the enrollment since. The read runs as a credential mutation,
      * so {@link stop} cancels a read hung on a locked keychain.
      */
     loadExisting(): Promise<DeviceRecord | undefined>;
-    /** `POST /byok/pair` (v2): generates a device keypair on first pair, reuses it on any subsequent (e.g. post-revocation) re-pair. */
-    pair(pairingCode: string): Promise<DeviceRecord>;
+    /**
+     * `POST /byok/pair` (v2): generates a device keypair on first pair, reuses
+     * it on any subsequent (e.g. post-revocation) re-pair of this store. It
+     * refuses with {@link DeviceStoreBindingMismatchError} while the OS entry
+     * holds an enrollment this storeDir did not pair, unless
+     * `replaceOtherStore` states the operator's intent to replace it; the
+     * replacement never reuses that enrollment's key.
+     */
+    pair(pairingCode: string, options?: {
+        readonly replaceOtherStore?: boolean;
+    }): Promise<DeviceRecord>;
     /** The current, non-expired access token — renews first if it's expired or close to it. Throws {@link DeviceRevokedError} if the device has been revoked. */
     getValidAccessToken(): Promise<string>;
     /** Force a renewal regardless of the cached token's remaining lifetime — the reactive path, used after a caller sees a 401. */
@@ -3209,7 +3220,11 @@ export declare class AuthManager {
      */
     private runRequest;
     private runCredentialMutation;
-    /** Read the current paired authority afresh; metadata without its OS secret is re-pair required. */
+    /**
+     * Read the current paired authority afresh; metadata without its OS secret
+     * is re-pair required, and an OS enrollment this storeDir's `device.json`
+     * does not name is never adopted.
+     */
     private loadRecord;
 }
 // ==== @byok-sdk/client dist/daemon/blob-client.d.ts ====
@@ -5100,9 +5115,16 @@ export interface Daemon {
      * `verificationSecret`, the base32 secret the web client shows after the
      * pairing code (#654 §7.2), the device also enrolls as an E2EE member; the
      * secret never reaches the Host. Without it the device pairs without E2EE.
+     *
+     * Pairing refuses with `DeviceStoreBindingMismatchError`
+     * (`device_store_not_bound`) while the OS credential entry of this
+     * productId holds an enrollment this storeDir did not pair.
+     * `replaceOtherStore: true` is the operator's explicit intent to replace
+     * that enrollment; the other store then reads as not bound.
      */
     pair(pairingCode: string, options?: {
         readonly verificationSecret?: string;
+        readonly replaceOtherStore?: boolean;
     }): Promise<DeviceEnrollment>;
     /**
      * Resolves once local startup is done — store ownership, storage, journal
@@ -5287,6 +5309,7 @@ export declare class CursorStore {
     clear(serverUrl: string, deviceId: string): Promise<void>;
 }
 // ==== @byok-sdk/client dist/daemon/daemon-errors.d.ts ====
+import type { DeviceMetadata } from './device-credential-store';
 /**
  * A `DaemonConfig` field that no longer exists was supplied. Construction
  * refuses it rather than ignoring it, so a host upgrading across a removal
@@ -5339,6 +5362,28 @@ export declare class DaemonJournalProtocolUnsupportedError extends Error {
  * always did; this check never repairs or reinterprets a row.
  */
 export declare function assertJournalEnvelopeProtocol(bytes: string, taskId: string, record: DaemonJournalProtocolRecord): void;
+/**
+ * The OS credential entry, keyed by productId alone, holds an enrollment
+ * that this storeDir's `device.json` does not name: another storeDir of the
+ * same productId paired it, or this store's projection is missing or from a
+ * different pairing. Nothing adopts it. Recovery is an explicit operator act:
+ * the doctor `restore-enrollment-metadata` action when this store owns the
+ * enrollment, or a pair of this store under its own productId (#1094).
+ */
+export declare class DeviceStoreBindingMismatchError extends Error {
+    readonly code: 'device_store_not_bound';
+    /** The enrollment the OS entry holds. Identifiers only, never credential bytes. */
+    readonly stored: {
+        readonly deviceId: string;
+        readonly tenantId: string;
+    };
+    /** The enrollment this storeDir's `device.json` names, if any. */
+    readonly bound: {
+        readonly deviceId: string;
+        readonly tenantId: string;
+    } | undefined;
+    constructor(stored: DeviceMetadata, bound: DeviceMetadata | undefined);
+}
 // ==== @byok-sdk/client dist/daemon/daemon-lifecycle.d.ts ====
 /**
  * The daemon's one lifecycle model (issues #391 and #394).
@@ -5354,6 +5399,8 @@ export declare const DAEMON_HALT_REASONS: readonly [
 'unpaired', 
 /** The device record on disk is unusable and only a fresh `pair` replaces it. */
 're_pair_required', 
+/** The OS enrollment of this productId was not paired by this storeDir (`device_store_not_bound`). */
+'store_not_bound', 
 /** Another daemon owns this store. Thrown by `start()`; never reported through `lifecycle`. */
 'store_owned', 
 /** The server revoked this device. */
@@ -8668,6 +8715,11 @@ export declare class DeviceRecordRePairRequiredError extends Error {
     constructor();
 }
 /**
+ * The one binding check between a storeDir and the shared OS enrollment: the
+ * `device.json` that pairing wrote must name exactly the stored enrollment.
+ */
+export declare function assertStoreBound(projection: DeviceMetadata | undefined, authority: DeviceMetadata): void;
+/**
  * Persists only bounded non-secret enrollment projection. The paired bearer
  * token and private key are never accepted here and are owned by the internal
  * OS DeviceCredentialStore.
@@ -8704,7 +8756,11 @@ export declare class DeviceStore {
      * identifiable until the synchronous pathname check and unlink complete.
      */
     remove(): Promise<DeviceMetadata | undefined>;
-    /** Rebuild only the non-secret projection, while the caller owns the store lease. */
+    /**
+     * Rebuild only the non-secret projection, while the caller owns the store
+     * lease. Only the operator-confirmed doctor `restore-enrollment-metadata`
+     * action calls this; startup and reads never adopt an enrollment.
+     */
     reconcileMetadata(authority: DeviceMetadata): Promise<boolean>;
     save(record: DeviceMetadata): Promise<void>;
     private openBounded;
@@ -8713,7 +8769,9 @@ export declare class DeviceStore {
  * Read and classify the canonical device store without writing anything.
  * A legacy/tampered record remains distinct from an absent record so hosts can
  * require explicit re-pair instead of silently changing semantics. Filesystem,
- * pathname-safety and credential-provider failures intentionally remain errors.
+ * pathname-safety and credential-provider failures intentionally remain errors,
+ * and so does an OS enrollment this storeDir did not pair
+ * ({@link DeviceStoreBindingMismatchError}).
  */
 export declare function readEnrollmentAuthority(options: DeviceEnrollmentStatusOptions): Promise<EnrollmentAuthorityRead>;
 /** The public non-secret identity projection of one enrollment record. */
@@ -10596,7 +10654,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonMemoryHelperResolution, } from './daemon/config-schema';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
 export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';

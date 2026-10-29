@@ -1,4 +1,5 @@
 import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import type { DeviceMetadata } from './device-credential-store';
 
 /**
  * A `DaemonConfig` field that no longer exists was supplied. Construction
@@ -73,4 +74,33 @@ export function assertJournalEnvelopeProtocol(bytes: string, taskId: string, rec
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
   const found = (parsed as { v?: unknown }).v;
   if (found !== PROTOCOL_VERSION) throw new DaemonJournalProtocolUnsupportedError(taskId, record, found);
+}
+
+/**
+ * The OS credential entry, keyed by productId alone, holds an enrollment
+ * that this storeDir's `device.json` does not name: another storeDir of the
+ * same productId paired it, or this store's projection is missing or from a
+ * different pairing. Nothing adopts it. Recovery is an explicit operator act:
+ * the doctor `restore-enrollment-metadata` action when this store owns the
+ * enrollment, or a pair of this store under its own productId (#1094).
+ */
+export class DeviceStoreBindingMismatchError extends Error {
+  readonly code = 'device_store_not_bound' as const;
+  /** The enrollment the OS entry holds. Identifiers only, never credential bytes. */
+  readonly stored: { readonly deviceId: string; readonly tenantId: string };
+  /** The enrollment this storeDir's `device.json` names, if any. */
+  readonly bound: { readonly deviceId: string; readonly tenantId: string } | undefined;
+
+  constructor(stored: DeviceMetadata, bound: DeviceMetadata | undefined) {
+    const held = `device ${stored.deviceId} (tenant ${stored.tenantId})`;
+    super(
+      `device_store_not_bound: the OS credential entry for this productId holds ${held}, but this storeDir ` +
+        (bound === undefined ? 'did not pair it' : `is bound to device ${bound.deviceId} (tenant ${bound.tenantId})`) +
+        `. If this store owns that enrollment, run \`byok-agent doctor --repair restore-enrollment-metadata --expected-device-id ${stored.deviceId} --expected-tenant-id ${stored.tenantId} --yes\`; ` +
+        'otherwise pair this store under its own productId',
+    );
+    this.name = 'DeviceStoreBindingMismatchError';
+    this.stored = { deviceId: stored.deviceId, tenantId: stored.tenantId };
+    this.bound = bound === undefined ? undefined : { deviceId: bound.deviceId, tenantId: bound.tenantId };
+  }
 }
