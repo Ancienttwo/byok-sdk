@@ -2388,7 +2388,8 @@ before its devices.
 The HTTP `Date` header of the pair and token responses is the one server-time
 reading the client takes. It only feeds the clock-skew measurement that
 `byok-agent doctor` reports (#1114) and never sets a token lifetime; a response
-without a parseable `Date` leaves that measurement unknown.
+without a parseable `Date`, or one during which the device clock was set back,
+leaves that measurement unknown.
 
 `signature` is the Ed25519 signature over the **domain-separated** nonce,
 base64url-encoded. **Pinned encoding (changed 2026-08-07, S1 — this replaces

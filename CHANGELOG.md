@@ -108,8 +108,9 @@
   header of each successful pair and token renewal (positive means the device
   is ahead), with an uncertainty of half the round trip plus the header's one
   second, and keeps only the last reading in memory. A response without a
-  parseable `Date` clears it. `ControlStatusResult` gains optional
-  `clockSkew`, `DiagnosticsSnapshot` gains `clockSkew`, and a new `clock-skew`
+  parseable `Date`, or a device clock set back during the request, clears it.
+  `ControlStatusResult` gains optional `clockSkew`, `DiagnosticsSnapshot`
+  gains `clockSkew`, and a new `clock-skew`
   check passes within 60 seconds, the default device-proof window of the Host
   (a Host may widen it up to 5 minutes), and warns beyond it or when the
   reading is unknown, which includes a stopped daemon. The reading is a report

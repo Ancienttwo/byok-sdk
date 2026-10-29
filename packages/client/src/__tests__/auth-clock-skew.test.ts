@@ -56,6 +56,16 @@ describe('device clock skew observation (#1114)', () => {
     expect(auth.clockSkew()).toBeUndefined();
   });
 
+  it('is unknown when the device clock is set back while the request is in flight', async () => {
+    vi.mocked(globalThis.fetch).mockImplementationOnce(async () => {
+      vi.setSystemTime(DEVICE_NOW - 120_000);
+      return new Response(JSON.stringify({ deviceId: 'device-skew', tenantId: 'tenant-skew', accessToken: 'token-0', expiresIn: 3600 }),
+        { status: 200, headers: { date: new Date(DEVICE_NOW).toUTCString() } });
+    });
+    await auth.pair('pairing-code');
+    expect(auth.clockSkew()).toBeUndefined();
+  });
+
   it.each([
     ['ahead of', 2 * HOUR_MS, -2 * HOUR_MS],
     ['behind', -2 * HOUR_MS, 2 * HOUR_MS],

@@ -170,7 +170,8 @@ export class AuthManager {
   private lastRenewedAt: number | undefined;
   private nearExpiryRenewals = 0;
   // The exchange that produced the stored credential; undefined when its
-  // response carried no parseable Date, so a stale measurement is never shown.
+  // response carried no parseable Date or the device clock was set back during
+  // the request, so a stale or meaningless measurement is never shown.
   private lastClockSkew: ClockSkewObservation | undefined;
 
   private readonly credentials: DeviceCredentialBackend;
@@ -189,7 +190,7 @@ export class AuthManager {
     return this.revoked;
   }
 
-  /** The skew measured by the last successful pair or renewal, if its response carried a parseable `Date`. */
+  /** The skew measured by the last successful pair or renewal, if its response carried a parseable `Date` and the device clock did not go back mid-request. */
   clockSkew(): ClockSkewObservation | undefined {
     return this.lastClockSkew;
   }
@@ -625,8 +626,11 @@ function deviceLocalExpiry(receivedAt: number, expiresInSeconds: number): string
  * Measures the device clock against the response's `Date` header, assuming the
  * server stamped it midway through the round trip. A missing or unparseable
  * header is unknown: no other field of the response is a server-time source.
+ * So is a round trip that ends before it starts: the device clock was set back
+ * mid-request, and neither the midpoint nor the uncertainty means anything.
  */
 function observeClockSkew(sentAt: number, receivedAt: number, response: Response): ClockSkewObservation | undefined {
+  if (receivedAt < sentAt) return undefined;
   const header = response.headers.get('date');
   if (header === null) return undefined;
   const serverMs = Date.parse(header);
