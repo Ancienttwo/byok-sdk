@@ -275,6 +275,9 @@ const SERVER_EXECUTION_CORE_EXPORTS = Object.freeze({
   './execution-core/canonical': { types: './dist/execution-core/canonical.d.ts', import: './dist/execution-core/canonical.js' },
 });
 const SERVER_TSX = '^4.19.2';
+// #1104: the single-file packaging entry, and the vitest runner of the packaging example's bundle test.
+const CLIENT_PACKAGING_EXPORT = Object.freeze({ types: './dist/adapters/packaging.d.ts', import: './dist/adapters/packaging.js' });
+const PACKAGING_VITEST = '^4.1.10';
 // #793 D2g: the K8 retention rule and its shared vectors, added to the hosted
 // entries for H's retention slice (owner question §53d).
 const K8_RETENTION_EXPORTS = Object.freeze({
@@ -415,6 +418,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         && manifest.devDependencies?.['@byok-sdk/cloud'] === 'workspace:*') {
         delete current.devDependencies['@byok-sdk/cloud'];
       }
+      if (dir === 'examples/packaging'
+        && record.devDependencies?.vitest === undefined
+        && current.devDependencies?.vitest === PACKAGING_VITEST
+        && manifest.devDependencies?.vitest === PACKAGING_VITEST) {
+        delete current.devDependencies.vitest;
+      }
       // #603 exposes the already resolved bundler to helper asset smoke tests.
       if (dir === 'packages/client'
         && record.devDependencies?.esbuild === undefined
@@ -511,6 +520,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     if (isDeepStrictEqual(before.exports, migrated) && isDeepStrictEqual(after.exports, { ...migrated, ...K8_SWITCH_EXPORTS })) {
       after.exports = before.exports;
     }
+  } else if (path === 'examples/packaging/package.json') {
+    if (before.private !== true || after.private !== true) throw new Error('The packaging example must stay private');
+    // #1104: the bundle test, exactly its script and runner.
+    if (before.scripts?.test === undefined && after.scripts?.test === 'vitest run') delete after.scripts.test;
+    if (before.devDependencies?.vitest === undefined && after.devDependencies?.vitest === PACKAGING_VITEST) delete after.devDependencies.vitest;
   } else if (path === 'examples/host-execution-core/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The host execution core example must stay private');
     // #1106: the core entries leave together with the description, from exactly the old entries.
@@ -560,6 +574,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       delete after.devDependencies.esbuild;
     }
     if (path === 'packages/client/package.json') {
+      if (before.exports?.['./packaging'] === undefined && isDeepStrictEqual(after.exports?.['./packaging'], CLIENT_PACKAGING_EXPORT)) delete after.exports['./packaging'];
       const key = '#byok-hermes-session';
       const entry = { types: './dist/adapters/hermes/hermes-session-runtime.d.ts', default: './dist/adapters/hermes/hermes-session-runtime.js' };
       if (before.imports?.[key] === undefined && isDeepStrictEqual(after.imports?.[key], entry)) delete after.imports[key];

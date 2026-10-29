@@ -143,6 +143,7 @@ test('a platform family is selected only by a path it owns', () => {
     'adapter-lifecycle-smoke': 'packages/client/src/adapters/codex/codex-adapter.ts',
     'windows-client': 'packages/client/src/daemon/auth-manager.ts',
     'packageability-smoke': 'packages/client/src/sdk-native-assets.ts',
+    'packaging-consistency': 'packages/client/src/adapters/packaging.ts',
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
@@ -316,6 +317,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/release/execution-submit-smoke.mjs',
     'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',
+    'scripts/release/packaging-plugin-smoke.mjs',
     'scripts/release/pi-launcher-smoke.mjs',
     'scripts/release/publish.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
@@ -381,7 +383,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 17);
+  assert.equal(knownFamilies.length, 18);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {
@@ -422,6 +424,23 @@ test('native asset packaging fixtures select their real platform smoke without b
   }
 });
 
+
+// #1104: the packaging consistency lane runs on the paths it bundles and qualifies, and nowhere else.
+test('the embedded Host packaging paths select the packaging consistency lane', () => {
+  for (const path of ['examples/packaging/embedded-host-fixture.ts', 'examples/packaging/embedded-host-smoke.mjs', 'examples/packaging/bundle-import-meta.test.ts']) {
+    const impact = selectImpact([path]);
+    assert.ok(impact.families.includes('packaging-consistency') && impact.dirs.includes('examples/packaging'), path);
+  }
+  assert.deepEqual(selectImpact(['examples/packaging/vitest.config.ts']).families, ['packageability-smoke']);
+  for (const path of ['packages/client/src/adapters/packaging.ts', 'packages/client/src/sdk-distribution-bins.json', 'packages/client/src/adapters/pi/runtime-assets.ts',
+    'packages/keys/src/pi-provider-launcher-core.ts']) assert.ok(selectImpact([path]).families.includes('packaging-consistency'), path);
+  // Package membership alone never selects it: the bundle test in the example suite guards every SDK source change.
+  for (const path of ['packages/client/src/daemon/task-runner.ts', 'packages/server/src/index.ts', 'examples/packaging/launcher.ts']) {
+    assert.ok(!selectImpact([path]).families.includes('packaging-consistency'), path);
+    if (path.startsWith('packages/client/')) assert.ok(selectImpact([path]).dirs.includes('examples/packaging'), path);
+  }
+  assert.throws(() => selectImpact(['examples/packaging/embedded-host-other.ts']), /reviewed CI mapping required/i);
+});
 
 test('SQLite packaging fixtures select only their reviewed packaging owner', () => {
   for (const path of ['examples/packaging/sqlite-fixture.ts', 'examples/packaging/sqlite-smoke.mjs']) {
