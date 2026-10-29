@@ -291,6 +291,30 @@ describe('SQLite receipt recovery', () => {
     } finally { await runtime.stores.close(); }
   });
 
+  // #1116: claimed work stays cancel_requested after its delivered cancel row
+  // ages out; a repeat cancel must not throw (a Host 500) or enqueue again.
+  it('replays a claimed cancellation after its acknowledged delivery is retention-deleted', async () => {
+    const { open } = fixture(); const runtime = open();
+    const taskId = 'claimed-cancel-retained';
+    try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { taskId, payload });
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+      const first = await runtime.cloud.cancelTask(tenant, taskId, 'stuck runtime');
+      expect(first.status).toBe('cancel_requested');
+      const delivered = (await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).nextSeq;
+      await runtime.stores.core.mailbox.recordDelivery(tenant, { deviceId, deliveredSeq: delivered });
+      await runtime.stores.core.mailbox.advanceCursor(tenant, { deviceId, ackedSeq: delivered });
+      await runtime.stores.core.mailbox.collectExpired(tenant, { now: '2999-01-01T00:00:00.000Z', limit: 500, ackedBefore: '2999-01-01T00:00:00.000Z', expireUnackedBefore: '2999-01-01T00:00:00.000Z' });
+
+      await expect(runtime.cloud.cancelTask(tenant, taskId, 'ignored retry')).resolves.toEqual(first);
+      expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: delivered })).messages).toEqual([]);
+      expect(await runtime.stores.core.mailbox.readUsage(tenant)).toEqual({ bytes: 0n });
+    } finally { await runtime.stores.close(); }
+  });
+
 
   it('reads only validated immutable offer authority and rejects corrupt receipts', async () => {
     const { open, path } = fixture(); let runtime = open();
