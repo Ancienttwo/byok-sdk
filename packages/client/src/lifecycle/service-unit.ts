@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import type { ServiceProgram } from './service-types';
@@ -145,7 +146,7 @@ export interface ServiceLifecycleOwnerInput {
   service: string;
 }
 
-export type ServiceOwnerFs = Pick<typeof fsp, 'readFile' | 'writeFile' | 'rename' | 'rm' | 'mkdir'>;
+export type ServiceOwnerFs = Pick<typeof fsp, 'readFile' | 'writeFile' | 'rename' | 'rm' | 'mkdir' | 'link'>;
 
 function ownerRecordPath(storeDir: string): string {
   return path.join(serviceStateDir(storeDir), OWNER_RECORD_FILENAME);
@@ -181,6 +182,8 @@ export async function readServiceLifecycleOwner(storeDir: string, fs: ServiceOwn
  * owner; throws `lifecycle_owner_conflict` when another owner holds it. An
  * App that sets autostart through its own mechanism (a login item) claims
  * here too, so the CLI's `install` refuses instead of adding a second one.
+ * A first claim publishes the record with a hard link, which fails when the
+ * record exists, so of two concurrent claimants only one wins.
  */
 export async function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs: ServiceOwnerFs = fsp): Promise<void> {
   assertServiceOwner(input.owner);
@@ -189,10 +192,26 @@ export async function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInp
   if (current?.service === input.service) return;
   const file = ownerRecordPath(input.storeDir);
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
+  const tmp = `${file}.${randomUUID()}.tmp`;
   const record: OwnerRecord = { version: 1, owner: input.owner, service: input.service };
   await fs.writeFile(tmp, `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600 });
-  await fs.rename(tmp, file);
+  try {
+    if (current === undefined) {
+      try {
+        await fs.link(tmp, file);
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException | null)?.code !== 'EEXIST') throw error;
+      }
+      const winner = await readServiceLifecycleOwner(input.storeDir, fs);
+      if (winner?.owner !== input.owner) throw new ServiceUnitError('lifecycle_owner_conflict');
+      if (winner.service === input.service) return;
+    }
+    // The same owner changes its service name: replace its own record.
+    await fs.rename(tmp, file);
+  } finally {
+    await fs.rm(tmp, { force: true });
+  }
 }
 
 /** Removes the owner record when `owner` holds it; throws `lifecycle_owner_conflict` when another owner does. */

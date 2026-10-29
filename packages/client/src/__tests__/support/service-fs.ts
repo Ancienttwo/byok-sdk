@@ -24,6 +24,12 @@ export function memoryServiceFs(initial: Record<string, string> = {}) {
       files.delete(from);
       files.set(to, content);
     }),
+    link: vi.fn(async (from: string, to: string) => {
+      const content = files.get(from);
+      if (content === undefined) throw enoent(from);
+      if (files.has(to)) throw Object.assign(new Error(`EEXIST: ${to}`), { code: 'EEXIST' });
+      files.set(to, content);
+    }),
     rm: vi.fn(async (file: string) => { files.delete(file); }),
     mkdir: vi.fn(async () => undefined),
     chmod: vi.fn(async () => undefined),

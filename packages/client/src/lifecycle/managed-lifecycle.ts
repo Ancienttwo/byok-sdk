@@ -13,7 +13,7 @@ import {
 } from './service-unit';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceStatusResult } from './service-types';
 
-export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
+export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod' | 'link'>;
 
 /** The platform half of a lifecycle: where its files go and how its manager loads them. */
 export interface PlatformUnit {

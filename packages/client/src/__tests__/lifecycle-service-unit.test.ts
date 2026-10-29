@@ -1,3 +1,6 @@
+import { promises as nodeFs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createServiceLifecycle } from '../lifecycle/create-service-lifecycle';
 import type { Runner } from '../lifecycle/exec-runner';
@@ -150,6 +153,26 @@ describe('lifecycle (#1097) owner record', () => {
     expect(await codeOf(releaseServiceLifecycleOwner({ storeDir: '/store', owner: 'cli' }, fs))).toBe('lifecycle_owner_conflict');
     await releaseServiceLifecycleOwner({ storeDir: '/store', owner: 'app' }, fs);
     expect(await readServiceLifecycleOwner('/store', fs)).toBeUndefined();
+  });
+
+  it('concurrent claims by two owners on an unclaimed store: exactly one wins, the other gets lifecycle_owner_conflict', async () => {
+    const storeDir = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'byok-owner-race-'));
+    try {
+      const results = await Promise.allSettled([
+        claimServiceLifecycleOwner({ storeDir, owner: 'app', service: 'com.acme.login-item' }),
+        claimServiceLifecycleOwner({ storeDir, owner: 'cli', service: 'acme' }),
+      ]);
+      const won = results.flatMap((result, index) => (result.status === 'fulfilled' ? [index === 0 ? 'app' : 'cli'] : []));
+      const lost = results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []));
+      expect(won).toHaveLength(1);
+      expect(lost).toHaveLength(1);
+      expect(lost[0]).toBeInstanceOf(ServiceUnitError);
+      expect((lost[0] as ServiceUnitError).code).toBe('lifecycle_owner_conflict');
+      expect((await readServiceLifecycleOwner(storeDir))?.owner).toBe(won[0]);
+      expect((await nodeFs.readdir(path.join(storeDir, 'service'))).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    } finally {
+      await nodeFs.rm(storeDir, { recursive: true, force: true });
+    }
   });
 
   it('fails closed on an unreadable record and an invalid owner', async () => {
