@@ -122,6 +122,7 @@ test('a platform family is selected only by a path it owns', () => {
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
     'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
+    'runtime-contract': 'packages/client/src/__tests__/runtime-contract/contract.ts',
   };
   assert.deepEqual(Object.keys(owned).sort(), Object.keys(familyOwners).sort());
   const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
@@ -189,7 +190,7 @@ test('family owners cover every test file and script their CI job runs', () => {
     const next = workflow.slice(start + 1).search(/\n  [a-z0-9-]+:\n/);
     const block = workflow.slice(start, next < 0 ? undefined : start + 1 + next).replace(/[`\\]\r?\n\s*/g, ' ');
     const paths = [];
-    for (const match of block.matchAll(/bun run (?:--filter (\S+)|--cwd (\S+)) (test|[a-z]+:[a-z-]+)(?: --([^\n]*))?/g)) {
+    for (const match of block.matchAll(/bun run (?:--filter (\S+)|--cwd (\S+)) (test|[a-z]+:[a-z-]+)(?=\s|$)(?: --([^\n]*))?/g)) {
       const dir = match[2] ?? dirOf(match[1]);
       assert.ok(dir, match[0]);
       if (match[3] === 'test') {
@@ -325,7 +326,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 15);
+  assert.equal(knownFamilies.length, 16);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {

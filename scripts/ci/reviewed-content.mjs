@@ -31,6 +31,8 @@ function revertUndiciMove(before, after, field) {
 const UPGRADE_MANIFEST_GATE = 'node scripts/release/check-upgrade-manifest.mjs';
 const UPGRADE_MANIFEST_TEST = 'scripts/release/check-upgrade-manifest.test.mjs';
 const CLIENT_FILES = Object.freeze(['dist', 'README.md', 'LICENSE']);
+// #1103: the runtime contract suite's own run, exactly; the runtime-contract CI family invokes it.
+export const RUNTIME_CONTRACT_SCRIPT = 'vitest run --config src/__tests__/runtime-contract/vitest.config.ts';
 
 // #925 wire v4: the protocol compatibility oracle moves to 0.30.2, the last
 // v3 release, and the 0.27.0 floor alias goes. Only these exact edges and
@@ -516,6 +518,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       if (before.imports?.[key] === undefined && isDeepStrictEqual(after.imports?.[key], entry)) delete after.imports[key];
       const smoke = ' && node scripts/check-hermes-session-entry.mjs';
       if (typeof before.scripts?.build === 'string' && after.scripts?.build === before.scripts.build + smoke) after.scripts.build = before.scripts.build;
+      if (before.scripts?.['test:runtime-contract'] === undefined && after.scripts?.['test:runtime-contract'] === RUNTIME_CONTRACT_SCRIPT) {
+        delete after.scripts['test:runtime-contract'];
+      }
       // #1102 ships the upgrade manifest in the client tarball: exactly one appended files entry.
       if (isDeepStrictEqual(before.files, CLIENT_FILES) && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json'])) {
         after.files = before.files;
