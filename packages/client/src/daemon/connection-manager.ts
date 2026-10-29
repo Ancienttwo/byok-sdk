@@ -90,7 +90,11 @@ export interface ConnectionManagerOptions {
   onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
   onOutboundQueued?: (envelope: Envelope) => void;
   beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
-  /** Base delay before each reconnect handshake, and for stalled-cycle and local-disposition backoff. Default 2s. */
+  /**
+   * Base of the capped exponential backoff (`backoffCeilingMs`) before each
+   * reconnect handshake, and for stalled-cycle and local-disposition retries.
+   * A route's `Retry-After` lengthens the reconnect wait. Default 2s.
+   */
   longPollRetryDelayMs?: number;
   /** Minimum delay before the next long-poll request after an empty (no-events) response. Default 250ms. */
   longPollIdleDelayMs?: number;
@@ -130,7 +134,8 @@ function settlementFor(envelope: Envelope, outcome: CorrelatedOutcome): Outbound
  * session polls and drains the outbox, so `conn.hello` is the first message
  * of every session, including after a reconnect (protocol §8). Any route
  * failure returns the session to `connecting` and the loop handshakes again
- * after `fleetJitter('reconnect')`. A rejected hello, a revoked device or a
+ * after the capped exponential `fleetJitter('reconnect')`, or the server's
+ * `Retry-After` when that is longer. A rejected hello, a revoked device or a
  * lost replay cursor halts it instead.
  *
  * `send()` (Design B, finding N4) pushes onto a single shared outbox this
@@ -210,6 +215,8 @@ export class ConnectionManager {
    * `drainRetryDelay`.
    */
   private cancelPendingDrainRetry: (() => void) | undefined;
+  /** The longest `Retry-After` a route answered since the last reconnect wait; see `nextReconnectDelayMs`. */
+  private retryAfterMs = 0;
   /**
    * The capabilities the current server response advertised — untyped
    * `string[]` for forward compatibility. An advertisement is scoped to the
@@ -234,6 +241,7 @@ export class ConnectionManager {
       onIngress: (ingress) => { this.ingressBudget = ingress; },
       onServerCapabilities: (capabilities) => this.applyServerCapabilities(capabilities),
       onLoopFailure: () => this.breakSession(),
+      onRetryAfter: (delayMs) => { this.retryAfterMs = Math.max(this.retryAfterMs, delayMs); },
       onRevoked: () => this.halt('device_revoked'),
       onReplayCursorTooOld: (error) => {
         console.error(`[byok/client] ${error.message}`);
@@ -288,7 +296,7 @@ export class ConnectionManager {
           await this.opts.onOutboundSettled?.([settlementFor(hello, answer.outcomes[0]!)]);
         } catch {
           this.notify(() => this.opts.onOperationalOutcome?.('failure', 'reconnect'));
-          await sleep(this.fleetJitter.delay('reconnect', this.reconnectAttempt++, this.opts.longPollRetryDelayMs ?? 2000), signal);
+          await sleep(this.nextReconnectDelayMs(), signal);
           continue;
         }
       }
@@ -304,9 +312,21 @@ export class ConnectionManager {
         hello = undefined;
         if (this.isEnded()) return;
       }
-      const baseMs = this.opts.longPollRetryDelayMs ?? 2000;
-      await sleep(this.fleetJitter.delay('reconnect', this.reconnectAttempt++, baseMs), signal);
+      await sleep(this.nextReconnectDelayMs(), signal);
     }
+  }
+
+  /**
+   * The wait before the next handshake: the capped exponential
+   * `fleetJitter('reconnect')` for this attempt, or the server's last
+   * `Retry-After` when that is longer. A `Retry-After` is consumed by the one
+   * wait it lengthens.
+   */
+  private nextReconnectDelayMs(): number {
+    const backoff = this.fleetJitter.delay('reconnect', this.reconnectAttempt++, this.opts.longPollRetryDelayMs ?? 2000);
+    const delay = Math.max(backoff, this.retryAfterMs);
+    this.retryAfterMs = 0;
+    return delay;
   }
 
   /** One open session: from an accepted handshake until a route failure, stop, or halt ends it. */

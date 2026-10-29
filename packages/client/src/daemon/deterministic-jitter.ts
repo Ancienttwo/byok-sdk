@@ -48,8 +48,39 @@ export function deterministicJitterMs(input: DeterministicJitterInput): number {
   return Math.max(0, Math.round(input.baseMs * multiplier));
 }
 
+/**
+ * How many times an automatic retry delay doubles before it stops growing:
+ * the ceiling is `baseMs × 2^MAX_BACKOFF_DOUBLINGS` (64 s for the 2 s default).
+ * The ceiling scales with the caller's base so a short test base keeps a short
+ * ceiling.
+ */
+export const MAX_BACKOFF_DOUBLINGS = 5;
+
+/**
+ * The capped exponential schedule every automatic retry loop on the device
+ * uses: `baseMs × 2^attempt`, flat from attempt {@link MAX_BACKOFF_DOUBLINGS}.
+ * Attempt 0 is the first retry after a failure; callers reset to 0 on success.
+ */
+export function backoffCeilingMs(attempt: number, baseMs: number): number {
+  if (!Number.isSafeInteger(attempt) || attempt < 0) {
+    throw new Error('backoff attempt must be a non-negative safe integer');
+  }
+  if (!Number.isFinite(baseMs) || baseMs < 0) {
+    throw new Error('backoff baseMs must be a finite non-negative number');
+  }
+  return baseMs * 2 ** Math.min(attempt, MAX_BACKOFF_DOUBLINGS);
+}
+
+export type FleetBackoffDomain = Exclude<JitterDomain, 'maintenance'>;
+
 export interface FleetJitter {
-  delay(domain: JitterDomain, sequence: number, baseMs: number): number;
+  /**
+   * The delay before retry `attempt` (0-based, reset on success): the capped
+   * exponential {@link backoffCeilingMs}, spread ±20% by the identity's
+   * deterministic jitter. Jitter is applied after the cap, so a fleet parked
+   * at the ceiling still retries spread out rather than in lockstep.
+   */
+  delay(domain: FleetBackoffDomain, attempt: number, baseMs: number): number;
 }
 
 export function createFleetJitter(productId: string, deviceId: string): FleetJitter {
@@ -58,6 +89,7 @@ export function createFleetJitter(productId: string, deviceId: string): FleetJit
   }
   const seed = `${productId}\0${deviceId}`;
   return {
-    delay: (domain, sequence, baseMs) => deterministicJitterMs({ seed, domain, sequence, baseMs }),
+    delay: (domain, attempt, baseMs) =>
+      deterministicJitterMs({ seed, domain, sequence: attempt, baseMs: backoffCeilingMs(attempt, baseMs) }),
   };
 }

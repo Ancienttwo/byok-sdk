@@ -1,6 +1,15 @@
+import { backoffCeilingMs } from './deterministic-jitter';
+
+/** First automatic retry delay; later ones double up to `backoffCeilingMs`'s ceiling. */
+export const TERMINAL_COMMIT_RETRY_BASE_MS = 1_000;
+
 /** Volatile ownership of exact terminal bytes until the journal accepts them.
  * The journal remains the sole durable authority. Failed receipts stay rejected;
  * only the internal scheduling tail recovers so another task can make progress.
+ * Automatic retries back off exponentially (capped) while commits keep failing
+ * and restart from the base after any commit succeeds. No fleet jitter: the
+ * first failure of each device follows its own task timing, not a shared
+ * server clock.
  */
 export class TerminalCommitQueue {
   private readonly pending = new Map<string, {
@@ -12,6 +21,8 @@ export class TerminalCommitQueue {
   private tail: Promise<void> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
+  /** Consecutive automatic retry rounds since the last successful commit. */
+  private retryAttempt = 0;
 
   constructor(private readonly committed: (taskId: string) => void) {}
 
@@ -60,6 +71,7 @@ export class TerminalCommitQueue {
     const join = (): Promise<void> => {
       const receipt = this.tail.catch(() => undefined).then(entry.commit).then(() => {
         if (this.pending.get(taskId) === entry) this.pending.delete(taskId);
+        this.retryAttempt = 0;
         this.committed(taskId);
       }, failed);
       this.tail = receipt;
@@ -76,7 +88,7 @@ export class TerminalCommitQueue {
     this.timer = setTimeout(() => {
       this.timer = undefined;
       for (const taskId of this.pending.keys()) void this.attempt(taskId).catch(() => undefined);
-    }, 1_000);
+    }, backoffCeilingMs(this.retryAttempt++, TERMINAL_COMMIT_RETRY_BASE_MS));
     this.timer.unref?.();
   }
 }
