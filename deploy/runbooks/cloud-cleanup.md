@@ -159,9 +159,13 @@ keeps the original as evidence. The clone is a limited mailbox append: it is
 refused with `storage_quota_exceeded` when it does not fit `mailboxLimitBytes`,
 and with `storage_entitlement_missing` when the tenant has no entitlement.
 `discardDeadLetter` is the only explicit delete; it removes one expired row.
-Automatic cleanup never calls discard; it reaps old dead letters itself and
-keeps each device's highest-seq one. Discarding that row lowers the device's
-`recoverableFrom`. After a reap, a replay of the reaped row is refused with
+Automatic cleanup never calls discard; it reaps old dead letters itself. Both
+keep each device's highest-seq dead letter, the `recoverableFrom` floor:
+discarding that row is refused with `cleanup_dead_letter_is_recovery_floor`
+and nothing is deleted, while a missing row is
+`cleanup_dead_letter_not_found`. The floor check and the delete are one
+statement. Tenant erasure removes every row, floor rows included. After a
+reap, a replay of the reaped row is refused with
 `cleanup_dead_letter_not_found`; a clone made earlier stays, since
 `replay_source_seq` is provenance, not a foreign key. A dead letter holds no
 mailbox quota (#1115), so discarding it frees no quota; only stored rows go

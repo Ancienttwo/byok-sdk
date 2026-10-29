@@ -103,9 +103,10 @@ as the recovery floor. S4B-c adds a Postgres maintenance surface:
   bytes to a new monotonic sequence; `replay_source_seq` binds that key to the
   exact expired row while retaining the original evidence;
 - `discardDeadLetter` explicitly removes one expired row; a dead letter holds
-  no quota, so removing it frees storage but no mailbox quota. Unlike the
-  reap, it can remove a device's highest-seq dead letter, which lowers that
-  device's `recoverableFrom`.
+  no quota, so removing it frees storage but no mailbox quota. Like the reap,
+  it never removes a device's highest-seq dead letter: that call fails with
+  `cleanup_dead_letter_is_recovery_floor`, so `recoverableFrom` never moves
+  back.
 
 Automatic retention calls none of the latter two. A replay clone outlives the
 reap of its source: `replay_source_seq` is provenance, not a foreign key. A non-zero

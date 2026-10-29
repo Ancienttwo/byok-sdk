@@ -344,6 +344,7 @@ Current behavior:
   highest-seq dead letter of each device, which stays as its `recoverableFrom` floor (#1115).
   Before that, only the operator call `discardDeadLetter` or tenant erasure deletes it
   (`packages/cloud-dataplane/src/cleanup.ts`, `packages/cloud-dataplane/src/tenant-erasure.ts:42`).
+  `discardDeadLetter` refuses the floor row with `cleanup_dead_letter_is_recovery_floor`; tenant erasure removes it with the rest of the tenant.
   `PostgresCloudCleanup` ships from the package root, not from `./runtime`
   (`packages/cloud-dataplane/src/index.ts:56-59`, `packages/cloud-dataplane/README.md:94-97`).
 - So the mailbox copy of an acked offer goes.
@@ -382,7 +383,7 @@ Deletion paths:
 - `revokeDevice` deletes only rows of the device (see [revokeDevice](#revokedevice)).
 - `eraseAgentMemoryProjection(tenant, agentId)` revokes consent and erases the hosted Agent memory projection of one Agent
   (`packages/cloud/src/cloud.ts:1782-1795`).
-- `discardDeadLetter` deletes one expired mailbox row (see above).
+- `discardDeadLetter` deletes one expired mailbox row other than the device's recovery floor (see above).
 - `redactTasks(tenant, { taskIds })` removes the content of terminal tasks and keeps their rows
   (`packages/cloud/src/task-redaction.ts`, `packages/cloud-dataplane/src/stores/task-redaction.ts`).
   It replaces the bodies of the task receipts, the admission row and the acked and expired outbox rows with a tombstone.
