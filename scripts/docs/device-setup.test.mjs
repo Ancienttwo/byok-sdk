@@ -37,3 +37,10 @@ test('layout migrations follow the current manifest into the guide', () => {
     assert.ok(generated.includes(entry.summary));
   }
 });
+
+test('the guide includes the breaking capability-port migration', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../../packages/client/upgrade-manifest.json', import.meta.url), 'utf8'));
+  const entry = manifest.entries.find((entry) => entry.id === 'capability-ports-two-way');
+  assert.ok(entry);
+  assert.ok(generateGuide(guide).includes(`| ${entry.id} | breaking | ${entry.summary}`));
+});
