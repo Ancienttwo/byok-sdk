@@ -6,9 +6,10 @@
  * read, the frozen at-least-once contract the client's stall recovery depends
  * on is gone, and it goes silently — the happy path still looks fine.
  *
- * The admission group pins the one mailbox-byte authority (#411): usage is the
- * sum over the retained rows, and a `limited` append is checked against
- * `mailboxLimitBytes` in the same serialized unit that inserts it.
+ * The admission group pins the one mailbox-byte authority (#411, #1115): usage
+ * is the sum over the retained `pending` rows, and a `limited` append is
+ * checked against `mailboxLimitBytes` in the same serialized unit that inserts
+ * it. Acked and dead-lettered rows are retained but never hold quota.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -412,7 +413,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
   });
 
   describe('mailbox admission', () => {
-    it('counts every retained row in readUsage until it is deleted', async () => {
+    it('counts only pending rows in readUsage', async () => {
       await withMailbox(factory, async ({ stores }) => {
         expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
         const first = await stores.mailbox.append(TENANT_A, offer(1));
@@ -424,9 +425,9 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
 
         await stores.mailbox.recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: 1 });
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 1 });
-        // Acked-but-retained still counts; reading or acking releases nothing.
+        // The ack releases the row's bytes even though retention still keeps it.
         expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(
-          first.byteSize + second.byteSize + other.byteSize,
+          second.byteSize + other.byteSize,
         );
 
         const swept = await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
@@ -434,10 +435,52 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
           expireUnackedBefore: '2999-01-01T00:00:00.000Z',
         });
         expect(swept).toMatchObject({ removed: 1, expired: 2, releasedBytes: 0n });
-        // The deleted row leaves usage; the dead letter stays counted.
-        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(
-          second.byteSize + other.byteSize,
-        );
+        // Dead letters stay visible but hold no quota.
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
+      });
+    });
+
+    it('admits new work into a mailbox filled only by dead letters (#1115)', async () => {
+      await withComposition(factory, async (handle) => {
+        const { stores } = handle;
+        await limitMailbox(stores, 1n, 20n);
+        await stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'lost', 20));
+        expect(
+          isCoreError(
+            await captureError(stores.mailbox.append(TENANT_A, fixedBody('device-2', 'blocked', 20))),
+            'storage_quota_exceeded',
+          ),
+        ).toBe(true);
+
+        await handle.advanceTime(1_000);
+        const cutoff = handle.now();
+        const swept = await stores.mailbox.collectExpired(TENANT_A, { now: cutoff, limit: 500,
+          ackedBefore: cutoff,
+          expireUnackedBefore: cutoff,
+        });
+        expect(swept).toMatchObject({ removed: 0, expired: 1 });
+
+        // The dead letter is retained and still moves the recoverable floor,
+        // but the tenant can dispatch again on any device.
+        const fresh = await stores.mailbox.append(TENANT_A, fixedBody('device-2', 'fresh', 20));
+        expect(fresh).toMatchObject({ seq: 1, state: 'pending' });
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(20n);
+        expect(
+          (await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 })).recoverableFrom,
+        ).toBe(2);
+      });
+    });
+
+    it('admits new work once the device acks the rows that filled the mailbox', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await limitMailbox(stores, 1n, 20n);
+        const first = await stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'delivered', 20));
+        await stores.mailbox.recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: first.seq });
+        await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: first.seq });
+
+        const next = await stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'next', 20));
+        expect(next).toMatchObject({ seq: 2, state: 'pending' });
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(20n);
       });
     });
 

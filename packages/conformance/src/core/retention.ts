@@ -3,7 +3,7 @@ import { ENTITLEMENT, TENANT_A, TENANT_B, hashOf } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 export function runCoreRetentionConformance(name: string, factory: CoreCompositionFactory): void {
   describe(`core retention [${name}]`, () => {
-    it('shares one mailbox budget; unacked rows expire and remain accounted', async () => {
+    it('shares one mailbox budget; unacked rows expire to retained dead letters that hold no quota (#1115)', async () => {
       await withComposition(factory, async handle => {
         const { stores } = handle;
         await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
@@ -15,10 +15,13 @@ export function runCoreRetentionConformance(name: string, factory: CoreCompositi
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: 'retention-device', ackedSeq: 1 });
         await handle.advanceTime(1);
         const input = { now: handle.now(), limit: 2, ackedBefore: handle.now(), expireUnackedBefore: handle.now() };
+        const floor = async () => (await stores.mailbox.readAfter(TENANT_A, { deviceId: 'retention-device', afterSeq: 0 })).recoverableFrom;
         expect(await stores.mailbox.collectExpired(TENANT_A, input)).toEqual({ removed: 1, expired: 1, releasedBytes: 0n, more: true });
-        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(2n);
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(1n);
+        expect(await floor()).toBe(3);
         expect(await stores.mailbox.collectExpired(TENANT_A, { ...input, limit: 1 })).toEqual({ removed: 0, expired: 1, releasedBytes: 0n, more: false });
-        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(2n);
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
+        expect(await floor()).toBe(4);
         expect(await stores.mailbox.collectExpired(TENANT_A, input)).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
       });
     });
