@@ -159,7 +159,7 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
     const objectStorage = { endpoint: env.BYOK_S3_ENDPOINT, bucket: env.BYOK_S3_BUCKET, accessKeyId: env.BYOK_S3_ACCESS_KEY_ID,
       secretAccessKey: env.BYOK_S3_SECRET_ACCESS_KEY, region: env.BYOK_S3_REGION, signingClock: clock };
     const core = createPostgresCoreStores({ pool: sdkPool, clock, objectStorage });
-    const stores = await createPostgresCloudStores({ pool: sdkPool, clock, crypto, objectStorage });
+    const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 50, burst: 100 }, pool: sdkPool, clock, crypto, objectStorage });
     const consumer = hostedMessageConsumer(store, { scopeOf });
     const observer: ByokCloudObserver = { onInboundCommitted: () => { notify(); } };
     const declared = fullCapabilityDeclaration();

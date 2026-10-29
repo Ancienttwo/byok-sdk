@@ -54,7 +54,7 @@ export async function openHostedCloud(options: HostedCloudOptions = {}) {
     const objectStorage = options.objectStorage ?? { endpoint: S3_ENDPOINT!, bucket: `hosted-${randomBytes(6).toString('hex')}`,
       accessKeyId: 'byokminio', secretAccessKey: 'byokminio', region: 'us-east-1', signingClock: clock };
     const core = createPostgresCoreStores({ pool, clock, objectStorage });
-    const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage });
+    const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage });
     const declared = fullCapabilityDeclaration(undefined, { includeE2eeMember: options.e2ee !== undefined });
     const cloud: ByokCloud = createByokCloud({ core, cloud: stores, mailboxWake: createInProcessMailboxWake(), clock, crypto,
       ...(options.e2ee === undefined ? {} : { e2eeMemberStore: new PostgresE2eeMemberStore(pool, clock) }),

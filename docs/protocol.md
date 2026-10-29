@@ -2508,6 +2508,12 @@ whether it also happens to carry a valid bearer header — the two auth models
 are not interchangeable, and a valid access token is neither necessary nor
 sufficient here.
 
+A blob accepts one upload at a time: while one `PUT` of a blob is in flight, a
+second answers `409 { "error": "upload_in_progress" }` without reading its
+body; retry after the first finishes. A body larger than the declared size
+answers 413. The server buffers only the bytes that arrive, never the
+declared size up front.
+
 `contentHash` enables content-addressed dedup on the server side (out of
 scope for this doc — server implementation detail) and is pinned to a single
 canonical format: **`sha256:<64 lowercase hex characters>`** — a SHA-256
@@ -2959,6 +2965,13 @@ tolerated and becomes `unknown`.
 A daemon sends every D→S envelope this way; there is no alternate socket
 queue or transport selection to reconcile.
 
+**A spent rate budget answers 429 `{ "error": "rate limit exceeded" }`** with
+`Retry-After` in whole seconds. The batch is charged one token per envelope as
+one admission before any envelope applies, so a refused batch applied nothing
+and resending it later is its first application. An admission needs one token
+of the device's budget and then charges the whole batch, so a batch larger than
+the burst is admitted and the device's next request waits for that debt.
+
 **A full mailbox answers 507 `{ "error": "storage_quota_exceeded" }`.** Some
 envelopes make the server append a reply to this device's mailbox (an
 `agent.egress.ack` for reliable egress or a content receipt, an
@@ -2966,8 +2979,7 @@ envelopes make the server append a reply to this device's mailbox (an
 against the tenant's `mailboxLimitBytes`; when it does not fit, the whole
 request answers HTTP 507 with that body, which is the storage error mapping of
 §12.7.7. Envelopes earlier in the batch, and the envelope whose reply was
-refused, may already have taken effect — the same no-rollback rule as the 429
-above. Resending the same batch is safe: each already-processed envelope is
+refused, may already have taken effect; there is no rollback. Resending the same batch is safe: each already-processed envelope is
 counted `accepted` as a duplicate (§9) and its idempotent reply is appended
 once the mailbox has room, so nothing executes twice. The remainder of the
 batch waits until there is room.

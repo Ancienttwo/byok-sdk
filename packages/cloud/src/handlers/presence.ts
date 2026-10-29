@@ -4,7 +4,7 @@ import type { Context } from 'hono';
 import { appendActivityEvents, type ActivityBounds } from '../coordination';
 import { ActivityAppendRequestSchema } from '../activity';
 import { isCloudError } from '../errors';
-import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 
 export interface PresenceRouteDeps extends DeviceRouteDeps {
   readonly ttlMs: number;
@@ -18,11 +18,19 @@ export interface ActivityRouteDeps extends DeviceRouteDeps {
 
 const PresenceBodySchema = PresencePublishRequestSchema;
 
+/** Everything in a presence body besides `detail` (runtimes, toolsets, versions). */
+export const PRESENCE_FIXED_FIELDS_MAX_BYTES = 64 * 1024;
+
+/** An activity body's ids and counters around its `events` array. */
+export const ACTIVITY_ENVELOPE_MAX_BYTES = 16 * 1024;
+
 export function presencePublishHandler(deps: PresenceRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
-    const parsed = PresenceBodySchema.safeParse(await readJsonBody(c));
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
+    const body = await readBoundedJsonBody(c, deps.detailMaxBytes + PRESENCE_FIXED_FIELDS_MAX_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = PresenceBodySchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'invalid presence body' }, 400);
     if (
       parsed.data.detail !== undefined &&
@@ -68,9 +76,11 @@ export function presencePublishHandler(deps: PresenceRouteDeps) {
 
 export function activityAppendHandler(deps: ActivityRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
-    const parsed = ActivityAppendRequestSchema.safeParse(await readJsonBody(c));
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
+    const body = await readBoundedJsonBody(c, deps.bounds.maxBytes + ACTIVITY_ENVELOPE_MAX_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = ActivityAppendRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'invalid activity body' }, 400);
     try {
       return c.json(

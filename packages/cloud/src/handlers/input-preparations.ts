@@ -7,8 +7,11 @@ import {
   type InputPreparationReadback,
 } from '@byok-sdk/protocol';
 import { isCloudError } from '../errors';
-import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 import type { TenantStores } from '../tenant-stores';
+
+/** A completion receipt is ids, an Agent ref, a profile, a revision and a receipt summary or reason. */
+export const INPUT_PREPARATION_COMPLETION_MAX_BODY_BYTES = 16 * 1024;
 
 export interface InputPreparationRouteDeps extends DeviceRouteDeps {
   readonly complete: (
@@ -52,10 +55,12 @@ function mapCloudError(c: Context, error: unknown): Response {
 
 export function inputPreparationCompletionHandler(deps: InputPreparationRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
 
-    const parsed = InputPreparationCompletionRequestSchema.safeParse(await readJsonBody(c));
+    const body = await readBoundedJsonBody(c, INPUT_PREPARATION_COMPLETION_MAX_BODY_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = InputPreparationCompletionRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'invalid input preparation completion' }, 422);
     const requestId = c.req.param('requestId');
     if (requestId === undefined || requestId !== parsed.data.requestId) {
@@ -75,8 +80,8 @@ export function inputPreparationCompletionHandler(deps: InputPreparationRouteDep
 
 export function inputPreparationStatusHandler(deps: InputPreparationRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
 
     const requestId = c.req.param('requestId');
     if (requestId === undefined || requestId.length === 0) {

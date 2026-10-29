@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createFleetJitter, deterministicJitterMs } from '../daemon/deterministic-jitter';
+import { MAX_BACKOFF_DOUBLINGS, backoffCeilingMs, createFleetJitter, deterministicJitterMs } from '../daemon/deterministic-jitter';
 
 describe('deterministic fleet jitter', () => {
   it('is stable, bounded, and domain-separated', () => {
@@ -39,5 +39,31 @@ describe('deterministic fleet jitter', () => {
       baseMs: 123,
     }));
     expect(jitter.delay('reconnect', 1, 123)).not.toBe(jitter.delay('reconnect', 0, 123));
+  });
+
+  it('grows each retry exponentially from the base up to a ceiling', () => {
+    expect([0, 1, 2, 3, 4, 5, 6, 40].map(attempt => backoffCeilingMs(attempt, 2000)))
+      .toEqual([2000, 4000, 8000, 16_000, 32_000, 64_000, 64_000, 64_000]);
+    expect(() => backoffCeilingMs(-1, 2000)).toThrow(/attempt/);
+    expect(() => backoffCeilingMs(1, Number.NaN)).toThrow(/baseMs/);
+  });
+
+  it('keeps the fleet delay inside ±20% of the capped schedule', () => {
+    const jitter = createFleetJitter('product', 'device');
+    for (let attempt = 0; attempt <= MAX_BACKOFF_DOUBLINGS + 3; attempt += 1) {
+      const ceiling = backoffCeilingMs(attempt, 1000);
+      const delay = jitter.delay('reconnect', attempt, 1000);
+      expect(delay).toBeGreaterThanOrEqual(ceiling * 0.8);
+      expect(delay).toBeLessThanOrEqual(ceiling * 1.2);
+    }
+    expect(jitter.delay('reconnect', 4, 1000)).toBeGreaterThan(jitter.delay('reconnect', 0, 1000) * 8);
+  });
+
+  it('still spreads a fleet parked at the ceiling', () => {
+    const delays = new Set<number>();
+    for (let index = 0; index < 1000; index += 1) {
+      delays.add(createFleetJitter('product', `device-${index}`).delay('reconnect', 50, 1000));
+    }
+    expect(delays.size).toBeGreaterThan(500);
   });
 });

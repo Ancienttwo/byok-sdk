@@ -40,6 +40,7 @@ if (SKIP_DATAPLANE) {
         const crypto = createWebCrypto();
         const objectStorage = await createObjectStorageScope();
         const stores = await createPostgresCloudStores({
+          rateLimit: { tokensPerSecond: 1_000, burst: 1_000 },
           pool: scope.pool,
           clock,
           crypto,

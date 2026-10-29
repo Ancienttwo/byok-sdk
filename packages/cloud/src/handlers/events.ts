@@ -35,7 +35,7 @@ import {
 import type { Context } from 'hono';
 import { isCoreConflictError } from '@byok-sdk/core';
 import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sdk/protocol';
-import { authenticateDevice, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, type DeviceRouteDeps } from './shared';
 
 /**
  * Protocol features this cloud build accepts from a long-poll daemon.
@@ -108,8 +108,8 @@ export interface EventsRouteDeps extends DeviceRouteDeps {
 
 export function eventsHandler(deps: EventsRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
     const { device, stores } = authenticated;
 
     const cursorRaw = c.req.query('cursor');

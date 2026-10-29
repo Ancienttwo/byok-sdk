@@ -11,13 +11,12 @@
  * not 400 the whole request — so only a structurally invalid `Envelope` or an
  * oversized batch (`MAX_MESSAGES_PER_BATCH`) fails the request outright.
  *
- * Rate limiting is per REQUEST, not per envelope: the moment any envelope
- * comes back `rate_limited`, the rest of the batch is abandoned (its bucket is
- * empty, so every remaining envelope would limit too) and the WHOLE request
- * answers 429. Envelopes processed earlier in the same batch already took
- * effect — there are no rollback semantics here — which is safe because every
- * `task.*` type is idempotent (§9): a client that retries the same batch gets
- * `duplicate` for whatever already landed.
+ * Rate admission covers the whole batch: it is charged one token per envelope
+ * before the first envelope applies, and a refusal answers 429 having applied
+ * nothing. Charging envelope by envelope while applying them let a batch
+ * larger than the remaining budget apply a prefix, answer 429 without that
+ * prefix's outcomes, and on every resend spend the refilled budget on the
+ * prefix's duplicates, so its suffix never landed (#1118).
  *
  * Server replies (acks, dispositions) are appended to the device's mailbox.
  * A full mailbox refuses them with `storage_quota_exceeded`, which answers the
@@ -40,7 +39,7 @@ import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
 import type { TenantStores } from '../tenant-stores';
 import { CLOUD_PROTOCOL_CAPABILITIES } from './events';
-import { authenticateDevice, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
+import { authenticateDevice, rateLimited, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 
 
 /** Coarse wire vocabulary deliberately hides task existence and identity bindings. */
@@ -149,6 +148,8 @@ export function messagesHandler(deps: MessagesRouteDeps) {
 
 function batchHandler(deps: MessagesRouteDeps) {
   return async (c: Context): Promise<Response> => {
+    // No request debit: the batch spends its envelopes below instead (see
+    // `admitDeviceRequest`).
     const authenticated = await authenticateDevice(c, deps);
     if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
     const { device, stores } = authenticated;
@@ -157,6 +158,8 @@ function batchHandler(deps: MessagesRouteDeps) {
     if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
     const parsed = MessagesSendRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes' }, 400);
+    const admission = await stores.rateLimiter.consume(device.deviceId, 'envelope', parsed.data.messages.length);
+    if (!admission.allowed) return rateLimited(c, admission.retryAfterMs);
 
     let accepted = 0;
     let rejected = 0;
@@ -173,7 +176,6 @@ function batchHandler(deps: MessagesRouteDeps) {
         deps.clock.now().toISOString(),
       );
       const { outcome } = result;
-      if (outcome === 'rate_limited') return c.json({ error: 'rate limit exceeded' }, 429);
       outcomes.push({ id: envelope.id, outcome, ...(result.outcome === 'rejected' ? { reason: WIRE_REFUSAL_REASONS[result.reason] } : {}) });
       if (envelope.type === 'agent.message.publish') {
         const disposition = await readAgentMessageDisposition(stores, device.deviceId, envelope.task_id, envelope.payload);

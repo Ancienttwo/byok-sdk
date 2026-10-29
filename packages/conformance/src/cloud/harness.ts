@@ -46,11 +46,11 @@ import { runCloudTenantIsolationConformance } from './tenant-isolation';
  * the assertions in `blobs.ts` are the ones that mean the same thing whether
  * the bytes live in a `Map` or in an object store nobody here can reach.
  *
- * `rateLimiter` IS here, and a durable composition satisfies it with the
- * in-memory allow-all reference rather than a table (§5): persisting an
- * allow-all would be a table that is always empty, and a real limiter is edge
- * work, not a per-request write. Method presence is all this suite asserts of
- * it — there is no honest behavioral assertion to make about allow-all.
+ * `rateLimiter` IS here, and no composition backs it with a table (§5): a
+ * per-request write would cost more than the flood it refuses. Method presence
+ * is all this suite asserts of it — budgets are composition policy (allow-all
+ * in memory, token buckets in the embedded server and the Postgres data
+ * plane), each tested where it is composed.
  */
 export const CLOUD_CONFORMANCE_PORTS = [
   'activity',

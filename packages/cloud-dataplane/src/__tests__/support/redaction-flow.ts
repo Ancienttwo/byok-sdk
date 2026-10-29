@@ -92,7 +92,7 @@ export async function composeRedactionHost(
   const clock = createMutableClock();
   const crypto = createWebCrypto();
   const core = createPostgresCoreStores({ pool, clock, objectStorage: objectStorage.config });
-  const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage: objectStorage.config });
+  const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage: objectStorage.config });
   const consumed: string[] = [];
   const full = fullCapabilityDeclaration();
   const cloud = createByokCloud({

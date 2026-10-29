@@ -358,6 +358,8 @@ export type {
   ProofRequestReceipt,
   ProofRequestReceiptInput,
   ProofRequestReceiptStore,
+  RateLimitDecision,
+  RateLimitUnit,
   RequestReceipt,
   RequestReceiptStore,
   TaskAttempt,

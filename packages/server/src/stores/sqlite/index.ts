@@ -1338,7 +1338,16 @@ export class SqliteCloudBlobStore implements CloudBlobStore {
 }
 
 export class SqliteBlobContentProxy implements BlobContentProxy {
+  /** In-flight upload claims: process memory, never a row (see `BlobContentProxy.claimUpload`). */
+  readonly #uploading = new Set<string>();
+
   constructor(private readonly registry: SqliteBlobRegistry) {}
+
+  async claimUpload(blobId: string): Promise<(() => void) | undefined> {
+    if (this.#uploading.has(blobId)) return undefined;
+    this.#uploading.add(blobId);
+    return () => { this.#uploading.delete(blobId); };
+  }
 
   async verifySignedUrl(blobId: string, action: 'put' | 'get', sig: string, exp: number): Promise<boolean> {
     if (!Number.isFinite(exp) || this.registry.clock.now().getTime() > exp) return false;

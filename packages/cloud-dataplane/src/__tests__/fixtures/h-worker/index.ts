@@ -152,7 +152,7 @@ async function composeHost(env: Env, hooks: ProductHooks): Promise<Host> {
     counts.readAfter += 1;
     return readAfter(tenant, query);
   };
-  const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage: storage });
+  const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage: storage });
   const full = fullCapabilityDeclaration();
   const cloud = createByokCloud({
     mailboxWake: createInProcessMailboxWake({ fallbackMs: WAKE_FALLBACK_MS }),

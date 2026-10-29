@@ -19,7 +19,7 @@ const factory: CloudCompositionFactory = {
       await migrate(scope.pool, deploySql);
       const clock = createMutableClock();
       const objectStorage = await createObjectStorageScope();
-      const stores = await createPostgresCloudStores({ pool: scope.pool, clock, crypto: createWebCrypto(), objectStorage: objectStorage.config });
+      const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool: scope.pool, clock, crypto: createWebCrypto(), objectStorage: objectStorage.config });
       return {
         stores, now: () => clock.now().toISOString(), advanceTime: ms => clock.advance(ms),
         landBlobBytes: async ({ grant, bytes, reservation }) => { const response = await fetch(grant.uploadUrl, { method: 'PUT', headers: { 'content-type': reservation.contentType, 'content-length': String(bytes.byteLength) }, body: bytes as unknown as BodyInit }); if (!response.ok) throw new Error('PUT refused'); },

@@ -58,6 +58,7 @@ const postgresFactory: CloudCompositionFactory = {
 
     const clock = createMutableClock();
     const stores = await createPostgresCloudStores({
+      rateLimit: { tokensPerSecond: 1_000, burst: 1_000 },
       pool: scope.pool,
       clock,
       crypto: createWebCrypto(),
@@ -117,6 +118,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
       const crypto = createWebCrypto();
       const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
       const stores = await createPostgresCloudStores({
+        rateLimit: { tokensPerSecond: 1_000, burst: 1_000 },
         pool: scope.pool,
         clock,
         crypto,

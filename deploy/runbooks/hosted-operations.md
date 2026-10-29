@@ -20,7 +20,7 @@ Four routes are `class: 'public'` and need no credential. Everything else requir
 | `POST /byok/token` | yes: device lookup, signature check, atomic nonce consumption | access-token minting |
 | `GET /byok/capabilities` | no | capability declaration |
 
-The SDK ships no policy for these routes. The data-plane composition uses `AllowAllRateLimiter` and `createByokCloud` applies no limit unless you pass `publicRouteLimiter(route, request)`. Minimum requirement for any internet-facing deployment:
+The SDK ships no policy for these routes. The data-plane composition's `rateLimit` token bucket covers authenticated device traffic only, and `createByokCloud` applies no limit to these routes unless you pass `publicRouteLimiter(route, request)`. Minimum requirement for any internet-facing deployment:
 
 - An edge limit (CDN, WAF or gateway) on `POST /byok/pair`, `/byok/challenge` and `/byok/token`, keyed by client IP, in force before traffic reaches the Worker or service. `POST /byok/pair` is the strictest of the three: it is the only route an anonymous caller can use to guess a secret.
 - A request body cap at the edge no larger than the application's own cap (16 KiB on these three routes).

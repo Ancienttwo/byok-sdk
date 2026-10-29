@@ -8,8 +8,16 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
+import type { FleetJitter } from '../daemon/deterministic-jitter';
 import { TestServer } from './fixtures/test-server';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
+
+/**
+ * This file is about tolerance and redelivery, not retry pacing: every
+ * stalled cycle waits exactly the 15 ms base, so the number of redeliveries
+ * a test observes never depends on how far the capped backoff has grown.
+ */
+const FLAT_RETRY_SCHEDULE: FleetJitter = { delay: (_domain, _attempt, baseMs) => baseMs };
 
 const TOLERANCE_AGENT = { agentId: 'tolerance-agent', profileRevision: 'rev-1' } as const;
 
@@ -82,6 +90,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       },
       longPollRetryDelayMs: 15,
       longPollIdleDelayMs: 15,
+      fleetJitter: FLAT_RETRY_SCHEDULE,
     });
 
     await connection.start();
@@ -493,6 +502,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       },
       longPollRetryDelayMs: 15,
       longPollIdleDelayMs: 15,
+      fleetJitter: FLAT_RETRY_SCHEDULE,
     });
 
     await connection.start();

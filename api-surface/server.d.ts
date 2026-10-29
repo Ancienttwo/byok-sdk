@@ -365,11 +365,12 @@ export interface LoopbackListener {
 export declare function listenLoopback(options: LoopbackListenerOptions): Promise<LoopbackListener>;
 // ==== @byok-sdk/server dist/rate-limiter.d.ts ====
 /**
- * M4 Phase 4 (part A): per-key token bucket that rate-limits inbound
- * daemon->server envelopes per device. `stores.ts` composes it into the cloud
- * kernel, which debits it at step 0 of the inbound gate.
- * Framework-agnostic on purpose (no kernel/transport types here) so it stays
- * unit-testable in isolation, mirroring `event-queue.ts`'s own
+ * M4 Phase 4 (part A): per-key token bucket that rate-limits each device's
+ * inbound envelopes and authenticated route requests (one shared budget).
+ * `stores.ts` composes it into the cloud kernel, which debits it at device
+ * route admission (a message batch is charged per envelope). The bucket itself is
+ * framework-agnostic on purpose (only the adapter below names the cloud port)
+ * so it stays unit-testable in isolation, mirroring `event-queue.ts`'s own
  * transport-agnostic split.
  *
  * Token bucket, not a fixed window: `burst` tokens are available immediately
@@ -400,6 +401,7 @@ export declare function listenLoopback(options: LoopbackListenerOptions): Promis
  * should be a construction-time error, not a runtime surprise discovered
  * once real traffic starts getting rejected.
  */
+import type { InboundRateLimiter } from '@byok-sdk/cloud';
 export interface RateLimiterOptions {
     /** Sustained refill rate, tokens (i.e. messages) per second. Must be a finite number > 0. Default 50. */
     messagesPerSecond?: number;
@@ -412,34 +414,32 @@ export declare class RateLimiter {
     private readonly messagesPerSecond;
     private readonly burst;
     private readonly buckets;
-    /**
-     * Wall-clock idle duration (ms) after which a bucket is GUARANTEED to
-     * already be refilled to `burst`, regardless of its actual token count at
-     * last touch — i.e. the time to go from 0 tokens to `burst` at this
-     * instance's configured rate. `evictIdleBucketsIfDue` uses this as the
-     * eviction threshold: dropping an entry idle at least this long and
-     * recreating it fresh (tokens = burst) on the next `consume()` is
-     * therefore behaviorally IDENTICAL to refilling it in place would have
-     * been — both cap at `burst` — so eviction is semantically invisible to
-     * the caller.
-     */
-    private readonly idleEvictionThresholdMs;
     /** Finding R5: hard cap on `buckets.size` — see {@link DEFAULT_MAX_TRACKED_DEVICES}'s own doc comment. */
     private readonly maxTrackedDevices;
     /** Calls to `consume()` since the last sweep — see `EVICTION_SWEEP_EVERY_N_CALLS`. */
     private callsSinceSweep;
     constructor(opts?: RateLimiterOptions);
     /**
-     * Debit one token from `key`'s bucket, refilling first for however much
-     * wall-clock time has elapsed since its last refill. Returns `false`
-     * (and debits nothing) when the bucket is currently empty — the caller is
-     * over budget right now.
+     * Charge `cost` tokens to `key`'s bucket, refilling first for however much
+     * wall-clock time has elapsed since its last refill. Admits while the bucket
+     * holds at least one token and then charges the whole `cost`, even below
+     * zero: a message batch larger than `burst` is admissible, and its debt is
+     * repaid before the key's next admission. Returns `false` (and charges
+     * nothing) when the bucket holds less than one token.
      */
-    consume(key: string): boolean;
+    consume(key: string, cost: number): boolean;
+    /**
+     * Milliseconds until `key`'s bucket next holds a whole token, as of its last
+     * refill — the `Retry-After` of a refusal `consume()` just answered. 0 for a
+     * key with a token available or no bucket at all.
+     */
+    retryAfterMs(key: string): number;
     /**
      * Every `EVICTION_SWEEP_EVERY_N_CALLS` calls to `consume()`, drops every
-     * bucket idle for at least `idleEvictionThresholdMs` (see that field's doc
-     * comment for why this is safe). Without this, `buckets` would hold one
+     * bucket that has been idle long enough to have refilled to `burst`, debt
+     * included. Recreating it fresh (tokens = burst) on its next `consume()` is
+     * then identical to refilling it in place, so eviction is invisible to the
+     * caller. Without this, `buckets` would hold one
      * permanent entry per historical key forever — every device that ever
      * connected, even long after it disconnected for good — growing without
      * bound over a long-lived server's lifetime.
@@ -456,14 +456,12 @@ export declare class RateLimiter {
      * `audit-log.ts`'s `compactPreservingLiveTasks` during rotation).
      *
      * Equivalence split (stated explicitly, not left implied):
-     * - For any evicted bucket that was ALREADY idle for at least
-     *   `idleEvictionThresholdMs` (i.e. `evictIdleBucketsIfDue` would have
-     *   reclaimed it anyway, just not yet — sweeps only run every
-     *   `EVICTION_SWEEP_EVERY_N_CALLS` calls, not continuously), eviction is
-     *   PROVABLY equivalent to an in-place refill: both cap at `burst`, so a
-     *   caller can never observe the difference (see `idleEvictionThresholdMs`'s
-     *   own doc comment for the identical reasoning `evictIdleBucketsIfDue`
-     *   already relies on).
+     * - For any evicted bucket that was ALREADY idle long enough to refill to
+     *   `burst` (i.e. `evictIdleBucketsIfDue` would have reclaimed it anyway,
+     *   just not yet — sweeps only run every `EVICTION_SWEEP_EVERY_N_CALLS`
+     *   calls, not continuously), eviction is PROVABLY equivalent to an
+     *   in-place refill: both cap at `burst`, so a caller can never observe the
+     *   difference (the same reasoning `evictIdleBucketsIfDue` relies on).
      * - For a bucket evicted EARLY — still within its idle threshold, forced
      *   out only because `buckets` is at capacity (many thousands of
      *   genuinely-distinct, actively-used keys, not a quiet one) — this is
@@ -482,12 +480,13 @@ export declare class RateLimiter {
  * The counting `InboundRateLimiter` (`@byok-sdk/cloud`'s store port) this
  * package composes the kernel with.
  *
- * Position matters and is not this adapter's choice: the kernel debits one
- * token at step 0 of its inbound gate, BEFORE the type-allow check, for every
- * envelope that reaches it. That is exactly the choke point the old
- * reference server's `ConnectionHub.handleInbound` occupied, which is why both
- * `envelopesIn` (one per envelope, every outcome) and `rateLimitEvents` (one
- * per REJECTED envelope, never coalesced) are counted here and nowhere else.
+ * Position matters and is not this adapter's choice: the kernel charges a
+ * `POST /byok/messages` batch one `envelope` token per envelope before the
+ * first one reaches its inbound gate, and one `request` token when it admits
+ * any other authenticated device route. Both spend the same bucket.
+ * `envelopesIn` (one per received envelope, admitted or refused) and
+ * `rateLimitEvents` (one per REFUSED admission of either unit, never
+ * coalesced) are counted here and nowhere else.
  *
  * The `device.rate_limited` embedder event is the one thing that IS coalesced,
  * matching the pre-fold rule: an episode fires exactly one event, and only a
@@ -496,16 +495,14 @@ export declare class RateLimiter {
  * again produces a second, distinct event.
  */
 export interface InboundRateLimiterCounters {
-    /** Every envelope handed to the kernel's inbound gate, whatever the gate then decides. */
+    /** Every envelope a `POST /byok/messages` batch carried, whether the batch was admitted or refused and whatever the gate then decided. Device route requests are not envelopes and are not counted. */
     envelopesIn: number;
-    /** Envelopes the bucket refused. Per envelope — see the episode rule above. */
+    /** Admissions the bucket refused: per message batch and per device route request — see the episode rule above. */
     rateLimitEvents: number;
 }
 export interface CountingInboundRateLimiter {
     /** The port `CloudStores.rateLimiter` is composed with. */
-    readonly limiter: {
-        consume(tenant: string, deviceId: string): Promise<boolean>;
-    };
+    readonly limiter: InboundRateLimiter;
     readonly counters: InboundRateLimiterCounters;
 }
 /**
@@ -991,20 +988,24 @@ export interface CreateByokServerOptions {
      */
     taskEventRetentionMs?: number;
     /**
-     * M4 Phase 4 (part A): per-device inbound-envelope token bucket, enforced at
-     * step 0 of the cloud kernel's inbound gate (`@byok-sdk/cloud`'s
-     * `inbound.ts`) — the single choke point every daemon -> server envelope
-     * passes through, debited BEFORE the type-allow check so a flood of
-     * garbage-typed envelopes costs the same budget as a flood of well-formed
-     * ones. Defaults: 50 msg/s sustained, burst 100 (see `rate-limiter.ts`).
+     * M4 Phase 4 (part A): the one per-device token bucket. The cloud kernel
+     * charges a `POST /byok/messages` batch one token per envelope before the
+     * first one reaches its inbound gate, so a flood of garbage-typed envelopes
+     * costs the same budget as a flood of well-formed ones and a refused batch
+     * applies nothing, and one token per authenticated device route request
+     * (each `GET /byok/events` poll, presence, board, blob grant, ...). An
+     * admission needs one token and then charges its whole count, so a batch
+     * larger than `burst` overdraws the bucket rather than never fitting.
+     * Defaults: 50 tokens/s sustained, burst 100 (see `rate-limiter.ts`).
      *
      * Exceeding it never drops silently: the occurrence counts in
-     * {@link HubStats.rateLimitEvents} (per REFUSED envelope), and the first
+     * {@link HubStats.rateLimitEvents} (per REFUSED admission), and the first
      * refusal of an episode emits a `device.rate_limited`
      * {@link ByokServerEvent} — coalesced per episode, re-armed only by a later
      * successful consume by the same device. Enforcement on the wire is a
-     * whole-request `429` from `POST /byok/messages`; `GET /byok/events` is not
-     * on this bucket, and neither are the blob upload/download routes.
+     * whole-request `429` with `Retry-After` (seconds until the bucket holds a
+     * token again). The presigned blob content routes carry no device principal
+     * and are not on this bucket.
      */
     rateLimit?: RateLimiterOptions;
     /**
@@ -1450,15 +1451,14 @@ export type ByokServerEvent = {
     at: string;
 } & Pick<TaskApprovalResolvedPayload, 'approvalId' | 'decision' | 'resolvedBy'>)
 /**
- * M4 Phase 4 (part A): `deviceId` exceeded its inbound-envelope rate limit
- * (`CreateByokServerOptions.rateLimit`, enforced at step 0 of the cloud
- * kernel's inbound gate) — fired ONCE PER EPISODE, not once per refused
- * envelope: the first refusal emits it, and only a later successful consume
+ * M4 Phase 4 (part A): `deviceId` exceeded its rate limit
+ * (`CreateByokServerOptions.rateLimit`, enforced at the cloud kernel's
+ * device route admission) — fired ONCE PER EPISODE, not once per refused
+ * admission: the first refusal emits it, and only a later successful consume
  * by the same device re-arms it, so a flood is one event and a device that
  * recovers and floods again is a second, distinct one. Never a silent drop
- * either way: every refused envelope counts in
- * {@link HubStats.rateLimitEvents}, and the request that carried it is
- * answered `429` by `POST /byok/messages`.
+ * either way: every refused admission counts in
+ * {@link HubStats.rateLimitEvents}, and its request is answered `429`.
  */
  | {
     kind: 'device.rate_limited';
@@ -1489,11 +1489,11 @@ export interface HubStats {
      * and approval timelines; unexpired approvals survive reopen without extending TTL.
      */
     taskCountsByState: Record<TaskState, number>;
-    /** Total inbound daemon->server envelopes since this server instance was created (every outcome, including rejected/rate-limited), counted at the gate's own step 0. Resets on SQLite reopen. */
+    /** Total inbound daemon->server envelopes since this server instance was created (every outcome, including rejected and rate-limited batches), counted at batch admission. Resets on SQLite reopen. */
     envelopesIn: number;
     /** Inbound dedup hits since this server instance was created; a no-op wire-level success. Resets on SQLite reopen. */
     dedupDrops: number;
-    /** Rate-limited envelopes since this server instance was created — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
+    /** Refused rate-limit admissions since this server instance was created: rate-limited message batches plus rate-limited device route requests — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
     rateLimitEvents: number;
     /** Every closed refusal reason, zero-filled; counted since this server instance was created. Rate limiting is separate. */
     inboundRefusals: Record<InboundRefusalReason, number>;

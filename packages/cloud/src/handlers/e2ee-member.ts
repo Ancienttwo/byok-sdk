@@ -25,7 +25,7 @@ import * as e2eeMember from '../e2ee-member';
 import { ByokCloudError, isCloudError, type CloudErrorCode } from '../errors';
 import { TRUTH_REQUEST_ID_MAX_LENGTH } from '../truth/contract';
 import { authenticateProofRequest, readProofRequestBody } from './device-proof-request';
-import { authenticateDevice, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, type DeviceRouteDeps } from './shared';
 
 /** Room for one full chain append, 64 entries of 64 KiB, plus its JSON wrapper. */
 export const DEFAULT_MAX_E2EE_REQUEST_BYTES = E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES * E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES + 64 * 1024;
@@ -132,8 +132,8 @@ function readQuery(c: Context, allowed: readonly string[], numeric: readonly str
 
 function deviceReadHandler(deps: E2eeMemberRouteDeps, allowed: readonly string[], numeric: readonly string[], read: DeviceRead) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps.device);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps.device);
+    if (authenticated instanceof Response) return authenticated;
     const query = readQuery(c, allowed, numeric);
     if (query === undefined) return c.json({ error: 'coordination_input_invalid' }, 400);
     const { device } = authenticated;

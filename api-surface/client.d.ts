@@ -3594,7 +3594,11 @@ export interface ConnectionManagerOptions {
     onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
     onOutboundQueued?: (envelope: Envelope) => void;
     beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
-    /** Base delay before each reconnect handshake, and for stalled-cycle and local-disposition backoff. Default 2s. */
+    /**
+     * Base of the capped exponential backoff (`backoffCeilingMs`) before each
+     * reconnect handshake, and for stalled-cycle and local-disposition retries.
+     * A route's `Retry-After` lengthens the reconnect wait. Default 2s.
+     */
     longPollRetryDelayMs?: number;
     /** Minimum delay before the next long-poll request after an empty (no-events) response. Default 250ms. */
     longPollIdleDelayMs?: number;
@@ -3631,7 +3635,8 @@ export type OutboundSettlement = {
  * session polls and drains the outbox, so `conn.hello` is the first message
  * of every session, including after a reconnect (protocol §8). Any route
  * failure returns the session to `connecting` and the loop handshakes again
- * after `fleetJitter('reconnect')`. A rejected hello, a revoked device or a
+ * after the capped exponential `fleetJitter('reconnect')`, or the server's
+ * `Retry-After` when that is longer. A rejected hello, a revoked device or a
  * lost replay cursor halts it instead.
  *
  * `send()` (Design B, finding N4) pushes onto a single shared outbox this
@@ -3712,6 +3717,8 @@ export declare class ConnectionManager {
      * `drainRetryDelay`.
      */
     private cancelPendingDrainRetry;
+    /** The longest `Retry-After` a route answered since the last reconnect wait; see `nextReconnectDelayMs`. */
+    private retryAfterMs;
     /**
      * The capabilities the current server response advertised — untyped
      * `string[]` for forward compatibility. An advertisement is scoped to the
@@ -3733,6 +3740,13 @@ export declare class ConnectionManager {
      * `fleetJitter('reconnect')` before the next handshake.
      */
     private run;
+    /**
+     * The wait before the next handshake: the capped exponential
+     * `fleetJitter('reconnect')` for this attempt, or the server's last
+     * `Retry-After` when that is longer. A `Retry-After` is consumed by the one
+     * wait it lengthens.
+     */
+    private nextReconnectDelayMs;
     /** One open session: from an accepted handshake until a route failure, stop, or halt ends it. */
     private serveSession;
     /**
@@ -5680,8 +5694,28 @@ export interface DeterministicJitterInput {
  * an automatic retry loop.
  */
 export declare function deterministicJitterMs(input: DeterministicJitterInput): number;
+/**
+ * How many times an automatic retry delay doubles before it stops growing:
+ * the ceiling is `baseMs × 2^MAX_BACKOFF_DOUBLINGS` (64 s for the 2 s default).
+ * The ceiling scales with the caller's base so a short test base keeps a short
+ * ceiling.
+ */
+export declare const MAX_BACKOFF_DOUBLINGS = 5;
+/**
+ * The capped exponential schedule every automatic retry loop on the device
+ * uses: `baseMs × 2^attempt`, flat from attempt {@link MAX_BACKOFF_DOUBLINGS}.
+ * Attempt 0 is the first retry after a failure; callers reset to 0 on success.
+ */
+export declare function backoffCeilingMs(attempt: number, baseMs: number): number;
+export type FleetBackoffDomain = Exclude<JitterDomain, 'maintenance'>;
 export interface FleetJitter {
-    delay(domain: JitterDomain, sequence: number, baseMs: number): number;
+    /**
+     * The delay before retry `attempt` (0-based, reset on success): the capped
+     * exponential {@link backoffCeilingMs}, spread ±20% by the identity's
+     * deterministic jitter. Jitter is applied after the cap, so a fleet parked
+     * at the ceiling still retries spread out rather than in lockstep.
+     */
+    delay(domain: FleetBackoffDomain, attempt: number, baseMs: number): number;
 }
 export declare function createFleetJitter(productId: string, deviceId: string): FleetJitter;
 // ==== @byok-sdk/client dist/daemon/device-credential-store.d.ts ====

@@ -80,7 +80,7 @@ function recordingPool(pending: readonly StubRow[]): { readonly pool: ByokPool; 
 }
 
 const compose = (pool: ByokPool) =>
-  createPostgresCloudStores({ pool, clock: createMutableClock(), crypto: createWebCrypto(), objectStorage: OBJECT_STORAGE });
+  createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock: createMutableClock(), crypto: createWebCrypto(), objectStorage: OBJECT_STORAGE });
 
 describe('pending-mailbox wire-major fence (substrate-free)', () => {
   it('is exported from the Worker runtime entry, and the factory has no synchronous form', () => {

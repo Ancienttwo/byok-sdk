@@ -57,6 +57,7 @@ export type {
   PostgresCloudStoreOptions,
   PostgresCloudStores,
   PostgresObjectStorageOptions,
+  PostgresRateLimitOptions,
   PostgresAgentMemoryProjectionStoreOptions,
   PostgresTaskRedactionStoreOptions,
 } from './stores/index';

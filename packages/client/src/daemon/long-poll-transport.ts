@@ -74,6 +74,12 @@ export interface LongPollClientOptions {
    * the caller's reconnect loop owns that (it handshakes again first).
    */
   onLoopFailure?: () => void;
+  /**
+   * A route refused with a usable `Retry-After` header (delta-seconds or an
+   * HTTP-date), as milliseconds from now, bounded by {@link MAX_RETRY_AFTER_MS}.
+   * Called before the failure is reported, so the caller's next wait honours it.
+   */
+  onRetryAfter?: (delayMs: number) => void;
   /** Called once the device is found to be revoked (401 surfaced through {@link AuthManager}) — the loop stops itself rather than retrying. */
   onRevoked?: () => void;
   /** Called when the server cannot replay the durable cursor supplied to this poll. */
@@ -349,6 +355,7 @@ export class LongPollClient {
       return undefined;
     }
     if (!res.ok) {
+      this.noteRetryAfter(res);
       this.warnRouteFailure(this.messagesEndpoint, res.status, undefined);
       return undefined;
     }
@@ -460,6 +467,7 @@ export class LongPollClient {
             this.opts.onReplayCursorTooOld?.(replayCursorTooOld);
             return;
           }
+          this.noteRetryAfter(res);
           this.warnRouteFailure(this.eventsEndpoint, res.status, undefined);
           this.failLoop(signal);
           return;
@@ -560,12 +568,48 @@ export class LongPollClient {
     }
   }
 
+  private noteRetryAfter(res: Response): void {
+    const delayMs = parseRetryAfterMs(res.headers.get('retry-after'), Date.now());
+    if (delayMs !== undefined) this.opts.onRetryAfter?.(delayMs);
+  }
+
   /** Ends this loop generation on a failure; a stopped generation ends silently. */
   private failLoop(signal: AbortSignal): void {
     if (!this.running || signal.aborted) return;
     this.opts.onOperationalOutcome?.('failure');
     this.opts.onLoopFailure?.();
   }
+}
+
+/**
+ * Ceiling on an honoured `Retry-After`: a misconfigured Host header must not
+ * park a whole fleet for days. Longer values wait this long, then the ordinary
+ * backoff resumes.
+ */
+export const MAX_RETRY_AFTER_MS = 60 * 60 * 1000;
+
+/** The one HTTP-date form senders generate (RFC 9110 §5.6.7). */
+const IMF_FIXDATE = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/u;
+
+/**
+ * RFC 9110 §10.2.3: `Retry-After` is delta-seconds or an IMF-fixdate HTTP-date. Anything
+ * else is ignored and the caller's own backoff applies unchanged.
+ */
+export function parseRetryAfterMs(value: string | null, nowMs: number): number | undefined {
+  if (value === null) return undefined;
+  const trimmed = value.trim();
+  let delayMs: number;
+  if (/^\d+$/u.test(trimmed)) {
+    delayMs = Number(trimmed) * 1000;
+  } else if (IMF_FIXDATE.test(trimmed)) {
+    const at = Date.parse(trimmed);
+    if (Number.isNaN(at)) return undefined;
+    delayMs = at - nowMs;
+  } else {
+    return undefined;
+  }
+  if (!Number.isFinite(delayMs)) return undefined;
+  return Math.min(Math.max(0, delayMs), MAX_RETRY_AFTER_MS);
 }
 
 async function parseReplayCursorTooOld(res: Response): Promise<ReplayCursorTooOldError | undefined> {

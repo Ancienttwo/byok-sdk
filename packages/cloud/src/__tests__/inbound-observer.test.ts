@@ -5,7 +5,7 @@
  * Two properties carry the whole design, and both are negative:
  *
  * - **It observes commits, not attempts.** `duplicate` re-ran nothing,
- *   `rejected` and `rate_limited` wrote nothing; none of them may reach it, or
+ *   `rejected` wrote nothing; neither may reach it, or
  *   a host counting committed work would over-count exactly the retries the
  *   at-least-once wire is built to produce.
  * - **It cannot change anything.** It returns `void` and its throw is
@@ -17,7 +17,6 @@ import { tenantId, type TenantId } from '@byok-sdk/core';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, type ByokCloudObserver, type InboundCommitted } from '../inbound';
-import type { InboundRateLimiter } from '../stores/ports';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
 import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
@@ -114,29 +113,6 @@ describe('observer.onInboundCommitted', () => {
     expect(
       await handleInboundEnvelope(stores, device.deviceId, wrongDirection, undefined, undefined, observer).then((result) => result.outcome),
     ).toBe('rejected');
-    expect(seen).toEqual([]);
-  });
-
-  it('stays silent for a rate-limited envelope', async () => {
-    const harness = createHarness();
-    const device = await harness.pairDevice(TENANT_A);
-    const limiter: InboundRateLimiter = { async consume() { return false; } };
-    const limited = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
-      core: harness.core,
-      mailboxWake: harness.mailboxWake, cloud: { ...harness.stores, rateLimiter: limiter },
-    });
-    const { seen, observer } = recorder();
-
-    expect(
-      await handleInboundEnvelope(
-        limited,
-        device.deviceId,
-        claim('task-rate-limited', device.deviceId),
-        undefined,
-        undefined,
-        observer,
-      ).then((result) => result.outcome),
-    ).toBe('rate_limited');
     expect(seen).toEqual([]);
   });
 
