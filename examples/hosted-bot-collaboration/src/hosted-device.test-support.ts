@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createAgentHomeProjectionConsumer, createDaemonWithAdapters } from '@byok-sdk/client';
 import type { TenantId } from '@byok-sdk/cloud';
-import type { FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
+import type { FrozenSubmitPort } from '@byok-sdk/server/execution-core';
 import { policy } from '@byok-sdk/example-host-execution-core/test-support';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { createTestKeychain } from '../../../scripts/testing/macos-keychain.mjs';

@@ -7,10 +7,11 @@ import { createDaemonWithAdapters } from '@byok-sdk/client';
 import { expect, it, vi } from 'vitest';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
-import { HostLedger } from './ledger';
-import type { Attempt } from './model';
+import type { ByokServer } from '@byok-sdk/server';
+import { HostLedger } from '@byok-sdk/server/execution-core';
 import { policy, template } from './test-support';
 
+type Attempt = NonNullable<Awaited<ReturnType<ByokServer['tasks']['attempt']>>>;
 interface Message {
   kind: string; port: number; code: string; taskId: string; delivering: boolean;
   dedupKey: string; delivery: number; beforeReplayCount: number; slotReplayCount: number;

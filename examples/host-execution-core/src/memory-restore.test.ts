@@ -4,13 +4,21 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { AgentMemoryExport } from '@byok-sdk/client';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from './ledger';
-import { HostMemoryPage, memoryRevision, MemoryBlockedError, type MemoryOptions } from './memory';
-import type { MemoryRestoreInput, MemoryRestoreResult } from './memory-restore';
-import { HostExecutionCore, type ExecutionServer } from './core';
-import { enqueue } from './transitions';
+import {
+  HostLedger,
+  MIN_TOMBSTONE_RETENTION_MS,
+  HostMemoryPage,
+  memoryRevision,
+  MemoryBlockedError,
+  HostExecutionCore,
+  enqueue,
+  type MemoryOptions,
+  type MemoryRestoreInput,
+  type MemoryRestoreResult,
+  type ExecutionServer,
+} from '@byok-sdk/server/execution-core';
 import { template } from './test-support';
+import type { AgentMemoryExport } from '@byok-sdk/protocol/agent-memory';
 const binding = { deviceId: 'device', agentRef: { agentId: 'main', profileRevision: '1' } };
 function snapshot(values: Record<string, string>): AgentMemoryExport {
   const files = Object.entries(values).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)

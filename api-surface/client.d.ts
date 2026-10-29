@@ -1504,20 +1504,12 @@ export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjec
 export { AgentMemoryService } from '../daemon/agent-memory';
 /** Bounded, audited snapshot of the Agent's local memory files, taken after `Session.close()` while the home lease still exists. */
 export { captureAgentMemorySnapshot } from '../daemon/agent-memory';
-/** The single source of truth for which relative path a model may name: `MEMORY.md` or `notes/<safe-relative>.md`. */
-export { validateAgentMemoryPath } from '../daemon/agent-memory';
 /** The sole platform gate for the memory write authority: native Linux, macOS and Windows x64 only with the host's helper. */
 export { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
-/** Base failure for every rejected memory operation. */
-export { AgentMemoryError } from '../daemon/agent-memory';
 /** Compare-and-swap failure carrying the expected and actual content revisions. */
 export { AgentMemoryRevisionConflictError } from '../daemon/agent-memory';
 /** The exact active-task binding required to construct the service; every field is validated on each call. */
 export type { AgentMemoryTaskContext } from '../daemon/agent-memory';
-/** One memory file as the snapshot sees it: relative path, sha256 revision, byte count, content. */
-export type { AgentMemoryFile } from '../daemon/agent-memory';
-/** A bounded set of memory files plus their total byte count. */
-export type { AgentMemorySnapshot } from '../daemon/agent-memory';
 /** Result of `recall`, including the metadata-only audit warning when the audit write failed but the read did not. */
 export type { AgentMemoryRecallResult } from '../daemon/agent-memory';
 /** Result of `save`, distinguishing a replace (with new revision) from a delete. */
@@ -2177,16 +2169,7 @@ export declare class AgentLatestValueState {
 export {};
 // ==== @byok-sdk/client dist/daemon/agent-memory-export.d.ts ====
 import type { AgentHomeManager, AgentRef } from '../agent-home';
-import { type AgentMemorySnapshot } from './agent-memory';
-/** Raw local-only Host result. Never send this through the redacted projection port. */
-export interface AgentMemoryExport extends AgentMemorySnapshot {
-    /** Validated Host request, not proof of a globally current profile revision. */
-    readonly requestedAgentRef: AgentRef;
-    /** Present only when the home has a durable applied profile projection. */
-    readonly appliedProfileRevision?: string;
-    /** sha256 of UTF-8 JSON ["byok-agent-memory-export.v1", [[path, revision, byteCount], ...]]. */
-    readonly snapshotDigest: string;
-}
+import { type AgentMemoryExport } from '@byok-sdk/protocol/agent-memory';
 export interface AgentMemoryExportOptions {
     readonly signal?: AbortSignal;
 }
@@ -2257,9 +2240,10 @@ export interface CopyAgentMemoryHelperAssetsOptions {
  */
 export declare function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelperAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/daemon/agent-memory-intent.d.ts ====
-import { type AgentMemoryIntentAvailablePayload, type AgentMemoryIntentCompletion, type AgentMemoryIntentFileObservation, type AgentMemoryIntentOperation, type AgentMemoryIntentReadback, type AgentMemoryIntentRejectionCode, type AgentMemoryIntentReservation, type AgentRef } from '@byok-sdk/protocol';
+import { type AgentMemoryIntentAvailablePayload, type AgentMemoryIntentCompletion, type AgentMemoryIntentFileObservation, type AgentMemoryIntentOperation, type AgentMemoryIntentReadback, type AgentMemoryIntentRejectionCode } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentHomeManager } from '../agent-home';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
+import { type AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 /**
  * Host-approved Agent memory intents — the daemon half.
  *
@@ -2305,30 +2289,6 @@ export declare class AgentMemoryIntentNoticeError extends Error {
     constructor(reason: AgentMemoryIntentNoticeFailureReason, intentId: string);
     get reason(): AgentMemoryIntentNoticeFailureReason;
     get intentId(): string;
-}
-/** Exactly what the daemon hands the Host transport for one fetch. */
-export interface AgentMemoryIntentFetchInput {
-    readonly intentId: string;
-    readonly agentRef: AgentRef;
-    /** `held`: a ledger slot is reserved; `none`: the Host must not release or change state. */
-    readonly reservation: AgentMemoryIntentReservation;
-}
-/**
- * Host-injected transport for Host-approved Agent memory intents. The Host
- * authenticates the device on its own routes; the SDK never sees an assertion.
- *
- * - `fetch` resolves with the Host's fetch answer (release / withheld /
- *   terminal / deferred) for exactly this intent and reservation.
- * - `complete` delivers one terminal completion and resolves with the Host's
- *   DURABLE readback for it.
- *
- * Both answers are copied into inert plain data and strictly parsed. A throw
- * from either is a transport failure: the notice is not acknowledged and a
- * redelivery retries. Neither is ever called while the Agent home is leased.
- */
-export interface AgentMemoryIntentTransport {
-    fetch(request: AgentMemoryIntentFetchInput): Promise<unknown>;
-    complete(completion: AgentMemoryIntentCompletion): Promise<unknown>;
 }
 /**
  * What one memory filesystem backend has PROVEN. A backend whose proof is
@@ -2439,6 +2399,7 @@ export declare function createAgentMemoryIntentProcessor(options: AgentMemoryInt
 import { AGENT_MEMORY_PROJECTION_CAPABILITY, type AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentRef } from '../agent-home';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
+import { AgentMemoryError, AgentMemoryValidationError, type AgentMemoryProjectionPort, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
 export declare const AGENT_MEMORY_AUDIT_FILENAME = "agent-memory-audit-v1.jsonl";
 /** v2 is one atomically replaced state file, never an append-only log. */
 export declare const AGENT_MEMORY_OUTBOX_FILENAME = "agent-memory-redacted-outbox-v2.json";
@@ -2448,17 +2409,6 @@ export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES = 512;
 /** One atomically replaced audit/outbox state must fit the cross-platform helper contract. */
 export declare const AGENT_MEMORY_MAX_LOCAL_LOG_BYTES: number;
-export declare class AgentMemoryError extends Error {
-    constructor(message: string);
-}
-/**
- * Deterministic refusal: the same input against the same home state fails the
- * same way on every retry (an invalid path, a forbidden delete, an oversized or
- * non-UTF-8 file, a non-regular leaf, a platform without a secure backend).
- */
-export declare class AgentMemoryValidationError extends AgentMemoryError {
-    constructor(message: string);
-}
 /** A complete snapshot cannot fit the bounded export contract. No partial result is returned. */
 export declare class AgentMemorySnapshotLimitError extends AgentMemoryValidationError {
     constructor(message: string);
@@ -2500,16 +2450,6 @@ export interface AgentMemoryTaskContext {
     /** Optional task-scoped external root handle; omission selects the native Linux backend. */
     readonly filesystem?: AgentMemoryFilesystem;
 }
-export interface AgentMemoryFile {
-    readonly path: string;
-    readonly revision: string;
-    readonly byteCount: number;
-    readonly content: string;
-}
-export interface AgentMemorySnapshot {
-    readonly files: readonly AgentMemoryFile[];
-    readonly totalBytes: number;
-}
 /**
  * Embedder-owned redaction authority. Its output is opaque bytes: the local
  * relative paths, source revisions, and raw source content never enter the
@@ -2528,18 +2468,6 @@ export interface AgentMemoryRedactedOutboxRecord {
     readonly version: 2;
     readonly mutation: AgentMemoryProjectionMutation;
     readonly createdAt: string;
-}
-/**
- * Optional bridge to a complete hosted client. It receives the canonical,
- * already-redacted protocol mutation only; this package intentionally owns no
- * consent, cloud transport, or raw-source upload fallback.
- */
-export interface AgentMemoryProjectionPort {
-    publish(input: Readonly<{
-        mutation: AgentMemoryProjectionMutation;
-    }>): Promise<{
-        readonly accepted: boolean;
-    }>;
 }
 /**
  * Replay exposes only ordering metadata. The redacted mutation body remains in
@@ -2566,8 +2494,6 @@ export interface AgentMemoryHostedProjection {
     readonly redactor?: AgentMemoryRedactor;
     readonly port?: AgentMemoryProjectionPort;
 }
-/** Model input can name one allowed file, never a root, directory, glob, or internal SDK state. */
-export declare function validateAgentMemoryPath(value: unknown): string;
 /**
  * The sole platform gate for the Agent-memory write authority. Linux retains
  * the native procfs descriptor backend. macOS and Windows x64 require the SDK
@@ -3105,15 +3031,29 @@ export declare class AuthRequestAbortedError extends Error {
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
  * truncated body, a missing field, or a token `expiresAt` that is not an ISO
- * timestamp with an offset. The renewal fails and the prior credential is kept
- * unchanged; nothing is inferred from the malformed body. The JSON
+ * timestamp with an offset — and when a token or pair response carries no
+ * `expiresIn` (#1114). The renewal or pairing fails and the prior credential
+ * is kept unchanged; nothing is inferred from the malformed body. The JSON
  * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
  */
 export declare class AuthResponseInvalidError extends Error {
-    readonly route: 'challenge' | 'token';
-    constructor(route: 'challenge' | 'token', options: {
+    readonly route: 'challenge' | 'token' | 'pair';
+    constructor(route: 'challenge' | 'token' | 'pair', options: {
         cause: unknown;
     });
+}
+/**
+ * One measurement of this device's clock against the server's HTTP `Date`
+ * header (#1114). It is reported only (`byok-agent doctor`); token lifetime never
+ * reads it.
+ */
+export interface ClockSkewObservation {
+    /** Positive when the device clock is ahead of the server's. */
+    readonly deviceAheadMs: number;
+    /** Half the request round trip plus the header's one-second resolution. */
+    readonly uncertaintyMs: number;
+    /** ISO time the response arrived on the device clock. */
+    readonly observedAt: string;
 }
 export interface AuthManagerOptions {
     serverUrl: string;
@@ -3158,11 +3098,14 @@ export declare class AuthManager {
     private activeMutation;
     private lastRenewedAt;
     private nearExpiryRenewals;
+    private lastClockSkew;
     private readonly credentials;
     private readonly requestDeadlineMs;
     constructor(opts: AuthManagerOptions);
     get deviceId(): string | undefined;
     isRevoked(): boolean;
+    /** The skew measured by the last successful pair or renewal, if its response carried a parseable `Date` and the device clock did not go back mid-request. */
+    clockSkew(): ClockSkewObservation | undefined;
     /**
      * Internal signer read: always recompose metadata with the current OS
      * secret authority. Like every OS read here it is a credential mutation, so
@@ -3930,6 +3873,7 @@ export declare class ConnectionManager {
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
+import type { ClockSkewObservation } from './auth-manager';
 import type { StoragePressureState } from './retention/pressure';
 import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
@@ -4200,6 +4144,13 @@ export interface ControlStatusResult {
      * peer that predates the cap.
      */
     agentHomeExecution?: AgentHomeExecutionStatus;
+    /**
+     * #1114: the device clock against the server's HTTP `Date` header at the
+     * last successful pair or renewal. Absent when the daemon has no
+     * observation (no pair or renewal since start, or the response carried no
+     * parseable `Date`) and from an older control peer: report unknown.
+     */
+    clockSkew?: ClockSkewObservation;
 }
 export interface ToolsetsReloadParams {
     expectedRevision: string;
@@ -4588,13 +4539,13 @@ import { type ProgressBatcherOptions } from './progress-batcher';
 import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { type AgentEgressStatus } from './agent-egress-policy';
 import { type ProviderProvisioningHandler } from './provider-provisioning';
-import { type AgentMemoryExport, type AgentMemoryExportOptions } from './agent-memory-export';
+import { type AgentMemoryExportOptions } from './agent-memory-export';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
-import { type AgentMemoryIntentTransport } from './agent-memory-intent';
 import { type AgentContentReadRoot } from './agent-content-read';
 import type { ToolAuthorizationResolver } from '../tool-authorization';
 import { type DaemonEffectiveConfig } from './config-schema/effective';
+import type { AgentMemoryExport, AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 /**
  * Optional white-label product display info — purely opaque passthrough
  * (never interpreted, validated, or rendered by the daemon itself). Carried
@@ -5724,6 +5675,11 @@ export declare function createFleetJitter(productId: string, deviceId: string): 
 /** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {
     readonly accessToken: string;
+    /**
+     * Device-local expiry of `accessToken` (#1114): this device's receipt time
+     * plus the server's relative `expiresIn`. It is compared only with this
+     * device's clock, never with a server timestamp.
+     */
     readonly expiresAt: string;
     readonly devicePrivateKeyPem: string;
 }
@@ -10581,7 +10537,7 @@ import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import type { ServiceEnvironmentRecord } from '../lifecycle/service-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
-    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'quarantine';
+    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'clock-skew' | 'health' | 'journal' | 'quarantine';
     status: DiagnosticStatus;
     summary: string;
 }
@@ -10644,6 +10600,20 @@ export interface DiagnosticsSnapshot {
         status: 'known';
         source: 'live' | 'audit';
         lifecycle: DaemonLifecycle;
+    };
+    /**
+     * #1114: the device clock against the server's HTTP `Date` header at the
+     * running daemon's last pair or renewal. Unknown while the daemon is
+     * offline: doctor stays network-free and keeps no state file of its own.
+     */
+    clockSkew: {
+        status: 'unknown';
+        reason: 'daemon-offline' | 'not-observed';
+    } | {
+        status: 'measured';
+        deviceAheadMs: number;
+        uncertaintyMs: number;
+        observedAt: string;
     };
     health: OperationalHealthFileInspection;
     journal: {
@@ -10709,9 +10679,9 @@ export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBrandin
 export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS, } from './daemon/provider-provisioning';
 export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning';
 export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent';
-export type { AgentMemoryIntentTransport, AgentMemoryIntentFetchInput, AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent';
-export { AgentMemoryError, AgentMemoryValidationError, AgentMemorySnapshotLimitError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory';
-export type { AgentMemoryFile, AgentMemorySnapshot, AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryProjectionPort, AgentMemoryHostedProjection, } from './daemon/agent-memory';
+export type { AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent';
+export { AgentMemorySnapshotLimitError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory';
+export type { AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryHostedProjection, } from './daemon/agent-memory';
 export type { AgentEgressDropReceipt, AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy';
 export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read';
 export type { AgentContentReadSurface, AgentContentReadDecision, AgentContentReadReason, AgentContentReadRoot, AgentContentReadPolicy, AgentContentReadPolicySelection, AgentContentReadRequest, AgentContentReadResult, AgentContentReadAllowed, AgentContentReadDenied, AgentContentSessionIdentity, AgentContentAuditReceipt, } from './daemon/agent-content-read';
@@ -10843,7 +10813,7 @@ export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
 export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
-export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
+export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, } from './tool-authorization';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
@@ -13326,7 +13296,6 @@ export declare const sdkDistributionManifest: Readonly<{
     version: 1;
     piRuntimePin: string;
     reservedHelperKinds: readonly import("./sdk-reserved-helper-host").SdkReservedHelperKind[];
-    piSubagentHelperKinds: readonly ["pi-subagent-print", "pi-subagent-runner"];
     nativeTargets: Readonly<{
         'win32-x64': Readonly<{
             package: "@koromix/koffi-win32-x64";
@@ -13367,15 +13336,8 @@ export interface ResolvedSdkReservedHelperBin {
     readonly args: readonly string[];
     readonly source: 'dist-script' | 'self-executable';
 }
-/** With `sdkPiSubagentHelperKinds`, the exact kinds that `runSdkReservedHelperCommand` accepts. */
+/** The exact kinds that `runSdkReservedHelperCommand` accepts. */
 export declare const sdkReservedHelperKinds: readonly SdkReservedHelperKind[];
-/**
- * Kinds that only a Pi subagent child re-enters with (`subagents/spawn.ts`).
- * They carry a tail argv and have no dist script, so `resolveSdkReservedHelperBin`
- * does not launch them. A product entrypoint still routes them through
- * {@link runSdkReservedHelperCommand}.
- */
-export declare const sdkPiSubagentHelperKinds: readonly ["pi-subagent-print", "pi-subagent-runner"];
 /** SDK-owned launcher shape used by every reserved stdio helper. */
 export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind, host?: SdkHelperHostConfig): ResolvedSdkReservedHelperBin;
 /**

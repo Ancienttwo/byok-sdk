@@ -22,8 +22,10 @@ function cloudWith(capabilities: CapabilityDeclaration, ports: CapabilityPorts) 
   const crypto = createWebCrypto();
   const objectBytes = createInMemoryBlobBytes(clock, crypto);
   const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
-  const { stores } = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, objectBytes);
+  const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, objectBytes);
+  const { stores } = composition;
   return createByokCloud({
+    proofReceiptRetention: { authority: composition.proofReceiptAuthority },
     mailboxWake: createInProcessMailboxWake(),
     core,
     cloud: stores,

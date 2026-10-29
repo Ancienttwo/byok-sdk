@@ -15,7 +15,7 @@ test('the K8 Windows runner runs every suite, with the real persona fixture suit
 });
 
 test('K4, K8 and Windows runner changes require the Windows-containing family', () => {
-  for (const path of ['examples/host-execution-core/src/core.ts', 'examples/bot-collaboration/src/channel.ts', 'scripts/ci/run-windows-bot-tests.mjs']) {
+  for (const path of ['packages/server/src/execution-core/core.ts', 'examples/host-execution-core/src/core.test.ts', 'examples/bot-collaboration/src/channel.ts', 'scripts/ci/run-windows-bot-tests.mjs']) {
     assert.ok(selectImpact([path]).families.includes('adapter-lifecycle-smoke'));
   }
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { tenantId } from '@byok-sdk/core';
-import { hash, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/example-host-execution-core';
+import { hash, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type AgentMessageInput } from './host';
 import { botCompactVeto } from './compaction';

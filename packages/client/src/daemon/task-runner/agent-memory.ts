@@ -1,10 +1,11 @@
 // `TaskRunner` members for the Agent memory context and filesystem
 // (see ./support.ts for how a member module runs).
-import { AgentMemoryError, isAgentMemorySecureFilesystemAvailable, snapshotAndProjectAgentMemory, type AgentMemoryTaskContext } from '../agent-memory';
+import { isAgentMemorySecureFilesystemAvailable, snapshotAndProjectAgentMemory, type AgentMemoryTaskContext } from '../agent-memory';
 import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
 import type { ActiveTask } from './support';
 import { errorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
+import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
 export function activeMemoryContext(this: TaskRunner, contextToken: string): AgentMemoryTaskContext {
   const registered = this['memoryContextByToken'].get(contextToken);

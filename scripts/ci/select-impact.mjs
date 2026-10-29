@@ -60,7 +60,8 @@ export const workspaceGraph = {
       "@byok-sdk/cloud-dataplane",
       "@byok-sdk/core",
       "@byok-sdk/example-bot-collaboration",
-      "@byok-sdk/example-host-execution-core"
+      "@byok-sdk/example-host-execution-core",
+      "@byok-sdk/server"
     ]
   },
   "examples/hosted-bot-collaboration-worker": {
@@ -71,7 +72,8 @@ export const workspaceGraph = {
       "@byok-sdk/cloud-dataplane",
       "@byok-sdk/example-bot-collaboration",
       "@byok-sdk/example-host-execution-core",
-      "@byok-sdk/example-hosted-bot-collaboration"
+      "@byok-sdk/example-hosted-bot-collaboration",
+      "@byok-sdk/server"
     ]
   },
   "examples/live-activity-host": {
@@ -175,7 +177,7 @@ export const workspaceGraph = {
 };
 
 export const knownFamilies = Object.freeze([
-  'build-test', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
+  'build-test', 'macos-client', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
@@ -190,8 +192,8 @@ export const knownFamilies = Object.freeze([
 export const familyOwners = Object.freeze({
   'agent-memory-export-linux': [
     /^examples\/host-execution-core\/src\/fixtures\/memory-restore-crash\.ts$/,
-    /^examples\/host-execution-core\/src\/memory\.ts$/,
-    /^examples\/host-execution-core\/src\/memory-restore\.ts$/,
+    // #1106: the K4 memory source now lives in the server execution core.
+    /^packages\/server\/src\/execution-core\/memory(?:-restore)?\.ts$/,
     /^examples\/host-execution-core\/src\/memory-restore\.test\.ts$/,
     /^examples\/host-execution-core\/src\/memory-linux\.test\.ts$/,
     /^packages\/client\/src\/daemon\/agent-memory-(?:export|filesystem|fs-helper)\.ts$/,
@@ -221,6 +223,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
     /^packages\/client\/scripts\/adapter-task-smoke\.mjs$/,
     /^examples\/(?:host-execution-core|bot-collaboration)\//,
+    // #1106: the K4 source the K4 Windows qualification runs against.
+    /^packages\/server\/src\/execution-core\//,
     /^examples\/basic\/goal-btw\.test-support\.ts$/,
     /^scripts\/ci\/run-windows-bot-tests\.mjs$/,
     /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
@@ -228,7 +232,9 @@ export const familyOwners = Object.freeze({
   'windows-client': [
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
     /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write|fold-name-aliases)\.ts|diagnostics\/|bin\/commands\/)/,
-    /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,
+    /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity|service-enrollment-handover)[^/]*$/,
+    // #1165: service enrollment's handover on a named-pipe control endpoint.
+    /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
     // #738: the Agent-home file write crash test, its child process and the code it qualifies.
     /^packages\/client\/src\/(?:agent-home\.ts|__tests__\/(?:fixtures\/)?agent-home-write-file[^/]*)$/,
     // #712: the Hermes suites this job runs on Windows, their fakes and the code they qualify.
@@ -254,6 +260,11 @@ export const familyOwners = Object.freeze({
   'windows-service-smoke': [
     /^templates\/service\/winsw\//,
     /^packages\/client\/src\/(?:lifecycle\/|util\/secure-dir\.ts$)/,
+    // #1165: the control socket check pairs, queries and unpairs a WinSW
+    // service daemon through service enrollment's handover to normal startup.
+    /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
+    /^packages\/client\/src\/bin\/(?:control-client|commands\/unpair)\.ts$/,
+    /^packages\/client\/scripts\/control-socket-check\.mjs$/,
   ],
   'ipc-smoke': [
     /^packages\/client\/src\/daemon\/(?:control-protocol|control-server|device-credential-provider|device-credential-store)\.ts$/,
@@ -406,10 +417,10 @@ export function selectImpact(paths, context = {}) {
     }
     // #702: the Node pin is the runtime of every platform job, so a reviewed
     // exact version selects every routine family. The complete test suite
-    // stays release-validation only.
+    // stays nightly/release-validation only.
     if (path === '.node-version') {
       verifyReviewedContent(path, context);
-      for (const id of knownFamilies) if (id !== 'build-test') families.add(id);
+      for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
@@ -493,8 +504,11 @@ export function selectImpact(paths, context = {}) {
     if (Object.hasOwn(reviewedBuildConfigOwners, path)) {
       dirs.add(reviewedBuildConfigOwners[path]); families.add('npm-release-pack'); continue;
     }
+    // Client build inputs: the entry checks, the main build config, the sealed
+    // host build check and the retired vendored-subagents build plugin.
     if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/scripts/check-adapters-entry.mjs'
-      || path === 'packages/client/tsup.config.ts') {
+      || path === 'packages/client/tsup.config.ts' || path === 'packages/client/scripts/build-sealed-host.mjs'
+      || path === 'packages/client/scripts/subagents-build.ts') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     // #636: the keys pi-catalog subpath entry, and the generator that keys
@@ -555,10 +569,9 @@ export function selectImpact(paths, context = {}) {
     // Opt-in Codex probes select their client runtime owner; CI does not invoke the probes.
     if (path === 'packages/client/scripts/codex-app-server-real.mjs'
       || path === 'packages/client/scripts/codex-reserved-mcp-loopback.mjs') { dirs.add('packages/client'); continue; }
-    // #701: the vendored pi-subagents factory and its provenance. Both Pi host
-    // flavors inline it; the client suite binds every vendored byte and runs
-    // the CommonJS single-file fixture.
-    if (/^packages\/client\/vendor\/pi-subagents\/0\.60\.0\/(?:index\.ts|PROVENANCE\.md|source-manifest\.json|src\/.+\.ts)$/.test(path)) {
+    // #701: the retired vendored pi-subagents 0.60.0 snapshot. The client now
+    // depends on the installed package; only this snapshot's deletion remains.
+    if (/^packages\/client\/vendor\/pi-subagents\/0\.60\.0\/(?:index\.ts|LICENSE|package\.json|PROVENANCE\.md|source-manifest\.json|src\/.+\.ts)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (path === 'examples/host-execution-core/VALIDATION.md'
@@ -587,10 +600,10 @@ export function selectImpact(paths, context = {}) {
     if (path === '.gitignore' || rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     // W7: a ci.yml change can change any family job, so it selects every
     // routine family. The client suite also runs: two of its tests read this
-    // workflow. The complete test suite stays release-validation only.
+    // workflow. The complete test suite stays nightly/release-validation only.
     if (path === '.github/workflows/ci.yml') {
       scripts = true; dirs.add('packages/client');
-      for (const id of knownFamilies) if (id !== 'build-test') families.add(id);
+      for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
     }
     // W7: agent-memory-windows.yml is removed. Its checks run in the

@@ -46,6 +46,7 @@ describe('GET /byok/events cursor_too_old', () => {
     const swept = await harness.core.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
       ackedBefore: cutoff,
       expireUnackedBefore: cutoff,
+      reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
     });
     expect(swept.expired).toBe(2);
 
@@ -87,6 +88,7 @@ describe('GET /byok/events cursor_too_old', () => {
     const swept = await harness.core.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
       ackedBefore: '2999-01-01T00:00:00.000Z',
       expireUnackedBefore: '2999-01-01T00:00:00.000Z',
+      reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
     });
     expect(swept).toMatchObject({ removed: 2, expired: 0 });
 

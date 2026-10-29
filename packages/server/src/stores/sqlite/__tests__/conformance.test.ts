@@ -68,6 +68,7 @@ const cloudFactory: CloudCompositionFactory = {
         proofReceipts: stores.proofReceipts,
         blobs: stores.blobs,
         rateLimiter: stores.rateLimiter,
+        taskArchive: stores.taskArchive,
       },
       now: () => clock.now().toISOString(),
       advanceTime: (ms) => clock.advance(ms),
@@ -96,7 +97,7 @@ const cloudFactory: CloudCompositionFactory = {
   },
 };
 
-if (isSqliteAvailable()) {
+if (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') {
   runCoreConformance('server SQLite embedded', coreFactory);
   runCloudConformance('server SQLite embedded', cloudFactory);
 }

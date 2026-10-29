@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addTurn } from './turn';
 import { applyDelegate, arbitrateCancel, settleDelegations, type DelegationState, type IntentFact, type IntentFacts } from './delegation';
 

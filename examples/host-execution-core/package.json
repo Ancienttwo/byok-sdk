@@ -2,15 +2,13 @@
   "name": "@byok-sdk/example-host-execution-core",
   "version": "0.0.1",
   "private": true,
-  "description": "Copy-and-own Host execution core with a durable FIFO, routine ledger and outbox",
+  "description": "Demo Host composing @byok-sdk/server/execution-core with a real daemon; integration qualification for the published execution core",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=24.15.0"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./canonical": "./src/canonical.ts",
     "./test-support": "./src/test-support.ts"
   },
   "scripts": {

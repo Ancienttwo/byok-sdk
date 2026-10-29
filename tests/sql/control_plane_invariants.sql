@@ -32,6 +32,7 @@
 --   deploy/sql/0028_e2ee_scope_shred.sql (tenant-first record of the scopes the member chain shredded)
 --   deploy/sql/0029_e2ee_member_kem_floor.sql (tenant-first member KEM floor and the own-package epoch index)
 --   deploy/sql/0030_task_attempt_phase_times.sql (nullable write-once attempt phase instants; no new table or key)
+--   deploy/sql/0031_mailbox_dead_letter_retention.sql (dead-letter retention column with a default; pending-only tenant-leading partial index replaces 0023's; no new table or key)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has

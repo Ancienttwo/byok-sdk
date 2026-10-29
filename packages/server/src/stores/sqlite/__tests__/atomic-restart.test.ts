@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createSqliteEmbeddedStores } from '..';
 import { isSqliteAvailable, SqliteSchemaError } from '../../../sqlite-support';
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const TENANT = tenantId('tenant-restart');
 
 describeSqlite('SQLite embedded atomicity and restart', () => {

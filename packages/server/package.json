@@ -25,6 +25,14 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./execution-core": {
+      "types": "./dist/execution-core/index.d.ts",
+      "import": "./dist/execution-core/index.js"
+    },
+    "./execution-core/canonical": {
+      "types": "./dist/execution-core/canonical.d.ts",
+      "import": "./dist/execution-core/canonical.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -51,6 +59,7 @@
     "hono": "^4.12.30"
   },
   "devDependencies": {
-    "@byok-sdk/conformance": "workspace:*"
+    "@byok-sdk/conformance": "workspace:*",
+    "tsx": "^4.19.2"
   }
 }

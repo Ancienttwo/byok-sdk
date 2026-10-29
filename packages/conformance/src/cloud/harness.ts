@@ -36,6 +36,7 @@ import { runProofReceiptConformance } from './proof-receipts';
 import { runBlobConformance } from './blobs';
 import { runCloudTenantIsolationConformance } from './tenant-isolation';
 import { runDeviceRetirementConformance } from './device-retirement';
+import { runTaskArchiveConformance } from './task-archive';
 
 /**
  * The cloud-local ports this suite certifies.
@@ -76,6 +77,7 @@ export const CLOUD_CONFORMANCE_PORTS = [
   'proofReceipts',
   'blobs',
   'rateLimiter',
+  'taskArchive',
 ] as const;
 
 export type CloudConformancePortName = (typeof CLOUD_CONFORMANCE_PORTS)[number];
@@ -175,6 +177,7 @@ export async function ackAndCollectMailbox(
     limit: 500,
     ackedBefore: farFuture,
     expireUnackedBefore: '1970-01-01T00:00:00.000Z',
+    reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
   });
   return collected.removed;
 }
@@ -323,5 +326,6 @@ export function runCloudConformance(name: string, factory: CloudCompositionFacto
     runCloudTenantIsolationConformance(factory);
     runDeviceRetirementConformance(factory);
     runCloudRetentionConformance(name, factory);
+    runTaskArchiveConformance(factory);
   });
 }

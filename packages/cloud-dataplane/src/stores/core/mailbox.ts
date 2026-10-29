@@ -9,11 +9,13 @@ import { assertCollectExpiredInput } from '@byok-sdk/core';
  * regression and future cursors are refused with the cursor state they lost
  * to rather than re-delivering or silently skipping work.
  *
- * `collectExpired` deletes acked rows and **marks** unacked ones `expired`. It
- * never deletes an unacked row. §12.7.5 requires an envelope that aged out
- * before anyone consumed it to stay visible; deleting it would make "we dropped
- * work" indistinguishable from "there was no work", and dead-lettering those
- * rows is S4B's job (O-009), not this one's.
+ * `collectExpired` deletes acked rows and **marks** unacked ones `expired`.
+ * It never deletes a `pending` row. §12.7.5 requires an envelope that aged out
+ * before anyone consumed it to stay visible, so a dead letter stays queryable
+ * until its grace period (`reapDeadLettersBefore`) passes. Then it is reaped,
+ * except the device's highest-seq dead letter: that row is the
+ * `recoverableFrom` floor, so losing work stays distinguishable from having
+ * had none.
  *
  * Rows are written only by `outbox-writer.ts`, which also admits them against
  * `mailboxLimitBytes`. Mailbox usage is the sum over the `pending` rows, so
@@ -177,11 +179,11 @@ export class PostgresMailboxStore implements MailboxStore {
    * One past the highest row this device lost, which is exactly the highest
    * `expired` seq — `1` when it has lost nothing.
    *
-   * No column and no migration, because `collectExpired` never deletes an
-   * unacked row: §12.7.5 keeps the dead letter, so the loss is already durable
-   * in `outbox` and a stored floor would be a second authority free to drift
-   * from the sweep that moved it. Whatever eventually reaps dead letters (S4B,
-   * O-009) is the change that has to carry this floor forward instead.
+   * No column and no migration: the loss is durable in `outbox` itself, and a
+   * stored floor would be a second authority free to drift from the sweep that
+   * moved it. `collectExpired` reaps old dead letters but never the device's
+   * highest-seq one, so the row this reads survives every reap and the floor
+   * never moves back.
    *
    * `acked` rows are not counted: a consumed row is not a lost one.
    *
@@ -343,23 +345,50 @@ export class PostgresMailboxStore implements MailboxStore {
     assertCollectExpiredInput(input);
     assertCanonicalTimestamp(input.ackedBefore, 'ackedBefore');
     assertCanonicalTimestamp(input.expireUnackedBefore, 'expireUnackedBefore');
+    assertCanonicalTimestamp(input.reapDeadLettersBefore, 'reapDeadLettersBefore');
+    // One statement, one snapshot: the reap sees only rows that were `expired`
+    // before this call, and a higher `expired` sibling in that snapshot keeps
+    // its own row. Dead letters only ever leave `expired` by deletion, so a
+    // device's highest-seq dead letter has no higher sibling in any snapshot
+    // and no concurrent sweep can reap it. The last `more` clause covers rows
+    // this call's expiry makes reapable for the next call.
     const result = await this.#pool.query<{removed: string; expired: string; more: boolean}>(
       `WITH acked AS MATERIALIZED (
          SELECT ctid FROM outbox WHERE tenant_id = $1 AND state = 'acked' AND appended_at < $2
          ORDER BY appended_at, ctid LIMIT $4 + 1 FOR UPDATE SKIP LOCKED
        ), deleted AS (
          DELETE FROM outbox WHERE ctid IN (SELECT ctid FROM acked LIMIT $4) RETURNING 1
+       ), reapable AS MATERIALIZED (
+         SELECT o.ctid FROM outbox o
+          WHERE o.tenant_id = $1 AND o.state = 'expired' AND o.appended_at < $5
+            AND EXISTS (SELECT 1 FROM outbox h WHERE h.tenant_id = $1 AND h.device_id = o.device_id
+                          AND h.state = 'expired' AND h.seq > o.seq)
+          ORDER BY o.appended_at, o.ctid LIMIT $4 - (SELECT count(*) FROM deleted) + 1 FOR UPDATE SKIP LOCKED
+       ), reaped AS (
+         DELETE FROM outbox WHERE ctid IN
+           (SELECT ctid FROM reapable LIMIT $4 - (SELECT count(*) FROM deleted)) RETURNING device_id, seq
        ), pending AS MATERIALIZED (
          SELECT ctid FROM outbox WHERE tenant_id = $1 AND state = 'pending' AND appended_at < $3
-         ORDER BY appended_at, ctid LIMIT $4 - (SELECT count(*) FROM deleted) + 1 FOR UPDATE SKIP LOCKED
+         ORDER BY appended_at, ctid
+         LIMIT $4 - (SELECT count(*) FROM deleted) - (SELECT count(*) FROM reaped) + 1 FOR UPDATE SKIP LOCKED
        ), expired AS (
          UPDATE outbox SET state = 'expired' WHERE ctid IN
-           (SELECT ctid FROM pending LIMIT $4 - (SELECT count(*) FROM deleted)) RETURNING 1
-       ) SELECT (SELECT count(*) FROM deleted)::text AS removed,
+           (SELECT ctid FROM pending LIMIT $4 - (SELECT count(*) FROM deleted) - (SELECT count(*) FROM reaped))
+         RETURNING device_id, seq, appended_at
+       ) SELECT ((SELECT count(*) FROM deleted) + (SELECT count(*) FROM reaped))::text AS removed,
                 (SELECT count(*) FROM expired)::text AS expired,
                 EXISTS(SELECT 1 FROM acked OFFSET $4) OR
-                (SELECT count(*) FROM pending) > $4 - (SELECT count(*) FROM deleted) AS more`,
-      [tenant, input.ackedBefore, input.expireUnackedBefore, input.limit],
+                (SELECT count(*) FROM reapable) > $4 - (SELECT count(*) FROM deleted) OR
+                (SELECT count(*) FROM pending) > $4 - (SELECT count(*) FROM deleted) - (SELECT count(*) FROM reaped) OR
+                EXISTS(SELECT 1 FROM expired e WHERE
+                  (e.appended_at < $5 AND EXISTS(SELECT 1 FROM outbox h WHERE h.tenant_id = $1
+                     AND h.device_id = e.device_id AND h.state = 'expired' AND h.seq > e.seq))
+                  OR EXISTS(SELECT 1 FROM expired r WHERE r.device_id = e.device_id
+                     AND r.seq < e.seq AND r.appended_at < $5)
+                  OR EXISTS(SELECT 1 FROM outbox r WHERE r.tenant_id = $1 AND r.device_id = e.device_id
+                     AND r.state = 'expired' AND r.seq < e.seq AND r.appended_at < $5
+                     AND NOT EXISTS(SELECT 1 FROM reaped x WHERE x.device_id = r.device_id AND x.seq = r.seq))) AS more`,
+      [tenant, input.ackedBefore, input.expireUnackedBefore, input.limit, input.reapDeadLettersBefore],
     );
     const row = result.rows[0]!;
     return { removed: Number(row.removed), expired: Number(row.expired), releasedBytes: 0n, more: row.more };

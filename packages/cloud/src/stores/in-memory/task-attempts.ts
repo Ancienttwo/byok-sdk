@@ -324,6 +324,8 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
 export class InMemoryTaskAttemptState {
   readonly attempts = new Map<string, TaskAttempt>();
   readonly messageAdmissions = new Map<string, StoredAgentMessageAdmission>();
+  /** `archive_settled_at` of archived tasks (#1120), by tenant/task key. */
+  readonly archiveSettled = new Map<string, string>();
   readonly #clock: Clock;
   readonly #mutationTails = new Map<string, Promise<void>>();
   /** Settles when the exclusive section in progress (or queued last) ends. */

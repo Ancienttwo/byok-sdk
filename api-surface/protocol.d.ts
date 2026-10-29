@@ -1325,6 +1325,86 @@ export declare const AgentMemoryProjectionEraseResultSchema: z.ZodObject<{
     nextWriterEpoch: z.ZodNumber;
 }, z.core.$strict>;
 export type AgentMemoryProjectionEraseResult = z.infer<typeof AgentMemoryProjectionEraseResultSchema>;
+// ==== @byok-sdk/protocol dist/agent-memory.d.ts ====
+/**
+ * `@byok-sdk/protocol/agent-memory` — the Host-side Agent memory contract that both
+ * `@byok-sdk/client` (the device) and `@byok-sdk/server/execution-core` (the Host)
+ * use: the file and export shapes, the model path policy, the Host transport and
+ * projection ports, and the memory error bases. It is zod-free so the embedded
+ * `@byok-sdk/client/agent-memory` entry stays schema-free, and it is its own entry
+ * so the error classes have one runtime definition.
+ */
+import type { AgentMemoryIntentCompletion, AgentMemoryIntentReservation } from './agent-memory-intent';
+import type { AgentMemoryProjectionMutation } from './agent-memory-projection';
+import type { AgentRef } from './messages';
+export declare class AgentMemoryError extends Error {
+    constructor(message: string);
+}
+/**
+ * Deterministic refusal: the same input against the same home state fails the
+ * same way on every retry (an invalid path, a forbidden delete, an oversized or
+ * non-UTF-8 file, a non-regular leaf, a platform without a secure backend).
+ */
+export declare class AgentMemoryValidationError extends AgentMemoryError {
+    constructor(message: string);
+}
+export interface AgentMemoryFile {
+    readonly path: string;
+    readonly revision: string;
+    readonly byteCount: number;
+    readonly content: string;
+}
+export interface AgentMemorySnapshot {
+    readonly files: readonly AgentMemoryFile[];
+    readonly totalBytes: number;
+}
+/** Raw local-only Host result. Never send this through the redacted projection port. */
+export interface AgentMemoryExport extends AgentMemorySnapshot {
+    /** Validated Host request, not proof of a globally current profile revision. */
+    readonly requestedAgentRef: AgentRef;
+    /** Present only when the home has a durable applied profile projection. */
+    readonly appliedProfileRevision?: string;
+    /** sha256 of UTF-8 JSON ["byok-agent-memory-export.v1", [[path, revision, byteCount], ...]]. */
+    readonly snapshotDigest: string;
+}
+/** Model input can name one allowed file, never a root, directory, glob, or internal SDK state. */
+export declare function validateAgentMemoryPath(value: unknown): string;
+/** Exactly what the daemon hands the Host transport for one fetch. */
+export interface AgentMemoryIntentFetchInput {
+    readonly intentId: string;
+    readonly agentRef: AgentRef;
+    /** `held`: a ledger slot is reserved; `none`: the Host must not release or change state. */
+    readonly reservation: AgentMemoryIntentReservation;
+}
+/**
+ * Host-injected transport for Host-approved Agent memory intents. The Host
+ * authenticates the device on its own routes; the SDK never sees an assertion.
+ *
+ * - `fetch` resolves with the Host's fetch answer (release / withheld /
+ *   terminal / deferred) for exactly this intent and reservation.
+ * - `complete` delivers one terminal completion and resolves with the Host's
+ *   DURABLE readback for it.
+ *
+ * Both answers are copied into inert plain data and strictly parsed. A throw
+ * from either is a transport failure: the notice is not acknowledged and a
+ * redelivery retries. Neither is ever called while the Agent home is leased.
+ */
+export interface AgentMemoryIntentTransport {
+    fetch(request: AgentMemoryIntentFetchInput): Promise<unknown>;
+    complete(completion: AgentMemoryIntentCompletion): Promise<unknown>;
+}
+/**
+ * Optional bridge to a complete hosted client. It receives the canonical,
+ * already-redacted protocol mutation only; the SDK intentionally owns no
+ * consent, cloud transport, or raw-source upload fallback.
+ */
+export interface AgentMemoryProjectionPort {
+    publish(input: Readonly<{
+        mutation: AgentMemoryProjectionMutation;
+    }>): Promise<{
+        readonly accepted: boolean;
+    }>;
+}
 // ==== @byok-sdk/protocol dist/blob.d.ts ====
 import { z } from 'zod';
 /**
@@ -2130,7 +2210,6 @@ export declare const TASK_FAIL_REASON_MAX_BYTES = 2048;
 export declare function boundFailureReason(reason: string): string;
 // ==== @byok-sdk/protocol dist/http-api.d.ts ====
 import { z } from 'zod';
-import { EnvelopeSchema } from './envelope';
 /**
  * HTTP-side request/response shapes for the reference server's auth and blob
  * endpoints (M1 Part B). These are plain HTTP bodies, not wire envelopes —
@@ -2164,6 +2243,7 @@ export declare const PairResponseSchema: z.ZodObject<{
     deviceId: z.ZodString;
     accessToken: z.ZodString;
     refreshHint: z.ZodOptional<z.ZodString>;
+    expiresIn: z.ZodOptional<z.ZodNumber>;
     tenantId: z.ZodString;
 }, z.core.$strip>;
 export type PairResponse = z.infer<typeof PairResponseSchema>;
@@ -2184,6 +2264,7 @@ export type TokenRequest = z.infer<typeof TokenRequestSchema>;
 export declare const TokenResponseSchema: z.ZodObject<{
     accessToken: z.ZodString;
     expiresAt: z.ZodISODateTime;
+    expiresIn: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 /**
@@ -2299,9 +2380,20 @@ export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
 export declare const MAX_MESSAGES_PER_BATCH = 256;
 /** Request body ceiling for `POST /byok/messages`; the cloud answers 413 above it, so the client chunks its drain by it. */
 export declare const MESSAGES_SEND_MAX_BODY_BYTES: number;
-/** Annotated so declaration emit names `EnvelopeSchema` instead of copying it. Type-only. */
+/**
+ * The batch frame only (#1121). Each entry must speak this wire major and
+ * carry the UUID its outcome is correlated by; everything else is decoded per
+ * entry with `parseMessage`, so one invalid envelope is answered
+ * `rejected: payload_invalid` on its own instead of failing every envelope in
+ * the batch — the same split as `EventsPollResponseSchema.events` (#386) on
+ * the receive side. A different `v` still fails the whole request: the wire
+ * major belongs to the sender, which could not read this version's outcomes.
+ */
 export declare const MessagesSendRequestSchema: z.ZodObject<{
-    messages: z.ZodArray<typeof EnvelopeSchema>;
+    messages: z.ZodArray<z.ZodObject<{
+        v: z.ZodLiteral<4>;
+        id: z.ZodUUID;
+    }, z.core.$loose>>;
 }, z.core.$strip>;
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 /**
@@ -2930,8 +3022,8 @@ export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_DE
 export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, ResultIssue, ResultDocumentFailureReason, ResultSchemaCheck, ResultOutcomeCheck, } from './result-schema';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
+export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -4736,7 +4828,7 @@ export declare const AgentContentReceiptPayloadSchema: z.ZodDiscriminatedUnion<[
     }>;
     decision: z.ZodLiteral<"denied">;
     byteCount: z.ZodLiteral<0>;
-    reason: z.ZodEnum<{
+    reason: z.ZodUnion<readonly [z.ZodEnum<{
         "absolute-target": "absolute-target";
         "byte-limit": "byte-limit";
         "capability-missing": "capability-missing";
@@ -4756,7 +4848,7 @@ export declare const AgentContentReceiptPayloadSchema: z.ZodDiscriminatedUnion<[
         "target-missing": "target-missing";
         "text-decode-failed": "text-decode-failed";
         "text-not-allowlisted": "text-not-allowlisted";
-    }>;
+    }>, z.ZodString]>;
 }, z.core.$strict>], "decision">;
 export type AgentContentReceiptPayload = z.infer<typeof AgentContentReceiptPayloadSchema>;
 /**
@@ -5076,6 +5168,16 @@ export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
  */
 export declare const TaskStartedPayloadSchema: z.ZodObject<{}, z.core.$strip>;
 export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
+declare const DECLINE_CODES: readonly ["agent_home_writer_busy", "agent_home_reader_busy", "sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch"];
+export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
+/** A decline code as this version understands it: one it does not know reads as `unknown`, its raw token kept. */
+export type TaskDeclineCodeReading = {
+    readonly code: TaskDeclineCode;
+} | {
+    readonly code: 'unknown';
+    readonly reportedCode: string;
+};
+export declare function readDeclineCode(code: string): TaskDeclineCodeReading;
 /**
  * Hard cap (1 MiB) on a single `task.complete.document` (see
  * {@link TaskCompletePayloadSchema}), measured as the UTF-8 byte length of
@@ -5261,7 +5363,7 @@ export declare const TerminalAgentHomeMemoryChangeSchema: z.ZodDiscriminatedUnio
     outcome: z.ZodLiteral<"unmeasured">;
 }, z.core.$strict>], "outcome">;
 export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemoryChangeSchema>;
-/** A closed runtime failure class (#869). `unknown` means the runtime gave no structured evidence. */
+/** A runtime failure class this version knows (#869). `unknown` means the runtime gave no structured evidence. */
 export declare const RuntimeFailureClassSchema: z.ZodEnum<{
     auth: "auth";
     billing: "billing";
@@ -5282,6 +5384,11 @@ export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
  * The machine-readable failure of a `task.fail` (#869); `reason` stays display
  * text. `resetsAt` (ISO 8601 UTC) exists only on `quota`, and only when the
  * runtime reported when the limit resets.
+ *
+ * The class is open (#1121): a well-formed class this version does not know,
+ * with whatever fields a newer device put beside it, is accepted and kept
+ * verbatim, so the terminal is still recorded. {@link readTaskFailure} is the
+ * typed reading.
  */
 export declare const TaskFailureSchema: z.ZodUnion<readonly [z.ZodObject<{
     class: z.ZodLiteral<"quota">;
@@ -5301,8 +5408,21 @@ export declare const TaskFailureSchema: z.ZodUnion<readonly [z.ZodObject<{
         runtime_exited: "runtime_exited";
         unknown: "unknown";
     }>;
-}, z.core.$strict>]>;
+}, z.core.$strict>, z.ZodObject<{
+    class: z.ZodString;
+}, z.core.$loose>]>;
 export type TaskFailure = z.infer<typeof TaskFailureSchema>;
+/** A {@link TaskFailure} as this version understands it: a class it does not know reads as `unknown`, its raw token kept. */
+export type TaskFailureReading = {
+    readonly class: 'quota';
+    readonly resetsAt?: string;
+} | {
+    readonly class: Exclude<RuntimeFailureClass, 'quota' | 'unknown'>;
+} | {
+    readonly class: 'unknown';
+    readonly reportedClass?: string;
+};
+export declare function readTaskFailure(failure: TaskFailure): TaskFailureReading;
 /**
  * daemon -> server: a pending `task.await_approval` was resolved entirely
  * LOCALLY on the device — the local control-socket `approvals.resolve` RPC,
@@ -5469,7 +5589,9 @@ export declare const TaskFailSealedPayloadSchema: z.ZodObject<{
             runtime_exited: "runtime_exited";
             unknown: "unknown";
         }>;
-    }, z.core.$strict>]>>;
+    }, z.core.$strict>, z.ZodObject<{
+        class: z.ZodString;
+    }, z.core.$loose>]>>;
     usage: z.ZodOptional<z.ZodObject<{
         runtime: z.ZodEnum<{
             claude: "claude";
@@ -5551,10 +5673,10 @@ export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
         toolsetProbeMs: z.ZodOptional<z.ZodNumber>;
         runtimeLaunchMs: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strict>>;
-    code: z.ZodOptional<z.ZodEnum<{
+    code: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
         agent_home_reader_busy: "agent_home_reader_busy";
         agent_home_writer_busy: "agent_home_writer_busy";
-    }>>;
+    }>, z.ZodString]>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
         suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -5793,14 +5915,14 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>>;
-    code: z.ZodOptional<z.ZodEnum<{
+    code: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
         agent_home_reader_busy: "agent_home_reader_busy";
         agent_home_writer_busy: "agent_home_writer_busy";
         sealed_content_mac_mismatch: "sealed_content_mac_mismatch";
         sealed_key_unavailable: "sealed_key_unavailable";
         sealed_open_failed: "sealed_open_failed";
         sealing_policy_mismatch: "sealing_policy_mismatch";
-    }>>;
+    }>, z.ZodString]>>;
     admission: z.ZodOptional<z.ZodObject<{
         totalMs: z.ZodNumber;
         agentHomeWaitMs: z.ZodOptional<z.ZodNumber>;
@@ -5824,10 +5946,10 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
         toolsetProbeMs: z.ZodOptional<z.ZodNumber>;
         runtimeLaunchMs: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strict>>;
-    code: z.ZodOptional<z.ZodEnum<{
+    code: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
         agent_home_reader_busy: "agent_home_reader_busy";
         agent_home_writer_busy: "agent_home_writer_busy";
-    }>>;
+    }>, z.ZodString]>>;
     sealed: z.ZodObject<{
         v: z.ZodLiteral<1>;
         suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
@@ -6201,7 +6323,9 @@ export declare const TaskFailPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
             runtime_exited: "runtime_exited";
             unknown: "unknown";
         }>;
-    }, z.core.$strict>]>>;
+    }, z.core.$strict>, z.ZodObject<{
+        class: z.ZodString;
+    }, z.core.$loose>]>>;
     usage: z.ZodOptional<z.ZodObject<{
         runtime: z.ZodEnum<{
             claude: "claude";
@@ -6266,7 +6390,9 @@ export declare const TaskFailPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
             runtime_exited: "runtime_exited";
             unknown: "unknown";
         }>;
-    }, z.core.$strict>]>>;
+    }, z.core.$strict>, z.ZodObject<{
+        class: z.ZodString;
+    }, z.core.$loose>]>>;
     usage: z.ZodOptional<z.ZodObject<{
         runtime: z.ZodEnum<{
             claude: "claude";
@@ -6487,6 +6613,7 @@ export declare const SERVER_TO_DAEMON_TYPES: readonly ["task.offer", "agent.egre
  * handler or counted `accepted` on the `/byok/messages` wire.
  */
 export declare const DAEMON_TO_SERVER_TYPES: readonly ["task.claim", "task.started", "task.decline", "task.progress", "task.artifact", "task.await_approval", "task.complete", "task.fail", "task.cancelled", "task.approval_resolved", "agent.egress.reliable", "agent.message.draft", "agent.message.publish", "agent.content.receipt"];
+export {};
 // ==== @byok-sdk/protocol dist/plain-json.d.ts ====
 /**
  * Plain-JSON-data canonicalization shared by every bounded JSON channel of
@@ -7608,7 +7735,7 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  */
 import type { MessageType } from './messages';
 import type { CapabilityFlag } from './version';
-type HttpWireSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
+type HttpWireSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse' | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
 export type WireAddition = {
     readonly kind: 'envelope';
     readonly rule: 'gated';

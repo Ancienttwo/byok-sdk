@@ -1,4 +1,5 @@
 import type { AgentMessageDraftStore } from '../agent-message-draft';
+import type { TaskArchiveStore } from '../task-archive';
 import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -398,6 +399,11 @@ export interface TaskAttempt {
   readonly firstOutputAt?: string;
   /** The first entry into `complete`, `failed` or `cancelled`. */
   readonly terminalAt?: string;
+  /**
+   * Set once the archive step replaced this task's bodies with tombstones
+   * (#1120). The row and the tombstoned receipts stay as its identity fence.
+   */
+  readonly archivedAt?: string;
   readonly updatedAt: string;
 }
 
@@ -875,6 +881,7 @@ export interface CloudStores {
   readonly proofReceipts: ProofRequestReceiptStore;
   readonly blobs: CloudBlobStore;
   readonly rateLimiter: InboundRateLimiter;
+  readonly taskArchive: TaskArchiveStore;
 }
 
 /** Names of every port in {@link CloudStores}, in contract order. */
@@ -894,6 +901,7 @@ export const CLOUD_STORE_NAMES = [
   'proofReceipts',
   'blobs',
   'rateLimiter',
+  'taskArchive',
 ] as const;
 
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];

@@ -16,8 +16,8 @@ import type {
   RuntimeId,
   TaskApprovalResolvedPayload,
   TaskArtifactPayload,
-  TaskDeclinePayload,
-  TaskFailure,
+  TaskDeclineCodeReading,
+  TaskFailureReading,
   TaskState,
   ToolsetId,
   TerminalProjectionSelection,
@@ -262,20 +262,23 @@ export interface TaskResult {
   artifactRefs?: BlobRef[];
   reason?: string;
   /**
-   * Verbatim home-busy decline code (`agent_home_writer_busy` /
-   * `agent_home_reader_busy`). Classify busy by this field; `reason` is
-   * display text only. Absent on every other terminal.
+   * The decline code (`agent_home_writer_busy` / `agent_home_reader_busy`).
+   * Classify busy by this field; `reason` is display text only. A code this
+   * version does not know reads as `unknown`, its raw token in `reportedCode`
+   * (#1121). Absent on every other terminal.
    */
-  code?: TaskDeclinePayload['code'];
+  code?: TaskDeclineCodeReading['code'];
+  reportedCode?: string;
   retryable?: boolean;
   /**
-   * The machine-readable runtime failure class of a failed task, verbatim
-   * `task.fail.failure`: `class` (a closed {@link TaskFailure} value, `unknown`
-   * when the runtime gave no structured evidence) and, on `quota`,
+   * The machine-readable runtime failure class of a failed task, read from
+   * `task.fail.failure`: `class` (`unknown` when the runtime gave no
+   * structured evidence, or when the class is one this version does not know,
+   * its raw token then in `reportedClass` — #1121) and, on `quota`,
    * `resetsAt` when the runtime reported it. Classify failures by this field;
    * `reason` is display text only. Absent when the daemon predates the field.
    */
-  failure?: TaskFailure;
+  failure?: TaskFailureReading;
   /**
    * The task's structured terminal result, projected verbatim from
    * `task.complete.document` (`@byok-sdk/protocol`'s `messages.ts`) — the

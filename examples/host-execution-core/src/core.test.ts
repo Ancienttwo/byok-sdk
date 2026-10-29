@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { RuntimeExecutionFailure } from '@byok-sdk/client';
 import type { CreateByokServerOptions } from '@byok-sdk/server';
-import { hash, taskId } from './model';
+import { hash, taskId } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from './test-support';
 
 let host: TestHost;

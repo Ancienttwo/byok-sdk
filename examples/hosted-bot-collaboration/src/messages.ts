@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import type { ByokCloudOptions, TenantId } from '@byok-sdk/cloud';
-import { canonical } from '@byok-sdk/example-host-execution-core';
+import { canonical } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { CommitConflict, revisionOf, type CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { earlierIntent, frozenIntent } from './intents';

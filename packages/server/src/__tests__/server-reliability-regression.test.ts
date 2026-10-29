@@ -72,6 +72,7 @@ async function cloudWithFirstMailboxAppendFailure() {
   };
   return {
     cloud: createByokCloud({
+      proofReceiptRetention: { authority: composition.proofReceiptAuthority },
         mailboxWake: createInProcessMailboxWake(),
       core: { ...base, mailbox },
       cloud: composition.stores,

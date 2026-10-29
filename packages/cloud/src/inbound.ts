@@ -81,7 +81,8 @@ import { isCloudError } from './errors';
 import { projectTerminalToReview } from './board-projection';
 import { agentReliabilityKey } from './agent-reliability';
 import type { TenantStores } from './tenant-stores';
-import { isTaskRedactionTombstone, taskRedactionReceiptKey } from './task-redaction';
+import type { TaskAttempt } from './stores/ports';
+import { isTaskRedactionTombstone, sameTaskBody, taskRedactionReceiptKey } from './task-redaction';
 import {
   releaseSealedCiphertext,
   retainSealedCiphertext,
@@ -155,6 +156,8 @@ export const INBOUND_REFUSAL_REASONS = [
   'activity_batch_too_large',
   'activity_batch_invalid',
   'approval_event_invalid',
+  // terminal receipt
+  'terminal_receipt_not_canonical',
 ] as const;
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 
@@ -693,8 +696,15 @@ async function applyInboundGate(
       || !device.harnesses?.some(harness => harness.id === harnessId))) return refuse('claim_harness_unavailable');
     const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
     const offer = await stores.receipts.get(`task-offer:${messageId}`);
-    if (offer !== undefined && isTaskRedactionTombstone(offer.body)) return refuse('claim_offer_mismatch');
-    if (offer !== undefined) {
+    // Redaction and the archive (#1120) leave the offer a tombstone. Only an
+    // archived task without a redaction receipt is answered past it: a claimed
+    // one keeps its immutable claim snapshot, which the winning claim was
+    // checked against the offer to get, and the harness check above and the
+    // claim CAS compare a replay with that snapshot, so the replay answers as
+    // it did before the archive. Every other tombstoned offer refuses.
+    if (offer !== undefined && isTaskRedactionTombstone(offer.body)) {
+      if (!(await archivedWithoutRedaction(stores, attempt)) || attempt.ownerDeviceId === undefined) return refuse('claim_offer_mismatch');
+    } else if (offer !== undefined) {
       const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
       if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse('claim_offer_mismatch');
       if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse('claim_offer_mismatch');
@@ -711,11 +721,26 @@ async function applyInboundGate(
     const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
     if (envelope.payload.recovery.offerId !== messageId) return refuse('recovery_offer_mismatch');
     const offer = await stores.receipts.get(`task-offer:${messageId}`);
-    if (offer === undefined || isTaskRedactionTombstone(offer.body)) return refuse('recovery_offer_mismatch');
-    const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
-    const harnessId = envelope.payload.harnessId;
-    if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse('recovery_offer_mismatch');
-    if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse('recovery_offer_mismatch');
+    if (offer === undefined) return refuse('recovery_offer_mismatch');
+    if (isTaskRedactionTombstone(offer.body)) {
+      // The offer content is gone (see the claim above), and only an archived
+      // task without a redaction receipt goes on. A claimed one's harness
+      // binding is its claim snapshot, checked below; an unclaimed one keeps
+      // only its terminal receipt, which only an exact replay of the recorded
+      // recovery matches.
+      if (!(await archivedWithoutRedaction(stores, attempt))) return refuse('recovery_offer_mismatch');
+      if (attempt.ownerDeviceId === undefined) {
+        const terminal = await stores.receipts.get(terminalReceiptKey(taskId));
+        if (terminal === undefined || !(await sameTaskBody(terminal.body, encodeEnvelope(envelope), { sha256: hashOfferBytes }))) {
+          return refuse('recovery_offer_mismatch');
+        }
+      }
+    } else {
+      const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
+      const harnessId = envelope.payload.harnessId;
+      if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse('recovery_offer_mismatch');
+      if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse('recovery_offer_mismatch');
+    }
     // For automatic selection the target device reports its sealed local
     // admission. Inventory is mutable and is not historical claim authority.
     unclaimedInterruption = attempt.ownerDeviceId === undefined && attempt.claimedHarnessId === undefined;
@@ -733,13 +758,13 @@ async function applyInboundGate(
   ) {
     return refuse('agent_identity_mismatch');
   }
-  // A redacted task keeps no new content. A late progress, approval or
-  // artifact report is complete as received, the same as one stored and then
-  // redacted. So is a terminal that names its ciphertext blob: redaction
-  // deleted the blob, and the terminal receipt is already a tombstone.
+  // A redacted or archived task keeps no new content. A late progress,
+  // approval or artifact report is complete as received, the same as one
+  // stored and then redacted. So is a terminal that names its ciphertext blob:
+  // its references are gone, and the terminal receipt is already a tombstone.
   if ((REDACTABLE_REPORT_TYPES.includes(envelope.type) || ciphertextRef !== undefined)
     && TERMINAL_TASK_STATUSES.includes(attempt.status)
-    && await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
+    && await taskContentRemoved(stores, attempt)) {
     return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
   }
   const sealingRefusal = await sealedOutputRefusal(stores, deviceId, taskId, attempt.agentRef, envelope);
@@ -844,8 +869,7 @@ async function applyLifecycle(
       // same key, first-terminal-wins, and therefore a readable result.
       // Recording only the coarse `failed` status here left an attempt that a
       // reader could see reach a terminal and then find no result to read.
-      await recordTerminal(stores, taskId, envelope);
-      return;
+      return recordTerminal(stores, taskId, envelope);
     case 'task.progress': {
       const batch = activityBatchOf(taskId, envelope);
       if (batch !== undefined) await appendActivityEvents(stores.activity, batch, activityBounds);
@@ -858,14 +882,11 @@ async function applyLifecycle(
       await stores.approvals.append(approvalTimelineAppendInput(taskId, envelope)!);
       return;
     case 'task.complete':
-      await recordTerminal(stores, taskId, envelope);
-      return;
+      return recordTerminal(stores, taskId, envelope);
     case 'task.fail':
-      await recordTerminal(stores, taskId, envelope);
-      return;
+      return recordTerminal(stores, taskId, envelope);
     case 'task.cancelled':
-      await recordTerminal(stores, taskId, envelope);
-      return;
+      return recordTerminal(stores, taskId, envelope);
     case 'task.artifact': {
       // A plaintext artifact is complete as received; a sealed one may hold its ciphertext blob.
       const ref = envelope.payload.sealed === undefined ? undefined : sealedCiphertextRef(envelope.payload);
@@ -948,7 +969,7 @@ async function recordTerminal(
   stores: TenantStores,
   taskId: string,
   envelope: Envelope,
-): Promise<void> {
+): Promise<Refused | undefined> {
   const body = encodeEnvelope(envelope);
   // The task holds a sealed terminal's blob before any receipt names it.
   const ciphertextRef = sealedCiphertextRef(envelope.payload);
@@ -972,9 +993,9 @@ async function recordTerminal(
   // writes. A retry resumes from the winning receipt instead of returning just
   // because the receipt was already present.
   const winner = terminalReceiptBinding(taskId, receipt.receipt.body);
-  if (winner === undefined) {
-    throw new Error(`terminal receipt for ${taskId} is not a canonical terminal binding`);
-  }
+  // A stored receipt nothing can read back is this task's fault, not the
+  // batch's: refuse this terminal and let the rest of the batch apply (#1121).
+  if (winner === undefined) return refuse('terminal_receipt_not_canonical');
   await stores.agentMessageDraft.delete(taskId);
   const attempt = await stores.tasks.get(taskId);
   if (attempt?.cancellation !== undefined) {
@@ -1013,6 +1034,21 @@ async function recordTerminal(
 }
 
 /** The ciphertext blob hash a stored terminal names; none for a plaintext terminal or a tombstone. */
+/** Redaction writes an audit receipt; the archive step (#1120) sets `archivedAt`. Either removed the task's content. */
+async function taskContentRemoved(stores: TenantStores, attempt: TaskAttempt): Promise<boolean> {
+  return attempt.archivedAt !== undefined || await taskRedacted(stores, attempt.taskId);
+}
+
+/** An explicit redaction's audit receipt; the archive writes none. */
+async function taskRedacted(stores: TenantStores, taskId: string): Promise<boolean> {
+  return await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined;
+}
+
+/** The archive (#1120) removed the content, and no explicit redaction did: redaction's refusals take precedence. */
+async function archivedWithoutRedaction(stores: TenantStores, attempt: TaskAttempt): Promise<boolean> {
+  return attempt.archivedAt !== undefined && !(await taskRedacted(stores, attempt.taskId));
+}
+
 function storedCiphertextHash(body: string): string | undefined {
   try {
     return sealedCiphertextRef(decodeEnvelope(body).payload)?.contentHash;

@@ -2,9 +2,18 @@ import { generateKeyPairSync } from 'node:crypto';
 import { createInMemoryByokCloud, tenantId } from '@byok-sdk/cloud';
 import { requiredReceiverCapabilities } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { FrozenOfferMismatchError, SealedDispatchUnavailableError, sameFrozenOffer, submitFrozen, type FrozenInput, type FrozenOffer,
-  type FrozenSubmitPort, type SealedAgentExecutionInput } from './index';
-import { sealRoutineTemplate, type RoutineRef } from './sealed-routine';
+import {
+  FrozenOfferMismatchError,
+  SealedDispatchUnavailableError,
+  sameFrozenOffer,
+  submitFrozen,
+  sealRoutineTemplate,
+  type FrozenInput,
+  type FrozenOffer,
+  type FrozenSubmitPort,
+  type SealedAgentExecutionInput,
+  type RoutineRef,
+} from '@byok-sdk/server/execution-core';
 import { template as plainTemplate } from './test-support';
 
 const egressPolicy = {

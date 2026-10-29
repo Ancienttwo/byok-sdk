@@ -1,5 +1,5 @@
 import type { RoomFields } from '@byok-sdk/protocol';
-import { hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn';
 import { activeBot, archiveBot, profileRevision, refuseExternalTeam, requireMain, teamSnapshot, TeamModeError, type ExternalTeam, type TeamSnapshot,
   type TeamSnapshotBot } from './team';

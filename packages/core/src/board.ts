@@ -137,4 +137,6 @@ export interface BoardStore {
   claim(tenant: TenantId, input: BoardClaimInput): Promise<BoardItem>;
   unclaim(tenant: TenantId, input: BoardUnclaimInput): Promise<BoardItem>;
   updateStatus(tenant: TenantId, input: BoardStatusUpdateInput): Promise<BoardItem>;
+  /** Removes the item; an absent item is not an error. The Host archive step (#1120) is the caller. */
+  remove(tenant: TenantId, itemId: string): Promise<void>;
 }

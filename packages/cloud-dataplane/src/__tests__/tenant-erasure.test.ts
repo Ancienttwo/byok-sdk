@@ -247,8 +247,8 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
   await pool.query(
     `INSERT INTO tenant_retention_policy (
        tenant_id, policy_id, mailbox_acked_retention_ms, mailbox_unacked_retention_ms,
-       request_receipt_retention_ms, object_orphan_grace_ms, updated_at
-     ) VALUES ($1, 'policy', 0, 0, 0, 0, $2)`,
+       mailbox_dead_letter_retention_ms, request_receipt_retention_ms, object_orphan_grace_ms, updated_at
+     ) VALUES ($1, 'policy', 0, 0, 0, 0, 0, $2)`,
     [tenant, now],
   );
   await pool.query(

@@ -199,9 +199,17 @@ usage rebuild are host operations, not device blob capabilities.
 The Host scheduler calls `cloud.runMaintenance({ tenant, now, policy, limit })`.
 Read the existing policy with
 `new PostgresRetentionPolicyStore(pool, clock).readRetentionPolicy(tenant)`
-from `@byok-sdk/cloud-dataplane/runtime` and pass it directly: its four fields
-use the kernel's bigint milliseconds. Policy writes use the same store; a missing
-entitlement-selected policy fails closed.
+from `@byok-sdk/cloud-dataplane/runtime` and pass it directly: its six fields
+use the kernel's bigint milliseconds. `mailboxDeadLetterRetentionMs` (stored by
+`0031_mailbox_dead_letter_retention.sql`, 30 days for existing policies) is how
+long a dead letter stays listable after it expired; the sweep then reaps it,
+except each device's highest-seq dead letter, which stays as the
+`recoverableFrom` floor. `terminalTaskArchiveMs` (stored by
+`0032_terminal_task_archive.sql`, 90 days for existing policies, at least the
+unacked plus dead-letter windows) is how long a terminal task keeps its
+bodies; the `tasks` step then archives it, keeping the task row and tombstoned
+receipts as its identity fence and removing its board item. Policy writes use
+the same store; a missing entitlement-selected policy fails closed.
 `createPostgresCoreStores` requires the real `objectStorage` configuration;
 standalone `PostgresObjectStore` requires a physical deletion authority.
 Each port has one bounded `collectExpired`, and each object consumes one
@@ -503,9 +511,13 @@ per process to the `max_connections` budget. At shutdown await
 
 The listener reconnects with bounded exponential backoff and wakes every local
 subscription after each successful LISTEN. A self-NOTIFY probe checks each new
-connection; missing notifications and connection failures go to `onError`, or
-to the default labelled console error. `probeTimeoutMs` defaults to 5 seconds.
-`onError` must not throw. A transaction-mode PgBouncer DSN cannot keep a LISTEN
+connection and repeats every `probeIntervalMs` (default 30 seconds) so a
+half-open path, such as an idle NAT or load balancer dropping the flow without
+closing it, is retired and reconnected instead of silently losing
+notifications. Missing notifications and connection failures go to `onError`,
+or to the default labelled console error; a missed probe is a
+`MailboxWakeProbeMissedError`. `probeTimeoutMs` defaults to 5 seconds, and TCP
+keepalive is enabled on the listener socket. `onError` must not throw. A transaction-mode PgBouncer DSN cannot keep a LISTEN
 session; the probe reports this configuration failure. Hints may be lost or
 repeated, so `fallbackMs` (default 5 seconds) still bounds delivery latency.
 

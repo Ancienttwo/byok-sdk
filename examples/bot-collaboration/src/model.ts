@@ -1,6 +1,6 @@
 import type { ResultSchema } from '@byok-sdk/protocol';
 import { emptyTeam, type TeamState } from './team-model';
-import type { Json } from '@byok-sdk/example-host-execution-core';
+import type { Json } from '@byok-sdk/server/execution-core';
 import type { ChannelState } from './delivery-routing';
 import type { InputBatch, UserInput } from './rules/coalesce';
 import { json, type Budget, type Card, type Question, type Rejection, type Turn } from './rules/turn';

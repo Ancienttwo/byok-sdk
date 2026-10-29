@@ -235,6 +235,10 @@ export class PostgresBoardStore implements BoardStore {
     );
   }
 
+  async remove(tenant: TenantId, itemId: string): Promise<void> {
+    await this.#pool.query('DELETE FROM board_item WHERE tenant_id = $1 AND item_id = $2', [tenant, itemId]);
+  }
+
   async updateStatus(tenant: TenantId, input: BoardStatusUpdateInput): Promise<BoardItem> {
     // Legality is a pure function of two caller-supplied values, so it is
     // decided before the statement rather than smuggled into the guard as a

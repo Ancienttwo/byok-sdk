@@ -6,7 +6,7 @@ import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
-import { HostLedger } from '@byok-sdk/example-host-execution-core';
+import { HostLedger } from '@byok-sdk/server/execution-core';
 import { policy, template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
 import { createBotPersonaProjection } from './persona';

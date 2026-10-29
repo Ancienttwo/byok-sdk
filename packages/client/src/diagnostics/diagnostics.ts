@@ -39,6 +39,14 @@ import {
 import { acquireDaemonOwner } from '../daemon/daemon-owner';
 import { ensureSecureDir } from '../util/secure-dir';
 
+/**
+ * The server rejects a device proof whose `issuedAt` is further than its skew
+ * window from server time. The cloud default is 60 s (`DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS`
+ * in `@byok-sdk/cloud`, which the client cannot import); a Host may widen it up
+ * to 5 min, so a warning here means "outside the default window".
+ */
+export const DEVICE_CLOCK_SKEW_WARN_MS = 60_000;
+
 export const MAX_QUARANTINE_ENTRIES = 100;
 // Inventory validation is synchronous while the checked quarantine directory
 // inode is cwd-pinned. Two entries are needed for each health evidence pair;
@@ -607,6 +615,7 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
       summary: snapshot.control.status === 'online' ? 'online' : 'daemon offline',
     },
     lifecycleCheck(snapshot.lifecycle),
+    clockSkewCheck(snapshot.clockSkew),
     {
       id: 'health',
       status:
@@ -644,6 +653,40 @@ function lifecycleCheck(lifecycle: DiagnosticsSnapshot['lifecycle']): Diagnostic
   return { id: 'lifecycle', status: 'pass', summary };
 }
 
+function clockSkewCheck(clockSkew: DiagnosticsSnapshot['clockSkew']): DiagnosticCheck {
+  if (clockSkew.status === 'unknown') {
+    return {
+      id: 'clock-skew',
+      status: 'warn',
+      summary: clockSkew.reason === 'daemon-offline' ? 'unknown (daemon offline)' : 'unknown (no server Date observed since start)',
+    };
+  }
+  const direction = clockSkew.deviceAheadMs >= 0 ? 'ahead of' : 'behind';
+  const summary = `device clock ${formatSkewDuration(Math.abs(clockSkew.deviceAheadMs))} ${direction} server (\u00b1${formatSkewDuration(clockSkew.uncertaintyMs)})`;
+  if (Math.abs(clockSkew.deviceAheadMs) <= DEVICE_CLOCK_SKEW_WARN_MS) return { id: 'clock-skew', status: 'pass', summary };
+  return {
+    id: 'clock-skew',
+    status: 'warn',
+    summary: `${summary}; device proofs fail outside the Host's skew window (default 60 s, up to 5 min)`,
+  };
+}
+
+function formatSkewDuration(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)} min`;
+  return `${(ms / 3_600_000).toFixed(1)} h`;
+}
+
+/** A control peer's `clockSkew` is untrusted input: anything but the exact measured shape is "not observed". */
+function parseClockSkew(value: unknown): Extract<DiagnosticsSnapshot['clockSkew'], { status: 'measured' }> | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { deviceAheadMs, uncertaintyMs, observedAt } = value as Record<string, unknown>;
+  if (typeof deviceAheadMs !== 'number' || !Number.isFinite(deviceAheadMs)) return undefined;
+  if (typeof uncertaintyMs !== 'number' || !Number.isFinite(uncertaintyMs)) return undefined;
+  if (typeof observedAt !== 'string') return undefined;
+  return { status: 'measured', deviceAheadMs, uncertaintyMs, observedAt };
+}
+
 export async function collectDiagnostics(
   config: DaemonConfig,
   storeDir: string,
@@ -666,6 +709,7 @@ export async function collectDiagnostics(
   let observations: RuntimeObservation[] = [];
   let environment: DiagnosticsSnapshot['environment'] = { status: 'unknown' };
   let liveLifecycle: ReturnType<typeof parseDaemonLifecycle>;
+  let clockSkew: DiagnosticsSnapshot['clockSkew'] = { status: 'unknown', reason: 'daemon-offline' };
   if (!controlConnection.ok) {
     control = { status: 'offline', reason: 'daemon control socket unavailable' };
   } else {
@@ -691,6 +735,7 @@ export async function collectDiagnostics(
         ...(live.outbound === undefined ? {} : { outbound: live.outbound }),
         storage: live.storage,
       };
+      clockSkew = parseClockSkew(live.clockSkew) ?? { status: 'unknown', reason: 'not-observed' };
     } catch {
       control = { status: 'offline', reason: 'daemon status request failed' };
     } finally {
@@ -736,6 +781,7 @@ export async function collectDiagnostics(
     environment,
     control,
     lifecycle,
+    clockSkew,
     health,
     journal,
     quarantine,

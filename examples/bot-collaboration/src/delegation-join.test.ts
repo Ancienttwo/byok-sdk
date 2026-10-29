@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { hash, type Json } from '@byok-sdk/example-host-execution-core';
+import { hash, type Json } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { addTurn, stateOf, type CollaborationState, type Delegation, type Turn, type Verdict } from './model';
 import { applyDelegate, claimUnit, endChain, releaseUnit, REPLY_UNCERTAIN_AFTER_MS, reserveUnits, resolveDelegation, retryReply, ROOT_BOT_BUDGET } from './delegation';

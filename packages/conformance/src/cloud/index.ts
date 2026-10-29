@@ -29,6 +29,7 @@ export type {
 } from './approval-timeline';
 
 export { runCloudRetentionConformance } from './retention';
+export { runTaskArchiveConformance } from './task-archive';
 
 export { runAgentMessageDraftConformance } from './agent-message-draft';
 export type { AgentMessageDraftCompositionHandle, AgentMessageDraftCompositionFactory } from './agent-message-draft';

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_RETRY, enqueue, hash, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { DEFAULT_RETRY, enqueue, hash, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { syncTurn, type Command } from '@byok-sdk/example-bot-collaboration/rules/commands';

@@ -7,7 +7,6 @@ import {
   DeviceNotRegisteredResponseSchema,
   PairResponseSchema,
   TokenResponseSchema,
-  type TokenResponse,
 } from '@byok-sdk/protocol';
 import {
   assertStoreBound,
@@ -53,19 +52,32 @@ export class AuthRequestAbortedError extends Error {
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
  * truncated body, a missing field, or a token `expiresAt` that is not an ISO
- * timestamp with an offset. The renewal fails and the prior credential is kept
- * unchanged; nothing is inferred from the malformed body. The JSON
+ * timestamp with an offset — and when a token or pair response carries no
+ * `expiresIn` (#1114). The renewal or pairing fails and the prior credential
+ * is kept unchanged; nothing is inferred from the malformed body. The JSON
  * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
  */
 export class AuthResponseInvalidError extends Error {
   constructor(
-    readonly route: 'challenge' | 'token',
+    readonly route: 'challenge' | 'token' | 'pair',
     options: { cause: unknown },
   ) {
-    super(`token renewal (${route}) failed: the server response does not match the protocol schema`, options);
+    super(`${route === 'pair' ? 'pairing' : `token renewal (${route})`} failed: the server response does not match the protocol schema`, options);
     this.name = 'AuthResponseInvalidError';
   }
 }
+
+/**
+ * The device reads token lifetime only from `expiresIn` (#1114). The wire
+ * schemas keep it optional because published v4 hosts omit it; this boundary
+ * requires it, so a response without it fails closed instead of falling back
+ * to a server timestamp read against this device's clock.
+ */
+const DeviceTokenResponseSchema = TokenResponseSchema.required({ expiresIn: true });
+const DevicePairResponseSchema = PairResponseSchema.required({ expiresIn: true });
+type RenewedToken = Pick<DeviceRecord, 'accessToken' | 'expiresAt'> & {
+  readonly clockSkew: ClockSkewObservation | undefined;
+};
 
 /**
  * Reads a successful renewal body as JSON. A body read failure (abort,
@@ -81,22 +93,13 @@ async function readAuthResponseJson(response: Response, route: 'challenge' | 'to
   }
 }
 
-/**
- * Conservative assumed lifetime for the token minted directly by
- * `/byok/pair`, which — unlike `/byok/token` — reports no explicit
- * `expiresAt` (only an opaque `refreshHint`). docs/protocol.md §6.1
- * documents a "~1h lifetime"; renewing proactively well before that leaves a
- * comfortable margin regardless of what `refreshHint` turns out to mean.
- */
-const ASSUMED_PAIR_TOKEN_TTL_MS = 45 * 60 * 1000;
 /** Renew this long before a token's recorded expiry — both proactively (background timer) and as the "already close enough to expiry, renew now" reactive threshold. */
 const RENEW_MARGIN_MS = 60 * 1000;
 /**
  * Floor between two renewals that no server 401 forced (#1114). A fresh token
- * can already sit inside {@link RENEW_MARGIN_MS} when this device's clock runs
- * ahead of the server or the server TTL is shorter than the margin; without a
- * floor every such renewal re-armed itself at delay 0 and rewrote the OS
- * credential entry in a tight loop. The floor stays at 30s after the first
+ * can already sit inside {@link RENEW_MARGIN_MS} when the server TTL is
+ * shorter than the margin; without a floor every such renewal re-armed itself
+ * at delay 0 and rewrote the OS credential entry in a tight loop. The floor stays at 30s after the first
  * such renewal and doubles from the second consecutive one, up to
  * {@link MAX_RENEW_INTERVAL_MS}.
  */
@@ -106,6 +109,20 @@ const MAX_RENEW_INTERVAL_MS = 30 * 60 * 1000;
 const DEFAULT_AUTH_REQUEST_DEADLINE_MS = 15_000;
 /** Back-off before the one exchange that confirms an untyped renewal 401 (#1117). */
 const UNTYPED_401_RECHECK_DELAY_MS = 1_000;
+
+/**
+ * One measurement of this device's clock against the server's HTTP `Date`
+ * header (#1114). It is reported only (`byok-agent doctor`); token lifetime never
+ * reads it.
+ */
+export interface ClockSkewObservation {
+  /** Positive when the device clock is ahead of the server's. */
+  readonly deviceAheadMs: number;
+  /** Half the request round trip plus the header's one-second resolution. */
+  readonly uncertaintyMs: number;
+  /** ISO time the response arrived on the device clock. */
+  readonly observedAt: string;
+}
 
 export interface AuthManagerOptions {
   serverUrl: string;
@@ -152,6 +169,10 @@ export class AuthManager {
   // a row returned a token already inside the renewal margin.
   private lastRenewedAt: number | undefined;
   private nearExpiryRenewals = 0;
+  // The exchange that produced the stored credential; undefined when its
+  // response carried no parseable Date or the device clock was set back during
+  // the request, so a stale or meaningless measurement is never shown.
+  private lastClockSkew: ClockSkewObservation | undefined;
 
   private readonly credentials: DeviceCredentialBackend;
   private readonly requestDeadlineMs: number;
@@ -167,6 +188,11 @@ export class AuthManager {
 
   isRevoked(): boolean {
     return this.revoked;
+  }
+
+  /** The skew measured by the last successful pair or renewal, if its response carried a parseable `Date` and the device clock did not go back mid-request. */
+  clockSkew(): ClockSkewObservation | undefined {
+    return this.lastClockSkew;
   }
 
   /**
@@ -269,6 +295,7 @@ export class AuthManager {
         // becomes an empty string or any other placeholder the server would
         // then treat as a real machine shared by every unidentifiable device.
         const body = await this.runRequest(signal, async (requestSignal) => {
+          const sentAt = Date.now();
           const res = await fetch(url, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -280,6 +307,7 @@ export class AuthManager {
             }),
             signal: requestSignal,
           });
+          const receivedAt = Date.now();
           if (!res.ok) {
             throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
           }
@@ -287,7 +315,13 @@ export class AuthManager {
           // local state. Parse the required wire contract before building the
           // one atomic DeviceRecord; no token claim or host configuration is an
           // alternate tenant authority.
-          return PairResponseSchema.parse(await res.json());
+          const paired = DevicePairResponseSchema.safeParse(await res.json());
+          if (!paired.success) throw new AuthResponseInvalidError('pair', { cause: paired.error });
+          return {
+            ...paired.data,
+            expiresAt: deviceLocalExpiry(receivedAt, paired.data.expiresIn),
+            clockSkew: observeClockSkew(sentAt, receivedAt, res),
+          };
         });
 
         const metadata: DeviceMetadata = {
@@ -298,7 +332,7 @@ export class AuthManager {
         const record: DeviceRecord = {
           ...metadata,
           accessToken: body.accessToken,
-          expiresAt: resolvePairExpiry(body.refreshHint),
+          expiresAt: body.expiresAt,
           devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
         };
         // device.json is this store's pair-time binding and a non-secret
@@ -309,6 +343,7 @@ export class AuthManager {
         await this.opts.store.save(metadata);
         await this.credentials.replace(record, signal);
         this.record = record;
+        this.lastClockSkew = body.clockSkew;
         this.revoked = false;
         return record;
       });
@@ -385,6 +420,7 @@ export class AuthManager {
     // and key cannot drift from the new token/expiry.
     await this.credentials.replace(updated, signal);
     this.record = updated;
+    this.lastClockSkew = body.clockSkew;
     this.lastRenewedAt = performance.now();
     this.nearExpiryRenewals = msUntilExpiry(updated.expiresAt) > RENEW_MARGIN_MS ? 0 : this.nearExpiryRenewals + 1;
     this.scheduleProactiveRenewal();
@@ -395,7 +431,7 @@ export class AuthManager {
    * One challenge → token exchange. Resolves `undefined` when either step
    * answered an untyped 401; a typed revocation 401 halts inside.
    */
-  private async exchangeToken(record: DeviceRecord, signal: AbortSignal): Promise<TokenResponse | undefined> {
+  private async exchangeToken(record: DeviceRecord, signal: AbortSignal): Promise<RenewedToken | undefined> {
     const base = toHttpBase(this.opts.serverUrl);
     const challenge = await this.runRequest(signal, async (requestSignal) => {
       const challengeRes = await fetch(new URL(BYOK_CHALLENGE_PATH, base), {
@@ -418,19 +454,25 @@ export class AuthManager {
     const signature = signNonce(importPrivateKeyPem(record.devicePrivateKeyPem), challenge.nonce);
 
     return this.runRequest(signal, async (requestSignal) => {
+      const sentAt = Date.now();
       const tokenRes = await fetch(new URL(BYOK_TOKEN_PATH, base), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ deviceId: record.deviceId, nonce: challenge.nonce, signature }),
         signal: requestSignal,
       });
+      const receivedAt = Date.now();
       if (tokenRes.status === 401) return this.readUnauthorized(tokenRes);
       if (!tokenRes.ok) {
         throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
       }
-      const token = TokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
+      const token = DeviceTokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
       if (!token.success) throw new AuthResponseInvalidError('token', { cause: token.error });
-      return token.data;
+      return {
+        accessToken: token.data.accessToken,
+        expiresAt: deviceLocalExpiry(receivedAt, token.data.expiresIn),
+        clockSkew: observeClockSkew(sentAt, receivedAt, tokenRes),
+      };
     });
   }
 
@@ -570,12 +612,34 @@ function msUntilExpiry(expiresAt: string): number {
   return new Date(expiresAt).getTime() - Date.now();
 }
 
-function resolvePairExpiry(refreshHint: string | undefined): string {
-  if (refreshHint) {
-    const parsed = new Date(refreshHint);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
-  }
-  return new Date(Date.now() + ASSUMED_PAIR_TOKEN_TTL_MS).toISOString();
+/**
+ * The stored `expiresAt` is device-local (#1114): this device's receipt time
+ * plus the server's relative `expiresIn`, so {@link msUntilExpiry} compares it
+ * only with the same device clock. The server's absolute `expiresAt` and
+ * `refreshHint` are never read for lifetime.
+ */
+function deviceLocalExpiry(receivedAt: number, expiresInSeconds: number): string {
+  return new Date(receivedAt + expiresInSeconds * 1000).toISOString();
+}
+
+/**
+ * Measures the device clock against the response's `Date` header, assuming the
+ * server stamped it midway through the round trip. A missing or unparseable
+ * header is unknown: no other field of the response is a server-time source.
+ * So is a round trip that ends before it starts: the device clock was set back
+ * mid-request, and neither the midpoint nor the uncertainty means anything.
+ */
+function observeClockSkew(sentAt: number, receivedAt: number, response: Response): ClockSkewObservation | undefined {
+  if (receivedAt < sentAt) return undefined;
+  const header = response.headers.get('date');
+  if (header === null) return undefined;
+  const serverMs = Date.parse(header);
+  if (!Number.isFinite(serverMs)) return undefined;
+  return {
+    deviceAheadMs: (sentAt + receivedAt) / 2 - serverMs,
+    uncertaintyMs: Math.ceil((receivedAt - sentAt) / 2) + 1000,
+    observedAt: new Date(receivedAt).toISOString(),
+  };
 }
 
 function resolveRequestDeadlineMs(value: number | undefined): number {

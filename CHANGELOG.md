@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+- **Breaking (examples, client; #1106)** — K4, the Host execution core, is
+  part of the SDK: `@byok-sdk/server/execution-core` exports the FIFO, ledger,
+  routines, transitions, schedule, submit, model, sealed routine and the Host
+  memory page and restore, with the same names and behavior as
+  `examples/host-execution-core`, plus `MemoryBlockedError`.
+  `@byok-sdk/server/execution-core/canonical` exports only `hash` and
+  `canonical` and imports only `node:crypto`, so K8 `rules/` still load on
+  Workers (#884). `examples/host-execution-core` is now a demo that composes
+  these entries; its package exports only `./test-support`, and it holds no
+  copy of the core. A Host that copied K4 deletes the copy and any provenance
+  check of it, and imports the two entries; the Host ledger file is kept. The
+  Agent memory contract that the device and the Host share
+  (`AgentMemoryFile`, `AgentMemorySnapshot`, `AgentMemoryExport`,
+  `AgentMemoryProjectionPort`, `AgentMemoryIntentFetchInput`,
+  `AgentMemoryIntentTransport`, `validateAgentMemoryPath`, `AgentMemoryError`,
+  `AgentMemoryValidationError`) moves from `@byok-sdk/client` and
+  `@byok-sdk/client/agent-memory` to the zod-free
+  `@byok-sdk/protocol/agent-memory`, its only definition; import these names
+  from there. The error classes now have one runtime definition, so
+  `instanceof AgentMemoryError` holds for an error from either client entry.
+  K8 imports the published entries and no longer lists K4 as a vendor layer.
+  Migration: [Migrating to the published core](docs/host-execution-core.md#migrating-to-the-published-core-1106).
+
+- **Breaking (client)** — Pi subagents move from a vendored, patched
+  pi-subagents 0.60.0 to the upstream `pi-subagents` 0.83.1 package, an exact
+  client dependency loaded from its installed package. Foreground children are
+  in-process Pi sessions and background runs use pi-subagents' own Node runner,
+  so subagent children no longer re-enter the SDK: the `pi-subagent-print` and
+  `pi-subagent-runner` helper kinds, `sdkPiSubagentHelperKinds` and
+  `sdkDistributionManifest.piSubagentHelperKinds` are removed.
+  Under the `auto` gate every native child loads
+  `dist/bin/pi-subagent-gate.js` as a pi-subagents required child extension,
+  and pi-subagents refuses external-cli, external-job and machine runners before
+  they start. The `keys-profile` lane no longer loads pi-subagents, so it offers
+  no `subagent` tool (it used to refuse each call with
+  `byok_subagent_credential_unavailable`). A single-file product's bundled
+  re-entry and the sealed host offer no Pi subagents until pi-subagents can ship
+  as an asset package. The client no longer pins `jiti` or `yaml`, and neither
+  host imports `typebox/compile`.
 - **Change (client)** — the Pi web extension moves from pi-web-access 0.24.1
   to 0.45.0, and the private todo extension from rpiv-todo 2.8.0 to 2.15.0
   (`@juicesharp/rpiv-i18n` and `@juicesharp/rpiv-config` 2.15.0).
@@ -45,6 +84,39 @@
   up to 30 minutes. Inside that gap `getValidAccessToken()` returns the token
   the server issued last. A server 401 still renews at once and is not
   throttled.
+
+- **Fix (protocol, cloud, client; #1114)** — the device no longer reads token
+  lifetime from the server's absolute timestamps, so a device clock hours fast
+  or slow renews on the same schedule. `POST /byok/token` and `POST /byok/pair`
+  responses carry `expiresIn`, the token lifetime in whole seconds, derived
+  from the same TTL as `expiresAt` / `refreshHint`. The client stores receipt
+  time + `expiresIn` as a device-local expiry. It refuses a token or pair
+  response without `expiresIn` with `AuthResponseInvalidError` (new route
+  `'pair'`) and keeps the prior credential; the assumed 45-minute pair-token
+  lifetime is gone. `expiresIn` is optional in `TokenResponseSchema` and
+  `PairResponseSchema`, and `TokenResponse.expiresIn` is a strip-safe HTTP
+  addition, so 0.31.0 devices keep reading `expiresAt` and `refreshHint`,
+  which the Host still sends. Upgrade the Host before its devices. A device
+  upgraded from 0.31.0 treats the `expiresAt` it already stored as
+  device-local for that one token, so a skewed device renews once early or on
+  the first 401, then follows `expiresIn`. `createAuthPlane` now rejects an
+  `accessTokenTtlSeconds` that is not a positive safe integer, and
+  `MintedAccessToken` gains `expiresIn`.
+
+- **Feature (client, protocol; #1114)** — `byok-agent doctor` reports the device
+  clock's offset from the server. The daemon measures it from the HTTP `Date`
+  header of each successful pair and token renewal (positive means the device
+  is ahead), with an uncertainty of half the round trip plus the header's one
+  second, and keeps only the last reading in memory. A response without a
+  parseable `Date`, or a device clock set back during the request, clears it.
+  `ControlStatusResult` gains optional `clockSkew`, `DiagnosticsSnapshot`
+  gains `clockSkew`, and a new `clock-skew`
+  check passes within 60 seconds, the default device-proof window of the Host
+  (a Host may widen it up to 5 minutes), and warns beyond it or when the
+  reading is unknown, which includes a stopped daemon. The reading is a report
+  only and never sets a token lifetime. `PairResponse.expiresIn` is now
+  registered as a strip-safe HTTP addition next to `TokenResponse.expiresIn`,
+  and the v4 HTTP corpus pins both pair surfaces. No migration.
 
 - **Fix (cloud-dataplane, server, cloud; #1116)** — `cancelTask` on a claimed
   task no longer throws after retention collects its acked `task.cancel` row.

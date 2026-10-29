@@ -77,10 +77,16 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
   });
 
   it.each([
-    ['a missing accessToken', { expiresAt: '2030-01-01T00:00:00.000Z' }, ['accessToken']],
-    ['a missing expiresAt', { accessToken: 'fresh-token' }, ['expiresAt']],
-    ['an expiresAt with no offset', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00' }, ['expiresAt']],
-    ['an expiresAt that is not an ISO timestamp', { accessToken: 'fresh-token', expiresAt: 'Tue, 01 Jan 2030 00:00:00 GMT' }, ['expiresAt']],
+    ['a missing accessToken', { expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: 3600 }, ['accessToken']],
+    ['a missing expiresAt', { accessToken: 'fresh-token', expiresIn: 3600 }, ['expiresAt']],
+    ['an expiresAt with no offset', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00', expiresIn: 3600 }, ['expiresAt']],
+    ['an expiresAt that is not an ISO timestamp', { accessToken: 'fresh-token', expiresAt: 'Tue, 01 Jan 2030 00:00:00 GMT', expiresIn: 3600 }, ['expiresAt']],
+    // #1114: expiresIn is the device's only lifetime authority, so the client requires it.
+    ['a missing expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z' }, ['expiresIn']],
+    ['a non-integer expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: 1.5 }, ['expiresIn']],
+    ['a zero expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: 0 }, ['expiresIn']],
+    ['a negative expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: -60 }, ['expiresIn']],
+    ['a string expiresIn', { accessToken: 'fresh-token', expiresAt: '2030-01-01T00:00:00.000Z', expiresIn: '3600' }, ['expiresIn']],
   ])('refuses a token response with %s and keeps the prior credential', async (_case, body, issuePath) => {
     const { auth, store, before } = await pairedWithResponse('/byok/token', body);
     try {
@@ -146,13 +152,80 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
     }
   });
 
-  it('accepts a token expiresAt with a numeric offset', async () => {
+  it('accepts a token expiresAt with a numeric offset and stores the device-local expiry from expiresIn, not expiresAt (#1114)', async () => {
+    // The server timestamp is two hours off this device's clock; only expiresIn may set the lifetime.
     // An hour out keeps the proactive renewal timer far from this test.
-    const expiresAt = new Date(Date.now() + 3_600_000).toISOString().replace('Z', '+00:00');
-    const { auth, store } = await pairedWithResponse('/byok/token', { accessToken: 'fresh-token', expiresAt });
+    const expiresAt = new Date(Date.now() - 7_200_000).toISOString().replace('Z', '+00:00');
+    const { auth, store } = await pairedWithResponse('/byok/token', { accessToken: 'fresh-token', expiresAt, expiresIn: 3600 });
     try {
+      const requestedAt = Date.now();
       await expect(auth.handleUnauthorized()).resolves.toBe('fresh-token');
-      expect(await store.credentials.read()).toMatchObject({ accessToken: 'fresh-token', expiresAt });
+      const settledAt = Date.now();
+      const stored = await store.credentials.read();
+      expect(stored).toMatchObject({ accessToken: 'fresh-token' });
+      const storedExpiry = Date.parse(stored!.expiresAt);
+      expect(storedExpiry).toBeGreaterThanOrEqual(requestedAt + 3_600_000);
+      expect(storedExpiry).toBeLessThanOrEqual(settledAt + 3_600_000);
+    } finally {
+      await auth.stop();
+    }
+  });
+
+  it('refuses a pair response without expiresIn and stores no enrollment (#1114)', async () => {
+    const store = createTestDeviceStore(await tmpDir('byok-auth-response-decoder-pair-'));
+    const auth = new AuthManager({ serverUrl: server.url, store });
+    const realFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+      if (url.pathname === '/byok/pair') {
+        const body = { deviceId: 'device-no-ttl', tenantId: 'tenant-no-ttl', accessToken: 'paired-token', refreshHint: '2030-01-01T00:00:00.000Z' };
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return realFetch(input, init);
+    });
+    try {
+      const error = await auth.pair('pairing-code').catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(AuthResponseInvalidError);
+      expect(error).toMatchObject({
+        name: 'AuthResponseInvalidError',
+        route: 'pair',
+        cause: { name: 'ZodError', issues: [expect.objectContaining({ path: ['expiresIn'] })] },
+      });
+      expect(auth.deviceId).toBeUndefined();
+      expect(await store.credentials.read()).toBeUndefined();
+      expect(await store.load()).toBeUndefined();
+    } finally {
+      await auth.stop();
+    }
+  });
+
+  it('stores the pair token expiry from expiresIn, not refreshHint (#1114)', async () => {
+    const store = createTestDeviceStore(await tmpDir('byok-auth-response-decoder-pair-ttl-'));
+    const auth = new AuthManager({ serverUrl: server.url, store });
+    const realFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+      if (url.pathname === '/byok/pair') {
+        // refreshHint is two hours off this device's clock; only expiresIn may set the lifetime.
+        const body = {
+          deviceId: 'device-relative-ttl',
+          tenantId: 'tenant-relative-ttl',
+          accessToken: 'paired-token',
+          refreshHint: new Date(Date.now() - 7_200_000).toISOString(),
+          expiresIn: 900,
+        };
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return realFetch(input, init);
+    });
+    try {
+      const requestedAt = Date.now();
+      const record = await auth.pair('pairing-code');
+      const settledAt = Date.now();
+      const storedExpiry = Date.parse(record.expiresAt);
+      expect(storedExpiry).toBeGreaterThanOrEqual(requestedAt + 900_000);
+      expect(storedExpiry).toBeLessThanOrEqual(settledAt + 900_000);
+      expect(await store.credentials.read()).toMatchObject({ accessToken: 'paired-token', expiresAt: record.expiresAt });
     } finally {
       await auth.stop();
     }

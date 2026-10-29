@@ -3,7 +3,7 @@ import { WAKE_MAX_FUTURE_MS } from '@byok-sdk/server';
 import { ROUTINE_HORIZON_MS } from '@byok-sdk/core';
 import { validateResultOutcome, type RoutineScheduleFields } from '@byok-sdk/protocol';
 import { join } from 'node:path';
-import { hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, WAKE_HORIZON_MS, type HostJobHandler, type HostJobRoutineDefinition } from '@byok-sdk/example-host-execution-core';
+import { hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, WAKE_HORIZON_MS, type HostJobHandler, type HostJobRoutineDefinition } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { json, stateOf } from './model';

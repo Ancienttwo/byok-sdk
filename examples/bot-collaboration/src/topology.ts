@@ -1,4 +1,4 @@
-import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { hash, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState } from './model';
 import type { HomeOperation } from './team-model';
 import { CommitConflict } from './rules/commit';

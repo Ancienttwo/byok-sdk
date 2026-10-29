@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HostExecutionCore, HostLedger, MIN_TOMBSTONE_RETENTION_MS, enqueue, type AgentMessageInput, type ExecutionServer } from '@byok-sdk/example-host-execution-core';
+import { HostExecutionCore, HostLedger, MIN_TOMBSTONE_RETENTION_MS, enqueue, type AgentMessageInput, type ExecutionServer } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf } from './model';
 const roots: string[] = [], ledgers: HostLedger[] = [];

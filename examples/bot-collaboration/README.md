@@ -177,7 +177,7 @@ Bot's history as an argument. This example reads that history from the device
 ledger. The other `src/` files are the K8 adapter around these rules.
 
 From K4, the rules import only `hash` and `canonical`, from the
-`@byok-sdk/example-host-execution-core/canonical` entry (#884). That entry
+`@byok-sdk/server/execution-core/canonical` entry (#884). That entry
 imports only `node:crypto`. The K4 root entry also loads `node:sqlite` and
 `node:async_hooks`, so the rules never import it. `src/rules-boundary.test.ts`
 holds both rules. The rules still need `node:crypto` and the global `Buffer`.

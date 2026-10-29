@@ -23,4 +23,4 @@ const factory: CloudCompositionFactory = {
     };
   },
 };
-describe.skipIf(!isSqliteAvailable())('SQLite request mock', () => runCloudRetentionConformance('sqlite request mock', factory, { requestPrefixMock: requestPrefix }));
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('SQLite request mock', () => runCloudRetentionConformance('sqlite request mock', factory, { requestPrefixMock: requestPrefix }));

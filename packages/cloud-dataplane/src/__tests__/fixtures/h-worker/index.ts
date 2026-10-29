@@ -47,6 +47,7 @@ import {
   createByokPool,
   createPostgresCloudStores,
   createPostgresCoreStores,
+  PostgresProofReceiptRetentionAuthority,
 } from '@byok-sdk/cloud-dataplane/runtime';
 import type { Clock, CoreStores } from '@byok-sdk/core';
 import type { AgentMessagePublishPayload, AgentMessageServerContext, AgentRef } from '@byok-sdk/protocol';
@@ -155,6 +156,7 @@ async function composeHost(env: Env, hooks: ProductHooks): Promise<Host> {
   const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage: storage });
   const full = fullCapabilityDeclaration();
   const cloud = createByokCloud({
+    proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
     mailboxWake: createInProcessMailboxWake({ fallbackMs: WAKE_FALLBACK_MS }),
     core,
     cloud: stores,

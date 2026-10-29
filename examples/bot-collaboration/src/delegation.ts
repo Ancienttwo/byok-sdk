@@ -1,4 +1,4 @@
-import { hash, taskId as taskIdOf, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId as taskIdOf, type LedgerState } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Delegation, DelegationCancel } from './model';
 import * as rules from './rules/delegation';
 

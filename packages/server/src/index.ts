@@ -415,7 +415,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     core: composition.core,
     cloud: composition.cloud,
     ...ports,
-    ...(composition.proofReceiptAuthority === undefined ? {} : { proofReceiptRetention: { authority: composition.proofReceiptAuthority } }),
+    proofReceiptRetention: { authority: composition.proofReceiptAuthority },
     crypto: composition.crypto,
     tokenSigner,
     clock: composition.clock,

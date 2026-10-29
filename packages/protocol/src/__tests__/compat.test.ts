@@ -104,7 +104,7 @@ function corpusOf(lines: readonly string[]): CorpusLine[] {
 }
 
 type HttpSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse'
-  | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
+  | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
 
 interface HttpCorpusLine {
   readonly index: number;
@@ -495,11 +495,13 @@ describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
     ] })).toEqual([]);
     expect(requiredReceiverCapabilities('task.complete', { document: {}, finalMessage: 'x' })).toEqual([]);
     expect(requiredReceiverCapabilities('task.decline', { code: 'agent_home_writer_busy' })).toEqual([]);
-    expect(WIRE_ADDITIONS.filter((entry) => entry.rule === 'strip-safe'), 'only declared optional observability fields are registered; v2 rows remain baseline').toEqual([
+    expect(WIRE_ADDITIONS.filter((entry) => entry.rule === 'strip-safe'), 'only declared optional fields are registered; v2 rows remain baseline').toEqual([
       { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
+      { kind: 'http', rule: 'strip-safe', surface: 'TokenResponse', field: 'expiresIn' },
+      { kind: 'http', rule: 'strip-safe', surface: 'PairResponse', field: 'expiresIn' },
     ]);
   });
 });
@@ -527,9 +529,9 @@ function assertCurrentHttp(line: HttpCorpusLine): void {
 }
 
 describe('compat v4: HTTP corpus (self-consistency; no published v4 decoder yet)', () => {
-  it('covers all eight scoped HTTP route schemas with owned bodies and independent expected values', () => {
+  it('covers all ten scoped HTTP route schemas with owned bodies and independent expected values', () => {
     const surfaces: readonly HttpSurface[] = ['ChallengeRequest', 'ChallengeResponse', 'TokenRequest', 'TokenResponse',
-      'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse'];
+      'PairRequest', 'PairResponse', 'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse'];
     expect([...new Set(v4HttpCorpus.map((line) => line.surface))].sort()).toEqual([...surfaces].sort());
     expect(v4HttpText.endsWith('\n'), 'literal corpus lines must be newline terminated').toBe(true);
     for (const line of v4HttpCorpus) {
@@ -775,16 +777,9 @@ function observedCoverage(root: SchemaNode, prefix: string, samples: readonly un
  * and value (per message type) and every header path and value (the
  * `envelope-header` surface). An exemption that prunes nothing also fails.
  */
-const COMPLETENESS_EXEMPTIONS: readonly { readonly below: string; readonly reason: string }[] = [
-  {
-    below: 'http:MessagesSendRequest.messages[]',
-    reason: 'The node is exactly EnvelopeSchema; the envelope corpus covers every payload path/value per message type and every header path/value.',
-  },
-];
+const COMPLETENESS_EXEMPTIONS: readonly { readonly below: string; readonly reason: string }[] = [];
 
-const EXPECTED_EXEMPTION_PATHS: readonly string[] = [
-  'http:MessagesSendRequest.messages[]',
-];
+const EXPECTED_EXEMPTION_PATHS: readonly string[] = [];
 
 const HEADER_PREFIX = 'envelope-header';
 

@@ -9,15 +9,12 @@ import { AGENT_MEMORY_PROJECTION_CAPABILITY, createEnvelope, type Envelope } fro
 
 import { AgentHomeManager } from '../agent-home';
 import {
-  AgentMemoryError,
   AgentMemoryRedactedOutbox,
   AgentMemoryRevisionConflictError,
   AgentMemoryService,
   captureAgentMemorySnapshot,
   snapshotAndProjectAgentMemory,
   type AgentMemoryTaskContext,
-  AgentMemoryValidationError,
-  validateAgentMemoryPath,
 } from '../daemon/agent-memory';
 import { AGENT_MEMORY_TOOLS, handleAgentMemoryToolCall } from '../bin/agent-memory-mcp-server';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
@@ -31,6 +28,7 @@ import { expectAgentMemoryNameRules } from './fixtures/agent-memory-name-rules';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
+import { AgentMemoryError, AgentMemoryValidationError, validateAgentMemoryPath } from '@byok-sdk/protocol/agent-memory';
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
 const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };

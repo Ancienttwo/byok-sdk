@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addTurn, type Turn } from './turn';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
 import { outcomeSchema, type ContextState } from './schema';

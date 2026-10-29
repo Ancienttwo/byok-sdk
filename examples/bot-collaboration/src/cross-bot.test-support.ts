@@ -1,5 +1,5 @@
 import { expect, vi } from 'vitest';
-import { hash, type Json } from '@byok-sdk/example-host-execution-core';
+import { hash, type Json } from '@byok-sdk/server/execution-core';
 import type { TestTeam } from './team.test-support';
 import type { Delegation } from './model';
 

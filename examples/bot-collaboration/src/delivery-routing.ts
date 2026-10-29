@@ -1,4 +1,4 @@
-import { hash, type Conclusion } from '@byok-sdk/example-host-execution-core';
+import { hash, type Conclusion } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Turn } from './model';
 import { inboundKey, type Conversation, type Delivery, type InboundMessage, type PushRoute, type ReplyRoute } from './channel';
 import { deliveryId } from './delivery';

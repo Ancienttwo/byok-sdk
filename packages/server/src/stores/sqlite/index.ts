@@ -80,12 +80,15 @@ const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
 const SQLITE_SCHEMA_VERSION = '6';
 const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'] as const;
+/** Host retention instants (#1120): when a terminal task may be archived, when it was, and when its board item went. */
+const TASK_ARCHIVE_COLUMNS = ['archive_after', 'archived_at', 'archive_settled_at'] as const;
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
 import { APPROVAL_TIMELINE_SCHEMA, SqliteApprovalTimelineStore } from './approval-timeline';
 import type { WakeStore } from '../../wakes/store';
 import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
+import { SqliteTaskArchiveStore } from './task-archive';
 import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
 import { abandonTask, expirePendingMailbox } from './task-retirement';
 import {
@@ -151,6 +154,9 @@ CREATE TABLE IF NOT EXISTS task_attempt (
   claimed_at TEXT,
   first_output_at TEXT,
   terminal_at TEXT,
+  archive_after TEXT,
+  archived_at TEXT,
+  archive_settled_at TEXT,
   PRIMARY KEY (tenant_id, task_id)
 );
 CREATE TABLE IF NOT EXISTS agent_message_admission (
@@ -283,11 +289,27 @@ class SqliteCoordinator {
           if (!taskColumns.has(column)) this.db.exec(`ALTER TABLE task_attempt ADD COLUMN ${column} TEXT`);
         }
         assertProjection(`${TASK_PHASE_COLUMNS.join(', ')} FROM task_attempt`);
+        // #1120 archive instants. A file from before them gets a one-shot
+        // backfill in the same transaction that adds the column: a task that is
+        // already terminal becomes archivable from its recorded terminal instant,
+        // or from its last update when none was recorded. `terminal_at` itself
+        // stays NULL. Later opens find the column and skip the backfill.
+        const archiveColumnsPresent = TASK_ARCHIVE_COLUMNS.every((column) => taskColumns.has(column));
+        for (const column of TASK_ARCHIVE_COLUMNS) {
+          if (!taskColumns.has(column)) this.db.exec(`ALTER TABLE task_attempt ADD COLUMN ${column} TEXT`);
+        }
+        if (!archiveColumnsPresent) {
+          this.db.exec(`UPDATE task_attempt SET archive_after = COALESCE(terminal_at, updated_at)
+            WHERE archive_after IS NULL AND status IN ('complete', 'failed', 'cancelled')`);
+        }
+        assertProjection(`${TASK_ARCHIVE_COLUMNS.join(', ')} FROM task_attempt`);
         assertProjection('tenant_id, wake_id, dedup_key, available_at, payload, state, due_at, retry_at, deliveries, last_error, done_at FROM wake');
         if (wake === undefined && this.db.prepare("SELECT 1 FROM wake WHERE state = 'queued' LIMIT 1").get() !== undefined) {
           throw new WakeHookMissingError();
         }
         this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_status_idx ON task_attempt (tenant_id, status, cancellation_requested_at, task_id)');
+        this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_archive_idx ON task_attempt (tenant_id, archive_after, task_id) WHERE archived_at IS NULL');
+        this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_unsettled_idx ON task_attempt (tenant_id, task_id) WHERE archived_at IS NOT NULL AND archive_settled_at IS NULL');
         this.db.exec(PROOF_REQUEST_RECEIPT_SCHEMA);
         assertProjection(PROOF_REQUEST_RECEIPT_PROJECTION);
         assertProjection('tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory');
@@ -393,6 +415,7 @@ interface TaskRow extends Record<string, unknown> {
   claimed_at: string | null;
   first_output_at: string | null;
   terminal_at: string | null;
+  archived_at: string | null;
   updated_at: string;
 }
 
@@ -422,6 +445,7 @@ function taskRow(row: TaskRow): TaskAttempt {
     ...(row.claimed_at === null ? {} : { claimedAt: row.claimed_at }),
     ...(row.first_output_at === null ? {} : { firstOutputAt: row.first_output_at }),
     ...(row.terminal_at === null ? {} : { terminalAt: row.terminal_at }),
+    ...(row.archived_at === null ? {} : { archivedAt: row.archived_at }),
     updatedAt: row.updated_at,
   };
 }
@@ -704,11 +728,12 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
         return existing;
       }
       const now = this.#now();
+      const terminalAt = ['complete', 'failed', 'cancelled'].includes(input.status) ? now : null;
       db.prepare(
-        `UPDATE task_attempt SET status = ?, terminal_cause = ?, terminal_at = COALESCE(terminal_at, ?), updated_at = ?
+        `UPDATE task_attempt SET status = ?, terminal_cause = ?, terminal_at = COALESCE(terminal_at, ?),
+           archive_after = COALESCE(archive_after, ?), updated_at = ?
          WHERE tenant_id = ? AND task_id = ?`,
-      ).run(input.status, input.terminalCause ?? null, ['complete', 'failed', 'cancelled'].includes(input.status) ? now : null, now,
-        tenant, input.taskId);
+      ).run(input.status, input.terminalCause ?? null, terminalAt, terminalAt, now, tenant, input.taskId);
       return readTask(db, tenant, input.taskId);
     });
   }
@@ -940,18 +965,30 @@ export class SqliteMailboxStore implements MailboxStore {
     assertCollectExpiredInput(input);
     assertCanonicalTimestamp(input.ackedBefore, 'ackedBefore');
     assertCanonicalTimestamp(input.expireUnackedBefore, 'expireUnackedBefore');
+    assertCanonicalTimestamp(input.reapDeadLettersBefore, 'reapDeadLettersBefore');
+    // A dead letter is reapable only below a higher `expired` sibling: the
+    // device's highest-seq dead letter is the recoverableFrom floor and stays.
+    const reapable = `m.tenant_id = ? AND m.state = 'expired' AND m.appended_at < ?
+      AND EXISTS (SELECT 1 FROM mailbox_message h WHERE h.tenant_id = m.tenant_id AND h.device_id = m.device_id
+        AND h.state = 'expired' AND h.seq > m.seq)`;
     return this.coordinator.transaction((db) => {
-      const removed = Number(db.prepare(`DELETE FROM mailbox_message WHERE rowid IN
+      const deleted = Number(db.prepare(`DELETE FROM mailbox_message WHERE rowid IN
         (SELECT rowid FROM mailbox_message WHERE tenant_id = ? AND state = 'acked' AND appended_at < ? ORDER BY appended_at, rowid LIMIT ?)`)
         .run(tenant, input.ackedBefore, input.limit).changes);
-      const remaining = input.limit - removed;
+      // Reaped before this call's expiry, so only rows already `expired` qualify.
+      const reaped = Number(db.prepare(`DELETE FROM mailbox_message WHERE rowid IN
+        (SELECT m.rowid FROM mailbox_message m WHERE ${reapable} ORDER BY m.appended_at, m.rowid LIMIT ?)`)
+        .run(tenant, input.reapDeadLettersBefore, input.limit - deleted).changes);
+      const remaining = input.limit - deleted - reaped;
       const expired = Number(db.prepare(`UPDATE mailbox_message SET state = 'expired' WHERE rowid IN
         (SELECT rowid FROM mailbox_message WHERE tenant_id = ? AND state = 'pending' AND appended_at < ? ORDER BY appended_at, rowid LIMIT ?)`)
         .run(tenant, input.expireUnackedBefore, remaining).changes);
       const more = db.prepare(`SELECT 1 FROM mailbox_message WHERE tenant_id = ? AND
         ((state = 'acked' AND appended_at < ?) OR (state = 'pending' AND appended_at < ?)) LIMIT 1`)
-        .get(tenant, input.ackedBefore, input.expireUnackedBefore) !== undefined;
-      return { removed, expired, releasedBytes: 0n, more };
+        .get(tenant, input.ackedBefore, input.expireUnackedBefore) !== undefined
+        || db.prepare(`SELECT 1 FROM mailbox_message m WHERE ${reapable} LIMIT 1`)
+          .get(tenant, input.reapDeadLettersBefore) !== undefined;
+      return { removed: deleted + reaped, expired, releasedBytes: 0n, more };
     });
   }
 
@@ -1000,9 +1037,10 @@ export class SqliteTaskCancellationStore implements TaskCancellationStore {
         `UPDATE task_attempt SET
            status = CASE WHEN owner_device_id IS NULL THEN 'cancelled' ELSE 'cancel_requested' END,
            terminal_at = CASE WHEN owner_device_id IS NULL THEN COALESCE(terminal_at, ?) ELSE terminal_at END,
+           archive_after = CASE WHEN owner_device_id IS NULL THEN COALESCE(archive_after, ?) ELSE archive_after END,
            cancellation_requested_at = ?, cancellation_reason = ?, cancellation_message_id = ?, updated_at = ?
          WHERE tenant_id = ? AND task_id = ?`,
-      ).run(requestedAt, requestedAt, input.reason ?? null, input.proposedMessageId, requestedAt, tenant, input.taskId);
+      ).run(requestedAt, requestedAt, requestedAt, input.reason ?? null, input.proposedMessageId, requestedAt, tenant, input.taskId);
       return { attempt: readTask(db, tenant, input.taskId)!, message };
     });
   }
@@ -1442,6 +1480,7 @@ export function createSqliteEmbeddedStores(
     objects,
     mailbox,
     createInMemoryBlobBytes(dependencies.clock, dependencies.crypto),
+    (rows) => new SqliteTaskArchiveStore(coordinator, dependencies.clock, rows),
   );
   const devices = new SqliteDeviceDirectory(coordinator, dependencies.clock);
   const pairing = new InMemoryPairingCodeStore(dependencies.clock, devices);

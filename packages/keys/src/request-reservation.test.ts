@@ -42,7 +42,7 @@ const OTHER_REF = 'salesko-9a8b7c6d5e4f4a3b8c2d1e0f9a8b7c6d';
 const enrollment = { tenantId: TENANT, deviceId: DEVICE };
 
 const STORES: Array<{ name: string; enabled: boolean; open: (dir: string) => ProviderProfileStore }> = [
-  { name: 'sqlite', enabled: isSqliteAvailable(), open: (dir) => new SqliteProviderProfileStore({ path: join(dir, 'provider-profile.sqlite') }) },
+  { name: 'sqlite', enabled: isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1', open: (dir) => new SqliteProviderProfileStore({ path: join(dir, 'provider-profile.sqlite') }) },
   { name: 'in-memory', enabled: true, open: () => new InMemoryProviderProfileStore() },
   {
     name: 'truth-store (process-local custody)',

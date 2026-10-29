@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { nextRoutineOccurrence } from '@byok-sdk/core';
-import { hash as hostKey } from '@byok-sdk/example-host-execution-core';
+import { hash as hostKey } from '@byok-sdk/server/execution-core';
 import { openHost as openCore, policy } from '@byok-sdk/example-host-execution-core/test-support';
 import { afterEach, expect, it, vi } from 'vitest';
 import { BetaLedger, createBetaMcpServer, createRoutineTools, createTaskTools, retireRevokedRoutines, routineScheduleCalendar,

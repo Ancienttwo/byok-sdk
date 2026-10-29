@@ -3,6 +3,7 @@ import {
   PAIR_RESPONSE_TENANT_ID_MAX_LENGTH,
   PairRequestSchema,
   PairResponseSchema,
+  TokenResponseSchema,
 } from '../http-api';
 
 const pairRequest = {
@@ -44,5 +45,26 @@ describe('authenticated enrollment HTTP DTOs', () => {
   it('accepts the exact maximum bounded opaque tenant shape', () => {
     const tenantId = 't'.repeat(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH);
     expect(PairResponseSchema.parse({ ...pairResponse, tenantId }).tenantId).toBe(tenantId);
+  });
+});
+
+describe('relative token lifetime (#1114)', () => {
+  const tokenResponse = { accessToken: 'opaque-access-token', expiresAt: '2026-08-23T12:00:00.000Z' };
+
+  it('keeps expiresIn optional on the pair and token responses, which published v4 hosts omit', () => {
+    expect(PairResponseSchema.parse(pairResponse)).toEqual(pairResponse);
+    expect(TokenResponseSchema.parse(tokenResponse)).toEqual(tokenResponse);
+    expect(PairResponseSchema.parse({ ...pairResponse, expiresIn: 3600 }).expiresIn).toBe(3600);
+    expect(TokenResponseSchema.parse({ ...tokenResponse, expiresIn: 3600 }).expiresIn).toBe(3600);
+  });
+
+  it.each([
+    ['zero', 0],
+    ['negative', -60],
+    ['fractional', 1.5],
+    ['string', '3600'],
+  ])('rejects a %s expiresIn', (_label, expiresIn) => {
+    expect(PairResponseSchema.safeParse({ ...pairResponse, expiresIn }).success).toBe(false);
+    expect(TokenResponseSchema.safeParse({ ...tokenResponse, expiresIn }).success).toBe(false);
   });
 });

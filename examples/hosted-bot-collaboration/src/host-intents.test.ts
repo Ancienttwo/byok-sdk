@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { RetiredIntentIdentityError, taskId, type FrozenInput, type FrozenSubmitPort, type IntentInput } from '@byok-sdk/example-host-execution-core';
+import { RetiredIntentIdentityError, taskId, type FrozenInput, type FrozenSubmitPort, type IntentInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { DeviceBindingError } from './binding';

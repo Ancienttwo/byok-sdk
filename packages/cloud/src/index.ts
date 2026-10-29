@@ -98,6 +98,15 @@ export type {
   AgentMemoryProjectionStore,
 } from './agent-memory-projection';
 
+export type {
+  TaskArchiveCounts,
+  TaskArchiveListInput,
+  TaskArchiveStepCounts,
+  TaskArchiveStore,
+  TaskArchiveStoreInput,
+  TaskArchiveStoreResult,
+  TaskArchiveWork,
+} from './task-archive';
 export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type {
   TaskRedactionCodec,

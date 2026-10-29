@@ -27,6 +27,7 @@ function setup() {
   const base = createInMemoryByokCloud({ clock });
   const store = new InMemoryE2eeMemberStore(base.stores.receipts);
   const cloud: ByokCloud = createByokCloud({
+    proofReceiptRetention: base.proofReceiptRetention,
     core: base.core,
     cloud: base.stores,
     mailboxWake: base.mailboxWake,

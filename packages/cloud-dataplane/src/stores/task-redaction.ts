@@ -45,7 +45,7 @@ export interface PostgresTaskRedactionStoreOptions {
   readonly objectStorage: PostgresObjectStorageOptions;
 }
 
-interface TaskRow {
+export interface TaskRow {
   readonly device_id: string;
   readonly owner_device_id: string | null;
   readonly status: string;
@@ -64,7 +64,7 @@ interface AdmissionBody {
   readonly terminal_body: string | null;
 }
 
-type Querier = Pick<PoolClient, 'query'>;
+export type Querier = Pick<PoolClient, 'query'>;
 
 export class PostgresTaskRedactionStore implements TaskRedactionStore {
   readonly #pool: Pool;
@@ -126,63 +126,10 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
         return refusal;
       }
 
-      // Fence an absent terminal key first (a task cancelled before a claim
-      // has none). A device terminal that commits before this insert is read
-      // and replaced below; one that arrives later finds the fence and stores nothing.
-      await client.query(
-        `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (tenant_id, key) DO NOTHING`,
-        [tenant, input.terminalReceiptKey, codec.absent, this.#clock.now()],
-      );
-      let receiptsRedacted = 0;
-      for (const row of await readReceipts(client, tenant, input.receiptKeys, true)) {
-        if (codec.isTombstone(row.body)) continue;
-        await client.query('UPDATE device_request_receipts SET body = $3 WHERE tenant_id = $1 AND key = $2', [
-          tenant,
-          row.key,
-          (await codec.tombstone(row.body)).body,
-        ]);
-        receiptsRedacted += 1;
-      }
-
-      let admissionsRedacted = 0;
-      for (const row of await readAdmissions(client, tenant, taskId, true)) {
-        const payload = await replacement(codec, row.payload_body);
-        const terminal = row.terminal_body === null ? undefined : await replacement(codec, row.terminal_body);
-        if (payload === undefined && terminal === undefined) continue;
-        await client.query(
-          `UPDATE agent_message_admission
-              SET payload_body = COALESCE($4, payload_body), terminal_body = COALESCE($5, terminal_body)
-            WHERE tenant_id = $1 AND device_id = $2 AND task_id = $3`,
-          [tenant, row.device_id, taskId, payload ?? null, terminal ?? null],
-        );
-        admissionsRedacted += 1;
-      }
-
-      let outboxRedacted = 0;
-      for (const row of await readOutbox(client, tenant, taskId, task, true)) {
-        // Only acked/expired rows are rewritten here, and those hold no mailbox quota (#1115).
-        const tombstone = await codec.tombstone(row.body);
-        await client.query(
-          `UPDATE outbox SET body = $4, body_hash = $5, byte_size = $6
-            WHERE tenant_id = $1 AND device_id = $2 AND seq = $3`,
-          [tenant, row.device_id, row.seq, tombstone.body, tombstone.bodyHash, tombstone.byteSize],
-        );
-        outboxRedacted += 1;
-      }
-
-      const cleared = await client.query(
-        `UPDATE task SET terminal_cause = NULL, cancel_reason = NULL
-          WHERE tenant_id = $1 AND task_id = $2 AND (terminal_cause IS NOT NULL OR cancel_reason IS NOT NULL)`,
-        [tenant, taskId],
-      );
-
-      let ephemeralRowsDeleted = 0;
-      for (const table of EPHEMERAL_TABLES) {
-        const deleted = await client.query(`DELETE FROM ${table} WHERE tenant_id = $1 AND task_id = $2`, [tenant, taskId]);
-        ephemeralRowsDeleted += deleted.rowCount ?? 0;
-      }
+      const rewritten = await rewriteTaskBodies(client, {
+        tenant, taskId, task, codec, receiptKeys: input.receiptKeys, terminalReceiptKey: input.terminalReceiptKey, now: this.#clock.now(),
+      });
+      const { receiptsRedacted, admissionsRedacted, outboxRedacted, ephemeralRowsDeleted } = rewritten;
 
       const counts: TaskRedactionCounts = {
         receiptsRedacted,
@@ -199,7 +146,7 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
         [tenant, input.auditReceiptKey, JSON.stringify({ redactedAt: now.toISOString(), counts }), now],
       );
       await client.query('COMMIT');
-      const changed = audit.rowCount === 1 || (cleared.rowCount ?? 0) > 0
+      const changed = audit.rowCount === 1 || rewritten.columnsCleared
         || Object.values(counts).some((count) => count > 0);
       return { taskId, outcome: changed ? 'redacted' : 'already_redacted', counts };
     } catch (cause) {
@@ -289,6 +236,94 @@ export function createPostgresTaskRedactionStore(options: PostgresTaskRedactionS
   return new PostgresTaskRedactionStore(options);
 }
 
+/** What {@link rewriteTaskBodies} changed. */
+export interface RewrittenTaskBodies {
+  readonly receiptsRedacted: number;
+  readonly admissionsRedacted: number;
+  readonly outboxRedacted: number;
+  readonly ephemeralRowsDeleted: number;
+  readonly columnsCleared: boolean;
+}
+
+/**
+ * The row half that redaction and the archive step share (#654, #1120). The
+ * caller holds the task row lock inside its transaction and has refused a task
+ * that is not terminal or still has a pending delivery. Mailbox rows are
+ * rewritten, never deleted.
+ */
+export async function rewriteTaskBodies(
+  client: Querier,
+  input: {
+    readonly tenant: TenantId;
+    readonly taskId: string;
+    readonly task: TaskRow;
+    readonly codec: TaskRedactionCodec;
+    readonly receiptKeys: readonly string[];
+    readonly terminalReceiptKey: string;
+    readonly now: Date;
+  },
+): Promise<RewrittenTaskBodies> {
+  const { tenant, taskId, task, codec } = input;
+  // Fence an absent terminal key first (a task cancelled before a claim
+  // has none). A device terminal that commits before this insert is read
+  // and replaced below; one that arrives later finds the fence and stores nothing.
+  await client.query(
+    `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (tenant_id, key) DO NOTHING`,
+    [tenant, input.terminalReceiptKey, codec.absent, input.now],
+  );
+  let receiptsRedacted = 0;
+  for (const row of await readReceipts(client, tenant, input.receiptKeys, true)) {
+    if (codec.isTombstone(row.body)) continue;
+    await client.query('UPDATE device_request_receipts SET body = $3 WHERE tenant_id = $1 AND key = $2', [
+      tenant,
+      row.key,
+      (await codec.tombstone(row.body)).body,
+    ]);
+    receiptsRedacted += 1;
+  }
+
+  let admissionsRedacted = 0;
+  for (const row of await readAdmissions(client, tenant, taskId, true)) {
+    const payload = await replacement(codec, row.payload_body);
+    const terminal = row.terminal_body === null ? undefined : await replacement(codec, row.terminal_body);
+    if (payload === undefined && terminal === undefined) continue;
+    await client.query(
+      `UPDATE agent_message_admission
+          SET payload_body = COALESCE($4, payload_body), terminal_body = COALESCE($5, terminal_body)
+        WHERE tenant_id = $1 AND device_id = $2 AND task_id = $3`,
+      [tenant, row.device_id, taskId, payload ?? null, terminal ?? null],
+    );
+    admissionsRedacted += 1;
+  }
+
+  let outboxRedacted = 0;
+  for (const row of await readOutbox(client, tenant, taskId, task, true)) {
+    // Only acked/expired rows are rewritten here, and those hold no mailbox quota (#1115).
+    const tombstone = await codec.tombstone(row.body);
+    await client.query(
+      `UPDATE outbox SET body = $4, body_hash = $5, byte_size = $6
+        WHERE tenant_id = $1 AND device_id = $2 AND seq = $3`,
+      [tenant, row.device_id, row.seq, tombstone.body, tombstone.bodyHash, tombstone.byteSize],
+    );
+    outboxRedacted += 1;
+  }
+
+  const cleared = await client.query(
+    `UPDATE task SET terminal_cause = NULL, cancel_reason = NULL
+      WHERE tenant_id = $1 AND task_id = $2 AND (terminal_cause IS NOT NULL OR cancel_reason IS NOT NULL)`,
+    [tenant, taskId],
+  );
+
+  let ephemeralRowsDeleted = 0;
+  for (const table of EPHEMERAL_TABLES) {
+    const deleted = await client.query(`DELETE FROM ${table} WHERE tenant_id = $1 AND task_id = $2`, [tenant, taskId]);
+    ephemeralRowsDeleted += deleted.rowCount ?? 0;
+  }
+  return { receiptsRedacted, admissionsRedacted, outboxRedacted, ephemeralRowsDeleted, columnsCleared: (cleared.rowCount ?? 0) > 0 };
+}
+
 async function inTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
@@ -312,7 +347,7 @@ function lock(forUpdate: boolean): string {
   return forUpdate ? ' FOR UPDATE' : '';
 }
 
-async function readTask(db: Querier, tenant: TenantId, taskId: string, forUpdate: boolean): Promise<TaskRow | undefined> {
+export async function readTask(db: Querier, tenant: TenantId, taskId: string, forUpdate: boolean): Promise<TaskRow | undefined> {
   const result = await db.query<TaskRow>(
     `SELECT device_id, owner_device_id, status FROM task WHERE tenant_id = $1 AND task_id = $2${lock(forUpdate)}`,
     [tenant, taskId],
@@ -321,7 +356,7 @@ async function readTask(db: Querier, tenant: TenantId, taskId: string, forUpdate
 }
 
 /** A cancellation that is still requested is not terminal, whatever the device reported. */
-async function refusalFor(
+export async function refusalFor(
   db: Querier,
   tenant: TenantId,
   taskId: string,

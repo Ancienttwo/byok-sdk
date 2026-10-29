@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hash, taskId, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from './model';
 import { outcomeSchema } from './schema';

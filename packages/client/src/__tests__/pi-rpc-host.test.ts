@@ -15,7 +15,7 @@ import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
 
 const clientRoot = resolve(import.meta.dirname, '../..');
 // Private parser/session exports are not public API. Compile their test entry
-// through the same peer-resolution author as the shipped ordinary host.
+// with the ordinary host's build-time define.
 const hostScratch = mkdtempSync(join(clientRoot, 'node_modules/.byok-rpc-host-test-'));
 const host = join(hostScratch, 'host.mjs');
 
@@ -25,12 +25,11 @@ beforeAll(() => {
   const entry = `export {parsePiRpcHostArgs,parsePiRpcHostConfig,openPiRpcSession} from ${JSON.stringify(resolve(import.meta.dirname, '../bin/pi-rpc-host.ts'))};`;
   writeFileSync(driver, `
     import {createRequire} from 'node:module';
-    import {subagentsBuild} from ${JSON.stringify(join(clientRoot, 'scripts/subagents-build.ts'))};
     const require = createRequire(createRequire(import.meta.url).resolve('tsup'));
     await require('esbuild').build({
       stdin:{contents:${JSON.stringify(entry)},resolveDir:${JSON.stringify(clientRoot)},loader:'ts'},
       outfile:${JSON.stringify(host)},bundle:true,packages:'external',platform:'node',format:'esm',target:'es2022',
-      plugins:[subagentsBuild(false)]
+      define:{__BYOK_PI_SUBAGENTS__:'true'}
     });
   `);
   const result = spawnSync(bun, ['--no-install', driver], { cwd: clientRoot, encoding: 'utf8', timeout: 20_000 });
@@ -38,7 +37,9 @@ beforeAll(() => {
 });
 afterAll(() => rmSync(hostScratch, { recursive: true, force: true }));
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+// pi-subagents runs `npm root -g` at session start for global agent discovery;
+// after a host is killed that npm child can still write its log under HOME.
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'pi-rpc-host-')));
   roots.push(root);

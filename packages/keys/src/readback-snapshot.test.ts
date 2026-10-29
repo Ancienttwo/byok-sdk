@@ -99,7 +99,7 @@ async function handoffRace(readerDigest: (original: string) => string) {
   };
 }
 
-describe.skipIf(!isSqliteAvailable())('F7: readback observes the reservation → receipt handoff consistently', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('F7: readback observes the reservation → receipt handoff consistently', () => {
   it('F7 same digest across the handoff reads back the completed result, never absent', async () => {
     const race = await handoffRace((digest) => digest);
     expect(race.reservationPresentBefore).toBe(true);

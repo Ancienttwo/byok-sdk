@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Json } from '@byok-sdk/example-host-execution-core';
+import type { Json } from '@byok-sdk/server/execution-core';
 import { inboundKey, type ChannelPort, type Delivery } from './channel';
 import type { CollaborationState } from './model';
 

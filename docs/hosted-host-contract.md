@@ -105,9 +105,9 @@ Do not guess a state. Keep the intent unsettled and tell an operator.
   (`packages/cloud-dataplane/src/stores/task-cancellations.ts:77-86`).
 - A repeat call returns the same marker and mailbox row while the mailbox keeps that row
   (`packages/cloud-dataplane/src/stores/task-cancellations.ts:58-73`).
-  Once the row is gone (acked and deleted by retention, or discarded by an operator as a dead letter), the attempt returns
+  Once the row is gone (acked and deleted by retention, reaped as a dead letter, or discarded by an operator), the attempt returns
   as it stands, in any status, with no row, and nothing is enqueued again (`packages/cloud-dataplane/src/stores/task-cancellations.ts:64-72`).
-  The SQLite and in-memory stores behave the same; only Postgres has the dead-letter discard.
+  The SQLite and in-memory stores behave the same, including the dead-letter reap; only Postgres has the operator discard.
 - The call returns the attempt after the commit (`packages/cloud/src/api/task-cancellation.ts:53`, `packages/cloud-dataplane/src/stores/task-cancellations.ts:99-103`).
   Embedded `tasks.cancel` returns void (`docs/host-execution-core.md:144`).
 
@@ -314,7 +314,7 @@ Defaults and settings:
 | Presence heartbeat | 30 s | Daemon `config.presence.intervalMs`. It must stay above the minimum interval and below the TTL. | `packages/client/src/daemon/presence-publisher.ts:45-52`, `packages/client/src/daemon/create-daemon.ts:1454-1459` |
 | Presence TTL | 90 s | Host `presenceTtlMs`. The daemon `config.presence.ttlMs` only checks the cadence. | `packages/cloud/src/coordination.ts:15`, `packages/cloud/src/cloud.ts:1000`, `packages/client/src/daemon/presence-publisher.ts:87-88` |
 | Presence on or off | On when the Host `capabilities` declaration has `presence.hints` | Host declaration | `packages/cloud/src/cloud.ts:995-1006`, `packages/client/src/daemon/create-daemon.ts:3078-3079` |
-| Access token | 1 h. The daemon renews it 60 s early with 2 calls. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/cloud/src/cloud.ts:340`, `packages/client/src/daemon/auth-manager.ts:83`, `packages/client/src/daemon/auth-manager.ts:310-332`, `packages/client/src/daemon/auth-manager.ts:366-375` |
+| Access token | 1 h. The daemon renews it 60 s early with 2 calls. It computes the expiry from its own receipt time plus the response's `expiresIn`, so the device clock's offset from the Host's does not move the renewal point. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/cloud/src/cloud.ts:331`, `packages/client/src/daemon/auth-manager.ts:96-97` (renewal margin), `packages/client/src/daemon/auth-manager.ts:614-622` (expiry from `expiresIn`), `packages/client/src/daemon/auth-manager.ts:510-532` (scheduling) |
 
 Calls per hour for one idle device.
 These numbers are computed from the defaults. They are not measured.
@@ -363,28 +363,30 @@ Current behavior:
 - `PostgresRequestReceiptStore.collectExpired` returns at once and removes no row, because the request prefix list is empty
   (`packages/cloud-dataplane/src/stores/receipts.ts:45-48`).
 - `runMaintenance` takes a complete retention policy from the caller
-  (`packages/cloud/src/maintenance.ts:52`, `packages/cloud/src/maintenance.ts:93-95`).
-  It calls `collectExpired` in its `receipts` step (`packages/cloud/src/maintenance.ts:111`).
+  (`packages/cloud/src/maintenance.ts:97`, `packages/cloud/src/maintenance.ts:141-144`).
+  It calls `collectExpired` in its `receipts` step (`packages/cloud/src/maintenance.ts:163`).
   So `requestReceiptRetentionMs` removes no receipt.
-- With `DEFAULT_RETENTION_POLICY` (`packages/cloud/src/maintenance.ts:15-20`), the `mailbox` step deletes acked rows after 1 day.
+- With `DEFAULT_RETENTION_POLICY` (`packages/cloud/src/maintenance.ts:23-29`), the `mailbox` step deletes acked rows after 1 day.
   It marks pending rows older than 7 days as `expired`. An expired row keeps its body
-  (`packages/cloud/src/maintenance.ts:104-105`, `packages/cloud/src/maintenance.ts:110`,
-  `packages/cloud-dataplane/src/stores/core/mailbox.ts:322-332`).
-- Automatic retention never deletes an expired row (a dead letter).
-  Only the operator call `discardDeadLetter` or tenant erasure deletes it
-  (`packages/cloud-dataplane/src/cleanup.ts:250-263`, `packages/cloud-dataplane/src/tenant-erasure.ts:42`).
+  (`packages/cloud/src/maintenance.ts:153-155`, `packages/cloud/src/maintenance.ts:162`,
+  `packages/cloud-dataplane/src/stores/core/mailbox.ts:320-371`).
+- Automatic retention deletes an expired row (a dead letter) once it is older than
+  `mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs` (7 + 30 days by default), except the
+  highest-seq dead letter of each device, which stays as its `recoverableFrom` floor (#1115).
+  Before that, only the operator call `discardDeadLetter` or tenant erasure deletes it
+  (`packages/cloud-dataplane/src/cleanup.ts:262-286`, `packages/cloud-dataplane/src/tenant-erasure.ts:44`).
+  `discardDeadLetter` refuses the floor row with `cleanup_dead_letter_is_recovery_floor`; tenant erasure removes it with the rest of the tenant.
   `PostgresCloudCleanup` ships from the package root, not from `./runtime`
   (`packages/cloud-dataplane/src/index.ts:56-59`, `packages/cloud-dataplane/README.md:94-97`).
 - So the mailbox copy of an acked offer goes.
-  The mailbox copy of an offer that the device never acked stays as a dead letter.
+  The mailbox copy of an offer that the device never acked stays as a dead letter for the dead-letter window.
   The receipt copy stays in both cases.
-- Used device-proof request ids live in `proof_request_receipt`. The `proofReceipts` step prunes them only when the Host
-  passes `proofReceiptRetention: { authority }` to `createByokCloud`; the authority is a `PostgresProofReceiptRetentionAuthority`
+- Used device-proof request ids live in `proof_request_receipt`. The Host must pass
+  `proofReceiptRetention: { authority }` to `createByokCloud` (#1120); the authority is a `PostgresProofReceiptRetentionAuthority`
   from `@byok-sdk/cloud-dataplane/runtime`, over the same table as the `proofReceipts` port
-  (`packages/cloud/src/cloud.ts:311`, `packages/cloud-dataplane/src/stores/proof-receipts.ts:104`).
-  Without it the step reports `not-configured` and the table keeps every row.
-  With it the step deletes rows recorded more than `proofReceiptRetentionMs` before `now`: 24 hours by default,
-  at least 15 minutes, checked at construction (`packages/cloud/src/maintenance.ts:46-61`).
+  (`packages/cloud-dataplane/src/stores/proof-receipts.ts:104`).
+  The step deletes rows recorded more than `proofReceiptRetentionMs` before `now`: 24 hours by default,
+  at least 15 minutes, checked at construction (`packages/cloud/src/maintenance.ts:48-70`).
   Within the retention a `requestId` stays single-use.
 
 What the kept rows hold:
@@ -398,10 +400,15 @@ What the kept rows hold:
 | `agent_message_admission` row | The full publish payload, with the message `body`, in `payload_body` (`NOT NULL`). The payload again in `terminal_body`, with the disposition. | `deploy/sql/0017_agent_message_admission.sql:16-17`, `packages/cloud/src/inbound.ts:262-268`, `packages/cloud/src/inbound.ts:289-296`, `packages/protocol/src/messages.ts:488-499` |
 | `task` row | Status, owner, claim snapshot and cancel marker | `packages/cloud-dataplane/src/stores/task-attempts.ts:53` |
 
-- The SDK has no ContextPack field. The K4 example adds its ContextPack to the inline instruction
-  (`examples/host-execution-core/src/core.ts:498-500`).
+- The SDK has no ContextPack field. The K4 execution core (`@byok-sdk/server/execution-core`) adds its ContextPack to the inline instruction
+  (`packages/server/src/execution-core/core.ts:655-663`).
   So the cloud keeps that ContextPack, with its resident memory text, as long as it keeps the offer receipt.
 - An `agent_message_admission` row goes only when its `task` row goes (`deploy/sql/0017_agent_message_admission.sql:20-22`).
+- The `tasks` maintenance step archives a terminal task once its `archive_after` is older than `terminalTaskArchiveMs`
+  (default 90 days) (#1120). Every body in the table above becomes a body-free tombstone (hash, byte length, envelope type),
+  the free-text terminal cause and cancel reason are cleared, and the board item is removed. The rows themselves stay as
+  the task's identity fence and are never deleted; only tenant erasure removes them. Archived tasks leave the board.
+  See [the cleanup runbook](../deploy/runbooks/cloud-cleanup.md) for migration 0032's backfill.
 - The receipt store writes each body as it gets it (`packages/cloud-dataplane/src/stores/receipts.ts:63-73`).
   For a task whose offer has `sealing`, a body of a sealed category holds the sealed member, so the store keeps ciphertext ([protocol §2.5](protocol.md#25-sealed-payload-v1-654-gated-addition)).
   Every other body is plaintext. [security.md, Sealed tasks](security.md#sealed-tasks) lists what a sealed task still shows the Host.
@@ -411,7 +418,7 @@ Deletion paths:
 - `revokeDevice` deletes only rows of the device (see [revokeDevice](#revokedevice)).
 - `eraseAgentMemoryProjection(tenant, agentId)` revokes consent and erases the hosted Agent memory projection of one Agent
   (`packages/cloud/src/cloud.ts:1782-1795`).
-- `discardDeadLetter` deletes one expired mailbox row (see above).
+- `discardDeadLetter` deletes one expired mailbox row other than the device's recovery floor (see above).
 - `redactTasks(tenant, { taskIds })` removes the content of terminal tasks and keeps their rows
   (`packages/cloud/src/task-redaction.ts`, `packages/cloud-dataplane/src/stores/task-redaction.ts`).
   It replaces the bodies of the task receipts, the admission row and the acked and expired outbox rows with a tombstone.
@@ -466,5 +473,5 @@ This document states current behavior. It does not promise a design or a release
 | Wake across invocations | The SDK has no wake across Worker invocations. Each wait ends at the fallback (section 3). | Accept the fallback reads, or build a Durable Object wake. |
 | Held message | No SDK route releases it. The task has no terminal until a cancel (section 4). | Return `held` only with a product release action. |
 | Idle cost | 62 to 194 HTTP calls and about 3,650 reads for each idle device per hour (section 5). | Choose presence, hold and fallback against the budget. |
-| Retention | No receipt TTL. `redactTasks` removes content by task only. Unacked offers stay as dead letters (section 6). | Tenant erasure from Node is the only delete path for task receipt rows and admission rows. |
+| Retention | No receipt TTL. `redactTasks` removes content by task only. Unacked offers stay as dead letters for the dead-letter window (section 6). | Tenant erasure from Node is the only delete path for task receipt rows and admission rows. |
 | Scope shred | The Host deletes a scope's key packages on any well-shaped `shred`, without verifying the signer. Backup copies of the packages stay openable until each member rotates its KEM key and deletes the old private key. Members keep their scope keys until they purge them (section 6). | Treat a shred as complete only on the live store. Remove the scope's task-keyed plaintext rows with `redactTasks`. |

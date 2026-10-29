@@ -96,7 +96,7 @@ async function configured(): Promise<ProviderProvisioningResult> {
   return result;
 }
 
-describe.skipIf(!isSqliteAvailable())('applySealedProviderProvisioning', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('applySealedProviderProvisioning', () => {
   describe('configure', () => {
     it('derives the endpoint from the catalog, stores the key, and commits profile + receipt', async () => {
       const result = await configured();

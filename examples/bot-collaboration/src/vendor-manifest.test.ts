@@ -7,11 +7,12 @@ import { imports } from './import-scan.test-support';
 /**
  * #886: `src/VENDOR.md` lists what a Host copies, in layers. Each layer's list must equal the import graph walked from
  * that layer's roots: its files, and the packages and K4 names those files import. Every other source file is listed
- * as not vendored. So the list can neither miss a file nor keep a stale one.
+ * as not vendored. So the list can neither miss a file nor keep a stale one. K4 is published in `@byok-sdk/server`
+ * (#1106), so it is a package import, not a layer.
  */
 const K8 = fileURLToPath(new URL('..', import.meta.url));
-const K4 = join(K8, '../host-execution-core');
-const LAYERS = ['rules', 'host', 'vectors', 'k4', 'unvendored'] as const;
+const SERVER = join(K8, '../../packages/server');
+const LAYERS = ['rules', 'host', 'vectors', 'unvendored'] as const;
 type Layer = typeof LAYERS[number];
 interface Listed { files: string[]; packages: Record<string, string[] | undefined> }
 interface Graph { files: string[]; packages: Record<string, string[]> }
@@ -85,14 +86,13 @@ function vendorLayers() {
     found[layer] = graph(K8, roots[layer], below);
     for (const file of found[layer].files) below.add(join(K8, file));
   }
-  found.k4 = graph(K4, ['src/index.ts'], new Set());
   return { listed, found, k8 };
 }
 
 it('lists each layer exactly as its import graph', () => {
   const { listed, found } = vendorLayers();
   expect([...listed.keys()], 'vendor layers in src/VENDOR.md').toEqual([...LAYERS]);
-  for (const layer of ['rules', 'host', 'vectors', 'k4'] as const) {
+  for (const layer of ['rules', 'host', 'vectors'] as const) {
     expect(compare(listed.get(layer)!, found[layer]!), `${layer}: update src/VENDOR.md`).toEqual(found[layer]);
   }
 });
@@ -108,16 +108,14 @@ it('lists every other K8 source file as not vendored, and only those', () => {
   expect(unvendored.files.filter(entry => !rest.some(file => covers(entry, file))), 'stale unvendored entry in src/VENDOR.md').toEqual([]);
 });
 
-it('copies all of K4 for its root entry, and declares every K8 package', () => {
-  const { listed, found, k8 } = vendorLayers();
-  expect(found.k4!.files).toEqual(sources(K4, 'src').filter(file => file !== 'src/test-support.ts' && !file.startsWith('src/fixtures/')).sort());
+it('declares every K8 package, and imports only published K4 entries', () => {
+  const { listed, k8 } = vendorLayers();
   const declared = new Set(Object.keys({ ...k8.dependencies, ...k8.devDependencies }));
   const used = (['rules', 'host', 'vectors'] as const).flatMap(layer => Object.keys(listed.get(layer)!.packages));
   expect(used.filter(spec => !spec.startsWith('node:') && !declared.has(packageName(spec)))).toEqual([]);
-  // Each K4 entry that K8 imports exists in the K4 exports table.
-  const k4Exports = Object.keys(packageJson(K4).exports).map(key => key === '.' ? '@byok-sdk/example-host-execution-core'
-    : `@byok-sdk/example-host-execution-core/${key.slice(2)}`);
-  expect(used.filter(spec => spec.startsWith('@byok-sdk/example-host-execution-core') && !k4Exports.includes(spec))).toEqual([]);
+  // Each K4 entry that K8 imports exists in the server exports table.
+  const serverExports = Object.keys(packageJson(SERVER).exports).map(key => key === '.' ? '@byok-sdk/server' : `@byok-sdk/server/${key.slice(2)}`);
+  expect(used.filter(spec => spec.startsWith('@byok-sdk/server/execution-core') && !serverExports.includes(spec))).toEqual([]);
 });
 
 it('finds a missing and a stale entry, and a K4 name outside the list', () => {

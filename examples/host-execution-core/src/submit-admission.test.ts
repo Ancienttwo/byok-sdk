@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { HostExecutionCore, HostLedger, type ExecutionServer, type Intent, type LedgerState } from './index';
+import { HostExecutionCore, HostLedger, type ExecutionServer, type Intent, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template } from './test-support';
 
 // #957: `HostOptions.admitSubmit` holds a submit in `begin` and in the readback right before the SDK call.
