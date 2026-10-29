@@ -893,6 +893,18 @@ rotation); offline `status`, `service-status` and the `doctor` `lifecycle`
 check read it, and a halted or crashed daemon fails that check with its
 remedy.
 
+The control `status` result carries `clockSkew` (#1114): the device clock
+against the HTTP `Date` header of the daemon's last successful pair or token
+renewal, as `deviceAheadMs` (positive means the device is ahead),
+`uncertaintyMs` and `observedAt`. It is absent when the daemon has no reading
+(no pair or renewal since start, a response without a parseable `Date`, or a
+device clock set back during the request) and
+from an older control peer. The `doctor` `clock-skew` check reads it, passes
+within 60 seconds (the default device-proof window; a Host may widen it up to
+5 minutes) and warns beyond that. An offline `doctor` reports it as unknown:
+it keeps no state file and sends no request. The reading never sets a token
+lifetime.
+
 ## Runtime operation authority
 
 ### Local runtime probe observation

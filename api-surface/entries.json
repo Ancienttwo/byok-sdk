@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1859054,
+      "budgetBytes": 1861363,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -527,7 +527,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 437442,
+      "budgetBytes": 437515,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -800,7 +800,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 396181,
+      "budgetBytes": 396254,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1104,7 +1104,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 504165,
+      "budgetBytes": 504238,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1157,7 +1157,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 733558,
+      "budgetBytes": 733631,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1282,7 +1282,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 697427,
+      "budgetBytes": 697500,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1794,7 +1794,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 125535,
+      "budgetBytes": 125608,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1935,7 +1935,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 632415,
+      "budgetBytes": 632488,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2006,7 +2006,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 389994,
+      "budgetBytes": 390067,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2133,7 +2133,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 527619,
+      "budgetBytes": 527692,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2215,7 +2215,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1807070,
+      "budgetBytes": 1809379,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

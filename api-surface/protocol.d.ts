@@ -7690,7 +7690,7 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  */
 import type { MessageType } from './messages';
 import type { CapabilityFlag } from './version';
-type HttpWireSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
+type HttpWireSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse' | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
 export type WireAddition = {
     readonly kind: 'envelope';
     readonly rule: 'gated';

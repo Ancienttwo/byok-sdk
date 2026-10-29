@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "ba12a7a7ac08621d77925c1069974184dc06bc9968eda791597f1cf8e039a63c"
+    "snapshotSha256": "c9a65fded4d898e3967511f70884b941a2f0cb79e633a19a31fe2cc2b7374204"
   },
   "configFields": {
     "status": "tracked",
@@ -436,6 +436,16 @@
         "export:@byok-sdk/server/execution-core#versionSwitchDue",
         "export:@byok-sdk/server/execution-core/canonical#canonical",
         "export:@byok-sdk/server/execution-core/canonical#hash"
+      ]
+    },
+    {
+      "id": "doctor-clock-skew",
+      "impact": "additive",
+      "summary": "doctor reports the device clock skew measured from the server Date header of the last pair or token response, as a new clock-skew check and a clockSkew snapshot field; it warns beyond 60 s, the Host's default device-proof window. PairResponse.expiresIn is registered as a strip-safe HTTP wire addition. No Host action.",
+      "migration": "docs/agent-diagnostics-integration.md#3-故障到用户动作的映射",
+      "items": [
+        "export:@byok-sdk/client#DiagnosticCheck",
+        "export:@byok-sdk/protocol#WireAddition"
       ]
     }
   ],
@@ -881,6 +891,11 @@
       "entry": "device-store-pairing-binding"
     },
     {
+      "item": "export:@byok-sdk/client#DiagnosticCheck",
+      "change": "changed",
+      "entry": "doctor-clock-skew"
+    },
+    {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
       "change": "changed",
       "entry": "local-tool-approval-host-only"
@@ -1169,6 +1184,11 @@
       "item": "export:@byok-sdk/protocol#TokenResponseSchema",
       "change": "changed",
       "entry": "token-expires-in"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#WireAddition",
+      "change": "changed",
+      "entry": "doctor-clock-skew"
     },
     {
       "item": "export:@byok-sdk/protocol#boundFailureReason",

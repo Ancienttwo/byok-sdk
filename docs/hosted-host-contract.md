@@ -283,7 +283,7 @@ Defaults and settings:
 | Presence heartbeat | 30 s | Daemon `config.presence.intervalMs`. It must stay above the minimum interval and below the TTL. | `packages/client/src/daemon/presence-publisher.ts:45-52`, `packages/client/src/daemon/create-daemon.ts:1454-1459` |
 | Presence TTL | 90 s | Host `presenceTtlMs`. The daemon `config.presence.ttlMs` only checks the cadence. | `packages/cloud/src/coordination.ts:15`, `packages/cloud/src/cloud.ts:1000`, `packages/client/src/daemon/presence-publisher.ts:87-88` |
 | Presence on or off | On when the Host `capabilities` declaration has `presence.hints` | Host declaration | `packages/cloud/src/cloud.ts:995-1006`, `packages/client/src/daemon/create-daemon.ts:3078-3079` |
-| Access token | 1 h. The daemon renews it 60 s early with 2 calls. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/cloud/src/cloud.ts:340`, `packages/client/src/daemon/auth-manager.ts:83`, `packages/client/src/daemon/auth-manager.ts:310-332`, `packages/client/src/daemon/auth-manager.ts:366-375` |
+| Access token | 1 h. The daemon renews it 60 s early with 2 calls. It computes the expiry from its own receipt time plus the response's `expiresIn`, so the device clock's offset from the Host's does not move the renewal point. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/cloud/src/cloud.ts:331`, `packages/client/src/daemon/auth-manager.ts:96-97` (renewal margin), `packages/client/src/daemon/auth-manager.ts:614-622` (expiry from `expiresIn`), `packages/client/src/daemon/auth-manager.ts:510-532` (scheduling) |
 
 Calls per hour for one idle device.
 These numbers are computed from the defaults. They are not measured.

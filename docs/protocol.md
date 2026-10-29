@@ -2316,8 +2316,9 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, 
   be derived from or parsed out of the access token.
 - This required field is part of the 0.7.0 HTTP auth contract. Pairing is an
   out-of-band HTTP DTO, so `PROTOCOL_VERSION` remains `1` and the frozen v1
-  envelope corpus is unchanged; the frozen HTTP schema fingerprint records
-  this required field explicitly.
+  envelope corpus is unchanged; the v4 HTTP corpus
+  (`golden/v4.http.ndjson`) pins this required field with its `PairResponse`
+  line.
 - `refreshHint`: opaque hint for when/how to renew; not itself a credential.
   **Pinned semantics: the reference server always sets `refreshHint` to the
   freshly-minted token's own ISO-8601 `expiresAt`** — the same value
@@ -2332,7 +2333,8 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, 
   the same schedule. The schema keeps it optional because published v4 hosts
   omit it; the current client refuses a pair response without it, so a Host
   must be upgraded before its devices. The server derives `expiresIn` and
-  `refreshHint` from the same TTL.
+  `refreshHint` from the same TTL. Like the token response's, the field is a
+  strip-safe HTTP addition in `WIRE_ADDITIONS`.
 
 **Claims flow (S1, 2026-08-07).** A pairing code is not an anonymous ticket:
 the server mints it already bound to a `{tenantId, productId}` pair
@@ -2382,6 +2384,12 @@ devices (0.31.0) read it. The field is a strip-safe HTTP addition in
 it; the current client fails a token response without it with
 `AuthResponseInvalidError` and keeps the prior credential. Upgrade the Host
 before its devices.
+
+The HTTP `Date` header of the pair and token responses is the one server-time
+reading the client takes. It only feeds the clock-skew measurement that
+`byok-agent doctor` reports (#1114) and never sets a token lifetime; a response
+without a parseable `Date`, or one during which the device clock was set back,
+leaves that measurement unknown.
 
 `signature` is the Ed25519 signature over the **domain-separated** nonce,
 base64url-encoded. **Pinned encoding (changed 2026-08-07, S1 — this replaces

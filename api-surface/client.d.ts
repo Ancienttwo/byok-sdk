@@ -3042,6 +3042,19 @@ export declare class AuthResponseInvalidError extends Error {
         cause: unknown;
     });
 }
+/**
+ * One measurement of this device's clock against the server's HTTP `Date`
+ * header (#1114). It is reported only (`byok-agent doctor`); token lifetime never
+ * reads it.
+ */
+export interface ClockSkewObservation {
+    /** Positive when the device clock is ahead of the server's. */
+    readonly deviceAheadMs: number;
+    /** Half the request round trip plus the header's one-second resolution. */
+    readonly uncertaintyMs: number;
+    /** ISO time the response arrived on the device clock. */
+    readonly observedAt: string;
+}
 export interface AuthManagerOptions {
     serverUrl: string;
     store: DeviceStore;
@@ -3085,11 +3098,14 @@ export declare class AuthManager {
     private activeMutation;
     private lastRenewedAt;
     private nearExpiryRenewals;
+    private lastClockSkew;
     private readonly credentials;
     private readonly requestDeadlineMs;
     constructor(opts: AuthManagerOptions);
     get deviceId(): string | undefined;
     isRevoked(): boolean;
+    /** The skew measured by the last successful pair or renewal, if its response carried a parseable `Date` and the device clock did not go back mid-request. */
+    clockSkew(): ClockSkewObservation | undefined;
     /**
      * Internal signer read: always recompose metadata with the current OS
      * secret authority. Like every OS read here it is a credential mutation, so
@@ -3855,6 +3871,7 @@ export declare class ConnectionManager {
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
+import type { ClockSkewObservation } from './auth-manager';
 import type { StoragePressureState } from './retention/pressure';
 import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
@@ -4125,6 +4142,13 @@ export interface ControlStatusResult {
      * peer that predates the cap.
      */
     agentHomeExecution?: AgentHomeExecutionStatus;
+    /**
+     * #1114: the device clock against the server's HTTP `Date` header at the
+     * last successful pair or renewal. Absent when the daemon has no
+     * observation (no pair or renewal since start, or the response carried no
+     * parseable `Date`) and from an older control peer: report unknown.
+     */
+    clockSkew?: ClockSkewObservation;
 }
 export interface ToolsetsReloadParams {
     expectedRevision: string;
@@ -10507,7 +10531,7 @@ import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import type { ServiceEnvironmentRecord } from '../lifecycle/service-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
-    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'quarantine';
+    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'clock-skew' | 'health' | 'journal' | 'quarantine';
     status: DiagnosticStatus;
     summary: string;
 }
@@ -10570,6 +10594,20 @@ export interface DiagnosticsSnapshot {
         status: 'known';
         source: 'live' | 'audit';
         lifecycle: DaemonLifecycle;
+    };
+    /**
+     * #1114: the device clock against the server's HTTP `Date` header at the
+     * running daemon's last pair or renewal. Unknown while the daemon is
+     * offline: doctor stays network-free and keeps no state file of its own.
+     */
+    clockSkew: {
+        status: 'unknown';
+        reason: 'daemon-offline' | 'not-observed';
+    } | {
+        status: 'measured';
+        deviceAheadMs: number;
+        uncertaintyMs: number;
+        observedAt: string;
     };
     health: OperationalHealthFileInspection;
     journal: {
