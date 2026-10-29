@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1858444,
+      "budgetBytes": 1868693,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -105,7 +105,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 343094,
+      "budgetBytes": 354724,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -369,7 +369,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 333505,
+      "budgetBytes": 344570,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2215,7 +2215,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1806460,
+      "budgetBytes": 1816156,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
