@@ -309,7 +309,8 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       // Nonce, presence and approval tail. Request receipts are no longer
       // swept by hosted cleanup (#411), so `old-receipt` is retained below.
       for (const name of ['nonces', 'presence', 'approvals']) expect(step(result, name)).toMatchObject({ status: 'ok', removed: 1 });
-      expect((await mailbox.readUsage(TENANT)).bytes).toBe(second.byteSize);
+      // The dead letter is retained for inspection but holds no quota (#1115).
+      expect((await mailbox.readUsage(TENANT)).bytes).toBe(0n);
       await expect(scope.pool.query(
         `SELECT key FROM device_request_receipts
           WHERE tenant_id = $1 AND key = 'pairing-completion:v1:durable-code'`,
@@ -336,9 +337,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       expect(replayed.bodyHash).toBe(
         contentHash(`sha256:${createHash('sha256').update(replayedBytes).digest('hex')}`),
       );
-      expect((await mailbox.readUsage(TENANT)).bytes).toBe(
-        second.byteSize + replayed.byteSize,
-      );
+      expect((await mailbox.readUsage(TENANT)).bytes).toBe(replayed.byteSize);
 
       const sameReplay = await cleanup.replayDeadLetter(TENANT, {
         deviceId: 'device-a',
@@ -346,9 +345,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         replayMessageId: 'operator-replay-1',
       });
       expect(sameReplay.seq).toBe(replayed.seq);
-      expect((await mailbox.readUsage(TENANT)).bytes).toBe(
-        second.byteSize + replayed.byteSize,
-      );
+      expect((await mailbox.readUsage(TENANT)).bytes).toBe(replayed.byteSize);
 
       await cleanup.discardDeadLetter(TENANT, { deviceId: 'device-a', seq: second.seq });
       expect((await mailbox.readUsage(TENANT)).bytes).toBe(replayed.byteSize);
@@ -469,9 +466,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         (outcome): outcome is PromiseFulfilledResult<Awaited<ReturnType<typeof cleanup.replayDeadLetter>>> =>
           outcome.status === 'fulfilled',
       );
-      expect((await mailbox.readUsage(TENANT)).bytes).toBe(
-        first.byteSize + second.byteSize + fulfilled!.value.byteSize,
-      );
+      expect((await mailbox.readUsage(TENANT)).bytes).toBe(fulfilled!.value.byteSize);
     } finally {
       releaseBarrier();
       await scope.dispose();
@@ -794,8 +789,9 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       expect(result).toMatchObject({
         removed: 1, expired: 1, releasedBytes: 0n,
       });
-      // The dead letter still counts until an operator discards it.
-      expect((await mailbox.readUsage(TENANT)).bytes).toBe(second.byteSize);
+      // The dead letter is retained until an operator discards it, but it
+      // holds no quota (#1115).
+      expect((await mailbox.readUsage(TENANT)).bytes).toBe(0n);
       // The outbox rows are the only mailbox byte record: 0025 dropped the
       // retired storage_usage counter (#387).
       const usageColumns = await scope.pool.query<{ column_name: string }>(
@@ -947,13 +943,14 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       clock.set('2026-01-01T00:00:02.000Z');
       await mailbox.collectExpired(TENANT, bounds(clock));
 
-      // The dead letter fills the mailbox, so its clone cannot fit.
+      // The dead letter holds no quota (#1115); a limit one byte short of the
+      // clone (same seq width, so same size) is what refuses it.
       await quota.writeEntitlement(TENANT, {
         version: 2n,
         hardLimitBytes: 2_000n,
         maxObjectBytes: 2_000n,
         maxInlineBytes: 2_000n,
-        mailboxLimitBytes: original.byteSize,
+        mailboxLimitBytes: original.byteSize - 1n,
         retentionPolicyId: 'default',
       });
       const replay = {
@@ -969,7 +966,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       await expect(cleanup.replayDeadLetter(TENANT, replay)).rejects.toMatchObject({
         code: 'storage_entitlement_missing',
       });
-      expect((await mailbox.readUsage(TENANT)).bytes).toBe(original.byteSize);
+      expect((await mailbox.readUsage(TENANT)).bytes).toBe(0n);
       const stream = await scope.pool.query<{ readonly next_seq: bigint }>(
         'SELECT next_seq FROM device_stream WHERE tenant_id = $1 AND device_id = $2',
         [TENANT, 'device-replay-limit'],

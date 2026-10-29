@@ -3171,6 +3171,8 @@ export declare class AuthManager {
     private credentialMutationTail;
     /** The sole cancellation authority for the request currently inside the serialized credential mutation. */
     private activeRequest;
+    private lastRenewedAt;
+    private nearExpiryRenewals;
     private readonly credentials;
     private readonly requestDeadlineMs;
     constructor(opts: AuthManagerOptions);
@@ -3192,6 +3194,7 @@ export declare class AuthManager {
     /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */
     private markRevoked;
     private scheduleProactiveRenewal;
+    private msUntilRenewAllowed;
     /**
      * Bounds one complete auth exchange rather than fetch alone. Keeping the
      * controller active through `json()`/`text()` makes a non-cooperative or

@@ -1,6 +1,7 @@
 import type { LocalAgentReleaseIdentity } from '../../release-identity';
 import type { RuntimeAdapter } from '../../types';
 import { resolveDaemonConfig } from '../create-daemon/config';
+import { resolveDaemonOperationalConfig } from '../create-daemon/operational-config';
 import { buildDefaultAdapters } from '../create-daemon/support';
 import type { DaemonConfig } from '../create-daemon';
 import { resolveStorageConfig } from '../retention/config';
@@ -42,6 +43,7 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
   const config = (options.localAgentRelease === undefined ? input : { ...(input as object), localAgentRelease: options.localAgentRelease }) as DaemonConfig;
   try {
     const scope = resolveDaemonConfig({ config, overrides: {} });
+    resolveDaemonOperationalConfig(config);
     const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
     const storage = resolveStorageConfig(storeDir, config.storage);
     const adapters = options.adapters ?? buildDefaultAdapters(config, scope.piByokLauncher);
