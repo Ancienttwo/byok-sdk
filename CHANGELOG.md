@@ -19,6 +19,15 @@
   root moves to `extensions/rpiv-todo/2.15.0` with unchanged locale files.
   Vendored pi-subagents stays at 0.60.0.
 
+- **Fix (client; #1114)** — token renewal no longer loops when a fresh token
+  is already within a minute of its expiry, which happened when the device
+  clock ran ahead of the server or the server TTL was under 60 seconds. Each
+  renewal re-armed itself at once and rewrote the OS credential entry every
+  time. Renewals that no server 401 forced are now at least 30 seconds apart,
+  and the gap doubles for each consecutive renewal that returns such a token,
+  up to 30 minutes. Inside that gap `getValidAccessToken()` returns the token
+  the server issued last. A 401 still renews at once.
+
 ## 0.31.0 — 2026-10-29 (published)
 
 0.31.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
