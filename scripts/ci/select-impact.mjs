@@ -273,6 +273,9 @@ export const familyOwners = Object.freeze({
 // tests that need installed packages, so the targeted job installs first;
 // `families` are the family jobs that the path selects.
 export const reviewedScripts = Object.freeze({
+  'scripts/architecture/dependency-graph.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
+  'scripts/architecture/dependency-graph.test.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
+  'scripts/architecture/dependency-baseline.json': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/docs/device-setup.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   'scripts/docs/device-setup.test.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
