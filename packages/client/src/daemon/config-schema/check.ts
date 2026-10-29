@@ -1,5 +1,6 @@
 import type { LocalAgentReleaseIdentity } from '../../release-identity';
 import type { RuntimeAdapter } from '../../types';
+import { AgentEgressPolicyError, resolveAgentEgressPolicy } from '../agent-egress-policy';
 import { resolveDaemonConfig } from '../create-daemon/config';
 import { resolveDaemonOperationalConfig } from '../create-daemon/operational-config';
 import { buildDefaultAdapters } from '../create-daemon/support';
@@ -43,6 +44,7 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
   const config = (options.localAgentRelease === undefined ? input : { ...(input as object), localAgentRelease: options.localAgentRelease }) as DaemonConfig;
   try {
     const scope = resolveDaemonConfig({ config, overrides: {} });
+    if (config.agentEgress !== undefined) resolveAgentEgressPolicy(config.agentEgress.policy);
     resolveDaemonOperationalConfig(config);
     const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
     const storage = resolveStorageConfig(storeDir, config.storage);
@@ -54,6 +56,11 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
     });
     return { ok: true, issues, effective };
   } catch (error) {
+    if (error instanceof AgentEgressPolicyError) {
+      return { ok: false, issues: [...issues, ...error.issues.map(({ path, message }): DaemonConfigIssue => ({
+        severity: 'error', code: 'invalid_value', path: ['agentEgress', 'policy', ...path].join('.'), message,
+      }))] };
+    }
     const message = error instanceof Error ? error.message : String(error);
     const path = error instanceof ScratchRootPathError ? 'storage.scratchRoot' : '';
     return { ok: false, issues: [...issues, { severity: 'error', code: 'invalid_value', path, message }] };

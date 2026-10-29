@@ -46,7 +46,7 @@ export const DEFAULT_AGENT_EGRESS_POLICY: Readonly<AgentEgressPolicy> = Object.f
 });
 
 export class AgentEgressPolicyError extends Error {
-  constructor(message: string) {
+  constructor(message: string, readonly issues: readonly { path: readonly (string | number)[]; message: string }[]) {
     super(message);
     this.name = 'AgentEgressPolicyError';
   }
@@ -57,7 +57,8 @@ export function resolveAgentEgressPolicy(policy: AgentEgressPolicy | undefined):
   if (policy === undefined) return DEFAULT_AGENT_EGRESS_POLICY;
   const parsed = AgentEgressPolicySchema.safeParse(policy);
   if (!parsed.success) {
-    throw new AgentEgressPolicyError(`Agent egress policy is invalid: ${parsed.error.message}`);
+    throw new AgentEgressPolicyError(`Agent egress policy is invalid: ${parsed.error.message}`,
+      parsed.error.issues.map(({ path, message }) => ({ path: path as (string | number)[], message })));
   }
   return Object.freeze({
     ...parsed.data,
