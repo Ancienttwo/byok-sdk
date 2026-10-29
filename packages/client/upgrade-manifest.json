@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "615dc87c6a05434ddda187d95aa411bd8e9296515cc210810dcaae2c5bd25901"
+    "snapshotSha256": "1156c42a6a72db8a2b41a7e276afb8890a205711452ee5d0020e8da467cc7fe2"
   },
   "configFields": {
     "status": "tracked",
@@ -135,6 +135,21 @@
         "export:@byok-sdk/cloud#CapabilityPorts",
         "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
         "export:@byok-sdk/server#SqliteSchemaErrorCode"
+      ]
+    },
+    {
+      "id": "store-compatibility-precheck",
+      "impact": "additive",
+      "summary": "Read-only store compatibility precheck (#1102). Before switching versions, run the candidate build's inspectors to learn whether it accepts each local store, needs a new path and pairing (new-path-repair), or refuses it (rejected): inspectDaemonStores (@byok-sdk/client, journal and pi-durable replicas; also `byok-agent upgrade check --store [--json]`, exit 2 when a store would be refused), inspectSqliteStore (@byok-sdk/server) and inspectProviderProfileStore (@byok-sdk/keys), all returning the StoreCompatibility type from @byok-sdk/core. Each one opens only a private temporary copy of the files.",
+      "migration": "docs/upgrade-manifest.md#store-compatibility-precheck",
+      "items": [
+        "export:@byok-sdk/client#InspectDaemonStoresInput",
+        "export:@byok-sdk/client#inspectDaemonStores",
+        "export:@byok-sdk/core#LocalStoreId",
+        "export:@byok-sdk/core#StoreCompatibility",
+        "export:@byok-sdk/core#StoreCompatibilityVerdict",
+        "export:@byok-sdk/keys#inspectProviderProfileStore",
+        "export:@byok-sdk/server#inspectSqliteStore"
       ]
     },
     {
@@ -519,6 +534,11 @@
       "entry": "host-layout-helper"
     },
     {
+      "item": "export:@byok-sdk/client#InspectDaemonStoresInput",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
       "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
       "change": "changed",
       "entry": "device-store-default-dir-removed"
@@ -532,6 +552,11 @@
       "item": "export:@byok-sdk/client#checkDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#inspectDaemonStores",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
     },
     {
       "item": "export:@byok-sdk/client#resolveHostLayout",
@@ -557,6 +582,26 @@
       "item": "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
       "change": "added",
       "entry": "capability-ports-two-way"
+    },
+    {
+      "item": "export:@byok-sdk/core#LocalStoreId",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/core#StoreCompatibility",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/core#StoreCompatibilityVerdict",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/keys#inspectProviderProfileStore",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
     },
     {
       "item": "export:@byok-sdk/protocol#TASK_FAIL_REASON_MAX_BYTES",
@@ -587,6 +632,11 @@
       "item": "export:@byok-sdk/server#SqliteSchemaErrorCode",
       "change": "changed",
       "entry": "capability-ports-two-way"
+    },
+    {
+      "item": "export:@byok-sdk/server#inspectSqliteStore",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
     }
   ]
 }

@@ -4,6 +4,44 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { ensureSecureDir } from '../../util/secure-dir';
 
+/** `<storeDir>/durable-replicas`: the replica root the daemon hands pi-durable. */
+export const DURABLE_REPLICA_DIRNAME = 'durable-replicas';
+const REPLICA_FILE_PREFIX = 'durable-';
+const REPLICA_FILE_SUFFIX = '.sqlite';
+const LOCK_OWNER_SCHEMA = 'owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL)';
+
+/** The lock database `acquireReplicaLock` holds for the replica database `file`. */
+export function replicaLockPath(file: string): string {
+  return `${file}.lock.sqlite`;
+}
+
+/**
+ * Every candidate `admitReplica` can produce. Lock names overlap valid task
+ * names, so only the database contents can identify a writer lock.
+ */
+export function durableReplicaFiles(names: readonly string[]): string[] {
+  return names.filter((name) => name.startsWith(REPLICA_FILE_PREFIX) && name.endsWith(REPLICA_FILE_SUFFIX));
+}
+
+/** Inspect an existing private copy and close its read-only handle even on refusal. */
+export function inspectReplicaDatabase<T>(file: string, inspect: (db: import('node:sqlite').DatabaseSync) => T): T {
+  const { DatabaseSync } = loadSqliteModule();
+  const db = new DatabaseSync(file, { readOnly: true });
+  try { return inspect(db); } finally { db.close(); }
+}
+
+/** Inspect a private copy; database errors must reach the compatibility refusal. */
+export function isReplicaWriterLock(file: string): boolean {
+  return inspectReplicaDatabase(file, (db) => {
+    const objects = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'").all();
+    const owner = objects[0];
+    if (objects.length !== 1 || owner?.type !== 'table' || owner.name !== 'owner'
+      || owner.tbl_name !== 'owner' || owner.sql !== `CREATE TABLE ${LOCK_OWNER_SCHEMA}`) return false;
+    const rows = db.prepare('SELECT slot, lease_id FROM owner').all();
+    return rows.length === 1 && rows[0]?.slot === 1 && typeof rows[0].lease_id === 'string' && rows[0].lease_id.length > 0;
+  });
+}
+
 export interface DurableReplicaBinding {
   readonly agentRef: Readonly<{ tenantId: string; agentId: string; profileRevision: string }>;
   readonly taskId: string;
@@ -40,12 +78,12 @@ export async function admitReplica(root: string, binding: DurableReplicaBinding)
   // taskId remains the request identity; percent encoding is only a filename representation.
   const name = encodeURIComponent(binding.taskId);
   if (Buffer.byteLength(name) > 180) throw new Error('durable task id exceeds filename budget');
-  return path.join(directory, `durable-${name}.sqlite`);
+  return path.join(directory, `${REPLICA_FILE_PREFIX}${name}${REPLICA_FILE_SUFFIX}`);
 }
 
 /** SQLite locking_mode=EXCLUSIVE retains the OS lock until close, including after commit. */
 export async function acquireReplicaLock(file: string, leaseId: string): Promise<{ release(): void }> {
-  const lockPath = `${file}.lock.sqlite`;
+  const lockPath = replicaLockPath(file);
   try {
     const stat = await fs.lstat(lockPath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('invalid durable replica lock file');
@@ -53,7 +91,7 @@ export async function acquireReplicaLock(file: string, leaseId: string): Promise
   const { DatabaseSync } = loadSqliteModule();
   const db = new DatabaseSync(lockPath);
   try {
-    db.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE IF NOT EXISTS owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL); BEGIN EXCLUSIVE;');
+    db.exec(`PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE IF NOT EXISTS ${LOCK_OWNER_SCHEMA}; BEGIN EXCLUSIVE;`);
     db.prepare('INSERT OR REPLACE INTO owner(slot,lease_id) VALUES(1,?)').run(leaseId);
     db.exec('COMMIT');
   } catch { db.close(); throw new Error('durable replica is locked or invalid'); }

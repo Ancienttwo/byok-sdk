@@ -106,6 +106,7 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
+export { inspectSqliteStore } from './store-compatibility';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 /** Page size `tasks.list()` uses when the caller names none. */
@@ -785,6 +786,23 @@ export declare function openSqliteDatabase(path: string, options?: DatabaseSyncO
  * treated as an error. No-op for `:memory:`.
  */
 export declare function secureSqliteFilePermissions(dbPath: string): void;
+// ==== @byok-sdk/server dist/store-compatibility.d.ts ====
+import type { StoreCompatibility } from '@byok-sdk/core';
+/**
+ * Store compatibility precheck for the embedded server SQLite store (#1102).
+ *
+ * Reports what this build does when `createByokServer({ storage: { kind:
+ * 'sqlite', path } })` opens `path`. The files are copied to a private
+ * temporary directory and the server's own open runs on the copy, so the
+ * schema rules stay in one place and the original files are only read. Stop
+ * the server that owns the file first: a file that changes while it is copied
+ * fails the check rather than yielding a verdict about a torn copy.
+ *
+ * An older `schema_version` is `new-path-repair` (start on a new path and pair
+ * the daemons again). A newer version, a file without BYOK metadata, a damaged
+ * file, or data this build refuses to adopt is `rejected`.
+ */
+export declare function inspectSqliteStore(path: string): Promise<StoreCompatibility>;
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
 import { type ByokCloud, type SteerRejectionCode, type TenantId } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
