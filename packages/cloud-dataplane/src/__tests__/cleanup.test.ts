@@ -233,7 +233,7 @@ async function maintenanceCloud(pool: ByokPool, clock: Clock, storage: R2ObjectM
   return createByokCloud({
     mailboxWake: createInProcessMailboxWake(),
     core: { ...core, objects: new PostgresObjectStore(pool, clock, storage) },
-    cloud: await createPostgresCloudStores({ pool, clock, crypto: createWebCrypto(), objectStorage }),
+    cloud: await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto: createWebCrypto(), objectStorage }),
     clock, crypto: createWebCrypto(), tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock),
     capabilities: { schema: 'byok-capabilities-v1', version: 1, capabilities: [] },
   });

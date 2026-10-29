@@ -7,7 +7,7 @@ import {
 } from '@byok-sdk/protocol';
 import { base64UrlDecode } from '../crypto/web-crypto';
 import { isCloudError } from '../errors';
-import { authenticateDevice, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 import type { TenantStores } from '../tenant-stores';
 
 /**
@@ -28,8 +28,8 @@ export interface AgentMemoryProjectionRouteDeps extends DeviceRouteDeps {
 
 export function agentMemoryProjectionHandler(deps: AgentMemoryProjectionRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
 
     const body = await readBoundedJsonBody(c, DEFAULT_MAX_AGENT_MEMORY_PROJECTION_REQUEST_BYTES);
     if (body.tooLarge) return c.json({ error: 'Agent-memory projection request body too large' }, 413);

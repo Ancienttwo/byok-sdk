@@ -50,9 +50,9 @@ describe('the inbound gate', () => {
   it('step 0: a rate-limited envelope never reaches the type check', async () => {
     const seen: string[] = [];
     const limiter: InboundRateLimiter = {
-      async consume(_tenant, device) {
-        seen.push(device);
-        return false;
+      async consume(_tenant, device, unit) {
+        seen.push(`${unit}:${device}`);
+        return { allowed: false, retryAfterMs: 1_000 };
       },
     };
     const limited = createHarness();
@@ -66,7 +66,7 @@ describe('the inbound gate', () => {
     // and the answer must be `rate_limited`, not `rejected`.
     const wrongDirection = createEnvelope('task.approve', { approvalId: 'approval-1' }, { taskId: 'task-1', seq: 1 });
     expect(await handleInboundEnvelope(limitedStores, device.deviceId, wrongDirection).then((result) => result.outcome)).toBe('rate_limited');
-    expect(seen).toEqual([device.deviceId]);
+    expect(seen).toEqual([`envelope:${device.deviceId}`]);
   });
 
   it('step 1: rejects every server -> daemon type arriving inbound', async () => {

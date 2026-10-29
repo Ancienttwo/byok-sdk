@@ -737,6 +737,13 @@ export interface BlobContentProxy {
   verifySignedUrl(blobId: string, action: 'put' | 'get', sig: string, exp: number): Promise<boolean>;
   /** Authoritative declared size for a signed PUT; no byte buffering precedes this lookup. */
   expectedUploadBytes(blobId: string): Promise<bigint | undefined>;
+  /**
+   * Claim the one upload a blob may have in flight. `undefined` means another
+   * upload of this blob is in flight (409 `upload_in_progress`); otherwise the
+   * returned release must run once the request ends, however it ends. Claims
+   * are process memory, never persisted, so a crash cannot leave one stuck.
+   */
+  claimUpload(blobId: string): Promise<(() => void) | undefined>;
   writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult>;
   /** `undefined` = no such blob (404); a `{ok:false}` result = the blob exists but its bytes could not be proxied (502, distinguished by {@link BlobReadErrorCode}). */
   readContent(blobId: string): Promise<BlobReadResult | undefined>;
@@ -747,14 +754,27 @@ export interface BlobContentProxy {
 // ---------------------------------------------------------------------------
 
 /**
- * Step 0 of the inbound gate. S3a ships an allow-all reference (a hosted
- * deployment's real limiter is edge/infra work, not handler work) — what
- * matters now is that the SEAM sits at gate position 0, before the type-allow
- * check, so a flood of garbage-typed envelopes costs the same budget as a
- * flood of well-formed ones once a real limiter is plugged in.
+ * What one debit spends: an inbound envelope at step 0 of the inbound gate
+ * (before the type-allow check, so a flood of garbage-typed envelopes costs
+ * the same as a flood of well-formed ones), or one authenticated device-class
+ * request at route admission. `POST /byok/messages` spends only its envelopes.
+ */
+export type RateLimitUnit = 'envelope' | 'request';
+
+/** A refusal always says how long until the device's budget admits it again. */
+export type RateLimitDecision =
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly retryAfterMs: number };
+
+/**
+ * The one per-device admission budget. Both units debit the same budget; the
+ * unit lets a composition count envelopes and requests separately. A refusal
+ * answers 429 with `Retry-After` derived from `retryAfterMs`. The in-memory
+ * reference is allow-all; the Postgres composition and the embedded server
+ * compose token buckets.
  */
 export interface InboundRateLimiter {
-  consume(tenant: TenantId, deviceId: string): Promise<boolean>;
+  consume(tenant: TenantId, deviceId: string, unit: RateLimitUnit): Promise<RateLimitDecision>;
 }
 
 // ---------------------------------------------------------------------------

@@ -152,7 +152,7 @@ describe('observer.onInboundRefused', () => {
 
     expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('accepted');
     expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('duplicate');
-    const limiter: InboundRateLimiter = { async consume() { return false; } };
+    const limiter: InboundRateLimiter = { async consume() { return { allowed: false, retryAfterMs: 1_000 }; } };
     const limited = tenantStoresFor(
       { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId },
       { core: harness.core, mailboxWake: harness.mailboxWake, cloud: { ...harness.stores, rateLimiter: limiter } },

@@ -120,7 +120,7 @@ describe('observer.onInboundCommitted', () => {
   it('stays silent for a rate-limited envelope', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const limiter: InboundRateLimiter = { async consume() { return false; } };
+    const limiter: InboundRateLimiter = { async consume() { return { allowed: false, retryAfterMs: 1_000 }; } };
     const limited = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       mailboxWake: harness.mailboxWake, cloud: { ...harness.stores, rateLimiter: limiter },

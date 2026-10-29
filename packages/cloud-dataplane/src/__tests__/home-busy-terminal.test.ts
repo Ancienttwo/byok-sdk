@@ -30,7 +30,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres home-busy terminal — ${SKIP_REASON}`
         const capabilities = { ...declared, capabilities: declared.capabilities.filter(cap => cap !== 'blobs.contentproxy') };
         async function open(pool: ByokPool) {
           const core = createPostgresCoreStores({ pool, clock, objectStorage });
-          const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage });
+          const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage });
           const mailboxWake = createInProcessMailboxWake();
           const cloud = createByokCloud({
             core, cloud: stores, mailboxWake, clock, crypto,

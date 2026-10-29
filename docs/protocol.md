@@ -2508,6 +2508,12 @@ whether it also happens to carry a valid bearer header — the two auth models
 are not interchangeable, and a valid access token is neither necessary nor
 sufficient here.
 
+A blob accepts one upload at a time: while one `PUT` of a blob is in flight, a
+second answers `409 { "error": "upload_in_progress" }` without reading its
+body; retry after the first finishes. A body larger than the declared size
+answers 413. The server buffers only the bytes that arrive, never the
+declared size up front.
+
 `contentHash` enables content-addressed dedup on the server side (out of
 scope for this doc — server implementation detail) and is pinned to a single
 canonical format: **`sha256:<64 lowercase hex characters>`** — a SHA-256

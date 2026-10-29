@@ -112,7 +112,7 @@ describe('store compositions refuse a pool createByokPool did not build (#1040)'
   };
   const entries: Record<string, (pool: ByokPool) => unknown> = {
     createPostgresCoreStores: (pool) => createPostgresCoreStores({ pool, clock, objectStorage }),
-    createPostgresCloudStores: (pool) => createPostgresCloudStores({ pool, clock, crypto: createWebCrypto(), objectStorage }),
+    createPostgresCloudStores: (pool) => createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto: createWebCrypto(), objectStorage }),
     PostgresTruthCommitter: (pool) => new PostgresTruthCommitter({ pool } as PostgresTruthCommitterOptions),
     PostgresCloudCleanup: (pool) => new PostgresCloudCleanup({ pool, clock, objectStorage: new R2ObjectMaintenanceStore(objectStorage) }),
     PostgresTenantErasure: (pool) => new PostgresTenantErasure({ pool, clock, objectStorage: new R2ObjectMaintenanceStore(objectStorage) }),

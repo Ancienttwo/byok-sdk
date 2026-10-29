@@ -3,7 +3,7 @@ export { PostgresAgentMessageDraftStore } from './agent-message-draft';
 /**
  * The Postgres composition of the cloud-local ports.
  *
- * Nine durable stores, one object-storage blob store, one in-memory limiter:
+ * Nine durable stores, one object-storage blob store, one in-process limiter:
  *
  * - Six durable ones have rows in `deploy/sql/0001_cloud_local.sql`; S6's
  *   proof receipt authority is the seventh, in `0004_device_proof_truth.sql`;
@@ -16,12 +16,12 @@ export { PostgresAgentMessageDraftStore } from './agent-message-draft';
  *   `BlobContentProxy` — a device uploading straight to R2 is what having no
  *   byte-proxy path means, and saying so by absence is what keeps the two
  *   `/content` routes from mounting on a deployment that cannot serve them.
- * - `rateLimiter` gets the allow-all reference and NO table, by design
- *   (docs/researches/s4a-dataplane-design.md §5). Persisting an allow-all would
- *   create a table that is always empty, and a real limiter is edge/infra work
- *   whose implementation would not be a per-request Postgres write either.
+ * - `rateLimiter` is a per-process token bucket over every inbound envelope
+ *   and admitted device route request, configured by the required `rateLimit`
+ *   option, with NO table: a per-request Postgres write would cost more than
+ *   the flood it refuses (`rate-limiter.ts`).
  */
-import { AllowAllRateLimiter, type CloudStores } from '@byok-sdk/cloud';
+import type { CloudStores } from '@byok-sdk/cloud';
 import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { Clock } from '@byok-sdk/core';
 import type { ByokPool } from '../pool';
@@ -40,6 +40,7 @@ import { PostgresActivityStore } from './activity';
 import { PostgresApprovalTimelineStore } from './approval-timeline';
 import { PostgresAgentEgressStore } from './agent-egress';
 import { assertPendingMailboxProtocol } from './mailbox-protocol';
+import { TokenBucketRateLimiter, type PostgresRateLimitOptions } from './rate-limiter';
 
 export { PostgresDeviceDirectory } from './devices';
 export { PostgresInboundDedupStore } from './dedup';
@@ -52,6 +53,7 @@ export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';
 export { PostgresApprovalTimelineStore } from './approval-timeline';
 export { PostgresAgentEgressStore } from './agent-egress';
+export type { PostgresRateLimitOptions } from './rate-limiter';
 export {
   POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
   PostgresMailboxProtocolUnsupportedError,
@@ -107,6 +109,12 @@ export interface PostgresCloudStoreOptions {
    * conformance suite certifies compositions whole, never in parts.
    */
   readonly objectStorage: PostgresObjectStorageOptions;
+  /**
+   * Each device's admission budget, per process: every inbound envelope and
+   * every authenticated device route request except `POST /byok/messages`
+   * spends one token. Required — there is no unlimited composition.
+   */
+  readonly rateLimit: PostgresRateLimitOptions;
 }
 
 /**
@@ -157,6 +165,6 @@ export async function createPostgresCloudStores(
       ...options.objectStorage,
       objects: new PostgresObjectStore(pool, clock, new R2ObjectMaintenanceStore(options.objectStorage)),
     }),
-    rateLimiter: new AllowAllRateLimiter(),
+    rateLimiter: new TokenBucketRateLimiter(options.rateLimit, clock),
   };
 }

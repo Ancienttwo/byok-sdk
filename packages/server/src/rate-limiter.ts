@@ -1,9 +1,10 @@
 /**
- * M4 Phase 4 (part A): per-key token bucket that rate-limits inbound
- * daemon->server envelopes per device. `stores.ts` composes it into the cloud
- * kernel, which debits it at step 0 of the inbound gate.
- * Framework-agnostic on purpose (no kernel/transport types here) so it stays
- * unit-testable in isolation, mirroring `event-queue.ts`'s own
+ * M4 Phase 4 (part A): per-key token bucket that rate-limits each device's
+ * inbound envelopes and authenticated route requests (one shared budget).
+ * `stores.ts` composes it into the cloud kernel, which debits it at step 0 of
+ * the inbound gate and at device route admission. The bucket itself is
+ * framework-agnostic on purpose (only the adapter below names the cloud port)
+ * so it stays unit-testable in isolation, mirroring `event-queue.ts`'s own
  * transport-agnostic split.
  *
  * Token bucket, not a fixed window: `burst` tokens are available immediately
@@ -34,6 +35,8 @@
  * should be a construction-time error, not a runtime surprise discovered
  * once real traffic starts getting rejected.
  */
+
+import type { InboundRateLimiter, RateLimitDecision, RateLimitUnit } from '@byok-sdk/cloud';
 
 export interface RateLimiterOptions {
   /** Sustained refill rate, tokens (i.e. messages) per second. Must be a finite number > 0. Default 50. */
@@ -154,6 +157,17 @@ export class RateLimiter {
   }
 
   /**
+   * Milliseconds until `key`'s bucket next holds a whole token, as of its last
+   * refill — the `Retry-After` of a refusal `consume()` just answered. 0 for a
+   * key with a token available or no bucket at all.
+   */
+  retryAfterMs(key: string): number {
+    const bucket = this.buckets.get(key);
+    if (bucket === undefined || bucket.tokens >= 1) return 0;
+    return Math.ceil(((1 - bucket.tokens) / this.messagesPerSecond) * 1000);
+  }
+
+  /**
    * Every `EVICTION_SWEEP_EVERY_N_CALLS` calls to `consume()`, drops every
    * bucket idle for at least `idleEvictionThresholdMs` (see that field's doc
    * comment for why this is safe). Without this, `buckets` would hold one
@@ -222,11 +236,12 @@ export class RateLimiter {
  * package composes the kernel with.
  *
  * Position matters and is not this adapter's choice: the kernel debits one
- * token at step 0 of its inbound gate, BEFORE the type-allow check, for every
- * envelope that reaches it. That is exactly the choke point the old
- * reference server's `ConnectionHub.handleInbound` occupied, which is why both
- * `envelopesIn` (one per envelope, every outcome) and `rateLimitEvents` (one
- * per REJECTED envelope, never coalesced) are counted here and nowhere else.
+ * `envelope` token at step 0 of its inbound gate, BEFORE the type-allow check,
+ * for every envelope that reaches it, and one `request` token when it admits
+ * an authenticated device route other than `POST /byok/messages`. Both spend
+ * the same bucket. `envelopesIn` (one per envelope, every outcome) and
+ * `rateLimitEvents` (one per REFUSED debit of either unit, never coalesced)
+ * are counted here and nowhere else.
  *
  * The `device.rate_limited` embedder event is the one thing that IS coalesced,
  * matching the pre-fold rule: an episode fires exactly one event, and only a
@@ -235,15 +250,15 @@ export class RateLimiter {
  * again produces a second, distinct event.
  */
 export interface InboundRateLimiterCounters {
-  /** Every envelope handed to the kernel's inbound gate, whatever the gate then decides. */
+  /** Every envelope handed to the kernel's inbound gate, whatever the gate then decides. Device route requests are not envelopes and are not counted. */
   envelopesIn: number;
-  /** Envelopes the bucket refused. Per envelope — see the episode rule above. */
+  /** Debits the bucket refused: per envelope and per device route request — see the episode rule above. */
   rateLimitEvents: number;
 }
 
 export interface CountingInboundRateLimiter {
   /** The port `CloudStores.rateLimiter` is composed with. */
-  readonly limiter: { consume(tenant: string, deviceId: string): Promise<boolean> };
+  readonly limiter: InboundRateLimiter;
   readonly counters: InboundRateLimiterCounters;
 }
 
@@ -265,19 +280,19 @@ export function createCountingInboundRateLimiter(
   return {
     counters,
     limiter: {
-      async consume(tenant: string, deviceId: string): Promise<boolean> {
-        counters.envelopesIn += 1;
+      async consume(tenant: string, deviceId: string, unit: RateLimitUnit): Promise<RateLimitDecision> {
+        if (unit === 'envelope') counters.envelopesIn += 1;
         const key = `${tenant}:${deviceId}`;
         if (limiter.consume(key)) {
           episodes.delete(key);
-          return true;
+          return { allowed: true };
         }
         counters.rateLimitEvents += 1;
         if (!episodes.has(key)) {
           episodes.add(key);
           onRateLimited(deviceId, new Date().toISOString());
         }
-        return false;
+        return { allowed: false, retryAfterMs: limiter.retryAfterMs(key) };
       },
     },
   };

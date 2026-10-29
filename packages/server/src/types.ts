@@ -100,20 +100,22 @@ export interface CreateByokServerOptions {
    */
   taskEventRetentionMs?: number;
   /**
-   * M4 Phase 4 (part A): per-device inbound-envelope token bucket, enforced at
-   * step 0 of the cloud kernel's inbound gate (`@byok-sdk/cloud`'s
-   * `inbound.ts`) — the single choke point every daemon -> server envelope
-   * passes through, debited BEFORE the type-allow check so a flood of
-   * garbage-typed envelopes costs the same budget as a flood of well-formed
-   * ones. Defaults: 50 msg/s sustained, burst 100 (see `rate-limiter.ts`).
+   * M4 Phase 4 (part A): the one per-device token bucket. The cloud kernel
+   * debits one token per inbound envelope at step 0 of its inbound gate
+   * (`@byok-sdk/cloud`'s `inbound.ts`), BEFORE the type-allow check so a flood
+   * of garbage-typed envelopes costs the same budget as a flood of well-formed
+   * ones, and one token per authenticated device route request other than
+   * `POST /byok/messages` (each `GET /byok/events` poll, presence, board, blob
+   * grant, ...). Defaults: 50 tokens/s sustained, burst 100 (see `rate-limiter.ts`).
    *
    * Exceeding it never drops silently: the occurrence counts in
-   * {@link HubStats.rateLimitEvents} (per REFUSED envelope), and the first
+   * {@link HubStats.rateLimitEvents} (per REFUSED debit), and the first
    * refusal of an episode emits a `device.rate_limited`
    * {@link ByokServerEvent} — coalesced per episode, re-armed only by a later
    * successful consume by the same device. Enforcement on the wire is a
-   * whole-request `429` from `POST /byok/messages`; `GET /byok/events` is not
-   * on this bucket, and neither are the blob upload/download routes.
+   * whole-request `429` with `Retry-After` (seconds until the bucket holds a
+   * token again). The presigned blob content routes carry no device principal
+   * and are not on this bucket.
    */
   rateLimit?: RateLimiterOptions;
   /**
@@ -593,7 +595,7 @@ export interface HubStats {
   envelopesIn: number;
   /** Inbound dedup hits since this server instance was created; a no-op wire-level success. Resets on SQLite reopen. */
   dedupDrops: number;
-  /** Rate-limited envelopes since this server instance was created — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
+  /** Refused rate-limit debits since this server instance was created: rate-limited envelopes plus rate-limited device route requests — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
   rateLimitEvents: number;
   /** Every closed refusal reason, zero-filled; counted since this server instance was created. Rate limiting is separate. */
   inboundRefusals: Record<InboundRefusalReason, number>;

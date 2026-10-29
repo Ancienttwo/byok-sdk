@@ -50,7 +50,7 @@ async function redact(env: Env, body: { readonly tenant: string; readonly taskId
     const cloud = createByokCloud({
       mailboxWake: createInProcessMailboxWake({ fallbackMs: 1_000 }),
       core: createPostgresCoreStores({ pool, clock, objectStorage }),
-      cloud: await createPostgresCloudStores({ pool, clock, crypto, objectStorage }),
+      cloud: await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage }),
       crypto,
       // No route here verifies a token; a fixed key is enough.
       tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(1), clock),

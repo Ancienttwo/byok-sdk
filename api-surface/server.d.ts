@@ -365,11 +365,12 @@ export interface LoopbackListener {
 export declare function listenLoopback(options: LoopbackListenerOptions): Promise<LoopbackListener>;
 // ==== @byok-sdk/server dist/rate-limiter.d.ts ====
 /**
- * M4 Phase 4 (part A): per-key token bucket that rate-limits inbound
- * daemon->server envelopes per device. `stores.ts` composes it into the cloud
- * kernel, which debits it at step 0 of the inbound gate.
- * Framework-agnostic on purpose (no kernel/transport types here) so it stays
- * unit-testable in isolation, mirroring `event-queue.ts`'s own
+ * M4 Phase 4 (part A): per-key token bucket that rate-limits each device's
+ * inbound envelopes and authenticated route requests (one shared budget).
+ * `stores.ts` composes it into the cloud kernel, which debits it at step 0 of
+ * the inbound gate and at device route admission. The bucket itself is
+ * framework-agnostic on purpose (only the adapter below names the cloud port)
+ * so it stays unit-testable in isolation, mirroring `event-queue.ts`'s own
  * transport-agnostic split.
  *
  * Token bucket, not a fixed window: `burst` tokens are available immediately
@@ -400,6 +401,7 @@ export declare function listenLoopback(options: LoopbackListenerOptions): Promis
  * should be a construction-time error, not a runtime surprise discovered
  * once real traffic starts getting rejected.
  */
+import type { InboundRateLimiter } from '@byok-sdk/cloud';
 export interface RateLimiterOptions {
     /** Sustained refill rate, tokens (i.e. messages) per second. Must be a finite number > 0. Default 50. */
     messagesPerSecond?: number;
@@ -436,6 +438,12 @@ export declare class RateLimiter {
      * over budget right now.
      */
     consume(key: string): boolean;
+    /**
+     * Milliseconds until `key`'s bucket next holds a whole token, as of its last
+     * refill — the `Retry-After` of a refusal `consume()` just answered. 0 for a
+     * key with a token available or no bucket at all.
+     */
+    retryAfterMs(key: string): number;
     /**
      * Every `EVICTION_SWEEP_EVERY_N_CALLS` calls to `consume()`, drops every
      * bucket idle for at least `idleEvictionThresholdMs` (see that field's doc
@@ -483,11 +491,12 @@ export declare class RateLimiter {
  * package composes the kernel with.
  *
  * Position matters and is not this adapter's choice: the kernel debits one
- * token at step 0 of its inbound gate, BEFORE the type-allow check, for every
- * envelope that reaches it. That is exactly the choke point the old
- * reference server's `ConnectionHub.handleInbound` occupied, which is why both
- * `envelopesIn` (one per envelope, every outcome) and `rateLimitEvents` (one
- * per REJECTED envelope, never coalesced) are counted here and nowhere else.
+ * `envelope` token at step 0 of its inbound gate, BEFORE the type-allow check,
+ * for every envelope that reaches it, and one `request` token when it admits
+ * an authenticated device route other than `POST /byok/messages`. Both spend
+ * the same bucket. `envelopesIn` (one per envelope, every outcome) and
+ * `rateLimitEvents` (one per REFUSED debit of either unit, never coalesced)
+ * are counted here and nowhere else.
  *
  * The `device.rate_limited` embedder event is the one thing that IS coalesced,
  * matching the pre-fold rule: an episode fires exactly one event, and only a
@@ -496,16 +505,14 @@ export declare class RateLimiter {
  * again produces a second, distinct event.
  */
 export interface InboundRateLimiterCounters {
-    /** Every envelope handed to the kernel's inbound gate, whatever the gate then decides. */
+    /** Every envelope handed to the kernel's inbound gate, whatever the gate then decides. Device route requests are not envelopes and are not counted. */
     envelopesIn: number;
-    /** Envelopes the bucket refused. Per envelope — see the episode rule above. */
+    /** Debits the bucket refused: per envelope and per device route request — see the episode rule above. */
     rateLimitEvents: number;
 }
 export interface CountingInboundRateLimiter {
     /** The port `CloudStores.rateLimiter` is composed with. */
-    readonly limiter: {
-        consume(tenant: string, deviceId: string): Promise<boolean>;
-    };
+    readonly limiter: InboundRateLimiter;
     readonly counters: InboundRateLimiterCounters;
 }
 /**
@@ -991,20 +998,22 @@ export interface CreateByokServerOptions {
      */
     taskEventRetentionMs?: number;
     /**
-     * M4 Phase 4 (part A): per-device inbound-envelope token bucket, enforced at
-     * step 0 of the cloud kernel's inbound gate (`@byok-sdk/cloud`'s
-     * `inbound.ts`) — the single choke point every daemon -> server envelope
-     * passes through, debited BEFORE the type-allow check so a flood of
-     * garbage-typed envelopes costs the same budget as a flood of well-formed
-     * ones. Defaults: 50 msg/s sustained, burst 100 (see `rate-limiter.ts`).
+     * M4 Phase 4 (part A): the one per-device token bucket. The cloud kernel
+     * debits one token per inbound envelope at step 0 of its inbound gate
+     * (`@byok-sdk/cloud`'s `inbound.ts`), BEFORE the type-allow check so a flood
+     * of garbage-typed envelopes costs the same budget as a flood of well-formed
+     * ones, and one token per authenticated device route request other than
+     * `POST /byok/messages` (each `GET /byok/events` poll, presence, board, blob
+     * grant, ...). Defaults: 50 tokens/s sustained, burst 100 (see `rate-limiter.ts`).
      *
      * Exceeding it never drops silently: the occurrence counts in
-     * {@link HubStats.rateLimitEvents} (per REFUSED envelope), and the first
+     * {@link HubStats.rateLimitEvents} (per REFUSED debit), and the first
      * refusal of an episode emits a `device.rate_limited`
      * {@link ByokServerEvent} — coalesced per episode, re-armed only by a later
      * successful consume by the same device. Enforcement on the wire is a
-     * whole-request `429` from `POST /byok/messages`; `GET /byok/events` is not
-     * on this bucket, and neither are the blob upload/download routes.
+     * whole-request `429` with `Retry-After` (seconds until the bucket holds a
+     * token again). The presigned blob content routes carry no device principal
+     * and are not on this bucket.
      */
     rateLimit?: RateLimiterOptions;
     /**
@@ -1493,7 +1502,7 @@ export interface HubStats {
     envelopesIn: number;
     /** Inbound dedup hits since this server instance was created; a no-op wire-level success. Resets on SQLite reopen. */
     dedupDrops: number;
-    /** Rate-limited envelopes since this server instance was created — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
+    /** Refused rate-limit debits since this server instance was created: rate-limited envelopes plus rate-limited device route requests — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
     rateLimitEvents: number;
     /** Every closed refusal reason, zero-filled; counted since this server instance was created. Rate limiting is separate. */
     inboundRefusals: Record<InboundRefusalReason, number>;

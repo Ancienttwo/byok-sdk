@@ -7,10 +7,10 @@
  * not move.
  */
 import type { TenantId } from '@byok-sdk/core';
-import type { InboundRateLimiter } from '../ports';
+import type { InboundRateLimiter, RateLimitDecision, RateLimitUnit } from '../ports';
 
 export class AllowAllRateLimiter implements InboundRateLimiter {
-  async consume(_tenant: TenantId, _deviceId: string): Promise<boolean> {
-    return true;
+  async consume(_tenant: TenantId, _deviceId: string, _unit: RateLimitUnit): Promise<RateLimitDecision> {
+    return { allowed: true };
   }
 }

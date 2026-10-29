@@ -1,8 +1,9 @@
 /**
- * The two things every device-facing handler starts from: a tolerant JSON body
- * read, and the bearer -> principal -> tenant-closed-facade step.
+ * The two things every device-facing handler starts from: a JSON body read
+ * under that route's own byte ceiling, and admission — the bearer -> principal
+ * -> tenant-closed-facade step plus one debit of the device's rate budget.
  *
- * Once {@link authenticateDevice} has answered, a handler holds a
+ * Once {@link admitDeviceRequest} has answered, a handler holds a
  * `TenantStores` and a `DevicePrincipal` and never sees a `TenantId` again.
  */
 import type { Context } from 'hono';
@@ -13,14 +14,6 @@ import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../ten
 /** Every error response on this surface is `{ error }` — the same shape the reference server uses. */
 export interface ErrorBody {
   readonly error: string;
-}
-
-export async function readJsonBody(c: Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    return undefined;
-  }
 }
 
 export interface BoundedJsonBodyResult {
@@ -146,6 +139,36 @@ export interface AuthenticatedDeviceContext {
 }
 
 /**
+ * Admission for every device-class route except `POST /byok/messages`:
+ * authenticate the bearer, then spend one `request` unit of the device's rate
+ * budget. Answers the refusal itself — 401 for any credential failure (see
+ * {@link authenticateDevice}), 429 with `Retry-After` when the budget is spent.
+ */
+export async function admitDeviceRequest(
+  c: Context,
+  deps: DeviceRouteDeps,
+): Promise<AuthenticatedDeviceContext | Response> {
+  const authenticated = await authenticateDevice(c, deps);
+  if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+  const admission = await authenticated.stores.rateLimiter.consume(authenticated.device.deviceId, 'request');
+  if (!admission.allowed) return rateLimited(c, admission.retryAfterMs);
+  return authenticated;
+}
+
+/** A spent rate budget: 429 with `Retry-After` rounded up to whole seconds (at least 1). */
+export function rateLimited(c: Context, retryAfterMs: number): Response {
+  return c.json({ error: 'rate limit exceeded' }, 429, {
+    'retry-after': String(Math.max(1, Math.ceil(retryAfterMs / 1000))),
+  });
+}
+
+/**
+ * Authentication alone, with no rate debit. Only two callers may skip the
+ * debit: `POST /byok/messages`, whose envelopes each spend an `envelope` unit
+ * at the inbound gate, and re-checks inside a request that was already
+ * admitted (the board stream's pump). Every other device route admits through
+ * {@link admitDeviceRequest}.
+ *
  * `undefined` means "answer 401" — and it means that for a missing header, a
  * forged token, an expired token, a revoked device, a product mismatch, and a
  * token whose tenant does not own the device, indistinguishably.

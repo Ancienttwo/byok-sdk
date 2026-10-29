@@ -46,15 +46,15 @@ describe('M4 Phase 4: rate-limit episode recovery', () => {
   });
 
   it('a NEW over-budget episode (after the device genuinely recovers under budget in between) gets its own fresh device.rate_limited event, not coalesced with the earlier one', async () => {
-    // 1 token/s with a burst of 2: the fixture's own `conn.hello` spends one,
-    // the first send below spends the other, and everything after that is over
-    // budget until the bucket refills — no clock stubbing needed, and the
+    // 1 token/s with a burst of 3: the fixture's own `conn.hello` and presence
+    // publish spend two, the first send below spends the third, and everything
+    // after that is over budget until the bucket refills — no clock stubbing needed, and the
     // recovery below is driven by a real (bounded) admission poll rather than
     // a fixed sleep.
     const instance = createByokServer({
       productId: PRODUCT_ID,
       longPollHoldMs: SHORT_HOLD_MS,
-      rateLimit: { messagesPerSecond: 1, burst: 2 },
+      rateLimit: { messagesPerSecond: 1, burst: 3 },
     });
     byok = instance;
     const started = await startServer(instance);

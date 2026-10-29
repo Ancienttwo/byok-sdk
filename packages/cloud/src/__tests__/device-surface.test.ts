@@ -95,7 +95,7 @@ describe('POST /byok/messages', () => {
     const limiter: InboundRateLimiter = {
       async consume() {
         budget -= 1;
-        return budget >= 0;
+        return budget >= 0 ? { allowed: true } : { allowed: false, retryAfterMs: 1_500 };
       },
     };
     const harness = createHarness();
@@ -111,6 +111,7 @@ describe('POST /byok/messages', () => {
     ]);
 
     expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBe('2');
     expect(await response.json()).toEqual({ error: 'rate limit exceeded' });
     // The envelope processed before the limit hit still took effect — there
     // are no rollback semantics, and every task.* type is idempotent.

@@ -326,7 +326,7 @@ export {};
 export { createByokPool } from './pool';
 export type { ByokPool, ByokPoolOptions } from './pool';
 export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index';
-export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresAgentMemoryProjectionStoreOptions, PostgresTaskRedactionStoreOptions, } from './stores/index';
+export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresRateLimitOptions, PostgresAgentMemoryProjectionStoreOptions, PostgresTaskRedactionStoreOptions, } from './stores/index';
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_PRESIGN_TTL_SECONDS, DEFAULT_RETRY_DELAY_MS, MAX_PRESIGN_TTL_SECONDS, MIN_PRESIGN_TTL_SECONDS, ObjectStoreRequestError, R2_BLOB_ERROR_CODES, R2BlobStoreError, R2CloudBlobStore, R2ObjectMaintenanceStore, } from './stores/index';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index';
 export type { R2DeleteResult, R2ListedObject, R2ObjectMaintenance, R2ObjectMaintenanceOptions, R2ObjectPage, } from './stores/index';
@@ -929,7 +929,7 @@ export { PostgresAgentMessageDraftStore } from './agent-message-draft';
 /**
  * The Postgres composition of the cloud-local ports.
  *
- * Nine durable stores, one object-storage blob store, one in-memory limiter:
+ * Nine durable stores, one object-storage blob store, one in-process limiter:
  *
  * - Six durable ones have rows in `deploy/sql/0001_cloud_local.sql`; S6's
  *   proof receipt authority is the seventh, in `0004_device_proof_truth.sql`;
@@ -942,16 +942,17 @@ export { PostgresAgentMessageDraftStore } from './agent-message-draft';
  *   `BlobContentProxy` — a device uploading straight to R2 is what having no
  *   byte-proxy path means, and saying so by absence is what keeps the two
  *   `/content` routes from mounting on a deployment that cannot serve them.
- * - `rateLimiter` gets the allow-all reference and NO table, by design
- *   (docs/researches/s4a-dataplane-design.md §5). Persisting an allow-all would
- *   create a table that is always empty, and a real limiter is edge/infra work
- *   whose implementation would not be a per-request Postgres write either.
+ * - `rateLimiter` is a per-process token bucket over every inbound envelope
+ *   and admitted device route request, configured by the required `rateLimit`
+ *   option, with NO table: a per-request Postgres write would cost more than
+ *   the flood it refuses (`rate-limiter.ts`).
  */
-import { type CloudStores } from '@byok-sdk/cloud';
+import type { CloudStores } from '@byok-sdk/cloud';
 import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { Clock } from '@byok-sdk/core';
 import type { ByokPool } from '../pool';
 import { type R2BlobStoreOptions } from './r2-blobs';
+import { type PostgresRateLimitOptions } from './rate-limiter';
 export { PostgresDeviceDirectory } from './devices';
 export { PostgresInboundDedupStore } from './dedup';
 export { PostgresNonceStore } from './nonces';
@@ -963,6 +964,7 @@ export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';
 export { PostgresApprovalTimelineStore } from './approval-timeline';
 export { PostgresAgentEgressStore } from './agent-egress';
+export type { PostgresRateLimitOptions } from './rate-limiter';
 export { POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './mailbox-protocol';
 export { PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, } from './agent-memory-projection';
 export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection';
@@ -992,6 +994,12 @@ export interface PostgresCloudStoreOptions {
      * conformance suite certifies compositions whole, never in parts.
      */
     readonly objectStorage: PostgresObjectStorageOptions;
+    /**
+     * Each device's admission budget, per process: every inbound envelope and
+     * every authenticated device route request except `POST /byok/messages`
+     * spends one token. Required — there is no unlimited composition.
+     */
+    readonly rateLimit: PostgresRateLimitOptions;
 }
 /**
  * Compose the cloud-local ports over one pool.
@@ -1377,6 +1385,39 @@ export declare class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
     inspectObject(tenant: TenantId, hash: ContentHash): Promise<BlobObservation | undefined>;
     deleteObject(tenant: TenantId, hash: ContentHash): Promise<R2DeleteResult>;
     listTenantObjects(tenant: TenantId, continuationToken?: string, limit?: number): Promise<R2ObjectPage>;
+}
+// ==== @byok-sdk/cloud-dataplane dist/stores/rate-limiter.d.ts ====
+/**
+ * The Postgres composition's `InboundRateLimiter`: one in-process token bucket
+ * per `(tenant, device)`. Every inbound envelope and every admitted device
+ * route request spends one token from the same bucket.
+ *
+ * In-process on purpose: a per-request Postgres write would cost more than the
+ * flood it refuses. Each replica therefore enforces its own budget, so a fleet
+ * behind N replicas can reach N times the configured rate at most; a
+ * deployment that needs one global budget still puts an edge limiter in front.
+ *
+ * Memory is bounded by `maxTrackedDevices`: buckets are kept in recency order
+ * and the least recently used one is dropped when a new device arrives at the
+ * cap. A dropped bucket comes back full, which only ever admits more, never
+ * less, than keeping it would have.
+ */
+import type { InboundRateLimiter, RateLimitDecision, RateLimitUnit } from '@byok-sdk/cloud';
+import type { Clock, TenantId } from '@byok-sdk/core';
+export interface PostgresRateLimitOptions {
+    /** Sustained refill per device, tokens per second. A finite number > 0. */
+    readonly tokensPerSecond: number;
+    /** Tokens a device may spend back to back. A finite number >= 1. */
+    readonly burst: number;
+    /** Device buckets this process tracks at once. An integer >= 1; default {@link DEFAULT_MAX_TRACKED_DEVICES}. */
+    readonly maxTrackedDevices?: number;
+}
+export declare const DEFAULT_MAX_TRACKED_DEVICES = 100000;
+export declare class TokenBucketRateLimiter implements InboundRateLimiter {
+    #private;
+    private readonly clock;
+    constructor(options: PostgresRateLimitOptions, clock: Clock);
+    consume(tenant: TenantId, deviceId: string, _unit: RateLimitUnit): Promise<RateLimitDecision>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/receipts.d.ts ====
 import { type ReceiptCollectExpiredInput } from '@byok-sdk/cloud';

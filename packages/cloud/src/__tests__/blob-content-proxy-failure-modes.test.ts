@@ -18,6 +18,7 @@ function appFor(read: BlobReadResult | undefined): Hono {
   const contentProxy: BlobContentProxy = {
     verifySignedUrl: async () => true,
     expectedUploadBytes: async () => 0n,
+    claimUpload: async () => () => {},
     writeContent: async () => ({ ok: true }),
     readContent: async () => read,
   };

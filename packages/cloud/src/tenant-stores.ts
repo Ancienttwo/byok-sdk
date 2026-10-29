@@ -65,6 +65,8 @@ import type {
   CloudStores,
   DeviceRecord,
   AgentEgressRecord,
+  RateLimitDecision,
+  RateLimitUnit,
   RequestReceipt,
   TaskCancellationMutation,
   TaskCancellationRequest,
@@ -218,7 +220,7 @@ export interface TenantBoundQuota {
 }
 
 export interface TenantBoundRateLimiter {
-  consume(deviceId: string): Promise<boolean>;
+  consume(deviceId: string, unit: RateLimitUnit): Promise<RateLimitDecision>;
 }
 
 export interface TenantStores {
@@ -364,7 +366,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       abortReservation: (reservationId) => core.quota.abortReservation(tenant, reservationId),
     },
     rateLimiter: {
-      consume: (deviceId) => cloud.rateLimiter.consume(tenant, deviceId),
+      consume: (deviceId, unit) => cloud.rateLimiter.consume(tenant, deviceId, unit),
     },
   };
 }

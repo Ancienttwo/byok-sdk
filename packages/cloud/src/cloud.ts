@@ -1213,7 +1213,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   const skillPacks = options.skillPacks;
   if (skillPacks !== undefined && declares(declaration, CLOUD_CAPABILITIES.skillPacks)) {
     const skillPackDeps = {
-      bearer: deviceRouteDeps.bearer,
+      ...deviceRouteDeps,
       skillPacks,
       pageLimit: options.skillPackPageLimit ?? DEFAULT_SKILL_PACK_PAGE_LIMIT,
     };

@@ -8,7 +8,7 @@ import {
 } from '@byok-sdk/core';
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, authenticateDevice, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 
 export const DEFAULT_BOARD_PAGE_LIMIT = 50;
 export const DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS = 5_000;
@@ -24,6 +24,9 @@ export interface BoardStreamRouteDeps extends BoardRouteDeps {
   readonly heartbeatIntervalMs: number;
   readonly reconciliationIntervalMs: number;
 }
+
+/** Claim and status bodies carry one or two status names. */
+export const BOARD_MUTATION_MAX_BODY_BYTES = 4 * 1024;
 
 const ClaimBodySchema = z.object({ expectedStatus: z.enum(BOARD_STATUSES).optional() });
 const StatusBodySchema = z.object({
@@ -61,8 +64,8 @@ function boardQuery(c: Context, pageLimit: number): BoardListQuery | undefined {
 
 export function boardListHandler(deps: BoardRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
     const query = boardQuery(c, deps.pageLimit);
     if (query === undefined) return c.json({ error: 'invalid board query' }, 400);
     return c.json(await authenticated.stores.board.list(query), 200);
@@ -71,9 +74,11 @@ export function boardListHandler(deps: BoardRouteDeps) {
 
 export function boardClaimHandler(deps: DeviceRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
-    const parsed = ClaimBodySchema.safeParse(await readJsonBody(c));
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
+    const body = await readBoundedJsonBody(c, BOARD_MUTATION_MAX_BODY_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = ClaimBodySchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'invalid claim body' }, 400);
     const itemId = c.req.param('id');
     if (itemId === undefined || itemId.length === 0) return c.json({ error: 'invalid board item id' }, 400);
@@ -94,8 +99,8 @@ export function boardClaimHandler(deps: DeviceRouteDeps) {
 
 export function boardUnclaimHandler(deps: DeviceRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
     const itemId = c.req.param('id');
     if (itemId === undefined || itemId.length === 0) return c.json({ error: 'invalid board item id' }, 400);
     try {
@@ -114,9 +119,11 @@ export function boardUnclaimHandler(deps: DeviceRouteDeps) {
 
 export function boardStatusHandler(deps: DeviceRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
-    const parsed = StatusBodySchema.safeParse(await readJsonBody(c));
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
+    const body = await readBoundedJsonBody(c, BOARD_MUTATION_MAX_BODY_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = StatusBodySchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'invalid status body' }, 400);
     const itemId = c.req.param('id');
     if (itemId === undefined || itemId.length === 0) return c.json({ error: 'invalid board item id' }, 400);
@@ -141,8 +148,8 @@ export function boardStatusHandler(deps: DeviceRouteDeps) {
 
 export function boardStreamHandler(deps: BoardStreamRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const firstAuth = await authenticateDevice(c, deps);
-    if (firstAuth === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const firstAuth = await admitDeviceRequest(c, deps);
+    if (firstAuth instanceof Response) return firstAuth;
     const query = boardQuery(c, deps.pageLimit);
     if (query === undefined) return c.json({ error: 'invalid board query' }, 400);
 

@@ -21,31 +21,30 @@
  */
 import { principalTenant, type SkillPackStore } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import { authenticateBearer, type BearerAuthDeps } from '../auth/bearer';
+import { admitDeviceRequest, type DeviceRouteDeps } from './shared';
 
 /** Rows per `GET /byok/skill-packs` response. A tenant's pack catalogue is small by design. */
 export const DEFAULT_SKILL_PACK_PAGE_LIMIT = 50;
 
-export interface SkillPackRouteDeps {
-  readonly bearer: BearerAuthDeps;
+export interface SkillPackRouteDeps extends DeviceRouteDeps {
   readonly skillPacks: SkillPackStore;
   readonly pageLimit: number;
 }
 
 export function skillPackListHandler(deps: SkillPackRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const device = await authenticateBearer(c.req.header('authorization'), deps.bearer);
-    if (device === undefined) return unauthorized(c);
+    const admitted = await admitDeviceRequest(c, deps);
+    if (admitted instanceof Response) return admitted;
 
-    const packs = await deps.skillPacks.list(principalTenant(device), { limit: deps.pageLimit });
+    const packs = await deps.skillPacks.list(principalTenant(admitted.device), { limit: deps.pageLimit });
     return c.json({ packs }, 200);
   };
 }
 
 export function skillPackFileHandler(deps: SkillPackRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const device = await authenticateBearer(c.req.header('authorization'), deps.bearer);
-    if (device === undefined) return unauthorized(c);
+    const admitted = await admitDeviceRequest(c, deps);
+    if (admitted instanceof Response) return admitted;
 
     const name = c.req.param('name');
     const path = c.req.param('path');
@@ -56,14 +55,10 @@ export function skillPackFileHandler(deps: SkillPackRouteDeps) {
     // passed core's path rule at publish time. A handler that "cleaned up" a
     // requested path would be inventing a second, weaker authority over what a
     // pack contains.
-    const file = await deps.skillPacks.readFile(principalTenant(device), name, path);
+    const file = await deps.skillPacks.readFile(principalTenant(admitted.device), name, path);
     if (file === undefined) return notFound(c);
     return c.json(file, 200);
   };
-}
-
-function unauthorized(c: Context): Response {
-  return c.json({ error: 'unauthorized' }, 401);
 }
 
 function notFound(c: Context): Response {

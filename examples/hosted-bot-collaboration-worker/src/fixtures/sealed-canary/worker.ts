@@ -22,7 +22,7 @@ export default {
       const clock = { now: () => new Date() }, crypto = createWebCrypto();
       const objectStorage = { ...JSON.parse(env.BYOK_CANARY_STORAGE), signingClock: clock };
       const core = createPostgresCoreStores({ pool, clock, objectStorage });
-      const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage });
+      const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 50, burst: 100 }, pool, clock, crypto, objectStorage });
       const full = fullCapabilityDeclaration(undefined, { includeE2eeMember: true });
       const cloud = createByokCloud({ core, cloud: stores, clock, crypto,
         mailboxWake: createInProcessMailboxWake({ fallbackMs: 100 }),

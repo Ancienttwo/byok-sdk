@@ -60,10 +60,11 @@ async function claimAndStart(daemon: FakeLongPollDaemon, taskId: string): Promis
 }
 
 /**
- * M4 Phase 4 (part A): the per-device inbound-envelope token bucket
- * (`rate-limiter.ts`), composed into the cloud kernel as its
- * `InboundRateLimiter` and debited at step 0 of the one inbound gate every
- * `POST /byok/messages` envelope passes through. Every test picks a small,
+ * M4 Phase 4 (part A): the per-device token bucket (`rate-limiter.ts`),
+ * composed into the cloud kernel as its `InboundRateLimiter`: debited at step
+ * 0 of the one inbound gate every `POST /byok/messages` envelope passes
+ * through, and once per other authenticated device route request (the
+ * fixture's presence publish and every `GET /byok/events` included). Every test picks a small,
  * fast-refilling `rateLimit` config so the relevant behavior is deterministic
  * well within normal CI scheduling jitter — see each test's own comment for
  * the specific margin reasoning.
@@ -117,9 +118,9 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
   it('burst exceed answers 429 and emits a device.rate_limited event with deviceId + at — never a silent drop', async () => {
     // burst=3, messagesPerSecond=5 (slow refill, 1 token/200ms): the fixture's
-    // own conn.hello spends one and the two sends below spend the rest, so
-    // everything after that is deterministically rate-limited regardless of CI
-    // speed.
+    // own conn.hello and presence publish spend two and the first send below
+    // spends the last, so everything after that is deterministically
+    // rate-limited regardless of CI speed.
     const started = await start({ messagesPerSecond: 5, burst: 3 });
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
@@ -190,7 +191,9 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
   });
 
   it('isolates rate limits per device: device A flooding past its burst never throttles device B', async () => {
-    const started = await start({ messagesPerSecond: 5, burst: 3 });
+    // burst=4: each fixture connect spends two (conn.hello + presence), which
+    // leaves device B exactly the claim and the start it sends below.
+    const started = await start({ messagesPerSecond: 5, burst: 4 });
     const deviceA = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       deviceName: 'device-a',

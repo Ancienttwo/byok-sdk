@@ -31,12 +31,15 @@ import {
   type StorageErrorCode,
 } from '@byok-sdk/core';
 import type { BlobContentProxy, BlobReadErrorCode } from '../stores/ports';
-import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
+import { admitDeviceRequest, cancelBody, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 
 /** The three bearer-authed routes: everything they touch goes through the tenant facade. */
 export interface BlobRouteDeps extends DeviceRouteDeps {
   readonly maxBlobSizeBytes: number;
 }
+
+/** `POST /byok/blobs` carries a size, a content type and a hash. */
+export const CREATE_BLOB_MAX_BODY_BYTES = 16 * 1024;
 
 /** Reservation and presign grants deliberately share one expiry horizon. */
 export const BLOB_RESERVATION_TTL_MS = 15 * 60 * 1000;
@@ -64,10 +67,12 @@ const SignedUrlQuerySchema = z.object({
 
 export function createBlobHandler(deps: BlobRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
 
-    const parsed = CreateBlobRequestSchema.safeParse(await readJsonBody(c));
+    const body = await readBoundedJsonBody(c, CREATE_BLOB_MAX_BODY_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = CreateBlobRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'size, contentType, and contentHash are required' }, 400);
     if (parsed.data.size > deps.maxBlobSizeBytes) {
       return c.json({ error: `blob exceeds max size of ${deps.maxBlobSizeBytes} bytes` }, 413);
@@ -110,8 +115,8 @@ export function createBlobHandler(deps: BlobRouteDeps) {
 
 export function finalizeBlobHandler(deps: BlobRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
 
     const reservationId = idempotencyKey(c);
     if (reservationId === undefined) {
@@ -148,8 +153,8 @@ export function finalizeBlobHandler(deps: BlobRouteDeps) {
 
 export function blobDownloadUrlHandler(deps: BlobRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const authenticated = await authenticateDevice(c, deps);
-    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+    const authenticated = await admitDeviceRequest(c, deps);
+    if (authenticated instanceof Response) return authenticated;
 
     const downloadUrl = await authenticated.stores.blobs.getDownloadUrl(c.req.param('id') ?? '');
     if (downloadUrl === undefined) return c.json({ error: 'blob not found' }, 404);
@@ -172,13 +177,25 @@ export function blobUploadContentHandler(deps: BlobContentRouteDeps) {
     if (expectedBytes > absoluteCeiling) return c.json({ error: 'upload exceeds size limit' }, 413);
     const contentLength = c.req.header('content-length');
     if (contentLength !== undefined && /^\d+$/u.test(contentLength) && BigInt(contentLength) > expectedBytes) {
+      cancelBody(c.req.raw.body);
       return c.json({ error: 'upload exceeds declared size' }, 413);
     }
-    const body = await readBoundedBody(c.req.raw.body, Number(expectedBytes));
-    if (body.tooLarge) return c.json({ error: 'upload exceeds declared size' }, 413);
-    const result = await deps.contentProxy.writeContent(blobId, body.data);
-    if (!result.ok) return c.json({ error: result.reason }, 422);
-    return c.body(null, 204);
+    // One signed URL stays valid for the whole reservation TTL; one claim per
+    // blob keeps parallel PUTs of it from multiplying its buffer.
+    const release = await deps.contentProxy.claimUpload(blobId);
+    if (release === undefined) {
+      cancelBody(c.req.raw.body);
+      return c.json({ error: 'upload_in_progress' }, 409);
+    }
+    try {
+      const body = await readBoundedBody(c.req.raw.body, Number(expectedBytes));
+      if (body.tooLarge) return c.json({ error: 'upload exceeds declared size' }, 413);
+      const result = await deps.contentProxy.writeContent(blobId, body.data);
+      if (!result.ok) return c.json({ error: result.reason }, 422);
+      return c.body(null, 204);
+    } finally {
+      release();
+    }
   };
 }
 
@@ -190,8 +207,10 @@ async function readBoundedBody(
   const reader = body.getReader();
   // The reservation's authoritative size is already bounded by the deployment
   // ceiling. Retaining chunks and later joining them would briefly hold a
-  // second attacker-sized copy at the moment memory pressure is highest.
-  const data = new Uint8Array(ceiling);
+  // second attacker-sized copy at the moment memory pressure is highest. The
+  // one buffer is allocated on the first byte, never for a connection that
+  // has sent nothing.
+  let data: Uint8Array | undefined;
   let offset = 0;
   try {
     for (;;) {
@@ -202,15 +221,17 @@ async function readBoundedBody(
         void reader.cancel().catch(() => undefined);
         return { tooLarge: true };
       }
+      if (chunk.byteLength === 0) continue;
+      data ??= new Uint8Array(ceiling);
       data.set(chunk, offset);
       offset += chunk.byteLength;
     }
   } finally {
     reader.releaseLock();
   }
-  // A subarray is a view of the one preallocated buffer. The content proxy
-  // retains exact-size validation without a second allocation.
-  return { tooLarge: false, data: data.subarray(0, offset) };
+  // A subarray is a view of the one buffer. The content proxy retains
+  // exact-size validation without a second allocation.
+  return { tooLarge: false, data: data === undefined ? new Uint8Array() : data.subarray(0, offset) };
 }
 
 export function blobDownloadContentHandler(deps: BlobContentRouteDeps) {

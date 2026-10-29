@@ -40,7 +40,7 @@ import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
 import type { TenantStores } from '../tenant-stores';
 import { CLOUD_PROTOCOL_CAPABILITIES } from './events';
-import { authenticateDevice, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
+import { authenticateDevice, rateLimited, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 
 
 /** Coarse wire vocabulary deliberately hides task existence and identity bindings. */
@@ -149,6 +149,8 @@ export function messagesHandler(deps: MessagesRouteDeps) {
 
 function batchHandler(deps: MessagesRouteDeps) {
   return async (c: Context): Promise<Response> => {
+    // No request debit: every envelope below spends its own `envelope` unit at
+    // the inbound gate (see `admitDeviceRequest`).
     const authenticated = await authenticateDevice(c, deps);
     if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
     const { device, stores } = authenticated;
@@ -172,8 +174,8 @@ function batchHandler(deps: MessagesRouteDeps) {
         deps.observer,
         deps.clock.now().toISOString(),
       );
+      if (result.outcome === 'rate_limited') return rateLimited(c, result.retryAfterMs);
       const { outcome } = result;
-      if (outcome === 'rate_limited') return c.json({ error: 'rate limit exceeded' }, 429);
       outcomes.push({ id: envelope.id, outcome, ...(result.outcome === 'rejected' ? { reason: WIRE_REFUSAL_REASONS[result.reason] } : {}) });
       if (envelope.type === 'agent.message.publish') {
         const disposition = await readAgentMessageDisposition(stores, device.deviceId, envelope.task_id, envelope.payload);

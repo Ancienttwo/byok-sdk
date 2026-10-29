@@ -2858,6 +2858,8 @@ export interface BoardStreamRouteDeps extends BoardRouteDeps {
     readonly heartbeatIntervalMs: number;
     readonly reconciliationIntervalMs: number;
 }
+/** Claim and status bodies carry one or two status names. */
+export declare const BOARD_MUTATION_MAX_BODY_BYTES: number;
 export declare function boardListHandler(deps: BoardRouteDeps): (c: Context) => Promise<Response>;
 export declare function boardClaimHandler(deps: DeviceRouteDeps): (c: Context) => Promise<Response>;
 export declare function boardUnclaimHandler(deps: DeviceRouteDeps): (c: Context) => Promise<Response>;
@@ -2878,10 +2880,11 @@ export declare function authenticateProofRequest(c: Context, deps: DeviceProofAu
 }): Promise<AuthenticatedDeviceProof | undefined>;
 // ==== @byok-sdk/cloud dist/handlers/shared.d.ts ====
 /**
- * The two things every device-facing handler starts from: a tolerant JSON body
- * read, and the bearer -> principal -> tenant-closed-facade step.
+ * The two things every device-facing handler starts from: a JSON body read
+ * under that route's own byte ceiling, and admission — the bearer -> principal
+ * -> tenant-closed-facade step plus one debit of the device's rate budget.
  *
- * Once {@link authenticateDevice} has answered, a handler holds a
+ * Once {@link admitDeviceRequest} has answered, a handler holds a
  * `TenantStores` and a `DevicePrincipal` and never sees a `TenantId` again.
  */
 import type { Context } from 'hono';
@@ -2892,7 +2895,6 @@ import { type CloudRootStores, type TenantStores } from '../tenant-stores';
 export interface ErrorBody {
     readonly error: string;
 }
-export declare function readJsonBody(c: Context): Promise<unknown>;
 export interface BoundedJsonBodyResult {
     readonly body: unknown;
     readonly tooLarge: boolean;
@@ -2927,6 +2929,21 @@ export interface AuthenticatedDeviceContext {
     readonly stores: TenantStores;
 }
 /**
+ * Admission for every device-class route except `POST /byok/messages`:
+ * authenticate the bearer, then spend one `request` unit of the device's rate
+ * budget. Answers the refusal itself — 401 for any credential failure (see
+ * {@link authenticateDevice}), 429 with `Retry-After` when the budget is spent.
+ */
+export declare function admitDeviceRequest(c: Context, deps: DeviceRouteDeps): Promise<AuthenticatedDeviceContext | Response>;
+/** A spent rate budget: 429 with `Retry-After` rounded up to whole seconds (at least 1). */
+export declare function rateLimited(c: Context, retryAfterMs: number): Response;
+/**
+ * Authentication alone, with no rate debit. Only two callers may skip the
+ * debit: `POST /byok/messages`, whose envelopes each spend an `envelope` unit
+ * at the inbound gate, and re-checks inside a request that was already
+ * admitted (the board stream's pump). Every other device route admits through
+ * {@link admitDeviceRequest}.
+ *
  * `undefined` means "answer 401" — and it means that for a missing header, a
  * forged token, an expired token, a revoked device, a product mismatch, and a
  * token whose tenant does not own the device, indistinguishably.
@@ -2956,11 +2973,10 @@ export declare function authenticateDevice(c: Context, deps: DeviceRouteDeps): P
  */
 import { type SkillPackStore } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import { type BearerAuthDeps } from '../auth/bearer';
+import { type DeviceRouteDeps } from './shared';
 /** Rows per `GET /byok/skill-packs` response. A tenant's pack catalogue is small by design. */
 export declare const DEFAULT_SKILL_PACK_PAGE_LIMIT = 50;
-export interface SkillPackRouteDeps {
-    readonly bearer: BearerAuthDeps;
+export interface SkillPackRouteDeps extends DeviceRouteDeps {
     readonly skillPacks: SkillPackStore;
     readonly pageLimit: number;
 }
@@ -3046,7 +3062,10 @@ interface Refused {
 }
 /** The gate's internal result. `rejected` cannot be expressed without a reason. */
 export type InboundResult = Refused | {
-    readonly outcome: Exclude<InboundOutcome, 'rejected'>;
+    readonly outcome: 'accepted' | 'duplicate';
+} | {
+    readonly outcome: 'rate_limited';
+    readonly retryAfterMs: number;
 };
 /**
  * One envelope whose write COMMITTED, handed to {@link ByokCloudObserver}.
@@ -3197,7 +3216,7 @@ export { TruthCommitError, isTruthCommitError } from './truth/errors';
 export type { TruthCommitErrorCode } from './truth/errors';
 export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, } from './stores/ports';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
-export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
+export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
@@ -3657,6 +3676,7 @@ export declare class InMemoryBlobContentProxy implements BlobContentProxy {
     constructor(registry: InMemoryBlobRegistry);
     verifySignedUrl(blobId: string, action: 'put' | 'get', sig: string, exp: number): Promise<boolean>;
     expectedUploadBytes(blobId: string): Promise<bigint | undefined>;
+    claimUpload(blobId: string): Promise<(() => void) | undefined>;
     writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult>;
     /**
      * Never returns `{ok:false}`: this composition holds the bytes in the same
@@ -3910,9 +3930,9 @@ export declare class InMemoryProofRequestReceiptStore implements ProofRequestRec
  * not move.
  */
 import type { TenantId } from '@byok-sdk/core';
-import type { InboundRateLimiter } from '../ports';
+import type { InboundRateLimiter, RateLimitDecision, RateLimitUnit } from '../ports';
 export declare class AllowAllRateLimiter implements InboundRateLimiter {
-    consume(_tenant: TenantId, _deviceId: string): Promise<boolean>;
+    consume(_tenant: TenantId, _deviceId: string, _unit: RateLimitUnit): Promise<RateLimitDecision>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/receipts.d.ts ====
 import { type CollectExpiredResult } from '@byok-sdk/core';
@@ -4693,19 +4713,40 @@ export interface BlobContentProxy {
     verifySignedUrl(blobId: string, action: 'put' | 'get', sig: string, exp: number): Promise<boolean>;
     /** Authoritative declared size for a signed PUT; no byte buffering precedes this lookup. */
     expectedUploadBytes(blobId: string): Promise<bigint | undefined>;
+    /**
+     * Claim the one upload a blob may have in flight. `undefined` means another
+     * upload of this blob is in flight (409 `upload_in_progress`); otherwise the
+     * returned release must run once the request ends, however it ends. Claims
+     * are process memory, never persisted, so a crash cannot leave one stuck.
+     */
+    claimUpload(blobId: string): Promise<(() => void) | undefined>;
     writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult>;
     /** `undefined` = no such blob (404); a `{ok:false}` result = the blob exists but its bytes could not be proxied (502, distinguished by {@link BlobReadErrorCode}). */
     readContent(blobId: string): Promise<BlobReadResult | undefined>;
 }
 /**
- * Step 0 of the inbound gate. S3a ships an allow-all reference (a hosted
- * deployment's real limiter is edge/infra work, not handler work) — what
- * matters now is that the SEAM sits at gate position 0, before the type-allow
- * check, so a flood of garbage-typed envelopes costs the same budget as a
- * flood of well-formed ones once a real limiter is plugged in.
+ * What one debit spends: an inbound envelope at step 0 of the inbound gate
+ * (before the type-allow check, so a flood of garbage-typed envelopes costs
+ * the same as a flood of well-formed ones), or one authenticated device-class
+ * request at route admission. `POST /byok/messages` spends only its envelopes.
+ */
+export type RateLimitUnit = 'envelope' | 'request';
+/** A refusal always says how long until the device's budget admits it again. */
+export type RateLimitDecision = {
+    readonly allowed: true;
+} | {
+    readonly allowed: false;
+    readonly retryAfterMs: number;
+};
+/**
+ * The one per-device admission budget. Both units debit the same budget; the
+ * unit lets a composition count envelopes and requests separately. A refusal
+ * answers 429 with `Retry-After` derived from `retryAfterMs`. The in-memory
+ * reference is allow-all; the Postgres composition and the embedded server
+ * compose token buckets.
  */
 export interface InboundRateLimiter {
-    consume(tenant: TenantId, deviceId: string): Promise<boolean>;
+    consume(tenant: TenantId, deviceId: string, unit: RateLimitUnit): Promise<RateLimitDecision>;
 }
 /**
  * All-or-nothing: a composition supplies every port here or it is not a
@@ -4908,7 +4949,7 @@ import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protoco
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline';
-import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RequestReceipt, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
+import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
 export interface TenantBoundMailbox {
     /** Subscribe before reading; hints never replace durable mailbox reads. */
     watch(deviceId: string, signal: AbortSignal): MailboxWakeSubscription;
@@ -5057,7 +5098,7 @@ export interface TenantBoundQuota {
     abortReservation(reservationId: string): Promise<StorageReservation>;
 }
 export interface TenantBoundRateLimiter {
-    consume(deviceId: string): Promise<boolean>;
+    consume(deviceId: string, unit: RateLimitUnit): Promise<RateLimitDecision>;
 }
 export interface TenantStores {
     readonly tenant: TenantId;

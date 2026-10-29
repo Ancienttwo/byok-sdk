@@ -147,6 +147,7 @@ describe.skipIf(SKIP_DATAPLANE)(`hosted plaintext inventory — ${SKIP_REASON}`,
       const crypto = createWebCrypto();
       const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
       const stores = await createPostgresCloudStores({
+        rateLimit: { tokensPerSecond: 1_000, burst: 1_000 },
         pool: scope.pool,
         clock,
         crypto,

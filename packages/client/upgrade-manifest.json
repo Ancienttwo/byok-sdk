@@ -150,6 +150,34 @@
         "export:@byok-sdk/core#StoreCompatibilityVerdict",
         "export:@byok-sdk/keys#inspectProviderProfileStore",
         "export:@byok-sdk/server#inspectSqliteStore"
+        ]
+      },
+      {
+      "id": "device-route-rate-admission",
+      "impact": "breaking",
+      "summary": "One per-device rate budget now covers every authenticated device route, and every Host route body is bounded (#1118). InboundRateLimiter.consume(tenant, deviceId, unit) takes a RateLimitUnit ('envelope' at the inbound gate, 'request' at device route admission) and returns a RateLimitDecision ({ allowed: true } or { allowed: false, retryAfterMs }) instead of a boolean; a custom limiter must adopt the new signature (there is no boolean form). Every authenticated device route except POST /byok/messages spends one 'request' unit, including each GET /byok/events poll, presence publishes and skill-pack reads; POST /byok/messages still spends one 'envelope' unit per envelope. A refusal answers 429 { error: 'rate limit exceeded' } with Retry-After in whole seconds (POST /byok/messages included). JSON device routes that read their body without a ceiling now answer 413 { error: 'request body too large' } above their own limit: presence = presenceDetailMaxBytes + 64 KiB, activity = activityMaxBytes + 16 KiB, board claim/status 4 KiB, POST /byok/blobs and both projection/preparation completions 16 KiB. The presigned blob PUT allocates its one buffer on the first arriving byte and holds at most one upload per blob: a concurrent PUT of the same blob answers 409 { error: 'upload_in_progress' } (a stable code; retry after the first finishes). BlobContentProxy gains a required claimUpload(blobId): Promise<(() => void) | undefined>; a custom proxy must return a release function, or undefined while an upload of that blob is in flight, and keep claims in process memory. Embedded server: rateLimit now budgets route requests too, so size burst for a connect (conn.hello + presence) plus polls; stats().envelopesIn still counts envelopes only, stats().rateLimitEvents counts refused requests as well.",
+      "migration": "docs/security.md#1-wire-daemon--saas-server",
+      "items": [
+        "export:@byok-sdk/cloud#AllowAllRateLimiter",
+        "export:@byok-sdk/cloud#BlobContentProxy",
+        "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
+        "export:@byok-sdk/cloud#InboundRateLimiter",
+        "export:@byok-sdk/cloud#InboundResult",
+        "export:@byok-sdk/cloud#RateLimitDecision",
+        "export:@byok-sdk/cloud#RateLimitUnit",
+        "export:@byok-sdk/cloud#TenantBoundRateLimiter"
+      ]
+    },
+    {
+      "id": "dataplane-rate-limit-required",
+      "impact": "breaking",
+      "summary": "createPostgresCloudStores requires a rateLimit option and composes a per-process token bucket instead of AllowAllRateLimiter (#1118); there is no unlimited Postgres composition. Pass rateLimit: { tokensPerSecond, burst, maxTrackedDevices? } (the embedded server's defaults are 50/s and burst 100; maxTrackedDevices defaults to 100,000, least recently used buckets are dropped beyond it). Each envelope and each authenticated device route request except POST /byok/messages spends one token; a refusal answers 429 with Retry-After. The budget is per process: N replicas admit up to N times the configured rate, so keep an edge limiter when you need one global budget.",
+      "migration": "docs/security.md#1-wire-daemon--saas-server",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresRateLimitOptions",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresRateLimitOptions"
       ]
     },
     {

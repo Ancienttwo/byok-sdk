@@ -122,9 +122,9 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     expect(response.status).toBe(413);
   });
 
-  it('uses one preallocated upload buffer rather than retaining chunks and joining a second full copy', () => {
+  it('uses one upload buffer, allocated on the first byte, rather than retaining chunks and joining a second full copy', () => {
     const source = readFileSync(new URL('../handlers/blobs.ts', import.meta.url), 'utf8');
-    expect(source).toContain('const data = new Uint8Array(ceiling);');
+    expect(source).toContain('data ??= new Uint8Array(ceiling);');
     expect(source).not.toContain('const chunks: Uint8Array[] = [];');
     expect(source).not.toContain('for (const chunk of chunks)');
   });

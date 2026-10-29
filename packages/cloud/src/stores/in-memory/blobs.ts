@@ -183,6 +183,7 @@ export class InMemoryCloudBlobStore implements CloudBlobStore {
 /** The optional half: the bytes this composition has nowhere else to put. */
 export class InMemoryBlobContentProxy implements BlobContentProxy {
   readonly #registry: InMemoryBlobRegistry;
+  readonly #uploading = new Set<string>();
 
   constructor(registry: InMemoryBlobRegistry) {
     this.#registry = registry;
@@ -196,6 +197,12 @@ export class InMemoryBlobContentProxy implements BlobContentProxy {
 
   async expectedUploadBytes(blobId: string): Promise<bigint | undefined> {
     return this.#registry.blobs.get(blobId)?.byteSize;
+  }
+
+  async claimUpload(blobId: string): Promise<(() => void) | undefined> {
+    if (this.#uploading.has(blobId)) return undefined;
+    this.#uploading.add(blobId);
+    return () => { this.#uploading.delete(blobId); };
   }
 
   async writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult> {

@@ -590,16 +590,17 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
   // -------------------------------------------------------------------
 
   it('case 10: a rate-limit episode rejects with 429, counts every rejected envelope in stats(), and admits again after the bucket refills', async () => {
-    // 1 token/s with a burst of 2: the fixture's own `conn.hello` spends one,
-    // the first send below spends the other, and everything after that is
-    // over budget until the bucket refills — deterministic without any
-    // dependence on how fast the two requests happen to be.
-    const started = await start({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 1, burst: 2 } });
+    // 1 token/s with a burst of 4: the fixture's own `conn.hello` and presence
+    // publish spend two, `GET /byok/events` a third, the first send below the
+    // fourth, and everything after that is over budget until the bucket
+    // refills — deterministic without any dependence on how fast the requests
+    // happen to be.
+    const started = await start({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 1, burst: 4 } });
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
     expect((await started.byok.stats()).rateLimitEvents).toBe(0);
 
     const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'rate limited' });
-    await daemon.next(); // `GET /byok/events` is not on the inbound bucket at all.
+    await daemon.next(); // `GET /byok/events` spends one request token.
 
     const admitted = await sendOne(
       daemon,
@@ -612,6 +613,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     // 429 (a WS device would instead be closed 1008 — there is no WS here).
     const firstRejected = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
     expect(firstRejected).toEqual({ status: 429, body: { error: 'rate limit exceeded' } });
+    expect((await started.byok.stats()).envelopesIn).toBe(3); // hello, claim, started: requests are not envelopes
     expect((await started.byok.stats()).rateLimitEvents).toBe(1);
 
     // The counter is PER REJECTED ENVELOPE, not per episode — the

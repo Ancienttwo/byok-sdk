@@ -168,7 +168,7 @@ function refuse(reason: InboundRefusalReason): Refused {
 }
 
 /** The gate's internal result. `rejected` cannot be expressed without a reason. */
-export type InboundResult = Refused | { readonly outcome: Exclude<InboundOutcome, 'rejected'> };
+export type InboundResult = Refused | { readonly outcome: 'accepted' | 'duplicate' } | { readonly outcome: 'rate_limited'; readonly retryAfterMs: number };
 
 /**
  * One envelope whose write COMMITTED, handed to {@link ByokCloudObserver}.
@@ -553,7 +553,7 @@ async function applyInboundGate(
   agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
   now: string,
 ): Promise<InboundResult> {
-  if (!(await stores.rateLimiter.consume(deviceId))) return { outcome: 'rate_limited' };
+  const admission = await stores.rateLimiter.consume(deviceId, 'envelope'); if (!admission.allowed) return { outcome: 'rate_limited', retryAfterMs: admission.retryAfterMs };
 
   // Long-poll has no live WS handshake. A bearer-authenticated conn.hello is
   // therefore accepted only as a capability snapshot for the same device
