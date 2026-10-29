@@ -2,9 +2,11 @@
  * The one Postgres writer of mailbox rows: the only `INSERT INTO outbox`.
  *
  * Mailbox bytes have one authority, the retained rows. Usage is the tenant's
- * `SUM(byte_size)` over every retained row in any state, so there is no counter
- * a writer could forget to move and no release step when retention deletes a
- * row. What has to be serialized instead is the limit check against that sum,
+ * `SUM(byte_size)` over its `pending` rows, so there is no counter a writer
+ * could forget to move and no release step when a row is acked, dead-lettered
+ * or deleted (#1115): an `acked` or `expired` row is retained for retention and
+ * §12.7.5 visibility but holds no quota, so neither one can wedge a tenant at
+ * its limit. What has to be serialized instead is the limit check against that sum,
  * and that is this file's job. Append, cancellation and dead-letter replay all
  * call it, so admission and sequence allocation cannot drift between writers.
  *
@@ -138,7 +140,8 @@ export async function insertOutboxRow(
     `INSERT INTO outbox (${OUTBOX_WRITE_COLUMNS})
      SELECT $1, $2, $3::bigint, $4, $5, $6, $7::bigint, 'pending', $8, $9::bigint
       WHERE $10::boolean
-         OR (SELECT COALESCE(SUM(o.byte_size), 0) FROM outbox o WHERE o.tenant_id = $1)
+         OR (SELECT COALESCE(SUM(o.byte_size), 0) FROM outbox o
+              WHERE o.tenant_id = $1 AND o.state = 'pending')
               + $7::bigint
             <= (SELECT e.mailbox_limit_bytes FROM storage_entitlement e WHERE e.tenant_id = $1)
      RETURNING ${OUTBOX_WRITE_COLUMNS}`,
@@ -166,13 +169,14 @@ export async function insertOutboxRow(
   return { row, inserted: true };
 }
 
-/** The tenant's mailbox bytes: every retained row, in any state. */
+/** The tenant's mailbox bytes: its `pending` rows on every device. */
 export async function readMailboxBytes(
   queryable: Pick<PoolClient, 'query'>,
   tenant: TenantId,
 ): Promise<bigint> {
   const used = await queryable.query<{ readonly bytes: bigint }>(
-    'SELECT COALESCE(SUM(byte_size), 0)::bigint AS bytes FROM outbox WHERE tenant_id = $1',
+    `SELECT COALESCE(SUM(byte_size), 0)::bigint AS bytes FROM outbox
+      WHERE tenant_id = $1 AND state = 'pending'`,
     [tenant],
   );
   return used.rows[0]!.bytes;

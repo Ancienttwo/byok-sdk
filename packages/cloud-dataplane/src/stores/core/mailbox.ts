@@ -16,8 +16,8 @@ import { assertCollectExpiredInput } from '@byok-sdk/core';
  * rows is S4B's job (O-009), not this one's.
  *
  * Rows are written only by `outbox-writer.ts`, which also admits them against
- * `mailboxLimitBytes`. Mailbox usage is the sum over the retained rows, so
- * neither retention here nor anything else that deletes a row does accounting.
+ * `mailboxLimitBytes`. Mailbox usage is the sum over the `pending` rows, so
+ * neither the ack, the dead-lettering, nor any delete here does accounting.
  *
  * Every row lives under `(tenant_id, device_id, seq)`, so a cross-tenant read
  * is not denied — it addresses a different key space and finds nothing. That is
