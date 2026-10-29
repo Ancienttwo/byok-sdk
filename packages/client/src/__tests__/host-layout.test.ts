@@ -42,6 +42,20 @@ describe('resolveHostLayout (#1094)', () => {
     expect(resolveHostLayout({ ...product, platform: 'win32', homeDir: 'C:\\Users\\ana', env: { LOCALAPPDATA: 'D:\\Local' } }).hostStorageRoot).toBe('D:\\Local\\Salesko');
   });
 
+  it.each(['//server/share', '\\\\server\\share'])('accepts a complete Windows UNC root %j', (root) => {
+    const layout = resolveHostLayout({ ...product, platform: 'win32', homeDir: root, env: { LOCALAPPDATA: root } });
+    expect(layout.storeDir).toBe('\\\\server\\share\\.byok\\salesko');
+    expect(layout.hostStorageRoot).toBe('\\\\server\\share\\Salesko');
+  });
+
+  it.each(['//server', '//server/', '\\\\server', '\\\\server\\'])('rejects incomplete Windows UNC home %j', (root) => {
+    expect(() => resolveHostLayout({ ...product, platform: 'win32', homeDir: root, env: {} })).toThrow(HostLayoutInputError);
+  });
+
+  it.each(['//server', '//server/', '\\\\server', '\\\\server\\'])('ignores incomplete Windows UNC LOCALAPPDATA %j', (root) => {
+    expect(resolveHostLayout({ ...product, platform: 'win32', homeDir: 'C:\\Users\\ana', env: { LOCALAPPDATA: root } }).hostStorageRoot).toBe('C:\\Users\\ana\\AppData\\Local\\Salesko');
+  });
+
   it('applies the #493 socket budget: a store whose tmp is too long gets the same short root the daemon picks', () => {
     const homeDir = `/Users/${'u'.repeat(40)}`;
     const layout = resolveHostLayout({ ...product, platform: 'darwin', homeDir, env: {} });
