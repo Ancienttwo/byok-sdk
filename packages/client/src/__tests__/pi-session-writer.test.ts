@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { closeSync, existsSync, mkdtempSync, mkdirSync, openSync, readFileSync, rmSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { closeSync, existsSync, mkdtempSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter } from '../util/pi-session-retention';
@@ -17,7 +18,9 @@ const clientRoot = resolve(import.meta.dirname, '../..');
 const root = mkdtempSync(join(clientRoot, 'node_modules/.pi-session-writer-'));
 const entry = join(root, 'host.mjs');
 const bun = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['bun'], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)[0]!;
-const processes: ChildProcess[] = [];
+const processes: {child:ChildProcess;closed:Promise<unknown>}[] = [];
+const ownedWriterFiles = new Set<string>();
+const setupMarkers: string[] = [];
 const descriptors: number[] = [];
 const descendants: number[] = [];
 let sequence = 0;
@@ -56,13 +59,62 @@ beforeAll(() => {
   const result = spawnSync(bun, ['--no-install', driver], { cwd: clientRoot, encoding: 'utf8', timeout: 20_000 });
   if (result.status !== 0) throw new Error(result.stderr || String(result.error));
 });
-afterEach(async () => {
-  for (const pid of descendants.splice(0)) { try { process.kill(pid, 'SIGKILL'); } catch {} }
-  for (const fd of descriptors.splice(0)) closeSync(fd);
-  for (const child of processes.splice(0)) {
-    if (child.exitCode === null && child.signalCode === null) { const closed = once(child, 'close'); child.kill('SIGKILL'); await closed; }
+async function waitForOwnedClose(closed: Promise<unknown>, pid: number | undefined): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([closed,new Promise<never>((_resolve,reject)=>{
+      timer=setTimeout(()=>reject(new Error(`owned Pi fixture did not close: ${pid}`)),5_000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+async function cleanupFixtures(): Promise<void> {
+  // Unblock only this fixture's deliberate setup barriers before requesting
+  // native disposal. A normal test must not SIGKILL its writer sockets away.
+  for (const marker of setupMarkers.splice(0)) {
+    writeFileSync(marker+'.continue','');
+    for (const candidate of [marker,marker+'.nested']) if (existsSync(candidate)) ownedWriterFiles.add(readFileSync(candidate,'utf8'));
   }
-});
+  const ownedDescendants=descendants.splice(0);
+  for (const pid of ownedDescendants) {
+    try { process.kill(pid, 'SIGTERM'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+  }
+  for (const {child} of processes) if (child.exitCode === null && child.signalCode === null) {
+    if (child.stdin === null) child.kill('SIGTERM');
+    else child.stdin.end();
+  }
+  const failures: unknown[] = [];
+  for (const {child,closed} of processes.splice(0)) {
+    try { await waitForOwnedClose(closed,child.pid); }
+    catch (error) {
+      // A failed close remains a test failure. Stop only these owned processes
+      // and still await pipe closure before attempting their gate recovery.
+      if (child.stdin === null) for (const pid of ownedDescendants) {
+        try { process.kill(pid,'SIGKILL'); } catch (failure) { if ((failure as NodeJS.ErrnoException).code !== 'ESRCH') failures.push(failure); }
+      }
+      child.kill('SIGKILL'); failures.push(error);
+      try { await waitForOwnedClose(closed,child.pid); } catch (failure) { failures.push(failure); }
+    }
+  }
+  for (const fd of descriptors.splice(0)) closeSync(fd);
+  // Reacquire only explicit file keys observed from our RPC/fixture callbacks.
+  // The production gate proves any endpoint stale and unlinks it on release;
+  // no directory snapshot or guessed socket/PID ownership is used for removal.
+  for (const file of ownedWriterFiles) {
+    try { const lease=await acquirePiSessionWriter(file); await lease.release(); ownedWriterFiles.delete(file); }
+    catch (error) { failures.push(error); }
+  }
+  if (failures.length > 0) throw new AggregateError(failures,'Pi fixture cleanup failed');
+}
+async function expectGateBusy(acquire: () => Promise<{release():Promise<void>}>): Promise<void> {
+  let unexpected: {release():Promise<void>} | undefined;
+  try { await expect(acquire().then(lease=>{unexpected=lease;return lease;})).rejects.toBeInstanceOf(PathMutationGateBusyError); }
+  finally { await unexpected?.release(); }
+}
+function expectWriterBusy(file: string): Promise<void> {
+  ownedWriterFiles.add(file);
+  return expectGateBusy(()=>acquirePiSessionWriter(file));
+}
+afterEach(cleanupFixtures);
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 function fixture() {
   const directory = join(root, `test-${++sequence}`), cwd = join(directory, 'cwd'), sessionDir = join(directory, 'sessions');
@@ -87,7 +139,10 @@ function start(config: { cwd: string; sessionDir: string; session?: string; test
     inputFd = openSync(fifo, 'r+'); descriptors.push(inputFd);
   }
   const child = spawn(process.execPath, args, { cwd: config.cwd, env, stdio: [inputFd ?? 'pipe', 'pipe', 'pipe'] });
-  processes.push(child);
+  const closed = once(child,'close');
+  processes.push({child,closed});
+  if (config.testMarker !== undefined) setupMarkers.push(config.testMarker);
+  if (config.testTarget !== undefined) ownedWriterFiles.add(config.testTarget);
   let buffer = '', stderr = '', nextId = 0;
   const frames: Record<string, unknown>[] = [];
   const pending = new Map<string, { resolve(value: Record<string, any>): void; reject(error: Error): void }>();
@@ -99,6 +154,7 @@ function start(config: { cwd: string; sessionDir: string; session?: string; test
       const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
       let message; try { message = JSON.parse(line); } catch { continue; }
       frames.push(message);
+      if (typeof message.data?.sessionFile === 'string') ownedWriterFiles.add(message.data.sessionFile);
       if (message.type === 'response') { pending.get(message.id)?.resolve(message); pending.delete(message.id); }
     }
   });
@@ -126,23 +182,23 @@ it('holds the actual fresh session file before RPC input and releases old writer
   const first = await runtime.send('get_state');
   expect(first.success).toBe(true);
   const file = first.data.sessionFile as string;
-  await expect(acquirePiSessionWriter(file)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(file);
   const discovery = await acquirePiSessionDiscovery(f.sessionDir); await discovery.release();
   const secondRuntime = start(f), parallel = await secondRuntime.send('get_state');
   expect(parallel.data.sessionFile).not.toBe(file);
-  await expect(acquirePiSessionWriter(parallel.data.sessionFile)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(parallel.data.sessionFile);
   expect((await runtime.send('new_session')).success).toBe(true);
   const next = await runtime.send('get_state');
   expect(next.data.sessionId).not.toBe(first.data.sessionId);
   const retired = await acquirePiSessionWriter(file); await retired.release();
-  await expect(acquirePiSessionWriter(next.data.sessionFile)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(next.data.sessionFile);
   // Pi resumes by header identity; the suffix may be different after reopening
   // an empty file. Its writer still owns the actual file that sweep would unlink.
   const mismatch = join(f.sessionDir, '2026-09-01T00-00-00-000Z_filename-id.jsonl');
   writeFileSync(mismatch, `${JSON.stringify({type:'session',version:3,id:'header-id',timestamp:'2026-09-01T00:00:00.000Z',cwd:f.cwd})}\n`);
   expect((await runtime.send('switch_session', { sessionPath: mismatch })).success).toBe(true);
   expect((await runtime.send('get_state')).data.sessionId).toBe('header-id');
-  await expect(acquirePiSessionWriter(mismatch)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(mismatch);
   const previous = await acquirePiSessionWriter(next.data.sessionFile); await previous.release();
   for (const sessionPath of [relative(f.cwd, mismatch), pathToFileURL(mismatch).href, `${f.sessionDir}/../sessions/${mismatch.split('/').pop()}`]) {
     expect((await runtime.send('switch_session', {sessionPath})).success).toBe(true);
@@ -152,14 +208,14 @@ it('holds the actual fresh session file before RPC input and releases old writer
   const tilde = join(home, 'tilde-session.jsonl');
   writeFileSync(tilde, `${JSON.stringify({type:'session',version:3,id:'tilde',timestamp:'2026-09-01T00:00:00.000Z',cwd:f.cwd})}\n`);
   expect((await runtime.send('switch_session', {sessionPath:'~/tilde-session.jsonl'})).success).toBe(true);
-  await expect(acquirePiSessionWriter(tilde)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(tilde);
   const empty = join(f.sessionDir, '2026-09-01T00-00-00-000Z_empty.jsonl');
   writeFileSync(empty, '');
   expect((await runtime.send('switch_session', {sessionPath:empty})).success).toBe(true);
   const emptyState = await runtime.send('get_state');
   expect(emptyState.data.sessionId).not.toBe('empty');
   expect(emptyState.data.sessionFile).toBe(empty);
-  await expect(acquirePiSessionWriter(empty)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(empty);
   const retiredMismatch = await acquirePiSessionWriter(mismatch); await retiredMismatch.release();
   const exited = once(runtime.child, 'exit'); runtime.child.stdin!.end(); await exited;
   const closed = await acquirePiSessionWriter(empty); await closed.release();
@@ -176,7 +232,7 @@ it.skipIf(process.platform === 'win32')('keeps the actual writer gate after its 
   const sweeper = await sweeperFor(f.sessionDir);
   const exited = once(runtime.child, 'exit'); runtime.child.kill('SIGKILL'); await exited;
   expect((await runtime.send('get_state')).data.sessionId).toBe(state.data.sessionId);
-  await expect(acquirePiSessionWriter(state.data.sessionFile)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(state.data.sessionFile);
   await sweeper.runPass('periodic'); expect(existsSync(file)).toBe(true);
   process.kill(pid, 'SIGKILL');
   // The writer's socket is released by process exit, without a persisted pin or
@@ -223,7 +279,7 @@ it('native resume discovers a header after blank and malformed prefix lines', as
   writeFileSync(file, `\nmalformed\n${JSON.stringify({type:'session',version:3,id:'header-id',timestamp:'2026-09-01T00:00:00.000Z',cwd:f.cwd})}\n`);
   const runtime = start({...f,session:'header-id'});
   expect((await runtime.send('get_state')).data.sessionId).toBe('header-id');
-  await expect(acquirePiSessionWriter(file)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(file);
 });
 
 it('protects mutable setup and allows reentrant withSession replacement', async () => {
@@ -232,12 +288,12 @@ it('protects mutable setup and allows reentrant withSession replacement', async 
   const original = await runtime.send('get_state');
   const command = runtime.send('prompt', {message:'/retention-rewrite'});
   await vi.waitFor(()=>expect(existsSync(marker)).toBe(true));
-  await expect(acquirePiSessionRebinding()).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectGateBusy(()=>acquirePiSessionRebinding());
   writeFileSync(marker+'.continue','');
   expect((await command).success).toBe(true);
   const state = await runtime.send('get_state');
   expect(state.data.sessionFile).toBe(readFileSync(marker+'.nested','utf8'));
-  await expect(acquirePiSessionWriter(state.data.sessionFile)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(state.data.sessionFile);
   const initial = await acquirePiSessionWriter(original.data.sessionFile); await initial.release();
   const intermediate = await acquirePiSessionWriter(readFileSync(marker,'utf8')); await intermediate.release();
   const discovery = await acquirePiSessionDiscovery(f.sessionDir); await discovery.release();
@@ -249,7 +305,7 @@ it('retains the actual file when mutable setup changes it and then throws', asyn
   const runtime = start({...f,testTarget:target});
   expect((await runtime.send('get_state')).success).toBe(true);
   expect((await runtime.send('prompt',{message:'/retention-target throw'})).success).toBe(true);
-  await expect(acquirePiSessionWriter(target)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(target);
 });
 
 it('protects a cross-directory setup mutation while it awaits and after it finishes', async () => {
@@ -271,7 +327,7 @@ it('protects a cross-directory setup mutation while it awaits and after it finis
     writeFileSync(marker+'.continue','');
     expect((await command).success).toBe(true);
     expect((await runtime.send('get_state')).data.sessionFile).toBe(target);
-    await expect(acquirePiSessionWriter(target)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+    await expectWriterBusy(target);
     const barrier = await acquirePiSessionRebinding(); await barrier.release();
     await sweeper.runPass('periodic'); expect(existsSync(target)).toBe(true);
     const exited = once(runtime.child,'exit'); runtime.child.stdin!.end(); await exited;
@@ -291,5 +347,19 @@ it('preserves native stale-context rejection during setup and releases rebinding
   const barrier = await acquirePiSessionRebinding(); await barrier.release();
   expect((await runtime.send('new_session')).success).toBe(true);
   const state = await runtime.send('get_state');
-  await expect(acquirePiSessionWriter(state.data.sessionFile)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+  await expectWriterBusy(state.data.sessionFile);
+});
+
+it.skipIf(process.platform === 'win32')('cleans the exact writer endpoint when an ordinary fixture is torn down', async () => {
+  const runtime = start(fixture()), state = await runtime.send('get_state');
+  const file = state.data.sessionFile as string;
+  // Diagnose this one owned socket; never infer ownership from a shared-directory
+  // diff or remove another runner's endpoints. These hashes mirror the gate's
+  // named writer identity only for the filesystem leak assertion.
+  const writer = createHash('sha256').update(basename(file)).digest('hex');
+  const identity = createHash('sha256').update(`pi-session-writer:${writer}\0${realpathSync(dirname(file))}`).digest('hex');
+  const endpoint = `/tmp/byok-pm-${process.getuid!()}/${identity}.sock`;
+  expect(existsSync(endpoint)).toBe(true);
+  await cleanupFixtures();
+  expect(existsSync(endpoint), `owned writer endpoint remains after fixture close: ${endpoint}; session=${file}`).toBe(false);
 });

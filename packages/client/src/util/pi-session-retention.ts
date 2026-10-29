@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { acquirePathMutationGate, type PathMutationGate } from './path-mutation-gate';
+import type { PathMutationGate } from './path-mutation-gate';
 import type { RuntimeSessionLease } from '../types';
 
 /**
@@ -8,12 +8,14 @@ import type { RuntimeSessionLease } from '../types';
  * Hold this before invoking it; confirm its final writer before release. Sweep
  * takes it first, before any directory/session gate. Known turns never hold it.
  */
-export function acquirePiSessionRebinding(waitMs = 0): Promise<PathMutationGate> {
+export async function acquirePiSessionRebinding(waitMs = 0): Promise<PathMutationGate> {
+  const { acquirePathMutationGate } = await import('./path-mutation-gate');
   return acquirePathMutationGate({ scope: 'pi-session-rebinding' }, { waitMs });
 }
 
 /** Short-lived barrier: a fresh runtime has not reported its authoritative id yet. */
-export function acquirePiSessionDiscovery(sessionDir: string, waitMs = 0): Promise<PathMutationGate> {
+export async function acquirePiSessionDiscovery(sessionDir: string, waitMs = 0): Promise<PathMutationGate> {
+  const { acquirePathMutationGate } = await import('./path-mutation-gate');
   return acquirePathMutationGate({ scope: 'pi-session-discovery', targetPath: sessionDir }, { waitMs });
 }
 
@@ -33,6 +35,9 @@ export function acquirePiSessionWriter(sessionFile: string): Promise<PiSessionRe
 }
 
 async function acquireSessionRole(sessionDir: string, sessionRef: string, role: 'admission' | 'writer'): Promise<PiSessionRetentionLease> {
+  // Importing Pi's pure settlement path must not load socket capabilities.
+  // Actual acquisition still has exactly one shared path-gate authority.
+  const { acquirePathMutationGate } = await import('./path-mutation-gate');
   const digest = createHash('sha256').update(sessionRef).digest('hex');
   const gate = await acquirePathMutationGate({ scope: `pi-session-${role}:${digest}`, targetPath: sessionDir });
   let released = false;

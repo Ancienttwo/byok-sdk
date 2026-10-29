@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "f23a2239a17abb1654189509e7e7b1534e4c8180aebfd38c163266f3766977cc"
+    "snapshotSha256": "1d16a4177a543ebe3aeee6ab997d054bf33dff4e7c6dceabedf6a6e152235b7b"
   },
   "configFields": {
     "status": "tracked",
@@ -423,7 +423,7 @@
     {
       "item": "config:storage",
       "change": "added",
-      "after": "optional schema-sha256=ed95bb4ee17281a3",
+      "after": "optional schema-sha256=072bdde0810d910b",
       "entry": "daemon-config-schema"
     },
     {
