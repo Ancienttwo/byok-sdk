@@ -179,7 +179,7 @@ export const knownFamilies = Object.freeze([
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
-  'hermes-real-windows',
+  'hermes-real-windows', 'runtime-contract',
 ]);
 // A routine PR selects a platform family only when it changes a path that the
 // family owns: its tests, smoke scripts and the source they qualify. Package
@@ -261,6 +261,16 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/__tests__\/device-credential-store[^/]*$/,
     /^packages\/client\/scripts\/(?:ipc-smoke|control-socket-check)\.mjs$/,
   ],
+  // #1103: the runtime contract suite against each qualified runtime CLI, the
+  // adapter and runtime code it qualifies, and its installer.
+  'runtime-contract': [
+    /^packages\/client\/src\/(?:adapters|runtime|mcp)\//,
+    /^packages\/client\/src\/(?:tool-authorization[a-z-]*|runtime-detection|types)\.ts$/,
+    /^packages\/client\/src\/bin\/pi-[a-z-]+\.ts$/,
+    /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
+    /^packages\/client\/src\/__tests__\/runtime-contract\//,
+    /^scripts\/ci\/runtime-contract-install(?:\.test)?\.mjs$/,
+  ],
   'credential-isolation-audit': [
     /^packages\/client\/src\/adapters\//,
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
@@ -276,6 +286,8 @@ export const reviewedScripts = Object.freeze({
   'scripts/architecture/dependency-graph.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/architecture/dependency-graph.test.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/architecture/dependency-baseline.json': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
+  'scripts/docs/device-setup.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
+  'scripts/docs/device-setup.test.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
@@ -358,7 +370,9 @@ const reviewedBuildConfigOwners = Object.freeze({
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'packages/AGENTS.md', 'packages/CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 // #605 W5: w5-runner-probe.yml is workflow_dispatch only and reads no repo
 // file, so like release.yml it selects only the CI script checks.
-const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml', '.github/workflows/w5-runner-probe.yml']);
+// #1103: runtime-contract-nightly.yml runs on a schedule against the latest CLIs; it never gates a PR.
+const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml', '.github/workflows/w5-runner-probe.yml',
+  '.github/workflows/runtime-contract-nightly.yml']);
 const sorted = values => [...values].sort();
 // An unmapped path is a selector gap. Fix it with a reviewed mapping; a
 // feature PR never falls back to the complete release matrix.
@@ -546,6 +560,7 @@ export function selectImpact(paths, context = {}) {
     }
     // #654: the dataplane job runs hosted-plaintext-inventory.test.ts, which
     // checks the inventory table in this doc against real Postgres and S3.
+    if (path === 'docs/device-setup.md') { dirs.add('packages/client'); continue; }
     if (path === 'docs/security.md') { families.add('dataplane'); continue; }
     // #654 E2c: `deploy/sql` is the only authored copy of the Postgres
     // migrations. cloud-dataplane builds it into `dist/sql`, its suites migrate

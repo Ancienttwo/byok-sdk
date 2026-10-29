@@ -43,8 +43,6 @@
   "cycle: packages/client/src/diagnostics/support-bundle.ts -> packages/client/src/diagnostics/diagnostics.ts",
   "cycle: packages/client/src/index.ts -> packages/client/src/diagnostics/device-doctor.ts",
   "cycle: packages/client/src/index.ts -> packages/client/src/diagnostics/operator-actions.ts",
-  "cycle: packages/cloud/src/inbound.ts -> packages/cloud/src/task-agent-message.ts",
-  "cycle: packages/cloud/src/task-agent-message.ts -> packages/cloud/src/inbound.ts",
   "directory: packages/client/src/adapters/claude/claude-adapter.ts -> packages/client/src/daemon/environment.ts",
   "directory: packages/client/src/adapters/codex/codex-adapter.ts -> packages/client/src/daemon/environment.ts",
   "directory: packages/client/src/adapters/detect-outcome.ts -> packages/client/src/daemon/environment.ts",

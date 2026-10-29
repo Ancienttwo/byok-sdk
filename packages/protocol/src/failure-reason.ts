@@ -19,10 +19,12 @@ export const TASK_FAIL_REASON_MAX_BYTES = 2048;
 const REDACTED = '[redacted]';
 
 // A secret value: a quoted string (an unclosed quote runs to the end of the
-// line), or an unquoted run. Every alternative succeeds greedily without
-// backtracking. An unquoted value never starts with `[` or `…`, so a
+// line), or an unquoted run. A backslash and its following character belong
+// to the value together, so an escaped quote cannot expose a secret suffix.
+// A dangling backslash in an unclosed value is consumed too. Every alternative
+// succeeds greedily without backtracking. An unquoted value never starts with `[` or `…`, so a
 // redaction or truncation marker is never mistaken for a value on a second pass.
-const VALUE = String.raw`(?:"[^"\n]*"?|'[^'\n]*'?|[^\s"'\[\u2026,;&|][^\s"',;&|]*)`;
+const VALUE = String.raw`(?:"(?:\\[^\n]|[^"\\\n])*(?:\\)?"?|'(?:\\[^\n]|[^'\\\n])*(?:\\)?'?|[^\s"'\[\u2026,;&|][^\s"',;&|]*)`;
 
 // Bounded runs keep a failed match from rescanning a long run at every literal.
 const GAP = '[ \\t]{0,16}';

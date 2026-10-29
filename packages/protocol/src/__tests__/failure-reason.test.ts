@@ -62,6 +62,19 @@ describe('boundFailureReason (#1124)', () => {
     ]) expect(boundFailureReason(text)).toBe(text);
   });
 
+  it.each([
+    [JSON.stringify({ DB_PASSWORD: 'before"sensitive-after', status: 'failed' }), '{"DB_PASSWORD":[redacted],"status":"failed"}'],
+    [JSON.stringify({ authorization: 'before\\"sensitive-after', status: 'failed' }), '{"authorization":[redacted],"status":"failed"}'],
+    [String.raw`DB_PASSWORD='before\'sensitive-after' status=failed`, 'DB_PASSWORD=[redacted] status=failed'],
+    [String.raw`DB_PASSWORD="before\"sensitive-after`, 'DB_PASSWORD=[redacted]'],
+    ['DB_PASSWORD="before\\', 'DB_PASSWORD=[redacted]'],
+  ])('redacts the entire escaped quoted value on the wire: %s', (input, expected) => {
+    const env = createEnvelope('task.fail', { reason: input, retryable: false }, { taskId: TASK_ID });
+    expect(env.payload).toMatchObject({ reason: expected });
+    expect(decodeEnvelope(encodeEnvelope(env)).payload).toMatchObject({ reason: expected });
+    expect(boundFailureReason(expected)).toBe(expected);
+  });
+
   it('caps the UTF-8 byte length on a code-point boundary with a truncation marker', () => {
     const input = `${'x'.repeat(TASK_FAIL_REASON_MAX_BYTES - 3)}${'🚀'.repeat(1000)}`;
     const out = boundFailureReason(input);

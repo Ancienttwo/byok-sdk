@@ -33,6 +33,13 @@ export const CLOUD_ERROR_CODES = {
    * deployment whose one honest interface lies.
    */
   capability_over_declared: 'capability_over_declared',
+  /**
+   * The composition was given a port whose capability the declaration does not
+   * name (#1096). Construction-time and fatal: the port would never be mounted,
+   * so passing it is a wiring mistake, not a rollout switch. Declare the
+   * capability or stop passing the port.
+   */
+  capability_port_undeclared: 'capability_port_undeclared',
   /** Host-supplied board labels or coordination input exceeded the explicit contract. */
   coordination_input_invalid: 'coordination_input_invalid',
   /**

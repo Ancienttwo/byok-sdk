@@ -524,9 +524,9 @@ describe('the capability gate', () => {
     expect(await listInstalledSkillPacks(dataDir)).toEqual([]);
   }, HEAVY_TEST_TIMEOUT_MS);
 
-  it('refuses when a deployment withholds the capability even though it has a store', async () => {
-    const store = new InMemorySkillPackStore();
-    const cloud = await startCloud({ skillPacks: store, declare: false });
+  it('refuses when a deployment withholds the capability', async () => {
+    // A deployment cannot hold a store it does not declare (#1096), so withholding means no store.
+    const cloud = await startCloud({ declare: false });
     const dataDir = await tmpDir('byok-skill-pack-data-');
     const auth = await pairedAuth(cloud, await tmpDir('byok-skill-pack-store-'));
 
