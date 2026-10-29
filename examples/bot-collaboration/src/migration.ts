@@ -1,6 +1,6 @@
-import { canonical, hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { canonical, hash } from '@byok-sdk/server/execution-core/canonical';
 import { isOccurrenceIntentKey, occurrenceIntentKey, routineWakeKey, taskId as taskIdOf, validateJson, validateRetry, type Conclusion, type Intent, type Json, type Occurrence, type RetryPolicy, type Routine,
-  type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
+  type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model';
 
 /**

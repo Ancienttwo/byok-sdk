@@ -5,7 +5,7 @@ ledger (B2), the task tool catalogue (B3), the routine tools (B4) and the
 read-only memory tool (B5) from
 [the beta plan](../../docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md).
 It reuses the public B1 HTTP transport, the public `@byok-sdk/server` API and the
-K4 Host execution core (`examples/host-execution-core`) for routines and memory.
+K4 Host execution core (`@byok-sdk/server/execution-core`) for routines and memory.
 It adds no public SDK API or new SDK runtime dependency.
 There is no listener, admin HTTP route, default key or model invocation here.
 - [Grok Bot client guide and owner acceptance checklist (B6)](docs/grok-bot.md)

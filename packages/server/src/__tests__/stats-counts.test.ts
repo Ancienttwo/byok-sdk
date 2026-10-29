@@ -279,7 +279,7 @@ describe('store-aggregated stats()', () => {
   });
 
   it('reads SQLite aggregate counts after restart without a startup history scan', async (context) => {
-    if (!isSqliteAvailable()) context.skip();
+    if (!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1')) context.skip();
     const root = mkdtempSync(join(tmpdir(), 'byok-stats-'));
     roots.push(root);
     const storage = { kind: 'sqlite' as const, path: join(root, 'server.sqlite') };

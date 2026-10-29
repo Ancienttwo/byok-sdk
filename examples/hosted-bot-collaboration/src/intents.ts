@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { agentKey, canonical, fifoHeads, frozenInput, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, SealedDispatchUnavailableError,
   submitFrozen, taskId,
-  type Conclusion, type RetryPolicy, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution, type Json } from '@byok-sdk/example-host-execution-core';
+  type Conclusion, type RetryPolicy, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution, type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';

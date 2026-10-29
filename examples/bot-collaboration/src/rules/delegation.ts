@@ -1,5 +1,5 @@
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
-import { hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addTurn, json, type Json, type Rejection, type ReplyEntry, type Turn, type TurnsState, type Verdict } from './turn';
 import { frame, REPLY_META_MAX_BYTES } from './frame';
 

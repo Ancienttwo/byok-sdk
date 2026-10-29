@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { enqueue, hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { enqueue, hash, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { addTurn, stateOf } from './model';
 import { applyDelegate, observeDevices, settleDelegations } from './delegation';

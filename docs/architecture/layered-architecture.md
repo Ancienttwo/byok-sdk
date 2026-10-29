@@ -10,7 +10,7 @@
 
 ## 1. 分层总图
 
-Host 侧分四层，L1 契约层同时被设备侧使用。设备侧 `client` 只 import `core` 与 `protocol`，和 Host 侧之间只有 HTTPS long-poll 一条通道。`keys` 与 `cloud-do` 不在派工主链路上。L4 的参考实现在 `examples/`：Topology L 见 `host-execution-core`、`basic`；Topology H 见 `hosted-bot-collaboration`、`hosted-bot-collaboration-worker`；Host UI 见 `live-activity-host`。
+Host 侧分四层，L1 契约层同时被设备侧使用。设备侧 `client` 只 import `core` 与 `protocol`，和 Host 侧之间只有 HTTPS long-poll 一条通道。`keys` 与 `cloud-do` 不在派工主链路上。Host 执行核心是 `@byok-sdk/server/execution-core`（#1106）。L4 的参考实现在 `examples/`：Topology L 见 `host-execution-core`（组合该子路径的演示）、`basic`；Topology H 见 `hosted-bot-collaboration`、`hosted-bot-collaboration-worker`；Host UI 见 `live-activity-host`。
 
 ```mermaid
 flowchart TB

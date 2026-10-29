@@ -39,6 +39,7 @@ describe('Issues #112/#113/#116/#121 client security and reliability guards', ()
           deviceId: 'device-first-pair',
           tenantId: 'tenant-first-pair',
           accessToken: 'access-token',
+          expiresIn: 3600,
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );

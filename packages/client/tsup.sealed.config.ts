@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'tsup';
-import { subagentsBuild } from './scripts/subagents-build';
 import { workspaceExternals } from './scripts/workspace-externals';
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
@@ -13,9 +12,9 @@ export default defineConfig({
   esbuildOptions(options) {
     options.legalComments = 'inline';
   },
-  esbuildPlugins: [workspaceExternals(), subagentsBuild(true)],
+  esbuildPlugins: [workspaceExternals()],
   noExternal: [/^@byok-sdk\//],
   external: ['koffi', '#byok-pi-todo-runtime', 'typebox', 'typebox/compile',
-    'undici', 'jiti', 'yaml'],
-  define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version) },
+    'undici'],
+  define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version), __BYOK_PI_SUBAGENTS__: 'false' },
 });

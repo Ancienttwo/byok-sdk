@@ -176,6 +176,7 @@ describe('proof-only truth routes', () => {
 
     expect(() =>
       createByokCloud({
+        proofReceiptRetention: composition.proofReceiptRetention,
         core: composition.core,
         cloud: composition.stores,
         mailboxWake: composition.mailboxWake,

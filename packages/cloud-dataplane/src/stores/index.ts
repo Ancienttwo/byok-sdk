@@ -33,6 +33,7 @@ import { PostgresInboundDedupStore } from './dedup';
 import { PostgresNonceStore } from './nonces';
 import { PostgresPairingCodeStore } from './pairing-codes';
 import { PostgresRequestReceiptStore } from './receipts';
+import { PostgresTaskArchiveStore } from './task-archive';
 import { PostgresProofRequestReceiptStore } from './proof-receipts';
 import { PostgresTaskAttemptStore } from './task-attempts';
 import { PostgresTaskCancellationStore } from './task-cancellations';
@@ -166,5 +167,6 @@ export async function createPostgresCloudStores(
       objects: new PostgresObjectStore(pool, clock, new R2ObjectMaintenanceStore(options.objectStorage)),
     }),
     rateLimiter: new TokenBucketRateLimiter(options.rateLimit, clock),
+    taskArchive: new PostgresTaskArchiveStore(pool, clock),
   };
 }

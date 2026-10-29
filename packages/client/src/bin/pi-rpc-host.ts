@@ -2,18 +2,22 @@ import { parsePiAgentResources } from '../adapters/pi/agent-resources';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getAgentDir, type CreateAgentSessionOptions } from '@earendil-works/pi-coding-agent';
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { runPiSessionRuntime } from './pi-session-runtime';
 export { openPiRpcSession } from './pi-session-runtime';
-import { webExtension, subagentsExtension } from './pi-extension-factories.js';
+import { webExtension } from './pi-extension-factories.js';
+import { loadPiSubagentsExtensions } from '../adapters/pi/subagents';
 import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { parseToolAuthorizationIpcConfig, setToolAuthorizationGateEnv, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
 import { createPiToolAuthorizationHook } from '../adapters/pi/tool-authorization-hook';
+
+declare const __BYOK_PI_SUBAGENTS__: boolean;
 
 const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
@@ -178,9 +182,18 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   else if (process.connected) fail('an undeclared custody IPC channel is open');
   const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
   const { createTodoExtension } = await import('#byok-pi-todo-runtime');
-  const extensionFactories = [webExtension, createByokMcpExtension(config.mcp), subagentsExtension, createTodoExtension(localeAnchor)];
+  const extensionFactories = [webExtension, createByokMcpExtension(config.mcp)];
+  // pi-subagents is an installed dependency that reads its own package files at
+  // run time, so a bundled product has no subagents (the sealed build drops this
+  // branch). Under keys-profile a child session opens its own model runtime and
+  // would read the key marker from the projection, not the in-memory key.
+  if (__BYOK_PI_SUBAGENTS__ && packaging === 'installed' && config.credentialSource !== 'keys-profile') {
+    const gateExtension = fileURLToPath(new URL('./pi-subagent-gate.js', import.meta.url));
+    extensionFactories.push(...await loadPiSubagentsExtensions(config.toolAuthorization, gateExtension));
+  }
+  extensionFactories.push(createTodoExtension(localeAnchor));
   // Register last: earlier handlers may rewrite the input the gate must judge.
-  // The environment hands the same gate to SDK-owned native Pi subagents.
+  // The environment hands the same gate to native Pi subagent children.
   setToolAuthorizationGateEnv(config.toolAuthorization, join(dirname(args.configPath), 'tool-authorization.json'));
   if (config.toolAuthorization !== null) extensionFactories.push(createPiToolAuthorizationHook(config.toolAuthorization));
   let resourceAgentDir: string | undefined;

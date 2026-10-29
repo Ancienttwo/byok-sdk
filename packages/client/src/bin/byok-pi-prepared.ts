@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-// Pi subagent children re-enter THIS entry
-// (`<runtime> <this bin> __byok_sdk_helper pi-subagent-print|pi-subagent-runner`),
-// so the reserved-helper command is handled before this bin's own parser. The
-// dispatch rides the same external `#byok-pi-runtime-host` seam as the host
-// call below. Normal product argv falls through untouched.
+// SDK-reserved helpers re-enter THIS entry (`<runtime> <this bin>
+// __byok_sdk_helper <kind>`), so the reserved-helper command is handled before
+// this bin's own parser. The dispatch rides the same external
+// `#byok-pi-runtime-host` seam as the host call below. Normal product argv
+// falls through untouched.
 
 // #700: Node's own undici loads before Pi's npm copy (see `loadNodeUndici` in
 // `sdk-reserved-helper-host.ts`).

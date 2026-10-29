@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { BLOB_URL_TTL_MS } from '../stores/in-memory/blobs';
 import type { InboundRateLimiter } from '../stores/ports';
+import { terminalReceiptKey } from '../inbound';
 import { TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload } from './support/harness';
 
 function send(
@@ -130,6 +131,77 @@ describe('POST /byok/messages', () => {
       createEnvelope('task.started', {}, { taskId: 'task-1' }),
     );
     expect((await send(harness, device.authorization, oversized)).status).toBe(400);
+  });
+
+  it('rejects an invalid entry on its own and applies the rest of the batch (#1121)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+    const broken = { ...createEnvelope('task.started', {}, { taskId }), task_id: 42 };
+    const started = createEnvelope('task.started', {}, { taskId });
+
+    const response = await send(harness, device.authorization, [claim, broken, started]);
+
+    expect(response.status).toBe(200);
+    const body = MessagesSendResponseSchema.parse(await response.json());
+    expect(body).toEqual({
+      accepted: 2,
+      rejected: 1,
+      outcomes: [
+        { id: claim.id, outcome: 'accepted' },
+        { id: broken.id, outcome: 'rejected', reason: 'payload_invalid' },
+        { id: started.id, outcome: 'accepted' },
+      ],
+    });
+    expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('running');
+  });
+
+  it('still fails the whole request for a broken frame: another wire major or an entry without a UUID id', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const started = createEnvelope('task.started', {}, { taskId: 'task-1' });
+
+    expect((await send(harness, device.authorization, [started, { ...started, id: 'not-a-uuid' }])).status).toBe(400);
+    expect((await send(harness, device.authorization, [started, { ...started, v: 3 }])).status).toBe(400);
+  });
+
+  it('refuses a terminal whose stored receipt is not canonical without failing the batch (#1121)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+    await send(harness, device.authorization, [claim]);
+    await harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey(taskId), body: 'not an envelope' });
+    const fail = createEnvelope('task.fail', { reason: 'boom', retryable: false, agentRef: TEST_AGENT_REF }, { taskId });
+    const started = createEnvelope('task.started', {}, { taskId });
+
+    const response = await send(harness, device.authorization, [fail, started]);
+
+    expect(response.status).toBe(200);
+    expect(MessagesSendResponseSchema.parse(await response.json()).outcomes).toEqual([
+      { id: fail.id, outcome: 'rejected', reason: 'state_conflict' },
+      { id: started.id, outcome: 'accepted' },
+    ]);
+  });
+
+  it('records a task.fail whose failure class this Host does not know (#1121)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await send(harness, device.authorization, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId })]);
+    const fail = { ...createEnvelope('task.fail', { reason: 'capacity', agentRef: TEST_AGENT_REF }, { taskId }) };
+    const newer = { ...fail, payload: { ...fail.payload, retryable: true, failure: { class: 'provider_capacity', retryAfterMs: 30_000 } } };
+
+    const response = await send(harness, device.authorization, [newer]);
+
+    expect(MessagesSendResponseSchema.parse(await response.json()).outcomes).toEqual([{ id: newer.id, outcome: 'accepted' }]);
+    expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).toMatchObject({
+      state: 'failed', reason: 'capacity', failure: { class: 'unknown', reportedClass: 'provider_capacity' },
+    });
   });
 
   it('accepts a full-sized batch', async () => {

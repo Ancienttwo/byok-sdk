@@ -45,7 +45,7 @@ const fields = {
     tenantId: true, taskId: true, deviceId: true, agentRef: false, ownerDeviceId: false,
     status: true, claimedRuntime: false, claimedHarnessId: false, claimedRuntimeCapabilities: false,
     terminalCause: false, cancellation: false, offeredAt: false, claimedAt: false,
-    firstOutputAt: false, terminalAt: false, updatedAt: true,
+    firstOutputAt: false, terminalAt: false, archivedAt: false, updatedAt: true,
   },
   offer: { taskId: true, deviceId: true, messageId: true, type: true, payload: true, recordedAt: true, delivered: true },
   offerPayload: {
@@ -82,7 +82,7 @@ const fields = {
   error: { kind: true, reason: true, retryable: false },
   result: {
     state: true, summary: false, finalMessage: false, sessionRef: false, artifactRefs: false,
-    reason: false, code: false, retryable: false, failure: false, document: false,
+    reason: false, code: false, reportedCode: false, retryable: false, failure: false, document: false,
   },
 } satisfies { [K in keyof Projections]: DeclaredFields<Projections[K]> };
 

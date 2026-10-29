@@ -13,6 +13,7 @@ export default defineConfig({
   resolve: { alias: { '#byok-hermes-session': fileURLToPath(new URL('./src/adapters/hermes/hermes-session-runtime.ts', import.meta.url)) } },
   define: {
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
+    __BYOK_PI_SUBAGENTS__: 'true',
   },
   test: {
     // One short per-run TMPDIR, removed in teardown; see scripts/vitest/tmp-root.mjs.

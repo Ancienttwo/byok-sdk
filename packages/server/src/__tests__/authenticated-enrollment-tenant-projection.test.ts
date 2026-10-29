@@ -88,13 +88,5 @@ describe('authenticated enrollment tenant projection (reference server)', () => 
     );
   });
 
-  // 2d gap: `createPairingCode` no longer accepts a caller-authored `tenantId`
-  // — an embedded server derives its one tenant from `productId` at
-  // construction — so a malformed or oversize tenant CLAIM has no input to
-  // arrive on, and the `PAIR_RESPONSE_TENANT_ID_MAX_LENGTH` rejection cannot be
-  // provoked from this surface at all. The mint-point validation itself is
-  // core's (`tenantId()`), covered by `packages/core`'s own suite.
-  it.skip('rejects malformed and oversize tenant claims before a response can be emitted', () => {
-    // intentionally empty — see the 2d gap note above.
-  });
+  // Tenant wire validation is covered by packages/protocol/src/__tests__/http-api.test.ts; enrollment derives its tenant.
 });

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { taskId, type Json } from '@byok-sdk/example-host-execution-core';
+import { taskId, type Json } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { ChannelPort, Delivery, InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
 import { FINAL_BODY, deliveryVectors, replyToken, type DeliverySubject } from '@byok-sdk/example-bot-collaboration/delivery-vectors';

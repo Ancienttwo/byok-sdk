@@ -42,7 +42,9 @@ describe('SQLite custom-harness claim authority', () => {
         mailboxLimitBytes: 100_000_000n,
         retentionPolicyId: 'test',
       });
-      const cloud = createByokCloud({ ...stores, clock, crypto,
+      const cloud = createByokCloud({
+        proofReceiptRetention: { authority: stores.proofReceiptAuthority },
+        ...stores, clock, crypto,
         tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock), capabilities: fullCapabilityDeclaration() });
       const bound = tenantStoresFor({ kind: 'device', tenantId: tenant, productId: 'probe', deviceId }, stores);
       return { stores, cloud, bound };

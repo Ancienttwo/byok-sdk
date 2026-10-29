@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
-  type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+  type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/server/execution-core';
 import { botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
 import { admitBotToolsets, applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot,

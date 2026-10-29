@@ -33,7 +33,7 @@ const roots: string[] = [], servers: Server[] = [], sessions: Session[] = [];
 afterEach(async () => {
   for (const session of sessions.splice(0)) await session.close();
   for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
-  for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function stream(res: ServerResponse, delta: Record<string, unknown>, finish: 'stop' | 'tool_calls'): void {
@@ -200,20 +200,20 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     }
   }, 60_000);
 
-  // The vendored subagents extension spawns its child with a copy of the host
-  // environment and its own stdio, so the key cannot follow it. The child must
-  // refuse instead of sending the projection marker as the key.
-  it.skipIf(BUN_BIN === undefined)('a subagent call in the lane never sends the IPC marker as a key', async () => {
+  // A pi-subagents child session opens its own model runtime and would read the
+  // projection marker, not the in-memory key, so the lane never loads subagents.
+  it.skipIf(BUN_BIN === undefined)('the lane offers no subagent tool and never sends the IPC marker as a key', async () => {
     const { events, received } = await runLane('Delegate a task.', toolCall('subagent', { agent: 'probe-worker', task: 'Reply with OK.', async: false }), async (home) => {
-      // A project agent in the session cwd, so the vendored extension really spawns its child.
       await fs.mkdir(path.join(home, '.agents'));
       await fs.writeFile(path.join(home, '.agents', 'probe-worker.md'), '---\nname: probe-worker\ndescription: Custody probe worker.\n---\n\nReply with OK.\n');
     });
 
     expect(events.filter(event => event.type === 'error')).toEqual([]);
+    const offered = (JSON.parse(received[0]!.body) as { tools?: { function?: { name?: string } }[] }).tools?.map(tool => tool.function?.name) ?? [];
+    expect(offered.length).toBeGreaterThan(0);
+    expect(offered).not.toContain('subagent');
     const result = events.find(event => event.type === 'tool_result');
-    expect(result?.type).toBe('tool_result');
-    expect(JSON.stringify(result)).toContain('byok_subagent_credential_unavailable');
+    expect(JSON.stringify(result)).toMatch(/subagent/);
     // Only the parent's two turns reached the provider, both with the real key.
     expect(received.map(request => request.authorization)).toEqual([`Bearer ${CANARY}`, `Bearer ${CANARY}`]);
     for (const request of received) {
@@ -221,31 +221,4 @@ describe('pi-rpc BYOK key custody (#385)', () => {
       expect(request.body).not.toContain(CANARY);
     }
   }, 90_000);
-
-  it.skipIf(BUN_BIN === undefined)('the built subagent print and runner children refuse a marker projection before any request', async () => {
-    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-385-sub-'))); roots.push(root);
-    let requests = 0;
-    const server = createServer((req, res) => { requests += 1; req.resume(); res.writeHead(500).end(); });
-    servers.push(server); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
-    const agentDir = path.join(root, 'projection'); await fs.mkdir(agentDir);
-    const profile = parseModelProviderProfile({ adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [],
-      created_at: '2026-10-13T00:00:00.000Z', updated_at: '2026-10-13T00:00:00.000Z', display_name: 'Probe', enabled: true, kind: 'model',
-      model: 'probe', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, reasoning: false, thinkingLevel: 'off' } });
-    await fs.writeFile(path.join(agentDir, 'models.json'), JSON.stringify(buildPiProviderProjection(profile, 'pi-rpc')));
-    const runnerConfig = path.join(root, 'runner.json'); await fs.writeFile(runnerConfig, '{}');
-    const entry = path.join(clientRoot, 'dist/bin/byok-pi-rpc.js');
-    for (const tail of [['pi-subagent-print', '-p', '--model', 'byok-sdk-probe/probe', 'Reply with OK.'], ['pi-subagent-runner', runnerConfig]]) {
-      const child = spawn(process.execPath, [entry, '__byok_sdk_helper', ...tail], {
-        cwd: root, env: { PATH: process.env.PATH!, HOME: root, PI_CODING_AGENT_DIR: agentDir, ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot!, USERPROFILE: root } : {}) }, stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
-      const code = await new Promise<number | null>(resolve => child.once('close', resolve));
-      expect(code, tail[0]).not.toBe(0);
-      expect(stderr, tail[0]).toContain('byok_subagent_credential_unavailable');
-    }
-    // The runner refused before the vendored entry read (and deleted) its config.
-    expect(readFileSync(runnerConfig, 'utf8')).toBe('{}');
-    expect(requests).toBe(0);
-  }, 60_000);
 });

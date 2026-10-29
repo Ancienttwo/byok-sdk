@@ -21,6 +21,7 @@ import type { CloudCrypto } from '../crypto/port';
 import { createByokCloud, type ByokCloud, type ByokCloudOptions } from '../cloud';
 import { createInMemoryCloudStores, createInMemoryBlobBytes } from '../stores/in-memory/index';
 import type { MailboxWake } from '../mailbox-wake';
+import type { ProofReceiptRetentionOptions } from '../maintenance';
 import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake';
 import type { BlobContentProxy, CloudStores } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
@@ -97,6 +98,8 @@ export interface InMemoryByokCloud {
   readonly stores: CloudStores;
   /** The byte proxy the two `/content` routes were mounted on. */
   readonly blobContentProxy: BlobContentProxy;
+  /** The retention the composition passed to `createByokCloud`, for a test that builds a second cloud on these stores. */
+  readonly proofReceiptRetention: ProofReceiptRetentionOptions;
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
 }
@@ -106,13 +109,14 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
   const crypto = options.crypto ?? createWebCrypto();
   const objectBytes = createInMemoryBlobBytes(clock, crypto);
   const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
-  const { stores, blobContentProxy } = createInMemoryCloudStores(
+  const { stores, blobContentProxy, proofReceiptAuthority } = createInMemoryCloudStores(
     clock,
     crypto,
     core.objects,
     core.mailbox,
     objectBytes,
   );
+  const proofReceiptRetention = { authority: proofReceiptAuthority };
   const tokenSigner =
     options.tokenSigner ??
     createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(TOKEN_SECRET_BYTES)), clock);
@@ -124,6 +128,7 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     mailboxWake,
     core,
     cloud: stores,
+    proofReceiptRetention,
     // This composition has nowhere else to put bytes and owns its proxy, so it
     // supplies it whenever the declaration names `blobs.contentproxy`.
     ...(declares(capabilities, CLOUD_CAPABILITIES.blobsContentProxy) ? { blobContentProxy } : {}),
@@ -190,5 +195,5 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
       : { skillPackPageLimit: options.skillPackPageLimit }),
   });
 
-  return { cloud, core, stores, blobContentProxy, clock, crypto, mailboxWake };
+  return { cloud, core, stores, blobContentProxy, proofReceiptRetention, clock, crypto, mailboxWake };
 }

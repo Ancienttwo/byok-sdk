@@ -16,6 +16,7 @@ import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { bindMcpToolsetServerObservation, observeMcpServer } from '../mcp/observation';
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { resolveBunBin } from './support/test-bun-bin';
+import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
@@ -404,10 +405,9 @@ await response.arrayBuffer();
 /**
  * #701: a Host that bundles its whole CLI as one CommonJS file in a single
  * esbuild pass (no ESM pass first). The bundle must load the Pi host and run a
- * real print session through the SDK-reserved helper, with no redirect or with
- * the sealed redirect. The subagents factory then loads its parent extension
- * lazily, so the provider request carries the subagent tools, except in a
- * subagent child. CommonJS output has no `import.meta`; Pi reads
+ * real RPC session through the SDK-reserved helper, with no redirect or with
+ * the sealed redirect. pi-subagents loads only from its installed package, so
+ * a bundled product offers no subagent tool. CommonJS output has no `import.meta`; Pi reads
  * `import.meta.url` when it evaluates, so the Host defines it from `__filename`.
  *
  * #724: `import.meta.url` is the only property the Host defines. The bundle
@@ -482,10 +482,9 @@ async function expectNodeUndiciOwnsDispatcher(slotReport: string): Promise<void>
 
 describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
   it.each([
-    ['the ordinary host', undefined, {}, true],
-    ['the sealed host redirect', SEALED_HOST, {}, true],
-    ['the ordinary host in a subagent child', undefined, { PI_SUBAGENT_CHILD: '1' }, false],
-  ] as const)('runs a Pi print session from %s', async (_name, redirect, childEnv, subagentTools) => {
+    ['the ordinary host', undefined],
+    ['the sealed host redirect', SEALED_HOST],
+  ] as const)('runs a Pi RPC session from %s', async (_name, redirect) => {
     const { build } = await import('esbuild');
     const release = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cjs-release-')));
     const toolNames: string[][] = [];
@@ -537,15 +536,30 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
       const slotPreload = path.join(release, 'slot-owner.cjs');
       const slotReport = path.join(release, 'slot-owner.json');
       await fs.writeFile(slotPreload, SLOT_OWNER_PRELOAD);
-      const env = { ...childEnv, PATH: process.env.PATH ?? '', HOME: release, TMPDIR: release,
+      const cwd = path.join(release, 'workspace');
+      await fs.mkdir(cwd);
+      const launch = serializePiHostConfig({ format: 'byok.pi.rpc-launch', version: 8, credentialSource: 'pi-auth-store', cwd,
+        agentUserContext: 'inherit', agentSkillPaths: [], agentExtensionPaths: [], toolAuthorization: null,
+        mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } });
+      const configPath = path.join(release, 'launch.json');
+      await fs.writeFile(configPath, launch.bytes);
+      const env = { PATH: process.env.PATH ?? '', HOME: release, TMPDIR: release,
         PI_CODING_AGENT_DIR: agentDir, PI_PACKAGE_DIR: assetRoot, BYOK_TEST_SLOT_REPORT: slotReport };
-      await execFileAsync(process.execPath,
-        ['-r', slotPreload, path.join(release, 'entry.cjs'), '__byok_sdk_helper', 'pi-subagent-print', '--mode', 'json', 'Say hi'],
-        { cwd: release, env, timeout: 30_000 });
-      expect(toolNames.length).toBeGreaterThan(0);
+      const child = spawn(process.execPath, ['-r', slotPreload, path.join(release, 'entry.cjs'), '__byok_sdk_helper', 'pi-rpc',
+        `--config-digest=${launch.digest}`, '--config', configPath, '--mode', 'rpc', '--provider', 'zai', '--model', 'glm-4.6'],
+      { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      let stderr = '';
+      child.stderr.on('data', bytes => { stderr += String(bytes); });
+      const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
+      child.stdin.write(`${JSON.stringify({ id: 'prompt', type: 'prompt', message: 'Say hi' })}\n`);
+      const deadline = Date.now() + 30_000;
+      while (toolNames.length === 0 && Date.now() < deadline && child.exitCode === null) await new Promise(resolve => setTimeout(resolve, 50));
+      child.stdin.end();
+      await closed;
+      expect(toolNames.length, stderr).toBeGreaterThan(0);
       for (const names of toolNames) {
         expect(names).toContain('read');
-        expect(names.includes('subagent')).toBe(subagentTools);
+        expect(names).not.toContain('subagent');
       }
 
       // #700: the request above ran through Node's built-in undici, not through Pi's npm copy.
@@ -568,7 +582,6 @@ describe('Pi host — CommonJS product bundle loads Node undici for every Pi hel
     ['pi-rpc', [], /byok-pi-rpc: exactly one --config-digest=<sha256> is required/],
     ['pi-prepared', [], /byok-pi-prepared: exactly one --config-digest=<sha256> is required/],
     ['pi-durable', [], /byok-pi-durable: exactly one --config-digest=<sha256> is required/],
-    ['pi-subagent-runner', ['/nonexistent/runner-config.json'], /Subagent runner error: .*ENOENT/],
   ] as const)('%s', async (kind, tail, refusal) => {
     const { build } = await import('esbuild');
     const release = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cjs-kind-')));

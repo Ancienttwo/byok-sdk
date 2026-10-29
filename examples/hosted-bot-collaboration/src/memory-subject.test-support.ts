@@ -1,4 +1,4 @@
-import { canonical, type Json } from '@byok-sdk/example-host-execution-core';
+import { canonical, type Json } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { admitUserInput } from '@byok-sdk/example-bot-collaboration/coalesce';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';

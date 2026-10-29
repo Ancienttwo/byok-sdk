@@ -282,18 +282,26 @@ per step. There is no disable option.
 Each pass calls the kernel's `ByokCloud.runMaintenance` for this server's tenant.
 `await server.maintenance.runNow()` joins an in-flight pass. `await server.close()`
 clears the timer, waits for that pass to settle, then closes storage. A pass
-returns twelve ordered step results and emits `maintenance.completed`, or
+returns thirteen ordered step results and emits `maintenance.completed`, or
 `maintenance.failed` when a step failed. A failed event with `report` carries
 step results; one with `errorCode` means the pass itself could not return a report.
 
-With SQLite storage the `proofReceipts` step deletes used device-proof request
-ids recorded more than 24 hours ago; within that window a `requestId` stays
-single-use. The memory composition does not prune them: the step reports
-`not-configured` and every used `requestId` is kept for the life of the process.
+The `proofReceipts` step deletes used device-proof request ids recorded more
+than 24 hours ago, with SQLite and memory storage alike; within that window a
+`requestId` stays single-use.
 
-Acked rows past policy are deleted; old unacked rows become retained `expired`
-rows, moving `recoverableFrom` so lost cursors receive `409 cursor_too_old`.
-Mailbox collection never changes accounting counters. Orphan collection deletes
+The `tasks` step archives a terminal task 90 days after it ended
+(`terminalTaskArchiveMs`, at least the unacked plus dead-letter mailbox
+windows). Its bodies become tombstones and its board item is removed; the
+task row and its tombstoned receipts stay as the replay fence until the
+tenant is deleted, so every device replay is answered as before.
+
+Acked rows past policy are deleted; old unacked rows become `expired` dead
+letters, moving `recoverableFrom` so lost cursors receive `409 cursor_too_old`.
+A dead letter is kept for `mailboxDeadLetterRetentionMs` (default 30 days)
+after it expired, then deleted, except each device's highest-seq dead letter,
+which stays so `recoverableFrom` never moves back. Mailbox quota counts only
+pending rows, and mailbox collection never changes accounting counters. Orphan collection deletes
 real bytes before settling their charge. Identity receipts and redeemed pairing
 codes stay protected. See the [migration](../../docs/migrations/412-retention-maintenance.md)
 and [runbook](../../deploy/runbooks/cloud-cleanup.md) for the port contract.

@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { hash, taskId, type Json } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId, type Json } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import type { Command, DelegationTimers } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { deviceVectors, replyVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, VECTOR_NOW, type DeviceSubject, type ReplySubject,
   type SettlementSubject, type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
-import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
+import type { FrozenInput } from '@byok-sdk/server/execution-core';
 import { frozenIntent, settleFacts } from './intents';
 import { storedKey } from './layout';
 import { TEST_HOST, VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';

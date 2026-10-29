@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { hash, taskId } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId } from '@byok-sdk/server/execution-core';
 import { openTeam, type TestTeam } from './team.test-support';
 import { crossBot } from './cross-bot.test-support';
 import type { AgentMessageInput } from './host';

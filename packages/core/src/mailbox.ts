@@ -124,8 +124,9 @@ export interface MailboxPage {
    * whole point of the field.
    *
    * `1` for a mailbox that has lost nothing, so a fresh device's cursor `0` is
-   * always inside the window. Monotonic for as long as dead-lettered rows are
-   * retained, which §12.7.5 requires.
+   * always inside the window. Monotonic: `collectExpired` reaps old dead
+   * letters but always keeps each device's highest-seq one, which is the
+   * evidence this floor is read from.
    *
    * This is a READ of the retained window, never a second retention authority:
    * `collectExpired` decides what is retained, this reports what it cost.
@@ -159,7 +160,7 @@ export interface MailboxCursorState {
 /**
  * Retention cutoffs.
  *
- * Both instants must be **canonical ISO-8601 UTC** (`YYYY-MM-DDTHH:mm:ss.sssZ`);
+ * All three instants must be **canonical ISO-8601 UTC** (`YYYY-MM-DDTHH:mm:ss.sssZ`);
  * anything else is rejected with `timestamp_not_canonical`. A retention sweep
  * deletes rows, so an offset-bearing string that a string comparison and a SQL
  * `timestamptz` comparison read differently is the worst place to guess — see
@@ -168,8 +169,26 @@ export interface MailboxCursorState {
 export interface MailboxCollectExpiredInput extends CollectExpiredInput {
   /** Acked rows appended before this instant are deleted. */
   readonly ackedBefore: string;
-  /** Unacked rows appended before this instant move to `expired`, never deleted here. */
+  /** Unacked rows appended before this instant move to `expired`. */
   readonly expireUnackedBefore: string;
+  /**
+   * Dead letters (`expired` rows) appended before this instant are deleted,
+   * except each device's highest-seq dead letter: that row is the evidence for
+   * `recoverableFrom`, so a reap never moves the floor. Only rows that were
+   * already `expired` when the call started are eligible; a row this call
+   * expires waits for the next call. Reaped rows count in `removed`.
+   */
+  readonly reapDeadLettersBefore: string;
+}
+
+/**
+ * Which of one device's `pending` rows {@link MailboxStore.expirePending}
+ * dead-letters: every one, or exactly the listed sequences. A listed seq that
+ * is not `pending` (acked, already expired, or never written) is skipped.
+ */
+export interface MailboxExpirePendingInput {
+  readonly deviceId: string;
+  readonly seqs: 'all' | readonly number[];
 }
 
 
@@ -202,9 +221,20 @@ export interface MailboxStore {
     input: MailboxAdvanceCursorInput,
   ): Promise<MailboxCursorState>;
   readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
-  /** Retention hook: delete acked rows, dead-letter unacked ones. */
+  /** Retention hook: delete acked rows, reap old dead letters below the floor, dead-letter unacked ones. */
   collectExpired(
     tenant: TenantId,
     input: MailboxCollectExpiredInput,
   ): Promise<CollectExpiredResult>;
+  /**
+   * Dead-letters undelivered rows nobody will ever ack — the rows of a retired
+   * device, or of a task the Host abandoned — without waiting for retention.
+   * Only `pending` rows move, and only to `expired`: nothing is deleted, no row
+   * returns to `pending`, the cursor is untouched, and the device's `seq`
+   * allocator keeps counting. The moved rows stop holding mailbox quota and
+   * raise `recoverableFrom` exactly as a retention sweep would. Serialized with
+   * the device's appends and acks, so a row appended before this call is
+   * either moved or already acked.
+   */
+  expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{ readonly expired: number }>;
 }

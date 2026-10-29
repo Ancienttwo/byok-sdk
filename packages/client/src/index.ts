@@ -198,13 +198,9 @@ export {
   AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS,
 } from './daemon/agent-memory-intent';
 export type {
-  AgentMemoryIntentTransport,
-  AgentMemoryIntentFetchInput,
   AgentMemoryIntentNoticeFailureReason,
 } from './daemon/agent-memory-intent';
 export {
-  AgentMemoryError,
-  AgentMemoryValidationError,
   AgentMemorySnapshotLimitError,
   AgentMemoryRevisionConflictError,
   isAgentMemorySecureFilesystemAvailable,
@@ -212,11 +208,8 @@ export {
   AGENT_MEMORY_OUTBOX_FILENAME,
 } from './daemon/agent-memory';
 export type {
-  AgentMemoryFile,
-  AgentMemorySnapshot,
   AgentMemoryRedactor,
   AgentMemoryProjectionGrant,
-  AgentMemoryProjectionPort,
   AgentMemoryHostedProjection,
 } from './daemon/agent-memory';
 export type {
@@ -580,7 +573,7 @@ export { isReservedMcpServerName } from './sdk-reserved-mcp';
 
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 
-export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
+export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 
 export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
 export type {

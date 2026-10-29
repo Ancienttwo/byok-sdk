@@ -7,18 +7,17 @@ import { AGENT_MEMORY_PROJECTION_CAPABILITY } from '@byok-sdk/protocol';
 import {
   AGENT_MEMORY_AUDIT_FILENAME,
   AGENT_MEMORY_OUTBOX_FILENAME,
-  AgentMemoryError,
   AgentMemoryRevisionConflictError,
   AgentMemoryService,
   captureAgentMemorySnapshot,
   snapshotAndProjectAgentMemory,
-  type AgentMemoryProjectionPort,
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
 import type {
   AgentMemoryFilesystem,
   AgentMemoryFilesystemFileState,
 } from '../daemon/agent-memory-filesystem';
+import { AgentMemoryError, type AgentMemoryProjectionPort } from '@byok-sdk/protocol/agent-memory';
 
 const AUDIT_PATH = `.byok/${AGENT_MEMORY_AUDIT_FILENAME}`;
 const OUTBOX_PATH = `.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`;

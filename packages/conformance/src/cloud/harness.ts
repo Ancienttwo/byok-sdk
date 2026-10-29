@@ -17,7 +17,14 @@ import { runCloudRetentionConformance } from './retention';
  */
 import { describe } from 'vitest';
 import type { BlobDeclaration, BlobObservation, CloudStores } from '@byok-sdk/cloud';
-import type { MailboxStore, StorageReservation, TenantId } from '@byok-sdk/core';
+import {
+  contentHash,
+  type CoreStores,
+  type MailboxMessage,
+  type MailboxStore,
+  type StorageReservation,
+  type TenantId,
+} from '@byok-sdk/core';
 import { runCloudPortInventoryConformance } from './port-inventory';
 import { runPairingConformance } from './pairing';
 import { runNonceConformance } from './nonces';
@@ -28,6 +35,8 @@ import { runReceiptConformance } from './receipts';
 import { runProofReceiptConformance } from './proof-receipts';
 import { runBlobConformance } from './blobs';
 import { runCloudTenantIsolationConformance } from './tenant-isolation';
+import { runDeviceRetirementConformance } from './device-retirement';
+import { runTaskArchiveConformance } from './task-archive';
 
 /**
  * The cloud-local ports this suite certifies.
@@ -68,6 +77,7 @@ export const CLOUD_CONFORMANCE_PORTS = [
   'proofReceipts',
   'blobs',
   'rateLimiter',
+  'taskArchive',
 ] as const;
 
 export type CloudConformancePortName = (typeof CLOUD_CONFORMANCE_PORTS)[number];
@@ -123,6 +133,30 @@ export interface CloudCompositionHandle {
    * delivery row is gone is contract behavior (#1116).
    */
   retireCancellationDelivery(tenant: TenantId, deviceId: string): Promise<number>;
+  /**
+   * The composition's own core mailbox, narrowed to what device retirement and
+   * task abandonment are observed through: their pending rows, the quota those
+   * rows hold, and the dead-letter floor. Same reason as
+   * `retireCancellationDelivery` — the mailbox is not a certified port here,
+   * yet what retirement does to it is contract behavior (#1119). Build it with
+   * {@link conformanceMailbox}.
+   */
+  readonly mailbox: CloudConformanceMailbox;
+  /**
+   * Makes every mailbox expiry (a `pending` row becoming `expired`) fail until
+   * the returned restore runs, the way a storage fault mid-retirement would.
+   * Retirement must then change nothing: registration, attempts and rows stay
+   * as they were (#1119). Absent where the store owns its file exclusively and
+   * nothing can reach inside its one retirement transaction (SQLite).
+   */
+  failMailboxExpiry?(): Promise<() => Promise<void>>;
+  /**
+   * Holds the next mailbox expiry until the returned release runs, so a case
+   * can act while a retirement is in flight. A composition whose retirement is
+   * one transaction serialized with every other write (SQLite) cannot be held
+   * mid-way and returns a release that does nothing (#1119).
+   */
+  holdMailboxExpiry(): Promise<() => Promise<void>>;
   /** Optional teardown for compositions holding connections. */
   dispose?(): void | Promise<void>;
 }
@@ -143,8 +177,111 @@ export async function ackAndCollectMailbox(
     limit: 500,
     ackedBefore: farFuture,
     expireUnackedBefore: '1970-01-01T00:00:00.000Z',
+    reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
   });
   return collected.removed;
+}
+
+/** See {@link CloudCompositionHandle.mailbox}. */
+export interface CloudConformanceMailbox {
+  /** Issues the tenant an entitlement whose only constraint the cases rely on is `mailboxLimitBytes`. */
+  limit(tenant: TenantId, mailboxLimitBytes: bigint): Promise<void>;
+  /** A `limited` append of `body`, exactly as an offer would be admitted. */
+  append(tenant: TenantId, input: { readonly deviceId: string; readonly messageId: string; readonly body: string }): Promise<MailboxMessage>;
+  /** Delivers and acks every row the device has, as its daemon's next poll does. */
+  ack(tenant: TenantId, deviceId: string): Promise<void>;
+  /** Every retained `pending` row of the device, its `recoverableFrom`, and the tenant's mailbox usage. */
+  inspect(tenant: TenantId, deviceId: string): Promise<{
+    readonly pending: readonly MailboxMessage[];
+    readonly recoverableFrom: number;
+    readonly usageBytes: bigint;
+  }>;
+}
+
+/**
+ * {@link CloudCompositionHandle.failMailboxExpiry} and
+ * {@link CloudCompositionHandle.holdMailboxExpiry} for a composition whose
+ * core mailbox object is the one its device directory expires through.
+ */
+export function mailboxExpiryFaults(mailbox: Pick<CoreStores['mailbox'], 'expirePending'>): Pick<
+  CloudCompositionHandle,
+  'failMailboxExpiry' | 'holdMailboxExpiry'
+> {
+  const original = mailbox.expirePending.bind(mailbox);
+  return {
+    async failMailboxExpiry() {
+      mailbox.expirePending = async () => {
+        throw new Error('injected mailbox expiry failure');
+      };
+      return async () => {
+        mailbox.expirePending = original;
+      };
+    },
+    async holdMailboxExpiry() {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      mailbox.expirePending = async (...args) => {
+        mailbox.expirePending = original;
+        await held;
+        return original(...args);
+      };
+      return async () => release();
+    },
+  };
+}
+
+/** {@link CloudCompositionHandle.mailbox} over a composition's core mailbox and quota ports. */
+export function conformanceMailbox(core: Pick<CoreStores, 'mailbox' | 'quota'>): CloudConformanceMailbox {
+  const versions = new Map<TenantId, bigint>();
+  return {
+    async limit(tenant, mailboxLimitBytes) {
+      const version = (versions.get(tenant) ?? 0n) + 1n;
+      versions.set(tenant, version);
+      await core.quota.writeEntitlement(tenant, {
+        version,
+        hardLimitBytes: 1_000_000n,
+        maxObjectBytes: 100_000n,
+        maxInlineBytes: 1_000n,
+        mailboxLimitBytes,
+        retentionPolicyId: 'default',
+      });
+    },
+    append(tenant, input) {
+      const byteSize = BigInt(new TextEncoder().encode(input.body).length);
+      return core.mailbox.append(tenant, {
+        deviceId: input.deviceId,
+        messageId: input.messageId,
+        admission: 'limited',
+        materialize: () => ({ body: input.body, bodyHash: contentHash(`sha256:${'c'.repeat(64)}`), byteSize }),
+      });
+    },
+    async ack(tenant, deviceId) {
+      const { ackedSeq } = await core.mailbox.readCursor(tenant, deviceId);
+      let deliveredSeq = ackedSeq;
+      for (let afterSeq = ackedSeq, more = true; more;) {
+        const page = await core.mailbox.readAfter(tenant, { deviceId, afterSeq });
+        deliveredSeq = page.nextSeq;
+        afterSeq = page.nextSeq;
+        more = page.hasMore;
+      }
+      await core.mailbox.recordDelivery(tenant, { deviceId, deliveredSeq });
+      await core.mailbox.advanceCursor(tenant, { deviceId, ackedSeq: deliveredSeq });
+    },
+    async inspect(tenant, deviceId) {
+      const pending: MailboxMessage[] = [];
+      let recoverableFrom = 1;
+      for (let afterSeq = 0, more = true; more;) {
+        const page = await core.mailbox.readAfter(tenant, { deviceId, afterSeq });
+        pending.push(...page.messages);
+        recoverableFrom = page.recoverableFrom;
+        afterSeq = page.nextSeq;
+        more = page.hasMore;
+      }
+      return { pending, recoverableFrom, usageBytes: (await core.mailbox.readUsage(tenant)).bytes };
+    },
+  };
 }
 
 /**
@@ -187,6 +324,8 @@ export function runCloudConformance(name: string, factory: CloudCompositionFacto
     runProofReceiptConformance(factory);
     runBlobConformance(factory);
     runCloudTenantIsolationConformance(factory);
+    runDeviceRetirementConformance(factory);
     runCloudRetentionConformance(name, factory);
+    runTaskArchiveConformance(factory);
   });
 }

@@ -1,4 +1,4 @@
-import { hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { frame } from './frame';
 
 /**

@@ -220,6 +220,7 @@ describe('reference-server Agent egress contract', () => {
   // unchanged and still readable from the retained window. Orchestrator
   // decision: accept one-durable-row delivery (the mailbox is at-least-once, so
   // a device that lost the row re-reads it by cursor), or re-append on replay.
+  // Decision D6: https://github.com/Ancienttwo/byok-sdk/issues/1153
   it.skip('answers an exact transport replay with a second, identical agent.message.disposition delivery', async () => {
     expect.fail('the kernel appends one durable disposition row per message — see the 2d gap note above');
   });
@@ -386,6 +387,7 @@ describe('reference-server Agent egress contract', () => {
   // receipt identity itself is still pinned, through `egress.get`.
   // Orchestrator decision: accept one-durable-row delivery, or re-append the
   // ack on replay.
+  // Decision D7: https://github.com/Ancienttwo/byok-sdk/issues/1153
   it.skip('re-delivers an identical agent.egress.ack envelope on an exact reliable replay', async () => {
     expect.fail('the kernel appends one durable ack row per receipt — see the 2d gap note above');
   });

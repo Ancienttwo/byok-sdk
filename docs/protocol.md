@@ -300,6 +300,17 @@ observability data, but FAIL-CLOSED for control/security data:
   likewise just ignored, not rejected. An unknown top-level envelope field is stripped, not rejected
   (§1). This tolerance exists because this data only ever informs a UI or a
   log line — silently ignoring what you don't understand yet is safe.
+- **Tolerated (open device vocabularies, #1121):** a device -> Host
+  vocabulary a newer device may extend — `task.fail.failure.class`,
+  `task.decline.code` and a denied `agent.content.receipt` `reason` — accepts
+  any well-formed token (`[a-z][a-z0-9_-]{0,63}`) it does not know and keeps
+  it verbatim, so the report is still recorded. Hosts read it as `unknown`
+  with the raw token beside it (`readTaskFailure` → `reportedClass`,
+  `readDeclineCode` → `reportedCode`); cloud `readTaskResult` and embedded
+  task results carry those readings. A failure class it does not know may
+  carry fields this version does not know either; they are kept too.
+  Message types, decisions and outcomes that select a payload shape stay
+  closed.
 - **Fail-closed (control/security):** `instruction` rejects any shape it
   doesn't recognize outright — there is no passthrough-unknown fallback,
   unlike `AgentEventSchema`. A payload that would change what a runtime is
@@ -424,10 +435,13 @@ paths name one shared field in `WIRE_ADDITIONS`. See the
 
 **Landed additive minor: `task.fail.failure` (#869).** `task.fail`, and so
 its sealed branch, gains an OPTIONAL strict `failure: { class, resetsAt? }`.
-`class` is a closed `RuntimeFailureClass` value: the vendored OAR
+`class` is a `RuntimeFailureClass` value: the vendored OAR
 `FailureClass` (`auth`, `quota`, `rate_limited`, `billing`,
 `model_unavailable`, `input_too_large`, `invalid_request`, `overloaded`,
 `provider`, `runtime_exited`, `limit_reached`, `output_schema`, `unknown`).
+The class is open (#1121): a well-formed class a Host does not know is
+accepted and read as `unknown` with `reportedClass`; see the
+observability-vs-control rule above.
 `resetsAt` is an ISO 8601 UTC time, only on `quota`, and only when the runtime
 reported when the limit resets. Adapters classify from structured runtime
 fields only and never parse `reason`, which stays display text. `unknown`
@@ -1194,7 +1208,8 @@ missing or revoked. The mailbox message id is derived from
 intentId })`, so while the original mailbox row is retained a retried enqueue
 returns the existing row and seq, and a retry that names a different `agentRef`
 for the same intent fails `mailbox_receipt_mismatch`. After acked-row retention
-cleanup (`mailboxAckedRetentionMs`) a retry appends a new row with a new seq
+cleanup (`mailboxAckedRetentionMs`) or a dead-letter reap
+(`mailboxDeadLetterRetentionMs`) a retry appends a new row with a new seq
 and `agentRef` is no longer compared, so the Host must keep `agentRef` fixed
 per `intentId`. The device replays safely (ledger idempotent readback, or the
 terminal fetch after prune). A mismatched `agentId`, or a mismatched
@@ -2007,14 +2022,15 @@ state would fork every terminal-state consumer (dashboards, retry logic,
 for no behavioral gain. Keeping the state machine at 7 states (not 8) was the
 deciding factor.
 
-Home-busy declines carry optional `code`, a closed enum:
-`agent_home_writer_busy` or `agent_home_reader_busy`, selected by the rejected
+Home-busy declines carry optional `code`: `agent_home_writer_busy` or
+`agent_home_reader_busy` (open since #1121: a code a Host does not know is
+read as `unknown` with `reportedCode`), selected by the rejected
 Attempt's requested home access. This includes capacity, lease acquisition,
 reader resume/run-directory and home initialization conflicts reported as
 `AgentHomeBusyError`. Other declines omit `code`. Hosts classify busy by
-`code`; `reason` is display text only. Cloud `readTaskResult` copies the code
-verbatim, and `readDeviceTerminal` / embedded `tasks.deviceTerminal` preserve
-it in the canonical envelope.
+`code`; `reason` is display text only. Cloud `readTaskResult` reads the code
+(`readDeclineCode`), and `readDeviceTerminal` / embedded `tasks.deviceTerminal`
+preserve it verbatim in the canonical envelope.
 
 Landed additive minor: `task.decline.code` (#471) was an optional v2 field,
 registered as strip-safe in `WIRE_ADDITIONS`. It is part of the v3 baseline.
@@ -2292,7 +2308,7 @@ generated device keypair register the device and mint its first token.
 
 ```
 Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey, machineId? }
-Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint? }
+Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint?, expiresIn? }
 ```
 
 - `devicePublicKey`: Ed25519 public key, base64url-encoded.
@@ -2315,21 +2331,25 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint? }
   be derived from or parsed out of the access token.
 - This required field is part of the 0.7.0 HTTP auth contract. Pairing is an
   out-of-band HTTP DTO, so `PROTOCOL_VERSION` remains `1` and the frozen v1
-  envelope corpus is unchanged; the frozen HTTP schema fingerprint records
-  this required field explicitly.
+  envelope corpus is unchanged; the v4 HTTP corpus
+  (`golden/v4.http.ndjson`) pins this required field with its `PairResponse`
+  line.
 - `refreshHint`: opaque hint for when/how to renew; not itself a credential.
-  **Pinned semantics (resolves a carried-forward pin): the reference server
-  always sets `refreshHint` to the freshly-minted token's own ISO-8601
-  `expiresAt`** — the exact same value `/byok/token` reports explicitly on
-  every subsequent renewal (§6.2). The schema keeps `refreshHint` typed as a
-  bare opaque `string` (not narrowed to an ISO datetime) so a client is never
-  *required* to parse it as a date to be spec-compliant, but a client MAY
-  treat it as `expiresAt` and schedule proactive renewal accordingly — the
-  reference client does exactly this (`AuthManager.resolvePairExpiry`),
-  falling back to a conservative assumed TTL only if the value doesn't parse
-  as a date at all. This is additive clarification of existing behavior, not
-  a schema change: `refreshHint` was always allowed to contain this value,
-  and always will be.
+  **Pinned semantics: the reference server always sets `refreshHint` to the
+  freshly-minted token's own ISO-8601 `expiresAt`** — the same value
+  `/byok/token` reports on every renewal (§6.2). It is kept for published
+  devices (0.31.0 and earlier read it as the first token's expiry). The
+  current reference client does not read it.
+- `expiresIn`: lifetime of `accessToken` in whole seconds (positive integer),
+  relative to when the device receives the response (#1114). It is the
+  device's only lifetime authority: the client stores receipt time +
+  `expiresIn` as a device-local expiry and never compares a server timestamp
+  with its own clock, so a device clock that is hours fast or slow renews on
+  the same schedule. The schema keeps it optional because published v4 hosts
+  omit it; the current client refuses a pair response without it, so a Host
+  must be upgraded before its devices. The server derives `expiresIn` and
+  `refreshHint` from the same TTL. Like the token response's, the field is a
+  strip-safe HTTP addition in `WIRE_ADDITIONS`.
 
 **Claims flow (S1, 2026-08-07).** A pairing code is not an anonymous ticket:
 the server mints it already bound to a `{tenantId, productId}` pair
@@ -2360,13 +2380,31 @@ POST /byok/challenge
 
 POST /byok/token
   Request  (TokenRequestSchema):  { deviceId, nonce, signature }
-  Response (TokenResponseSchema): { accessToken, expiresAt }
+  Response (TokenResponseSchema): { accessToken, expiresAt, expiresIn? }
 ```
 
 The reference client decodes both responses with these schemas (#386).
 `expiresAt` must be an ISO 8601 timestamp with `Z` or a numeric UTC offset. A
 response that fails its schema fails the renewal and leaves the prior
 credential unchanged; it is not treated as a revocation.
+
+`expiresIn` is the token lifetime in whole seconds (positive integer),
+relative to when the device receives the response (#1114). It is the device's
+lifetime authority: the client records receipt time + `expiresIn` as a
+device-local expiry and never reads `expiresAt` for lifetime, so device clock
+skew does not move its renewal point. The server derives both fields from one
+TTL and one clock read, and keeps sending `expiresAt` because published
+devices (0.31.0) read it. The field is a strip-safe HTTP addition in
+`WIRE_ADDITIONS` and optional in the schema, since published v4 hosts omit
+it; the current client fails a token response without it with
+`AuthResponseInvalidError` and keeps the prior credential. Upgrade the Host
+before its devices.
+
+The HTTP `Date` header of the pair and token responses is the one server-time
+reading the client takes. It only feeds the clock-skew measurement that
+`byok-agent doctor` reports (#1114) and never sets a token lifetime; a response
+without a parseable `Date`, or one during which the device clock was set back,
+leaves that measurement unknown.
 
 `signature` is the Ed25519 signature over the **domain-separated** nonce,
 base64url-encoded. **Pinned encoding (changed 2026-08-07, S1 — this replaces
@@ -2903,13 +2941,14 @@ a typed, fail-closed path.
 that set — a server → daemon type (`task.offer`, `agent.egress.ack`, etc.) arriving
 inbound, or anything unrecognized — is rejected per-envelope: not dispatched
 to any handler, and not counted toward `accepted`. This never 400s the rest
-of the batch: a *structurally* invalid `Envelope` (fails schema validation
-outright) still 400s the whole request as before, but a *wrong-direction*
-type is schema-valid — a `task.offer` is a well-formed envelope regardless
-of which side sent it — and only fails this endpoint's semantic type-allow
-check, which is per-envelope. The batch itself is also capped at 256
-envelopes (`MessagesSendRequestSchema`); exceeding the cap 400s the whole
-request.
+of the batch. Neither does an envelope that fails schema validation: the
+request schema (`MessagesSendRequestSchema`) checks only the frame, and each
+entry is decoded on its own, so an undecodable entry is answered
+`rejected: payload_invalid` and the rest of the batch applies (#1121). The
+frame is what still 400s the whole request: a body that is not
+`{ messages: [...] }`, an entry whose `v` is not this wire major (the sender
+could not read this version's outcomes), an entry without a UUID `id` its
+outcome could be correlated by, or more than 256 entries.
 
 **`accepted` counts every envelope the server took in and will not ask the
 daemon to resend** — including one it recognized as an already-processed
@@ -2921,7 +2960,7 @@ is a separate, additive count — every envelope the server refused — present
 in the response only when nonzero. Every v3 answer also carries `outcomes`
 (below); a counts-only answer is not a v3 response. The type-allow check above and the ownership check
 (§9) are only two of the causes. An envelope is also rejected, among other
-reasons, for an unsupported protocol version; for a device that is revoked or lacks the
+reasons, for a device that is revoked or lacks the
 capability the type requires; for a missing or mismatched Agent or harness
 identity; for a `task.claim` that does not win ownership or contradicts the
 sealed offer; for a `task.progress` events batch or approval event that is
@@ -2931,7 +2970,9 @@ conflicts with the stored one, or a content receipt for a request the server
 does not know; for an `agent.message.publish` the server refuses (binding
 mismatch, `byteCount` over `maxBytes`, a reservation conflict, or admission
 that cannot be confirmed); for a `task.fail` whose recovery report is
-refused; and for a `conn.hello` with a product mismatch or whose
+refused; for a terminal whose task already holds a stored terminal receipt the
+server cannot read back (`state_conflict`, rather than a 500 for the whole
+batch); and for a `conn.hello` with a product mismatch or whose
 capabilities the server fails to record. These are examples, not an
 exhaustive list. `outcomes` is required and contains exactly one result per
 request envelope: `{ id: uuid, outcome: 'accepted' | 'duplicate' | 'rejected', reason?: string }`.

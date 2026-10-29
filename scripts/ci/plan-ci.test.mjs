@@ -19,6 +19,20 @@ test('only exact approved dispatch selects the complete release matrix', () => {
   assert.throws(() => planCi({ event: 'workflow_dispatch', sha, approvedSha: 'b'.repeat(40), ref }));
   assert.throws(() => planCi({ event: 'workflow_dispatch', sha, ref }));
 });
+test('nightly main selects every family without becoming release evidence', () => {
+  const plan = planCi({ event: 'schedule', sha, ref });
+  assert.equal(plan.mode, 'nightly');
+  assert.deepEqual(plan.families, knownFamilies);
+  assert.ok(plan.families.includes('macos-client'));
+  assert.doesNotThrow(() => requireCiPlan(results(plan), plan, 'schedule', sha));
+  assert.throws(() => requireCiPlan(results(plan), plan, 'workflow_dispatch', sha), /mode mismatch/);
+  for (const badRef of [undefined, 'refs/heads/release/0.32', 'refs/heads/feature', 'refs/pull/1/merge']) {
+    assert.throws(() => planCi({ event: 'schedule', sha, ref: badRef }), /only on main/);
+  }
+  for (const id of knownFamilies) for (const result of ['skipped', 'failure', 'cancelled']) {
+    assert.throws(() => requireCiPlan({ ...results(plan), [id]: { result } }, plan, 'schedule', sha));
+  }
+});
 test('routine docs select no matrix, but mandatory scope checks must succeed', () => {
   for (const event of ['push', 'pull_request']) {
     const plan = planCi({ event, sha, paths: ['README.md'] });
@@ -78,7 +92,7 @@ test('a migration PR plans the targeted cloud-dataplane suite, the dataplane job
 test('a ci.yml change runs every routine family and the client suite, never the complete suite (W7)', () => {
   const plan = planCi({ event: 'pull_request', sha, paths: ['.github/workflows/ci.yml'] });
   assert.ok(plan.dirs.includes('packages/client'));
-  assert.deepEqual(plan.families, knownFamilies.filter(id => id !== 'build-test').sort());
+  assert.deepEqual(plan.families, knownFamilies.filter(id => id !== 'build-test' && id !== 'macos-client').sort());
   assert.equal(plan.reason, 'impacted');
 });
 

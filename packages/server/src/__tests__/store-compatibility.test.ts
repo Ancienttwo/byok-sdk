@@ -10,7 +10,7 @@ import { isSqliteAvailable } from '../sqlite-support';
 
 /** #1102: the server SQLite store precheck, over checked-in stores written by released builds. */
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const FIXTURES = fileURLToPath(new URL('../../../../scripts/release/fixtures/stores/', import.meta.url));
 const MANIFEST = fileURLToPath(new URL('../../../client/upgrade-manifest.json', import.meta.url));
 

@@ -24,7 +24,7 @@
 4. **`cloud-do` 范围**：`@byok-sdk/cloud-do` 保持只在 Cloudflare 上运行，不做 Node 版本。它只用平台 key，BYOK 产品不走它。
 5. **执行与时钟在设备上**：BYOK routine 不需要官方 key。执行和时钟都在设备上，用用户自己的 key 或 runtime。云端只保存定义、结果投影和可见性状态。
 6. **hosted 真相层不为 routine 计时**：没有 cron，没有 DO alarm，没有服务端定时器。设备端时钟由 `@byok-sdk/server` 的 wake 队列提供（PRD §7）。周期规则留在 Host。设备上没有 Host 进程的 Host 可以用自己服务端的定时器提交 routine 执行，执行仍在设备上（PRD O8）。
-7. **Bot 与 Host 执行核心**：Bot 是持久的 Agent，即一个 AgentRef 加它的 home。它的执行有三种触发来源：用户输入、routine、其他 Bot。三者进同一个 Host 执行核心：每个 Agent 一个 FIFO；按 intent 派生 `taskId` 和代际；只有读到设备 terminal 才换代；执行结算和 intent 结论分开记录（PRD §9.2）。核心以 copy-and-own 参考实现交付，不进 SDK API。两个下游 Host 采用同一形状后，再评估是否提升为包。per-Agent 队列不进 SDK。
+7. **Bot 与 Host 执行核心**：Bot 是持久的 Agent，即一个 AgentRef 加它的 home。它的执行有三种触发来源：用户输入、routine、其他 Bot。三者进同一个 Host 执行核心：每个 Agent 一个 FIFO；按 intent 派生 `taskId` 和代际；只有读到设备 terminal 才换代；执行结算和 intent 结论分开记录（PRD §9.2）。核心是 SDK 的一部分，以 `@byok-sdk/server/execution-core` 子路径发布，Host 直接依赖，不再复制（2026-10-29 修订，见文末）。per-Agent 队列的策略仍归 Host，SDK 只提供这个核心。
 8. **协作由 Host 编排**：委派和群聊是 Host 编排的多次 fresh 执行（ADR-036 D1）。SDK 不加 Conversation 或 Room 存储。Local TeamWorkspace 只做本机 operator 协调，不作为 Bot 协作的底座。
 9. **上下文进，outcome 出**：Bot 要读的内容由 Host 放进 ContextPack。Bot 的意图在执行结束时以结构化 outcome 提交，Host 按 `taskId` 只应用一次。Host 生成的 schema 就是权限边界：花名册写成 enum，管理类动作只出现在 Main Bot 的 schema 里。不从模型正文推导语义；缺 outcome 或执行失败不算 PASS。运行中往返 Host 的动作通道推迟，只有测量数据证明需要时才做（PRD K9）。
 10. **统一提交（K5）**：`executions.submit`（cloud 侧 `submitAgentExecution`）取代 `recurring.submit` 和 `dispatchFreshAgentEgress`，`messageEgress` 改为可选。旧入口直接删除，不留别名。
@@ -44,10 +44,19 @@
 - K5–K7 是破坏性变更。`examples/basic`、Salesko 的 recurring 测试和 SummaryJob、durable Pi、prepared lane 的 SummaryJob 记录都要迁移。发布后不提供兼容期。
 - K7 发布需要一次协调升级：先在旧版本上排空，再升级 server 和 daemon，和 v1→v2 的切换相同。cloud-dataplane 和 daemon 要补上未排空数据的启动检查。
 - 按 `agent home busy:` 前缀判断换代的规则改为按 `code` 判断。
-- K4 扩大为 Host 执行核心参考实现，依赖 K2、K5、K6、K7；Bot 协作参考实现 K8 在 K4 之后。
+- K4 扩大为 Host 执行核心，依赖 K2、K5、K6、K7；Bot 协作参考实现 K8 在 K4 之后。K4 自 #1106 起作为 `@byok-sdk/server/execution-core` 发布。
 - 模型能否可靠调用 `submit_result` 是新的前提，要按 runtime 测量。
 - per-Agent 队列、hop 和预算、群聊调度都是 Host 的策略。不同 Host 可以选不同的数值，但都必须有上限。
 
 ## Status
 
 决策 1、2、3、5：**Accepted（owner，2026-10-13）**。决策 4、6–13：**Proposed（2026-10-13）**，PR 合并即视为 owner 接受。仅记录决策；实现未开始。
+
+## 修订记录
+
+- **2026-10-29（owner 批准 Q7，#1106）**：决策 7 原文是「核心以 copy-and-own 参考实现交付，不进 SDK API」，改为「K4 是 SDK 的一部分」。AiphaBee 原样复制了 K4，又自写 `PROVENANCE.json` 逐文件核对版本，每次修复都要重新复制才到达下游，所以收回 SDK。
+  - 执行核心（FIFO、ledger、routines、transitions、schedule、submit、model、sealed routine）和 Host 记忆恢复（`memory.ts`、`memory-restore.ts`）一起发布为 `@byok-sdk/server/execution-core`。记忆代码与执行 ledger 共用同一个 SQLite 事务，拆不开，所以没有并入 `@byok-sdk/client/agent-memory`。
+  - `@byok-sdk/server/execution-core/canonical` 只导出 `hash` 与 `canonical`，只依赖 `node:crypto`，供 Workers 上的 K8 `rules/` 使用（#884）。
+  - 记忆核心与设备共用的契约（`AgentMemoryFile`、`AgentMemorySnapshot`、`AgentMemoryExport`、`AgentMemoryProjectionPort`、`AgentMemoryIntentFetchInput`、`AgentMemoryIntentTransport`、`validateAgentMemoryPath`、`AgentMemoryError`、`AgentMemoryValidationError`）从 `@byok-sdk/client` 移到 `@byok-sdk/protocol/agent-memory`，作为唯一定义。server 不能依赖 client，`@byok-sdk/core` 不能依赖 protocol，protocol 是两边都能依赖的那一层。这个子路径不含 zod，`@byok-sdk/client/agent-memory` 仍不加载 schema。
+  - 公开 package 仍是 9 个。`examples/host-execution-core` 改为演示：组合发布的 API，跑依赖真实 daemon 的集成测试，不再保存核心源码。
+  - K8 仍按 vendor 契约复制（#886），不在本次修订内。

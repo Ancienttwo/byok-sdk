@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { enqueue, hash, type Intent, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { enqueue, hash, type Intent, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { addTurn, stateOf } from './model';
 import { abandonDelegation, applyDelegate, arbitrateCancel, claimUnit, delegationDue, releaseUnit, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply, ROOT_BOT_BUDGET,

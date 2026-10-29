@@ -63,14 +63,11 @@ import type { AgentReliableEgressRecord } from './agent-egress-spool';
 import {
   type ProviderProvisioningHandler,
 } from './provider-provisioning';
-import { exportAgentMemoryHome, type AgentMemoryExport, type AgentMemoryExportOptions } from './agent-memory-export';
+import { exportAgentMemoryHome, type AgentMemoryExportOptions } from './agent-memory-export';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import {
   type AgentMemoryHostedProjection,
 } from './agent-memory';
-import {
-  type AgentMemoryIntentTransport,
-} from './agent-memory-intent';
 import {
   type AgentContentReadRoot,
 } from './agent-content-read';
@@ -84,6 +81,7 @@ import { bindDaemonFunctions } from './create-daemon/functions';
 import { createControlMethods } from './create-daemon/control-methods';
 import type { ToolAuthorizationResolver } from '../tool-authorization';
 import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './config-schema/effective';
+import type { AgentMemoryExport, AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 /**
  * Optional white-label product display info — purely opaque passthrough
@@ -942,7 +940,7 @@ function buildDaemon(
     tenantRebinding: false,
     runner: undefined,
     controlServerHandle: undefined,
-    serviceEnrollmentWaiting: false,
+    serviceEnrollmentEpoch: undefined,
     serviceEnrollmentTransitioning: false,
     daemonOwnerLease: undefined,
     presencePublisher: undefined,

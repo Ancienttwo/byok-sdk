@@ -2,6 +2,7 @@ export const CLOUD_CLEANUP_ERROR_CODES = {
   cleanup_invalid_input: 'cleanup_invalid_input',
   cleanup_policy_missing: 'cleanup_policy_missing',
   cleanup_dead_letter_not_found: 'cleanup_dead_letter_not_found',
+  cleanup_dead_letter_is_recovery_floor: 'cleanup_dead_letter_is_recovery_floor',
   cleanup_accounting_drift: 'cleanup_accounting_drift',
 } as const;
 

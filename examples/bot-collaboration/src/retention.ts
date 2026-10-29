@@ -1,4 +1,4 @@
-import { hash, MIN_TOMBSTONE_RETENTION_MS, time, type Json } from '@byok-sdk/example-host-execution-core';
+import { hash, MIN_TOMBSTONE_RETENTION_MS, time, type Json } from '@byok-sdk/server/execution-core';
 import { DEFAULT_CONTEXT_TURN_LIMIT } from './rules/context';
 import type { CollaborationState, Turn } from './model';
 

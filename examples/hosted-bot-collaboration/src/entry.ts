@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { hash, type Routine } from '@byok-sdk/example-host-execution-core';
+import { hash, type Routine } from '@byok-sdk/server/execution-core';
 import { isOwner, verified, type Principal } from '@byok-sdk/example-bot-collaboration/channel';
 import type { Command, KeylessCommand } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { CommitConflict, type CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';

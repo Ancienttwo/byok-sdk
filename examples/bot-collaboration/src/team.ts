@@ -1,5 +1,5 @@
 import type { AgentHomeProjectionReadback, BotTurnOutcome, CreateBotAction, RoomFields, UpdateBotAction } from '@byok-sdk/protocol';
-import { hash, canonical, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
+import { hash, canonical, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { json, type CollaborationState } from './model';
 import type { BotProfile, HomeOperation, Room, TeamState } from './team-model';
 import type { Publish } from './rules/delegation';

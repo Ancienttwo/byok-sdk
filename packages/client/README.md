@@ -142,6 +142,10 @@ directory before you write the executable into it. Without the asset root, `dete
 launch is refused with `pi_bundled_assets_unavailable`. Pi reads its photon
 WASM file beside the executable; without it, pi skips image resizing.
 
+Bundled pi offers no Pi subagents. The SDK loads the `pi-subagents` dependency
+only from its installed package, because it reads its own package files at run
+time; a product bundle never inlines it.
+
 Bundled pi loads the user's own Pi packages and extensions from the user's
 agent directory (`settings.json` `packages`, `extensions`), as the installed
 `pi` CLI does. An extension may import the packages pi supplies to extensions:
@@ -259,7 +263,9 @@ through the task's normal approval (`task.await_approval`, `Daemon.approve` /
 `reject`), before a high-risk call runs: privileged, destructive, publishing
 or credential-touching commands, and file writes outside the task workspace.
 `auto` is supported on Claude and the ordinary Pi RPC lane (including native
-Pi subagents); an `auto` task for Codex, Grok, Hermes or a prepared/durable Pi
+pi-subagents children, which load the gate as a required child extension;
+external-cli, external-job and machine subagent runners are refused while it is
+on); an `auto` task for Codex, Grok, Hermes or a prepared/durable Pi
 lane is declined before claim. The classifier is lexical and is not an OS
 sandbox or a file-scope boundary.
 
@@ -688,10 +694,13 @@ Runtime dependencies, code-generation evidence and size budgets are recorded in 
 Hosted projection is not on this entry. An embedded host gets the local
 snapshot and no way to send it anywhere from this package.
 
-Because each entry is bundled separately, `AgentMemoryError` imported from
+The base `AgentMemoryError` and `AgentMemoryValidationError`, and
+`validateAgentMemoryPath`, come from `@byok-sdk/protocol/agent-memory`, so `instanceof`
+against them holds from either entry. Each entry bundles the subclasses this
+package defines separately, so `AgentMemoryRevisionConflictError` imported from
 `@byok-sdk/client/agent-memory` and from `@byok-sdk/client` are distinct
-constructors. Discriminate on `error.name`, not `instanceof`, if a host mixes
-both entries.
+constructors. Discriminate those on `error.name`, not `instanceof`, if a host
+mixes both entries.
 
 ## Daemon-free assertion requests
 
@@ -1120,9 +1129,8 @@ installed optional dependency. Omission retains package-installed behavior.
 
 `sdkDistributionManifest` exposes the Pi pin, the reserved helper routing kinds and
 native target files/signing policies. `reservedHelperKinds` (including
-`agent-memory-describe`) and `piSubagentHelperKinds` together are exactly the kinds
-that `runSdkReservedHelperCommand` accepts. Only Pi subagent children re-enter with
-`piSubagentHelperKinds`; they carry a tail argv and have no `dist/bin` script. For
+`agent-memory-describe`) is exactly the set of kinds that
+`runSdkReservedHelperCommand` accepts. For
 Darwin, the copier delegates to `copyAgentMemoryHelperAssets`; use its returned
 `agent-memory-fs` subdirectory as the existing `agentMemoryHelperAssetRoot`. This
 preserves the established memory-helper configuration API. For Windows x64 the

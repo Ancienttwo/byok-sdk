@@ -1,4 +1,4 @@
-import { hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addTurn, json, type Card, type Json, type TurnsState } from './turn';
 import type { Publish } from './delegation';
 

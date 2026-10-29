@@ -60,7 +60,6 @@
   "directory: packages/client/src/local-state-relocation.ts -> packages/client/src/daemon/daemon-owner.ts",
   "directory: packages/client/src/sdk-native-assets.ts -> packages/client/src/daemon/agent-memory-helper-release.ts",
   "directory: packages/client/src/sdk-reserved-helper-host.ts -> packages/client/src/bin/sdk-reserved-helper-runners.ts",
-  "directory: packages/client/src/sdk-reserved-helper-host.ts -> packages/client/src/subagents/spawn.ts",
   "directory: packages/client/src/util/secure-dir.ts -> packages/client/src/lifecycle/exec-runner.ts",
   "manifest: packages/conformance/src/simulator/harness.ts -> @byok-sdk/testkit"
 ]

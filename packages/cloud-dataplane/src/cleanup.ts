@@ -251,22 +251,38 @@ export class PostgresCloudCleanup {
   }
 
   /**
-   * Explicit operator discard. Automatic retention never deletes dead letters.
-   * A dead letter holds no mailbox quota, so deleting one is the whole
-   * operation.
+   * Explicit operator discard, before the automatic reap reaches the row. A
+   * dead letter holds no mailbox quota, so deleting one is the whole
+   * operation. Like the reap, it never deletes the device's highest-seq dead
+   * letter: that row is the `recoverableFrom` floor, so the guard sits in the
+   * same statement as the DELETE. A dead letter leaves `expired` only by
+   * deletion, so the true highest row has no higher sibling in any snapshot.
+   * The probe after a refused DELETE only picks the error; it decides nothing.
    */
   async discardDeadLetter(tenant: TenantId, ref: DeadLetterRef): Promise<MailboxMessage> {
     assertDeadLetterRef(ref);
     const removed = await this.#pool.query<OutboxRow>(
-      `DELETE FROM outbox
-        WHERE tenant_id = $1 AND device_id = $2 AND seq = $3::bigint
-          AND state = 'expired'
+      `DELETE FROM outbox o
+        WHERE o.tenant_id = $1 AND o.device_id = $2 AND o.seq = $3::bigint
+          AND o.state = 'expired'
+          AND EXISTS (SELECT 1 FROM outbox h
+                       WHERE h.tenant_id = o.tenant_id AND h.device_id = o.device_id
+                         AND h.state = 'expired' AND h.seq > o.seq)
         RETURNING ${OUTBOX_COLUMNS}`,
       [tenant, ref.deviceId, ref.seq],
     );
     const row = removed.rows[0];
-    if (row === undefined) throw deadLetterMissing(ref);
-    return toMailboxMessage(row);
+    if (row !== undefined) return toMailboxMessage(row);
+    const present = await this.#pool.query(
+      `SELECT 1 FROM outbox
+        WHERE tenant_id = $1 AND device_id = $2 AND seq = $3::bigint AND state = 'expired'`,
+      [tenant, ref.deviceId, ref.seq],
+    );
+    if (present.rows.length === 0) throw deadLetterMissing(ref);
+    throw new CloudCleanupError(
+      'cleanup_dead_letter_is_recovery_floor',
+      `Expired mailbox row ${ref.deviceId}/${String(ref.seq)} is the device's recoverableFrom floor and cannot be discarded.`,
+    );
   }
 
   /**

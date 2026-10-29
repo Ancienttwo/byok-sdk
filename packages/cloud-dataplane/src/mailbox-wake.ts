@@ -10,6 +10,9 @@ import type { TenantId } from '@byok-sdk/core';
 const CHANNEL = 'byok_mailbox_wake';
 const APPLICATION_NAME = 'byok-mailbox-wake';
 const CONNECTION_TIMEOUT_MS = 5_000;
+const DEFAULT_PROBE_INTERVAL_MS = 30_000;
+// Lets the kernel notice a dead peer even when no probe is in flight.
+const KEEPALIVE_INITIAL_DELAY_MS = 10_000;
 const MIN_RECONNECT_MS = 100;
 const MAX_RECONNECT_MS = 30_000;
 
@@ -19,8 +22,30 @@ export interface PostgresMailboxWakeOptions {
   readonly fallbackMs?: number;
   /** Missing probe or connection failure; default reports to console.error. Must not throw. */
   readonly onError?: (error: Error) => void;
-  /** Self-NOTIFY observation deadline; defaults to 5 seconds. */
+  /**
+   * Self-NOTIFY observation deadline for the connect probe and every periodic
+   * probe; defaults to 5 seconds. A miss retires the connection.
+   */
   readonly probeTimeoutMs?: number;
+  /**
+   * Period of the self-NOTIFY probe on an established connection; defaults to
+   * 30 seconds. It detects a half-open path (an idle NAT or load balancer
+   * dropping the flow without closing it), which otherwise stops notifications
+   * silently.
+   */
+  readonly probeIntervalMs?: number;
+}
+
+/** A self-NOTIFY probe was not observed, so the connection cannot be trusted to carry notifications. */
+export class MailboxWakeProbeMissedError extends Error {
+  override readonly name = 'MailboxWakeProbeMissedError';
+}
+
+function timerMs(name: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) {
+    throw new RangeError(`mailbox wake ${name} must be a positive timer-safe integer`);
+  }
+  return value;
 }
 
 export interface PostgresMailboxWake extends MailboxWake {
@@ -39,10 +64,8 @@ export function createPostgresMailboxWake(options: PostgresMailboxWakeOptions): 
   const inner = createInProcessMailboxWake({
     ...(options.fallbackMs === undefined ? {} : { fallbackMs: options.fallbackMs }),
   });
-  const probeTimeoutMs = options.probeTimeoutMs ?? CONNECTION_TIMEOUT_MS;
-  if (!Number.isSafeInteger(probeTimeoutMs) || probeTimeoutMs <= 0 || probeTimeoutMs > 2_147_483_647) {
-    throw new RangeError('mailbox wake probeTimeoutMs must be a positive timer-safe integer');
-  }
+  const probeTimeoutMs = timerMs('probeTimeoutMs', options.probeTimeoutMs ?? CONNECTION_TIMEOUT_MS);
+  const probeIntervalMs = timerMs('probeIntervalMs', options.probeIntervalMs ?? DEFAULT_PROBE_INTERVAL_MS);
   const report = options.onError ?? ((error: Error) => console.error('[byok-sdk] Postgres mailbox wake', error));
   // Routing metadata only: the subscription implementation remains in cloud.
   // Keep all colliding routes so a hash collision can only cause an extra read.
@@ -63,10 +86,14 @@ export function createPostgresMailboxWake(options: PostgresMailboxWakeOptions): 
         application_name: APPLICATION_NAME,
         connectionTimeoutMillis: CONNECTION_TIMEOUT_MS,
         query_timeout: CONNECTION_TIMEOUT_MS,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: KEEPALIVE_INITIAL_DELAY_MS,
       });
       const disconnected = new AbortController();
-      const probe = `probe:${randomUUID()}`;
+      // At most one probe is outstanding; an earlier payload cannot satisfy a later one.
+      let outstanding: string | undefined;
       let probeTimer: ReturnType<typeof setTimeout> | undefined;
+      let probeInterval: ReturnType<typeof setInterval> | undefined;
       let failure: Error | undefined;
       const failed = (error: Error): void => {
         failure ??= error;
@@ -77,14 +104,36 @@ export function createPostgresMailboxWake(options: PostgresMailboxWakeOptions): 
       };
       const notification = (message: Notification): void => {
         if (message.channel !== CHANNEL || message.payload === undefined) return;
-        if (message.payload === probe) {
+        if (message.payload === outstanding) {
           clearTimeout(probeTimer);
           probeTimer = undefined;
+          outstanding = undefined;
           reconnectMs = MIN_RECONNECT_MS;
+          if (probeInterval === undefined) {
+            probeInterval = setInterval(() => {
+              if (outstanding !== undefined || disconnected.signal.aborted || lifetime.signal.aborted) return;
+              sendProbe(false).catch(failed);
+            }, probeIntervalMs);
+            probeInterval.unref();
+          }
           return;
         }
         const bucket = routes.get(message.payload);
         if (bucket !== undefined) notify(bucket);
+      };
+      const sendProbe = (initial: boolean): Promise<unknown> => {
+        const payload = `probe:${randomUUID()}`;
+        outstanding = payload;
+        probeTimer = setTimeout(() => {
+          probeTimer = undefined;
+          // This connection cannot prove it carries notifications. Retire it,
+          // report once, and retry with backoff; reads still use fallbackMs.
+          failed(new MailboxWakeProbeMissedError(initial
+            ? 'mailbox wake self-NOTIFY probe timed out; a session-mode DSN is required'
+            : 'mailbox wake connection stopped carrying notifications; periodic self-NOTIFY probe timed out'));
+        }, probeTimeoutMs);
+        probeTimer.unref();
+        return client.query('SELECT pg_notify($1, $2)', [CHANNEL, payload]);
       };
       client.on('error', failed);
       client.on('end', ended);
@@ -99,13 +148,7 @@ export function createPostgresMailboxWake(options: PostgresMailboxWakeOptions): 
         await client.query(`LISTEN ${CHANNEL}`);
         // A reconnected listener missed hints, so every local route must read.
         for (const bucket of routes.values()) notify(bucket);
-        probeTimer = setTimeout(() => {
-          probeTimer = undefined;
-          // This connection cannot prove it carries notifications. Retire it,
-          // report once, and retry with backoff; reads still use fallbackMs.
-          failed(new Error('mailbox wake self-NOTIFY probe timed out; a session-mode DSN is required'));
-        }, probeTimeoutMs);
-        await client.query('SELECT pg_notify($1, $2)', [CHANNEL, probe]);
+        await sendProbe(true);
         if (!lifetime.signal.aborted && !disconnected.signal.aborted) {
           await new Promise<void>((resolve) => {
             const finish = (): void => {
@@ -121,6 +164,7 @@ export function createPostgresMailboxWake(options: PostgresMailboxWakeOptions): 
         failure ??= caught instanceof Error ? caught : new Error('mailbox wake listener failed', { cause: caught });
       } finally {
         clearTimeout(probeTimer);
+        clearInterval(probeInterval);
         lifetime.signal.removeEventListener('abort', stop);
         await end().catch((error: Error) => { failure ??= error; });
         client.removeListener('notification', notification);

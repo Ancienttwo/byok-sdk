@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect } from 'vitest';
 import { freezeRuntimeAdapterDescriptor } from '@byok-sdk/client';
 import { tenantId } from '@byok-sdk/core';
-import { HostLedger } from '@byok-sdk/example-host-execution-core';
+import { HostLedger } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotStubAdapter } from '../../basic/goal-btw.test-support';
 import type { ChannelPort, InboundMessage } from './channel';

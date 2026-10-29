@@ -1,6 +1,5 @@
 // Child-only synthetic fixture. The parent kills this owned process after a durable stage.
-import { HostLedger } from '../ledger';
-import { HostMemoryPage, memoryRevision } from '../memory';
+import { HostLedger, HostMemoryPage, memoryRevision } from '@byok-sdk/server/execution-core';
 const [filename, stage] = process.argv.slice(2);
 const binding = { deviceId: 'device', agentRef: { agentId: 'main', profileRevision: '1' } };
 const files = [{ path: 'MEMORY.md', content: '', revision: memoryRevision(''), byteCount: 0 }];

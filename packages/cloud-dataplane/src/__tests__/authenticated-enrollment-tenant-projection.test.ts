@@ -20,6 +20,7 @@ import {
   SKIP_DATAPLANE,
   SKIP_REASON,
 } from './support/dataplane';
+import { PostgresProofReceiptRetentionAuthority } from '../stores/proof-receipts';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const TENANT = tenantId('tenant-enrollment-projection');
@@ -48,6 +49,7 @@ if (SKIP_DATAPLANE) {
         });
         const capabilities = fullCapabilityDeclaration();
         const cloud = createByokCloud({
+          proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(scope.pool) },
           core: createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config }),
           mailboxWake: createInProcessMailboxWake(),
           cloud: stores,

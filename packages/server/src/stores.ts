@@ -87,8 +87,7 @@ export interface FacadeStoreComposition {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
-  /** SQLite only: the in-memory composition keeps every used proof `requestId` for the life of the process. */
-  readonly proofReceiptAuthority?: ProofReceiptRetentionAuthority;
+  readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
   readonly counters: FacadeCounters;
@@ -168,7 +167,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
       dedup,
     },
     blobContentProxy,
-    ...(sqlite === undefined ? {} : { proofReceiptAuthority: sqlite.proofReceiptAuthority }),
+    proofReceiptAuthority: sqlite?.proofReceiptAuthority ?? inMemoryCloud!.proofReceiptAuthority,
     clock,
     crypto,
     counters,
@@ -227,6 +226,7 @@ function observingMailbox(inner: MailboxStore, presence: LeasedPresence): Mailbo
       return cursor;
     },
     collectExpired: (tenant, input) => inner.collectExpired(tenant, input),
+    expirePending: (tenant, input) => inner.expirePending(tenant, input),
   };
 }
 

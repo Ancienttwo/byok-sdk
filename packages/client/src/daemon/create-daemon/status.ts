@@ -39,6 +39,7 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
   // second control-socket round trip) and `approvalsPending` (the same
   // list's count) — same source `approvals.list` itself calls.
   const pendingApprovals = approvalRegistry.list();
+  const clockSkew = daemonState.auth.clockSkew();
   return {
     localAgentRelease,
     pid: process.pid,
@@ -71,6 +72,7 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
     toolsets: toolsetRegistry.status(),
     // WP0: same counts `Daemon.status()` reports, from the same reader.
     agentHomeExecution: agentHomeExecutionStatus(),
+    ...(clockSkew === undefined ? {} : { clockSkew }),
   };
 }
 

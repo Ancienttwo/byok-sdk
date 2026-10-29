@@ -3,11 +3,15 @@ import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { knownFamilies, reviewedScripts, selectImpact } from './select-impact.mjs';
 
-// The complete matrix is release validation only: main, or a release/* candidate branch.
+// Full runs are either nightly on main or exact-SHA approved release validation.
 export const isReleaseRef = ref => ref === 'refs/heads/main' || /^refs\/heads\/release\/[A-Za-z0-9._-]+$/.test(ref ?? '');
 
 export function planCi({ event, sha, approvedSha, ref, paths, base, cwd }) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '')) throw new Error('CI requires an exact commit SHA');
+  if (event === 'schedule') {
+    if (ref !== 'refs/heads/main') throw new Error('Nightly validation runs only on main');
+    return { mode: 'nightly', sha, dirs: [], files: [], families: [...knownFamilies] };
+  }
   if (event === 'workflow_dispatch') {
     if (!isReleaseRef(ref)) throw new Error(`Release validation runs only on main or release/* refs, not ${JSON.stringify(ref)}`);
     if (approvedSha !== sha) throw new Error('Release validation SHA differs from the dispatched commit');
@@ -15,7 +19,7 @@ export function planCi({ event, sha, approvedSha, ref, paths, base, cwd }) {
   }
   if (!['pull_request', 'push'].includes(event)) throw new Error('Unsupported CI event');
   const plan = { ...selectImpact(paths, { base, cwd }), base, mode: 'targeted', sha };
-  if (plan.families.includes('build-test')) throw new Error('A targeted plan never selects the complete test suite');
+  if (plan.families.some(id => id === 'build-test' || id === 'macos-client')) throw new Error('A targeted plan never selects the complete test suite');
   return plan;
 }
 
@@ -56,10 +60,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const event = process.env.CI_EVENT;
   const base = resolveCiBase();
   let paths;
-  if (event !== 'workflow_dispatch') {
+  if (!['workflow_dispatch', 'schedule'].includes(event)) {
     paths = changedPaths(base);
   }
   const plan = planCi({ event, sha: process.env.GITHUB_SHA, approvedSha: process.env.CI_RELEASE_SHA, ref: process.env.CI_REF, paths, base });
   console.log(JSON.stringify(plan, null, 2));
-  appendFileSync(process.env.GITHUB_OUTPUT, `plan=${JSON.stringify(plan)}\nfamilies=${JSON.stringify(plan.families)}\nrelease=${plan.mode === 'release'}\nbuild=${needsBuild(plan)}\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT, `plan=${JSON.stringify(plan)}\nfamilies=${JSON.stringify(plan.families)}\nmode=${plan.mode}\nrelease=${plan.mode === 'release'}\nbuild=${needsBuild(plan)}\n`);
 }

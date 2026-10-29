@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { DEFAULT_RETRY } from '@byok-sdk/example-host-execution-core';
+import { DEFAULT_RETRY } from '@byok-sdk/server/execution-core';
 import { ROUTINE_WAIT_MS } from './routines';
 import { OFFER_WAIT_MS } from './rules/sync';
 

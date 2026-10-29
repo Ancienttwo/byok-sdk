@@ -1,5 +1,5 @@
 import { agentKey, canonical, frozenInput, hash, isOccurrenceIntentKey, occurrenceIntentKey, parseRoutineWakeKey, routineWakeKey, taskId,
-  type HostLedger, type Intent, type Json, type LedgerDump, type LedgerState, type Occurrence, type Routine } from '@byok-sdk/example-host-execution-core';
+  type HostLedger, type Intent, type Json, type LedgerDump, type LedgerState, type Occurrence, type Routine } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState } from './model';
 import { sealSwitchExport, switchAttempts, SwitchExportError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
   type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal } from './migration';

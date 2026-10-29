@@ -1,4 +1,4 @@
-import type { HostMemoryPage } from '@byok-sdk/example-host-execution-core';
+import type { HostMemoryPage } from '@byok-sdk/server/execution-core';
 import type { AgentRef } from '@byok-sdk/protocol';
 import type { ScopedTool } from './http';
 import type { BetaLedger } from './ledger';

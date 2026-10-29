@@ -154,7 +154,7 @@ export class TestServer {
 
   // --- test controls ---------------------------------------------------
 
-  /** How long a freshly (re)minted access token is valid for — controls both `/byok/pair`'s `refreshHint` and `/byok/token`'s `expiresAt`. */
+  /** How long a freshly (re)minted access token is valid for — controls `expiresIn` on `/byok/pair` and `/byok/token`, plus their absolute `refreshHint` / `expiresAt`. */
   setTokenTtlMs(ms: number): void {
     this.tokenTtlMs = ms;
   }
@@ -459,6 +459,7 @@ export class TestServer {
       tenantId: device.tenantId,
       accessToken: device.accessToken,
       refreshHint: new Date(Date.now() + this.tokenTtlMs).toISOString(),
+      expiresIn: this.tokenTtlSeconds(),
     });
   }
 
@@ -497,7 +498,13 @@ export class TestServer {
     respondJson(res, 200, {
       accessToken: device.accessToken,
       expiresAt: new Date(Date.now() + this.tokenTtlMs).toISOString(),
+      expiresIn: this.tokenTtlSeconds(),
     });
+  }
+
+  /** `expiresIn` is whole positive seconds on the wire. */
+  private tokenTtlSeconds(): number {
+    return Math.max(1, Math.ceil(this.tokenTtlMs / 1000));
   }
 
   private verifySignature(device: DeviceAuthState, nonce: string, signatureBase64Url: string): boolean {

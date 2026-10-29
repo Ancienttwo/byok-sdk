@@ -3,6 +3,7 @@ import {
   DEVICE_ASSERTION_SCHEMA_ID,
   InMemoryDeviceAssertionReplayAuthority,
   TASK_ASSERTION_SCHEMA_ID,
+  InMemoryMailboxStore,
   createMutableClock,
   deviceAssertionSigningInput,
   taskAssertionSigningInput,
@@ -17,6 +18,7 @@ import { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } fr
 import { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, declares, fullCapabilityDeclaration } from '../capabilities';
 import { createWebCrypto } from '../crypto/web-crypto';
 import { InMemoryDeviceDirectory } from '../stores/in-memory/device-directory';
+import { InMemoryTaskAttemptState } from '../stores/in-memory/task-attempts';
 
 const TENANT = tenantId('tenant-a');
 const ISSUER = 'https://api.example.com';
@@ -32,7 +34,7 @@ describe('hosted device assertion authentication', () => {
 
   beforeEach(async () => {
     clock.set(new Date(NOW));
-    devices = new InMemoryDeviceDirectory();
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
     await devices.register(TENANT, {
       productId: 'product-a',
       deviceId: 'device-a',
@@ -96,7 +98,7 @@ describe('hosted device assertion authentication', () => {
     await devices.revoke(TENANT, 'device-a');
     await expect(authenticate(assertion)).resolves.toBeUndefined();
 
-    devices = new InMemoryDeviceDirectory();
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
     await devices.register(TENANT, {
       productId: 'product-b',
       deviceId: 'device-a',
@@ -153,7 +155,7 @@ describe('hosted task assertion authentication', () => {
 
   beforeEach(async () => {
     clock.set(new Date(NOW));
-    devices = new InMemoryDeviceDirectory();
+    devices = new InMemoryDeviceDirectory(new InMemoryTaskAttemptState(clock), new InMemoryMailboxStore(clock, { readEntitlement: async () => undefined }));
     await devices.register(TENANT, {
       productId: 'product-a',
       deviceId: 'device-a',

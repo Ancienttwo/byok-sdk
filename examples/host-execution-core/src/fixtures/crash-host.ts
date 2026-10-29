@@ -3,9 +3,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { serve } from '@hono/node-server';
 import { createByokServer } from '@byok-sdk/server';
-import { HostExecutionCore } from '../core';
-import { HostLedger } from '../ledger';
-import { hash, type ExecutionTemplate } from '../model';
+import { HostExecutionCore, HostLedger, hash, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 
 const root = process.argv[2]!;
 const port = Number(process.argv[3] ?? 0);
