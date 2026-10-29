@@ -137,11 +137,33 @@ until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
 `pi-session-dir` is `DaemonConfig.piByokLauncher.sessionDir`. The SDK deletes
 only Pi's own session files there, flat `<ISO time>_<session id>.jsonl` names,
 once their last write is older than the TTL; other names, folders and symbolic
-links stay. Pi appends on every turn, so an old file has no writer, and a
-session ledger that could still resume the session is at least a day younger
-than the file. A config whose `pi-session-dir` TTL is less than the
+links stay. Age alone never proves that a session is idle. Before validating a
+resume ledger, TaskRunner obtains the prepared operation's `RuntimeSessionLease`
+and retains it through startup and disposal. Standalone PiAdapter uses the same
+admission gate. The actual Pi RPC host holds a separate writer gate for its
+session file, so a surviving child stays protected even if its parent is killed.
+The gates use canonical paths and coordinate all stores sharing the directory.
+A short discovery gate covers native session opening and replacement; different
+sessions run concurrently. Cleanup must acquire discovery, admission and writer
+gates, then recheck last-write time. Native `newSession.setup` receives a mutable
+session manager and may synchronously select another directory. Only that
+callback holds the shared Pi rebinding barrier, through confirmation of its
+final file's writer lease, including callback failure. Nested setup calls reuse
+the same barrier. A callback that never returns delays Pi session cleanup and
+other setup callbacks, but does not stop already running sessions or other
+retention classes. Normal turns never hold this barrier. Files whose header id disagrees with their
+filename, or whose header identity cannot be determined within the bounded
+header read, are retained. A config whose `pi-session-dir` TTL is less than the
 `session-ledger` TTL plus one day fails with `LocalStorageConfigError`. A
-resume of an expired Pi session fails like a resume of an expired ledger.
+resume whose file was already reclaimed fails like a resume of an expired ledger.
+
+Custom adapters that own swept session data implement
+`PreparedRuntimeOperation.acquireSessionLease(sessionRef)`. A custom caller must
+acquire it before handoff validation, pass the exact returned object as
+`RuntimeOperationStartInput.sessionLease`, and release it only after confirmed
+runtime disposal, or when declining an offer that never started. The Pi token
+is bound to its prepared operation and directory; a fabricated or released token
+is rejected. Prepared in-memory and external login sessions have no such lease.
 
 Migration from 0.31: a Host that trimmed this folder itself, such as
 AiphaBee's `pruneLocalPiSessions` in `apps/local-agent/src/pi-provider-launcher.ts`,

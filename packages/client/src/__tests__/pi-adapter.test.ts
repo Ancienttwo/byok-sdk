@@ -1,3 +1,5 @@
+import { acquirePiSessionRetention } from '../util/pi-session-retention';
+import { PathMutationGateBusyError } from '../util/path-mutation-gate';
 import type { RuntimeTaskInput } from '../types';
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
@@ -58,6 +60,37 @@ describe('PiAdapter against the fake-pi fixture', () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
     await Promise.all(openSessions.splice(0).map((s) => s.close()));
+  });
+
+  it.each([false,true])('standalone keys Pi retains its session until close (resume=%s), without serializing other sessions',async resume=>{
+    const dir=await fs.mkdtemp(path.join(os.tmpdir(),'pi-retention-'));
+    const spawnFn=((_command:string,args:string[],options:Parameters<typeof realSpawn>[2])=>realSpawn(FIXTURE_PATH,args.slice(args.indexOf('--')+1),options)) as never;
+    const adapter=new PiAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'env'}),spawnFn,
+      byokLauncher:{command:'/opt/byok-pi-provider-launcher',profileDbPath:'/private/providers.sqlite',sessionDir:dir}});
+    const task:RuntimeTaskInput={...baseTask,dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'},...(resume?{sessionRef:'fake-session-1'}:{})};
+    let session:Session|undefined;
+    try{
+      session=await startAdapter(adapter,task,await makeCtx({...process.env,FAKE_PI_HANG_AFTER_TOOL:'1'}));
+      await expect(acquirePiSessionRetention(dir,session.sessionRef)).rejects.toBeInstanceOf(PathMutationGateBusyError);
+      const other=await acquirePiSessionRetention(dir,'another-session');await other.release();
+      await session.close();
+      const released=await acquirePiSessionRetention(dir,session.sessionRef);await released.release();
+    }finally{await session?.close();await fs.rm(dir,{recursive:true,force:true});}
+  });
+
+  it('rejects a forged admission lease before spawning a Pi writer',async()=>{
+    const dir=await fs.mkdtemp(path.join(os.tmpdir(),'pi-retention-token-')),spawnFn=vi.fn(()=>{throw new Error('must not spawn');});
+    const adapter=new PiAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'env'}),spawnFn:spawnFn as never,
+      byokLauncher:{command:'/opt/byok-pi-provider-launcher',profileDbPath:'/private/providers.sqlite',sessionDir:dir}});
+    const task:RuntimeTaskInput={...baseTask,sessionRef:'fake-session-1',dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'}};
+    let retained:import('../types').RuntimeSessionLease|undefined;
+    const wrapped:import('../types').RuntimeAdapter={descriptor:adapter.descriptor,detect:()=>adapter.detect(),prepare:async input=>{
+      const result=await adapter.prepare(input);if(result.kind!=='prepared')return result;
+      retained=await result.operation.acquireSessionLease!(task.sessionRef!);
+      return {...result,operation:{...result.operation,start:input=>result.operation.start({...input,sessionLease:{sessionRef:task.sessionRef!,release:async()=>{}}})}};
+    }};
+    try{await expect(startPreparedOperation(wrapped,task,await makeCtx())).rejects.toThrow('exact session retention lease');expect(spawnFn).not.toHaveBeenCalled();}
+    finally{await retained?.release();await fs.rm(dir,{recursive:true,force:true});}
   });
 
   it('detect() reports present + version from the fake binary', async () => {

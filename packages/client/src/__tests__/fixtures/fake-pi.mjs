@@ -205,7 +205,6 @@ async function waitForReplyGate(name) {
 /** id -> resolve function, for extension_ui_request/response correlation (see FAKE_PI_EXTENSION_UI_REQUEST above). */
 const pendingExtensionUiResolvers = new Map();
 /** FAKE_PI_TRAJECTORY=killed: die mid-frame once start() has its session id. */
-let killAfterState = false;
 
 rl.on('line', (line) => {
   let msg;
@@ -254,7 +253,6 @@ async function handleCommand(msg) {
         id: msg.id,
         data: { model: { id: 'fake-model' }, thinkingLevel: 'off', isStreaming: false, sessionId },
       });
-      if (killAfterState) process.stdout.write('{"type":"tool_execution_end"', () => process.kill(process.pid, 'SIGKILL'));
       break;
 
     case 'prompt': {
@@ -287,8 +285,9 @@ async function handleCommand(msg) {
         args: { command: 'echo hi' },
       });
       if (trajectory === 'killed') {
-        // get_state still has to answer, or start() fails before a session exists.
-        killAfterState = true;
+        // Boot identity has already been answered; die during the admitted turn.
+        process.stdout.write('{"type":"tool_execution_end"', () => process.kill(process.pid, 'SIGKILL'));
+
         break;
       }
       if (trajectory !== 'missing-tool-end') {

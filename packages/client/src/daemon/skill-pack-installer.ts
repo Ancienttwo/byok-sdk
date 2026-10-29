@@ -34,7 +34,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { acquirePathMutationGate } from './path-mutation-gate';
+import { acquirePathMutationGate } from '../util/path-mutation-gate';
 import {
   CONTENT_HASH_PATTERN,
   SKILL_PACK_ENTRY_PATH,

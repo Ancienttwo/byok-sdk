@@ -341,6 +341,7 @@ export interface OfferStartInput
     Pick<OfferManifest, 'manifest' | 'preparedLaunch' | 'runtimeLaunch' | 'toolAuthorization'>,
     Pick<OfferClaim, 'resolvedInstruction' | 'taskMcpServers'> {
   readonly agentBinding: OfferWorkspace['agentBinding'];
+  readonly sessionLease: OfferWorkspace['sessionLease'];
   readonly blobAbort: AbortController;
   readonly startupDeadline: number;
 }
@@ -392,6 +393,7 @@ async function startAndActivateRuntime(
     : launch.promise.then(() => requestTaskApproval.call(this, taskId, summary, signal, kind));
   const startInput: RuntimeOperationStartInput = {
     scratch,
+    ...(input.sessionLease === undefined ? {} : { sessionLease: input.sessionLease }),
     ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {
       tenantId: this['deps'].tenantId!, replicaRoot: path.join(this['deps'].storeDir, 'durable-replicas'), lifecycle: {
         ownsLease: () => !blobAbort.signal.aborted && !this['pendingCancelled'].has(taskId),

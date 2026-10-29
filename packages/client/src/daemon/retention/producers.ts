@@ -8,7 +8,7 @@ import { AGENT_RESULT_DIRECTORY, AGENT_RESULT_MAX_RETAINED, AGENT_RESULT_RECORD_
 import type { AgentSessionHandoffStore } from '../agent-session-handoff-store';
 import type { InputPreparationService } from '../input-preparation-service';
 import type { JournalIdentity, LocalTaskJournal } from '../journal/journal';
-import { acquirePathMutationGate, PathMutationGateBusyError } from '../path-mutation-gate';
+import { acquirePathMutationGate, PathMutationGateBusyError } from '../../util/path-mutation-gate';
 import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer';
 import type { ResolvedStorageConfig } from './config';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_BOUNDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ProtectedClassId, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry';
@@ -17,8 +17,9 @@ import { authorityBudget, classBudget } from './runtime-accounting';
 import { TreeCleanup } from './tree-cleanup';
 import { selectReaderRuns } from '../../agent-home-reader-retention';
 import { RuntimeCleanup } from './runtime-cleanup';
-import { isAgentSessionLedgerName, isAgentTaskTerminalName, isPiSessionFileName, pruneByLastWrite } from './session-ledgers';
+import { isAgentSessionLedgerName, isAgentTaskTerminalName, isPiSessionFileName, piSessionRefFromFileName, pruneByLastWrite } from './session-ledgers';
 import { existingDirectory, measureTree, removeOwnedPath } from './usage';
+import { acquirePiSessionDiscovery, acquirePiSessionRetention, acquirePiSessionWriter, acquirePiSessionRebinding } from '../../util/pi-session-retention';
 
 interface ProducerOptions {
   readonly storeDir: string;
@@ -303,12 +304,61 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   }
   async function sweepPiSessions(budget: SweepBudget): Promise<void> {
     if (piSessionDir === undefined) return;
-    // Pi appends to a session file on every turn, so an old mtime means no launch is writing it, and the
-    // config keeps this TTL a day past the session-ledger TTL: no live ledger names an expired session.
+    let rebinding;
+    try { rebinding = await acquirePiSessionRebinding(); }
+    catch (error) { if (error instanceof PathMutationGateBusyError) return; throw error; }
+    try {
+    // A fresh launch holds discovery until it knows and leases its real session id.
+    // Resumes take their session lease before validating the home handoff. Both
+    // gates are directory-scoped across daemons and standalone adapters.
     await pruneByLastWrite({ directory: piSessionDir, entries: entries('pi-session-dir', piSessionDir, budget), match: isPiSessionFileName,
       nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['pi-session-dir'],
-      remove: async file => { await remove(piSessionDir, file, budget); return true; },
+      remove: async file => {
+        const sessionRef = piSessionRefFromFileName(path.basename(file));
+        if (sessionRef === undefined) return true;
+        let discovery;
+        try { discovery = await acquirePiSessionDiscovery(piSessionDir); }
+        catch (error) { if (error instanceof PathMutationGateBusyError) return true; throw error; }
+        try {
+          let session;
+          try { session = await acquirePiSessionRetention(piSessionDir, sessionRef); }
+          catch (error) { if (error instanceof PathMutationGateBusyError) return true; throw error; }
+          let writer;
+          try { writer = await acquirePiSessionWriter(file); }
+          catch (error) { await session.release(); if (error instanceof PathMutationGateBusyError) return true; throw error; }
+          try {
+            // Selection happened before the gates; a completed turn may have refreshed the file.
+            const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+            if (stat?.isFile() && !stat.isSymbolicLink() && budget.now.getTime() - stat.mtimeMs >= config.ttlMs['pi-session-dir']) {
+              // Native resume matches header.id, not the suffix. Preserve a
+              // renamed/reused file whose admission identity is ambiguous.
+              const handle = await fs.open(file, 'r');
+              let headerId: unknown;
+              try {
+                const buffer = Buffer.alloc(4096);
+                const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+                const text = buffer.subarray(0, bytesRead).toString('utf8');
+                if (bytesRead < stat.size && !text.includes('\n')) return true;
+                const firstLine = text.split('\n', 1)[0]!;
+                try {
+                  const header = JSON.parse(firstLine);
+                  if (!header) return true; // Native discovery also skips parsed falsy prefix values.
+                  if (header.type === 'session') headerId = header.id;
+                }
+                catch {
+                  // Native discovery skips blank/malformed prefix lines. This
+                  // bounded read cannot prove the later header identity.
+                  if (stat.size > 0) return true;
+                }
+              } finally { await handle.close(); }
+              if (typeof headerId !== 'string' || headerId === sessionRef) await remove(piSessionDir, file, budget);
+            }
+          } finally { await writer.release(); await session.release(); }
+        } finally { await discovery.release(); }
+        return true;
+      },
     });
+    } finally { await rebinding.release(); }
   }
   const sweep: Record<ExpiringClassId, (budget: SweepBudget) => Promise<void>> = {
     'exec-sdk': sweepExecSdk, 'exec-runtime': sweepRuntime, 'daemon-temp': sweepDaemon, 'durable-replica': sweepReplicas,

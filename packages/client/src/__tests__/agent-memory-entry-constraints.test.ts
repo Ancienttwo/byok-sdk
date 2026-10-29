@@ -113,7 +113,7 @@ describe('the embedded agent-memory entry module graph', () => {
       'daemon/agent-memory-helper-release.ts',
       'daemon/agent-memory.ts',
       'daemon/memory-guidance.ts',
-      'daemon/path-mutation-gate.ts',
+      'util/path-mutation-gate.ts',
       'lifecycle/exec-runner.ts',
       'mcp-server/dispatch.ts',
       'mcp-server/framing.ts',

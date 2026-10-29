@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "3c40928c92a6236d6a5a66358c590285a84bf372d999962029849da1b310cb54"
+    "snapshotSha256": "bc31dd0032e702dd04ce066495f1221eeaaddf8366ffce4693529bb03f816e5a"
   },
   "configFields": {
     "status": "pending",
@@ -36,6 +36,20 @@
         "export:@byok-sdk/client#ExpiringClassId",
         "export:@byok-sdk/client#ProtectedClassId",
         "export:@byok-sdk/client#resolveStorageConfig"
+      ]
+    },
+    {
+      "id": "pi-session-retention-lifecycle",
+      "impact": "additive",
+      "summary": "Prepared operations that own swept session data expose acquireSessionLease. TaskRunner acquires it before validating a resume handoff and passes the exact local RuntimeSessionLease to start; callers retain it until confirmed disposal. Pi admission and actual child writer gates coordinate shared session directories, including parent crashes and native session replacement.",
+      "migration": "docs/host-local-storage-layout.md#retention-bounds",
+      "items": [
+        "export:@byok-sdk/client#PreparedRuntimeOperation",
+        "export:@byok-sdk/client#RuntimeOperationStartInput",
+        "export:@byok-sdk/client#RuntimeSessionLease",
+        "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
+        "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+        "export:@byok-sdk/client/adapters#RuntimeSessionLease"
       ]
     }
   ],
@@ -71,14 +85,44 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#PreparedRuntimeOperation",
+      "change": "changed",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
       "item": "export:@byok-sdk/client#ProtectedClassId",
       "change": "changed",
       "entry": "storage-retention-bounds"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeSessionLease",
+      "change": "added",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
       "item": "export:@byok-sdk/client#resolveStorageConfig",
       "change": "changed",
       "entry": "storage-retention-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
+      "change": "changed",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeSessionLease",
+      "change": "added",
+      "entry": "pi-session-retention-lifecycle"
     }
   ]
 }

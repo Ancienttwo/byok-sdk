@@ -7,7 +7,7 @@ import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
   type PathMutationGate,
-} from './path-mutation-gate';
+} from '../util/path-mutation-gate';
 
 export const DAEMON_OWNER_FILENAME = 'daemon-owner.json';
 const RECLAIM_FILENAME = `${DAEMON_OWNER_FILENAME}.reclaim`;

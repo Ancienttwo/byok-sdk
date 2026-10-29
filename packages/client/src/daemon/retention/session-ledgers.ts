@@ -12,9 +12,13 @@ export function isAgentSessionLedgerName(name: string): boolean {
 export function isAgentTaskTerminalName(name: string): boolean {
   return /^[A-Za-z0-9._-]{1,64}-task-[a-f0-9]{64}\.jsonl$/u.test(name);
 }
+export function piSessionRefFromFileName(name: string): string | undefined {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_([A-Za-z0-9-]{1,128})\.jsonl$/u.exec(name)?.[1];
+}
+
 /** Pi 1.4.0 `SessionManager` names a file `<ISO time with : and . as ->_<session id>.jsonl`; other names are the Host's. */
 export function isPiSessionFileName(name: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[A-Za-z0-9-]{1,128}\.jsonl$/u.test(name);
+  return piSessionRefFromFileName(name) !== undefined;
 }
 
 /** Removes matching files whose last write is at least `maxAgeMs` old. Content is never parsed. */

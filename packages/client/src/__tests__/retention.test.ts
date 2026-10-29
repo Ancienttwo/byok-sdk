@@ -1,5 +1,13 @@
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { TaskRunner } from '../daemon/task-runner';
+import { ApprovalRegistry } from '../daemon/approvals';
+import { testScratchOwner } from './fixtures/execution-scratch';
+import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { acquirePiSessionRetention, acquirePiSessionWriter } from '../util/pi-session-retention';
 import { PASS_INSPECTIONS, runtimeReclaimedBytes } from '../daemon/retention/runtime-accounting';
-import { acquirePathMutationGate, PathMutationGateBusyError } from '../daemon/path-mutation-gate';
+import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { projectSkillPack } from '../daemon/skill-pack-installer';
 import { promises as fs } from 'node:fs';
 import { execFile } from 'node:child_process';
@@ -497,6 +505,102 @@ it('every retention class declares a bound, and a registry with an undeclared or
  expect(build('quarantine',{...fakeAuthority('quarantine'),bound:{kind:'exempt',reason:' ',cleanedBy:'operator',api:'x'}})).toThrow('retention class quarantine does not declare its bound');
 });
 const piSession=(c:string)=>`2026-09-01T00-00-00-000Z_0192f0c4-0000-7000-8000-${c.repeat(12)}.jsonl`;
+it.each(['complete', 'cancel', 'start-failure', 'handoff-failure', 'busy', 'close-failure'] as const)('TaskRunner retains an expired Pi resume before requireMatch through %s disposal',async(outcome)=>{
+ const {home,binding,directory}=await idleHome();
+ const sessionRef='0192f0c4-0000-7000-8000-aaaaaaaaaaaa',dir=testScratchRoot(),file=path.join(dir,piSession('a'));
+ const handoffs=new AgentSessionHandoffStore();
+ const match={agentRef:binding.resolution.agentRef,sessionRef,runtimeId:'pi',home:directory,cwd:directory};
+ await handoffs.record({...match,taskId:'original',leaseId:binding.lease.leaseId});
+ const ledgerDir=path.join(directory,'.byok','runtime-sessions'),ledger=path.join(ledgerDir,(await fs.readdir(ledgerDir))[0]!);
+ await fs.writeFile(file,JSON.stringify({type:'session',id:sessionRef})+'\n');
+ await stamp(file,EXPIRED);await stamp(ledger,EXPIRED);await binding.lease.release();
+ // A different daemon/store owns the same session directory. No process-local
+ // live map or original store's home lease can protect this sweep.
+ const f=await fixture({piSessionDir:dir}),adapter=new StubRuntimeAdapter('pi'),sent:Envelope[]=[];
+ const prepare=adapter.prepare.bind(adapter);
+ vi.spyOn(adapter,'prepare').mockImplementation(async input=>{
+  const prepared=await prepare(input);if(prepared.kind!=='prepared')return prepared;
+  return {...prepared,operation:{...prepared.operation,acquireSessionLease:ref=>acquirePiSessionRetention(dir,ref),start:async input=>{
+   expect(input.sessionLease?.sessionRef).toBe(sessionRef);
+   expect(await exists(file)).toBe(true);
+   return prepared.operation.start(input);
+  }}};
+ });
+ const requireMatch=handoffs.requireMatch.bind(handoffs);
+ let protectedBeforeMatch=false;
+ vi.spyOn(handoffs,'requireMatch').mockImplementation(async input=>{
+  await f.sweeper.runPass('periodic');protectedBeforeMatch=await exists(file);
+  if(outcome==='handoff-failure')throw new Error('deterministic rejected handoff');
+  return requireMatch(input);
+ });
+ const competing=outcome==='busy'?await acquirePiSessionRetention(dir,sessionRef):undefined;
+ if(competing)cleanups.push(()=>competing.release());
+ if(outcome==='start-failure')adapter.startError=new Error('deterministic failed start');
+ const runner=new TaskRunner({advertisedCapabilities:advertiseEveryDeviceFlag,...freshOfferEgressDeps(),getIngressBudget:testIngressBudget,scratchRoot:testScratchOwner(),
+  adapters:[adapter],agentHome:home,agentSessionHandoffs:handoffs,deviceId:'device-1',send:e=>sent.push(e),
+  blobClient:{resolveInstruction:async()=>{throw new Error('unused');},uploadArtifact:async()=>{throw new Error('unused');}},
+  approvalRegistry:new ApprovalRegistry(),storeDir:testScratchRoot(),productId:'product-1'});
+ cleanups.push(()=>runner.shutdownActiveTasks('test cleanup'));
+ await runner.handleEnvelope(createEnvelope('task.offer',{instruction:'resume old Pi transcript',runtime:'pi',agentRef:match.agentRef,...FRESH_OFFER,session:{mode:'resume',sessionRef}},{taskId:'retained-resume',seq:1}));
+ if(outcome==='busy'){
+  expect(handoffs.requireMatch).not.toHaveBeenCalled();
+  expect(sent.find(e=>e.type==='task.decline')?.payload).toMatchObject({retryable:true});
+  expect(adapter.startCalls).toHaveLength(0);await competing!.release();
+ }else expect(protectedBeforeMatch).toBe(true);
+ if(outcome==='close-failure'){
+  const session=adapter.sessions[0]!,close=vi.spyOn(session,'close');
+  close.mockRejectedValueOnce(new Error('deterministic disposal failure'));
+  session.emit({type:'turn_end'});
+  await vi.waitFor(()=>expect(close).toHaveBeenCalled());
+  await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(true);expect(runner.activeTaskCount).toBe(1);
+  await runner.handleEnvelope(createEnvelope('task.cancel',{reason:'retry disposal'},{taskId:'retained-resume',seq:2}));
+  await vi.waitFor(()=>expect(runner.activeTaskCount).toBe(0));
+ }
+ if(outcome==='complete'||outcome==='cancel'){
+  const session=adapter.sessions[0]!;expect(session).toBeDefined();
+  const releaseClose=session.blockClose(),close=vi.spyOn(session,'close');
+  cleanups.push(async()=>releaseClose());
+  const finish=outcome==='cancel'?runner.handleEnvelope(createEnvelope('task.cancel',{reason:'cancel'},{taskId:'retained-resume',seq:2})):undefined;
+  if(outcome==='complete')session.emit({type:'turn_end'});
+  await vi.waitFor(()=>expect(close).toHaveBeenCalled());
+  await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(true);
+  releaseClose();await finish;
+  await vi.waitFor(()=>expect(session.closeCalled).toBe(true));
+  // Ownership stays registered through terminal evidence and lease release.
+  await vi.waitFor(()=>expect(runner.activeTaskCount).toBe(0));
+ }
+ await f.sweeper.runPass('periodic');expect(await exists(file)).toBe(false);expect(f.failures).toEqual([]);
+});
+it('shared Pi directories keep busy writers, permit different sessions, and preserve mismatched header identities',async()=>{
+ const dir=testScratchRoot(),active=path.join(dir,piSession('a')),idle=path.join(dir,piSession('b')),mismatch=path.join(dir,piSession('c'));
+ for(const file of [active,idle,mismatch]){await fs.writeFile(file,'{}\n');await stamp(file,EXPIRED);}
+ await fs.writeFile(mismatch,JSON.stringify({type:'session',padding:'x'.repeat(5000),id:'different-id'})+'\n');await stamp(mismatch,EXPIRED);
+ const writer=await acquirePiSessionWriter(active);cleanups.push(()=>writer.release());
+ const other=await acquirePiSessionWriter(idle);await other.release();
+ const f=await fixture({piSessionDir:dir});await f.sweeper.runPass('periodic');
+ expect(await exists(active)).toBe(true);expect(await exists(idle)).toBe(false);expect(await exists(mismatch)).toBe(true);
+ await writer.release();await f.sweeper.runPass('periodic');expect(await exists(active)).toBe(false);
+});
+it('Pi cleanup rechecks last write after selection, and preserves header ids that disagree with filenames',async()=>{
+ const dir=testScratchRoot(),refreshed=path.join(dir,piSession('a')),mismatch=path.join(dir,piSession('b'));
+ await fs.writeFile(refreshed,'{}\n');await stamp(refreshed,EXPIRED);
+ await fs.writeFile(mismatch,JSON.stringify({type:'session',id:'other-id'})+'\n');await stamp(mismatch,EXPIRED);
+ const lstat=fs.lstat.bind(fs);let selected=false;
+ vi.spyOn(fs,'lstat').mockImplementation((async(...args:Parameters<typeof fs.lstat>)=>{
+  const stat=await lstat(...args);
+  if(args[0]===refreshed&&!selected){selected=true;await stamp(refreshed,FRESH);}
+  return stat;
+ }) as typeof fs.lstat);
+ const f=await fixture({piSessionDir:dir});await f.sweeper.runPass('periodic');
+ expect(selected).toBe(true);expect(await exists(refreshed)).toBe(true);expect(await exists(mismatch)).toBe(true);expect(f.failures).toEqual([]);
+});
+it.each(['\nmalformed\n','null\n','false\n','0\n'])('Pi cleanup preserves a native-resumable header after prefix %j',async prefix=>{
+ const dir=testScratchRoot(),file=path.join(dir,piSession('a'));
+ await fs.writeFile(file,prefix+JSON.stringify({type:'session',version:3,id:'0192f0c4-0000-7000-8000-bbbbbbbbbbbb',timestamp:EXPIRED,cwd:dir})+'\n');
+ await stamp(file,EXPIRED);
+ const f=await fixture({piSessionDir:dir});await f.sweeper.runPass('periodic');
+ expect(await exists(file)).toBe(true);expect(f.failures).toEqual([]);
+});
 it('Pi BYOK session files expire by last write; other names, folders and symlinks in the session folder stay',async()=>{
  const dir=testScratchRoot(),files={old:piSession('a'),fresh:piSession('b'),host:'host-notes.jsonl',odd:'2026-09-01_session.jsonl'};
  for(const name of Object.values(files)){await fs.writeFile(path.join(dir,name),'{}\n');await stamp(path.join(dir,name),EXPIRED);}
