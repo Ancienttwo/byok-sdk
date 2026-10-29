@@ -5,14 +5,20 @@ import { randomUUID } from 'node:crypto';
 import { serve } from '@hono/node-server';
 import { createInMemoryByokCloud } from '@byok-sdk/cloud';
 import { tenantId } from '@byok-sdk/core';
-import { createDaemonWithAdapters, AgentHomeManager, type AgentMemoryExport } from '@byok-sdk/client';
+import { createDaemonWithAdapters, AgentHomeManager } from '@byok-sdk/client';
+import type { AgentMemoryExport } from '@byok-sdk/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady, waitForTaskCleanup } from '../../basic/goal-btw.test-support';
 import { createByokServer } from '@byok-sdk/server';
-import { HostExecutionCore, type ExecutionServer } from './core';
-import { HostLedger } from './ledger';
-import { HostMemoryPage, memoryRevision, type MemoryApproval } from './memory';
+import {
+  HostExecutionCore,
+  HostLedger,
+  HostMemoryPage,
+  memoryRevision,
+  type ExecutionServer,
+  type MemoryApproval,
+} from '@byok-sdk/server/execution-core';
 import { policy, template } from './test-support';
 
 async function openMemoryHost(mode: 'cloud' | 'embedded') {

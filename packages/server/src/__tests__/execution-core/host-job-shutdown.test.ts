@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { expect, it, vi } from 'vitest';
-import { HostExecutionCore, type ExecutionServer } from './core';
-import { HostLedger } from './ledger';
+import { HostExecutionCore, type ExecutionServer } from '../../execution-core/core';
+import { HostLedger } from '../../execution-core/ledger';
 
 it.each(['reject', 'return', 'node-abort', 'unrelated-error', 'other-abort'] as const)('retains pending Host work across shutdown: %s', async mode => {
   const root = mkdtempSync(join(tmpdir(), 'host-job-shutdown-'));

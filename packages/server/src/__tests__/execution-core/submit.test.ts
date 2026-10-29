@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { FrozenOfferMismatchError, HostExecutionCore, HostLedger, submitFrozen, type ExecutionServer, type FrozenInput, type FrozenOffer, type FrozenSubmitPort } from './index';
+import { FrozenOfferMismatchError, HostExecutionCore, HostLedger, submitFrozen, type ExecutionServer, type FrozenInput, type FrozenOffer, type FrozenSubmitPort } from '../../execution-core/index';
 
 const input: FrozenInput = {
   taskId: 'task-1',

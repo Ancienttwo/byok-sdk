@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import type { Occurrence, Routine, RoutineDefinition } from './model';
-import { versionSwitchDue } from './routines';
+import type { Occurrence, Routine, RoutineDefinition } from '../../execution-core/model';
+import { versionSwitchDue } from '../../execution-core/routines';
 
 // The switch rule is pure: no HostLedger, server or clock.
 const definition = (version: number): RoutineDefinition => ({ id: 'watch', version, timeZone: 'UTC',

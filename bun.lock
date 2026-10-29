@@ -329,6 +329,7 @@
       },
       "devDependencies": {
         "@byok-sdk/conformance": "workspace:*",
+        "tsx": "^4.19.2",
       },
     },
     "packages/testkit": {

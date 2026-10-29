@@ -1,6 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { HostLedger } from './ledger';
-import { project } from './model';
+import { HostLedger, project } from '@byok-sdk/server/execution-core';
 import { openHost, type TestHost } from './test-support';
 
 let host: TestHost | undefined;

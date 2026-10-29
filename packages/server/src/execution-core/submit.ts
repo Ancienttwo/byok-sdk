@@ -1,5 +1,5 @@
-import type { ByokServer } from '@byok-sdk/server';
-import type { AgentExecutionInput } from '@byok-sdk/server';
+import type { AgentExecutionInput } from '@byok-sdk/cloud';
+import type { ByokServer } from '../index';
 import { canonical, isSealed, type FrozenExecutionInput, type SealedAgentExecutionInput } from './model';
 
 /**

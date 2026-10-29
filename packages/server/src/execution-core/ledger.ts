@@ -1,4 +1,5 @@
-import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import type { DatabaseSync, StatementSync } from 'node:sqlite';
+import { loadSqliteModule } from '../sqlite-support';
 import type { MemoryIntentRow } from './memory';
 import { hash, isOccurrenceIntentKey, occurrenceIntentKey, taskId, time, type Json, type LedgerState, type Occurrence } from './model';
 import { agentKey } from './transitions';
@@ -153,7 +154,9 @@ export class HostLedger {
       this.projectionLimits = Object.freeze({ maxCount, maxBytes });
     }
     if (!filename || !tenant.trim()) throw new Error('Select a Host database and tenant');
-    this.db = new DatabaseSync(filename);
+    // The bundler drops the `node:` prefix from static imports, and `sqlite` has no unprefixed builtin.
+    const { DatabaseSync: Database } = loadSqliteModule();
+    this.db = new Database(filename);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS host_ledger (tenant TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS host_retired_identity (

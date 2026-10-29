@@ -1,7 +1,5 @@
-import { AgentRefSchema } from '@byok-sdk/protocol';
+import { AgentRefSchema, validateAgentMemoryPath, type AgentMemoryExport, type AgentMemoryFile } from '@byok-sdk/protocol';
 import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
-import { validateAgentMemoryPath } from '@byok-sdk/client/agent-memory';
-import type { AgentMemoryExport, AgentMemoryFile } from '@byok-sdk/client';
 import { HostLedger } from './ledger';
 import { canonical, hash, type LedgerState } from './model';
 import type { MemoryApproval, MemoryBinding, MemoryIntentRow, MemoryOptions } from './memory';

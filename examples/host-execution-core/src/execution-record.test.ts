@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { freezeRuntimeAdapterDescriptor, type DaemonEvent } from '@byok-sdk/client';
 import { BotStubAdapter } from '../../basic/goal-btw.test-support';
-import { taskId } from './model';
+import { taskId } from '@byok-sdk/server/execution-core';
 import { openHost, type TestHost } from './test-support';
 
 let host: TestHost;
