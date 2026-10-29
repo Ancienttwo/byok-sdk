@@ -49,7 +49,6 @@ import {
   type BlobWriteResult,
   type CloudCrypto,
   type CloudStores,
-  type E2eeMemberStore,
   type ProofReceiptRetentionAuthority,
   type RequestReceipt,
   type RequestReceiptStore,
@@ -86,7 +85,12 @@ import type { WakeStore } from '../../wakes/store';
 import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
 import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
-import { E2EE_MEMBER_PROJECTIONS, E2EE_MEMBER_SCHEMA, SqliteE2eeMemberStore } from './e2ee-member';
+import {
+  PROOF_REQUEST_RECEIPT_PROJECTION,
+  PROOF_REQUEST_RECEIPT_SCHEMA,
+  SqliteProofReceiptRetentionAuthority,
+  SqliteProofRequestReceiptStore,
+} from './proof-receipts';
 
 const RECEIPT_SCHEMA = `
 CREATE TABLE request_receipt (
@@ -196,8 +200,7 @@ export interface SqliteEmbeddedStores {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
-  readonly e2eeMember: E2eeMemberStore;
-  /** Prunes the used device-proof request ids that `e2eeMember` records. */
+  /** Prunes the used device-proof request ids that `cloud.proofReceipts` records. */
   readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
   wakes(tenant: TenantId): WakeStore;
   close(): Promise<void>;
@@ -282,14 +285,8 @@ class SqliteCoordinator {
           throw new WakeHookMissingError();
         }
         this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_status_idx ON task_attempt (tenant_id, status, cancellation_requested_at, task_id)');
-        // No 0.30.1 SDK path appends a `rotate`, so one on a chain from before the floor table came from a Host client
-        // outside the SDK and its floor is unknown. The refusal rolls back the tables created here.
-        const floored = this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'e2ee_member_kem_floor'").get();
-        this.db.exec(E2EE_MEMBER_SCHEMA);
-        if (!floored && this.db.prepare("SELECT 1 FROM e2ee_member_chain_entry WHERE json_extract(entry, '$.op') = 'rotate'").get()) {
-          throw schemaError('SQLITE_MIGRATION_REFUSED', 'Member chain rotate entries predate the KEM floor (docs/security.md)');
-        }
-        for (const projection of E2EE_MEMBER_PROJECTIONS) assertProjection(projection);
+        this.db.exec(PROOF_REQUEST_RECEIPT_SCHEMA);
+        assertProjection(PROOF_REQUEST_RECEIPT_PROJECTION);
         assertProjection('tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory');
         const receiptColumns = this.db.prepare('PRAGMA table_info(request_receipt)').all() as unknown as
           { name: string; type: string; notnull: number; pk: number }[];
@@ -1430,16 +1427,15 @@ export function createSqliteEmbeddedStores(
     pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
     tasks,
     receipts: new SqliteRequestReceiptStore(coordinator, dependencies.clock),
+    proofReceipts: new SqliteProofRequestReceiptStore(coordinator, dependencies.clock),
     cancellations,
     blobs,
   };
-  const e2eeMember = new SqliteE2eeMemberStore(coordinator, dependencies.clock);
   return {
     core,
     cloud,
     blobContentProxy,
-    e2eeMember,
-    proofReceiptAuthority: { collectExpired: (tenant, input) => e2eeMember.collectExpiredProofReceipts(tenant, input) },
+    proofReceiptAuthority: new SqliteProofReceiptRetentionAuthority(coordinator),
     wakes: tenant => new SqliteWakeStore(coordinator, tenant),
     close: () => coordinator.close(),
   };

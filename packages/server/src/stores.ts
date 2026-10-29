@@ -13,9 +13,7 @@ import {
   createInProcessMailboxWake,
   type MailboxWake,
   createWebCrypto,
-  InMemoryE2eeMemberStore,
   type BlobContentProxy,
-  type E2eeMemberStore,
   type ProofReceiptRetentionAuthority,
   type CloudCrypto,
   type CloudStores,
@@ -89,8 +87,7 @@ export interface FacadeStoreComposition {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
-  readonly e2eeMember: E2eeMemberStore;
-  /** SQLite only: the in-memory E2EE store keeps every used `requestId` for the life of the process. */
+  /** SQLite only: the in-memory composition keeps every used proof `requestId` for the life of the process. */
   readonly proofReceiptAuthority?: ProofReceiptRetentionAuthority;
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
@@ -171,7 +168,6 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
       dedup,
     },
     blobContentProxy,
-    e2eeMember: sqlite?.e2eeMember ?? new InMemoryE2eeMemberStore(stores.receipts),
     ...(sqlite === undefined ? {} : { proofReceiptAuthority: sqlite.proofReceiptAuthority }),
     clock,
     crypto,

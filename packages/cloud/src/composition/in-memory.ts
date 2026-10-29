@@ -15,7 +15,7 @@ import {
   type SkillPackStore,
 } from '@byok-sdk/core';
 import { createHmacTokenSigner, type TokenSigner } from '../auth/tokens';
-import { fullCapabilityDeclaration } from '../capabilities';
+import { CLOUD_CAPABILITIES, capabilityDeclarationForPorts, declares } from '../capabilities';
 import { createWebCrypto } from '../crypto/web-crypto';
 import type { CloudCrypto } from '../crypto/port';
 import { createByokCloud, type ByokCloud, type ByokCloudOptions } from '../cloud';
@@ -75,10 +75,8 @@ export interface InMemoryByokCloudOptions {
   readonly truthObjectDownloads?: TruthObjectDownloads;
   readonly maxTruthRequestBytes?: number;
   /**
-   * Host/test supplied skill pack catalogue. Absent by default, and
-   * `fullCapabilityDeclaration()` withholds `skills.pack` to match — a
-   * composition that declared a channel it has no store for would be refused at
-   * construction, which would break every existing in-memory deployment.
+   * Host/test supplied skill pack catalogue. Absent by default; the default
+   * declaration names `skills.pack` exactly when it is supplied.
    */
   readonly skillPacks?: SkillPackStore;
   readonly skillPackPageLimit?: number;
@@ -120,22 +118,19 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(TOKEN_SECRET_BYTES)), clock);
 
   const mailboxWake = options.mailboxWake ?? createInProcessMailboxWake();
+  // The default declaration is derived from the ports this composition holds.
+  const capabilities = options.capabilities ?? capabilityDeclarationForPorts({ ...options, blobContentProxy });
   const cloud = createByokCloud({
     mailboxWake,
     core,
     cloud: stores,
-    // This composition has nowhere else to put bytes, so it supplies the proxy
-    // and `fullCapabilityDeclaration()` declares `blobs.contentproxy`. That
-    // pairing is what keeps hosted-in-memory behavior identical to what it was
-    // before the port narrowed.
-    blobContentProxy,
+    // This composition has nowhere else to put bytes and owns its proxy, so it
+    // supplies it whenever the declaration names `blobs.contentproxy`.
+    ...(declares(capabilities, CLOUD_CAPABILITIES.blobsContentProxy) ? { blobContentProxy } : {}),
     crypto,
     tokenSigner,
     clock,
-    capabilities: options.capabilities ?? fullCapabilityDeclaration(undefined, {
-      includeAgentMemoryProjection:
-        options.agentMemoryProjectionAuthorizer !== undefined && options.agentMemoryProjectionStore !== undefined,
-    }),
+    capabilities,
     ...(options.truthCommitter === undefined ? {} : { truthCommitter: options.truthCommitter }),
     ...(options.truthObjectDownloads === undefined
       ? {}

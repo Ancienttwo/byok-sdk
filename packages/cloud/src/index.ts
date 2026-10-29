@@ -130,11 +130,13 @@ export type {
 export {
   CLOUD_CAPABILITIES,
   CapabilitiesResponseSchema,
+  capabilityDeclarationForPorts,
   declares,
   fullCapabilityDeclaration,
 } from './capabilities';
 export type {
   CapabilitiesResponse,
+  CapabilityPorts,
   CloudCapability,
   FullCapabilityDeclarationOptions,
 } from './capabilities';

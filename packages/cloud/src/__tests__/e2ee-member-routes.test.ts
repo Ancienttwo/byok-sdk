@@ -130,13 +130,15 @@ async function answer(response: Response): Promise<{ readonly status: number; re
 }
 
 describe('E2EE member device routes', () => {
-  it('mounts the six routes only when e2ee.member is declared and a store is supplied', () => {
+  it('mounts the six routes only when e2ee.member is declared and a store is supplied, and refuses either alone', () => {
     const e2eeRoutes = (cloud: { readonly routes: readonly { method: string; path: string; class: string }[] }) =>
       Object.fromEntries(cloud.routes.filter(route => route.path.startsWith('/byok/e2ee/')).map(route => [`${route.method} ${route.path}`, route.class]));
     expect(e2eeRoutes(setup().cloud)).toEqual(E2EE_ROUTES);
-    expect(e2eeRoutes(setup({ capabilities: fullCapabilityDeclaration() }).cloud)).toEqual({});
+    expect(e2eeRoutes(setup({ capabilities: fullCapabilityDeclaration(), e2eeMemberStore: undefined }).cloud)).toEqual({});
     expect(fullCapabilityDeclaration().capabilities).not.toContain(CLOUD_CAPABILITIES.e2eeMember);
     expect(() => setup({ e2eeMemberStore: undefined })).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
+    expect(() => setup({ capabilities: fullCapabilityDeclaration() }))
+      .toThrowError(expect.objectContaining({ code: 'capability_port_undeclared', message: expect.stringContaining('e2eeMemberStore (e2ee.member)') }));
   });
 
   it('declares e2ee.member.kem-epoch exactly with e2ee.member', async () => {
