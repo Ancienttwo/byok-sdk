@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentEventSchema, type AgentEvent } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { createClaudeControlChannel } from '../adapters/claude/control-channel';
-import { claudeMcpEventIdentities } from '../adapters/claude/mcp-identity';
+import { claudeMcpEventIdentities, createClaudeMcpIdentityResolver } from '../adapters/claude/mcp-identity';
 import { AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 import type { Session, MessageDraftDelta } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -26,6 +26,20 @@ const status = (...servers: { name: string; tools?: string[]; status?: string; c
 });
 
 describe('Claude MCP identity from its own mcp_status answer', () => {
+  it('shares one in-flight lookup across simultaneous hooks and event reporting', async () => {
+    let complete!: (response: unknown) => void;
+    const fetch = vi.fn(() => new Promise<unknown>(resolve => { complete = resolve; }));
+    const source = createClaudeMcpIdentityResolver(fetch, configured('market'));
+    await expect(source.resolve('Read')).resolves.toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+    const lookups = [source.resolve('mcp__market__get_quote'), source.observe(), source.resolve('mcp__market__get_quote')];
+    expect(fetch).toHaveBeenCalledOnce();
+    complete(status({ name: 'market', tools: ['get.quote'] }));
+    expect(await Promise.all(lookups)).toEqual([{ server: 'market', tool: 'get.quote' }, undefined, { server: 'market', tool: 'get.quote' }]);
+    expect(source.identities.get('mcp__market__get_quote')).toEqual({ server: 'market', tool: 'get.quote' });
+    await source.observe();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
   it('maps Claude runtime names to the configured server and original tool names', () => {
     const identities = claudeMcpEventIdentities(
       status({ name: 'market.feed', tools: ['get.quote', 'get_snapshot'] }),

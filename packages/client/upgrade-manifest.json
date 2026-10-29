@@ -88,6 +88,33 @@
       ]
     },
     {
+      "id": "tool-authorization-rules",
+      "impact": "additive",
+      "summary": "Add task-level tool authorization rules and decision metadata. Claude MCP selectors use the shared trusted runtime identity observation within the callback deadline; custom ToolAuthorizationGate wrappers must forward the optional identity resolver to preserve MCP policy enforcement.",
+      "migration": "docs/spec.md#tool-authorization-auto-and-all-1061",
+      "items": [
+        "export:@byok-sdk/client#DaemonEvent",
+        "export:@byok-sdk/client#DaemonObserver",
+        "export:@byok-sdk/client#DaemonRecord",
+        "export:@byok-sdk/client#ToolAuthorizationDecision",
+        "export:@byok-sdk/client#ToolAuthorizationGate",
+        "export:@byok-sdk/client#ToolAuthorizationPolicy",
+        "export:@byok-sdk/client#ToolAuthorizationReason",
+        "export:@byok-sdk/client#ToolAuthorizationResolver",
+        "export:@byok-sdk/client#ToolAuthorizationRules",
+        "export:@byok-sdk/client#ToolAuthorizationVerdict",
+        "export:@byok-sdk/client#ToolCall",
+        "export:@byok-sdk/client#ToolReminder",
+        "export:@byok-sdk/client#ToolRisk",
+        "export:@byok-sdk/client#ToolRiskReason",
+        "export:@byok-sdk/client#ToolRule",
+        "export:@byok-sdk/client#classifyToolCall",
+        "export:@byok-sdk/client#createAutoToolAuthorizationGate",
+        "export:@byok-sdk/client#parseToolAuthorizationPolicy",
+        "union:daemon-event#tool-authorization"
+      ]
+    },
+    {
       "id": "daemon-config-schema",
       "impact": "additive",
       "summary": "DaemonConfig has a generated, versioned JSON schema (daemon-config.schema.json beside the client package.json) and one validator for config files and createDaemon. Unknown fields are warnings, never rejected at runtime (Q4'); `byok-agent config check [--strict] [--json]` and checkDaemonConfig validate a config and report its effective values (store, Agent-home and scratch directories with the socket budget, MCP servers, memory helper, runtime isolation, tool-authorization mode). Daemon.status().config returns the same report. Each top-level DaemonConfig field is now a config:<field> manifest item. Nothing to change; run `byok-agent config check --strict` in CI to catch typos. AgentEgressConfig.policy is optional, as config files already wrote it (`\"agentEgress\": {}` selects the client default policy).",

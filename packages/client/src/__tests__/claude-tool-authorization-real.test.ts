@@ -4,9 +4,10 @@ import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { createAutoToolAuthorizationGate, type ToolAuthorizationRules, type ToolAuthorizationVerdict, type ToolCall } from '../tool-authorization';
+import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolAuthorizationRules, type ToolAuthorizationVerdict, type ToolCall } from '../tool-authorization';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
@@ -30,7 +31,7 @@ async function localPushFixture(root: string, workspace: string, env: NodeJS.Pro
 /** Explicit local-runtime acceptance; all model traffic ends at the zero-cost loopback provider. */
 describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto gate with a loopback provider', () => {
   it.each(['denied', 'approved', 'workspace', 'all', 'subagent', 'native-all', 'native-approved', 'native-denied',
-    'rules-ask', 'rules-allow', 'rules-floor', 'rules-resume', 'F1-shell-chain'] as const)('%s: enforced under bypassPermissions, allow rules and disableAllHooks', async mode => {
+    'rules-ask', 'rules-allow', 'rules-floor', 'rules-resume', 'rules-mcp', 'F1-shell-chain'] as const)('%s: enforced under bypassPermissions, allow rules and disableAllHooks', async mode => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-real-auth-')));
     const workspace = path.join(root, 'home');
     await fs.mkdir(workspace);
@@ -49,6 +50,8 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
     let delegationOffered = false;
     let childWriteIssued = false;
     let resumedWriteIssued = false;
+    let mcpSearchIssued = false;
+    let mcpCallIssued = false;
     const childPrompt = 'BYOK_SUBAGENT_LOOPBACK_CHILD: perform the requested write, then finish.';
     let session: Session | undefined;
     const server = createServer(async (request, response) => {
@@ -73,7 +76,15 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
       const resumeWrite = mode === 'rules-resume' && !resumedWriteIssued
         && userTexts.some(text => text.includes('BYOK_RULE_RESUME_WRITE'));
       let content: Array<{ type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } | { type: 'text'; text: string }>;
-      if (shellChain && toolResults.length === 0 && tools.some(tool => tool.name === 'Bash')) {
+      if (mode === 'rules-mcp' && !mcpCallIssued && tools.some(tool => tool.name === 'mcp__salesko__find_leads')) {
+        mcpCallIssued = true;
+        content = [{ type: 'tool_use', id: 'loopback-mcp', name: 'mcp__salesko__find_leads', input: { company: 'Synthetic', limit: 1 } }];
+      } else if (mode === 'rules-mcp' && !mcpSearchIssued && tools.some(tool => tool.name === 'ToolSearch')) {
+        mcpSearchIssued = true;
+        content = [{ type: 'tool_use', id: 'loopback-mcp-search', name: 'ToolSearch', input: { query: 'select:mcp__salesko__find_leads', max_results: 1 } }];
+      } else if (mode === 'rules-mcp') {
+        content = [{ type: 'text', text: 'Finished.' }];
+      } else if (shellChain && toolResults.length === 0 && tools.some(tool => tool.name === 'Bash')) {
         content = [{ type: 'tool_use', id: 'loopback-shell-chain', name: 'Bash', input: { command } }];
       } else if (mode === 'subagent' && !child && toolResults.length === 0 && delegation?.name) {
         delegationOffered = true;
@@ -129,7 +140,9 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
       });
       const matchedWrite = { id: mode === 'rules-ask' ? 'ask-write' : 'allow-write',
         description: 'Host display text only', match: { toolName: 'Write', pathGlob: target } };
-      const rules: ToolAuthorizationRules | undefined = shellChain
+      const rules: ToolAuthorizationRules | undefined = mode === 'rules-mcp'
+        ? { alwaysAsk: [{ id: 'ask-leads', match: { mcpServer: 'salesko', mcpTool: 'find_leads' } }] }
+        : shellChain
         ? { allowWithoutAsking: [{ id: 'allow-push', match: { toolName: 'Bash', commandGlob: 'git push origin *' } }] }
         : mode === 'rules-ask' ? { alwaysAsk: [matchedWrite] }
         : mode === 'rules-allow' || mode === 'rules-floor' || mode === 'rules-resume' ? { allowWithoutAsking: [matchedWrite] } : undefined;
@@ -137,19 +150,29 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
         summaries.push(summary);
         return mode === 'approved' || mode === 'native-approved' ? { approved: true } : { approved: false, reason: '主人尚未授权' };
       } });
-      const toolAuthorization = mode === 'all' || mode === 'native-all' ? undefined : { timeoutMs: inner.timeoutMs, authorize: async (call: ToolCall) => {
+      const toolAuthorization: ToolAuthorizationGate | undefined = mode === 'all' || mode === 'native-all' ? undefined : { timeoutMs: inner.timeoutMs, authorize: async (call, resolveMcpIdentity) => {
         calls.push(call);
-        const verdict = await inner.authorize(call);
+        const verdict = await inner.authorize(call, resolveMcpIdentity);
         verdicts.push(verdict);
         return verdict;
       } };
       session = await startPreparedOperation(adapter, { instruction: 'Perform the requested file operation, then finish.' }, {
         workspaceDir: workspace, agentHome: workspace, env, ...(toolAuthorization === undefined ? {} : { toolAuthorization }),
+        ...(mode !== 'rules-mcp' ? {} : { mcpServers: { salesko: { command: process.execPath,
+          args: [fileURLToPath(new URL('./fixtures/fake-salesko-mcp.mjs', import.meta.url))] } } }),
       });
       let ended = false;
       for await (const event of session.events) { if (event.type === 'turn_end') { ended = true; break; } }
       expect(ended).toBe(true);
-      if (shellChain) {
+      if (mode === 'rules-mcp') {
+        expect(mcpCallIssued).toBe(true);
+        expect(calls.filter(call => call.toolName === 'mcp__salesko__find_leads')).toHaveLength(1);
+        expect(summaries).toHaveLength(1);
+        expect(verdicts.filter(verdict => verdict.decision === 'deny')).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: '主人尚未授权',
+          authorization: { source: 'rule', ruleIds: ['ask-leads'] } }]);
+        expect(JSON.stringify(results)).toContain('tool_authorization_denied: 主人尚未授权');
+        expect(JSON.stringify(results)).not.toContain('salesko-fake');
+      } else if (shellChain) {
         expect(calls).toHaveLength(1);
         expect(calls[0]).toMatchObject({ toolName: 'Bash', input: { command } });
         expect(await fs.readFile(local!.marker, 'utf8')).toBe('must survive the denied shell chain');

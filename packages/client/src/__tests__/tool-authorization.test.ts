@@ -390,6 +390,28 @@ describe('auto gate', () => {
     expect(requestAuthorization).toHaveBeenCalledTimes(1);
   });
 
+  it('bounds trusted identity lookup and never revives a timed-out authorization', async () => {
+    vi.useFakeTimers();
+    try {
+      let complete!: (identity: { server: string; tool: string }) => void;
+      const identity = new Promise<{ server: string; tool: string }>(resolve => { complete = resolve; });
+      const requestAuthorization = vi.fn(async () => ({ approved: true }));
+      const gate = createAutoToolAuthorizationGate({ workspace: WORKSPACE, timeoutMs: 100, requestAuthorization,
+        rules: { alwaysAsk: [{ id: 'mcp', match: { mcpServer: 's' } }] },
+        mcpIdentities: new Map([['mcp__s__t', { server: 's', tool: 't' }]]),
+      });
+      const verdict = gate.authorize({ ...call, toolName: 'mcp__s__t', input: {}, mcp: { server: 'forged', tool: 'forged' } }, () => identity);
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(verdict).resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
+      complete({ server: 's', tool: 't' });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(requestAuthorization).not.toHaveBeenCalled();
+      await expect(gate.authorize({ ...call, toolName: 'mcp__s__t' }, async () => undefined))
+        .resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
+      expect(requestAuthorization).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('denies every unanswered call at its own wall-clock deadline and withdraws its request', async () => {
     vi.useFakeTimers();
     try {

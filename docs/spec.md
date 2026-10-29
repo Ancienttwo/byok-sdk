@@ -3997,8 +3997,15 @@ must all match. A rule has a unique nonblank `id`, optional display-only
   `auto` paths use the hook's call cwd; `all` has no per-call cwd in its event
   and resolves relative paths against the task workspace.
 - `mcpServer`, `mcpTool`: trusted MCP identity from the admitted task tool
-  observation, or the normalized event in `all`. Names are not split on `__`;
-  unobserved personal MCP tools cannot match these selectors by inference.
+  observation, or the normalized event in `all`. Claude shares one runtime
+  `mcp_status` lookup between its pre-execution gate and event reporting,
+  matching the task's configured command/args and rejecting ambiguous names.
+  Identity lookup consumes the same authorization deadline as approval wait.
+  In `auto`, an MCP call without trusted identity is denied when the policy
+  includes MCP selectors. Names are not split on `__`; unobserved personal
+  MCP tools cannot match these selectors by inference. A custom adapter that
+  owns runtime MCP discovery supplies that trusted resolver as the second
+  `ToolAuthorizationGate.authorize` argument; wrappers must forward it.
 
 The four glob selectors use the SDK's bounded-state, one-pass matcher, with
 identical Node and Bun semantics. Only literals, `*`, `**` and `?` are supported;

@@ -46,7 +46,8 @@ export class ClaudeToolAuthorizationBridge {
   private readonly undelivered = new Set<ReturnType<typeof setTimeout>>();
   readonly hooks: Readonly<Record<string, unknown>>;
 
-  constructor(private readonly gate: ToolAuthorizationGate, private readonly onFatal: (error: Error) => void) {
+  constructor(private readonly gate: ToolAuthorizationGate, private readonly onFatal: (error: Error) => void,
+    private readonly resolveMcpIdentity?: (name: string) => Promise<{ readonly server: string; readonly tool: string } | undefined>) {
     // The gate settles within `timeoutMs` of receipt, queue wait included.
     // A hook timeout lets Claude continue the tool call, so a verdict not
     // delivered DELIVERY_GRACE_MS later disposes the process strictly before
@@ -85,7 +86,8 @@ export class ClaudeToolAuthorizationBridge {
   private async respond(requestId: string, payload: unknown): Promise<void> {
     let verdict: ToolAuthorizationVerdict;
     try {
-      verdict = await this.gate.authorize(decodeClaudePreToolUse(payload));
+      const call = decodeClaudePreToolUse(payload);
+      verdict = await this.gate.authorize(call, this.resolveMcpIdentity === undefined ? undefined : () => this.resolveMcpIdentity!(call.toolName));
     } catch {
       verdict = { decision: 'deny', code: 'tool_authorization_unavailable', reason: 'invalid Claude tool authorization request' };
     }

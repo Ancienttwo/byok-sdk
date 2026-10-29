@@ -411,7 +411,8 @@ export interface ToolAuthorizationGate {
    * deadline must exceed it.
    */
   readonly timeoutMs: number;
-  authorize(call: ToolCall): Promise<ToolAuthorizationVerdict>;
+  /** The adapter may supply its trusted runtime observation, never identity from tool arguments. */
+  authorize(call: ToolCall, resolveMcpIdentity?: () => Promise<{ readonly server: string; readonly tool: string } | undefined>): Promise<ToolAuthorizationVerdict>;
 }
 
 const MAX_SUMMARY_CHARS = 1_000;
@@ -439,9 +440,11 @@ export function createAutoToolAuthorizationGate(input: {
   readonly requestAuthorization: (summary: string, signal: AbortSignal) => Promise<{ approved: boolean; reason?: string }>;
 }): ToolAuthorizationGate {
   const rules = parseToolAuthorizationPolicy({ mode: 'auto', ...(input.rules === undefined ? {} : { rules: input.rules }) }).rules;
+  const needsMcpIdentity = [...(rules?.alwaysAsk ?? []), ...(rules?.allowWithoutAsking ?? [])]
+    .some(rule => rule.match.mcpServer !== undefined || rule.match.mcpTool !== undefined);
   return Object.freeze({
     timeoutMs: input.timeoutMs,
-    async authorize(rawCall: ToolCall): Promise<ToolAuthorizationVerdict> {
+    async authorize(rawCall: ToolCall, resolveMcpIdentity?: () => Promise<{ readonly server: string; readonly tool: string } | undefined>): Promise<ToolAuthorizationVerdict> {
       let call = rawCall;
       const withdraw = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -458,7 +461,15 @@ export function createAutoToolAuthorizationGate(input: {
         // A runtime label is not an MCP authority. Only an exact admitted mapping
         // may attach identity to a gate request, even if the request supplies one.
         const { mcp: _untrustedMcp, ...nativeCall } = rawCall;
-        const mcp = input.mcpIdentities?.get(rawCall.toolName);
+        const mcp = resolveMcpIdentity === undefined ? input.mcpIdentities?.get(rawCall.toolName)
+          : await Promise.race([resolveMcpIdentity(), expired]);
+        if (mcp === 'expired') {
+          withdraw.abort();
+          return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` });
+        }
+        if (needsMcpIdentity && rawCall.toolName.startsWith('mcp__') && mcp === undefined) {
+          return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: 'trusted MCP tool identity is unavailable' });
+        }
         call = { ...nativeCall, ...(mcp === undefined ? {} : { mcp }) };
         risk = classifyToolCall(call, input.workspace, input.home, rules, { platform: input.platform });
         if (risk.level === 'normal') return finish({ decision: 'allow' });

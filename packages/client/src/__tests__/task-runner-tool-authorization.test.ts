@@ -348,7 +348,7 @@ describe('daemon tool authorization', () => {
     const call = { toolCallId: 'reading', toolName: 'read', input: { path: 'notes.md' }, cwd: adapter.inputs[0]!.manifest.workspace.workspaceDir };
     const first = adapter.inputs[0]!.toolAuthorization!.authorize(call);
     await vi.waitFor(() => expect(approvalRegistry.list()).toHaveLength(1));
-    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', 'ask rule applies');
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', 'ask rule applies', 'control');
     await expect(first).resolves.toMatchObject({ decision: 'deny', authorization: { source: 'rule', ruleIds: ['read-once'] } });
     await expect(adapter.inputs[1]!.toolAuthorization!.authorize({ ...call, toolCallId: 'new-reading', cwd: adapter.inputs[1]!.manifest.workspace.workspaceDir }))
       .resolves.toMatchObject({ decision: 'allow', authorization: { source: 'built-in', ruleIds: [] } });
@@ -385,7 +385,7 @@ describe('daemon tool authorization', () => {
     expect(seen).toEqual(['first-turn', 'resumed-turn']);
     const verdict = adapter.inputs[1]!.toolAuthorization!.authorize({ toolCallId: 'resumed-read', toolName: 'read', input: { path: 'notes.md' }, cwd: first.manifest.workspace.workspaceDir });
     await vi.waitFor(() => expect(approvalRegistry.list()).toHaveLength(1));
-    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', 'resume needs approval');
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'reject', 'resume needs approval', 'control');
     await expect(verdict).resolves.toMatchObject({ decision: 'deny', authorization: { source: 'rule', ruleIds: ['resumed-read'] } });
     expect(adapter.sessions[1]!.interruptCalled).toBe(false);
   });
@@ -611,7 +611,7 @@ describe('control-socket decisions on tool authorization', () => {
       expect(await controlList(storeDir)).toEqual([expect.objectContaining({ approvalId })]);
       expect(server.received.filter(e => e.type === 'task.approval_resolved')).toEqual([]);
       await daemon.approve('public-task', { approvalId });
-      await expect(verdict).resolves.toEqual({ decision: 'allow' });
+      await expect(verdict).resolves.toEqual({ decision: 'allow', authorization: { source: 'built-in', ruleIds: [] } });
     });
   });
 
@@ -620,7 +620,7 @@ describe('control-socket decisions on tool authorization', () => {
       const verdict = dangerousCall(adapter);
       const approvalId = await awaitedApprovalId(server);
       await expect(controlResolve(storeDir, { approvalId, decision: 'reject', reason: 'not from here' })).resolves.toEqual({ resolved: true });
-      await expect(verdict).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: 'not from here' });
+      await expect(verdict).resolves.toEqual({ decision: 'deny', code: 'tool_authorization_denied', reason: 'not from here', authorization: { source: 'built-in', ruleIds: [] } });
       await server.waitFor(e => e.type === 'task.approval_resolved');
       expect(adapter.sessions[0]!.interruptCalled).toBe(false);
     });
@@ -631,7 +631,7 @@ describe('control-socket decisions on tool authorization', () => {
       const verdict = dangerousCall(adapter);
       const approvalId = await awaitedApprovalId(server);
       await expect(controlResolve(storeDir, { approvalId, decision: 'approve' })).resolves.toEqual({ resolved: true });
-      await expect(verdict).resolves.toEqual({ decision: 'allow' });
+      await expect(verdict).resolves.toEqual({ decision: 'allow', authorization: { source: 'built-in', ruleIds: [] } });
       await server.waitFor(e => e.type === 'task.approval_resolved');
     }, { localToolApproval: 'allow' });
   });

@@ -1,9 +1,8 @@
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import type { RuntimeTaskInput } from '../../types';
-import { claudeMcpEventIdentities } from './mcp-identity';
+import { createClaudeMcpIdentityResolver } from './mcp-identity';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities';
 import { claudeAgentUserContextSettings } from './agent-user-context';
-import type { McpEventIdentity } from '../../mcp/event-identity';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
@@ -383,8 +382,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ];
 
       throwIfCancelled();
+      const mcpIdentity = createClaudeMcpIdentityResolver(() => control.mcpStatus(),
+        new Map(Object.entries(taskMcpServers).filter(([name]) => !isReservedMcpServerName(name))));
       gate = startInput.toolAuthorization === undefined ? undefined
-        : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => client?.abortStartup(error));
+        : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => client?.abortStartup(error), mcpIdentity.resolve);
       const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000, gate?.hooks);
       const native = this.nativeOptions === undefined ? undefined : new ClaudeNativeInteractionBridge({
         ...this.nativeOptions,
@@ -499,9 +500,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
         manifestCwd,
         control,
         startInput.scratch,
+        mcpIdentity,
         manifestModelId,
         native,
-        new Map(Object.entries(taskMcpServers).filter(([name]) => !isReservedMcpServerName(name))),
         gate,
       );
     } catch (cause) {
@@ -599,9 +600,6 @@ class ClaudeSession implements Session {
   private readonly servedModel = new ClaudeServedModel();
   private readonly failureEvidence = new ClaudeFailureEvidence();
   private closeAttempt: Promise<void> | undefined;
-  /** Filled once from Claude's own `mcp_status` answer (`./mcp-identity.ts`). */
-  private readonly mcpIdentities = new Map<string, McpEventIdentity>();
-  private mcpStatusRequested = false;
 
   constructor(
     public readonly sessionRef: string,
@@ -610,12 +608,11 @@ class ClaudeSession implements Session {
     private readonly control: ReturnType<typeof createClaudeControlChannel>,
     /** Task-scoped temp `--mcp-config` directory, if any — removed in `close()`. */
     private readonly scratch: ExecutionScratch,
+    private readonly mcpIdentity: ReturnType<typeof createClaudeMcpIdentityResolver>,
     private readonly modelId?: string,
     private readonly native?: ClaudeNativeInteractionBridge,
-    /** Task-projected toolset servers in `--mcp-config`; only these receive event MCP identity. */
-    private readonly toolsetServers: ReadonlyMap<string, McpStdioServerConfig> = new Map(),
     private readonly gate?: ClaudeToolAuthorizationBridge,
-  ) { this.correlation = createToolUseCorrelation(this.mcpIdentities); if (native !== undefined) this.interactions = native.channel; }
+  ) { this.correlation = createToolUseCorrelation(this.mcpIdentity.identities); if (native !== undefined) this.interactions = native.channel; }
 
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const client = this.client;
@@ -625,8 +622,7 @@ class ClaudeSession implements Session {
     const failureEvidence = this.failureEvidence;
     const workspaceDir = this.workspaceDir;
     const control = this.control;
-    const toolsetServers = this.toolsetServers;
-    const mcpIdentities = this.mcpIdentities;
+    const mcpIdentity = this.mcpIdentity;
     const session = this;
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent | MessageDraftDelta> {
@@ -702,12 +698,11 @@ class ClaudeSession implements Session {
               if (value.type === 'result') turnSettled = true;
               failureEvidence.observe(value);
 
-              if (!session.mcpStatusRequested && toolsetServers.size > 0 && callsUnresolvedMcpTool(value, correlation)) {
+              if (callsUnresolvedMcpTool(value, correlation)) {
                 // Asked at the first MCP call, when Claude has connected its
                 // servers: an earlier answer reports them `pending` with no
                 // tools. One lookup per process; a failure leaves `mcp` absent.
-                session.mcpStatusRequested = true;
-                for (const [name, identity] of claudeMcpEventIdentities(await control.mcpStatus(), toolsetServers)) mcpIdentities.set(name, identity);
+                await mcpIdentity.observe();
               }
               const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir });
               servedModel.observe(value);

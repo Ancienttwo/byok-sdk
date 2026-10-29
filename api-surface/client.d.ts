@@ -14386,7 +14386,11 @@ export interface ToolAuthorizationGate {
      * deadline must exceed it.
      */
     readonly timeoutMs: number;
-    authorize(call: ToolCall): Promise<ToolAuthorizationVerdict>;
+    /** The adapter may supply its trusted runtime observation, never identity from tool arguments. */
+    authorize(call: ToolCall, resolveMcpIdentity?: () => Promise<{
+        readonly server: string;
+        readonly tool: string;
+    } | undefined>): Promise<ToolAuthorizationVerdict>;
 }
 export declare function describeHighRiskToolCall(call: Pick<ToolCall, 'toolName' | 'input'>, reasons: readonly ToolRiskReason[]): string;
 export declare function createAutoToolAuthorizationGate(input: {

@@ -7,7 +7,7 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeToolAuthorizationBridge } from '../adapters/claude/tool-authorization';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolCall } from '../tool-authorization';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { MessageDraftDelta, Session } from '../types';
+import type { McpStdioServerConfig, MessageDraftDelta, Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-claude-tool-authorization.mjs', import.meta.url));
@@ -22,10 +22,11 @@ async function tempRoot(): Promise<string> {
   roots.push(root);
   return root;
 }
-async function start(workspace: string, toolAuthorization?: ToolAuthorizationGate, env: NodeJS.ProcessEnv = process.env): Promise<Session> {
+async function start(workspace: string, toolAuthorization?: ToolAuthorizationGate, env: NodeJS.ProcessEnv = process.env, mcpServers?: Record<string, McpStdioServerConfig>): Promise<Session> {
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: fixture, source: 'env' }) });
   const session = await startPreparedOperation(adapter, { instruction: 'write' }, {
     workspaceDir: workspace, agentHome: workspace, env, ...(toolAuthorization === undefined ? {} : { toolAuthorization }),
+    ...(mcpServers === undefined ? {} : { mcpServers }),
   });
   sessions.push(session);
   return session;
@@ -47,6 +48,47 @@ function recordingGate(approved: boolean, workspace: string) {
 }
 
 describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)', () => {
+  it('applies MCP Always Ask before event iteration using one trusted runtime observation', async () => {
+    const workspace = await tempRoot();
+    const receipt = path.join(workspace, 'status-receipt');
+    const requestAuthorization = vi.fn(async (_summary: string) => ({ approved: false }));
+    const decisions: string[] = [];
+    const gate = createAutoToolAuthorizationGate({ workspace, timeoutMs: 2_000,
+      rules: { alwaysAsk: [{ id: 'delete-ticket', match: { mcpServer: 'market.feed', mcpTool: 'delete.ticket' } }] },
+      requestAuthorization, onDecision: ({ verdict }) => { decisions.push(verdict.decision); },
+    });
+    const session = await start(workspace, gate, { ...process.env,
+      FAKE_TOOL_NAME: 'mcp__market_feed__delete_ticket', FAKE_MCP_STATUS_RECEIPT: receipt,
+    }, { 'market.feed': { command: process.execPath, args: ['synthetic-mcp-server'] } });
+    await vi.waitFor(() => expect(decisions).toEqual(['deny']));
+    expect(requestAuthorization).toHaveBeenCalledOnce();
+    expect(requestAuthorization.mock.calls[0]?.[0]).toContain('custom-rule');
+    const events = await takeTurn(session);
+    expect(events.find(event => event.type === 'tool_use')).toMatchObject({ mcp: { server: 'market.feed', tool: 'delete.ticket' } });
+    expect((await fs.readFile(receipt, 'utf8')).trim().split('\n')).toEqual(['lookup']);
+    await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
+  });
+
+  it.each(['malformed', 'wrong-command', 'collision', 'timeout'])('denies an MCP call when its runtime identity is %s', async scenario => {
+    const workspace = await tempRoot();
+    const requestAuthorization = vi.fn(async () => ({ approved: true }));
+    const gate = createAutoToolAuthorizationGate({ workspace, timeoutMs: 300,
+      rules: { alwaysAsk: [{ id: 'ask', match: { mcpServer: 'market.feed' } }],
+        allowWithoutAsking: [{ id: 'allow', match: { toolName: 'mcp__market_feed__delete_ticket' } }] },
+      requestAuthorization,
+    });
+    const status = scenario === 'malformed' ? null : { mcpServers: [{ name: 'market.feed',
+      config: { command: scenario === 'wrong-command' ? 'other-command' : process.execPath, args: ['synthetic-mcp-server'] },
+      tools: [{ name: 'delete.ticket' }, ...(scenario === 'collision' ? [{ name: 'delete_ticket' }] : [])],
+    }] };
+    const session = await start(workspace, gate, { ...process.env, FAKE_TOOL_NAME: 'mcp__market_feed__delete_ticket',
+      ...(scenario === 'timeout' ? { FAKE_MCP_STATUS_NO_ACK: '1' } : { FAKE_MCP_STATUS: JSON.stringify(status) }),
+    }, { 'market.feed': { command: process.execPath, args: ['synthetic-mcp-server'] } });
+    const events = await takeTurn(session);
+    expect(JSON.stringify(events)).toContain('tool_authorization_unavailable');
+    expect(requestAuthorization).not.toHaveBeenCalled();
+    await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
+  });
   it('denies a high-risk write outside the workspace before it happens, with the classified reason', async () => {
     const root = await tempRoot();
     const workspace = path.join(root, 'home');
