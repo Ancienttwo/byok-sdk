@@ -1471,9 +1471,12 @@ export interface MailboxBody {
  * How an append is admitted against the tenant's `mailboxLimitBytes`.
  *
  * Mailbox bytes have one authority: the retained rows. Usage is the tenant's
- * `SUM(byteSize)` over every retained row in any state, and the limit is
- * checked in the same serialized unit that inserts the row — there is no
- * counter for a writer to forget, so deleting a row needs no accounting.
+ * `SUM(byteSize)` over its `pending` rows, and the limit is checked in the same
+ * serialized unit that inserts the row — there is no counter for a writer to
+ * forget, so acking, dead-lettering or deleting a row needs no accounting.
+ * `acked` and `expired` rows stay retained for retention and §12.7.5
+ * visibility but hold no quota, so undelivered-and-lost work can never wedge
+ * a tenant at its limit.
  *
  * - `limited`: refused with `storage_quota_exceeded` when `used + byteSize`
  *   exceeds the limit, and with `storage_entitlement_missing` when the tenant
@@ -1507,7 +1510,7 @@ export interface MailboxAppendInput {
 }
 /** Tenant mailbox usage, derived from the retained rows on every read. */
 export interface MailboxUsage {
-    /** `SUM(byteSize)` over every retained row (`pending`, `acked`, `expired`). */
+    /** `SUM(byteSize)` over the retained `pending` rows. */
     readonly bytes: bigint;
 }
 export interface MailboxReadQuery {
@@ -1594,7 +1597,7 @@ export interface MailboxCollectExpiredInput extends CollectExpiredInput {
  */
 export interface MailboxStore {
     append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
-    /** The tenant's mailbox bytes, summed from the retained rows. */
+    /** The tenant's mailbox bytes, summed from the retained `pending` rows. */
     readUsage(tenant: TenantId): Promise<MailboxUsage>;
     /** Pure read. Never advances the cursor, never deletes, never marks acked. */
     readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
