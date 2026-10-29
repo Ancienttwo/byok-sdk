@@ -96,7 +96,7 @@ Pair once during enrollment, not on every process restart. On subsequent runs,
 construct from the same configuration and call `start()`. The Host observes
 `daemon.status().lifecycle` until the connection is open, then uses the same
 basic-example **Dispatch** flow above (or its own fresh-execution submission).
-For E2EE enrollment the Host also passes the decoded verification secret through
+For E2EE enrollment the Host also passes the base32 verification-secret string through
 `daemon.pair(code, { verificationSecret })`; use the Host's pairing flow rather
 than treating the combined UI string as an ordinary code.
 
