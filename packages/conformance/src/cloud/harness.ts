@@ -17,7 +17,7 @@ import { runCloudRetentionConformance } from './retention';
  */
 import { describe } from 'vitest';
 import type { BlobDeclaration, BlobObservation, CloudStores } from '@byok-sdk/cloud';
-import type { StorageReservation, TenantId } from '@byok-sdk/core';
+import type { MailboxStore, StorageReservation, TenantId } from '@byok-sdk/core';
 import { runCloudPortInventoryConformance } from './port-inventory';
 import { runPairingConformance } from './pairing';
 import { runNonceConformance } from './nonces';
@@ -114,8 +114,35 @@ export interface CloudCompositionHandle {
     reservation: StorageReservation,
     observation: BlobObservation,
   ): Promise<void>;
+  /**
+   * Acks every row the device's mailbox holds and lets retention collect it,
+   * returning how many rows were removed. Same reason as `landBlobBytes`: the
+   * mailbox is not a certified port, yet what a cancellation does after its
+   * delivery row is gone is contract behavior (#1116).
+   */
+  retireCancellationDelivery(tenant: TenantId, deviceId: string): Promise<number>;
   /** Optional teardown for compositions holding connections. */
   dispose?(): void | Promise<void>;
+}
+
+/** {@link CloudCompositionHandle.retireCancellationDelivery} through the real ack and retention path. */
+export async function ackAndCollectMailbox(
+  mailbox: MailboxStore,
+  tenant: TenantId,
+  deviceId: string,
+): Promise<number> {
+  const { ackedSeq } = await mailbox.readCursor(tenant, deviceId);
+  const { nextSeq } = await mailbox.readAfter(tenant, { deviceId, afterSeq: ackedSeq });
+  await mailbox.recordDelivery(tenant, { deviceId, deliveredSeq: nextSeq });
+  await mailbox.advanceCursor(tenant, { deviceId, ackedSeq: nextSeq });
+  const farFuture = '2999-01-01T00:00:00.000Z';
+  const collected = await mailbox.collectExpired(tenant, {
+    now: farFuture,
+    limit: 500,
+    ackedBefore: farFuture,
+    expireUnackedBefore: farFuture,
+  });
+  return collected.removed;
 }
 
 /**

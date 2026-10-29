@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createMutableClock } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import {
+  ackAndCollectMailbox,
   runCloudConformance,
   runCoreConformance,
   type CloudCompositionFactory,
@@ -79,6 +80,8 @@ const cloudFactory: CloudCompositionFactory = {
           ...observation,
         });
       },
+      retireCancellationDelivery: (tenant, deviceId) =>
+        ackAndCollectMailbox(composition.core.mailbox, tenant, deviceId),
       dispose: async () => {
         await composition.close();
         database.remove();
