@@ -495,11 +495,12 @@ describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
     ] })).toEqual([]);
     expect(requiredReceiverCapabilities('task.complete', { document: {}, finalMessage: 'x' })).toEqual([]);
     expect(requiredReceiverCapabilities('task.decline', { code: 'agent_home_writer_busy' })).toEqual([]);
-    expect(WIRE_ADDITIONS.filter((entry) => entry.rule === 'strip-safe'), 'only declared optional observability fields are registered; v2 rows remain baseline').toEqual([
+    expect(WIRE_ADDITIONS.filter((entry) => entry.rule === 'strip-safe'), 'only declared optional fields are registered; v2 rows remain baseline').toEqual([
       { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
+      { kind: 'http', rule: 'strip-safe', surface: 'TokenResponse', field: 'expiresIn' },
     ]);
   });
 });

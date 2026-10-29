@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "604a1f6d9344cb8c2da2804ef0e0636dd5086e4c9a2859800e324f34c67c6b50"
+    "snapshotSha256": "cb4effa4e8985981800b26de617d90ef518445e7c8939600a310cb52cb2b1da8"
   },
   "configFields": {
     "status": "tracked",
@@ -250,6 +250,18 @@
         "export:@byok-sdk/client#DAEMON_HALT_REASONS",
         "export:@byok-sdk/client#Daemon",
         "export:@byok-sdk/client#DeviceStoreBindingMismatchError"
+      ]
+    },
+    {
+      "id": "token-expires-in",
+      "impact": "breaking",
+      "summary": "Pair and token responses carry expiresIn, the access token lifetime in seconds. A device computes its token expiry from its own receipt time plus expiresIn and no longer from expiresAt or refreshHint, so a device clock that is off by hours keeps the normal renewal schedule. A device refuses a pair or token response without expiresIn with AuthResponseInvalidError, whose route now includes 'pair'. Upgrade the Host before its devices; the Host keeps sending expiresAt and refreshHint for devices on earlier releases.",
+      "migration": "docs/protocol.md#62-token-renewal--post-byokchallenge--post-byoktoken",
+      "items": [
+        "export:@byok-sdk/client#AuthResponseInvalidError",
+        "export:@byok-sdk/cloud#MintedAccessToken",
+        "export:@byok-sdk/protocol#PairResponseSchema",
+        "export:@byok-sdk/protocol#TokenResponseSchema"
       ]
     }
   ],
@@ -516,6 +528,11 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#AuthResponseInvalidError",
+      "change": "changed",
+      "entry": "token-expires-in"
+    },
+    {
       "item": "export:@byok-sdk/client#BlobClient",
       "change": "changed",
       "entry": "device-store-default-dir-removed"
@@ -771,6 +788,11 @@
       "entry": "device-route-rate-admission"
     },
     {
+      "item": "export:@byok-sdk/cloud#MintedAccessToken",
+      "change": "changed",
+      "entry": "token-expires-in"
+    },
+    {
       "item": "export:@byok-sdk/cloud#RateLimitDecision",
       "change": "added",
       "entry": "device-route-rate-admission"
@@ -846,6 +868,11 @@
       "entry": "auth-revocation-typed-keychain-deadline"
     },
     {
+      "item": "export:@byok-sdk/protocol#PairResponseSchema",
+      "change": "changed",
+      "entry": "token-expires-in"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TASK_FAIL_REASON_MAX_BYTES",
       "change": "added",
       "entry": "task-fail-reason-bound"
@@ -854,6 +881,11 @@
       "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
       "change": "changed",
       "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TokenResponseSchema",
+      "change": "changed",
+      "entry": "token-expires-in"
     },
     {
       "item": "export:@byok-sdk/protocol#boundFailureReason",

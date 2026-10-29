@@ -2164,6 +2164,7 @@ export declare const PairResponseSchema: z.ZodObject<{
     deviceId: z.ZodString;
     accessToken: z.ZodString;
     refreshHint: z.ZodOptional<z.ZodString>;
+    expiresIn: z.ZodOptional<z.ZodNumber>;
     tenantId: z.ZodString;
 }, z.core.$strip>;
 export type PairResponse = z.infer<typeof PairResponseSchema>;
@@ -2184,6 +2185,7 @@ export type TokenRequest = z.infer<typeof TokenRequestSchema>;
 export declare const TokenResponseSchema: z.ZodObject<{
     accessToken: z.ZodString;
     expiresAt: z.ZodISODateTime;
+    expiresIn: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 /**
