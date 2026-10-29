@@ -21,6 +21,14 @@ import { LongPollClient, type CorrelatedOutcome, type MessageBatchPostResult } f
 export { ReplayCursorTooOldError } from './replay-cursor';
 
 /**
+ * #1121: the most bytes of droppable envelopes the outbox holds while the
+ * Host is unreachable. Past it the oldest of them are dropped unsent.
+ */
+export const MAX_OUTBOX_EPHEMERAL_BYTES = 8 * 1024 * 1024;
+/** Envelopes the outbox may drop under {@link MAX_OUTBOX_EPHEMERAL_BYTES}: live views whose loss leaves a gap, not a wrong state. */
+const OUTBOX_DROPPABLE_TYPES: ReadonlySet<Envelope['type']> = new Set(['task.progress', 'agent.message.draft']);
+
+/**
  * The daemon's one long-poll session: `open` from the moment the server
  * accepts this session's `conn.hello` until any route fails, `connecting`
  * otherwise.
@@ -89,6 +97,8 @@ export interface ConnectionManagerOptions {
   /** Await durable disposition before retiring the exact accepted/rejected bytes. */
   onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
   onOutboundQueued?: (envelope: Envelope) => void;
+  /** An ephemeral envelope left the outbox unsent because the outbox passed {@link MAX_OUTBOX_EPHEMERAL_BYTES}. */
+  onOutboundDropped?: (envelope: Envelope) => void;
   beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
   /**
    * Base of the capped exponential backoff (`backoffCeilingMs`) before each
@@ -197,6 +207,13 @@ export class ConnectionManager {
    * separately from `this.outbox` at all.
    */
   private inFlightBatch: readonly Envelope[] = [];
+  /**
+   * Every id in `outbox` or `inFlightBatch`, mapped to its encoded size when
+   * the envelope is droppable and 0 otherwise. `send()` dedups against it in
+   * O(1), and `ephemeralBytes` is the sum of its values.
+   */
+  private readonly queuedIds = new Map<string, number>();
+  private ephemeralBytes = 0;
   private draining = false;
   private stopped = false;
   private haltReason: ConnectionHaltReason | undefined;
@@ -403,14 +420,49 @@ export class ConnectionManager {
    * `drainOutbox`.
    * An id still queued or in flight is not queued again, so a timer retry
    * during an outage keeps one copy in its original place (#693).
+   * An ended session (halted, crashed or stopped) queues nothing, so its
+   * outbox cannot grow; a terminal is journaled before it is sent (#1119).
    */
   send(envelope: Envelope): void {
-    const pending = (queued: Envelope) => queued.id === envelope.id;
-    if (!this.outbox.some(pending) && !this.inFlightBatch.some(pending)) {
+    if (this.isEnded()) return;
+    if (!this.queuedIds.has(envelope.id)) {
+      const bytes = OUTBOX_DROPPABLE_TYPES.has(envelope.type) ? Buffer.byteLength(JSON.stringify(envelope)) : 0;
+      this.queuedIds.set(envelope.id, bytes);
+      this.ephemeralBytes += bytes;
       this.outbox.push(envelope);
       this.opts.onOutboundQueued?.(envelope);
+      if (this.ephemeralBytes > MAX_OUTBOX_EPHEMERAL_BYTES) this.dropOldestEphemeral();
     }
     void this.drainOutbox();
+  }
+
+  /** The envelope left the outbox for good: settled, filtered out, or dropped. */
+  private forget(envelope: Envelope): void {
+    this.ephemeralBytes -= this.queuedIds.get(envelope.id) ?? 0;
+    this.queuedIds.delete(envelope.id);
+  }
+
+  /**
+   * #1121: an outage must not grow the outbox without bound. Over the cap, the
+   * oldest queued `task.progress` and `agent.message.draft` envelopes are
+   * dropped until it fits again. Nothing else is ever dropped: terminals are
+   * journaled and resent from the journal, and claim, started and approval
+   * envelopes carry task state. The Host tolerates a gap in progress seqs.
+   * An envelope already in flight is not dropped.
+   */
+  private dropOldestEphemeral(): void {
+    let dropped = 0;
+    for (let index = 0; index < this.outbox.length && this.ephemeralBytes > MAX_OUTBOX_EPHEMERAL_BYTES;) {
+      const envelope = this.outbox[index]!;
+      if (!OUTBOX_DROPPABLE_TYPES.has(envelope.type)) { index++; continue; }
+      this.outbox.splice(index, 1);
+      this.forget(envelope);
+      dropped++;
+      this.opts.onOutboundDropped?.(envelope);
+    }
+    if (dropped > 0) {
+      console.warn(`[byok/client] outbox passed ${MAX_OUTBOX_EPHEMERAL_BYTES} bytes of progress; dropped ${dropped} oldest ephemeral envelope(s) unsent`);
+    }
   }
 
   /** Publish a fresh local configuration snapshot while this daemon is running. */
@@ -489,6 +541,7 @@ export class ConnectionManager {
         // serveSession applies handshake capabilities before opening this drain.
         // Re-gate queued drafts after reconnect; dropped drafts have no receipt.
         if (!this.serverCapabilities.includes('agent-message-draft')) {
+          for (const envelope of batch) if (envelope.type === 'agent.message.draft') this.forget(envelope);
           batch = batch.filter(envelope => envelope.type !== 'agent.message.draft');
         }
         if (batch.length === 0) continue;
@@ -506,6 +559,7 @@ export class ConnectionManager {
           this.inFlightBatch = [];
         }
         if (retained === undefined) {
+          for (const envelope of batch) this.forget(envelope);
           if (this.isEnded()) return;
           this.uploadRetryAttempt = 0;
           this.notify(() => this.opts.onOperationalOutcome?.('success', 'upload'));
@@ -830,8 +884,8 @@ export class ConnectionManager {
 
   /**
    * Ends the session for good: stops the loop, the poll and the drain, then
-   * reports the reason once. The outbox keeps whatever it held, so
-   * `outboxLength()` stays an honest count of what never left.
+   * reports the reason once. The outbox keeps whatever it held and takes
+   * nothing more, so `outboxLength()` stays an honest count of what never left.
    */
   private halt(reason: ConnectionHaltReason): void {
     if (this.isEnded()) return;

@@ -1,6 +1,5 @@
 import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
-import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +10,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DaemonHaltError, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { OPERATIONAL_HEALTH_FILENAME } from '../daemon/operational-health';
 import { TaskRunner } from '../daemon/task-runner';
+import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
@@ -189,11 +189,10 @@ describe('daemon lifecycle (#391)', () => {
       {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
-    const { deviceId } = await daemon.pair('lifecycle-pair-code');
-    // An unreadable redelivery cursor (a directory where its file belongs) is
-    // a local fault no halt reason names.
-    const cursorKey = createHash('sha256').update(`${server.url}::${deviceId}`).digest('hex').slice(0, 32);
-    await fs.mkdir(path.join(storeDir, `cursor-${cursorKey}.json`));
+    await daemon.pair('lifecycle-pair-code');
+    // A local fault no halt reason names. (An unreadable cursor file is the
+    // named halt `cursor_unreadable`, #1121.)
+    vi.spyOn(CursorStore.prototype, 'load').mockRejectedValueOnce(new Error('injected local startup fault'));
 
     const failure = await daemon.start().then(() => undefined, (error: unknown) => error);
     expect(failure).toBeInstanceOf(Error);

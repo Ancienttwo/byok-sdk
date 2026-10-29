@@ -3,6 +3,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import path from 'node:path';
 import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
+import type { ClockSkewObservation } from './auth-manager';
 import type { StoragePressureState } from './retention/pressure';
 import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
@@ -456,6 +457,13 @@ export interface ControlStatusResult {
    * peer that predates the cap.
    */
   agentHomeExecution?: AgentHomeExecutionStatus;
+  /**
+   * #1114: the device clock against the server's HTTP `Date` header at the
+   * last successful pair or renewal. Absent when the daemon has no
+   * observation (no pair or renewal since start, or the response carried no
+   * parseable `Date`) and from an older control peer: report unknown.
+   */
+  clockSkew?: ClockSkewObservation;
 }
 
 export interface ToolsetsReloadParams {

@@ -68,9 +68,11 @@ async function cloudWithFirstMailboxAppendFailure() {
     advanceCursor: (tenant, input) => base.mailbox.advanceCursor(tenant, input),
     readCursor: (tenant, deviceId) => base.mailbox.readCursor(tenant, deviceId),
     collectExpired: (tenant, input) => base.mailbox.collectExpired(tenant, input),
+    expirePending: (tenant, input) => base.mailbox.expirePending(tenant, input),
   };
   return {
     cloud: createByokCloud({
+      proofReceiptRetention: { authority: composition.proofReceiptAuthority },
         mailboxWake: createInProcessMailboxWake(),
       core: { ...base, mailbox },
       cloud: composition.stores,

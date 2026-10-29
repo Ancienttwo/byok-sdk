@@ -283,6 +283,7 @@ describe('agent-home-contract reference server', () => {
   // Orchestrator decision: accept the kernel's refuse-don't-fail rule (and
   // document the break in Step 5), or restore a force-fail for the
   // same-device-wrong-AgentRef case only.
+  // Decision D8: https://github.com/Ancienttwo/byok-sdk/issues/1153
   it.skip('force-fails the task with retryable: false on a claim or terminal AgentRef mismatch', async () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {

@@ -52,6 +52,7 @@ import { createRetentionRegistry } from './retention/producers';
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, MIN_MAX_INLINE_EVENT_BYTES } from './event-spill';
 import {
   DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME,
+  DEFAULT_MAX_CONCURRENT_TASKS,
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
 } from './task-runner';
 import {
@@ -192,6 +193,29 @@ export interface DaemonConfig {
    * Attempts replace.
    */
   maxConcurrentReaderAttemptsPerAgentHome?: number;
+  /**
+   * How many tasks this daemon runs at once, across every Agent home, lane and
+   * runtime. Default {@link DEFAULT_MAX_CONCURRENT_TASKS} (8).
+   *
+   * Active tasks and offers already admitted but still starting both count.
+   * An offer over the cap is declined retryably (`task.decline` with
+   * `retryable: true` and no code) before adapter preparation, the claim, or
+   * any process side effect, so the Host can offer it again later or to
+   * another device.
+   *
+   * Validated up front: a positive safe integer. There is no "uncapped"
+   * value; `0`, a negative number, `NaN` and a non-integer are construction
+   * errors.
+   */
+  maxConcurrentTasks?: number;
+  /**
+   * Wall-clock limit, in milliseconds, for a task whose offer carries no
+   * `limits.maxDurationMs`. An offer's own limit always wins. Enforced the
+   * same way: the task fails with `resource limit exceeded: maxDurationMs`.
+   * Omitted, a task without an offer limit runs until it ends or is
+   * cancelled. Validated up front: a positive safe integer.
+   */
+  defaultMaxDurationMs?: number;
   /**
    * Explicit Agent-local/cloud egress selection. Omission still enforces the
    * SDK metadata/status projection, but does not advertise or admit the new
@@ -861,7 +885,7 @@ function buildDaemon(
   // per `start()`) so `subscribe()`/`tasks()` work immediately after
   // `createDaemonWithAdapters()` returns and keep accumulating across an
   // internal stop()/start() cycle within the same instance. See `observer.ts`.
-  const outbound: OutboundStatus = { accepted: 0, duplicate: 0, rejected: 0, rejectedByReason: {}, rejectedTerminals: 0 };
+  const outbound: OutboundStatus = { accepted: 0, duplicate: 0, rejected: 0, rejectedByReason: {}, rejectedTerminals: 0, droppedEphemeral: 0 };
   const observer = new DaemonObserver();
   // The one pending-approval registry: `TaskRunner` registers, and wire,
   // in-process and control-socket decisions resolve — see `approvals.ts`.
@@ -928,7 +952,7 @@ function buildDaemon(
     tenantRebinding: false,
     runner: undefined,
     controlServerHandle: undefined,
-    serviceEnrollmentWaiting: false,
+    serviceEnrollmentEpoch: undefined,
     serviceEnrollmentTransitioning: false,
     daemonOwnerLease: undefined,
     presencePublisher: undefined,

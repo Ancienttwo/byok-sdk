@@ -3,7 +3,7 @@ import { type resolveProofReceiptRetention, runMaintenanceSteps } from '../maint
 
 interface Dependencies {
   options: ByokCloudOptions;
-  proofReceiptRetention: ReturnType<typeof resolveProofReceiptRetention> | undefined;
+  proofReceiptRetention: ReturnType<typeof resolveProofReceiptRetention>;
 }
 
 export function createMaintenanceApi({ options, proofReceiptRetention }: Dependencies): Pick<ByokCloud,
@@ -11,9 +11,9 @@ export function createMaintenanceApi({ options, proofReceiptRetention }: Depende
 > {
   return {
     async runMaintenance(input) {
-      const report = await runMaintenanceSteps({ core: options.core, cloud: options.cloud, clock: options.clock,
+      const report = await runMaintenanceSteps({ core: options.core, cloud: options.cloud, clock: options.clock, crypto: options.crypto,
         ...(options.deviceAssertionReplay === undefined ? {} : { deviceAssertionReplay: options.deviceAssertionReplay }),
-        ...(proofReceiptRetention === undefined ? {} : { proofReceiptRetention }) }, input);
+        proofReceiptRetention }, input);
       try { options.observer?.onMaintenance?.(report); } catch { /* Observers cannot change committed maintenance. */ }
       return report;
     },

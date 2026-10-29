@@ -34,7 +34,8 @@ function runTargeted(plan, cwd = root) {
 }
 
 // #671 selects packageability-smoke only for paths it owns. A keys-only change
-// selected examples/packaging without that family before #671 too.
+// selected examples/packaging without that family before #671 too. #1104: the
+// example's bundle test runs with it, so a new SDK import.meta site fails here.
 test('dependent-only changes run every selected workspace check without the packaging smoke', posixOnly, () => {
   for (const changed of ['packages/client/src/daemon/task-runner.ts', 'packages/keys/src/index.ts']) {
     const plan = planCi({ event: 'push', sha, base, paths: [changed] });
@@ -47,7 +48,8 @@ test('dependent-only changes run every selected workspace check without the pack
       return ['typecheck', 'test'].filter(script => scripts[script]).map(script => `run --cwd ${dir} ${script}`);
     });
     assert.deepEqual(calls, expected, changed);
-    assert.deepEqual(calls.filter(call => call.startsWith('run --cwd examples/packaging ')), ['run --cwd examples/packaging typecheck'], changed);
+    assert.deepEqual(calls.filter(call => call.startsWith('run --cwd examples/packaging ')),
+      ['run --cwd examples/packaging typecheck', 'run --cwd examples/packaging test'], changed);
   }
 });
 
@@ -57,7 +59,7 @@ test('another selected workspace without a test check still fails closed', posix
   try {
     for (const dir of plan.dirs) {
       mkdirSync(path.join(cwd, dir), { recursive: true });
-      const scripts = ['examples/packaging', 'packages/keys'].includes(dir) ? { typecheck: 'tsc' } : { typecheck: 'tsc', test: 'vitest' };
+      const scripts = dir === 'packages/keys' ? { typecheck: 'tsc' } : { typecheck: 'tsc', test: 'vitest' };
       writeFileSync(path.join(cwd, dir, 'package.json'), JSON.stringify({ scripts }));
     }
     const { status, stderr, calls } = runTargeted(plan, cwd);

@@ -389,27 +389,9 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     expect(result).toEqual({ state: 'Failed', reason: 'no compatible runtime', retryable: true });
   });
 
-  // 2d gap: "a decline is only legal pre-claim" was a rule of the deleted task
-  // FSM (`IllegalTaskTransitionError`, `task-store.ts`). The kernel has no
-  // execution state machine by design (ADR-028: no execution state in the
-  // cloud) — an attempt carries a coarse status and the inbound gate decides
-  // ownership and dedup, not legality of a transition — so a late decline is
-  // applied rather than dropped as stale. Same family as the FSM assertions
-  // 2b's conformance-coverage skim classified as "(A) the concept is deleted;
-  // there is nothing to cover".
-  it.skip('a task.decline arriving after the task was already claimed is a stale no-op', () => {
-    // intentionally empty — see the 2d gap note above.
-  });
+  // ADR-028 removes the cloud execution FSM; the runtime owns terminal transitions.
 
-  // 2d gap: `Offered -> Running is illegal` is verbatim the deleted FSM rule
-  // (`IllegalTaskTransitionError` on `Offered -> Running`), named in 2b's
-  // conformance-coverage skim under "(A) the concept is deleted; there is
-  // nothing to cover (ADR-028)". The kernel records the coarse status the
-  // envelope reports and never force-fails a task for arriving out of order, so
-  // there is no terminal here and `result()` never settles.
-  it.skip('task.started arriving before any claim forces the task to Failed (Offered -> Running is illegal)', () => {
-    // intentionally empty — see the 2d gap note above.
-  });
+  // ADR-028 permits coarse runtime status reports without a cloud Offered-to-Running transition rule.
 
   it('task.cancelled is the authoritative trigger when the daemon observes a cancellation the server did not initiate', async () => {
     const { byok: instance, daemon } = await startWithDaemon();

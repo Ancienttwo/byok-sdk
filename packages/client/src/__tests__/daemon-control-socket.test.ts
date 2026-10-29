@@ -145,6 +145,23 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     conn.client.close();
   });
 
+  it('status carries the clock skew measured from the pair response Date header (#1114)', async () => {
+    const built = await pairedAndStarted('acme-ctl-clock-skew', new StubRuntimeAdapter('pi'));
+    daemon = built.daemon;
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+    const status = await conn.client.request<ControlStatusResult>('status');
+    conn.client.close();
+
+    // The test server runs on this machine's clock and Node stamps `Date`
+    // with whole-second resolution, so the device is within the 1 s header
+    // resolution plus the round trip of it.
+    expect(status.clockSkew).toBeDefined();
+    expect(Math.abs(status.clockSkew?.deviceAheadMs ?? Number.NaN)).toBeLessThanOrEqual(status.clockSkew?.uncertaintyMs ?? 0);
+    expect(status.clockSkew?.uncertaintyMs).toBeGreaterThanOrEqual(1000);
+    expect(Number.isFinite(Date.parse(status.clockSkew?.observedAt ?? ''))).toBe(true);
+  });
+
   it('reloads the registry with CAS and reports only explicit, redacted lifecycle evidence', async () => {
     const built = await pairedAndStarted('acme-ctl-toolsets', new StubRuntimeAdapter('pi'));
     daemon = built.daemon;

@@ -244,6 +244,12 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
     "maxConcurrentReaderAttemptsPerAgentHome": {
       "type": "number"
     },
+    "maxConcurrentTasks": {
+      "type": "number"
+    },
+    "defaultMaxDurationMs": {
+      "type": "number"
+    },
     "agentEgress": {
       "type": "object",
       "properties": {

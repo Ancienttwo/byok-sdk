@@ -181,6 +181,16 @@ export interface MailboxCollectExpiredInput extends CollectExpiredInput {
   readonly reapDeadLettersBefore: string;
 }
 
+/**
+ * Which of one device's `pending` rows {@link MailboxStore.expirePending}
+ * dead-letters: every one, or exactly the listed sequences. A listed seq that
+ * is not `pending` (acked, already expired, or never written) is skipped.
+ */
+export interface MailboxExpirePendingInput {
+  readonly deviceId: string;
+  readonly seqs: 'all' | readonly number[];
+}
+
 
 
 /**
@@ -216,4 +226,15 @@ export interface MailboxStore {
     tenant: TenantId,
     input: MailboxCollectExpiredInput,
   ): Promise<CollectExpiredResult>;
+  /**
+   * Dead-letters undelivered rows nobody will ever ack — the rows of a retired
+   * device, or of a task the Host abandoned — without waiting for retention.
+   * Only `pending` rows move, and only to `expired`: nothing is deleted, no row
+   * returns to `pending`, the cursor is untouched, and the device's `seq`
+   * allocator keeps counting. The moved rows stop holding mailbox quota and
+   * raise `recoverableFrom` exactly as a retention sweep would. Serialized with
+   * the device's appends and acks, so a row appended before this call is
+   * either moved or already acked.
+   */
+  expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{ readonly expired: number }>;
 }

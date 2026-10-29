@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Add (client; #1104)** — single-file Host packaging. `@byok-sdk/client/packaging`
+  exports `byokSdkPackaging`, an esbuild plugin (esbuild stays the Host's
+  dependency) for single-file ESM, single-file CommonJS and Node SEA bundles. It
+  sets each format's module `require` or `import.meta.url` and fails the build on
+  any empty `import.meta`, SDK files included, except three reviewed third-party
+  sites (`sdkBundleImportMetaExemptions`). In a CommonJS or SEA bundle, unpdf's
+  exemption means PDF reads lose its standard font and CMap defaults, as before.
+  `copySdkPackagingAssets` copies the Pi runtime and native assets one target
+  ships. `bundledSdkHelperHost()` returns the `sdkHelperHost` of the running bundle
+  or SEA. `sdkDistributionManifest` adds `nodeEngine`, a role for every published
+  bin (`bins`) and the `formats`. A new bin without a role fails CI. A new CI lane,
+  `packaging-consistency`, runs a complete embedded Host in each format on
+  macOS, Linux and Windows. Nothing changes for a Host that does not use these.
+
 - **Breaking (examples, client; #1106)** — K4, the Host execution core, is
   part of the SDK: `@byok-sdk/server/execution-core` exports the FIFO, ledger,
   routines, transitions, schedule, submit, model, sealed routine and the Host
@@ -102,6 +116,21 @@
   the first 401, then follows `expiresIn`. `createAuthPlane` now rejects an
   `accessTokenTtlSeconds` that is not a positive safe integer, and
   `MintedAccessToken` gains `expiresIn`.
+
+- **Feature (client, protocol; #1114)** — `byok-agent doctor` reports the device
+  clock's offset from the server. The daemon measures it from the HTTP `Date`
+  header of each successful pair and token renewal (positive means the device
+  is ahead), with an uncertainty of half the round trip plus the header's one
+  second, and keeps only the last reading in memory. A response without a
+  parseable `Date`, or a device clock set back during the request, clears it.
+  `ControlStatusResult` gains optional `clockSkew`, `DiagnosticsSnapshot`
+  gains `clockSkew`, and a new `clock-skew`
+  check passes within 60 seconds, the default device-proof window of the Host
+  (a Host may widen it up to 5 minutes), and warns beyond it or when the
+  reading is unknown, which includes a stopped daemon. The reading is a report
+  only and never sets a token lifetime. `PairResponse.expiresIn` is now
+  registered as a strip-safe HTTP addition next to `TokenResponse.expiresIn`,
+  and the v4 HTTP corpus pins both pair surfaces. No migration.
 
 - **Fix (cloud-dataplane, server, cloud; #1116)** — `cancelTask` on a claimed
   task no longer throws after retention collects its acked `task.cancel` row.

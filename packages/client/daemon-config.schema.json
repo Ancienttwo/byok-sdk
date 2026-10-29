@@ -263,6 +263,14 @@
       "type": "number",
       "description": "How many `homeAccess: 'memory-reader'` Attempts this daemon lets run\nCONCURRENTLY in one canonical Agent home, across every lane and every\nsession. Default DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME (4).\n\nReaders are counted apart from the writer. A home has at most one writer\nAttempt, fixed: the writer runs in the home itself, so a second writer\nwould co-write `MEMORY.md`, `notes/` and `.git`. Each reader runs in its\nown run directory, `<home>/.byok/runs/<taskId>/`. An offer over either\nlimit is declined retryably before adapter preparation, the claim, or any\nprocess side effect.\n\nValidated up front, the same way `maxTaskOutputBytes` is: a positive safe\ninteger, so `0`, a negative number, `NaN` and a non-integer are\nconstruction errors rather than a silently reinterpreted \"unlimited\".\n\nThe removed `maxConcurrentMutableSessionsPerAgentHome` is a construction\nerror: a value above 1 let Attempts co-write one home, which reader\nAttempts replace."
     },
+    "maxConcurrentTasks": {
+      "type": "number",
+      "description": "How many tasks this daemon runs at once, across every Agent home, lane and\nruntime. Default DEFAULT_MAX_CONCURRENT_TASKS (8).\n\nActive tasks and offers already admitted but still starting both count.\nAn offer over the cap is declined retryably (`task.decline` with\n`retryable: true` and no code) before adapter preparation, the claim, or\nany process side effect, so the Host can offer it again later or to\nanother device.\n\nValidated up front: a positive safe integer. There is no \"uncapped\"\nvalue; `0`, a negative number, `NaN` and a non-integer are construction\nerrors."
+    },
+    "defaultMaxDurationMs": {
+      "type": "number",
+      "description": "Wall-clock limit, in milliseconds, for a task whose offer carries no\n`limits.maxDurationMs`. An offer's own limit always wins. Enforced the\nsame way: the task fails with `resource limit exceeded: maxDurationMs`.\nOmitted, a task without an offer limit runs until it ends or is\ncancelled. Validated up front: a positive safe integer."
+    },
     "agentEgress": {
       "type": "object",
       "properties": {

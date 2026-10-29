@@ -2,6 +2,7 @@ import { readRegistryExpectations, runtimeDependencyMetadata } from './registry-
 import { cloudDoConsumerSmoke } from './cloud-do-consumer-smoke.mjs';
 import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -497,6 +498,10 @@ try {
     await cloudDoConsumerSmoke(smokeDir, smokeImports.worker);
     copyFileSync(path.join(repoRoot, 'scripts/release/execution-submit-smoke.mjs'), path.join(smokeDir, 'execution-submit-smoke.mjs'));
     run(nodeBin, ['execution-submit-smoke.mjs'], smokeDir);
+    // #1104: the packaging plugin builds and runs single-file bundles from the installed tarballs.
+    copyFileSync(path.join(repoRoot, 'scripts/release/packaging-plugin-smoke.mjs'), path.join(smokeDir, 'packaging-plugin-smoke.mjs'));
+    const esbuildMain = createRequire(path.join(repoRoot, 'packages/client/package.json')).resolve('esbuild');
+    console.log(run(nodeBin, ['packaging-plugin-smoke.mjs', '--esbuild', esbuildMain], smokeDir));
     // Preserve the verifier's relative module graph in the isolated fixture.
     // These are test-oracle files, not a replacement runtime or mutable install evidence.
     for (const relative of [

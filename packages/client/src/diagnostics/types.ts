@@ -7,7 +7,7 @@ import type { ServiceEnvironmentRecord } from '../login-shell-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 
 export interface DiagnosticCheck {
-  id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'quarantine';
+  id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'clock-skew' | 'health' | 'journal' | 'quarantine';
   status: DiagnosticStatus;
   summary: string;
 }
@@ -52,6 +52,14 @@ export interface DiagnosticsSnapshot {
    * `lifecycle` event in `audit.jsonl` (`audit`), else `unknown`.
    */
   lifecycle: { status: 'unknown' } | { status: 'known'; source: 'live' | 'audit'; lifecycle: DaemonLifecycle };
+  /**
+   * #1114: the device clock against the server's HTTP `Date` header at the
+   * running daemon's last pair or renewal. Unknown while the daemon is
+   * offline: doctor stays network-free and keeps no state file of its own.
+   */
+  clockSkew:
+    | { status: 'unknown'; reason: 'daemon-offline' | 'not-observed' }
+    | { status: 'measured'; deviceAheadMs: number; uncertaintyMs: number; observedAt: string };
   health: OperationalHealthFileInspection;
   journal: {
     status: 'missing' | 'present' | 'corrupt' | 'unavailable';

@@ -324,8 +324,12 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
 export class InMemoryTaskAttemptState {
   readonly attempts = new Map<string, TaskAttempt>();
   readonly messageAdmissions = new Map<string, StoredAgentMessageAdmission>();
+  /** `archive_settled_at` of archived tasks (#1120), by tenant/task key. */
+  readonly archiveSettled = new Map<string, string>();
   readonly #clock: Clock;
   readonly #mutationTails = new Map<string, Promise<void>>();
+  /** Settles when the exclusive section in progress (or queued last) ends. */
+  #exclusiveTail: Promise<void> = Promise.resolve();
 
   constructor(clock: Clock) {
     this.#clock = clock;
@@ -335,10 +339,14 @@ export class InMemoryTaskAttemptState {
     return this.#clock.now().toISOString();
   }
 
-  /** Serialize every state-changing operation for one tenant/task key. */
+  /**
+   * Serialize every state-changing operation for one tenant/task key. It also
+   * waits for an exclusive section queued before it (see {@link exclusive}).
+   */
   async mutate<T>(key: string, operation: () => T | Promise<T>): Promise<T> {
     const previous = this.#mutationTails.get(key) ?? Promise.resolve();
-    const result = previous.then(operation);
+    const exclusive = this.#exclusiveTail;
+    const result = Promise.all([previous, exclusive]).then(operation);
     const tail = result.then(
       () => undefined,
       () => undefined,
@@ -349,5 +357,20 @@ export class InMemoryTaskAttemptState {
     } finally {
       if (this.#mutationTails.get(key) === tail) this.#mutationTails.delete(key);
     }
+  }
+
+  /**
+   * Runs `operation` with no task mutation in flight: it starts once every
+   * mutation queued before it has settled, and every mutation queued after it
+   * waits for it to end. Device retirement runs here, so its attempt and
+   * mailbox halves are one step no cancellation or abandonment can split, the
+   * in-memory stand-in for the SQL stores' transaction (#1119). `operation`
+   * writes `attempts` directly; calling {@link mutate} from it deadlocks.
+   */
+  exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = [this.#exclusiveTail, ...this.#mutationTails.values()];
+    const result = Promise.all(queued).then(operation);
+    this.#exclusiveTail = result.then(() => undefined, () => undefined);
+    return result;
   }
 }

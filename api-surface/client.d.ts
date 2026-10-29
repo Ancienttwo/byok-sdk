@@ -662,6 +662,94 @@ export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../
 export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from '../runtime/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
+// ==== @byok-sdk/client dist/adapters/packaging.d.ts ====
+import { type SdkPackagingFormat } from '../sdk-native-assets';
+export type { SdkPackagingFormat } from '../sdk-native-assets';
+/** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
+export interface SdkPackagingBuild {
+    readonly initialOptions: {
+        bundle?: boolean;
+        platform?: string;
+        format?: string;
+        define?: Record<string, string>;
+        banner?: Record<string, string>;
+        logOverride?: Record<string, string>;
+    };
+    onEnd(callback: (result: {
+        readonly warnings: readonly SdkPackagingMessage[];
+    }) => {
+        errors: SdkPackagingMessage[];
+    } | undefined): void;
+}
+/** The part of an esbuild message that this plugin reads and reports. */
+export interface SdkPackagingMessage {
+    readonly id?: string;
+    readonly text: string;
+    readonly location?: {
+        readonly file: string;
+        readonly line?: number;
+        readonly column?: number;
+        readonly lineText?: string;
+    } | null;
+}
+export interface SdkBundleImportMetaExemption {
+    /** npm package name, as installed under `node_modules`. */
+    readonly package: string;
+    /** File within the package, `/`-separated. */
+    readonly file: string;
+    /** Why the empty `import.meta` is not reached, or what a bundle loses. */
+    readonly reason: string;
+}
+/**
+ * The reviewed third-party files whose `import.meta` esbuild empties in a CommonJS bundle of the SDK. Every other
+ * empty `import.meta`, in any file, fails the build. The SDK's own files are never exempt. A test bundles the embedded
+ * Host and requires exactly these files to warn, so an entry a dependency update made stale fails too.
+ */
+export declare const sdkBundleImportMetaExemptions: readonly SdkBundleImportMetaExemption[];
+/** Structurally an esbuild `Plugin`: pass it in `plugins`. */
+export interface SdkPackagingPlugin {
+    readonly name: string;
+    setup(build: SdkPackagingBuild): void;
+}
+export interface ByokSdkPackagingOptions {
+    readonly format: SdkPackagingFormat;
+}
+/**
+ * The esbuild plugin for a single-file Host bundle (`sdkPackagingFormats`). `sea` is the CommonJS bundle a Node SEA
+ * embeds. The build must be a `platform: 'node'` bundle in the format's esbuild output format.
+ *
+ * - ESM: a module-scoped `require`, which the CommonJS dependencies of the bundled Pi host need for Node built-ins.
+ * - CommonJS: `import.meta.url` is the bundle's own file URL (`__filename`; the executable inside a SEA). It is the only
+ *   `import.meta` property SDK code reads, so a Host must not define it too.
+ * - Every format: an empty `import.meta` is a build error in any file, SDK included, except the reviewed third-party
+ *   sites in `sdkBundleImportMetaExemptions`, which stay visible as warnings. esbuild already rejects top-level `await`
+ *   in CommonJS output. Neither is ever left for the bundle to hit at run time.
+ */
+export declare function byokSdkPackaging(options: ByokSdkPackagingOptions): SdkPackagingPlugin;
+export interface CopySdkPackagingAssetsOptions {
+    /** A new or empty directory that ships beside the product bundle or executable. */
+    readonly outDir: string;
+    readonly platform: 'darwin' | 'linux' | 'win32';
+    readonly arch: 'x64' | 'arm64';
+}
+/** Directories relative to `outDir`, for the product's daemon configuration and environment. */
+export interface SdkPackagingAssets {
+    /** Every written file, relative to `outDir`, sorted. */
+    readonly files: readonly string[];
+    /** `PI_PACKAGE_DIR` for the Pi host. */
+    readonly piPackageDir: string;
+    /** `DaemonConfig.nativeAssetRoot`; Windows x64 only. */
+    readonly nativeAssetRoot?: string;
+    /** `DaemonConfig.agentMemoryHelperAssetRoot`; macOS and Windows x64. Linux memory needs no helper. */
+    readonly agentMemoryHelperAssetRoot?: string;
+}
+/**
+ * Build-time copy of every SDK file a single-file Host ships for one target, in `sdkPackagingAssetLayout`: the Pi
+ * runtime assets, and the native assets of the platforms that have them (`sdkNativeAssetTargets`). It composes
+ * `copyPiRuntimeAssets` and `copySdkNativeAssets`, with their integrity checks; the Windows target downloads the
+ * integrity-pinned koffi archive.
+ */
+export declare function copySdkPackagingAssets(options: CopySdkPackagingAssetsOptions): Promise<SdkPackagingAssets>;
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
@@ -3055,6 +3143,19 @@ export declare class AuthResponseInvalidError extends Error {
         cause: unknown;
     });
 }
+/**
+ * One measurement of this device's clock against the server's HTTP `Date`
+ * header (#1114). It is reported only (`byok-agent doctor`); token lifetime never
+ * reads it.
+ */
+export interface ClockSkewObservation {
+    /** Positive when the device clock is ahead of the server's. */
+    readonly deviceAheadMs: number;
+    /** Half the request round trip plus the header's one-second resolution. */
+    readonly uncertaintyMs: number;
+    /** ISO time the response arrived on the device clock. */
+    readonly observedAt: string;
+}
 export interface AuthManagerOptions {
     serverUrl: string;
     store: DeviceStore;
@@ -3098,11 +3199,14 @@ export declare class AuthManager {
     private activeMutation;
     private lastRenewedAt;
     private nearExpiryRenewals;
+    private lastClockSkew;
     private readonly credentials;
     private readonly requestDeadlineMs;
     constructor(opts: AuthManagerOptions);
     get deviceId(): string | undefined;
     isRevoked(): boolean;
+    /** The skew measured by the last successful pair or renewal, if its response carried a parseable `Date` and the device clock did not go back mid-request. */
+    clockSkew(): ClockSkewObservation | undefined;
     /**
      * Internal signer read: always recompose metadata with the current OS
      * secret authority. Like every OS read here it is a credential mutation, so
@@ -3496,6 +3600,11 @@ import type { DaemonHaltReason } from './daemon-lifecycle';
 import { type FleetJitter } from './deterministic-jitter';
 export { ReplayCursorTooOldError } from './replay-cursor';
 /**
+ * #1121: the most bytes of droppable envelopes the outbox holds while the
+ * Host is unreachable. Past it the oldest of them are dropped unsent.
+ */
+export declare const MAX_OUTBOX_EPHEMERAL_BYTES: number;
+/**
  * The daemon's one long-poll session: `open` from the moment the server
  * accepts this session's `conn.hello` until any route fails, `connecting`
  * otherwise.
@@ -3533,6 +3642,8 @@ export interface ConnectionManagerOptions {
     /** Await durable disposition before retiring the exact accepted/rejected bytes. */
     onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
     onOutboundQueued?: (envelope: Envelope) => void;
+    /** An ephemeral envelope left the outbox unsent because the outbox passed {@link MAX_OUTBOX_EPHEMERAL_BYTES}. */
+    onOutboundDropped?: (envelope: Envelope) => void;
     beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
     /**
      * Base of the capped exponential backoff (`backoffCeilingMs`) before each
@@ -3639,6 +3750,13 @@ export declare class ConnectionManager {
      * separately from `this.outbox` at all.
      */
     private inFlightBatch;
+    /**
+     * Every id in `outbox` or `inFlightBatch`, mapped to its encoded size when
+     * the envelope is droppable and 0 otherwise. `send()` dedups against it in
+     * O(1), and `ephemeralBytes` is the sum of its values.
+     */
+    private readonly queuedIds;
+    private ephemeralBytes;
     private draining;
     private stopped;
     private haltReason;
@@ -3709,8 +3827,21 @@ export declare class ConnectionManager {
      * `drainOutbox`.
      * An id still queued or in flight is not queued again, so a timer retry
      * during an outage keeps one copy in its original place (#693).
+     * An ended session (halted, crashed or stopped) queues nothing, so its
+     * outbox cannot grow; a terminal is journaled before it is sent (#1119).
      */
     send(envelope: Envelope): void;
+    /** The envelope left the outbox for good: settled, filtered out, or dropped. */
+    private forget;
+    /**
+     * #1121: an outage must not grow the outbox without bound. Over the cap, the
+     * oldest queued `task.progress` and `agent.message.draft` envelopes are
+     * dropped until it fits again. Nothing else is ever dropped: terminals are
+     * journaled and resent from the journal, and claim, started and approval
+     * envelopes carry task state. The Host tolerates a gap in progress seqs.
+     * An envelope already in flight is not dropped.
+     */
+    private dropOldestEphemeral;
     /** Publish a fresh local configuration snapshot while this daemon is running. */
     refreshHello(): void;
     /**
@@ -3858,8 +3989,8 @@ export declare class ConnectionManager {
     private advanceCursor;
     /**
      * Ends the session for good: stops the loop, the poll and the drain, then
-     * reports the reason once. The outbox keeps whatever it held, so
-     * `outboxLength()` stays an honest count of what never left.
+     * reports the reason once. The outbox keeps whatever it held and takes
+     * nothing more, so `outboxLength()` stays an honest count of what never left.
      */
     private halt;
     /** The defined end for an unexpected error: stop like a halt, then report it once. */
@@ -3868,6 +3999,7 @@ export declare class ConnectionManager {
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
+import type { ClockSkewObservation } from './auth-manager';
 import type { StoragePressureState } from './retention/pressure';
 import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
@@ -4138,6 +4270,13 @@ export interface ControlStatusResult {
      * peer that predates the cap.
      */
     agentHomeExecution?: AgentHomeExecutionStatus;
+    /**
+     * #1114: the device clock against the server's HTTP `Date` header at the
+     * last successful pair or renewal. Absent when the daemon has no
+     * observation (no pair or renewal since start, or the response carried no
+     * parseable `Date`) and from an older control peer: report unknown.
+     */
+    clockSkew?: ClockSkewObservation;
 }
 export interface ToolsetsReloadParams {
     expectedRevision: string;
@@ -4642,6 +4781,29 @@ export interface DaemonConfig {
      * Attempts replace.
      */
     maxConcurrentReaderAttemptsPerAgentHome?: number;
+    /**
+     * How many tasks this daemon runs at once, across every Agent home, lane and
+     * runtime. Default {@link DEFAULT_MAX_CONCURRENT_TASKS} (8).
+     *
+     * Active tasks and offers already admitted but still starting both count.
+     * An offer over the cap is declined retryably (`task.decline` with
+     * `retryable: true` and no code) before adapter preparation, the claim, or
+     * any process side effect, so the Host can offer it again later or to
+     * another device.
+     *
+     * Validated up front: a positive safe integer. There is no "uncapped"
+     * value; `0`, a negative number, `NaN` and a non-integer are construction
+     * errors.
+     */
+    maxConcurrentTasks?: number;
+    /**
+     * Wall-clock limit, in milliseconds, for a task whose offer carries no
+     * `limits.maxDurationMs`. An offer's own limit always wins. Enforced the
+     * same way: the task fails with `resource limit exceeded: maxDurationMs`.
+     * Omitted, a task without an offer limit runs until it ends or is
+     * cancelled. Validated up front: a positive safe integer.
+     */
+    defaultMaxDurationMs?: number;
     /**
      * Explicit Agent-local/cloud egress selection. Omission still enforces the
      * SDK metadata/status projection, but does not advertise or admit the new
@@ -5261,10 +5423,28 @@ export declare function createDaemon(config: DaemonConfig, overrides?: DaemonOve
  * `clear()` additionally lets `create-daemon.ts`'s `pair()` proactively wipe
  * the previous device's entry for this `serverUrl` as a hygiene measure.
  */
+/**
+ * #1121: the cursor file exists but holds no usable cursor, or cannot be read.
+ * Never read as "no cursor": a missing cursor means a fresh device, and a
+ * fresh device must not be inferred from a damaged store. Startup halts with
+ * `cursor_unreadable`; the operator resets the cursor with
+ * `byok-agent doctor --repair reset-cursor --yes` (or `resetDeviceCursor`).
+ */
+export declare class CursorUnreadableError extends Error {
+    constructor(options?: {
+        cause?: unknown;
+    });
+}
 export declare class CursorStore {
     private readonly storeDir;
     constructor(storeDir: string);
     private fileFor;
+    /**
+     * `undefined` only when no cursor file exists. A file that cannot be read,
+     * or that holds anything but a nonnegative integer cursor (the same guard
+     * the server applies to `GET /byok/events?cursor=`), throws
+     * {@link CursorUnreadableError}.
+     */
     load(serverUrl: string, deviceId: string): Promise<number | undefined>;
     save(serverUrl: string, deviceId: string, cursor: number): Promise<void>;
     /** Remove any persisted cursor for (serverUrl, deviceId) — a no-op if none exists. Called from `pair()` (finding F5) so a device that's about to be replaced never leaves a cursor a future, unrelated device could somehow inherit. */
@@ -5371,6 +5551,8 @@ export declare const DAEMON_HALT_REASONS: readonly [
 'handshake_rejected', 
 /** The server no longer retains the history after this device's acknowledged cursor. */
 'replay_cursor_too_old', 
+/** The durable delivery cursor file is unreadable: run `doctor --repair reset-cursor`. */
+'cursor_unreadable', 
 /** The configuration cannot work; a restart with the same configuration fails the same way. Thrown by `start()`; never reported through `lifecycle`. */
 'config_invalid'];
 export type DaemonHaltReason = (typeof DAEMON_HALT_REASONS)[number];
@@ -7850,6 +8032,8 @@ export interface OutboundStatus {
     rejected: number;
     rejectedByReason: Partial<Record<OutboundRefusalReason, number>>;
     rejectedTerminals: number;
+    /** `task.progress` / `agent.message.draft` envelopes dropped unsent because the outbox passed its byte cap. */
+    droppedEphemeral: number;
     lastRejection?: OutboundRejection;
 }
 // ==== @byok-sdk/client dist/daemon/prepared-agent-memory.d.ts ====
@@ -8892,6 +9076,11 @@ export declare const DEFAULT_MAX_TASK_OUTPUT_BYTES: number;
  * second writer would co-write `MEMORY.md`, `notes/` and `.git`.
  */
 export declare const DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME = 4;
+/**
+ * Default number of tasks one daemon runs at once, across every Agent home and
+ * runtime: active tasks plus offers already admitted past this cap.
+ */
+export declare const DEFAULT_MAX_CONCURRENT_TASKS = 8;
 export interface TaskRunnerDeps {
     adapters: RuntimeAdapter[];
     runtimeAllowlist?: string[];
@@ -8952,6 +9141,13 @@ export interface TaskRunnerDeps {
      * The writer limit is fixed at one.
      */
     maxConcurrentReaderAttemptsPerAgentHome?: number;
+    /**
+     * Device-wide task cap — see `DaemonConfig.maxConcurrentTasks`. Unset
+     * defaults to {@link DEFAULT_MAX_CONCURRENT_TASKS}.
+     */
+    maxConcurrentTasks?: number;
+    /** Wall-clock limit for an offer without `limits.maxDurationMs` — see `DaemonConfig.defaultMaxDurationMs`. */
+    defaultMaxDurationMs?: number;
     /** Exact host-selected policy accepted by a `task.offer` that carries `egressPolicy`. */
     agentEgressPolicy?: Readonly<AgentEgressPolicy>;
     /** Latest-value activity lane and reliable spool for Agent egress offers. */
@@ -9356,6 +9552,8 @@ export declare class TaskRunner {
     private readonly sealedOpening;
     private readonly claimedHarnesses;
     private readonly homeReservations;
+    /** Offers admitted past the device-wide task cap that are not yet active; cleared when `handleOffer` returns. */
+    private readonly deviceTaskReservations;
     private readonly startupOwnership;
     /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
     private readonly inFlightBlobAborts;
@@ -9427,6 +9625,8 @@ export declare class TaskRunner {
     private get maxInlineEventBytes();
     /** Effective per-canonical-Agent-home reader cap — see {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}. */
     private get maxConcurrentReaderAttemptsPerAgentHome();
+    /** Effective device-wide task cap — see {@link DEFAULT_MAX_CONCURRENT_TASKS}. */
+    private get maxConcurrentTasks();
     /**
      * M4 Phase 4 (part B.3, observability): per-active-task queue watermarks
      * for the control socket's `status` result — see
@@ -9536,8 +9736,12 @@ export declare class TaskRunner {
      * own `stop()` call has already resolved), so it can no longer race
      * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
      * regression test for the exact scenario.
+     *
+     * `interruptTimeoutMs` caps each soft interrupt below the configured
+     * bound: a halted run passes its shutdown grace, so its tasks reach close
+     * and their `task.fail` is journaled within that grace (#1119).
      */
-    shutdownActiveTasks(reason: string): Promise<void>;
+    shutdownActiveTasks(reason: string, interruptTimeoutMs?: number): Promise<void>;
     private closeActiveSession;
     private awaitActiveSessionClose;
     /**
@@ -10382,6 +10586,38 @@ export declare class DeviceMetadataRepairError extends Error {
  * Ordinary doctor remains credential-blind; only this confirmed action opens the OS store.
  */
 export declare function repairDeviceEnrollmentMetadata(config: DaemonConfig, input: RepairDeviceEnrollmentMetadataInput): Promise<DeviceMetadataRepairResult>;
+export interface ResetDeviceCursorInput {
+    confirmed: true;
+}
+export interface DeviceCursorResetResult {
+    action: 'reset-cursor';
+    scope: 'device';
+    /** The cursor file now holds 0; nothing was replayed yet. */
+    status: 'reset';
+}
+declare const CURSOR_RESET_MESSAGES: {
+    readonly 'confirmation-required': 'Explicit confirmation is required to reset the delivery cursor.';
+    readonly 'daemon-running': 'Stop the daemon before resetting the delivery cursor.';
+    readonly 'store-busy': 'The store is owned by another operation; cursor reset refused.';
+    readonly unpaired: 'No readable device record exists; pair this device instead of resetting its cursor.';
+    readonly 'reset-failed': 'The delivery cursor could not be reset; inspect the store before retrying.';
+};
+export type DeviceCursorResetErrorCode = keyof typeof CURSOR_RESET_MESSAGES;
+/** Closed diagnostics only, like {@link DeviceMetadataRepairError}. */
+export declare class DeviceCursorResetError extends Error {
+    readonly code: DeviceCursorResetErrorCode;
+    constructor(code: DeviceCursorResetErrorCode);
+}
+/**
+ * #1121: the operator recovery for the `cursor_unreadable` halt. Rewrites the
+ * paired device's delivery cursor as 0, so the next start asks the server to
+ * replay everything it still retains for this device. Replay is safe: a
+ * redelivered offer this device journaled is matched by its id, and the
+ * server suppresses offers whose task already ended. If the server no longer
+ * retains seq 1, the next start halts `replay_cursor_too_old` as for any
+ * expired cursor. Refused while the daemon runs; takes the store's owner lease.
+ */
+export declare function resetDeviceCursor(config: DaemonConfig, input: ResetDeviceCursorInput): Promise<DeviceCursorResetResult>;
 // ==== @byok-sdk/client dist/diagnostics/operator-actions.d.ts ====
 import { type AgentRef } from '@byok-sdk/protocol';
 import type { DaemonConfig } from '../daemon/create-daemon';
@@ -10478,7 +10714,7 @@ import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import type { ServiceEnvironmentRecord } from '../login-shell-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
-    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'quarantine';
+    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'clock-skew' | 'health' | 'journal' | 'quarantine';
     status: DiagnosticStatus;
     summary: string;
 }
@@ -10542,6 +10778,20 @@ export interface DiagnosticsSnapshot {
         source: 'live' | 'audit';
         lifecycle: DaemonLifecycle;
     };
+    /**
+     * #1114: the device clock against the server's HTTP `Date` header at the
+     * running daemon's last pair or renewal. Unknown while the daemon is
+     * offline: doctor stays network-free and keeps no state file of its own.
+     */
+    clockSkew: {
+        status: 'unknown';
+        reason: 'daemon-offline' | 'not-observed';
+    } | {
+        status: 'measured';
+        deviceAheadMs: number;
+        uncertaintyMs: number;
+        observedAt: string;
+    };
     health: OperationalHealthFileInspection;
     journal: {
         status: 'missing' | 'present' | 'corrupt' | 'unavailable';
@@ -10588,7 +10838,7 @@ export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './lo
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
-export { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, runSdkReservedHelperCommand, } from './sdk-reserved-helper-host';
+export { BYOK_SDK_HELPER_SUBCOMMAND, bundledSdkHelperHost, resolveSdkReservedHelperBin, runSdkReservedHelperCommand, } from './sdk-reserved-helper-host';
 export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host';
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
@@ -10728,8 +10978,8 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
 export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
-export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
-export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
+export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor';
+export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
 export { NativeInteractionController, NativeInteractionError } from './native-interactions';
@@ -10742,7 +10992,7 @@ export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } 
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
 export { isReservedMcpServerName } from './sdk-reserved-mcp';
-export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
+export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets';
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, } from './tool-authorization';
@@ -13366,6 +13616,7 @@ export declare function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions)
 /** Runtime loader: explicit absolute root only, no download or package-search fallback. */
 export declare function loadSdkKoffiAsset(root: string): unknown;
 // ==== @byok-sdk/client dist/sdk-native-assets.d.ts ====
+import { type SdkReservedHelperKind } from './sdk-reserved-helper-host';
 export declare const sdkNativeAssetTargets: Readonly<{
     'win32-x64': Readonly<{
         package: "@koromix/koffi-win32-x64";
@@ -13393,11 +13644,52 @@ export interface CopySdkNativeAssetsOptions {
 /** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;
 export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
+/**
+ * What a single-file product does with each published bin. `cli`: the daemon CLI, not shipped by an embedded Host.
+ * `reserved-helper` and `pi-host`: re-entered through `sdkHelperHost` as `kind`. `provider-launcher`: the keys
+ * custody launcher, which the product re-enters as its own command with `runPiProviderLauncher`.
+ */
+export type SdkDistributionBinRole = 'cli' | 'reserved-helper' | 'pi-host' | 'provider-launcher';
+export interface SdkDistributionBin {
+    readonly package: '@byok-sdk/client' | '@byok-sdk/keys';
+    readonly role: SdkDistributionBinRole;
+    readonly kind?: SdkReservedHelperKind;
+}
+/**
+ * The supported single-file formats. Every format ships the same asset layout (`copySdkPackagingAssets` in
+ * `@byok-sdk/client/packaging`): `pi` is `PI_PACKAGE_DIR`, `native` is `nativeAssetRoot` and
+ * `native/agent-memory-fs` is `agentMemoryHelperAssetRoot`, where the platform has native targets.
+ */
+export declare const sdkPackagingFormats: Readonly<{
+    readonly esm: Readonly<{
+        esbuildFormat: "esm";
+        helperHost: "node-entry";
+        piRuntimeForm: "interpreter+bundle";
+    }>;
+    readonly cjs: Readonly<{
+        esbuildFormat: "cjs";
+        helperHost: "node-entry";
+        piRuntimeForm: "interpreter+bundle";
+    }>;
+    readonly sea: Readonly<{
+        esbuildFormat: "cjs";
+        helperHost: "executable";
+        piRuntimeForm: "interpreter+bundle";
+    }>;
+}>;
+export type SdkPackagingFormat = keyof typeof sdkPackagingFormats;
+export declare const sdkPackagingAssetLayout: Readonly<{
+    readonly pi: 'pi';
+    readonly native: 'native';
+    readonly agentMemoryHelper: 'native/agent-memory-fs';
+}>;
 /** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
 export declare const sdkDistributionManifest: Readonly<{
     version: 1;
     piRuntimePin: string;
-    reservedHelperKinds: readonly import("./sdk-reserved-helper-host").SdkReservedHelperKind[];
+    nodeEngine: string;
+    bins: Readonly<Readonly<Record<string, SdkDistributionBin>>>;
+    reservedHelperKinds: readonly SdkReservedHelperKind[];
     nativeTargets: Readonly<{
         'win32-x64': Readonly<{
             package: "@koromix/koffi-win32-x64";
@@ -13416,6 +13708,28 @@ export declare const sdkDistributionManifest: Readonly<{
             files: readonly string[];
             signingPolicy: "product-resigning-allowed";
         }>;
+    }>;
+    formats: Readonly<{
+        readonly esm: Readonly<{
+            esbuildFormat: "esm";
+            helperHost: "node-entry";
+            piRuntimeForm: "interpreter+bundle";
+        }>;
+        readonly cjs: Readonly<{
+            esbuildFormat: "cjs";
+            helperHost: "node-entry";
+            piRuntimeForm: "interpreter+bundle";
+        }>;
+        readonly sea: Readonly<{
+            esbuildFormat: "cjs";
+            helperHost: "executable";
+            piRuntimeForm: "interpreter+bundle";
+        }>;
+    }>;
+    assetLayout: Readonly<{
+        readonly pi: 'pi';
+        readonly native: 'native';
+        readonly agentMemoryHelper: 'native/agent-memory-fs';
     }>;
 }>;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
@@ -13442,6 +13756,15 @@ export interface ResolvedSdkReservedHelperBin {
 export declare const sdkReservedHelperKinds: readonly SdkReservedHelperKind[];
 /** SDK-owned launcher shape used by every reserved stdio helper. */
 export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind, host?: SdkHelperHostConfig): ResolvedSdkReservedHelperBin;
+/**
+ * The helper host of a single-file product, called from inside that product. A
+ * Node SEA re-enters its own executable; a bundle run by Node re-enters Node
+ * with the running bundle as its entry. `node:sea` decides which, so nothing is
+ * inferred from paths or names.
+ */
+export declare function bundledSdkHelperHost(): SdkHelperHostConfig & {
+    readonly executable: string;
+};
 /**
  * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
  * side effects for normal product commands; a reserved command is handled to

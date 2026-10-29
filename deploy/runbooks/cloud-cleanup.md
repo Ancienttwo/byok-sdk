@@ -68,8 +68,28 @@ Receipt classification has one frozen kernel table: all 11 SDK families and
 unknown keys are `identity`. `REQUEST_RECEIPT_PREFIXES` is derived and empty,
 so production receipt collection removes zero rows. There is no caller prefix
 argument, registration hook or constructor injection. Request/completion names
-alone do not make a receipt disposable. Tasks, egress, truth, board, memory,
-profile and terminal history remain outside automatic collection.
+alone do not make a receipt disposable. Task identity fences, egress, truth,
+memory and profile remain outside automatic collection.
+
+The `tasks` step (#1120) archives terminal tasks whose `archive_after` is older
+than the policy's `terminalTaskArchiveMs` (default 90 days; the policy store
+refuses less than the unacked plus dead-letter windows). In one transaction per
+task it tombstones the offer and terminal receipts, the Agent message
+admission and the acked or expired mailbox bodies, fences an absent terminal
+receipt, deletes the ephemeral rows and the task's object references, and sets
+`archived_at`. It never deletes a mailbox row, so each device's recovery-floor
+dead letter stays. The object step reclaims the released objects after orphan
+grace. Then the board item is removed and `archive_settled_at` is set; a crash
+before that leaves `archived_at` set, and the next run settles the task before
+it archives new ones. The task row and the tombstoned receipts stay forever as
+the task's identity fence, about 1.2 KB of heap per task plus index entries
+(the `task` row, three tombstone receipts and, for an Agent message task, its
+admission row); tenant deletion is the only way to remove them. Archived
+tasks leave the board, and their content reads fail with
+`task_content_redacted`.
+
+`ByokCloudOptions.proofReceiptRetention` is required: the `proofReceipts` step
+always runs. Pass `PostgresProofReceiptRetentionAuthority`.
 
 Device assertion replay lives outside the ordinary cloud store bundle. Pass
 the exact auth authority as `ByokCloudOptions.deviceAssertionReplay` to collect
@@ -275,3 +295,50 @@ SELECT d.tenant_id, count(*) AS devices
 Issue each returned tenant an entitlement before upgrading.
 
 Committed reservations of both kinds remain protected accounting identity: PG uses them as dedup witnesses and stored finalize-replay answers. The settled-row collector deletes only old expired/aborted rows. Removing a committed row would change later accounting while leaving the committed byte counter intact. No new accounting table or fallback is added. Cross-kind dedup differences between drivers are a pre-existing boundary, not corrected by this maintenance change.
+
+## Terminal-task archive migration (#1120)
+
+Migration `0032_terminal_task_archive.sql` adds
+`tenant_retention_policy.terminal_task_archive_ms` and the `task` columns
+`archive_after`, `archived_at` and `archive_settled_at`.
+
+The new policy column is `NOT NULL` with no default, and an application from
+before #1120 cannot write a policy once 0032 has run. Stop every policy writer
+running an earlier release before migrating, and do not roll the application
+back below #1120 afterwards. Each stored policy gets 90 days, or its
+`mailbox_unacked_retention_ms + mailbox_dead_letter_retention_ms` when that is
+longer; its other columns stay as they were. The migration first checks every
+policy row, referenced by an entitlement or not, and stops before any change
+if one holds a window outside 1..9007199254740991 ms or two mailbox windows
+whose sum exceeds 9007199254740991 ms (`Number.MAX_SAFE_INTEGER`, the largest
+window the application accepts). Find those rows first and correct their
+windows through the policy store before migrating:
+
+```sql
+SELECT tenant_id, policy_id FROM tenant_retention_policy
+ WHERE NOT (mailbox_acked_retention_ms BETWEEN 1 AND 9007199254740991
+   AND mailbox_unacked_retention_ms BETWEEN 1 AND 9007199254740991
+   AND mailbox_dead_letter_retention_ms BETWEEN 1 AND 9007199254740991
+   AND request_receipt_retention_ms BETWEEN 1 AND 9007199254740991
+   AND object_orphan_grace_ms BETWEEN 1 AND 9007199254740991
+   AND mailbox_unacked_retention_ms::numeric + mailbox_dead_letter_retention_ms::numeric <= 9007199254740991);
+```
+
+The migration holds `ACCESS EXCLUSIVE` on `tenant_retention_policy`, one row
+per policy, until it commits. It backfills `archive_after` once for every terminal row:
+`terminal_at` where 0030 recorded it, and otherwise `updated_at`, which is
+never earlier than the real terminal instant, so no task is archived early.
+`terminal_at` stays NULL for those rows. The backfill UPDATE rewrites every
+terminal task row inside the migration transaction: a status write to a
+terminal task waits for it, new tasks do not. The two partial index builds
+then scan the `task` heap under a SHARE lock, so task writes wait while reads
+continue. Count the rows first and schedule the upgrade for the window that
+count needs:
+
+```sql
+SELECT count(*) AS terminal_tasks FROM task WHERE status IN ('complete', 'failed', 'cancelled');
+```
+
+The first maintenance runs after the upgrade archive at most the step limit
+(default 500) per tenant per pass, oldest first; `more: true` in the `tasks`
+step report means a backlog remains.

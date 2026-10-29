@@ -1174,3 +1174,48 @@ its digest and is refused. The Windows Agent memory helper may be
 Authenticode-signed: its `pe-content-v1` digest ignores the signature. Darwin memory helpers retain their separate product
 re-signing policy. Copying assets proves packaging, not platform execution: the
 relocated Windows SEA CI fixture must pass before Windows qualification is claimed.
+
+### Single-file packaging
+
+`@byok-sdk/client/packaging` is the build-time helper for a Host that ships as one
+file: a single-file ESM bundle, a single-file CommonJS bundle, or a Node SEA (the
+CommonJS bundle the SEA embeds). It does not change a Host that does not use it.
+
+```js
+import { build } from 'esbuild';
+import { byokSdkPackaging, copySdkPackagingAssets } from '@byok-sdk/client/packaging';
+
+const assets = await copySdkPackagingAssets({ outDir: shipDir, platform: 'darwin', arch: 'arm64' });
+await build({ entryPoints: ['src/host.ts'], bundle: true, platform: 'node', format: 'cjs',
+  outfile: `${shipDir}/host.cjs`, plugins: [byokSdkPackaging({ format: 'cjs' })] });
+```
+
+- `byokSdkPackaging({ format })` is an esbuild plugin, typed structurally, so
+  esbuild stays the Host's own build dependency. For ESM it adds the module-scoped
+  `require` that the bundled Pi host's CommonJS dependencies need. For CommonJS
+  and SEA it defines `import.meta.url` as the bundle's own file URL. It fails the
+  build on any empty `import.meta`, in any file, SDK included, except the
+  reviewed third-party sites in `sdkBundleImportMetaExemptions`, which stay
+  visible as warnings. esbuild already rejects top-level `await` in CommonJS.
+  One exemption has an effect a Host can see: in a CommonJS or SEA bundle, PDF
+  reads lose unpdf's standard font and CMap defaults.
+- `copySdkPackagingAssets({ outDir, platform, arch })` writes everything the SDK
+  needs beside the bundle or executable for one target, in
+  `sdkPackagingAssetLayout`: `pi/` is `PI_PACKAGE_DIR` (`copyPiRuntimeAssets`),
+  `native/` is `nativeAssetRoot` on Windows x64 and `native/agent-memory-fs` is
+  `agentMemoryHelperAssetRoot` on macOS and Windows x64 (`copySdkNativeAssets`).
+  Linux ships only `pi/`: its Agent memory needs no helper.
+- Inside the product, `bundledSdkHelperHost()` is the `sdkHelperHost`: the SEA
+  executable itself, or Node with the running bundle as its entry. The product
+  entrypoint calls `runSdkReservedHelperCommand()` before its own arguments.
+- `sdkDistributionManifest.bins` gives every published bin a role: `cli`
+  (`byok-agent`, which an embedded Host does not ship), `reserved-helper` and
+  `pi-host` (re-entered through `sdkHelperHost` as `kind`), and
+  `provider-launcher` (`byok-pi-provider-launcher` from `@byok-sdk/keys`, which
+  the product re-enters as its own command with `runPiProviderLauncher`). A new
+  bin without a role fails the SDK's CI. `nodeEngine` is the client's
+  `engines.node`, and `formats` lists the three formats.
+
+`examples/packaging/embedded-host-fixture.ts` is a complete embedded Host built
+this way, and the packaging consistency CI lane runs it in each format on macOS,
+Linux and Windows.

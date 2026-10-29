@@ -20,6 +20,7 @@ import {
   createPostgresCloudStores,
   createPostgresCoreStores,
   createPostgresTaskRedactionStore,
+  PostgresProofReceiptRetentionAuthority,
 } from '@byok-sdk/cloud-dataplane/runtime';
 import type { Clock } from '@byok-sdk/core';
 
@@ -48,6 +49,7 @@ async function redact(env: Env, body: { readonly tenant: string; readonly taskId
     };
     const full = fullCapabilityDeclaration();
     const cloud = createByokCloud({
+      proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
       mailboxWake: createInProcessMailboxWake({ fallbackMs: 1_000 }),
       core: createPostgresCoreStores({ pool, clock, objectStorage }),
       cloud: await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage }),

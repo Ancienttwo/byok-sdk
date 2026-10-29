@@ -8,8 +8,10 @@ import {
   type TerminalAgentHomeProjection,
   type TerminalAgentHomeMemoryChange,
   type TaskFailPayload,
-  type TaskFailure,
-  type TaskDeclinePayload,
+  type TaskFailureReading,
+  type TaskDeclineCodeReading,
+  readDeclineCode,
+  readTaskFailure,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
 import { assertTaskContentPresent } from './task-redaction';
@@ -100,18 +102,24 @@ export interface TerminalResult {
    */
   readonly preparedObservation?: TerminalPreparedObservation;
   readonly reason?: string;
-  /** Verbatim home-busy decline code; reason is display text only. */
-  readonly code?: TaskDeclinePayload['code'];
+  /**
+   * The decline code; reason is display text only. A code this version does
+   * not know reads as `unknown`, its raw token in `reportedCode` (#1121).
+   */
+  readonly code?: TaskDeclineCodeReading['code'];
+  readonly reportedCode?: string;
   /** Terminal cause projection; currently the protocol's terminal reason. */
   readonly terminalCause?: string;
   readonly retryable?: boolean;
   /**
-   * The machine-readable runtime failure class, verbatim `task.fail.failure`
+   * The machine-readable runtime failure class of `task.fail.failure`
    * (plaintext on a sealed `task.fail` too). Read the class here, never from
-   * `reason`. Absent when the daemon or the server predates the field, or the
-   * daemon built the terminal while it had no live connection.
+   * `reason`. A class this version does not know reads as `unknown`, its raw
+   * token in `reportedClass` (#1121). Absent when the daemon or the server
+   * predates the field, or the daemon built the terminal while it had no live
+   * connection.
    */
-  readonly failure?: TaskFailure;
+  readonly failure?: TaskFailureReading;
   /** When the receipt store wrote the terminal fact — the first one, by its own first-write-wins rule. */
   readonly recordedAt: string;
 }
@@ -184,7 +192,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
           ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
           ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
-          ...(envelope.payload.failure === undefined ? {} : { failure: envelope.payload.failure }),
+          ...(envelope.payload.failure === undefined ? {} : { failure: readTaskFailure(envelope.payload.failure) }),
           ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
           ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
           recordedAt: receipt.recordedAt,
@@ -202,7 +210,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.retryable !== undefined
           ? { retryable: envelope.payload.retryable }
           : {}),
-        ...(envelope.payload.failure === undefined ? {} : { failure: envelope.payload.failure }),
+        ...(envelope.payload.failure === undefined ? {} : { failure: readTaskFailure(envelope.payload.failure) }),
         ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         ...(envelope.payload.preparedObservation === undefined
@@ -220,7 +228,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         return {
           taskId,
           state: 'failed',
-          ...(envelope.payload.code === undefined ? {} : { code: envelope.payload.code, terminalCause: envelope.payload.code }),
+          ...(envelope.payload.code === undefined ? {} : { ...readDeclineCode(envelope.payload.code), terminalCause: envelope.payload.code }),
           ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
           ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
           recordedAt: receipt.recordedAt,
@@ -229,7 +237,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
       return {
         taskId,
         state: 'failed',
-        ...(envelope.payload.code === undefined ? {} : { code: envelope.payload.code }),
+        ...(envelope.payload.code === undefined ? {} : readDeclineCode(envelope.payload.code)),
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         reason: envelope.payload.reason,
         terminalCause: envelope.payload.reason,

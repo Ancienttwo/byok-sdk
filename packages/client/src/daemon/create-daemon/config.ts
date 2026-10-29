@@ -9,7 +9,7 @@ import { resolveLocalAgentReleaseIdentity } from '../../release-identity';
 import { LocalStorageConfigError } from '../retention/config';
 import { McpToolsetRegistry } from '../toolset-registry';
 import { validatePiByokLauncherConfig } from '../../adapters/pi/pi-adapter';
-import { DEFAULT_MAX_TASK_OUTPUT_BYTES, DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME } from '../task-runner';
+import { DEFAULT_MAX_TASK_OUTPUT_BYTES, DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME, DEFAULT_MAX_CONCURRENT_TASKS } from '../task-runner';
 import { MIN_MAX_INLINE_EVENT_BYTES, DEFAULT_MAX_INLINE_EVENT_BYTES } from '../event-spill';
 import { validateProgressBatcherOptions } from '../progress-batcher';
 import type { DaemonStatus } from '../create-daemon';
@@ -159,6 +159,21 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
     throw new Error(
       `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome must be a positive safe integer (or omitted to use the default of ${DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}) — got ${config.maxConcurrentReaderAttemptsPerAgentHome}. 0, a negative number, NaN, or a non-integer is rejected rather than silently treated as "uncapped".`,
     );
+  }
+  // #1121: like the reader cap above, there is no "uncapped" value.
+  if (
+    config.maxConcurrentTasks !== undefined
+    && !(Number.isSafeInteger(config.maxConcurrentTasks) && config.maxConcurrentTasks > 0)
+  ) {
+    throw new Error(
+      `DaemonConfig.maxConcurrentTasks must be a positive safe integer (or omitted to use the default of ${DEFAULT_MAX_CONCURRENT_TASKS}) — got ${config.maxConcurrentTasks}. 0, a negative number, NaN, or a non-integer is rejected rather than silently treated as "uncapped".`,
+    );
+  }
+  if (
+    config.defaultMaxDurationMs !== undefined
+    && !(Number.isSafeInteger(config.defaultMaxDurationMs) && config.defaultMaxDurationMs > 0)
+  ) {
+    throw new Error(`DaemonConfig.defaultMaxDurationMs must be a positive safe integer (or omitted for no default limit) — got ${config.defaultMaxDurationMs}.`);
   }
   return {
     agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,

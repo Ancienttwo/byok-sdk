@@ -39,7 +39,9 @@ describe('SQLite receipt recovery', () => {
         mailboxLimitBytes: 100_000_000n,
         retentionPolicyId: 'test',
       });
-      const cloud = createByokCloud({ ...stores, clock, crypto,
+      const cloud = createByokCloud({
+        proofReceiptRetention: { authority: stores.proofReceiptAuthority },
+        ...stores, clock, crypto,
         tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock), capabilities: fullCapabilityDeclaration(),
         agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
       const bound = tenantStoresFor({ kind: 'device', tenantId: tenant, productId: 'probe', deviceId }, stores);

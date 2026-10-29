@@ -7,7 +7,7 @@ import { createByokServer, createHmacTokenSigner } from '../index';
 import { isSqliteAvailable } from '../sqlite-support';
 import { pairFakeDaemon, startServer, stopServer } from './test-support';
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 
 describeSqlite('SQLite device enrollment across server restart', () => {
   it('renews the original enrollment without re-pairing and preserves revocation', async () => {

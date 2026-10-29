@@ -17,6 +17,7 @@ import { bindMcpToolsetServerObservation, observeMcpServer } from '../mcp/observ
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { resolveBunBin } from './support/test-bun-bin';
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
+import { sdkBundleImportMetaExemptions } from '../adapters/packaging';
 
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
@@ -425,17 +426,10 @@ runSdkReservedHelperCommand(process.argv.slice(2)).then(handled => {
 `;
 const SEALED_HOST = fileURLToPath(new URL('../../dist/bin/pi-runtime-host-sealed.js', import.meta.url));
 /**
- * Third-party modules whose `import.meta` stays empty in a CommonJS bundle.
- * koffi's loader reads `import.meta.dirname`; a CJS Host passes
- * `nativeAssetRoot`, so the SDK loads the addon itself and never evaluates it.
- * Pi's extension loader resolves aliases only without `PI_BUNDLED_NODE`, which
- * the SDK-reserved helper sets. unpdf reads PDF font defaults inside try/catch.
+ * The reviewed third-party modules whose `import.meta` stays empty in a CommonJS bundle, with the reason each is
+ * not reached (`sdkBundleImportMetaExemptions`, the packaging plugin's list).
  */
-const CJS_EMPTY_IMPORT_META_ALLOWLIST = [
-  /\/koffi\/src\/koffi\/index\.js$/u,
-  /\/@earendil-works\/pi-coding-agent\/dist\/core\/extensions\/loader\.js$/u,
-  /\/unpdf\/dist\/index\.mjs$/u,
-];
+const CJS_EMPTY_IMPORT_META_ALLOWLIST = sdkBundleImportMetaExemptions.map(site => `/${site.package}/${site.file}`);
 
 /** The source module of each empty `import.meta` object esbuild left in a bundle. */
 function emptyImportMetaModules(bundle: string): string[] {
@@ -513,8 +507,8 @@ describe('Pi host — single-pass CommonJS product bundle (#701)', () => {
       expect(result.errors).toEqual([]);
       expect(result.warnings.filter(warning => warning.id === 'empty-import-meta').map(warning => warning.location?.file)).toEqual([]);
       const emptyImportMeta = emptyImportMetaModules(await fs.readFile(path.join(release, 'entry.cjs'), 'utf8'));
-      expect(emptyImportMeta.filter(module => !CJS_EMPTY_IMPORT_META_ALLOWLIST.some(allowed => allowed.test(module)))).toEqual([]);
-      for (const allowed of CJS_EMPTY_IMPORT_META_ALLOWLIST) expect(emptyImportMeta.filter(module => allowed.test(module)), String(allowed)).toHaveLength(1);
+      expect(emptyImportMeta.filter(module => !CJS_EMPTY_IMPORT_META_ALLOWLIST.some(allowed => module.endsWith(allowed)))).toEqual([]);
+      for (const allowed of CJS_EMPTY_IMPORT_META_ALLOWLIST) expect(emptyImportMeta.filter(module => module.endsWith(allowed)), allowed).toHaveLength(1);
       expect(redirects).toBe(redirect === undefined ? 0 : 1);
       const hosts = Object.keys(result.metafile.inputs).map(input => path.basename(input)).filter(name => name.startsWith('pi-runtime-host'));
       expect(hosts).toEqual([redirect === undefined ? 'pi-runtime-host.js' : 'pi-runtime-host-sealed.js']);

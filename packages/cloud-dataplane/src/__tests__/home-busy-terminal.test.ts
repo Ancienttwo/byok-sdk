@@ -10,6 +10,7 @@ import { migrate } from '../migrate';
 import { createPostgresCloudStores } from '../stores';
 import { createPostgresCoreStores } from '../stores/core';
 import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
+import { PostgresProofReceiptRetentionAuthority } from '../stores/proof-receipts';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const tenant = tenantId('home-busy-terminal');
@@ -33,6 +34,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres home-busy terminal — ${SKIP_REASON}`
           const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto, objectStorage });
           const mailboxWake = createInProcessMailboxWake();
           const cloud = createByokCloud({
+            proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
             core, cloud: stores, mailboxWake, clock, crypto,
             tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock),
             capabilities,

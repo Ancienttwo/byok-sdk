@@ -149,6 +149,77 @@ describe('diagnostics collector', () => {
     expect(live.checks.find((check) => check.id === 'lifecycle')?.status).toBe('pass');
   });
 
+  describe('#1114: the clock-skew check reports the daemon-measured device clock offset', () => {
+    const observedAt = '2026-10-14T00:00:00.000Z';
+    const clockSkewCheck = (snapshot: Awaited<ReturnType<typeof collectDiagnostics>>) => snapshot.checks.find((check) => check.id === 'clock-skew');
+
+    it('is unknown while the daemon is offline, without inventing a measurement', async () => {
+      const dir = await tempDir();
+      const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+      expect(snapshot.clockSkew).toEqual({ status: 'unknown', reason: 'daemon-offline' });
+      expect(clockSkewCheck(snapshot)).toEqual({ id: 'clock-skew', status: 'warn', summary: 'unknown (daemon offline)' });
+    });
+
+    it('is unknown when the daemon has not observed a server Date, or reports a malformed one', async () => {
+      const dir = await tempDir();
+      for (const clockSkew of [
+        undefined,
+        null,
+        { deviceAheadMs: Number.NaN, uncertaintyMs: 1000, observedAt },
+        { deviceAheadMs: 5, uncertaintyMs: '1000', observedAt },
+        { deviceAheadMs: 5, uncertaintyMs: 1000 },
+      ]) {
+        const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected({ clockSkew }) });
+        expect(snapshot.clockSkew).toEqual({ status: 'unknown', reason: 'not-observed' });
+        expect(clockSkewCheck(snapshot)).toEqual({ id: 'clock-skew', status: 'warn', summary: 'unknown (no server Date observed since start)' });
+      }
+    });
+
+    it('passes a skew inside the default 60 s device-proof window', async () => {
+      const dir = await tempDir();
+      const clockSkew = { deviceAheadMs: 400, uncertaintyMs: 1100, observedAt };
+      const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected({ clockSkew }) });
+      expect(snapshot.clockSkew).toEqual({ status: 'measured', ...clockSkew });
+      expect(clockSkewCheck(snapshot)).toEqual({ id: 'clock-skew', status: 'pass', summary: 'device clock 0.4 s ahead of server (\u00b11.1 s)' });
+
+      const edge = await collectDiagnostics(config(dir), dir, {
+        adapters: [],
+        connectControl: () => connected({ clockSkew: { ...clockSkew, deviceAheadMs: -60_000 } }),
+      });
+      expect(clockSkewCheck(edge)?.status).toBe('pass');
+    });
+
+    it.each([
+      ['ahead of', 2 * 60 * 60 * 1000, '2.0 h'],
+      ['behind', -2 * 60 * 60 * 1000, '2.0 h'],
+      ['ahead of', 61_000, '1.0 min'],
+    ])('warns a device clock %s the server by %i ms', async (direction, deviceAheadMs, amount) => {
+      const dir = await tempDir();
+      const clockSkew = { deviceAheadMs, uncertaintyMs: 1100, observedAt };
+      const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected({ clockSkew }) });
+      expect(clockSkewCheck(snapshot)).toEqual({
+        id: 'clock-skew',
+        status: 'warn',
+        summary: `device clock ${amount} ${direction} server (\u00b11.1 s); device proofs fail outside the Host's skew window (default 60 s, up to 5 min)`,
+      });
+    });
+
+    it('doctor prints the check and --json carries the measurement', async () => {
+      const dir = await tempDir();
+      const clockSkew = { deviceAheadMs: -7_200_000, uncertaintyMs: 1100, observedAt };
+      const text: string[] = [];
+      await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({ clockSkew }), log: (line) => text.push(line) });
+      expect(text).toContain(
+        `check clock-skew: warn (device clock 2.0 h behind server (\u00b11.1 s); device proofs fail outside the Host's skew window (default 60 s, up to 5 min))`,
+      );
+
+      const json: string[] = [];
+      await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({ clockSkew }), json: true, log: (line) => json.push(line) });
+      const parsed = JSON.parse(json.join('')) as { diagnostics: { clockSkew: unknown } };
+      expect(parsed.diagnostics.clockSkew).toEqual({ status: 'measured', ...clockSkew });
+    });
+  });
+
   it('reports a corrupt health file without changing its bytes', async () => {
     const dir = await tempDir();
     const healthPath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);

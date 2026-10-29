@@ -81,6 +81,20 @@ export function resolveSdkReservedHelperBin(
 }
 
 /**
+ * The helper host of a single-file product, called from inside that product. A
+ * Node SEA re-enters its own executable; a bundle run by Node re-enters Node
+ * with the running bundle as its entry. `node:sea` decides which, so nothing is
+ * inferred from paths or names.
+ */
+export function bundledSdkHelperHost(): SdkHelperHostConfig & { readonly executable: string } {
+  const sea = process.getBuiltinModule('node:sea') as typeof import('node:sea');
+  if (sea.isSea()) return Object.freeze({ mode: 'self-executable' as const, executable: process.execPath });
+  const entry = process.argv[1];
+  if (entry === undefined || !path.isAbsolute(entry)) throw new Error('bundledSdkHelperHost must run inside a bundle started by node <bundle>');
+  return Object.freeze({ mode: 'self-executable' as const, executable: process.execPath, entry });
+}
+
+/**
  * The reserved re-entry is the single-file product, whose bundle holds official
  * Pi (see `SdkHelperHostConfig`). Pi reads the free global `PI_BUNDLED_NODE`
  * once, when its config module evaluates, as its own bundled Node distribution
