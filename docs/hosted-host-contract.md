@@ -53,7 +53,7 @@ Evidence for each row:
 
 - **A.** Each read returns `undefined` for an unknown taskId
   (`packages/cloud/src/cloud.ts:2319-2320`, `packages/cloud/src/cloud.ts:2357-2358`, `packages/cloud/src/cloud.ts:2378-2397`).
-  `cancelTask` throws `task_not_found` (`packages/cloud/src/cloud.ts:2302-2304`).
+  `cancelTask` throws `task_not_found` (`packages/cloud/src/api/task-cancellation.ts:40-42`).
 - **B and C.** Submit opens the attempt first (`packages/cloud/src/cloud.ts:1148-1154`).
   Then it records the offer receipt (`packages/cloud/src/cloud.ts:1187-1201`) and appends to the mailbox (`packages/cloud/src/cloud.ts:1206-1225`).
   It writes the delivered marker last (`packages/cloud/src/cloud.ts:1239`).
@@ -93,20 +93,21 @@ Do not guess a state. Keep the intent unsettled and tell an operator.
 ### cancelTask
 
 `cancelTask(tenant, taskId, reason)` records the cancel and appends `task.cancel` to the device mailbox
-(`packages/cloud/src/cloud.ts:2280-2315`). The Postgres store does this in one transaction:
+(`packages/cloud/src/api/task-cancellation.ts:18-54`). The Postgres store does this in one transaction:
 
 - A task that is already `complete`, `failed` or `cancelled`, with no earlier marker, is returned unchanged.
-  The store writes no marker and no mailbox row (`packages/cloud-dataplane/src/stores/task-cancellations.ts:49-55`).
+  The store writes no marker and no mailbox row (`packages/cloud-dataplane/src/stores/task-cancellations.ts:50-56`).
 - Otherwise the store appends `task.cancel` and records the marker.
   The status becomes `cancelled` when no device owns the task. Otherwise it becomes `cancel_requested`
-  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:74-96`).
+  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:75-98`).
 - The cancel row is exempt from the mailbox limit. A full mailbox does not block it
-  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:76-85`).
+  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:77-86`).
 - A repeat call returns the same marker and mailbox row while the mailbox keeps that row
-  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:57-72`).
-  After retention deletes the row, the attempt returns as it stands, in any status, with no row; nothing is enqueued again
-  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:64-72`). The SQLite and in-memory stores behave the same.
-- The call returns the attempt after the commit (`packages/cloud/src/cloud.ts:2314`, `packages/cloud-dataplane/src/stores/task-cancellations.ts:97-101`).
+  (`packages/cloud-dataplane/src/stores/task-cancellations.ts:58-73`).
+  Once the row is gone (acked and deleted by retention, or discarded by an operator as a dead letter), the attempt returns
+  as it stands, in any status, with no row, and nothing is enqueued again (`packages/cloud-dataplane/src/stores/task-cancellations.ts:64-72`).
+  The SQLite and in-memory stores behave the same; only Postgres has the dead-letter discard.
+- The call returns the attempt after the commit (`packages/cloud/src/api/task-cancellation.ts:53`, `packages/cloud-dataplane/src/stores/task-cancellations.ts:99-103`).
   Embedded `tasks.cancel` returns void (`docs/host-execution-core.md:144`).
 
 After the marker, no claim can win (`packages/cloud-dataplane/src/stores/task-attempts.ts:377-378`).
