@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1857897,
+      "budgetBytes": 1858444,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -23,6 +23,7 @@
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
         "@byok-sdk/protocol",
+        "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
         "@modelcontextprotocol/client",
@@ -163,7 +164,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 63970,
+      "budgetBytes": 64534,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -180,6 +181,7 @@
         "packages/client/dist/agent-memory/index.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
         "child_process",
         "crypto",
@@ -1837,6 +1839,38 @@
       ]
     }
   },
+  "@byok-sdk/protocol/agent-memory": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Agent memory Host contract; schema-free",
+      "budgetBytes": 1418,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": false,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/protocol/dist/agent-memory.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/protocol/dist/agent-memory.d.ts"
+      ],
+      "bareImports": [],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/protocol/constants": {
     "kind": "exports",
     "policy": {
@@ -1873,7 +1907,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1417,
+      "budgetBytes": 1532,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1968,11 +2002,110 @@
       ]
     }
   },
+  "@byok-sdk/server/execution-core": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
+      "budgetBytes": 389994,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      }
+    },
+    "facts": {
+      "target": "packages/server/dist/execution-core/index.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/server/dist/execution-core/index.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/core",
+        "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/protocol",
+        "@byok-sdk/protocol/agent-memory",
+        "@byok-sdk/protocol/constants",
+        "@cfworker/json-schema",
+        "async_hooks",
+        "crypto",
+        "fs",
+        "path",
+        "zod"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "async_hooks",
+          "crypto",
+          "fs",
+          "path"
+        ],
+        "thirdParty": []
+      },
+      "codegen": [
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 28,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 156,
+          "rule": "Function reference"
+        }
+      ]
+    }
+  },
+  "@byok-sdk/server/execution-core/canonical": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Worker-safe canonical JSON hash",
+      "budgetBytes": 574,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/server/dist/execution-core/canonical.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/server/dist/execution-core/canonical.d.ts"
+      ],
+      "bareImports": [
+        "crypto"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "crypto"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/server/package.json": {
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1455,
+      "budgetBytes": 1761,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2082,7 +2215,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1805867,
+      "budgetBytes": 1806460,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2098,6 +2231,7 @@
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
         "@byok-sdk/protocol",
+        "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
         "@modelcontextprotocol/client",
