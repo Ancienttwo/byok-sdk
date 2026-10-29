@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildServiceDefinition } from '../bin/commands/service';
+import { cliServiceDefinition } from '../bin/commands/service';
 import { HostLayoutInputError, resolveHostLayout, type DaemonConfig } from '../index';
 import { DeviceStore } from '../daemon/store';
 import { describeEffectiveDaemonConfig } from '../daemon/config-schema/effective';
@@ -77,7 +77,7 @@ describe('resolveHostLayout (#1094)', () => {
     const layout = resolveHostLayout(product);
     expect(DeviceStore.resolveDir(product.productId)).toBe(layout.storeDir);
     const config = { ...product, serverUrl: 'https://byok.example' } as DaemonConfig;
-    expect(buildServiceDefinition(config, '/etc/salesko.json', []).logDir).toBe(layout.logDir);
+    expect(cliServiceDefinition(config, '/etc/salesko.json', []).logDir).toBe(layout.logDir);
     const effective = describeEffectiveDaemonConfig({
       config, warnings: [], memoryHelper: { state: 'not-needed' }, agentMemoryMcpAdmission: 'unavailable',
       storeDir: layout.storeDir, scratchRoot: path.join(layout.storeDir, 'tmp'), adapters: [], runtimeSource: 'injected',

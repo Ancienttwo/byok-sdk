@@ -2,12 +2,15 @@ import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
+import { createManagedLifecycle, type ManagedLifecycleFs } from './managed-lifecycle';
+import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceLifecycle } from './service-types';
+import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit';
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface SystemdDeps {
   run?: Runner;
-  fs?: Pick<typeof fsp, 'mkdir' | 'writeFile' | 'rm' | 'stat'>;
+  fs?: ManagedLifecycleFs;
   homedir?: () => string;
 }
 
@@ -132,23 +135,21 @@ function quoteSystemdArg(value: string): string {
 }
 
 /**
- * Generates a systemd user unit for `name` running `program`, logging to
- * `logDir`. Pure/no I/O — unit-tested directly for exact content shape, and
- * (locally, when `systemd-analyze` is available) verified with
- * `systemd-analyze verify` — see `templates/service/systemd/README.md`.
+ * Generates a systemd user unit for `name` that runs only the stable
+ * `launcherPath` (#1097), logging to `logDir`. Pure/no I/O — unit-tested
+ * directly for exact content shape, and (locally, when `systemd-analyze` is
+ * available) verified with `systemd-analyze verify` — see
+ * `templates/service/systemd/README.md`.
  *
- * `Restart=on-failure` + `RestartSec=10` is the crash-restart M3-4 asks for,
- * delegated entirely to systemd. `StandardOutput`/`StandardError` are
- * pointed at append-mode files under `logDir` for parity with the launchd
- * plist's `StandardOutPath`/`StandardErrorPath` and the WinSW `<logpath>` —
- * systemd's own native idiom (the journal, `journalctl --user -u <name>`)
- * still works unconditionally alongside this (systemd always journals
- * unit's output; explicitly setting `StandardOutput=append:...` needs
- * systemd >= 240, present on every currently-supported distro this SDK
- * targets) and is documented in the README as the alternative.
+ * `Restart=always` + `RestartPreventExitStatus=0` + `RestartSec=10` is the
+ * exit-code contract in `exit-codes.ts`: any exit but 0 restarts.
+ * `StandardOutput`/`StandardError` append to redirect files under `logDir`
+ * that receive only early-boot crash output; the daemon writes its own
+ * rotated log (`service-log.ts`). The journal (`journalctl --user -u
+ * <name>`) still records the unit's output alongside.
  */
-export function generateSystemdUnit(def: { name: string; displayName: string; program: ServiceProgram; logDir: string }): string {
-  const { name, displayName, program, logDir } = def;
+export function generateSystemdUnit(def: { name: string; displayName: string; launcherPath: string; workingDirectory: string; logDir: string }): string {
+  const { name, displayName, launcherPath, workingDirectory, logDir } = def;
   // Every interpolated value is validated/escaped BEFORE being written into
   // the template below — never after — so there is no path that emits an
   // unchecked value into the generated unit file (cross-model-review P1
@@ -159,21 +160,21 @@ export function generateSystemdUnit(def: { name: string; displayName: string; pr
   // `createSystemdLifecycle`.
   assertNoControlChars(name, 'name');
   assertNoControlChars(displayName, 'displayName');
-  const cwd = program.cwd ?? os.homedir();
-  assertNoControlChars(cwd, 'program.cwd');
-  const outLog = path.join(logDir, `${name}.out.log`);
-  const errLog = path.join(logDir, `${name}.err.log`);
+  assertNoControlChars(workingDirectory, 'workingDirectory');
+  const outLog = path.join(logDir, SERVICE_REDIRECT_STDOUT_FILENAME);
+  const errLog = path.join(logDir, SERVICE_REDIRECT_STDERR_FILENAME);
   assertNoControlChars(outLog, 'logDir');
   assertNoControlChars(errLog, 'logDir');
-  const execStart = [program.command, ...program.args].map(quoteSystemdArg).join(' ');
-  return `[Unit]
+  return `# ${SERVICE_UNIT_MARKER}
+[Unit]
 Description=${escapeSystemdPercent(displayName)}
 
 [Service]
 Type=simple
-ExecStart=${execStart}
-WorkingDirectory=${escapeSystemdPercent(cwd)}
-Restart=on-failure
+ExecStart=${quoteSystemdArg(launcherPath)}
+WorkingDirectory=${escapeSystemdPercent(workingDirectory)}
+Restart=always
+RestartPreventExitStatus=0
 RestartSec=10
 StandardOutput=append:${escapeSystemdPercent(outLog)}
 StandardError=append:${escapeSystemdPercent(errLog)}
@@ -204,76 +205,53 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
 
   const name = sanitizeServiceName(def.name);
   const unitName = `${name}.service`;
-  const unitPath = () => path.join(homedir(), '.config', 'systemd', 'user', unitName);
+  const unitPath = path.join(homedir(), '.config', 'systemd', 'user', unitName);
+  const launcherPath = serviceLauncherPath(def.storeDir, name, 'linux');
 
-  async function fileExists(p: string): Promise<boolean> {
-    try {
-      await fs.stat(p);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async function writeUnit(program: ServiceProgram): Promise<void> {
-    const unit = generateSystemdUnit({ name, displayName: def.displayName ?? def.name, program, logDir: def.logDir });
-    await fs.mkdir(path.dirname(unitPath()), { recursive: true });
-    await fs.mkdir(def.logDir, { recursive: true });
-    await fs.writeFile(unitPath(), unit, 'utf8');
-  }
-
-  async function install(opts: ServiceInstallOptions = {}): Promise<void> {
-    await writeUnit(opts.program ?? def.program);
-    await runOrThrow(run, 'systemctl', ['--user', 'daemon-reload'], 'systemctl daemon-reload');
-    // `enable --now` both enables (survives logout/reboot, given linger)
-    // AND starts in one call.
-    await runOrThrow(run, 'systemctl', ['--user', 'enable', '--now', unitName], 'systemctl enable --now');
-  }
-
-  async function uninstall(): Promise<void> {
-    // Tolerant of "wasn't installed/running" (fine — nothing to
-    // stop/unregister), but a REAL failure (permission denied, no running
-    // `--user` instance, a manager fault) must NOT be masked: only delete
-    // the unit file once we know it's actually disabled/stopped or was
-    // never there, so a still-running unit never loses its control file
-    // and becomes an orphan nobody can stop/uninstall (cross-model-review
-    // P1 #7).
-    await runIdempotent(run, 'systemctl', ['--user', 'disable', '--now', unitName], 'systemctl disable --now', SYSTEMD_NOT_LOADED);
-    await fs.rm(unitPath(), { force: true });
-    await run('systemctl', ['--user', 'daemon-reload']); // best-effort — no control file left to protect at this point
-  }
-
-  async function start(): Promise<void> {
-    if (!(await fileExists(unitPath()))) {
-      throw new Error(`service "${name}" is not installed (no unit file at ${unitPath()}) — call install() first`);
-    }
-    await runOrThrow(run, 'systemctl', ['--user', 'start', unitName], 'systemctl start');
-  }
-
-  async function stop(): Promise<void> {
-    // Tolerant of "already stopped/not loaded" (fine — nothing to stop),
-    // but a REAL failure (permission denied, no running `--user` instance,
-    // a manager fault) must be surfaced rather than silently reported as
-    // "stopped" (cross-model-review P1 #7, round 2, second half).
-    await runIdempotent(run, 'systemctl', ['--user', 'stop', unitName], 'systemctl stop', SYSTEMD_NOT_LOADED);
-  }
-
-  async function status(): Promise<ServiceStatusResult> {
-    const installed = await fileExists(unitPath());
-    const result = await run('systemctl', ['--user', 'is-active', unitName]);
-    const detail = (result.stdout || result.stderr).trim();
-    const running = result.code === 0 && detail === 'active';
-    // Finding P1 #2 (residual, round 3): a bus-connect/permission failure on
-    // THIS query is not evidence of "inactive" — it means `systemctl`
-    // couldn't even be asked. Reuses the same `neverAbsence`-style pattern
-    // this file already applies to `uninstall()`/`stop()` (see
-    // `SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE`'s own doc comment) so a
-    // caller like `bin/commands/unpair.ts`'s `checkServiceState` can tell
-    // "confirmed not running" apart from "couldn't tell" — see
-    // `service-types.ts`'s `ServiceStatusResult.determinate`.
-    const determinate = running || !SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
-    return { installed, running, determinate, detail };
-  }
-
-  return { install, uninstall, start, stop, status };
+  return createManagedLifecycle(def, {
+    serviceName: name,
+    unitPath,
+    launcherPath,
+    files: () => [
+      { path: unitPath, content: generateSystemdUnit({ name, displayName: def.displayName ?? def.name, launcherPath, workingDirectory: homedir(), logDir: def.logDir }) },
+      { path: launcherPath, content: generateServiceLauncher(def.program), mode: 0o755 },
+    ],
+    async activate() {
+      await runOrThrow(run, 'systemctl', ['--user', 'daemon-reload'], 'systemctl daemon-reload');
+      // `enable` survives logout/reboot (given linger); `restart` starts a
+      // stopped unit and reloads a running one onto the rewritten launcher.
+      await runOrThrow(run, 'systemctl', ['--user', 'enable', unitName], 'systemctl enable');
+      await runOrThrow(run, 'systemctl', ['--user', 'restart', unitName], 'systemctl restart');
+    },
+    async deactivate() {
+      // Tolerant of "wasn't installed/running", but a REAL failure
+      // (permission denied, no running `--user` instance, a manager fault)
+      // must NOT be masked: the unit file is only deleted once it is
+      // disabled/stopped or was never there (cross-model-review P1 #7).
+      await runIdempotent(run, 'systemctl', ['--user', 'disable', '--now', unitName], 'systemctl disable --now', SYSTEMD_NOT_LOADED);
+    },
+    async removeFiles() {
+      await fs.rm(unitPath, { force: true });
+      await fs.rm(launcherPath, { force: true });
+      await run('systemctl', ['--user', 'daemon-reload']); // best-effort — no control file left to protect at this point
+    },
+    async start() {
+      await runOrThrow(run, 'systemctl', ['--user', 'start', unitName], 'systemctl start');
+    },
+    async stop() {
+      // Tolerant of "already stopped/not loaded", but a REAL failure must
+      // be surfaced rather than reported as "stopped" (P1 #7, round 2).
+      await runIdempotent(run, 'systemctl', ['--user', 'stop', unitName], 'systemctl stop', SYSTEMD_NOT_LOADED);
+    },
+    async query() {
+      const result = await run('systemctl', ['--user', 'is-active', unitName]);
+      const detail = (result.stdout || result.stderr).trim();
+      const running = result.code === 0 && detail === 'active';
+      // Finding P1 #2 (residual, round 3): a bus-connect/permission failure
+      // on THIS query is not evidence of "inactive"; see
+      // `service-types.ts`'s `ServiceStatusResult.determinate`.
+      const determinate = running || !SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
+      return { running, determinate, detail };
+    },
+  }, fs);
 }

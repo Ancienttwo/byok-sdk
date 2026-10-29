@@ -1,8 +1,9 @@
-import os from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { createLaunchdLifecycle, generateLaunchdPlist } from '../lifecycle/launchd';
 import type { RunResult, Runner } from '../lifecycle/exec-runner';
 import { nodeAgentProgram, type ServiceDefinition } from '../lifecycle/service-types';
+import { SERVICE_UNIT_MARKER } from '../lifecycle/service-unit';
+import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -12,39 +13,31 @@ function fail(code = 1, stderr = 'boom'): RunResult {
 }
 
 describe('lifecycle/launchd: generateLaunchdPlist', () => {
-  it('renders Label/ProgramArguments/WorkingDirectory/RunAtLoad/KeepAlive/log paths', () => {
+  it('renders the marker, a launcher-only ProgramArguments, RunAtLoad, KeepAlive and bounded redirect paths', () => {
     const xml = generateLaunchdPlist({
       label: 'com.acme.agent',
-      program: { command: '/usr/local/bin/node', args: ['/opt/agent/byok-agent.js', 'start', '--config', '/etc/agent/config.json'], cwd: '/opt/agent' },
+      launcherPath: '/Users/t/.byok/acme/service/com.acme.agent.launcher.sh',
+      workingDirectory: '/Users/t',
       logDir: '/var/log/acme',
     });
 
-    expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<!-- byok-sdk-service-unit:')).toBe(true);
     expect(xml).toContain('<key>Label</key>\n  <string>com.acme.agent</string>');
-    expect(xml).toContain(
-      '<key>ProgramArguments</key>\n  <array>\n    <string>/usr/local/bin/node</string>\n    <string>/opt/agent/byok-agent.js</string>\n    <string>start</string>\n    <string>--config</string>\n    <string>/etc/agent/config.json</string>\n  </array>',
-    );
-    expect(xml).toContain('<key>WorkingDirectory</key>\n  <string>/opt/agent</string>');
+    // #1097: the unit names only the stable launcher — no versioned path, no args, no env.
+    expect(xml).toContain('<key>ProgramArguments</key>\n  <array>\n    <string>/Users/t/.byok/acme/service/com.acme.agent.launcher.sh</string>\n  </array>');
+    expect(xml).not.toContain('EnvironmentVariables');
+    expect(xml).toContain('<key>WorkingDirectory</key>\n  <string>/Users/t</string>');
     expect(xml).toContain('<key>RunAtLoad</key>\n  <true/>');
-    // Crash-restart only, not on a clean exit(0) — see launchd.ts's doc comment.
+    // Exit-code contract: only exit 0 stops (see exit-codes.ts).
     expect(xml).toContain('<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>');
     expect(xml).toContain('<key>ThrottleInterval</key>\n  <integer>10</integer>');
-    expect(xml).toContain('<key>StandardOutPath</key>\n  <string>/var/log/acme/com.acme.agent.out.log</string>');
-    expect(xml).toContain('<key>StandardErrorPath</key>\n  <string>/var/log/acme/com.acme.agent.err.log</string>');
+    expect(xml).toContain('<key>StandardOutPath</key>\n  <string>/var/log/acme/service-stdout.log</string>');
+    expect(xml).toContain('<key>StandardErrorPath</key>\n  <string>/var/log/acme/service-stderr.log</string>');
   });
 
-  it('defaults WorkingDirectory to the homedir when program.cwd is omitted', () => {
-    const xml = generateLaunchdPlist({ label: 'x', program: { command: 'node', args: [] }, logDir: '/tmp/logs' });
-    expect(xml).toContain(`<string>${os.homedir()}</string>`);
-  });
-
-  it('XML-escapes special characters in args', () => {
-    const xml = generateLaunchdPlist({
-      label: 'x',
-      program: { command: 'node', args: ['--flag=<a & b> "quoted" \'single\''] },
-      logDir: '/tmp/logs',
-    });
-    expect(xml).toContain('&lt;a &amp; b&gt; &quot;quoted&quot; &apos;single&apos;');
+  it('XML-escapes special characters in the launcher path', () => {
+    const xml = generateLaunchdPlist({ label: 'x', launcherPath: '/a & <b>/"q"/l.sh', workingDirectory: '/h', logDir: '/tmp/logs' });
+    expect(xml).toContain('/a &amp; &lt;b&gt;/&quot;q&quot;/l.sh');
   });
 });
 
@@ -53,18 +46,20 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     return {
       name: 'Acme Agent!!',
       program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start'] },
+      storeDir: '/store',
       logDir: '/tmp/acme-logs',
+      owner: 'cli',
       ...overrides,
     };
   }
 
+  const PLIST = '/h/Library/LaunchAgents/Acme-Agent-.plist';
+  const LAUNCHER = '/store/service/Acme-Agent-.launcher.sh';
   function fakeFs() {
-    return {
-      mkdir: vi.fn().mockResolvedValue(undefined),
-      writeFile: vi.fn().mockResolvedValue(undefined),
-      rm: vi.fn().mockResolvedValue(undefined),
-      stat: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
-    };
+    return memoryServiceFs();
+  }
+  function installedFs() {
+    return memoryServiceFs({ [PLIST]: DRIFTED_MARKED_UNIT });
   }
 
   it('sanitizes the service name into a safe launchd label used for the plist path and service target', async () => {
@@ -112,34 +107,23 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     await expect(lifecycle.install()).rejects.toThrow(/launchctl bootstrap failed \(exit 1\): Input\/output error/);
   });
 
-  it('install() opts.program overrides the definition program for that call only', async () => {
+  it('issue #392/#1097: the launcher execs the Host program verbatim; the plist never changes with it', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(ok());
     const fs = fakeFs();
-    const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
-    await lifecycle.install({ program: { command: '/other/node', args: ['x'] } });
-    const written = fs.writeFile.mock.calls[0]?.[1] as string;
-    expect(written).toContain('<string>/other/node</string>');
-  });
-
-  it('issue #392: a Host program is written verbatim; nodeAgentProgram({ service: true }) carries --service last', async () => {
-    const run = vi.fn<Runner>().mockResolvedValue(ok());
-    const fs = fakeFs();
-    const lifecycle = createLaunchdLifecycle(
+    await createLaunchdLifecycle(
       def({ program: { command: '/opt/host/bin/host-agent', args: ['run', '--profile', 'default'] } }),
       { run, fs, homedir: () => '/h', getuid: () => 501 },
-    );
-    await lifecycle.install();
-    const written = fs.writeFile.mock.calls[0]?.[1] as string;
-    expect(written).toContain(
-      '<string>/opt/host/bin/host-agent</string>\n    <string>run</string>\n    <string>--profile</string>\n    <string>default</string>\n  </array>',
-    );
-    expect(written).not.toContain('--service');
+    ).install();
+    expect(fs.files.get(LAUNCHER)).toBe(`#!/bin/sh\n# ${SERVICE_UNIT_MARKER}\nexec '/opt/host/bin/host-agent' 'run' '--profile' 'default'\n`);
+    expect(fs.chmod).toHaveBeenCalledWith(LAUNCHER, 0o755);
+    const plist = fs.files.get(PLIST);
 
-    await lifecycle.install({ program: nodeAgentProgram({ agentBin: '/opt/agent.js', configPath: '/etc/agent.json', nodeBin: '/usr/bin/node', service: true }) });
-    const rewritten = fs.writeFile.mock.calls[1]?.[1] as string;
-    expect(rewritten).toContain(
-      '<string>start</string>\n    <string>--config</string>\n    <string>/etc/agent.json</string>\n    <string>--service</string>\n  </array>',
-    );
+    await createLaunchdLifecycle(
+      def({ program: nodeAgentProgram({ agentBin: '/opt/agent.js', configPath: '/etc/agent.json', nodeBin: '/usr/bin/node', service: true }) }),
+      { run, fs, homedir: () => '/h', getuid: () => 501 },
+    ).install();
+    expect(fs.files.get(LAUNCHER)).toContain(`exec '/usr/bin/node' '/opt/agent.js' 'start' '--config' '/etc/agent.json' '--service'\n`);
+    expect(fs.files.get(PLIST)).toBe(plist);
   });
 
   it('uninstall() bootouts (idempotent "not loaded") and removes the plist file', async () => {
@@ -151,6 +135,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
 
     expect(run).toHaveBeenCalledWith('launchctl', ['bootout', 'gui/501/Acme-Agent-']);
     expect(fs.rm).toHaveBeenCalledWith('/h/Library/LaunchAgents/Acme-Agent-.plist', { force: true });
+    expect(fs.rm).toHaveBeenCalledWith(LAUNCHER, { force: true });
   });
 
   it('uninstall() throws and does NOT delete the plist when bootout fails for a real reason (P1 #7)', async () => {
@@ -187,8 +172,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
 
   it('start() bootstraps (best-effort) then kickstarts (hard-fail) when the plist exists', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(ok());
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
 
     await lifecycle.start();
@@ -198,8 +182,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
 
   it('start() throws if kickstart fails even though the plist exists', async () => {
     const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'kickstart' ? fail(1) : ok()));
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
     await expect(lifecycle.start()).rejects.toThrow(/launchctl kickstart failed/);
   });
@@ -219,23 +202,23 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
 
   it('status() reports installed=true/running=true when the plist exists and launchctl print reports "state = running"', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(ok('gui/501/Acme-Agent- = {\n\tstate = running\n}'));
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
 
     const status = await lifecycle.status();
-    expect(status).toEqual({
+    expect(status).toMatchObject({
       installed: true,
       running: true,
       determinate: true,
       detail: expect.stringContaining('state = running'),
+      unit: { state: 'repairable', unitPath: PLIST, launcherPath: LAUNCHER },
+      logs: { dir: '/tmp/acme-logs' },
     });
   });
 
   it('status() reports running=false, determinate=true when launchctl print fails (not loaded), even though the plist file exists', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'Could not find service'));
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
 
     const status = await lifecycle.status();
@@ -253,8 +236,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
 
   it('finding P1 #2 (residual, round 3): status() reports determinate=false (never a confirmed "not running") when launchctl cannot find the GUI domain for this uid', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(112, 'Could not find domain for user gui: 1'));
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 1 });
 
     const status = await lifecycle.status();
@@ -264,8 +246,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
 
   it('finding P1 #2 (residual, round 3): status() reports determinate=false on "Operation not permitted"', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(1, 'Operation not permitted'));
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
 
     const status = await lifecycle.status();
@@ -277,8 +258,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     const originalGetuid = process.getuid;
     delete process.getuid;
     try {
-      const fs = fakeFs();
-      fs.stat.mockResolvedValue({} as never);
+      const fs = installedFs();
       const lifecycle = createLaunchdLifecycle(def(), { run: vi.fn().mockResolvedValue(ok()), fs, homedir: () => '/h' });
       await expect(lifecycle.status()).rejects.toThrow(/process\.getuid unavailable/);
     } finally {

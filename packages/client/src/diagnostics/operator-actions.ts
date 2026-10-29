@@ -13,7 +13,7 @@ import type { DaemonConfig } from '../daemon/create-daemon';
 import { quarantineCorruptOperationalHealth } from './diagnostics';
 import type { OperationalHealthFixResult } from './types';
 import type { DiagnoseDeviceOptions } from './device-doctor';
-import { createSupportBundle, writeSupportBundle } from './support-bundle';
+import { createSupportBundle, isSupportBundleOutputInStore, writeSupportBundle } from './support-bundle';
 
 const MESSAGES = {
   'confirmation-required': 'Explicit confirmation is required for this local maintenance action.',
@@ -42,7 +42,7 @@ export type DeviceHealthQuarantineResult = OperationalHealthFixResult & {
   action: 'quarantine-operational-health'; scope: 'device';
 };
 export interface ExportDeviceSupportBundleInput extends DiagnoseDeviceOptions {
-  /** Absolute, previously unused file in an existing directory. */
+  /** Absolute, previously unused file in an existing directory outside the device store. */
   outputPath: string;
 }
 export interface DeviceSupportBundleExportResult {
@@ -101,6 +101,7 @@ export async function exportDeviceSupportBundle(
   }
   try {
     const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
+    if (isSupportBundleOutputInStore(storeDir, input.outputPath)) throw new DeviceOperatorError('invalid-input');
     const bundle = await createSupportBundle(config, storeDir, {
       adapters: input.adapters, runtimeProbeTimeoutMs: input.runtimeProbeTimeoutMs,
     });

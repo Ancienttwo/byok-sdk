@@ -6,6 +6,8 @@ import { auditLogPath, readAuditRecords, readLastEnvironmentRecord, parseEnviron
 import { parseRuntimeObservations } from '../../runtime-detection';
 import { connectControlClient } from '../control-client';
 import { resolveStoreDir } from '../config';
+import { serviceLogDir } from '../../daemon/host-layout';
+import { inspectServiceLogs } from '../../lifecycle/service-log';
 import { formatLiveStatusLines, formatStatusLines, type StatusView } from '../format';
 import { deriveTasksFromRecords, lastLifecycle, tallyTaskStates } from '../tasks-view';
 
@@ -35,10 +37,11 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
   const storeDir = resolveStoreDir(config);
   const connectControl = deps.connectControl ?? connectControlClient;
 
-  const [record, records, environment] = await Promise.all([
+  const [record, records, environment, logs] = await Promise.all([
     new DeviceStore(storeDir, createDeviceCredentialStore({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials })).load(),
     readAuditRecords(storeDir),
     readLastEnvironmentRecord(storeDir),
+    inspectServiceLogs(serviceLogDir(storeDir)),
   ]);
   const tasks = deriveTasksFromRecords(records);
   const lastRuntimes = records.findLast(event => event.kind === 'runtimes-detected');
@@ -59,6 +62,8 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
     ...(environment ? { environment } : {}),
   };
   for (const line of formatStatusLines(view)) log(line);
+  // #1097: where the daemon log and the service manager's redirect files are, and how large.
+  log(`logs: ${logs.dir} ${logs.status} totalBytes=${logs.totalBytes}`);
 
   const conn = await connectControl({ storeDir, productId: config.productId });
   if (!conn.ok) {

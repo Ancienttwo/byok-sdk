@@ -69,6 +69,13 @@ export interface DiagnosticsSnapshot {
     entries: Array<{ nameHash: string; sizeBytes: number; modifiedAt: string }>;
     reason?: string;
   };
+  /** #1097: the daemon log and the service manager's redirect files under `serviceLogDir(storeDir)`. */
+  logs: {
+    status: 'present' | 'missing' | 'unavailable';
+    totalBytes: number;
+    files: Array<{ kind: 'daemon' | 'service-manager'; sizeBytes: number }>;
+    truncated: boolean;
+  };
   checks: DiagnosticCheck[];
 }
 

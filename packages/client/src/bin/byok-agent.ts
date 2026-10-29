@@ -14,14 +14,17 @@ import { runDoctorCommand } from './commands/doctor';
 import { runConfigCheckCommand } from './commands/config-check';
 import { runRuntimesCommand } from './commands/runtimes';
 import {
-  buildServiceDefinition,
+  cliServiceDefinition,
   runInstallCommand,
   runServiceStartCommand,
   runServiceStatusCommand,
   runServiceStopCommand,
   runUninstallCommand,
 } from './commands/service';
-import { formatStartErrorReason, runStartCommand, startExitCode, type StartOutcome } from './commands/start';
+import { formatStartErrorReason, runStartCommand, type StartOutcome } from './commands/start';
+import { daemonExitCode, EXIT_FAILURE } from '../lifecycle/exit-codes';
+import { boundServiceRedirectLogs, openDaemonLog } from '../lifecycle/service-log';
+import { serviceLogDir } from '../daemon/host-layout';
 import { runStatusCommand } from './commands/status';
 import { runSupportBundleCommand } from './commands/support-bundle';
 import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
@@ -117,7 +120,7 @@ function usage(): never {
       '  byok-agent reject <approvalId> [--reason <text>] [--config <path>]',
       '',
       '  Background OS service (launchd/systemd/WinSW) — see templates/service/**:',
-      '  byok-agent install [--config <path>] [--name <svc>] [--agent-bin <path>] [--node-bin <path>] [--winsw-bin <path>] [--winsw-install-dir <path>]',
+      '  byok-agent install [--config <path>] [--name <svc>] [--agent-bin <path>] [--node-bin <path>] [--winsw-bin <path>] [--winsw-install-dir <path>] [--replace-unmarked]',
       '  byok-agent uninstall [--config <path>] [--name <svc>]',
       '  byok-agent service-start [--config <path>] [--name <svc>]',
       '  byok-agent service-stop [--config <path>] [--name <svc>]',
@@ -127,8 +130,13 @@ function usage(): never {
   process.exit(1);
 }
 
-/** A configuration that cannot load is the `config_invalid` halt: restarting with it fails the same way. */
-async function startOutcome(rest: string[]): Promise<StartOutcome> {
+/**
+ * A configuration that cannot load is the `config_invalid` halt: restarting
+ * with it fails the same way. Under `--service` the daemon writes its own
+ * rotated log (#1097, `lifecycle/service-log.ts`); the service manager's
+ * redirect keeps only output from before it opens, such as a config error.
+ */
+async function startOutcome(rest: string[], service: boolean): Promise<StartOutcome> {
   const configPath = configPathFrom(rest);
   let config: ReturnType<typeof loadConfig>;
   try {
@@ -141,7 +149,15 @@ async function startOutcome(rest: string[]): Promise<StartOutcome> {
     return { kind: 'halted', reason: 'config_invalid' };
   }
   const controller = abortOnSignal();
-  return runStartCommand(config, { signal: controller.signal });
+  if (!service) return runStartCommand(config, { signal: controller.signal });
+  const logDir = serviceLogDir(resolveStoreDir(config));
+  boundServiceRedirectLogs(logDir);
+  const daemonLog = openDaemonLog({ logDir });
+  try {
+    return await runStartCommand(config, { signal: controller.signal, log: daemonLog.write, error: daemonLog.write });
+  } finally {
+    daemonLog.close();
+  }
 }
 
 function configPathFrom(args: string[]): string | undefined {
@@ -190,10 +206,10 @@ async function main(): Promise<void> {
       if (service) await applyLoginShellEnvironment();
       // exitCode, not exit(): a piped stdout/stderr (a service log) drains the
       // final lines, the halt remedy included, before the process ends.
-      process.exitCode = startExitCode(await startOutcome(rest), service);
+      process.exitCode = daemonExitCode(await startOutcome(rest, service), service);
     } catch (error) {
       console.error(formatStartErrorReason(error));
-      process.exitCode = 1;
+      process.exitCode = EXIT_FAILURE;
     }
     return;
   }
@@ -309,7 +325,7 @@ async function main(): Promise<void> {
     let lifecycle: ServiceLifecycle | undefined;
     if (configPath) {
       try {
-        lifecycle = createServiceLifecycle(buildServiceDefinition(config, configPath, rest));
+        lifecycle = createServiceLifecycle(cliServiceDefinition(config, configPath, rest));
       } catch {
         lifecycle = undefined;
       }

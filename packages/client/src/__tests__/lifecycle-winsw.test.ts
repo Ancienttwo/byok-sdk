@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWinswLifecycle, generateWinswXml } from '../lifecycle/winsw';
 import type { RunResult, Runner } from '../lifecycle/exec-runner';
 import { nodeAgentProgram, type ServiceDefinition } from '../lifecycle/service-types';
+import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -23,16 +24,19 @@ describe('lifecycle/winsw: generateWinswXml', () => {
       logDir: 'C:\\acme\\logs',
     });
 
+    // #1097: the SCM registration names only the stable <id>.exe; this descriptor is the launcher.
+    expect(xml.startsWith('<!-- byok-sdk-service-unit:')).toBe(true);
     expect(xml).toContain('<id>acme-agent</id>');
     expect(xml).toContain('<name>Acme Agent</name>');
-    expect(xml).toContain('<description>Acme Agent (managed by byok-agent; see templates/service/winsw/README.md)</description>');
+    expect(xml).toContain('<description>Acme Agent (managed by @byok-sdk/client)</description>');
     expect(xml).toContain('<executable>C:\\Program Files\\nodejs\\node.exe</executable>');
     expect(xml).toContain(
       '<argument>C:\\acme\\byok-agent.js</argument>\n  <argument>start</argument>\n  <argument>--config</argument>\n  <argument>C:\\acme\\config.json</argument>',
     );
     expect(xml).toContain('<workingdirectory>C:\\acme</workingdirectory>');
     expect(xml).toContain('<logpath>C:\\acme\\logs</logpath>');
-    expect(xml).toContain('<log mode="roll"></log>');
+    // The redirect is bounded like the launchd/systemd one (SERVICE_REDIRECT_LIMITS).
+    expect(xml).toContain('<log mode="roll-by-size">\n    <sizeThreshold>1024</sizeThreshold>\n    <keepFiles>2</keepFiles>\n  </log>');
     expect(xml).toContain('<startmode>Automatic</startmode>');
     expect(xml).toContain('<onfailure action="restart" delay="10 sec"/>');
     expect(xml).toContain('<onfailure action="restart" delay="30 sec"/>');
@@ -61,20 +65,20 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     return {
       name: 'Acme Agent!!',
       program: { command: 'C:\\node.exe', args: ['C:\\agent.js', 'start'] },
+      storeDir: 'C:\\store',
       logDir: 'C:\\acme\\logs',
+      owner: 'cli',
       windows: { winswBin: 'C:\\bundled\\WinSW.exe' },
       ...overrides,
     };
   }
 
+  const XML = 'C:\\acme\\logs/Acme-Agent-.xml';
   function fakeFs() {
-    return {
-      mkdir: vi.fn().mockResolvedValue(undefined),
-      writeFile: vi.fn().mockResolvedValue(undefined),
-      rm: vi.fn().mockResolvedValue(undefined),
-      copyFile: vi.fn().mockResolvedValue(undefined),
-      stat: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
-    };
+    return memoryServiceFs();
+  }
+  function installedFs() {
+    return memoryServiceFs({ [XML]: DRIFTED_MARKED_UNIT });
   }
 
   // The image-lock retry tests below fake the timer queue instead of paying
@@ -124,19 +128,28 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe install', 'C:\\acme\\logs/Acme-Agent-.exe start']);
   });
 
-  it('issue #394: a Host program is written verbatim; nodeAgentProgram({ service: true }) carries --service last', async () => {
+  it('issue #394: the descriptor runs the Host program verbatim; nodeAgentProgram({ service: true }) carries --service last', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(ok());
     const fs = fakeFs();
-    const lifecycle = createWinswLifecycle(def(), { run: vi.fn<Runner>().mockResolvedValue(ok()), fs });
-    await lifecycle.install();
-    const written = fs.writeFile.mock.calls[0]?.[1] as string;
-    expect(written).toContain('<argument>start</argument>');
-    expect(written).not.toContain('--service');
+    await createWinswLifecycle(def(), { run, fs }).install();
+    expect(fs.files.get(XML)).toContain('<argument>start</argument>');
+    expect(fs.files.get(XML)).not.toContain('--service');
 
-    await lifecycle.install({
-      program: nodeAgentProgram({ agentBin: 'C:\\agent.js', configPath: 'C:\\agent.json', nodeBin: 'C:\\node.exe', service: true }),
+    await createWinswLifecycle(
+      def({ program: nodeAgentProgram({ agentBin: 'C:\\agent.js', configPath: 'C:\\agent.json', nodeBin: 'C:\\node.exe', service: true }) }),
+      { run, fs },
+    ).install();
+    expect(fs.files.get(XML)).toContain('<argument>C:\\agent.json</argument>\n  <argument>--service</argument>');
+  });
+
+  it('a re-install stops the running service before copying over its exe, and keeps an existing SCM registration (1073)', async () => {
+    const calls: string[] = [];
+    const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
+      calls.push(`${cmd} ${args.join(' ')}`);
+      return args[0] === 'install' ? fail(1073, '', 'The specified service already exists.') : ok();
     });
-    const rewritten = fs.writeFile.mock.calls[1]?.[1] as string;
-    expect(rewritten).toContain('<argument>C:\\agent.json</argument>\n  <argument>--service</argument>');
+    await createWinswLifecycle(def(), { run, fs: installedFs() }).install();
+    expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe stop', 'C:\\acme\\logs/Acme-Agent-.exe install', 'C:\\acme\\logs/Acme-Agent-.exe start']);
   });
 
   it('install() uses windows.installDir when given instead of logDir', async () => {
@@ -338,8 +351,7 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
   });
 
   it('start() calls "winsw start" when the xml exists, and throws if that fails', async () => {
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const run = vi.fn<Runner>().mockResolvedValue(fail(1));
     const lifecycle = createWinswLifecycle(def(), { run, fs });
     await expect(lifecycle.start()).rejects.toThrow(/winsw start failed/);
@@ -371,8 +383,7 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
   });
 
   it('status() queries sc.exe (not WinSW\'s own status) and reports running=true on a RUNNING state line', async () => {
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const scOutput = [
       'SERVICE_NAME: Acme-Agent-',
       '        TYPE               : 10  WIN32_OWN_PROCESS',
@@ -391,8 +402,7 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
   });
 
   it('status() reports running=false, determinate=true on a STOPPED state line', async () => {
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const scOutput = ['SERVICE_NAME: Acme-Agent-', '        STATE              : 1  STOPPED'].join('\r\n');
     const run = vi.fn<Runner>().mockResolvedValue(ok(scOutput));
     const lifecycle = createWinswLifecycle(def(), { run, fs });
@@ -412,8 +422,7 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
   });
 
   it('finding P1 #2 (residual, round 3): status() reports determinate=false (never a confirmed "not running") when sc.exe reports access denied', async () => {
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const run = vi.fn<Runner>().mockResolvedValue(fail(5, '', 'Access is denied.'));
     const lifecycle = createWinswLifecycle(def(), { run, fs });
 

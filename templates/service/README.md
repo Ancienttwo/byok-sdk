@@ -7,7 +7,7 @@ your target:
 | Platform | Recipe | Mechanism |
 |----------|--------|-----------|
 | macOS | [`launchd/`](./launchd/) | `launchd` LaunchAgent (`KeepAlive` crash-restart) |
-| Linux | [`systemd/`](./systemd/) | `systemd --user` unit (`Restart=on-failure`) |
+| Linux | [`systemd/`](./systemd/) | `systemd --user` unit (`Restart=always`, `RestartPreventExitStatus=0`) |
 | Windows | [`winsw/`](./winsw/) | [WinSW](https://github.com/winsw/winsw) service (SCM-integrated, `onfailure` restart) |
 
 Crash-restart is delegated entirely to the OS supervisor — the daemon runs no

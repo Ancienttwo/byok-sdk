@@ -7,6 +7,7 @@ import {
   type OperationalHealthFixResult,
 } from '../../diagnostics/diagnostics';
 import { resolveStoreDir } from '../config';
+import { serviceLogDir } from '../../daemon/host-layout';
 import type { ServiceEnvironmentRecord } from '../../lifecycle/service-environment';
 import { formatServiceEnvironment } from '../format';
 import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from '../../diagnostics/device-doctor';
@@ -35,7 +36,7 @@ export class DoctorDaemonRunningError extends Error {
   }
 }
 
-function formatDoctorLines(snapshot: DiagnosticsSnapshot, environment: ServiceEnvironmentRecord | undefined, fixResult?: OperationalHealthFixResult): string[] {
+function formatDoctorLines(snapshot: DiagnosticsSnapshot, logDir: string, environment: ServiceEnvironmentRecord | undefined, fixResult?: OperationalHealthFixResult): string[] {
   const lines = [
     `doctor: productHash=${snapshot.product.nameHash} generatedAt=${snapshot.generatedAt}`,
     `system: node=${snapshot.system.node} platform=${snapshot.system.platform} arch=${snapshot.system.arch} sqlite=${snapshot.system.sqliteAvailable ? 'available' : 'unavailable'}`,
@@ -43,6 +44,8 @@ function formatDoctorLines(snapshot: DiagnosticsSnapshot, environment: ServiceEn
     environment ? `environment: ${formatServiceEnvironment(environment.status)} at=${environment.ts}` : 'environment: unknown',
   ];
   for (const check of snapshot.checks) lines.push(`check ${check.id}: ${check.status} (${check.summary})`);
+  // #1097: where the daemon log and the service manager's redirect files are, and how large.
+  lines.push(`logs: ${logDir} ${snapshot.logs.status} totalBytes=${snapshot.logs.totalBytes} files=${snapshot.logs.files.length}${snapshot.logs.truncated ? '+' : ''}`);
   if (snapshot.health.status === 'corrupt' || snapshot.health.status === 'unavailable') {
     lines.push(`health-detail: ${snapshot.health.reason}; bytes=${snapshot.health.sizeBytes ?? 'unknown'}`);
   }
@@ -93,10 +96,11 @@ export async function runDoctorCommand(config: DaemonConfig, options: DoctorOpti
     snapshot = await collectDiagnostics(config, storeDir, options);
   }
   const log = options.log ?? ((line: string) => console.log(line));
+  const logDir = serviceLogDir(storeDir);
   const environment = snapshot.environment.status === 'unknown' ? undefined : snapshot.environment;
   if (options.json) {
-    log(JSON.stringify({ diagnostics: snapshot, environment: environment ?? { status: 'unknown' }, ...(fixResult ? { fix: fixResult } : {}) }, null, 2));
+    log(JSON.stringify({ diagnostics: snapshot, logDir, environment: environment ?? { status: 'unknown' }, ...(fixResult ? { fix: fixResult } : {}) }, null, 2));
     return;
   }
-  for (const line of formatDoctorLines(snapshot, environment, fixResult)) log(line);
+  for (const line of formatDoctorLines(snapshot, logDir, environment, fixResult)) log(line);
 }

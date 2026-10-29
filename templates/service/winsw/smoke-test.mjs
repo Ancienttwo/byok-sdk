@@ -76,9 +76,18 @@ const lifecycle = createServiceLifecycle({
   name,
   displayName: 'BYOK WinSW smoke test',
   program: { command: process.execPath, args: ['-e', 'setInterval(() => {}, 60000)'] },
+  storeDir: path.join(workDir, 'store'),
   logDir,
+  owner: 'smoke',
   windows: { winswBin },
 });
+const xmlPath = path.join(logDir, `${name}.xml`);
+
+async function expectUnitState(expected) {
+  const { state } = await lifecycle.inspect();
+  if (state !== expected) throw new Error(`expected unit state ${expected}, got ${state}`);
+  console.log(`PASS: unit state ${expected}`);
+}
 
 async function scQuery() {
   try {
@@ -177,6 +186,14 @@ try {
   }
   console.log('PASS: lifecycle.status() agrees with sc.exe (installed:true running:true)');
 
+  // #1097: a hand-edited descriptor is repairable; repair restarts onto the rewritten one.
+  await expectUnitState('exact');
+  await fs.appendFile(xmlPath, '<!-- hand edit -->\n');
+  await expectUnitState('repairable');
+  console.log(`    repair(): ${JSON.stringify(await lifecycle.repair())}`);
+  await waitForScState('RUNNING');
+  await expectUnitState('exact');
+
   console.log('==> stopping via the lifecycle API');
   await lifecycle.stop();
   await waitForScState('STOPPED');
@@ -203,6 +220,20 @@ try {
     throw new Error(`expected sc.exe to report the service gone after uninstall, got:\n${afterUninstall}`);
   }
   console.log('PASS: service removed from the SCM after uninstall');
+
+  // #1097: a marker-less descriptor at our path is foreign and never touched.
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(xmlPath, '<service><id>someone-else</id></service>\n');
+  await expectUnitState('foreign');
+  try {
+    await lifecycle.install();
+    throw new Error('install accepted a foreign unit');
+  } catch (error) {
+    if (error?.code !== 'service_unit_unmarked') throw error;
+  }
+  if (!(await fs.readFile(xmlPath, 'utf8')).includes('someone-else')) throw new Error('install changed a foreign unit');
+  await fs.rm(xmlPath);
+  console.log('PASS: foreign unit refused and left untouched');
 
   console.log('==> WinSW service lifecycle smoke: PASS');
 

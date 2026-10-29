@@ -237,9 +237,26 @@ describe('support bundle privacy and bounds', () => {
     expect(await fs.stat(path.join(dir, 'windows-support.json'))).toBeDefined();
   });
 
+  it('#1097: reports service log sizes without log paths, names or content, and refuses an output inside the store', async () => {
+    const dir = await tempDir();
+    await fs.mkdir(path.join(dir, 'service-logs'));
+    await fs.writeFile(path.join(dir, 'service-logs', 'daemon.log'), 'SENTINEL_LOG_LINE\n');
+    await fs.writeFile(path.join(dir, 'service-logs', 'SENTINEL_PRODUCT_ID.err.log'), 'x');
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(bundle.logs).toEqual({
+      status: 'present', totalBytes: 19, truncated: false,
+      files: [{ kind: 'service-manager', sizeBytes: 1 }, { kind: 'daemon', sizeBytes: 18 }],
+    });
+    const text = JSON.stringify(bundle);
+    expect(text).not.toContain('SENTINEL_LOG_LINE');
+    expect(text).not.toContain('service-logs');
+    await expect(runSupportBundleCommand(config(dir), { outputPath: path.join(dir, 'in-store.json'), adapters: [], connectControl: unreachable }))
+      .rejects.toThrow(/outside the device store/);
+  });
+
   it('CLI writes the requested bundle and prints an explicit redaction summary', async () => {
     const dir = await tempDir();
-    const outputPath = path.join(dir, 'cli-support.json');
+    const outputPath = path.join(await tempDir(), 'cli-support.json');
     const lines: string[] = [];
     await runSupportBundleCommand(config(dir), {
       outputPath,

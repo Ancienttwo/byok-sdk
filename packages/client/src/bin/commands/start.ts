@@ -24,8 +24,8 @@ export interface StartDeps {
 /**
  * How a `start` ended without crashing (issue #394). A crash is a throw
  * (including {@link DaemonCrashedError} for a crash after start).
- * `byok-agent.ts` maps these to exit codes: `stopped` 0, `halted` 78
- * (0 under `--service`), a throw 1.
+ * `byok-agent.ts` maps these to exit codes with `daemonExitCode`
+ * (`lifecycle/exit-codes.ts`).
  */
 export type StartOutcome = { kind: 'stopped' } | { kind: 'halted'; reason: DaemonHaltReason };
 
@@ -51,18 +51,6 @@ export function formatStartErrorReason(error: unknown): string {
   const reason = error instanceof Error ? error.message : String(error);
   // Unknown names and codes can themselves contain runtime text.
   return `${error instanceof Error ? 'Error' : 'UnknownError'} reasonBytes=${Buffer.byteLength(reason, 'utf8')}`;
-}
-
-/**
- * Issue #394, the `start` exit-code contract: 0 a normal stop, 78 a halt
- * (EX_CONFIG: a restart cannot fix it), 1 a crash (`main().catch`). Under
- * `--service` a halt exits 0 too: it is the one status launchd
- * (`SuccessfulExit`), systemd (`Restart=on-failure`) and WinSW (`onfailure`)
- * all leave stopped, while a crash still exits 1 and is restarted.
- */
-export function startExitCode(outcome: StartOutcome, service: boolean): number {
-  if (outcome.kind === 'stopped') return 0;
-  return service ? 0 : 78;
 }
 
 /**

@@ -2,23 +2,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { createServiceLifecycle, UnsupportedServicePlatformError } from '../lifecycle/create-service-lifecycle';
 import type { Runner } from '../lifecycle/exec-runner';
 import type { ServiceDefinition } from '../lifecycle/service-types';
+import { memoryServiceFs } from './support/service-fs';
 
 function def(overrides: Partial<ServiceDefinition> = {}): ServiceDefinition {
   return {
     name: 'acme',
     program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start'] },
+    storeDir: '/store',
     logDir: '/tmp/acme-logs',
+    owner: 'cli',
     ...overrides,
   };
 }
 
-const fakeFs = {
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  rm: vi.fn().mockResolvedValue(undefined),
-  stat: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
-  copyFile: vi.fn().mockResolvedValue(undefined),
-};
+const fakeFs = memoryServiceFs();
 
 describe('lifecycle/create-service-lifecycle: createServiceLifecycle', () => {
   it('dispatches darwin -> launchd (invokes launchctl)', async () => {

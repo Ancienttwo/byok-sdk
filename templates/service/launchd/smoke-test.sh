@@ -60,11 +60,19 @@ const lifecycle = createServiceLifecycle({
   name: '$LABEL',
   displayName: 'BYOK launchd smoke test',
   program: { command: process.execPath, args: ['-e', 'setInterval(() => {}, 60000)'] },
+  storeDir: '$WORK_DIR/store',
   logDir: '$LOG_DIR',
+  owner: 'smoke',
 });
 
 const mode = process.argv[2];
 if (mode === 'install') await lifecycle.install();
+else if (mode === 'inspect') console.log((await lifecycle.inspect()).state);
+else if (mode === 'repair') console.log(JSON.stringify(await lifecycle.repair()));
+else if (mode === 'install-expect-unmarked') {
+  try { await lifecycle.install(); console.error('install accepted a foreign unit'); process.exit(1); }
+  catch (error) { if (error.code !== 'service_unit_unmarked') throw error; console.log(error.code); }
+}
 else if (mode === 'status') console.log(JSON.stringify(await lifecycle.status()));
 else if (mode === 'start') await lifecycle.start();
 else if (mode === 'stop') await lifecycle.stop();
@@ -96,6 +104,24 @@ if ! echo "$STATUS_JSON" | grep -q '"running":true'; then
   exit 1
 fi
 echo "PASS: installed + running after install"
+
+# #1097: the plist names only the stable launcher; a hand edit is repairable.
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+expect_state() {
+  local got
+  got="$(node "$RUNNER" inspect)"
+  if [ "$got" != "$1" ]; then echo "FAIL: expected unit state $1, got $got"; exit 1; fi
+  echo "PASS: unit state $1"
+}
+expect_state exact
+if ! grep -q "$WORK_DIR/store/service/$LABEL.launcher.sh" "$PLIST"; then
+  echo "FAIL: plist does not run the stable launcher"; exit 1
+fi
+plutil -lint "$PLIST"
+echo "<!-- hand edit -->" >> "$PLIST"
+expect_state repairable
+node "$RUNNER" repair
+expect_state exact
 
 echo "==> stopping"
 node "$RUNNER" stop
@@ -139,6 +165,14 @@ if launchctl print "gui/$UID_NUM/$LABEL" 2>&1; then
   echo "FAIL: launchctl print unexpectedly succeeded after uninstall"
   exit 1
 fi
+
+# #1097: a marker-less unit at our path is foreign and never touched.
+echo '<plist version="1.0"><dict/></plist>' > "$PLIST"
+expect_state foreign
+node "$RUNNER" install-expect-unmarked
+if ! grep -q '<dict/>' "$PLIST"; then echo "FAIL: install changed a foreign unit"; exit 1; fi
+rm -f "$PLIST"
+echo "PASS: foreign unit refused and left untouched"
 
 echo "==> launchd service lifecycle smoke: PASS"
 
