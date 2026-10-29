@@ -78,8 +78,8 @@ if (process.argv[2] !== 'task') {
   try {
     try { await import(input.piSpecifier); report.lookup = 'resolved'; } catch (error) { report.lookup = String(error); }
     report.defaultDetect = await new sdk.PiAdapter().detect();
-    // The Host sets PI_CODING_AGENT_DIR itself, so the runtime gets it only through pass (#1095).
-    const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
+    // The Host sets PI_CODING_AGENT_DIR and PI_PACKAGE_DIR itself, so the runtime gets them only through pass (#1095).
+    const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR', 'PI_PACKAGE_DIR'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
       ...(input.bundleEntry ? { entry: process.argv[1] } : {}) } });
     report.stage = 'detect'; report.detect = await adapter.detect();
     report.stage = 'prepare';

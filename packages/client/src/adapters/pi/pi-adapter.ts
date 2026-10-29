@@ -266,7 +266,7 @@ export class PiAdapter implements RuntimeAdapter {
         const version = readClientPiRuntimePin();
         if (version === undefined) return { kind: 'not-found' };
         try {
-          locateBundledPiAssets({ piPackageDir: process.env.PI_PACKAGE_DIR, executable: host.executable ?? process.execPath, ...(host.entry === undefined ? {} : { entry: host.entry }) });
+          locateBundledPiAssets({ piPackageDir: env.PI_PACKAGE_DIR, executable: host.executable ?? process.execPath, ...(host.entry === undefined ? {} : { entry: host.entry }) });
         } catch {
           return { kind: 'not-found' };
         }

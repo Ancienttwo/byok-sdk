@@ -136,7 +136,10 @@ await copyPiRuntimeAssets({ outDir: 'release/pi-assets', form: 'interpreter+bund
 The helper requires the exact pinned pi package on the build machine and an
 empty `outDir`. It verifies the pi export resources and the SDK todo locale
 assets, and fails closed on a mismatch. Ship `outDir` with the product. Set
-`PI_PACKAGE_DIR` to it when the product starts. A Bun-compiled executable may
+`PI_PACKAGE_DIR` to it when the product starts, and pass the name explicitly
+through `DaemonConfig.runtimeEnvironment.pass` or
+`PiAdapterOptions.runtimeEnvironment`: detection and every launch read the
+asset root from the runtime environment. A Bun-compiled executable may
 use its own directory as the asset root instead: run the helper on that empty
 directory before you write the executable into it. Without the asset root, `detect()` reports pi `not-found` and a pi
 launch is refused with `pi_bundled_assets_unavailable`. Pi reads its photon

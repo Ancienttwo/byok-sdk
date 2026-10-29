@@ -2207,8 +2207,10 @@ behind an explicit helper dispatch.
 A single-file product sets `sdkHelperHost: { mode: 'self-executable' }`. Every
 Pi launch then re-enters the product executable as
 `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`, and
-the product names its Pi asset root in `PI_PACKAGE_DIR` (a Bun-compiled
-executable may keep the assets beside itself).
+the product names its Pi asset root in `PI_PACKAGE_DIR` and passes that name
+explicitly through `DaemonConfig.runtimeEnvironment.pass` or
+`PiAdapterOptions.runtimeEnvironment` (a Bun-compiled executable may keep the
+assets beside itself).
 
 This is the one supported way to ship official pi in a host download. The
 product bundles the SDK root, so official pi from the build machine install is
