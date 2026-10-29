@@ -101,7 +101,7 @@ export async function exportDeviceSupportBundle(
   }
   try {
     const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
-    if (isSupportBundleOutputInStore(storeDir, input.outputPath)) throw new DeviceOperatorError('invalid-input');
+    if (await isSupportBundleOutputInStore(storeDir, input.outputPath)) throw new DeviceOperatorError('invalid-input');
     const bundle = await createSupportBundle(config, storeDir, {
       adapters: input.adapters, runtimeProbeTimeoutMs: input.runtimeProbeTimeoutMs,
     });

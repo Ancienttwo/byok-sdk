@@ -275,9 +275,26 @@ export async function createSupportBundle(
  * #1097: a bundle written into the store would be swept, archived or shipped
  * with the store itself. The CLI and `exportDeviceSupportBundle` both refuse it.
  */
-export function isSupportBundleOutputInStore(storeDir: string, outputPath: string): boolean {
-  const relative = path.relative(path.resolve(storeDir), path.resolve(outputPath));
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+export async function isSupportBundleOutputInStore(storeDir: string, outputPath: string): Promise<boolean> {
+  const [store, output] = await Promise.all([realPathOf(storeDir), realPathOf(outputPath)]);
+  const relative = path.relative(store, output);
+  return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
+}
+
+/** The real path of the deepest existing ancestor (symlinks resolved) joined with the segments that do not exist yet. */
+async function realPathOf(target: string): Promise<string> {
+  const missing: string[] = [];
+  let current = path.resolve(target);
+  for (;;) {
+    try {
+      return path.join(await fs.realpath(current), ...missing.reverse());
+    } catch (error) {
+      const parent = path.dirname(current);
+      if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT' || parent === current) throw error;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
 }
 
 export async function writeSupportBundle(

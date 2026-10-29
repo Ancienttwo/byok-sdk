@@ -13,7 +13,7 @@ export async function runSupportBundleCommand(config: DaemonConfig, options: Sup
   if (!options.outputPath) throw new Error('support-bundle requires --output <path>');
   const outputPath = path.resolve(options.outputPath);
   const storeDir = resolveStoreDir(config);
-  if (isSupportBundleOutputInStore(storeDir, outputPath)) throw new Error('support-bundle --output must be outside the device store');
+  if (await isSupportBundleOutputInStore(storeDir, outputPath)) throw new Error('support-bundle --output must be outside the device store');
   const bundle = await createSupportBundle(config, storeDir, options);
   await writeSupportBundle(outputPath, bundle);
   const log = options.log ?? ((line: string) => console.log(line));

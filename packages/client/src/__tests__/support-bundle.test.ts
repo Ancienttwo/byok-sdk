@@ -14,6 +14,7 @@ import { DAEMON_RECORD_KINDS } from '../daemon/daemon-record';
 import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
 import {
   createSupportBundle,
+  isSupportBundleOutputInStore,
   MAX_SUPPORT_AUDIT_FACTS,
   MAX_SUPPORT_AUDIT_TAIL_BYTES,
   writeSupportBundle,
@@ -251,6 +252,31 @@ describe('support bundle privacy and bounds', () => {
     expect(text).not.toContain('SENTINEL_LOG_LINE');
     expect(text).not.toContain('service-logs');
     await expect(runSupportBundleCommand(config(dir), { outputPath: path.join(dir, 'in-store.json'), adapters: [], connectControl: unreachable }))
+      .rejects.toThrow(/outside the device store/);
+  });
+
+  it('#1097: the in-store refusal compares whole path segments of the real paths', async () => {
+    const outside = await tempDir();
+    const store = path.join(outside, 'store');
+    await fs.mkdir(path.join(store, '..bundle'), { recursive: true });
+    await fs.mkdir(path.join(outside, '..store-sibling'));
+    await fs.symlink(path.join(store, '..bundle'), path.join(outside, 'alias'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    // A directory named `..bundle` inside the store is inside it.
+    expect(await isSupportBundleOutputInStore(store, path.join(store, '..bundle', 'report.json'))).toBe(true);
+    // An outside path that resolves into the store through a symlink is inside it.
+    expect(await isSupportBundleOutputInStore(store, path.join(outside, 'alias', 'report.json'))).toBe(true);
+    expect(await isSupportBundleOutputInStore(path.join(outside, 'alias'), path.join(store, '..bundle', 'report.json'))).toBe(true);
+    // The store itself, and a real outside directory, `..`-prefixed or not.
+    expect(await isSupportBundleOutputInStore(store, store)).toBe(true);
+    expect(await isSupportBundleOutputInStore(store, path.join(outside, 'report.json'))).toBe(false);
+    expect(await isSupportBundleOutputInStore(path.join(outside, 'store'), path.join(outside, '..store-sibling', 'report.json'))).toBe(false);
+    // Paths that do not exist yet compare by their deepest existing ancestor.
+    expect(await isSupportBundleOutputInStore(path.join(outside, 'absent'), path.join(outside, 'report.json'))).toBe(false);
+    expect(await isSupportBundleOutputInStore(path.join(outside, 'absent'), path.join(outside, 'absent', 'report.json'))).toBe(true);
+    expect(await isSupportBundleOutputInStore(path.join(outside, 'alias', 'absent'), path.join(store, '..bundle', 'absent', 'r.json'))).toBe(true);
+
+    await expect(runSupportBundleCommand(config(store), { outputPath: path.join(outside, 'alias', 'report.json'), adapters: [], connectControl: unreachable }))
       .rejects.toThrow(/outside the device store/);
   });
 
