@@ -3757,7 +3757,9 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * composition hands in: its unfinished attempts are settled and its pending
  * rows dead-lettered (see `DeviceDirectory` in `../ports`). Registration and
  * revocation run one at a time, so a retirement never overlaps a later
- * registration of the same device id, and a failed mailbox expiry puts the
+ * registration of the same device id. A retirement runs in the task state's
+ * exclusive section, so no cancellation or abandonment lands between its
+ * mailbox and attempt halves, and a failed mailbox expiry puts the
  * registrations back before anything else moved: the in-memory stand-in for
  * the SQL stores' one transaction (#1119).
  */
@@ -4075,8 +4077,20 @@ export declare class InMemoryTaskAttemptState {
     readonly messageAdmissions: Map<string, StoredAgentMessageAdmission>;
     constructor(clock: Clock);
     now(): string;
-    /** Serialize every state-changing operation for one tenant/task key. */
+    /**
+     * Serialize every state-changing operation for one tenant/task key. It also
+     * waits for an exclusive section queued before it (see {@link exclusive}).
+     */
     mutate<T>(key: string, operation: () => T | Promise<T>): Promise<T>;
+    /**
+     * Runs `operation` with no task mutation in flight: it starts once every
+     * mutation queued before it has settled, and every mutation queued after it
+     * waits for it to end. Device retirement runs here, so its attempt and
+     * mailbox halves are one step no cancellation or abandonment can split, the
+     * in-memory stand-in for the SQL stores' transaction (#1119). `operation`
+     * writes `attempts` directly; calling {@link mutate} from it deadlocks.
+     */
+    exclusive<T>(operation: () => Promise<T>): Promise<T>;
 }
 export {};
 // ==== @byok-sdk/cloud dist/stores/in-memory/task-cancellations.d.ts ====

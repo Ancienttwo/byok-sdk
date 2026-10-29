@@ -254,6 +254,82 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
       });
     });
 
+    it('a cancellation landing while a revoke waits on another task of the device leaves no pending row', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, registration('busy'));
+        for (const taskId of ['busy-a', 'busy-b']) {
+          await stores.tasks.open(TENANT, { taskId, deviceId: 'busy' });
+          await stores.tasks.claim(TENANT, { taskId, deviceId: 'busy' });
+        }
+        // Hold task a inside its own cancellation, the way any in-flight task mutation would.
+        let entered!: () => void;
+        const inside = new Promise<void>((resolve) => { entered = resolve; });
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        const holdingA = stores.cancellations.request(TENANT, {
+          taskId: 'busy-a',
+          proposedMessageId: 'busy-a-cancel',
+          materialize: async () => {
+            entered();
+            await gate;
+            return materialized('busy-a', 'cancel');
+          },
+        });
+        await Promise.race([inside, new Promise((resolve) => setTimeout(resolve, 50))]);
+
+        const revoking = stores.devices.revoke(TENANT, 'busy');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const cancellingB = stores.cancellations.request(TENANT, {
+          taskId: 'busy-b',
+          proposedMessageId: 'busy-b-cancel',
+          materialize: async () => materialized('busy-b', 'cancel'),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        release();
+        await Promise.allSettled([holdingA, cancellingB]);
+        await revoking;
+
+        await expect(stores.devices.get(TENANT, 'busy')).resolves.toBeUndefined();
+        for (const taskId of ['busy-a', 'busy-b']) {
+          await expect(stores.tasks.get(TENANT, taskId), taskId).resolves.toMatchObject({ status: 'cancelled' });
+        }
+        const after = await mailbox.inspect(TENANT, 'busy');
+        expect(after.pending).toEqual([]);
+        expect(after.usageBytes).toBe(0n);
+      });
+    });
+
+    it('a cancellation that waits on a revoke of its device appends nothing once the revoke commits', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, registration('late'));
+        await stores.tasks.open(TENANT, { taskId: 'late-task', deviceId: 'late' });
+        await stores.tasks.claim(TENANT, { taskId: 'late-task', deviceId: 'late' });
+        await mailbox.append(TENANT, { deviceId: 'late', messageId: 'late-offer', body: envelope('late-task') });
+
+        const release = await handle.holdMailboxExpiry();
+        const revoking = stores.devices.revoke(TENANT, 'late');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const cancelling = stores.cancellations.request(TENANT, {
+          taskId: 'late-task',
+          proposedMessageId: 'late-cancel',
+          materialize: async () => materialized('late-task', 'cancel'),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await release();
+        await revoking;
+        await cancelling;
+
+        await expect(stores.tasks.get(TENANT, 'late-task')).resolves.toMatchObject({ status: 'cancelled', terminalCause: 'device_revoked' });
+        const after = await mailbox.inspect(TENANT, 'late');
+        expect(after.pending).toEqual([]);
+        expect(after.usageBytes).toBe(0n);
+      });
+    });
+
     it('a re-registration racing a revoke of the same device id keeps its own later rows and floor', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox } = handle;

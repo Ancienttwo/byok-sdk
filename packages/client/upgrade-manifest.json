@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "5acc513051ad1472c0742ea3c329b4c5ee8e1edf829f7221396895fea8f8823b"
+    "snapshotSha256": "8dcdb7ff88ab3ebfac26db796cf6d56de75a0ee28d79d3039c35cb4488dc5f89"
   },
   "configFields": {
     "status": "tracked",
@@ -252,6 +252,7 @@
         "export:@byok-sdk/cloud#ByokCloud",
         "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
         "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+        "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
         "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
         "export:@byok-sdk/cloud#TASK_ABANDON_CAUSES",
         "export:@byok-sdk/cloud#TASK_ATTEMPT_UNFINISHED_STATUSES",
@@ -782,6 +783,11 @@
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
       "change": "changed",
       "entry": "device-retirement-settles-tasks"
     },

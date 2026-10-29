@@ -32,22 +32,21 @@ function abandoned(attempt: TaskAttempt, cause: TaskAbandonCause, now: string): 
   };
 }
 
-/** Device retirement, attempt half: every unfinished attempt the device was offered or owns. Never throws. */
-export async function settleDeviceAttempts(
+/**
+ * Device retirement, attempt half: every unfinished attempt the device was
+ * offered or owns. Synchronous, so it runs inside the caller's
+ * {@link InMemoryTaskAttemptState.exclusive} section with nothing between it
+ * and the mailbox half.
+ */
+export function settleDeviceAttempts(
   state: InMemoryTaskAttemptState,
   tenant: TenantId,
   deviceId: string,
   cause: Extract<TaskAbandonCause, 'device_revoked' | 'device_superseded'>,
-): Promise<void> {
-  const keys = [...state.attempts.entries()]
-    .filter(([, attempt]) => attempt.tenantId === tenant &&
-      (attempt.deviceId === deviceId || attempt.ownerDeviceId === deviceId))
-    .map(([key]) => key);
-  for (const key of keys) {
-    await state.mutate(key, () => {
-      const attempt = state.attempts.get(key);
-      if (attempt !== undefined && unfinished(attempt)) state.attempts.set(key, abandoned(attempt, cause, state.now()));
-    });
+): void {
+  for (const [key, attempt] of state.attempts) {
+    if (attempt.tenantId !== tenant || (attempt.deviceId !== deviceId && attempt.ownerDeviceId !== deviceId)) continue;
+    if (unfinished(attempt)) state.attempts.set(key, abandoned(attempt, cause, state.now()));
   }
 }
 

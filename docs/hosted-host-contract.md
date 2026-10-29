@@ -147,6 +147,16 @@ So the device cannot send a terminal for its tasks.
 `readTaskResult` returns a retired task as `state: 'cancelled'` with that `terminalCause` and the attempt's
 `terminalAt` as `recordedAt`, unless a cancellation marker or a device terminal receipt already answers it.
 
+Known gap (#1160, older than #1119): only `cancelTask` orders its append against the retirement. Every other mailbox
+writer (offers, agent controls, scope-key notices, approve/reject, steer, inbound acks, Postgres dead-letter replay)
+checks the device or task in a separate read, so one whose check ran before the retirement can still commit a
+`pending` row for the retired device after it. Such a row is never delivered. It holds quota until the maintenance
+`mailbox` step expires it: every `pending` row older than `mailboxUnackedRetentionMs` (7 days in
+`DEFAULT_RETENTION_POLICY`, `packages/cloud/src/maintenance.ts:18`) becomes `expired` whatever its device
+(`packages/cloud/src/maintenance.ts:146,153`; Postgres `packages/cloud-dataplane/src/stores/core/mailbox.ts:352-357`,
+SQLite `packages/server/src/stores/sqlite/index.ts:948-950`, in-memory `packages/core/src/in-memory/mailbox.ts:205-219`).
+`ByokServer` runs maintenance every 5 minutes by default; a hosted Host runs `runMaintenance` on its own schedule.
+
 ### abandonTask
 
 `abandonTask(tenant, taskId, cause)` settles one task that no device will finish
