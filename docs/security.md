@@ -89,12 +89,20 @@ Unknown throws, wrong-phase failures, and clean iterator completion without
 `turn_end` fail closed as a stable, non-retryable adapter-contract violation;
 their source value is logged locally only and is not copied to the wire.
 
-The typed `reason` is intentionally the adapter-authored operator/wire reason,
-so a custom adapter must treat it as wire-visible. Bundled adapters preserve
-their existing process-exit/stderr-tail diagnostics there; known credentials,
-environment values, prompts, tool bodies, and provider response payloads must
-not be deliberately copied into it. In contrast, the source value of an
-untyped contract violation remains local-only. Process or transport loss may
+The typed `reason` is the adapter-authored operator reason. Bundled adapters
+fold their process-exit/stderr-tail diagnostics into it, and that raw text
+stays on the local `RuntimeExecutionFailure`. The `task.fail` schema bounds
+`reason` with `boundFailureReason` from `@byok-sdk/protocol` on every parse
+(#1124), so `createEnvelope` bounds what the daemon sends, sealed or not, and
+every decode bounds what a receiver holds: Authorization and
+Bearer values, provider key shapes (`sk-`, `xai-`, `AIza`, `gh*_`,
+`github_pat_`, `AKIA`, JWT-like `eyJ…`), `*KEY`/`*TOKEN`/`*SECRET`/`*PASSWORD*`
+assignments and URL userinfo become `[redacted]`, and the result is capped at
+`TASK_FAIL_REASON_MAX_BYTES` (2048) UTF-8 bytes with a `…[truncated N bytes]`
+marker. Redaction is pattern-based, so a custom adapter must still not copy
+environment values, prompts, tool bodies or provider response payloads into
+the reason. In contrast, the source value of an untyped contract violation
+remains local-only. Process or transport loss may
 be marked retryable; session/protocol/manifest authority violations and
 unstructured native task failure are non-retryable. Teardown remains separate
 because an interrupt or close failure may happen after the task already has a
@@ -989,7 +997,7 @@ The canary run does not write them, so the test does not check them.
 | `agent_message_draft.text` | C2 draft text, until the terminal | `deploy/sql/0026_agent_message_draft.sql:11` |
 | `approval_timeline_tail.entries` | C3 approval summaries | `deploy/sql/0007_approval_timeline.sql:7` |
 | `attested_record.body_inline` | Truth records: `task.terminal`, `profile` and `memory` | `deploy/sql/0002_core_domain.sql:206` |
-| `task.terminal_cause` | The `reason` of `task.fail`, `task.decline` or `task.cancelled` | `packages/cloud/src/inbound.ts:945-948` |
+| `task.terminal_cause` | The `reason` of `task.fail`, `task.decline` or `task.cancelled`. A `task.fail` reason is redacted and capped at `TASK_FAIL_REASON_MAX_BYTES` by the protocol schema on decode (#1124); rows recorded before that are not rewritten | `packages/cloud/src/inbound.ts` (`terminalReceiptBinding`) |
 | `task.cancel_reason` | The cancel reason from the Host | `deploy/sql/0009_task_cancellation.sql:5` |
 | `device_request_receipts.body` | `agent-input-preparation-request:` (preparation context) and `agent-home-projection-request:` (home projection values) | `packages/cloud/src/receipt-retention.ts:7-8` |
 | `skill_pack_file.content` | Skill pack text from the Host | `deploy/sql/0005_skill_packs.sql:76` |

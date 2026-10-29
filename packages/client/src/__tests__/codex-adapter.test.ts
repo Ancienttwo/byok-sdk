@@ -12,7 +12,9 @@ import {
   RuntimeExecutionFailure,
   RuntimeDisposalFailure,
   RuntimeStartupDisposalFailure,
+  projectRuntimeBoundaryFailure,
 } from '../runtime-failure';
+import { TASK_FAIL_REASON_MAX_BYTES, createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import {
   startPreparedOperation,
   type PreparedOperationResources,
@@ -248,6 +250,22 @@ describe('Codex persistent app-server adapter', () => {
         await ctx({ FAKE_CODEX_CRASH_WITH_STDERR: 'crash' }),
       ),
     ).rejects.toBeInstanceOf(RuntimeExecutionFailure);
+  });
+  it('bounds and redacts the 64 KiB app-server stderr tail on its way to the wire reason (#1124)', async () => {
+    const key = ['sk', 'proj', 'Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h6'].join('-');
+    const stderr = `Authorization: Bearer opaqueBearerValue0123 OPENAI_API_KEY=${key} ${'e'.repeat(16 * 1024)}`;
+    const failure = await open(adapter(), task, await ctx({ FAKE_CODEX_CRASH_WITH_STDERR: stderr }))
+      .then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toHaveProperty('message', expect.stringContaining(key));
+    const projection = projectRuntimeBoundaryFailure(failure, 'start');
+    const wire = encodeEnvelope(createEnvelope('task.fail', { reason: projection.reason, retryable: projection.retryable },
+      { taskId: '7c5b6b0e-7d0b-4d5f-9b0a-2b9f8b4f0c11' }));
+    expect(wire).not.toContain(key);
+    expect(wire).not.toContain('opaqueBearerValue0123');
+    const reason = (decodeEnvelope(wire).payload as { reason: string }).reason;
+    expect(reason).toMatch(/Authorization: \[redacted\] OPENAI_API_KEY=\[redacted\] e+\u2026\[truncated \d+ bytes\]$/u);
+    expect(new TextEncoder().encode(reason).length).toBeLessThanOrEqual(TASK_FAIL_REASON_MAX_BYTES);
   });
   it('marks an app-server exit during the open runtime_exited, and an open it did not end unknown (#869)', async () => {
     await expect(open(adapter(), task, await ctx({ FAKE_CODEX_CRASH_WITH_STDERR: 'crash' }))).rejects.toMatchObject({

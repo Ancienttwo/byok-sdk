@@ -1842,6 +1842,7 @@ export {};
 export * from './version';
 export * from './task-state';
 export * from './capability-constants';
+export * from './failure-reason';
 /** Maximum raw UTF-8 content bytes in one local Host Agent-memory export; no truncation. */
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 /** Maximum memory files in one local Host export, including MEMORY.md. */
@@ -2103,6 +2104,30 @@ export declare class EnvelopeValidationError extends ProtocolError {
     readonly issues: ZodError;
     constructor(message: string, issues: ZodError);
 }
+// ==== @byok-sdk/protocol dist/failure-reason.d.ts ====
+/**
+ * The single authority for the display text of a `task.fail` `reason` (#1124).
+ *
+ * A runtime's stderr tail can carry credentials a runtime or proxy printed
+ * while failing. The `task.fail` schema applies this to `reason` on every
+ * parse, so `createEnvelope` bounds what a daemon sends (sealed or not) and
+ * every decode bounds what a receiver holds. The raw tail stays local, on the
+ * adapter's `RuntimeExecutionFailure`. The result is a fixed point: applying
+ * it to its own output changes nothing, so a bounded envelope round-trips
+ * byte-for-byte.
+ *
+ * Every pattern starts at a literal and its runs never backtrack into a
+ * failure, so the cost stays linear in the input length.
+ */
+/** Maximum UTF-8 bytes of a `task.fail` `reason` after normalization, truncation marker included. */
+export declare const TASK_FAIL_REASON_MAX_BYTES = 2048;
+/**
+ * Redact credentials from a failure reason, then cap it at
+ * {@link TASK_FAIL_REASON_MAX_BYTES} UTF-8 bytes on a code-point boundary
+ * with a `…[truncated N bytes]` marker, where N counts the dropped redacted
+ * bytes.
+ */
+export declare function boundFailureReason(reason: string): string;
 // ==== @byok-sdk/protocol dist/http-api.d.ts ====
 import { z } from 'zod';
 import { EnvelopeSchema } from './envelope';
@@ -6142,7 +6167,7 @@ export declare const TaskFailPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
         offerId: z.ZodUUID;
     }, z.core.$strict>>;
     harnessId: z.ZodOptional<z.ZodString>;
-    reason: z.ZodString;
+    reason: z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>;
     retryable: z.ZodOptional<z.ZodBoolean>;
     failure: z.ZodOptional<z.ZodUnion<readonly [z.ZodObject<{
         class: z.ZodLiteral<"quota">;

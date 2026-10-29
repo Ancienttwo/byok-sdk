@@ -26,6 +26,7 @@ import {
   PROTOCOL_VERSION,
   SEALED_INLINE_MAX_PADDED_LENGTH,
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
+  TASK_FAIL_REASON_MAX_BYTES,
   SEALED_SPLIT_TABLE,
   createEnvelope,
   decodeEnvelope,
@@ -650,23 +651,20 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     }
   }, 30_000);
 
-  it('replaces the runtime failure class of an unsealable failure with unknown (#869)', async () => {
+  it('bounds an oversized runtime failure reason, so it seals with its runtime class intact (#869, #1124)', async () => {
     const { server, adapter, deviceId, member } = await start({ failureClass: true });
     server.send(await sealedOffer(member, 'huge-classed', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
-        phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'auth' },
-        reason: 'r'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024),
-      }));
-      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge-classed', 15_000);
-      expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
-      // The replacement is the daemon's own failure: it names no runtime class.
-      expect(failed.payload).toMatchObject({ failure: { class: 'unknown' } });
-    } finally {
-      diagnostic.mockRestore();
-    }
+    adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
+      phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'auth' },
+      reason: 'r'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024),
+    }));
+    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge-classed', 15_000);
+    const { reason } = await openOutput(member, failed, deviceId) as { reason: string };
+    expect(reason).toMatch(/^r+\u2026\[truncated \d+ bytes\]$/u);
+    expect(new TextEncoder().encode(reason).length).toBeLessThanOrEqual(TASK_FAIL_REASON_MAX_BYTES);
+    // No unsealable replacement happened: the runtime's own class is kept.
+    expect(failed.payload).toMatchObject({ failure: { class: 'auth' } });
   }, 30_000);
 
   it.each([

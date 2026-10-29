@@ -40,8 +40,9 @@ describe('drainOutbox chunks outbound sends by encoded bytes', () => {
     return { manager, posts };
   }
 
+  // `task.complete.summary` is unbounded text; a `task.fail` reason is capped by the schema (#1124).
   const big = (index: number, bytes: number): Envelope =>
-    createEnvelope('task.fail', { reason: 'x'.repeat(bytes) }, { taskId: `bytes-task-${index}` });
+    createEnvelope('task.complete', { sessionRef: 'outbox-bytes-session', summary: 'x'.repeat(bytes) }, { taskId: `bytes-task-${index}` });
   const bodyBytes = (batch: Envelope[]): number => Buffer.byteLength(JSON.stringify({ messages: batch }));
 
   it('splits a queue whose encoded size passes the body limit into several in-limit posts, in order', async () => {

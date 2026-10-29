@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1834404,
+      "budgetBytes": 1837550,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -104,7 +104,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 338061,
+      "budgetBytes": 339617,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -163,7 +163,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 62414,
+      "budgetBytes": 63970,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -367,7 +367,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 323214,
+      "budgetBytes": 324770,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -525,7 +525,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 3480904,
+      "budgetBytes": 3484050,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -826,7 +826,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 3437008,
+      "budgetBytes": 3440154,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1160,7 +1160,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 499232,
+      "budgetBytes": 500561,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1213,7 +1213,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 724198,
+      "budgetBytes": 725527,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1338,7 +1338,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 688673,
+      "budgetBytes": 690002,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1850,7 +1850,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 123545,
+      "budgetBytes": 125135,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1899,7 +1899,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Schema-free protocol values",
-      "budgetBytes": 4946,
+      "budgetBytes": 6502,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2058,7 +2058,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 522686,
+      "budgetBytes": 524015,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2140,7 +2140,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1780914,
+      "budgetBytes": 1784060,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2237,7 +2237,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 41586,
+      "budgetBytes": 43142,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2278,7 +2278,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 41590,
+      "budgetBytes": 43146,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2319,7 +2319,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 41586,
+      "budgetBytes": 43142,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2360,7 +2360,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 41578,
+      "budgetBytes": 43134,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
