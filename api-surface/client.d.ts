@@ -1,11 +1,14 @@
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { type ResolvedBin } from './resolve-bin';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type SpawnFn } from './process-client';
 export interface ClaudeAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Claude and its MCP servers get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** Override bin resolution — tests substitute the fake-claude fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
@@ -35,26 +38,13 @@ export interface ClaudeAdapterOptions {
      */
     agentSessionPersistence?: 'enabled' | 'disabled';
 }
-/**
- * Claude Code stream-json adapter.
- *
- * An ordinary session runs with `--dangerously-skip-permissions`, as in OAR:
- * in embedded use there is no human at an approval prompt, so a permission
- * gate is a hang, not safety. Claude keeps its own guardrails (the user's
- * `~/.claude` settings and deny rules).
- *
- * Explicit nativeInteractions opts into the Agent SDK stdio control handshake
- * (`--permission-prompt-tool stdio`) instead of the skip flag so that
- * AskUserQuestion reaches the local Host UI. Every other can_use_tool request
- * is allowed by the SDK at once: tool permission is decided only by the task's
- * `auto | all` mode (the PreToolUse gate), never by a second native prompt.
- * Remote boolean approvals remain unsupported, as does mid-turn steering.
- */
 export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
+    private readonly environmentPolicy;
     constructor(options?: ClaudeAdapterOptions);
+    runtimeEnvironment(): Promise<Record<string, string>>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private startPrepared;
@@ -394,6 +384,7 @@ export declare function resolveClaudeBin(): ResolvedBin;
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { type ResolvedBin } from './resolve-bin';
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
@@ -402,6 +393,8 @@ export declare function assertCodexSandboxSetting(value: unknown, label: string)
 export interface CodexAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Codex and its MCP servers get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /**
      * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
      * `danger-full-access`: no human answers an approval prompt, so a sandbox
@@ -442,7 +435,9 @@ export interface CodexAdapterOptions {
 export declare class CodexAdapter implements RuntimeAdapter {
     private readonly options;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
+    private readonly environmentPolicy;
     constructor(options?: CodexAdapterOptions);
+    runtimeEnvironment(): Promise<Record<string, string>>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
@@ -475,10 +470,13 @@ export declare function resolveCodexBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/grok/grok-adapter.d.ts ====
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ResolvedBin } from '../codex/resolve-bin';
 export interface GrokAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Grok and its MCP servers get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
     model?: string;
     /**
@@ -527,7 +525,9 @@ export interface GrokAdapterOptions {
 export declare class GrokAdapter implements RuntimeAdapter {
     private readonly options;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
+    private readonly environmentPolicy;
     constructor(options?: GrokAdapterOptions);
+    runtimeEnvironment(): Promise<Record<string, string>>;
     /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -538,6 +538,7 @@ import { type HermesByokLauncher } from './hermes-custody';
 export type { HermesByokLauncher } from './hermes-custody';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ResolvedBin } from '../codex/resolve-bin';
 /** Provider choice written into each execution profile. Credentials stay in the environment. */
 export interface HermesModelSelection {
@@ -552,6 +553,8 @@ export interface HermesModelSelection {
 export interface HermesAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Hermes and its MCP servers get (#1095). Default: the login-shell snapshot. A `byokLauncher` narrows it further. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /**
      * Absolute path of the Hermes root that this SDK owns, for example under the
      * Host's store directory. Each execution runs in a fresh profile home below
@@ -585,11 +588,15 @@ export interface HermesAdapterOptions {
 export declare class HermesAdapter implements RuntimeAdapter {
     private readonly root;
     private readonly options;
+    private readonly environmentPolicy;
     /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
     private readonly liveHomes;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     constructor(options: HermesAdapterOptions);
     private command;
+    runtimeEnvironment(): Promise<Record<string, string>>;
+    /** The custody launcher's lane is the platform baseline of the runtime environment. */
+    private launchEnvironment;
     private rootEnvironment;
     /**
      * Prepares the SDK root, deletes profiles a dead Host left, runs
@@ -651,10 +658,12 @@ export { HermesAdapter } from './hermes/hermes-adapter';
 export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
-export { buildRuntimeEnv } from '../daemon/environment';
+export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../runtime/environment';
+export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from '../runtime/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
@@ -670,6 +679,8 @@ export interface PiAdapterOptions {
     agentExtensionPaths?: readonly string[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Pi and its MCP servers get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** Opt-in ordinary, lease-bound durable worker. */
     durablePi?: boolean;
     /** Override bin resolution — tests substitute the fake-pi fixture script. */
@@ -705,7 +716,9 @@ export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly agentResources;
+    private readonly environmentPolicy;
     constructor(options?: PiAdapterOptions);
+    runtimeEnvironment(): Promise<Record<string, string>>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private resolveBin;
@@ -3860,7 +3873,7 @@ import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
@@ -4491,13 +4504,14 @@ export declare function parseInputPreparationCancelParams(value: unknown): Input
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
 import type { OutboundStatus } from './outbound-settlement';
 import { type RuntimeObservation } from '../runtime-detection';
-import { type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import { type ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
+import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
 import { type LocalToolApprovalPolicy } from './approvals';
 import { type DaemonLifecycle } from './daemon-lifecycle';
 import { type ControlStorageStatus } from './control-protocol';
@@ -4647,6 +4661,14 @@ export interface DaemonConfig {
      * unchanged from M1/M2.
      */
     runtimeAllowlist?: string[];
+    /**
+     * The environment every runtime `createDaemon` builds gives its children
+     * (#1095): by default the user's login-shell snapshot, so a variable the
+     * Host sets in `process.env` reaches a runtime only when `pass` names it.
+     * `createDaemonWithAdapters` refuses this field: each injected adapter
+     * takes its own `runtimeEnvironment` option.
+     */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /**
      * Separate-process Pi BYOK credential boundary. Required only for a
      * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
@@ -5406,7 +5428,7 @@ export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | 
 import type { ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { type AssertionLane, type DaemonEvent } from './observer';
-import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../login-shell-environment';
 import type { RuntimeObservation } from '../runtime-detection';
 /**
  * The content-free projection of what a daemon observed — the ONE shape every
@@ -5882,57 +5904,6 @@ export interface HostDeviceProofSigner extends DeviceProofSigner {
  */
 export declare function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner;
 export {};
-// ==== @byok-sdk/client dist/daemon/environment.d.ts ====
-/**
- * The environment of every child process of a task: the runtime CLI and the
- * MCP servers the daemon probes for it.
- *
- * {@link buildRuntimeEnv} inherits the daemon's full environment, as OAR
- * does. The user's own agent reads its own configuration and credentials from
- * it. Only two groups of names are removed:
- *
- * - `CLAUDECODE`: Claude Code sets it inside its own sessions. OAR removes
- *   it so that a child agent starts as its own top-level session.
- * - `BYOK_*`: this SDK's own control-plane variables (key custody).
- *
- * {@link buildAllowlistedEnv} is the narrow form. It is used by the durable
- * Pi tool shell, the prepared Pi lane on the Pi auth store, and Hermes launcher
- * or custody paths.
- *
- * Every name in every list may be an exact match or a `*`-suffixed prefix
- * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
- */
-/** Inputs to {@link buildAllowlistedEnv}. */
-export interface BuildAllowlistedEnvOptions {
-    /**
-     * The ambient environment (normally `process.env`). Never mutated — every
-     * returned variable is copied into a fresh object.
-     */
-    ambient: NodeJS.ProcessEnv;
-    /** Names admitted beyond the platform baseline, still subject to the hard deny. */
-    allow?: readonly string[];
-    /**
-     * Test seam: which platform's extra base vars to include
-     * ({@link WINDOWS_BASE_ALLOWLIST} vs none) — defaults to `process.platform`
-     * so callers never have to think about it, while still letting a test
-     * exercise the win32 branch deterministically on any host OS.
-     */
-    platform?: NodeJS.Platform;
-}
-/**
- * The environment every child process of a task receives: the full ambient
- * environment minus the hard deny. A fresh object; `ambient` is never
- * mutated.
- */
-export declare function buildRuntimeEnv(options: {
-    ambient: NodeJS.ProcessEnv;
-    platform?: NodeJS.Platform;
-}): Record<string, string>;
-/**
- * The platform baseline plus `options.allow`, minus the hard deny. Only two
- * Pi lanes use it (see this module's own doc comment).
- */
-export declare function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string>;
 // ==== @byok-sdk/client dist/daemon/execution-record.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { RuntimeAdapterDescriptor, Session } from '../types';
@@ -7193,7 +7164,7 @@ export interface McpToolsProbeOptions {
     timeoutMs?: number;
     /**
      * The exact base environment the RUNTIME child of this task receives
-     * (`buildRuntimeEnv`, `./environment.ts`) — never `process.env`. The probe
+     * (`RuntimeAdapter.runtimeEnvironment`, `../runtime/environment.ts`) — never `process.env`. The probe
      * spawns a host-configured command, so it must not become the one place
      * this SDK's own `BYOK_*` control-plane variables reach a server the real
      * runtime path would have filtered out. Required, deliberately: a caller
@@ -7266,7 +7237,7 @@ import { type AgentEvent, type BlobRef, type Envelope, type OfferAdmissionTiming
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { ExecutionRecord } from './execution-record';
 import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
  * live task feed, a task list, and approve/reject/unpair from, all LOCALLY
@@ -9193,7 +9164,7 @@ export interface TaskRunnerDeps {
     /**
      * Production pre-runtime executability/handshake gate for the exact message
      * helper config. `env` is the same child environment the runtime
-     * gets (`buildRuntimeEnv`), so the helper is proved under the environment
+     * gets (`RuntimeAdapter.runtimeEnvironment`), so the helper is proved under the environment
      * it will actually run in.
      */
     agentMessageMcpPreflight?: (server: Readonly<McpStdioServerConfig>, env: Readonly<Record<string, string>>) => Promise<void>;
@@ -10504,7 +10475,7 @@ import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../type
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import type { ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentRecord } from '../login-shell-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
     id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'quarantine';
@@ -10739,9 +10710,12 @@ export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions,
 export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
-export { applyLoginShellEnvironment, serviceEnvironmentStatus } from './lifecycle/service-environment';
+export { applyLoginShellEnvironment } from './lifecycle/service-environment';
+export { serviceEnvironmentStatus } from './login-shell-environment';
+export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
+export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from './runtime/environment';
 export type { RuntimeObservation } from './runtime-detection';
-export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './lifecycle/service-environment';
+export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
@@ -12014,92 +11988,27 @@ export declare function generateLaunchdPlist(def: {
  */
 export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: LaunchdDeps): ServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/service-environment.d.ts ====
+import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment';
 /**
- * Issue #392 (parent #384 item 2): a daemon started by launchd or systemd
- * gets the service manager's minimal environment (launchd's default PATH is
- * `/usr/bin:/bin:/usr/sbin:/sbin`), not the user's. ADR-037 D2 lets every
- * runtime inherit the daemon's environment, which assumes the daemon's
- * environment IS the user's — so under a service, `claude`/`codex` installed
- * by Homebrew, nvm, bun or an official installer are `not-found`, and
- * rc-only settings (proxies, `ANTHROPIC_BASE_URL`, `CODEX_HOME`, ...) are
- * missing.
- *
- * D2 itself is unchanged: a child's environment is still the daemon's minus
- * `CLAUDECODE` and `BYOK_*` (`daemon/environment.ts`). This module only
- * changes where the daemon's environment comes from, once per process:
- * {@link applyLoginShellEnvironment} runs the passwd login shell
- * (`os.userInfo().shell`, never `$SHELL`) once as
- * `<shell> -i -l -c 'printf %s B; /usr/bin/env -0; printf %s E'`, with B and
- * E random per-run nonces, and replaces `process.env` with the NUL-separated
- * entries found between them. Bytes outside the frame — rc chatter on stdout
- * — are ignored. The capture is complete once the shell has exited and the
- * end nonce has been read; a background job the rc started may keep stdout
- * open, so the capture never waits for EOF after that. Caps:
- * {@link LOGIN_SHELL_ENV_TIMEOUT_MS} and {@link LOGIN_SHELL_ENV_MAX_BYTES}.
- * However the capture ends, the shell's whole process group is SIGKILLed.
- *
- * The shell gets this process's environment minus `BYOK_*`, so rc files
- * never see SDK control variables. `BYOK_*` names found in the capture are
- * dropped and the `BYOK_*` values this process had before the capture are
- * put back: rc files never set SDK control variables either.
- *
- * `byok-agent start --service` calls it first ({@link SERVICE_FLAG}; the
- * launchd plist, systemd unit and WinSW XML pass that flag). An embedding Host started
- * outside a terminal (an Electron app launched from the Dock has launchd's
- * PATH too) calls the same function at its own startup.
- *
- * Every report of the result — `start` stdout, `audit.jsonl`, `status` —
- * carries only {@link ServiceEnvironmentStatus}: a source, a closed code,
- * the shell's basename and a duration. Never a variable name, value or path.
+ * Issue #392: `byok-agent start --service` runs under a service manager's
+ * minimal environment. {@link applyLoginShellEnvironment} replaces this
+ * process's `process.env` with the login-shell snapshot
+ * (`../login-shell-environment.ts`, the base of every runtime environment)
+ * and puts back the `BYOK_*` values this process had, so that the daemon
+ * resolves its own config and binaries as the user's terminal would.
  */
 /** The `byok-agent start` flag generated service definitions pass. */
 export declare const SERVICE_FLAG = "--service";
-export declare const LOGIN_SHELL_ENV_TIMEOUT_MS = 10000;
-export declare const LOGIN_SHELL_ENV_MAX_BYTES: number;
-export declare const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES: readonly ['unsupported-shell', 'spawn-failed', 'timeout', 'output-too-large', 'bad-frame', 'shell-exit-nonzero'];
-export type ServiceEnvironmentUnavailableCode = (typeof SERVICE_ENVIRONMENT_UNAVAILABLE_CODES)[number];
-export type ServiceEnvironmentStatus = {
-    source: 'login-shell';
-    shell: string;
-    durationMs: number;
-} | {
-    source: 'inherited';
-} | {
-    source: 'unavailable';
-    code: ServiceEnvironmentUnavailableCode;
-};
-/** Timestamped closed environment observation shared by diagnostics and audit. */
-export interface ServiceEnvironmentRecord {
-    status: ServiceEnvironmentStatus;
-    ts: string;
-}
 /**
- * Test seams for {@link captureAndApply}. Not part of the public API:
- * {@link applyLoginShellEnvironment} takes no options.
- *
- * @internal
- */
-export interface ApplyLoginShellEnvironmentOptions {
-    /** Test seam: an absolute shell path instead of the passwd shell. */
-    shell?: string;
-    /** Test seam: the environment to replace. Defaults to `process.env`. */
-    env?: NodeJS.ProcessEnv;
-    timeoutMs?: number;
-    maxBytes?: number;
-    platform?: NodeJS.Platform;
-}
-/** What {@link applyLoginShellEnvironment} did in this process; `inherited` until it has run. */
-export declare function serviceEnvironmentStatus(): ServiceEnvironmentStatus;
-/**
- * Captures the login-shell environment and replaces `process.env` with it.
- * Runs once per process: later calls return the first call's result. On
- * failure `process.env` is left exactly as inherited. Never throws. win32
- * has no login shell: the result is `inherited`.
+ * Replaces `process.env` with this process's login-shell snapshot, keeping
+ * this process's own `BYOK_*` values. Runs once per process: later calls
+ * return the first call's result. On failure `process.env` is left exactly as
+ * inherited. Never throws.
  */
 export declare function applyLoginShellEnvironment(): Promise<ServiceEnvironmentStatus>;
 /**
- * The capture-and-replace step without the once-per-process latch; for
- * tests and for {@link applyLoginShellEnvironment} only.
+ * {@link captureLoginShellSnapshot} followed by the replacement
+ * {@link applyLoginShellEnvironment} makes, on `options.env`.
  *
  * @internal
  */
@@ -12432,6 +12341,121 @@ export declare const localStateRelocation: Readonly<{
     acquire: typeof acquire;
 }>;
 export {};
+// ==== @byok-sdk/client dist/login-shell-environment.d.ts ====
+/**
+ * Issue #392 (parent #384 item 2): a daemon started by launchd or systemd
+ * gets the service manager's minimal environment (launchd's default PATH is
+ * `/usr/bin:/bin:/usr/sbin:/sbin`), not the user's. ADR-037 D2 lets every
+ * runtime inherit the daemon's environment, which assumes the daemon's
+ * environment IS the user's — so under a service, `claude`/`codex` installed
+ * by Homebrew, nvm, bun or an official installer are `not-found`, and
+ * rc-only settings (proxies, `ANTHROPIC_BASE_URL`, `CODEX_HOME`, ...) are
+ * missing.
+ *
+ * #1095: this capture is also the base of every runtime environment
+ * (`runtime/environment.ts`). {@link loginShellSnapshot} runs the passwd login
+ * shell (`os.userInfo().shell`, never `$SHELL`) once per process as
+ * `<shell> -i -l -c 'printf %s B; /usr/bin/env -0; printf %s E'`, with B and
+ * E random per-run nonces, and keeps the NUL-separated entries found between
+ * them. Bytes outside the frame — rc chatter on stdout — are ignored. The
+ * capture is complete once the shell has exited and the end nonce has been
+ * read; a background job the rc started may keep stdout open, so the capture
+ * never waits for EOF after that. Caps: {@link LOGIN_SHELL_ENV_TIMEOUT_MS} and
+ * {@link LOGIN_SHELL_ENV_MAX_BYTES}. However the capture ends, the shell's
+ * whole process group is SIGKILLed.
+ *
+ * The shell does not start from this process's environment: an embedding
+ * Host's own variables would come back out of `env -0`. It starts from
+ * {@link LOGIN_SHELL_SEED_NAMES} copied from this process and `PATH` set to
+ * {@link LOGIN_SHELL_SEED_PATH}, what launchd and login(1) give a session;
+ * everything else in the snapshot is what the user's rc files produced.
+ * `BYOK_*` names found in the capture are dropped: rc files never set SDK
+ * control variables. The snapshot never changes `process.env`.
+ *
+ * `byok-agent start --service` additionally replaces `process.env` with the
+ * snapshot (`lifecycle/service-environment.ts`). win32 has no login shell:
+ * the snapshot source is `windows-session`, and the runtime environment takes
+ * its baseline names from the live session environment.
+ *
+ * Every report of the result — `start` stdout, `audit.jsonl`, `status` —
+ * carries only {@link ServiceEnvironmentStatus}: a source, a closed code,
+ * the shell's basename and a duration. Never a variable name, value or path.
+ */
+export declare const LOGIN_SHELL_ENV_TIMEOUT_MS = 10000;
+export declare const LOGIN_SHELL_ENV_MAX_BYTES: number;
+/**
+ * The names the login shell starts with, copied from this process: the
+ * account and locale, where the shell finds its rc files (`ZDOTDIR`,
+ * `XDG_*`), and the session sockets a login manager sets and no rc sets.
+ * Every other variable of this process stays out of the capture.
+ */
+export declare const LOGIN_SHELL_SEED_NAMES: readonly string[];
+/** The login shell's starting `PATH`; `/etc/zprofile` (path_helper) and `/etc/profile` build the rest. */
+export declare const LOGIN_SHELL_SEED_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+export declare const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES: readonly ['unsupported-shell', 'spawn-failed', 'timeout', 'output-too-large', 'bad-frame', 'shell-exit-nonzero'];
+export type ServiceEnvironmentUnavailableCode = (typeof SERVICE_ENVIRONMENT_UNAVAILABLE_CODES)[number];
+/**
+ * Where the runtime environment base came from. `inherited`: no snapshot has
+ * been taken in this process yet. `windows-session`: win32, which has no login
+ * shell.
+ */
+export type ServiceEnvironmentStatus = {
+    source: 'login-shell';
+    shell: string;
+    durationMs: number;
+} | {
+    source: 'inherited';
+} | {
+    source: 'windows-session';
+} | {
+    source: 'unavailable';
+    code: ServiceEnvironmentUnavailableCode;
+};
+/** One process's login-shell capture. `env` is present exactly when `status.source` is `login-shell`. */
+export interface LoginShellSnapshot {
+    readonly status: ServiceEnvironmentStatus;
+    readonly env?: Readonly<Record<string, string | undefined>>;
+}
+/** Timestamped closed environment observation shared by diagnostics and audit. */
+export interface ServiceEnvironmentRecord {
+    status: ServiceEnvironmentStatus;
+    ts: string;
+}
+/**
+ * Test seams for {@link captureLoginShellSnapshot} and `captureAndApply`.
+ * Not part of the public API.
+ *
+ * @internal
+ */
+export interface ApplyLoginShellEnvironmentOptions {
+    /** Test seam: an absolute shell path instead of the passwd shell. */
+    shell?: string;
+    /** Test seam: the environment the seed is copied from (and, for `captureAndApply`, the one replaced). Defaults to `process.env`. */
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    maxBytes?: number;
+    platform?: NodeJS.Platform;
+}
+/** Where this process's runtime environment base came from; `inherited` until {@link loginShellSnapshot} has resolved. */
+export declare function serviceEnvironmentStatus(): ServiceEnvironmentStatus;
+/**
+ * This process's login-shell snapshot, captured on the first call. Later
+ * calls return the first call's result. Never throws.
+ */
+export declare function loginShellSnapshot(): Promise<LoginShellSnapshot>;
+/**
+ * Test seam: replaces how {@link loginShellSnapshot} obtains the snapshot and
+ * forgets an earlier one; `undefined` restores the real capture.
+ *
+ * @internal
+ */
+export declare function setLoginShellSnapshotSource(source: (() => Promise<LoginShellSnapshot>) | undefined): void;
+/**
+ * Takes one snapshot without the once-per-process latch.
+ *
+ * @internal
+ */
+export declare function captureLoginShellSnapshot(options: ApplyLoginShellEnvironmentOptions): Promise<LoginShellSnapshot>;
 // ==== @byok-sdk/client dist/mcp-server/dispatch.d.ts ====
 /**
  * JSON-RPC 2.0 classification and per-session id bookkeeping.
@@ -12759,7 +12783,7 @@ export interface McpStdioClientOptions {
     readonly label?: string;
     /**
      * The exact base environment the RUNTIME child of this task receives
-     * (`buildRuntimeEnv`) — never `process.env`. Required, deliberately: a
+     * (`RuntimeAdapter.runtimeEnvironment`) — never `process.env`. Required, deliberately: a
      * caller that forgets it fails to compile rather than passing this SDK's
      * own `BYOK_*` control-plane variables.
      */
@@ -13102,6 +13126,7 @@ export declare const LOCAL_AGENT_RELEASE_BUILD_ID_MAX_LENGTH = 128;
 export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleaseIdentity | undefined): Readonly<LocalAgentReleaseIdentity>;
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
 import type { RuntimeId } from '@byok-sdk/protocol';
+import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
 export interface RuntimeObservation {
@@ -13109,6 +13134,8 @@ export interface RuntimeObservation {
     present: boolean;
     outcome: RuntimeDetectResult['kind'];
     reason?: RuntimeDetectionRefusalReason;
+    /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture failed. */
+    code?: ServiceEnvironmentUnavailableCode;
     version?: string;
     qualifiedVersion?: string;
     authPresent?: boolean;
@@ -13216,6 +13243,114 @@ export declare class RuntimeStartupDisposalFailure extends Error {
     constructor(retryDisposal: () => Promise<void>, options?: ErrorOptions);
 }
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
+// ==== @byok-sdk/client dist/runtime/environment.d.ts ====
+import { type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
+/**
+ * The environment of every child process of a task: the runtime CLI and the
+ * MCP servers the daemon probes for it (#1095).
+ *
+ * {@link buildRuntimeEnvironment} builds it from a
+ * {@link RuntimeEnvironmentPolicy}, which each runtime adapter owns:
+ *
+ * - `login-shell` (default): the user's login-shell snapshot
+ *   (`../login-shell-environment.ts`), never the daemon's live
+ *   environment, so a variable an embedding Host puts into `process.env` does
+ *   not reach the runtime. A failed capture fails closed with
+ *   {@link RuntimeEnvironmentUnavailableError}. On win32, which has no login
+ *   shell, the base is {@link WINDOWS_SESSION_NAMES} from the live session
+ *   environment.
+ * - `allowlist`: the platform baseline plus `allow`, from the live
+ *   environment; it needs no snapshot.
+ *
+ * Then, in order: the adapter's conflict rule removes names from the base;
+ * `pass` copies the named variables from the live environment at every build;
+ * the hard deny removes `CLAUDECODE` (Claude Code sets it inside its own
+ * sessions; a child agent starts as its own top-level session) and `BYOK_*`
+ * (this SDK's control-plane variables), whatever listed them; `NO_PROXY` and
+ * `no_proxy` gain `127.0.0.1` and `localhost`, so a user's proxy never takes
+ * the traffic to the daemon's loopback gate and MCP servers.
+ *
+ * {@link buildAllowlistedEnv} is the narrow form over a given environment. It
+ * is used by the durable Pi tool shell, the prepared Pi lane on the Pi auth
+ * store, and Hermes launcher or custody paths.
+ *
+ * Every name in every list may be an exact match or a `*`-suffixed prefix
+ * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
+ */
+/** Inputs to {@link buildAllowlistedEnv}. */
+export interface BuildAllowlistedEnvOptions {
+    /**
+     * The ambient environment (normally `process.env`). Never mutated — every
+     * returned variable is copied into a fresh object.
+     */
+    ambient: Readonly<Record<string, string | undefined>>;
+    /** Names admitted beyond the platform baseline, still subject to the hard deny. */
+    allow?: readonly string[];
+    /**
+     * Test seam: which platform's extra base vars to include
+     * ({@link WINDOWS_BASE_ALLOWLIST} vs none) — defaults to `process.platform`
+     * so callers never have to think about it, while still letting a test
+     * exercise the win32 branch deterministically on any host OS.
+     */
+    platform?: NodeJS.Platform;
+}
+/**
+ * Which environment a runtime adapter gives its children (see this module's
+ * doc comment). `pass` names variables taken from the live `process.env` at
+ * every build, for a Host that sets them after it starts. Names never match
+ * `CLAUDECODE` or `BYOK_*`.
+ */
+export type RuntimeEnvironmentPolicy = {
+    readonly base?: 'login-shell';
+    readonly pass?: readonly string[];
+} | {
+    readonly base: 'allowlist';
+    readonly allow?: readonly string[];
+    readonly pass?: readonly string[];
+};
+/**
+ * An adapter's conflict rule: given the names `pass` actually supplied, the
+ * names (or `*` prefixes) to remove from the base.
+ */
+export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => readonly string[];
+/** The login-shell capture failed, so no `login-shell` runtime environment exists in this process. */
+export declare class RuntimeEnvironmentUnavailableError extends Error {
+    readonly reason: ServiceEnvironmentUnavailableCode;
+    readonly code: 'runtime_environment_unavailable';
+    constructor(reason: ServiceEnvironmentUnavailableCode);
+}
+/** Validates a policy at the adapter or daemon boundary and returns a frozen copy. */
+export declare function assertRuntimeEnvironmentPolicy(value: unknown, label: string): RuntimeEnvironmentPolicy;
+/** Inputs to {@link composeRuntimeEnvironment}. */
+export interface ComposeRuntimeEnvironmentInput {
+    policy: RuntimeEnvironmentPolicy;
+    /** Required for `login-shell` off win32. */
+    snapshot?: LoginShellSnapshot;
+    /** The live environment (normally `process.env`). Never mutated. */
+    live: Readonly<Record<string, string | undefined>>;
+    conflicts?: RuntimeEnvironmentConflictRule;
+    platform?: NodeJS.Platform;
+}
+/**
+ * The synchronous core of {@link buildRuntimeEnvironment}: a fresh object
+ * from the given snapshot and live environment.
+ *
+ * @internal
+ */
+export declare function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput): Record<string, string>;
+/**
+ * The environment every child process of a task receives under `policy`, from
+ * this process's login-shell snapshot (captured on first use) and the live
+ * `process.env`. A fresh object. Throws
+ * {@link RuntimeEnvironmentUnavailableError} when `login-shell` has no
+ * snapshot to build from.
+ */
+export declare function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, conflicts?: RuntimeEnvironmentConflictRule): Promise<Record<string, string>>;
+/**
+ * The platform baseline plus `options.allow`, minus the hard deny (see this
+ * module's own doc comment for its callers).
+ */
+export declare function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string>;
 // ==== @byok-sdk/client dist/sdk-native-assets-runtime.d.ts ====
 /** Runtime loader: explicit absolute root only, no download or package-search fallback. */
 export declare function loadSdkKoffiAsset(root: string): unknown;
@@ -13351,11 +13486,13 @@ export interface FakeRuntimeAdapterBehavior {
     readonly detect?: RuntimeDetectResult | ((signal?: AbortSignal) => Promise<RuntimeDetectResult>);
     /** Default: a non-retryable reject, so a fake starts nothing the test did not supply. */
     readonly prepare?: (input: RuntimeAdapterPrepareInput) => Promise<RuntimeAdapterPrepareResult>;
+    /** Default: the `allowlist` runtime environment, which takes no login-shell snapshot. */
+    readonly runtimeEnvironment?: () => Promise<Record<string, string>>;
 }
 /**
  * A runtime adapter double whose descriptor is the real adapter's default
  * descriptor, so its capabilities, selection target and platforms follow the
- * SDK. Only `detect` and `prepare` are the test's.
+ * SDK. Only `detect`, `prepare` and `runtimeEnvironment` are the test's.
  */
 export declare function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior?: FakeRuntimeAdapterBehavior): RuntimeAdapter;
 // ==== @byok-sdk/client dist/tool-authorization.d.ts ====
@@ -13447,6 +13584,7 @@ export interface ToolReminder {
     readonly summary: string;
 }
 // ==== @byok-sdk/client dist/types.d.ts ====
+import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { ToolAuthorizationGate } from './tool-authorization';
@@ -13489,7 +13627,11 @@ export type RuntimeDetectResult = {
     readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'>;
 } | {
     readonly kind: 'refused';
-    readonly reason: RuntimeDetectionRefusalReason;
+    readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable'>;
+} | {
+    readonly kind: 'refused';
+    readonly reason: 'runtime_environment_unavailable';
+    readonly code: ServiceEnvironmentUnavailableCode;
 };
 /**
  * A local agent updates itself, so a version the SDK was not qualified against
@@ -13502,8 +13644,9 @@ export interface RuntimeDetectionAdvisory {
 /**
  * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
  * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.
+ * `runtime_environment_unavailable`: the login-shell capture failed (`code`), so the runtime has no environment to start in (#1095).
  */
-export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported';
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported' | 'runtime_environment_unavailable';
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /**
@@ -13968,6 +14111,14 @@ export interface RuntimeAdapter {
     /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
     detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    /**
+     * The environment every child process of this runtime's tasks receives
+     * (#1095): a fresh object, built under the adapter's own
+     * `RuntimeEnvironmentPolicy` (`buildRuntimeEnvironment`). Rejects with
+     * `RuntimeEnvironmentUnavailableError` when that policy has no environment
+     * to build from; the daemon then refuses the runtime.
+     */
+    runtimeEnvironment(): Promise<Record<string, string>>;
 }
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */
 export declare function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescriptor): RuntimeAdapterDescriptor;

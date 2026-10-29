@@ -591,6 +591,48 @@
       },
       "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = all three bundled adapters\n— pi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildDefaultAdapters`), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
     },
+    "runtimeEnvironment": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "base": {
+              "const": "login-shell"
+            },
+            "pass": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "base": {
+              "const": "allowlist"
+            },
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pass": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "base"
+          ]
+        }
+      ],
+      "description": "The environment every runtime `createDaemon` builds gives its children\n(#1095): by default the user's login-shell snapshot, so a variable the\nHost sets in `process.env` reaches a runtime only when `pass` names it.\n`createDaemonWithAdapters` refuses this field: each injected adapter\ntakes its own `runtimeEnvironment` option."
+    },
     "durablePi": {
       "type": "boolean",
       "description": "Disabled by default. Requires Agent homes, journal and custody launcher."
