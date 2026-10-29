@@ -283,7 +283,7 @@ Defaults and settings:
 | Presence heartbeat | 30 s | Daemon `config.presence.intervalMs`. It must stay above the minimum interval and below the TTL. | `packages/client/src/daemon/presence-publisher.ts:45-52`, `packages/client/src/daemon/create-daemon.ts:1454-1459` |
 | Presence TTL | 90 s | Host `presenceTtlMs`. The daemon `config.presence.ttlMs` only checks the cadence. | `packages/cloud/src/coordination.ts:15`, `packages/cloud/src/cloud.ts:1000`, `packages/client/src/daemon/presence-publisher.ts:87-88` |
 | Presence on or off | On when the Host `capabilities` declaration has `presence.hints` | Host declaration | `packages/cloud/src/cloud.ts:995-1006`, `packages/client/src/daemon/create-daemon.ts:3078-3079` |
-| Access token | 1 h. The daemon renews it 60 s early with 2 calls. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/cloud/src/cloud.ts:340`, `packages/client/src/daemon/auth-manager.ts:83`, `packages/client/src/daemon/auth-manager.ts:310-332`, `packages/client/src/daemon/auth-manager.ts:366-375` |
+| Access token | 1 h. The daemon renews it 60 s early with 2 calls. It computes the expiry from its own receipt time plus the response's `expiresIn`, so the device clock's offset from the Host's does not move the renewal point. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/cloud/src/cloud.ts:331`, `packages/client/src/daemon/auth-manager.ts:96-97` (renewal margin), `packages/client/src/daemon/auth-manager.ts:614-622` (expiry from `expiresIn`), `packages/client/src/daemon/auth-manager.ts:510-532` (scheduling) |
 
 Calls per hour for one idle device.
 These numbers are computed from the defaults. They are not measured.
@@ -369,8 +369,8 @@ What the kept rows hold:
 | `agent_message_admission` row | The full publish payload, with the message `body`, in `payload_body` (`NOT NULL`). The payload again in `terminal_body`, with the disposition. | `deploy/sql/0017_agent_message_admission.sql:16-17`, `packages/cloud/src/inbound.ts:262-268`, `packages/cloud/src/inbound.ts:289-296`, `packages/protocol/src/messages.ts:488-499` |
 | `task` row | Status, owner, claim snapshot and cancel marker | `packages/cloud-dataplane/src/stores/task-attempts.ts:53` |
 
-- The SDK has no ContextPack field. The K4 example adds its ContextPack to the inline instruction
-  (`examples/host-execution-core/src/core.ts:498-500`).
+- The SDK has no ContextPack field. The K4 execution core (`@byok-sdk/server/execution-core`) adds its ContextPack to the inline instruction
+  (`packages/server/src/execution-core/core.ts:655-663`).
   So the cloud keeps that ContextPack, with its resident memory text, as long as it keeps the offer receipt.
 - An `agent_message_admission` row goes only when its `task` row goes (`deploy/sql/0017_agent_message_admission.sql:20-22`).
 - The `tasks` maintenance step archives a terminal task once its `archive_after` is older than `terminalTaskArchiveMs`

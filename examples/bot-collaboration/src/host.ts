@@ -4,10 +4,10 @@ import { admitBotToolsets } from './rules/team';
 import type { UpdateRoutineAction } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
-  type MessageTransaction } from '@byok-sdk/example-host-execution-core';
-import type { HostJobHandler, Routine } from '@byok-sdk/example-host-execution-core';
-import { HostLedger } from '@byok-sdk/example-host-execution-core';
-import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+  type MessageTransaction } from '@byok-sdk/server/execution-core';
+import type { HostJobHandler, Routine } from '@byok-sdk/server/execution-core';
+import { HostLedger } from '@byok-sdk/server/execution-core';
+import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,

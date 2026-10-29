@@ -20,7 +20,7 @@ import { tenantId } from '@byok-sdk/cloud';
 import { HostedCollaborationStore, type HostConfig } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import type { Principal } from '@byok-sdk/example-bot-collaboration/channel';
 import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
-import { taskId } from '@byok-sdk/example-host-execution-core';
+import { taskId } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
 import { hostScopeDdl, sha256Hex, writeHostScope } from './host-scopes';

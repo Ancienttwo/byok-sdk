@@ -93,6 +93,14 @@ export interface ControlServerHandle {
   stopServing(): Promise<void>;
   /** Runs {@link stopServing}, then removes the socket/token files (a Windows pipe leaves no file to remove). Idempotent. */
   close(): Promise<void>;
+  /**
+   * Replaces the method table on this same listener and token. Every later
+   * request uses it, on connections already authenticated as well as new
+   * ones. Changing what a running daemon serves never closes the endpoint,
+   * so the liveness signal never reads "gone" while this daemon still holds
+   * its store lease (service enrollment's handover to normal startup).
+   */
+  setMethods(methods: ControlMethods): void;
 }
 
 function errorMessage(err: unknown): string {
@@ -246,7 +254,7 @@ async function bindControlEndpoint(server: net.Server, endpoint: string): Promis
 function handleConnection(
   socket: net.Socket,
   token: string,
-  methods: ControlMethods,
+  methods: () => ControlMethods,
   handshakeTimeoutMs: number,
   onHandshakeSettled: () => void,
 ): void {
@@ -407,7 +415,8 @@ function handleConnection(
   }
 
   function dispatch(id: string, method: string, params: unknown): void {
-    const unary = methods.unary[method];
+    const { unary: unaryMethods, stream: streamMethods } = methods();
+    const unary = unaryMethods[method];
     if (unary) {
       const record: ActiveRequest = { kind: 'unary' };
       if (!registerRequest(id, record)) return;
@@ -423,7 +432,7 @@ function handleConnection(
         });
       return;
     }
-    const stream = methods.stream[method];
+    const stream = streamMethods[method];
     if (stream) {
       const controller = new AbortController();
       const record: ActiveRequest = { kind: 'stream', controller };
@@ -530,6 +539,7 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
   // it), so this only ever bites a misbehaving/hostile peer.
   const maxHalfOpenConnections = opts.maxHalfOpenConnections ?? MAX_HALF_OPEN_CONNECTIONS;
   let halfOpenCount = 0;
+  let methods = opts.methods;
   const server = net.createServer((socket) => {
     if (halfOpenCount >= maxHalfOpenConnections) {
       socket.destroy();
@@ -538,7 +548,7 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
     halfOpenCount += 1;
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
-    handleConnection(socket, token, opts.methods, handshakeTimeoutMs, () => {
+    handleConnection(socket, token, () => methods, handshakeTimeoutMs, () => {
       halfOpenCount -= 1;
     });
   });
@@ -603,5 +613,12 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
     await fs.rm(tokenPath, { force: true }).catch(() => {});
   }
 
-  return { endpoint, stopServing, close };
+  return {
+    endpoint,
+    stopServing,
+    close,
+    setMethods: (next) => {
+      methods = next;
+    },
+  };
 }

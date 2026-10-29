@@ -705,7 +705,7 @@ device Host computes is the one it schedules. A successor outside the wake
 limit stays in the Host outbox and is retried; a null successor is a visible
 stopped state, not a silent stop.
 
-The copy-and-own K4 Host execution example keeps a bounded diagnostic history of
+The K4 Host execution core (`@byok-sdk/server/execution-core`) keeps a bounded diagnostic history of
 ignored routine wake deliveries in `LedgerState.ignoredWakes`: unknown keys,
 missing or inactive routines, and keys without a matching current reservation.
 The newest 128 observations contain only a timestamp, closed reason code and
@@ -718,8 +718,8 @@ its JSON summary and optional Agent intent commit atomically afterward. A summar
 result records an occurrence without an Agent execution. Failures retain pending work
 and reject the drain; recovery retries it with the same occurrence identity. External
 Host effects require occurrence-key idempotency across crashes. Pause/completed stop
-new slots, not admitted jobs. This remains Host example code, not an SDK scheduler.
-See the [K4 Host job contract](../examples/host-execution-core/README.md#host-jobs-and-execution-free-occurrences).
+new slots, not admitted jobs. The core runs inside the Host; it is not an SDK scheduler.
+See the [K4 Host job contract](host-execution-core.md#host-jobs-and-execution-free-occurrences).
 K4 `updateRoutine` changes a routine version in place. The version must be
 `max(current, pending) + 1` with the same destination and Host job type, and an
 exact replay does nothing. The ledger keeps the current definition and one
@@ -728,7 +728,7 @@ version replaces the current one when the routine is active, no occurrence of it
 is unsettled and no reserved old slot is due (the pure `versionSwitchDue`). While
 a version is pending, the old chain gets no new slot, and admitted work finishes
 with the version that admitted it. See
-[K4 routine versions](../examples/host-execution-core/README.md#routine-versions).
+[K4 routine versions](host-execution-core.md#routine-versions).
 K4 also accepts `hostOccurrence` routine definitions. A registered synchronous
 hook writes Host state in the transaction that records the occurrence: both
 persist or neither does, a replay does not call the hook, and a throw or a
@@ -738,11 +738,11 @@ Host calls the exported `promoteOccurrence`, which adds intent
 later promotion settle as `superseded`. `OutcomeTransaction.routines` runs
 `create`, `update` and `lifecycle` in the outcome commit with the same rules as
 the core methods. See
-[K4 Host occurrences](../examples/host-execution-core/README.md#host-occurrences).
+[K4 Host occurrences](host-execution-core.md#host-occurrences).
 
 ### K4 Host reply transaction
 
-The copy-and-own Host execution core exposes `consumeMessage` for the server's
+The Host execution core exposes `consumeMessage` for the server's
 Agent message consumer. Admission checks the exact frozen tenant/device/Agent/
 context binding, then commits a synchronous Host `applyMessage` hook and a single
 execution-owned message-id/content-hash receipt with its projections. Exceptions
@@ -892,6 +892,18 @@ XML. The last `lifecycle` event is kept in `audit.jsonl` (also across
 rotation); offline `status`, `service-status` and the `doctor` `lifecycle`
 check read it, and a halted or crashed daemon fails that check with its
 remedy.
+
+The control `status` result carries `clockSkew` (#1114): the device clock
+against the HTTP `Date` header of the daemon's last successful pair or token
+renewal, as `deviceAheadMs` (positive means the device is ahead),
+`uncertaintyMs` and `observedAt`. It is absent when the daemon has no reading
+(no pair or renewal since start, a response without a parseable `Date`, or a
+device clock set back during the request) and
+from an older control peer. The `doctor` `clock-skew` check reads it, passes
+within 60 seconds (the default device-proof window; a Host may widen it up to
+5 minutes) and warns beyond that. An offline `doctor` reports it as unknown:
+it keeps no state file and sends no request. The reading never sets a token
+lifetime.
 
 ## Runtime operation authority
 

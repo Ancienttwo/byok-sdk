@@ -15,7 +15,7 @@ describe('createByokServer capability declaration', () => {
   });
 
   const storages: [string, () => CreateByokServerOptions['storage']][] = [['memory', () => undefined]];
-  if (isSqliteAvailable()) {
+  if (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') {
     storages.push(['sqlite', () => {
       const directory = mkdtempSync(join(tmpdir(), 'byok-server-capabilities-'));
       directories.push(directory);

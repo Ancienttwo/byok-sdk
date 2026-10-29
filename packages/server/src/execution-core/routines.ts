@@ -1,4 +1,4 @@
-import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '@byok-sdk/server';
+import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '../wakes/types';
 import { canonical, hash, isSealed, occurrenceIntentKey, time, validateInput, validateJson, validateRetry, type Conclusion, type HostOccurrenceRun, type IntentExecution,
   type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
 import { admit, cancelWake, settle } from './transitions';

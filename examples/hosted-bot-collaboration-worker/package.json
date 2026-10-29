@@ -10,6 +10,7 @@
     "@byok-sdk/cloud-dataplane": "workspace:*",
     "@byok-sdk/example-bot-collaboration": "workspace:*",
     "@byok-sdk/example-host-execution-core": "workspace:*",
+    "@byok-sdk/server": "workspace:*",
     "@byok-sdk/example-hosted-bot-collaboration": "workspace:*",
     "pg": "^8.22.0"
   },

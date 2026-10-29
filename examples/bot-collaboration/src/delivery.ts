@@ -1,4 +1,4 @@
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { hash } from '@byok-sdk/server/execution-core';
 import type { ChannelPort, Delivery } from './channel';
 
 const MAX_ATTEMPTS = 3;

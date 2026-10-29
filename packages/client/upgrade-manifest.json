@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "c50bcac00f74dcd37de989c6c0438d46096cb80c0aba85f09465947b2ddc9196"
+    "snapshotSha256": "71f2743ff80802ea60675254624acb5d00362efa2d6c51670c0c81cfe89b138e"
   },
   "configFields": {
     "status": "tracked",
@@ -276,6 +276,206 @@
         "export:@byok-sdk/cloud-dataplane/runtime#CLOUD_CLEANUP_ERROR_CODES",
         "export:@byok-sdk/core#MailboxCollectExpiredInput",
         "store:cloud-dataplane-postgres"
+      ]
+    },
+    {
+      "id": "agent-memory-contract-in-protocol",
+      "impact": "breaking",
+      "summary": "The Agent memory contract shared by the device and the Host (AgentMemoryFile, AgentMemorySnapshot, AgentMemoryExport, AgentMemoryProjectionPort, AgentMemoryIntentFetchInput, AgentMemoryIntentTransport, validateAgentMemoryPath, AgentMemoryError, AgentMemoryValidationError) moved from @byok-sdk/client and @byok-sdk/client/agent-memory to the new zod-free @byok-sdk/protocol/agent-memory entry, its only definition (#1106). Import these names from @byok-sdk/protocol/agent-memory; client no longer exports them. The error classes now have one runtime definition, so instanceof AgentMemoryError holds across client entries.",
+      "migration": "docs/host-execution-core.md#migrating-to-the-published-core-1106",
+      "items": [
+        "entry:@byok-sdk/protocol/agent-memory",
+        "export:@byok-sdk/client#AgentMemoryError",
+        "export:@byok-sdk/client#AgentMemoryExport",
+        "export:@byok-sdk/client#AgentMemoryFile",
+        "export:@byok-sdk/client#AgentMemoryIntentFetchInput",
+        "export:@byok-sdk/client#AgentMemoryIntentTransport",
+        "export:@byok-sdk/client#AgentMemoryProjectionPort",
+        "export:@byok-sdk/client#AgentMemorySnapshot",
+        "export:@byok-sdk/client#AgentMemoryValidationError",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryError",
+        "export:@byok-sdk/client/agent-memory#AgentMemoryFile",
+        "export:@byok-sdk/client/agent-memory#AgentMemorySnapshot",
+        "export:@byok-sdk/client/agent-memory#validateAgentMemoryPath",
+        "export:@byok-sdk/protocol/agent-memory#AgentMemoryError",
+        "export:@byok-sdk/protocol/agent-memory#AgentMemoryExport",
+        "export:@byok-sdk/protocol/agent-memory#AgentMemoryFile",
+        "export:@byok-sdk/protocol/agent-memory#AgentMemoryIntentFetchInput",
+        "export:@byok-sdk/protocol/agent-memory#AgentMemoryIntentTransport",
+        "export:@byok-sdk/protocol/agent-memory#AgentMemoryProjectionPort",
+        "export:@byok-sdk/protocol/agent-memory#AgentMemorySnapshot",
+        "export:@byok-sdk/protocol/agent-memory#AgentMemoryValidationError",
+        "export:@byok-sdk/protocol/agent-memory#validateAgentMemoryPath"
+      ]
+    },
+    {
+      "id": "execution-core-published",
+      "impact": "breaking",
+      "summary": "The K4 Host execution core (FIFO, ledger, routines, transitions, schedule, submit, model, sealed routine, Host memory page and restore) is published as @byok-sdk/server/execution-core, with hash and canonical in the Worker-safe @byok-sdk/server/execution-core/canonical entry (#1106). examples/host-execution-core is now a demo that composes these entries; its package exports only ./test-support. A Host that vendored K4 deletes the copy and its provenance check and imports the subpaths; the Host ledger file is kept. MemoryBlockedError is newly exported. K8 imports the published entries; its own vendoring is unchanged.",
+      "migration": "docs/host-execution-core.md#migrating-to-the-published-core-1106",
+      "items": [
+        "entry:@byok-sdk/server/execution-core",
+        "entry:@byok-sdk/server/execution-core/canonical",
+        "example:bot-collaboration",
+        "example:host-execution-core",
+        "export:@byok-sdk/server/execution-core#AgentMessageInput",
+        "export:@byok-sdk/server/execution-core#AgentRoutineDefinition",
+        "export:@byok-sdk/server/execution-core#ApplicationRows",
+        "export:@byok-sdk/server/execution-core#CompactVeto",
+        "export:@byok-sdk/server/execution-core#CompactVetoError",
+        "export:@byok-sdk/server/execution-core#CompactionOptions",
+        "export:@byok-sdk/server/execution-core#CompactionResult",
+        "export:@byok-sdk/server/execution-core#Conclusion",
+        "export:@byok-sdk/server/execution-core#DEFAULT_RETRY",
+        "export:@byok-sdk/server/execution-core#EMPTY_MEMORY_REVISION",
+        "export:@byok-sdk/server/execution-core#ExecutionServer",
+        "export:@byok-sdk/server/execution-core#ExecutionTemplate",
+        "export:@byok-sdk/server/execution-core#FrozenExecutionInput",
+        "export:@byok-sdk/server/execution-core#FrozenInput",
+        "export:@byok-sdk/server/execution-core#FrozenOffer",
+        "export:@byok-sdk/server/execution-core#FrozenOfferMismatchError",
+        "export:@byok-sdk/server/execution-core#FrozenSubmitPort",
+        "export:@byok-sdk/server/execution-core#HostExecutionCore",
+        "export:@byok-sdk/server/execution-core#HostJobHandler",
+        "export:@byok-sdk/server/execution-core#HostJobResult",
+        "export:@byok-sdk/server/execution-core#HostJobRoutineDefinition",
+        "export:@byok-sdk/server/execution-core#HostJobRun",
+        "export:@byok-sdk/server/execution-core#HostJobSpec",
+        "export:@byok-sdk/server/execution-core#HostLedger",
+        "export:@byok-sdk/server/execution-core#HostLedgerOptions",
+        "export:@byok-sdk/server/execution-core#HostMemoryPage",
+        "export:@byok-sdk/server/execution-core#HostOccurrenceRoutineDefinition",
+        "export:@byok-sdk/server/execution-core#HostOccurrenceRun",
+        "export:@byok-sdk/server/execution-core#HostOptions",
+        "export:@byok-sdk/server/execution-core#IGNORED_WAKE_AUDIT_LIMIT",
+        "export:@byok-sdk/server/execution-core#IgnoredWakeAudit",
+        "export:@byok-sdk/server/execution-core#Intent",
+        "export:@byok-sdk/server/execution-core#IntentExecution",
+        "export:@byok-sdk/server/execution-core#IntentInput",
+        "export:@byok-sdk/server/execution-core#Json",
+        "export:@byok-sdk/server/execution-core#LedgerDump",
+        "export:@byok-sdk/server/execution-core#LedgerDumpMemoryTombstone",
+        "export:@byok-sdk/server/execution-core#LedgerDumpRow",
+        "export:@byok-sdk/server/execution-core#LedgerDumpTombstone",
+        "export:@byok-sdk/server/execution-core#LedgerIntentInput",
+        "export:@byok-sdk/server/execution-core#LedgerState",
+        "export:@byok-sdk/server/execution-core#MIN_TOMBSTONE_RETENTION_MS",
+        "export:@byok-sdk/server/execution-core#MemoryApproval",
+        "export:@byok-sdk/server/execution-core#MemoryBinding",
+        "export:@byok-sdk/server/execution-core#MemoryBlockedError",
+        "export:@byok-sdk/server/execution-core#MemoryContextPack",
+        "export:@byok-sdk/server/execution-core#MemoryOptions",
+        "export:@byok-sdk/server/execution-core#MemoryRestoreFileResult",
+        "export:@byok-sdk/server/execution-core#MemoryRestoreInput",
+        "export:@byok-sdk/server/execution-core#MemoryRestoreResult",
+        "export:@byok-sdk/server/execution-core#MessageDecision",
+        "export:@byok-sdk/server/execution-core#MessageTransaction",
+        "export:@byok-sdk/server/execution-core#NextOccurrence",
+        "export:@byok-sdk/server/execution-core#Occurrence",
+        "export:@byok-sdk/server/execution-core#OccurrenceHook",
+        "export:@byok-sdk/server/execution-core#OccurrenceTransaction",
+        "export:@byok-sdk/server/execution-core#OutboxFullError",
+        "export:@byok-sdk/server/execution-core#OutcomeTransaction",
+        "export:@byok-sdk/server/execution-core#ProjectionOutboxLimits",
+        "export:@byok-sdk/server/execution-core#ProjectionOutboxUsage",
+        "export:@byok-sdk/server/execution-core#RESIDENT_MEMORY_MAX_BYTES",
+        "export:@byok-sdk/server/execution-core#RetiredIntentIdentityError",
+        "export:@byok-sdk/server/execution-core#RetryPolicy",
+        "export:@byok-sdk/server/execution-core#Routine",
+        "export:@byok-sdk/server/execution-core#RoutineCommandOptions",
+        "export:@byok-sdk/server/execution-core#RoutineCommands",
+        "export:@byok-sdk/server/execution-core#RoutineDefinition",
+        "export:@byok-sdk/server/execution-core#RoutineRef",
+        "export:@byok-sdk/server/execution-core#RoutineValidation",
+        "export:@byok-sdk/server/execution-core#SealRoutineTemplateInput",
+        "export:@byok-sdk/server/execution-core#SealedAgentExecutionInput",
+        "export:@byok-sdk/server/execution-core#SealedDispatchUnavailableError",
+        "export:@byok-sdk/server/execution-core#SealedExecutionTemplate",
+        "export:@byok-sdk/server/execution-core#SealedTaskInput",
+        "export:@byok-sdk/server/execution-core#TombstoneKind",
+        "export:@byok-sdk/server/execution-core#WAKE_HORIZON_MS",
+        "export:@byok-sdk/server/execution-core#agentKey",
+        "export:@byok-sdk/server/execution-core#applyPlan",
+        "export:@byok-sdk/server/execution-core#auditCalendarError",
+        "export:@byok-sdk/server/execution-core#canonical",
+        "export:@byok-sdk/server/execution-core#concludeOccurrence",
+        "export:@byok-sdk/server/execution-core#createRoutine",
+        "export:@byok-sdk/server/execution-core#enqueue",
+        "export:@byok-sdk/server/execution-core#fifoHeads",
+        "export:@byok-sdk/server/execution-core#frozenInput",
+        "export:@byok-sdk/server/execution-core#hash",
+        "export:@byok-sdk/server/execution-core#isOccurrenceIntentKey",
+        "export:@byok-sdk/server/execution-core#isSealed",
+        "export:@byok-sdk/server/execution-core#memoryRevision",
+        "export:@byok-sdk/server/execution-core#nextIntervalOccurrence",
+        "export:@byok-sdk/server/execution-core#nextWake",
+        "export:@byok-sdk/server/execution-core#occurrenceIntentKey",
+        "export:@byok-sdk/server/execution-core#occurrenceOfIntentKey",
+        "export:@byok-sdk/server/execution-core#occurrenceRun",
+        "export:@byok-sdk/server/execution-core#parseRoutineWakeKey",
+        "export:@byok-sdk/server/execution-core#project",
+        "export:@byok-sdk/server/execution-core#promoteOccurrence",
+        "export:@byok-sdk/server/execution-core#queuedExpiry",
+        "export:@byok-sdk/server/execution-core#recordOccurrence",
+        "export:@byok-sdk/server/execution-core#routineCommands",
+        "export:@byok-sdk/server/execution-core#routineTemplateBinding",
+        "export:@byok-sdk/server/execution-core#routineWakeKey",
+        "export:@byok-sdk/server/execution-core#sameFrozenOffer",
+        "export:@byok-sdk/server/execution-core#scheduleNext",
+        "export:@byok-sdk/server/execution-core#sealRoutineTemplate",
+        "export:@byok-sdk/server/execution-core#setLifecycle",
+        "export:@byok-sdk/server/execution-core#settle",
+        "export:@byok-sdk/server/execution-core#stageVersion",
+        "export:@byok-sdk/server/execution-core#submitFrozen",
+        "export:@byok-sdk/server/execution-core#switchVersion",
+        "export:@byok-sdk/server/execution-core#taskId",
+        "export:@byok-sdk/server/execution-core#time",
+        "export:@byok-sdk/server/execution-core#validateJson",
+        "export:@byok-sdk/server/execution-core#validateRetry",
+        "export:@byok-sdk/server/execution-core#validateRoutineDefinition",
+        "export:@byok-sdk/server/execution-core#versionSwitchDue",
+        "export:@byok-sdk/server/execution-core/canonical#canonical",
+        "export:@byok-sdk/server/execution-core/canonical#hash"
+      ]
+    },
+    {
+      "id": "doctor-clock-skew",
+      "impact": "additive",
+      "summary": "doctor reports the device clock skew measured from the server Date header of the last pair or token response, as a new clock-skew check and a clockSkew snapshot field; it warns beyond 60 s, the Host's default device-proof window. PairResponse.expiresIn is registered as a strip-safe HTTP wire addition. No Host action.",
+      "migration": "docs/agent-diagnostics-integration.md#3-故障到用户动作的映射",
+      "items": [
+        "export:@byok-sdk/client#DiagnosticCheck",
+        "export:@byok-sdk/protocol#WireAddition"
+      ]
+    },
+    {
+      "id": "messages-per-envelope-decode",
+      "impact": "breaking",
+      "summary": "POST /byok/messages decodes each entry on its own (#1121). An entry that is not a valid Envelope is answered rejected with reason payload_invalid and the rest of the batch applies; only a broken frame (not { messages: [...] }, an entry whose v is not this wire major, an entry without a UUID id, or more than 256 entries) still fails the whole request with 400. MessagesSendRequestSchema now validates that frame only: its messages entries are typed { v, id } plus unvalidated fields, so code that read decoded envelopes from it must decode each entry with parseMessage. A terminal whose task already holds a stored receipt the Host cannot read back is refused for that envelope with state_conflict (internal reason terminal_receipt_not_canonical in INBOUND_REFUSAL_REASONS) instead of a 500 for the batch. Devices need no change: a rejected outcome was already final for them.",
+      "migration": "docs/protocol.md#82-send--post-byokmessages",
+      "items": [
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#MessagesSendRequestSchema"
+      ]
+    },
+    {
+      "id": "open-device-vocabularies",
+      "impact": "breaking",
+      "summary": "Device -> Host vocabularies a newer device may extend are open (#1121): task.fail.failure.class, task.decline.code and a denied agent.content.receipt reason accept any well-formed token ([a-z][a-z0-9_-]{0,63}) this version does not know and keep it verbatim, so the report is recorded instead of rejected; a failure class it does not know may carry extra fields, which are kept too. The wire types widen accordingly (TaskFailure, the decline code and the denial reason admit unrecognized tokens). Hosts read them with readTaskFailure and readDeclineCode: a value this version does not know reads as class/code 'unknown' with the raw token in reportedClass/reportedCode. Cloud TerminalResult and embedded TaskResult now carry these readings: failure is a TaskFailureReading, code is a TaskDeclineCodeReading code, and a new reportedCode field holds an unknown code's raw token. Switch on failure.class and code as before and handle 'unknown'.",
+      "migration": "docs/protocol.md#freeze-rule",
+      "items": [
+        "export:@byok-sdk/cloud#TerminalResult",
+        "export:@byok-sdk/protocol#AgentContentReceiptPayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineCode",
+        "export:@byok-sdk/protocol#TaskDeclineCodeReading",
+        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailureReading",
+        "export:@byok-sdk/protocol#TaskFailureSchema",
+        "export:@byok-sdk/protocol#readDeclineCode",
+        "export:@byok-sdk/protocol#readTaskFailure",
+        "export:@byok-sdk/server#TaskResult"
       ]
     },
     {
@@ -575,6 +775,35 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "entry:@byok-sdk/protocol/agent-memory",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "entry:@byok-sdk/server/execution-core",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "entry:@byok-sdk/server/execution-core/canonical",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=494803d4d57d5fbd",
+      "after": "K8 0.0.1 src-sha256=90dc26d44c7903d3",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "example:host-execution-core",
+      "change": "changed",
+      "before": "K4 0.0.1 src-sha256=af951f5752164745",
+      "after": "K4 0.0.1 src-sha256=29b76c2746aa7b33",
+      "entry": "execution-core-published"
+    },
+    {
       "item": "export:@byok-sdk/client#APPROVAL_REQUIRES_HOST",
       "change": "added",
       "entry": "local-tool-approval-host-only"
@@ -583,6 +812,46 @@
       "item": "export:@byok-sdk/client#AgentEgressConfig",
       "change": "changed",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryError",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryExport",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryFile",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryIntentFetchInput",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryIntentTransport",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryProjectionPort",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemorySnapshot",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryValidationError",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
     },
     {
       "item": "export:@byok-sdk/client#ApprovalKind",
@@ -700,6 +969,11 @@
       "entry": "device-store-pairing-binding"
     },
     {
+      "item": "export:@byok-sdk/client#DiagnosticCheck",
+      "change": "changed",
+      "entry": "doctor-clock-skew"
+    },
+    {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
       "change": "changed",
       "entry": "local-tool-approval-host-only"
@@ -810,6 +1084,26 @@
       "entry": "pi-session-retention-lifecycle"
     },
     {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryError",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemoryFile",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#AgentMemorySnapshot",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#validateAgentMemoryPath",
+      "change": "removed",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
       "item": "export:@byok-sdk/cloud#AllowAllRateLimiter",
       "change": "changed",
       "entry": "device-route-rate-admission"
@@ -843,6 +1137,11 @@
       "item": "export:@byok-sdk/cloud#CloudStores",
       "change": "changed",
       "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "messages-per-envelope-decode"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
@@ -960,6 +1259,11 @@
       "entry": "device-route-rate-admission"
     },
     {
+      "item": "export:@byok-sdk/cloud#TerminalResult",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
       "item": "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
       "change": "added",
       "entry": "capability-ports-two-way"
@@ -1055,6 +1359,11 @@
       "entry": "store-compatibility-precheck"
     },
     {
+      "item": "export:@byok-sdk/protocol#AgentContentReceiptPayloadSchema",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
       "item": "export:@byok-sdk/protocol#DEVICE_NOT_REGISTERED_CODE",
       "change": "added",
       "entry": "auth-revocation-typed-keychain-deadline"
@@ -1070,6 +1379,11 @@
       "entry": "auth-revocation-typed-keychain-deadline"
     },
     {
+      "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+      "change": "changed",
+      "entry": "messages-per-envelope-decode"
+    },
+    {
       "item": "export:@byok-sdk/protocol#PairResponseSchema",
       "change": "changed",
       "entry": "token-expires-in"
@@ -1080,9 +1394,44 @@
       "entry": "task-fail-reason-bound"
     },
     {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCode",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCodeReading",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
       "change": "changed",
       "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureReading",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureSchema",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
     },
     {
       "item": "export:@byok-sdk/protocol#TokenResponseSchema",
@@ -1090,9 +1439,69 @@
       "entry": "token-expires-in"
     },
     {
+      "item": "export:@byok-sdk/protocol#WireAddition",
+      "change": "changed",
+      "entry": "doctor-clock-skew"
+    },
+    {
       "item": "export:@byok-sdk/protocol#boundFailureReason",
       "change": "added",
       "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#readDeclineCode",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#readTaskFailure",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/agent-memory#AgentMemoryError",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/agent-memory#AgentMemoryExport",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/agent-memory#AgentMemoryFile",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/agent-memory#AgentMemoryIntentFetchInput",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/agent-memory#AgentMemoryIntentTransport",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/agent-memory#AgentMemoryProjectionPort",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/agent-memory#AgentMemorySnapshot",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/agent-memory#AgentMemoryValidationError",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/agent-memory#validateAgentMemoryPath",
+      "change": "added",
+      "entry": "agent-memory-contract-in-protocol"
     },
     {
       "item": "export:@byok-sdk/protocol/constants#TASK_FAIL_REASON_MAX_BYTES",
@@ -1110,9 +1519,604 @@
       "entry": "capability-ports-two-way"
     },
     {
+      "item": "export:@byok-sdk/server#TaskResult",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
       "item": "export:@byok-sdk/server#inspectSqliteStore",
       "change": "added",
       "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#AgentMessageInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#AgentRoutineDefinition",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#ApplicationRows",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#CompactVeto",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#CompactVetoError",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#CompactionOptions",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#CompactionResult",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#Conclusion",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#DEFAULT_RETRY",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#EMPTY_MEMORY_REVISION",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#ExecutionServer",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#ExecutionTemplate",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#FrozenExecutionInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#FrozenInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#FrozenOffer",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#FrozenOfferMismatchError",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#FrozenSubmitPort",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostJobHandler",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostJobResult",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostJobRoutineDefinition",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostJobRun",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostJobSpec",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedger",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerOptions",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostMemoryPage",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostOccurrenceRoutineDefinition",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostOccurrenceRun",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostOptions",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#IGNORED_WAKE_AUDIT_LIMIT",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#IgnoredWakeAudit",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#Intent",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#IntentExecution",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#IntentInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#Json",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerDump",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerDumpMemoryTombstone",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerDumpRow",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerDumpTombstone",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerIntentInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerState",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MIN_TOMBSTONE_RETENTION_MS",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MemoryApproval",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MemoryBinding",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MemoryBlockedError",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MemoryContextPack",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MemoryOptions",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MemoryRestoreFileResult",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MemoryRestoreInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MemoryRestoreResult",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MessageDecision",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#MessageTransaction",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#NextOccurrence",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#Occurrence",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#OccurrenceHook",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#OccurrenceTransaction",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#OutboxFullError",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#OutcomeTransaction",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#ProjectionOutboxLimits",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#ProjectionOutboxUsage",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RESIDENT_MEMORY_MAX_BYTES",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RetiredIntentIdentityError",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RetryPolicy",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#Routine",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RoutineCommandOptions",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RoutineCommands",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RoutineDefinition",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RoutineRef",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#RoutineValidation",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#SealRoutineTemplateInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#SealedAgentExecutionInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#SealedDispatchUnavailableError",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#SealedExecutionTemplate",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#SealedTaskInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#TombstoneKind",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#WAKE_HORIZON_MS",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#agentKey",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#applyPlan",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#auditCalendarError",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#canonical",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#concludeOccurrence",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#createRoutine",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#enqueue",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#fifoHeads",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#frozenInput",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#hash",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#isOccurrenceIntentKey",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#isSealed",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#memoryRevision",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#nextIntervalOccurrence",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#nextWake",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#occurrenceIntentKey",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#occurrenceOfIntentKey",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#occurrenceRun",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#parseRoutineWakeKey",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#project",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#promoteOccurrence",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#queuedExpiry",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#recordOccurrence",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#routineCommands",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#routineTemplateBinding",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#routineWakeKey",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#sameFrozenOffer",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#scheduleNext",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#sealRoutineTemplate",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#setLifecycle",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#settle",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#stageVersion",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#submitFrozen",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#switchVersion",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#taskId",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#time",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#validateJson",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#validateRetry",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#validateRoutineDefinition",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#versionSwitchDue",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core/canonical#canonical",
+      "change": "added",
+      "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core/canonical#hash",
+      "change": "added",
+      "entry": "execution-core-published"
     },
     {
       "item": "store:cloud-dataplane-postgres",

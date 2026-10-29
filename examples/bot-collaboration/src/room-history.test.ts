@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { canonical, hash } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash } from '@byok-sdk/server/execution-core';
 import { openTeam, type TestTeam } from './team.test-support';
 import { ROOM_GRACE_MS, type RoomMessage } from './rooms';
 

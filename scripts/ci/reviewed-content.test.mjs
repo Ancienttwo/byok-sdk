@@ -290,7 +290,7 @@ function commit(f, message) {
 test('the Node pin admits one exact X.Y.Z and selects every routine family, never the complete suite', t => {
   const f = fixture(t);
   f.write('.node-version', '24.21.0\n'); commit(f, 'node pin');
-  const routine = knownFamilies.filter(id => id !== 'build-test').sort();
+  const routine = knownFamilies.filter(id => id !== 'build-test' && id !== 'macos-client').sort();
   for (const value of ['24.22.1\n', '24.22.1', '26.0.0\n']) {
     f.write('.node-version', value);
     assert.deepEqual(selectImpact(['.node-version'], f), { dirs: [], files: ['.node-version'], families: routine, reason: 'impacted' });
@@ -298,7 +298,7 @@ test('the Node pin admits one exact X.Y.Z and selects every routine family, neve
   f.write('.node-version', '24.22.1\n');
   const plan = planCi({ event: 'push', sha: f.base, paths: ['.node-version'], ...f });
   assert.deepEqual(plan.families, routine);
-  const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, { result: id === 'build-test' ? 'skipped' : 'success' }]));
+  const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, { result: ['build-test', 'macos-client'].includes(id) ? 'skipped' : 'success' }]));
   assert.doesNotThrow(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd));
   needs['build-test'] = { result: 'success' };
   assert.throws(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd), /unexpectedly ran: build-test/);
@@ -795,34 +795,83 @@ test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
   }
 });
 
-test('#884: the K4 manifest admits only the I/O-free ./canonical entry', t => {
-  const f = fixture(t);
-  const path = 'examples/host-execution-core/package.json';
-  const exports = { '.': './src/index.ts', './test-support': './src/test-support.ts' };
-  const manifest = { name: '@byok-sdk/example-host-execution-core', private: true, version: '0.0.1', exports };
-  f.write(path, manifest);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K4 without the canonical entry');
-  f.base = git('rev-parse', 'HEAD').trim();
-  f.write(path, { ...manifest, exports: { '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' } });
-  assert.ok(selectImpact([path], f).dirs.includes('examples/host-execution-core'));
-  for (const [candidate, reason] of [
-    [{ ...manifest, exports: { ...exports, './canonical': './src/model.ts' } }, 'the entry retargeted to another file'],
-    [{ ...manifest, exports: { ...exports, './canonical': './src/canonical.ts', './ledger': './src/ledger.ts' } }, 'a second new entry'],
-    [{ ...manifest, exports: { ...exports, './canonical': './src/canonical.ts' }, dependencies: { x: '1.0.0' } }, 'a dependency change'],
-  ]) {
-    f.write(path, candidate);
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-  f.write(path, { ...manifest, private: false, exports: { ...exports, './canonical': './src/canonical.ts' } });
-  assert.throws(() => selectImpact([path], f), /must stay private/);
-});
-
 function rebase(f, message) {
   const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message);
   f.base = git('rev-parse', 'HEAD').trim();
 }
+
+test('#1106: the K4 manifest drops its core entries only with the demo description, and stays private', t => {
+  const f = fixture(t);
+  const path = 'examples/host-execution-core/package.json';
+  const exports = { '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' };
+  const description = 'Copy-and-own Host execution core with a durable FIFO, routine ledger and outbox';
+  const demo = 'Demo Host composing @byok-sdk/server/execution-core with a real daemon; integration qualification for the published execution core';
+  const manifest = { name: '@byok-sdk/example-host-execution-core', private: true, version: '0.0.1', description, exports };
+  f.write(path, manifest); rebase(f, 'K4 with its core entries');
+  const demoExports = { './test-support': './src/test-support.ts' };
+  f.write(path, { ...manifest, description: demo, exports: demoExports });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/host-execution-core'));
+  for (const [candidate, reason] of [
+    [{ ...manifest, exports: demoExports }, 'the entries without the description'],
+    [{ ...manifest, description: demo }, 'the description without the entries'],
+    [{ ...manifest, description: demo, exports: { ...demoExports, './canonical': './src/canonical.ts' } }, 'an old entry kept'],
+    [{ ...manifest, description: demo, exports: demoExports, dependencies: { x: '1.0.0' } }, 'a dependency change'],
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /more than/, reason);
+  }
+  f.write(path, { ...manifest, private: false, description: demo, exports: demoExports });
+  assert.throws(() => selectImpact([path], f), /must stay private/);
+});
+
+test('#1106: the protocol manifest admits the agent-memory subpath exactly', t => {
+  const f = fixture(t);
+  const path = 'packages/protocol/package.json';
+  const manifest = { name: '@byok-sdk/protocol', version: '0.31.0', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
+  f.write(path, manifest); rebase(f, 'protocol without the agent-memory subpath');
+  const entry = { types: './dist/agent-memory.d.ts', import: './dist/agent-memory.js' };
+  f.write(path, { ...manifest, exports: { ...manifest.exports, './agent-memory': entry } });
+  assert.deepEqual(selectImpact([path], f).families, ['npm-release-pack']);
+  for (const [exports, reason] of [
+    [{ ...manifest.exports, './agent-memory': { ...entry, import: './dist/other.js' } }, 'a retargeted subpath'],
+    [{ ...manifest.exports, './agent-memory': entry, './memory': entry }, 'a second subpath'],
+  ]) {
+    f.write(path, { ...manifest, exports });
+    assert.throws(() => selectImpact([path], f), /more than/, reason);
+  }
+});
+
+test('#1106: the server manifest admits both execution-core subpaths together and the tsx edge, in manifest and lock', t => {
+  const f = fixture(t);
+  const path = 'packages/server/package.json';
+  const root = { types: './dist/index.d.ts', import: './dist/index.js' };
+  const manifest = { name: '@byok-sdk/server', version: '0.31.0', exports: { '.': root, './package.json': './package.json' },
+    devDependencies: { '@byok-sdk/conformance': 'workspace:*' } };
+  f.write(path, manifest);
+  f.lock.workspaces['packages/server'] = { name: manifest.name, version: manifest.version, devDependencies: { '@byok-sdk/conformance': 'workspace:*' } };
+  f.write('bun.lock', f.lock); rebase(f, 'server without execution-core');
+  const core = { types: './dist/execution-core/index.d.ts', import: './dist/execution-core/index.js' };
+  const canonical = { types: './dist/execution-core/canonical.d.ts', import: './dist/execution-core/canonical.js' };
+  const exports = { '.': root, './execution-core': core, './execution-core/canonical': canonical, './package.json': './package.json' };
+  const devDependencies = { '@byok-sdk/conformance': 'workspace:*', tsx: '^4.19.2' };
+  f.write(path, { ...manifest, exports, devDependencies });
+  f.lock.workspaces['packages/server'].devDependencies = devDependencies; f.write('bun.lock', f.lock);
+  assert.deepEqual(selectImpact([path, 'bun.lock'], f).families, ['npm-release-pack']);
+  for (const [candidate, reason] of [
+    [{ ...manifest, exports: { ...exports, './execution-core/canonical': undefined } }, 'one subpath without the other'],
+    [{ ...manifest, exports: { ...exports, './execution-core': { ...core, import: './dist/other.js' } } }, 'a retargeted subpath'],
+    [{ ...manifest, exports: { ...exports, './execution-core/ledger': core } }, 'a third subpath'],
+    [{ ...manifest, exports, devDependencies: { ...devDependencies, tsx: '^4.20.0' } }, 'another tsx range'],
+    [{ ...manifest, exports, devDependencies, dependencies: { tsx: '^4.19.2' } }, 'a runtime tsx edge'],
+  ]) {
+    f.write(path, JSON.parse(JSON.stringify(candidate)));
+    assert.throws(() => selectImpact([path], f), /more than/, reason);
+  }
+  f.write(path, { ...manifest, exports, devDependencies });
+  f.lock.workspaces['packages/server'].devDependencies = { ...devDependencies, tsx: '^4.20.0' }; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /more than/, 'a lock range the manifest does not declare');
+});
 
 test('#927: the server manifest admits only the reviewed description without a protocol version', t => {
   const f = fixture(t);

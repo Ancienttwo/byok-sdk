@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
+import { WAKE_HORIZON_MS } from '@byok-sdk/server/execution-core';
 import { ROUTINE_LATE_AFTER_MS } from '@byok-sdk/example-bot-collaboration/routines';
 import { DeviceBindingError, DeviceSwitchingError } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';

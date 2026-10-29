@@ -18,7 +18,7 @@ import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import * as memoryRuntime from '../daemon/agent-memory';
 import { CursorStore } from '../daemon/cursor-store';
 import * as helperClient from '../daemon/agent-memory-fs-helper';
-import type { AgentMemoryIntentTransport } from '../daemon/agent-memory-intent';
+import type { AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 const helperBuilt = builtAgentMemoryFilesystemHelperBin() !== undefined;
 const itProvenBackend = process.platform === 'darwin' && !helperBuilt ? it.skip : it;

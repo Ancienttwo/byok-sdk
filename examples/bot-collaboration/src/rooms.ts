@@ -1,5 +1,5 @@
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
-import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { hash, type LedgerState } from '@byok-sdk/server/execution-core';
 import { addTurn, type CollaborationState, type Turn } from './model';
 import * as rules from './rules/rooms';
 

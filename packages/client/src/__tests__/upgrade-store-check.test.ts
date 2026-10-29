@@ -15,7 +15,7 @@ import { openLocalDurableStorage } from '../adapters/pi-durable/storage';
 
 /** #1102: the daemon store precheck (journal + pi-durable replicas) and `byok-agent upgrade check --store`. */
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const REPO = fileURLToPath(new URL('../../../../', import.meta.url));
 const FIXTURES = join(REPO, 'scripts/release/fixtures/stores');
 const DAEMON_STORES = ['client-journal', 'pi-durable'] as const;

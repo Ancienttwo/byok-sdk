@@ -1,5 +1,5 @@
 import { validateResultOutcome, type BotTurnOutcome, type ResultSchema } from '@byok-sdk/protocol';
-import { hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { json, type Card, type Question, type Turn } from './turn';
 import { applyDelegate, arbitrateCancel, endChain, observeStart, type DelegationBot, type DelegationState, type IntentFacts, type Publish } from './delegation';
 import { applySpeech, memberPresent, roomMessageProjection, type RoomsState } from './rooms';

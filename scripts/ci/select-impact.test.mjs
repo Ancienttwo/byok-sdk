@@ -70,7 +70,7 @@ test('ci.yml selects every routine family and the client suites that read it (W7
     'packages/client/src/__tests__/support/test-bun-bin.pin.test.ts',
   ]) assert.match(readFileSync(new URL(reader, root), 'utf8'), /\.github\/workflows\/ci\.yml/, reader);
   const impact = selectImpact(['.github/workflows/ci.yml']);
-  assert.deepEqual(impact.families, knownFamilies.filter(id => id !== 'build-test').sort());
+  assert.deepEqual(impact.families, knownFamilies.filter(id => id !== 'build-test' && id !== 'macos-client').sort());
   assert.ok(impact.dirs.includes('packages/client'));
   assert.equal(impact.reason, 'impacted');
   assert.deepEqual(selectImpact(['.github/workflows/release.yml']).families, []);
@@ -120,6 +120,20 @@ test('client source/deleted tests select reverse dependents and only the datapla
   }
 });
 
+test('#1106: the moved K4 source still selects the example memory jobs and the K4 Windows qualification', () => {
+  for (const path of ['packages/server/src/execution-core/memory.ts', 'packages/server/src/execution-core/memory-restore.ts']) {
+    const impact = selectImpact([path]);
+    assert.ok(impact.dirs.includes('packages/server'), path);
+    assert.ok(impact.dirs.includes('examples/host-execution-core'), path);
+    assert.ok(impact.families.includes('agent-memory-export-linux'), path);
+    assert.ok(impact.families.includes('adapter-lifecycle-smoke'), path);
+  }
+  const ledger = selectImpact(['packages/server/src/execution-core/ledger.ts']);
+  assert.ok(ledger.dirs.includes('examples/host-execution-core'));
+  assert.ok(ledger.families.includes('adapter-lifecycle-smoke'));
+  assert.ok(!ledger.families.includes('agent-memory-export-linux'));
+});
+
 test('a platform family is selected only by a path it owns', () => {
   const owned = {
     'agent-memory-export-linux': 'packages/client/src/daemon/agent-memory-export.ts',
@@ -150,6 +164,23 @@ test('a platform family is selected only by a path it owns', () => {
 test('shared Windows filesystem helpers select their real Windows consumers', () => {
   assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'windows-client', 'windows-service-smoke']);
   assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-client']);
+});
+
+test('service enrollment handover paths select the WinSW control socket check and the Windows client suite (#1165)', () => {
+  for (const path of [
+    'packages/client/src/daemon/control-server.ts',
+    'packages/client/src/daemon/create-daemon/control-methods.ts',
+    'packages/client/src/daemon/create-daemon/lifecycle.ts',
+    'packages/client/src/daemon/create-daemon/start-run.ts',
+    'packages/client/src/daemon/create-daemon/start.ts',
+  ]) {
+    const { families } = selectImpact([path]);
+    assert.ok(families.includes('windows-service-smoke') && families.includes('windows-client'), path);
+  }
+  for (const path of ['packages/client/src/bin/control-client.ts', 'packages/client/src/bin/commands/unpair.ts', 'packages/client/scripts/control-socket-check.mjs']) {
+    assert.ok(selectImpact([path]).families.includes('windows-service-smoke'), path);
+  }
+  assert.ok(selectImpact(['packages/client/src/__tests__/service-enrollment-handover.test.ts']).families.includes('windows-client'));
 });
 
 test('Hermes adapter, fake and custody launcher paths select the Windows Hermes suites', () => {
@@ -350,7 +381,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 16);
+  assert.equal(knownFamilies.length, 17);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {

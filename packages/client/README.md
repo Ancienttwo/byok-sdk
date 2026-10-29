@@ -694,10 +694,13 @@ Runtime dependencies, code-generation evidence and size budgets are recorded in 
 Hosted projection is not on this entry. An embedded host gets the local
 snapshot and no way to send it anywhere from this package.
 
-Because each entry is bundled separately, `AgentMemoryError` imported from
+The base `AgentMemoryError` and `AgentMemoryValidationError`, and
+`validateAgentMemoryPath`, come from `@byok-sdk/protocol/agent-memory`, so `instanceof`
+against them holds from either entry. Each entry bundles the subclasses this
+package defines separately, so `AgentMemoryRevisionConflictError` imported from
 `@byok-sdk/client/agent-memory` and from `@byok-sdk/client` are distinct
-constructors. Discriminate on `error.name`, not `instanceof`, if a host mixes
-both entries.
+constructors. Discriminate those on `error.name`, not `instanceof`, if a host
+mixes both entries.
 
 ## Daemon-free assertion requests
 

@@ -1,5 +1,5 @@
 import type { AgentHomeProjectionRequest } from '@byok-sdk/server';
-import type { ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
+import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import type { Room, Round, Seat } from './rules/rooms';
 import type { ExternalTeam } from './rules/team';
 

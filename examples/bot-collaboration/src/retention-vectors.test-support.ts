@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hash, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/example-host-execution-core';
+import { hash, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model';
 import type { CommitRequest } from './rules/commit';
 import { RetiredIdentityError, type Command } from './rules/commands';

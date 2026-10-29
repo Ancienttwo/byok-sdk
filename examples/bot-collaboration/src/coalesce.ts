@@ -1,4 +1,4 @@
-import type { Json } from '@byok-sdk/example-host-execution-core';
+import type { Json } from '@byok-sdk/server/execution-core';
 import { addBatchTurns, addTurn, json, type CollaborationState } from './model';
 import * as rules from './rules/coalesce';
 

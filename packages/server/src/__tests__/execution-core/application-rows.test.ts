@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, type ApplicationRows } from './index';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, type ApplicationRows } from '../../execution-core/index';
 
 const roots: string[] = [], ledgers: HostLedger[] = [];
 afterEach(() => { for (const ledger of ledgers.splice(0)) ledger.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

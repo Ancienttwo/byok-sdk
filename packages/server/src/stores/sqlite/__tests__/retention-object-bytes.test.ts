@@ -20,7 +20,7 @@ async function setup() {
   return { ...composition, clock, hash, grant, size: BigInt(bytes.length), input: { now: clock.now().toISOString(), orphanBefore: clock.now().toISOString(), limit: 1 } };
 }
 afterEach(() => vi.restoreAllMocks());
-describe.skipIf(!isSqliteAvailable())('SQLite physical object retention', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('SQLite physical object retention', () => {
   it('preserves committed deletion counts when the final remainder query fails', async () => {
     const composition = await setup();
     const prepare = DatabaseSync.prototype.prepare;

@@ -1934,7 +1934,7 @@ SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态�
 
 **状态：计划中，未实现。** [ADR-038](adr-2026-10-13-bot-platform.md) 与 [PRD](../researches/2026-10-13_bot-platform-prd.md) 定义 BYOK Bot 平台的方向，本节只做指引，不描述现状：
 
-- Bot 的三种触发来源（用户输入、routine、其他 Bot）共用 Host 执行核心；执行核心是 Host 复制后自有的参考实现（copy-and-own），SDK 不为它新增 authority。
+- Bot 的三种触发来源（用户输入、routine、其他 Bot）共用 Host 执行核心；执行核心以 `@byok-sdk/server/execution-core` 发布（ADR-038 2026-10-29 修订，#1106），在 Host 进程内运行，队列策略仍归 Host，SDK 不为它新增服务端 authority。
 - Bot 协作由 Host 编排一次次 fresh execution（ADR-036 D1 的方案 A）；Local TeamWorkspace 不作为 Bot 协作底座。
 - routine 时钟在设备上（K2 wake 队列），hosted 真相层不计时；不计量执行，超额存储是收费单位。
 - SDK 侧计划重构：K5 `executions.submit`、K6 typed busy decline、K7 `submit_result` 结构化 outcome（wire major 升到 3，先排空再一起升级）。

@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import { applyPlan, auditCalendarError, canonical, hash, nextWake, recordOccurrence, routineCommands, routineWakeKey, scheduleNext, switchVersion,
   versionSwitchDue, type FrozenExecutionInput, type RetryPolicy, type HostJobHandler, type Intent, type Json, type LedgerState, type Occurrence, type Routine,
-  type RoutineCommands, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
+  type RoutineCommands, type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { BOT_ROUTINE, createDefinition, owned, routineCalendar, routineTurn, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
 import type { CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { storedKey } from './layout';

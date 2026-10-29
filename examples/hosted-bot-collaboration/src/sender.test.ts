@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { MIN_TOMBSTONE_RETENTION_MS, taskId, type Json } from '@byok-sdk/example-host-execution-core';
+import { MIN_TOMBSTONE_RETENTION_MS, taskId, type Json } from '@byok-sdk/server/execution-core';
 import { inboundKey, type ChannelPort, type Delivery, type InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
 import { RetentionRefused } from '@byok-sdk/example-bot-collaboration/retention';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';

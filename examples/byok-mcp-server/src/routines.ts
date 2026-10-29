@@ -1,6 +1,6 @@
 import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '@byok-sdk/core';
 import { hash as hostKey, type ExecutionTemplate, type HostExecutionCore, type Json, type LedgerState, type NextOccurrence,
-  type Routine, type AgentRoutineDefinition } from '@byok-sdk/example-host-execution-core';
+  type Routine, type AgentRoutineDefinition } from '@byok-sdk/server/execution-core';
 import type { ByokServer } from '@byok-sdk/server';
 import { RequiredToolsetsSchema, TerminalProjectionSelectionSchema, type TerminalProjectionSelection } from '@byok-sdk/protocol';
 import type { ScopedTool } from './http';

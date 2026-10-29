@@ -1,6 +1,8 @@
 import type { MemoryState } from './memory';
 import { canonical, hash } from './canonical';
-import type { AgentExecutionInput, ByokServer, WakeScheduleInput } from '@byok-sdk/server';
+import type { AgentExecutionInput } from '@byok-sdk/cloud';
+import type { ByokServer } from '../index';
+import type { WakeScheduleInput } from '../wakes/types';
 import { HarnessIdSchema, RuntimeIdSchema, TaskOfferSealedPayloadSchema, type AgentMessageServerContext,
   type TaskOfferSealedPayload } from '@byok-sdk/protocol';
 

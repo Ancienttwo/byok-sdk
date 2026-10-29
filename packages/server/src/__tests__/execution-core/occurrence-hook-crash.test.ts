@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
-import { HostLedger } from './ledger';
-import { hash } from './model';
+import { HostLedger } from '../../execution-core/ledger';
+import { hash } from '../../execution-core/model';
 
 interface Message { kind: string; dedupKey?: string; delivery?: number }
 const exited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;

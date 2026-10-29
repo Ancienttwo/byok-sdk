@@ -1,4 +1,4 @@
-import { hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { describe, expect, it } from 'vitest';
 import { sealSwitchExport, switchAttempts, SwitchExportError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type RoutineRecord,
   type SwitchContent, type SwitchExport, type SwitchExportRefusal } from './migration';

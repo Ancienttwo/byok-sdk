@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Breaking (examples, client; #1106)** — K4, the Host execution core, is
+  part of the SDK: `@byok-sdk/server/execution-core` exports the FIFO, ledger,
+  routines, transitions, schedule, submit, model, sealed routine and the Host
+  memory page and restore, with the same names and behavior as
+  `examples/host-execution-core`, plus `MemoryBlockedError`.
+  `@byok-sdk/server/execution-core/canonical` exports only `hash` and
+  `canonical` and imports only `node:crypto`, so K8 `rules/` still load on
+  Workers (#884). `examples/host-execution-core` is now a demo that composes
+  these entries; its package exports only `./test-support`, and it holds no
+  copy of the core. A Host that copied K4 deletes the copy and any provenance
+  check of it, and imports the two entries; the Host ledger file is kept. The
+  Agent memory contract that the device and the Host share
+  (`AgentMemoryFile`, `AgentMemorySnapshot`, `AgentMemoryExport`,
+  `AgentMemoryProjectionPort`, `AgentMemoryIntentFetchInput`,
+  `AgentMemoryIntentTransport`, `validateAgentMemoryPath`, `AgentMemoryError`,
+  `AgentMemoryValidationError`) moves from `@byok-sdk/client` and
+  `@byok-sdk/client/agent-memory` to the zod-free
+  `@byok-sdk/protocol/agent-memory`, its only definition; import these names
+  from there. The error classes now have one runtime definition, so
+  `instanceof AgentMemoryError` holds for an error from either client entry.
+  K8 imports the published entries and no longer lists K4 as a vendor layer.
+  Migration: [Migrating to the published core](docs/host-execution-core.md#migrating-to-the-published-core-1106).
+
 - **Breaking (client)** — Pi subagents move from a vendored, patched
   pi-subagents 0.60.0 to the upstream `pi-subagents` 0.83.1 package, an exact
   client dependency loaded from its installed package. Foreground children are
@@ -79,6 +102,21 @@
   the first 401, then follows `expiresIn`. `createAuthPlane` now rejects an
   `accessTokenTtlSeconds` that is not a positive safe integer, and
   `MintedAccessToken` gains `expiresIn`.
+
+- **Feature (client, protocol; #1114)** — `byok-agent doctor` reports the device
+  clock's offset from the server. The daemon measures it from the HTTP `Date`
+  header of each successful pair and token renewal (positive means the device
+  is ahead), with an uncertainty of half the round trip plus the header's one
+  second, and keeps only the last reading in memory. A response without a
+  parseable `Date`, or a device clock set back during the request, clears it.
+  `ControlStatusResult` gains optional `clockSkew`, `DiagnosticsSnapshot`
+  gains `clockSkew`, and a new `clock-skew`
+  check passes within 60 seconds, the default device-proof window of the Host
+  (a Host may widen it up to 5 minutes), and warns beyond it or when the
+  reading is unknown, which includes a stopped daemon. The reading is a report
+  only and never sets a token lifetime. `PairResponse.expiresIn` is now
+  registered as a strip-safe HTTP addition next to `TokenResponse.expiresIn`,
+  and the v4 HTTP corpus pins both pair surfaces. No migration.
 
 - **Fix (cloud-dataplane, server, cloud; #1116)** — `cancelTask` on a claimed
   task no longer throws after retention collects its acked `task.cancel` row.

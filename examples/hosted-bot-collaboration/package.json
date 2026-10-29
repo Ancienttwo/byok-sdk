@@ -10,6 +10,7 @@
     "@byok-sdk/cloud-dataplane": "workspace:*",
     "@byok-sdk/example-bot-collaboration": "workspace:*",
     "@byok-sdk/example-host-execution-core": "workspace:*",
+    "@byok-sdk/server": "workspace:*",
     "pg": "^8.22.0"
   },
   "devDependencies": { "@byok-sdk/client": "workspace:*", "@byok-sdk/core": "workspace:*", "@hono/node-server": "^2.0.10", "@types/node": "^24", "@types/pg": "^8.20.4", "typescript": "^7.0.2", "vitest": "^4.1.10" }

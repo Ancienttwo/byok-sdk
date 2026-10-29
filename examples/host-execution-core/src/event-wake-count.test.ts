@@ -1,6 +1,5 @@
 import { expect, it } from 'vitest';
-import { HostExecutionCore } from './core';
-import { HostLedger } from './ledger';
+import { HostExecutionCore, HostLedger } from '@byok-sdk/server/execution-core';
 import { openHost } from './test-support';
 
 it('measures initial scan wake records for 1000 submitted intents with and without event hints', async () => {

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
-import { canonical, hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, project, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, project, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf } from './model';
 import { admitUserInput } from './coalesce';
 import { callCardsInLedger, commitInLedger, retainInLedger, syncTurnInLedger } from './commit';

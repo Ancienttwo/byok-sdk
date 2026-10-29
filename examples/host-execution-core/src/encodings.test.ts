@@ -1,5 +1,14 @@
 import { expect, it } from 'vitest';
-import { frozenInput, hash, isOccurrenceIntentKey, occurrenceIntentKey, occurrenceOfIntentKey, parseRoutineWakeKey, routineWakeKey, taskId } from './index';
+import {
+  frozenInput,
+  hash,
+  isOccurrenceIntentKey,
+  occurrenceIntentKey,
+  occurrenceOfIntentKey,
+  parseRoutineWakeKey,
+  routineWakeKey,
+  taskId,
+} from '@byok-sdk/server/execution-core';
 import { template } from './test-support';
 
 // #975: the K4 encodings that a switch export derives again, exported so no other module spells them.

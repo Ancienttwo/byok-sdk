@@ -4,9 +4,15 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AgentMemoryIntentCompletion, AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from './ledger';
-import { enqueue } from './transitions';
-import { HostMemoryPage, EMPTY_MEMORY_REVISION, memoryRevision, type MemoryApproval } from './memory';
+import {
+  HostLedger,
+  MIN_TOMBSTONE_RETENTION_MS,
+  enqueue,
+  HostMemoryPage,
+  EMPTY_MEMORY_REVISION,
+  memoryRevision,
+  type MemoryApproval,
+} from '@byok-sdk/server/execution-core';
 import { openHost, type TestHost } from './test-support';
 
 const agentRef = { agentId: 'main', profileRevision: '1' };

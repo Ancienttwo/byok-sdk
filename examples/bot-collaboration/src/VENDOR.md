@@ -1,42 +1,42 @@
 # Vendoring K8
 
-K8 (`examples/bot-collaboration`) and K4 (`examples/host-execution-core`) are
-private workspace packages. Neither is on npm. A Host copies their source files
-into its own repository and owns the copy. This file lists what to copy, in
-layers. A layer needs the layers above it.
+K8 (`examples/bot-collaboration`) is a private workspace package and is not on
+npm. A Host copies its source files into its own repository and owns the copy.
+K4, the Host execution core, is not copied: it is published as
+`@byok-sdk/server/execution-core` (see [K4](#k4)). This file lists what to copy,
+in layers. A layer needs the layers above it.
 
 `src/vendor-manifest.test.ts` walks the imports from each layer's roots and
 checks each list below against that graph: the files, the packages, and the
 names a list gives. So each list is complete for the commit it comes from.
 
 How to read a list:
-- A path line is a file to copy. K8 paths are relative to
-  `examples/bot-collaboration`. K4 paths are relative to
-  `examples/host-execution-core`.
+- A path line is a file to copy, relative to `examples/bot-collaboration`.
 - Any other line is an import that the copy must resolve. Names after `:` are
   the only names that the layer imports from it.
 
 ## Record the source
 
-Copy K8 and K4 from the same release tag. K8 is tested only with the K4 of its
-own commit. Record the tag and its commit in your repository, for example:
+Copy K8 from a release tag and install the SDK packages of that same version.
+K8 is tested only with the `@byok-sdk/server/execution-core` of its own commit.
+Record the tag and its commit in your repository, for example:
 
 ```text
-byok-sdk v<version> <commit> examples/bot-collaboration examples/host-execution-core
+byok-sdk v<version> <commit> examples/bot-collaboration
 ```
 
-To update, read the diff of both folders between the recorded commit and the
-new one, and the `Breaking (examples)` entries of `CHANGELOG.md` in that range:
+To update, read the diff of the folder between the recorded commit and the new
+one, and the `Breaking (examples)` entries of `CHANGELOG.md` in that range:
 
 ```sh
-git diff <recorded-commit>..<new-commit> -- examples/bot-collaboration examples/host-execution-core
+git diff <recorded-commit>..<new-commit> -- examples/bot-collaboration
 ```
 
 ## Published SDK packages
 
 The copy imports `@byok-sdk/protocol`, `@byok-sdk/core`, `@byok-sdk/server` and
 `@byok-sdk/client` from npm. Layers 2 and 3 need all four, because they need
-the K4 root entry (see the [K4](#k4) list). Layer 1 needs only the packages
+the K4 root entry, `@byok-sdk/server/execution-core`. Layer 1 needs only the packages
 its list names. These packages are released
 together under one version. Use exactly the version of the tag you copied. A commit between tags
 can use package changes that are not on npm yet. K4 needs Node 24.15 or later,
@@ -47,11 +47,10 @@ because its ledger uses `node:sqlite`.
 `src/rules/` holds the pure rules: no I/O, no ledger and no clock (#606 §5.5).
 `src/rules-boundary.test.ts` also holds this layer to its imports.
 
-The rules import `hash` and `canonical` from the K4 `./canonical` entry, never
-the K4 root entry (#884). That entry is K4 `src/canonical.ts` and imports only
-`node:crypto`. So a copy of this layer alone needs only that K4 file, resolved
-as `@byok-sdk/example-host-execution-core/canonical`, and no `node:sqlite` or
-`node:async_hooks` (see [K4](#k4)).
+The rules import `hash` and `canonical` from the K4 canonical entry,
+`@byok-sdk/server/execution-core/canonical`, never the K4 root entry (#884).
+That entry imports only `node:crypto`, so a copy of this layer alone needs no
+`node:sqlite` or `node:async_hooks` (see [K4](#k4)).
 
 ```vendor rules
 src/rules/cards.ts
@@ -73,7 +72,7 @@ src/rules/team.ts
 src/rules/turn.ts
 @byok-sdk/core
 @byok-sdk/protocol
-@byok-sdk/example-host-execution-core/canonical: canonical hash
+@byok-sdk/server/execution-core/canonical: canonical hash
 ```
 
 ## Layer 2: L Host
@@ -81,9 +80,9 @@ src/rules/turn.ts
 The roots are `src/host.ts` (`BotCollaboration`) and `src/index.ts`. The package
 entries other than the vectors are in this layer too. `src/persona.ts` is the
 daemon side of the persona projection. It is the only K8 file that imports
-`@byok-sdk/client` directly. The K4 root entry needs that package too.
+`@byok-sdk/client` directly.
 `src/migration.ts`, the owner switch format, takes `validateJson` and K4
-types from the K4 root entry, and `hash` and `canonical` from `./canonical`.
+types from the K4 root entry, and `hash` and `canonical` from the canonical entry.
 `src/switch.ts` is the L side of the owner switch: it reads an L ledger into
 that format and writes the format into an L tenant.
 
@@ -113,10 +112,10 @@ src/toolset-policy.ts
 src/topology.ts
 @byok-sdk/client
 @byok-sdk/core
-@byok-sdk/example-host-execution-core
-@byok-sdk/example-host-execution-core/canonical: canonical hash
 @byok-sdk/protocol
 @byok-sdk/server
+@byok-sdk/server/execution-core
+@byok-sdk/server/execution-core/canonical: canonical hash
 node:crypto
 ```
 
@@ -136,10 +135,11 @@ enrollment store from `scripts/testing/`, whose types come from the client
 package source, and a stub runtime adapter from the basic example. Resolve
 `@byok-sdk/example-host-execution-core/test-support` to a module of your own
 instead. Copy the `policy` constant and the `template(deviceId, agentId =
-'main')` function from K4 `src/test-support.ts` into it. They need only
-`AgentEgressPolicy` from `@byok-sdk/client` and `ExecutionTemplate` from the K4
-root entry, so the module typechecks against the published packages. Keep the
-returned value the same as K4's.
+'main')` function from `examples/host-execution-core/src/test-support.ts` into
+it. They need only `AgentEgressPolicy` from `@byok-sdk/client` and
+`ExecutionTemplate` from `@byok-sdk/server/execution-core`, so the module
+typechecks against the published packages. Keep the returned value the same as
+the example's.
 
 ```vendor vectors
 src/commit-vectors.test-support.ts
@@ -147,52 +147,19 @@ src/delivery-vectors.test-support.ts
 src/retention-vectors.test-support.ts
 src/routine-vectors.test-support.ts
 @byok-sdk/core
-@byok-sdk/example-host-execution-core
 @byok-sdk/example-host-execution-core/test-support: template
 @byok-sdk/protocol
+@byok-sdk/server/execution-core
 vitest
 ```
 
 ## K4
 
-K8 imports K4 by its package name, `@byok-sdk/example-host-execution-core`. The
-root entry (`.`, `src/index.ts`) reaches every non-test file of K4 `src/`, except
-`src/test-support.ts` and `src/fixtures/`. The test checks this. The
-`./canonical` entry is `src/canonical.ts`, one of those files, and it is the
-only K4 file that [Layer 1](#layer-1-rules) imports. The
-`./test-support` entry is not copied ([Layer 3](#layer-3-shared-vectors)). The K4
-[README](../../host-execution-core/README.md#files) describes those files.
-
-Copy them, and resolve the package name to the copy. Use a workspace package
-with the same name and `exports` table, or an alias such as tsconfig `paths`
-with the same alias in your bundler and test runner. Keep the name: the copied
-imports and `src/rules-boundary.test.ts` use it. The root entry imports these
-files and packages:
-
-```vendor k4
-src/canonical.ts
-src/core.ts
-src/index.ts
-src/ledger.ts
-src/memory-restore.ts
-src/memory.ts
-src/model.ts
-src/routines.ts
-src/schedule.ts
-src/sealed-routine.ts
-src/submit.ts
-src/transitions.ts
-@byok-sdk/client
-@byok-sdk/client/agent-memory
-@byok-sdk/core
-@byok-sdk/core/sealed-payload
-@byok-sdk/protocol
-@byok-sdk/protocol/constants
-@byok-sdk/server
-node:async_hooks
-node:crypto
-node:sqlite
-```
+K8 imports K4 from the published `@byok-sdk/server` package (#1106): the root
+entry `@byok-sdk/server/execution-core` and the Worker-safe
+`@byok-sdk/server/execution-core/canonical`. Nothing of K4 is copied. The
+[execution core API](../../../docs/host-execution-core.md) describes both
+entries.
 
 ## Not vendored
 

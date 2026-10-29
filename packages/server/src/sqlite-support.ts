@@ -168,7 +168,7 @@ let sqliteModule: typeof import('node:sqlite') | undefined;
  * gives the common "Node too old" case a specific, actionable message
  * before even attempting the built-in lookup.
  */
-function loadSqliteModule(): typeof import('node:sqlite') {
+export function loadSqliteModule(): typeof import('node:sqlite') {
   if (sqliteModule) return sqliteModule;
   if (!isSqliteCapableNodeVersion(process.versions.node)) {
     throw new SqliteUnavailableError(
