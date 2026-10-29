@@ -227,7 +227,9 @@ grows with the retained outbox, not the pending rows. Outbox writes wait for
 the build (SHARE lock); reads continue. The old index is dropped after the new
 one is built, so reads block only briefly at that final drop. 0031 also adds
 `tenant_retention_policy.mailbox_dead_letter_retention_ms`; existing policies
-take 30 days.
+take 30 days. That column is added first, so `tenant_retention_policy` stays
+locked for the whole build: maintenance and tenant erasure wait for the
+migration to commit, while device and Host requests do not read that table.
 
 Before upgrading, run this audit. Every tenant it returns has its next limited
 append refused right after the upgrade, so raise its `mailboxLimitBytes`,
