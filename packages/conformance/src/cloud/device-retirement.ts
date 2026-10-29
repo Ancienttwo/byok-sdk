@@ -366,6 +366,59 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         }
       });
     });
+
+    // #1160: every writer checks the device in a read of its own, so the one
+    // gate that holds whatever it checked is the closed stream at the append.
+    for (const firstAppend of [false, true]) {
+      it(`an append that lost a race to a revoke is refused and leaves no pending row${firstAppend ? ' (first append for the device)' : ''}`, async () => {
+        await withCloudComposition(factory, async (handle) => {
+          const { stores, mailbox, holdMailboxAppend } = handle;
+          await mailbox.limit(TENANT, 1_000_000n);
+          await stores.devices.register(TENANT, registration('lagging'));
+          if (!firstAppend) await mailbox.append(TENANT, { deviceId: 'lagging', messageId: 'earlier', body: envelope('earlier') });
+
+          const release = await holdMailboxAppend?.();
+          const appending = refusal(mailbox.append(TENANT, { deviceId: 'lagging', messageId: 'late', body: envelope('late') }));
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          await stores.devices.revoke(TENANT, 'lagging');
+          await release?.();
+          const outcome = await appending;
+
+          // Where no append can be held mid-way, it committed before the revoke, which expired it.
+          if (release !== undefined) {
+            expect(isCoreError(outcome, 'mailbox_stream_closed')).toBe(true);
+            expect(outcome).toMatchObject({ deviceId: 'lagging', closeCause: 'device_revoked' });
+          }
+          const after = await mailbox.inspect(TENANT, 'lagging');
+          expect(after.pending).toEqual([]);
+          expect(after.usageBytes).toBe(0n);
+
+          // Every later append is refused, a known id included, until the id is registered again.
+          for (const messageId of firstAppend ? ['later'] : ['later', 'earlier']) {
+            const refused = await refusal(mailbox.append(TENANT, { deviceId: 'lagging', messageId, body: envelope(messageId) }));
+            expect(isCoreError(refused, 'mailbox_stream_closed'), messageId).toBe(true);
+          }
+          await stores.devices.register(TENANT, registration('lagging'));
+          const reopened = await mailbox.append(TENANT, { deviceId: 'lagging', messageId: 'again', body: envelope('again') });
+          expect(reopened.state).toBe('pending');
+          expect(reopened.seq).toBeGreaterThanOrEqual(after.recoverableFrom);
+          expect((await mailbox.inspect(TENANT, 'lagging')).recoverableFrom).toBeGreaterThanOrEqual(after.recoverableFrom);
+        });
+      });
+    }
+
+    it('machine supersession closes the predecessor\'s stream under device_superseded', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, { ...registration('first-pairing'), machineId: MACHINE });
+        await stores.devices.register(TENANT, { ...registration('second-pairing'), machineId: MACHINE });
+        const refused = await refusal(mailbox.append(TENANT, { deviceId: 'first-pairing', messageId: 'stale', body: envelope('stale') }));
+        expect(refused).toMatchObject({ code: 'mailbox_stream_closed', closeCause: 'device_superseded' });
+        await expect(mailbox.append(TENANT, { deviceId: 'second-pairing', messageId: 'fresh', body: envelope('fresh') }))
+          .resolves.toMatchObject({ state: 'pending' });
+      });
+    });
   });
 
   describe('task abandonment', () => {

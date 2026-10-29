@@ -157,6 +157,14 @@ export interface CloudCompositionHandle {
    * mid-way and returns a release that does nothing (#1119).
    */
   holdMailboxExpiry(): Promise<() => Promise<void>>;
+  /**
+   * Holds the next mailbox append after its caller's checks and before it
+   * reaches the device's stream, until the returned release runs, so a case
+   * can retire the device while a writer is in flight (#1160). Absent where
+   * every write is one transaction serialized with every other (SQLite):
+   * there an append either commits before a retirement or runs after it.
+   */
+  holdMailboxAppend?(): Promise<() => Promise<void>>;
   /** Optional teardown for compositions holding connections. */
   dispose?(): void | Promise<void>;
 }
@@ -203,18 +211,18 @@ export interface CloudConformanceMailbox {
  * {@link CloudCompositionHandle.holdMailboxExpiry} for a composition whose
  * core mailbox object is the one its device directory expires through.
  */
-export function mailboxExpiryFaults(mailbox: Pick<CoreStores['mailbox'], 'expirePending'>): Pick<
+export function mailboxExpiryFaults(mailbox: Pick<CoreStores['mailbox'], 'closeStream'>): Pick<
   CloudCompositionHandle,
   'failMailboxExpiry' | 'holdMailboxExpiry'
 > {
-  const original = mailbox.expirePending.bind(mailbox);
+  const original = mailbox.closeStream.bind(mailbox);
   return {
     async failMailboxExpiry() {
-      mailbox.expirePending = async () => {
+      mailbox.closeStream = async () => {
         throw new Error('injected mailbox expiry failure');
       };
       return async () => {
-        mailbox.expirePending = original;
+        mailbox.closeStream = original;
       };
     },
     async holdMailboxExpiry() {
@@ -222,8 +230,27 @@ export function mailboxExpiryFaults(mailbox: Pick<CoreStores['mailbox'], 'expire
       const held = new Promise<void>((resolve) => {
         release = resolve;
       });
-      mailbox.expirePending = async (...args) => {
-        mailbox.expirePending = original;
+      mailbox.closeStream = async (...args) => {
+        mailbox.closeStream = original;
+        await held;
+        return original(...args);
+      };
+      return async () => release();
+    },
+  };
+}
+
+/** {@link CloudCompositionHandle.holdMailboxAppend} for a composition whose writers append through this core mailbox object. */
+export function mailboxAppendHold(mailbox: Pick<CoreStores['mailbox'], 'append'>): Pick<CloudCompositionHandle, 'holdMailboxAppend'> {
+  return {
+    async holdMailboxAppend() {
+      const original = mailbox.append.bind(mailbox);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      mailbox.append = async (...args) => {
+        mailbox.append = original;
         await held;
         return original(...args);
       };

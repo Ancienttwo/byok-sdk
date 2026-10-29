@@ -24,6 +24,7 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * device-facing handler must not be able to reach them.
  */
 import {
+  MailboxStreamClosedError,
   principalTenant,
   type BoardClaimInput,
   type BoardItem,
@@ -55,6 +56,7 @@ import {
 } from '@byok-sdk/core';
 import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
+import { DeviceRetiredError } from './errors';
 import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity';
 import type {
   ApprovalTimelineAppendInput,
@@ -268,7 +270,12 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     mailbox: {
       watch: (deviceId, signal) => mailboxWake.subscribe(tenant, deviceId, signal),
       append: async (input) => {
-        const message = await core.mailbox.append(tenant, input);
+        const message = await core.mailbox.append(tenant, input).catch((refusal: unknown) => {
+          if (refusal instanceof MailboxStreamClosedError) {
+            throw new DeviceRetiredError(refusal.deviceId, refusal.closeCause, { cause: refusal });
+          }
+          throw refusal;
+        });
         mailboxWake.appended(tenant, message.deviceId);
         return message;
       },

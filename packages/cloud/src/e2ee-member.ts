@@ -40,7 +40,7 @@ import {
 import { z } from 'zod';
 import { PAIRING_CODE_TTL_MS } from './auth/plane';
 import type { DeviceDirectory } from './stores/ports';
-import { ByokCloudError } from './errors';
+import { ByokCloudError, DeviceRetiredError } from './errors';
 
 /** One stored chain entry: its seq and its canonical JSON. */
 export interface E2eeMemberChainRow {
@@ -489,7 +489,12 @@ async function notifyRecipientDevices(ctx: E2eeMemberContext, rows: readonly E2e
       skipped.push(device.deviceId);
       continue;
     }
-    for (const row of notices) await ctx.enqueueKeyPackageNotice(device.deviceId, { scopeId: row.scopeId, epoch: row.epoch });
+    try {
+      for (const row of notices) await ctx.enqueueKeyPackageNotice(device.deviceId, { scopeId: row.scopeId, epoch: row.epoch });
+    } catch (refusal) {
+      // Retired after the list was read: a device that no longer exists needs no notice.
+      if (!(refusal instanceof DeviceRetiredError)) throw refusal;
+    }
   }
   return skipped.sort(compareCodePoints);
 }

@@ -15,7 +15,7 @@ import {
   type AgentEgressPolicy,
 } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { TaskOfferAppendRefusedError } from '../errors';
+import { DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors';
 import {
   TENANT_A,
   createHarness,
@@ -311,5 +311,84 @@ describe('mailbox admission at the cloud surface', () => {
     });
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: 'storage_entitlement_missing' });
+  });
+
+  // #1160: every check a writer makes is a separate read from its append, so
+  // the closed stream is what refuses an append that lost a race to a revoke.
+  it('settles an offer whose device was revoked between its admission check and its attempt', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const reserve = harness.stores.tasks.reserveAgentOffer.bind(harness.stores.tasks);
+    harness.stores.tasks.reserveAgentOffer = async (...args) => {
+      await harness.cloud.revokeDevice(TENANT_A, device.deviceId);
+      return reserve(...args);
+    };
+
+    const refused = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('too late') })
+      .then(() => undefined, (caught: unknown) => caught);
+
+    expect(refused).toBeInstanceOf(DeviceRetiredError);
+    const { taskId } = refused as DeviceRetiredError;
+    expect(refused).toMatchObject({ code: 'device_retired', deviceId: device.deviceId, retirementCause: 'device_revoked' });
+    expect(taskId).toEqual(expect.any(String));
+    await expect(harness.cloud.readTaskAttempt(TENANT_A, taskId!)).resolves.toMatchObject({
+      status: 'cancelled', terminalCause: 'device_revoked',
+    });
+    const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
+    expect(page.messages).toEqual([]);
+    expect((await harness.core.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
+  });
+
+  it('answers 401 when the device is revoked between authenticating a batch and appending its reply', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [
+        'agent-home-contract',
+        'agent-egress-policy',
+        'agent-egress-reliable-ack',
+        'agent-content-workspace-read',
+        'agent-message-egress',
+        'terminal-projection-selection',
+      ],
+    });
+    await harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, {
+      taskId: 'retired-egress',
+      payload: {
+        instruction: 'emit one reliable event',
+        agentRef: AGENT_REF,
+        session: { mode: 'resume', sessionRef: 'session-admission' },
+        egressPolicy: POLICY,
+      },
+    });
+    const append = harness.core.mailbox.append.bind(harness.core.mailbox);
+    harness.core.mailbox.append = async (...args) => {
+      harness.core.mailbox.append = append;
+      await harness.cloud.revokeDevice(TENANT_A, device.deviceId);
+      return append(...args);
+    };
+
+    const response = await harness.request('/byok/messages', {
+      method: 'POST',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [createEnvelope('agent.egress.reliable', {
+        agentRef: AGENT_REF,
+        sessionRef: 'session-admission',
+        policyRevision: POLICY.policyRevision,
+        eventId: '10000000-0000-4000-8000-000000001160',
+        cursor: 1,
+        payload: { status: 'ready' },
+        contentHash: `sha256:${'a'.repeat(64)}`,
+        byteCount: 18,
+      })] }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'unauthorized' });
+    const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
+    expect(page.messages).toEqual([]);
+    expect((await harness.core.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
   });
 });

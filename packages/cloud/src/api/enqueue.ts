@@ -19,7 +19,7 @@ import {
   type SessionSelection,
   type TaskOfferPayload,
 } from '@byok-sdk/protocol';
-import { ByokCloudError, TaskOfferAppendRefusedError } from '../errors';
+import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors';
 import { taskOfferMessageId, uuidFromSha256 } from '../offer-identity';
 import { firstSealedPayload } from '../sealed-comparison';
 import { retainSealedCiphertext, sealedCiphertextCommitted, sealedCiphertextRef } from '../sealed-ciphertext';
@@ -182,7 +182,14 @@ export function createEnqueuePaths({ root, controlPlane, options }: Dependencies
           byteSize: BigInt(bytes.length),
         };
       },
-    }).catch((refusal: unknown) => {
+    }).catch(async (refusal: unknown) => {
+      // A retired device's stream refuses every retry of this offer, and the
+      // Host's cancel would append to the same closed stream, so the attempt
+      // opened above is settled here with the retirement's cause.
+      if (refusal instanceof DeviceRetiredError) {
+        await stores.cancellations.abandon({ taskId, cause: refusal.retirementCause });
+        throw new DeviceRetiredError(refusal.deviceId, refusal.retirementCause, { cause: refusal, taskId });
+      }
       throw new TaskOfferAppendRefusedError(taskId, refusal);
     });
     const envelope = decodeEnvelope(message.body);

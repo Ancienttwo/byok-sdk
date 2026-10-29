@@ -119,6 +119,21 @@ const postgresFactory: CloudCompositionFactory = {
           holder.release();
         };
       },
+      // An append's stream upsert fires BEFORE INSERT ahead of its conflict
+      // check, so it waits here holding no stream lock; a retirement's own
+      // upsert carries a cause and passes.
+      holdMailboxAppend: async () => {
+        const holder = await scope.pool.connect();
+        await holder.query(`SELECT pg_advisory_lock(${HOLD_APPEND_LOCK})`);
+        await scope.pool.query(`CREATE OR REPLACE FUNCTION conformance_hold_append() RETURNS trigger LANGUAGE plpgsql
+          AS $$ BEGIN PERFORM pg_advisory_xact_lock(${HOLD_APPEND_LOCK}); RETURN NEW; END $$`);
+        await scope.pool.query(`CREATE OR REPLACE TRIGGER conformance_hold_append BEFORE INSERT ON device_stream FOR EACH ROW
+          WHEN (NEW.closed_cause IS NULL) EXECUTE FUNCTION conformance_hold_append()`);
+        return async () => {
+          await holder.query(`SELECT pg_advisory_unlock(${HOLD_APPEND_LOCK})`);
+          holder.release();
+        };
+      },
       dispose: () => scope.dispose(),
     };
   },
@@ -126,6 +141,7 @@ const postgresFactory: CloudCompositionFactory = {
 
 /** Advisory lock key the hold above shares with its trigger; one case holds it at a time. */
 const HOLD_EXPIRY_LOCK = 1119;
+const HOLD_APPEND_LOCK = 1160;
 
 if (SKIP_DATAPLANE) {
   // `runCloudConformance` opens its own `describe`, so the skip has to be

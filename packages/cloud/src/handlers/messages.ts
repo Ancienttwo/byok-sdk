@@ -43,6 +43,7 @@ import { handleInboundEnvelope, readAgentMessageDisposition, type ByokCloudObser
 import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
 import type { TenantStores } from '../tenant-stores';
+import { DeviceRetiredError } from '../errors';
 import { CLOUD_PROTOCOL_CAPABILITIES } from './events';
 import { authenticateDevice, rateLimited, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 
@@ -138,6 +139,9 @@ export function messagesHandler(deps: MessagesRouteDeps) {
     try {
       return await send(c);
     } catch (cause) {
+      // The device was retired after this batch authenticated: answer as its
+      // authentication now would.
+      if (cause instanceof DeviceRetiredError) return c.json({ error: 'unauthorized' }, 401);
       if (isCoreError(cause, 'storage_quota_exceeded')) {
         return c.json({ error: cause.code }, STORAGE_ERROR_HTTP_STATUS.storage_quota_exceeded);
       }

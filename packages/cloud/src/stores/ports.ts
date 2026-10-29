@@ -1,6 +1,6 @@
 import type { AgentMessageDraftStore } from '../agent-message-draft';
 import type { TaskArchiveStore } from '../task-archive';
-import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
+import { MAILBOX_STREAM_CLOSE_CAUSES, type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * The cloud-local store ports.
@@ -125,15 +125,17 @@ export interface DeviceRegistration {
  *    `device_revoked` or `device_superseded` and, when it has none,
  *    `terminalAt`. A terminal attempt is never touched; a cancellation
  *    tombstone stays as it was.
- * 2. Every `pending` mailbox row addressed to that device becomes `expired`
- *    (see `MailboxStore.expirePending`): the rows stop holding mailbox quota
- *    and raise the device's `recoverableFrom`, and nothing is deleted.
+ * 2. The device's mailbox stream is closed with the same cause, and every
+ *    `pending` row on it becomes `expired` (see `MailboxStore.closeStream`):
+ *    the rows stop holding mailbox quota and raise the device's
+ *    `recoverableFrom`, nothing is deleted, and no later append for that id
+ *    commits until the id is registered again, which reopens the stream.
  *
  * Neither the task history nor the mailbox rows go away: what the device did
  * and what it was sent stay readable after its grant is gone.
  */
 export interface DeviceDirectory {
-  /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. */
+  /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. In the same transaction it reopens the registered id's mailbox stream (`MailboxStore.reopenStream`), so a fresh grant for a retired id receives mail again. */
   register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
   /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
@@ -303,7 +305,7 @@ export const TASK_ATTEMPT_UNFINISHED_STATUSES = [
  * `ByokCloud.abandonTask`. An attempt settled this way is `cancelled` and
  * carries no device terminal receipt.
  */
-export const TASK_ABANDON_CAUSES = ['operator', 'device_revoked', 'device_superseded'] as const;
+export const TASK_ABANDON_CAUSES = ['operator', ...MAILBOX_STREAM_CLOSE_CAUSES] as const;
 export type TaskAbandonCause = (typeof TASK_ABANDON_CAUSES)[number];
 
 export function isTaskAbandonCause(value: unknown): value is TaskAbandonCause {
