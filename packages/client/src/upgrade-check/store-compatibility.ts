@@ -5,8 +5,8 @@ import type { StoreCompatibility } from '@byok-sdk/core';
 import { JournalCorruptError, JournalUnavailableError } from '../daemon/journal/journal';
 import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { loadSqliteModule } from '../daemon/journal/sqlite-support';
-import { DURABLE_REPLICA_DIRNAME, durableReplicaFiles } from '../adapters/pi-durable/replica';
-import { openLocalDurableStorage } from '../adapters/pi-durable/storage';
+import { DURABLE_REPLICA_DIRNAME, durableReplicaFiles, isReplicaWriterLock } from '../adapters/pi-durable/replica';
+import { openExistingLocalDurableStorage } from '../adapters/pi-durable/storage';
 
 /** A SQLite store is its main file plus a WAL or a hot rollback journal. `-shm` is rebuilt from the WAL. */
 const SQLITE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
@@ -36,7 +36,10 @@ export async function inspectDaemonStores(input: InspectDaemonStoresInput): Prom
   const storeDir = resolve(input.storeDir);
   loadSqliteModule();
   const results = [await inspectJournal(storeDir)];
-  for (const replica of listReplicas(join(storeDir, DURABLE_REPLICA_DIRNAME))) results.push(await inspectDurableReplica(replica));
+  for (const replica of listReplicas(join(storeDir, DURABLE_REPLICA_DIRNAME))) {
+    const result = await inspectDurableReplica(replica);
+    if (result !== undefined) results.push(result);
+  }
   return results;
 }
 
@@ -56,24 +59,33 @@ async function inspectJournal(storeDir: string): Promise<StoreCompatibility> {
   });
 }
 
-async function inspectDurableReplica(file: string): Promise<StoreCompatibility> {
+async function inspectDurableReplica(file: string): Promise<StoreCompatibility | undefined> {
   return inspectCopy('pi-durable', file, async (copy) => {
     // Opening applies pi-durable's forward migrations to the copy; a newer schema is refused.
-    // Pi packages stay out of the root entry's static graph, as openLocalDurableStorage does.
-    const storage = await openLocalDurableStorage(copy);
+    // Pi packages stay out of the root entry's static graph, as the storage factory does.
+    const storage = await openExistingLocalDurableStorage(copy);
     const { BACKGROUND_CONTEXT } = await import('@earendil-works/chord/context');
     await storage.close(BACKGROUND_CONTEXT);
-  }, () => undefined);
+  }, () => undefined, isReplicaWriterLock);
 }
 
 type Refusal = Pick<StoreCompatibility, 'verdict' | 'code' | 'reason'>;
 
 async function inspectCopy(
+  store: StoreCompatibility['store'], file: string, open: (copy: string) => Promise<void>,
+  classify: (error: unknown) => Refusal | undefined,
+): Promise<StoreCompatibility>;
+async function inspectCopy(
+  store: StoreCompatibility['store'], file: string, open: (copy: string) => Promise<void>,
+  classify: (error: unknown) => Refusal | undefined, omit: (copy: string) => boolean,
+): Promise<StoreCompatibility | undefined>;
+async function inspectCopy(
   store: StoreCompatibility['store'],
   file: string,
   open: (copy: string) => Promise<void>,
   classify: (error: unknown) => Refusal | undefined,
-): Promise<StoreCompatibility> {
+  omit?: (copy: string) => boolean,
+): Promise<StoreCompatibility | undefined> {
   const stat = statOrUndefined(file);
   if (stat === undefined) return { store, path: file, verdict: 'absent', reason: 'No store file at this path' };
   if (!stat.isFile()) return { store, path: file, verdict: 'rejected', reason: 'The store path is not a regular file' };
@@ -81,6 +93,7 @@ async function inspectCopy(
   try {
     const copy = copyStoreFiles(file, directory);
     try {
+      if (omit?.(copy)) return undefined;
       await open(copy);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);

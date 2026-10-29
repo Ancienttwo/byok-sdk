@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -10,7 +10,8 @@ import { inspectDaemonStores } from '../upgrade-check/store-compatibility';
 import { runUpgradeStoreCheckCommand, UPGRADE_CHECK_REFUSED_EXIT_CODE } from '../bin/commands/upgrade';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
-import { acquireReplicaLock, admitReplica, DURABLE_REPLICA_DIRNAME } from '../adapters/pi-durable/replica';
+import { acquireReplicaLock, admitReplica, DURABLE_REPLICA_DIRNAME, replicaLockPath, resetReplica } from '../adapters/pi-durable/replica';
+import { openLocalDurableStorage } from '../adapters/pi-durable/storage';
 
 /** #1102: the daemon store precheck (journal + pi-durable replicas) and `byok-agent upgrade check --store`. */
 
@@ -178,6 +179,85 @@ describeSqlite('inspectDaemonStores', () => {
     const storeDir = fixtureStoreDir('main');
     const before = treeState(storeDir);
     await inspectDaemonStores({ storeDir });
+    expect(treeState(storeDir)).toEqual(before);
+  });
+
+  it('omits actual writer companion, orphan and chained lock databases without changing originals', async () => {
+    const storeDir = fixtureStoreDir('main');
+    const directory = join(storeDir, DURABLE_REPLICA_DIRNAME, 'fixture');
+    const replica = join(directory, 'durable-fixture.sqlite');
+    for (const file of [replica, join(directory, 'durable-orphan.sqlite'), replicaLockPath(replica)]) {
+      const lock = await acquireReplicaLock(file, 'lease');
+      lock.release();
+    }
+    const before = treeState(storeDir);
+    const replicas = (await inspectDaemonStores({ storeDir })).filter((result) => result.store === 'pi-durable');
+    expect(replicas.map((result) => [basename(result.path), result.verdict])).toEqual([['durable-fixture.sqlite', 'accepted']]);
+    expect(treeState(storeDir)).toEqual(before);
+  });
+
+  it('refuses a future-schema replica overlapping a writer lock, with or without its sibling', async () => {
+    const storeDir = fixtureStoreDir('main');
+    const home = join(tempDir(), 'home');
+    mkdirSync(home);
+    const binding = { agentRef: { tenantId: 't', agentId: 'a', profileRevision: '1' }, leaseId: 'lease', canonicalHome: home };
+    const root = join(storeDir, DURABLE_REPLICA_DIRNAME);
+    const healthy = await admitReplica(root, { ...binding, taskId: 'fixture' });
+    const collision = await admitReplica(root, { ...binding, taskId: 'fixture.sqlite.lock' });
+    expect(collision).toBe(replicaLockPath(healthy));
+    const { BACKGROUND_CONTEXT } = await import('@earendil-works/chord/context');
+    for (const file of [healthy, collision]) {
+      const lock = await acquireReplicaLock(file, 'lease');
+      try {
+        await resetReplica(file);
+        const storage = await openLocalDurableStorage(file);
+        await storage.close(BACKGROUND_CONTEXT);
+      } finally { lock.release(); }
+    }
+    // The writer can put owner in an existing replica; durable_schema still owns its verdict.
+    (await acquireReplicaLock(healthy, 'lease')).release();
+    const compatibleBefore = treeState(storeDir);
+    expect((await inspectDaemonStores({ storeDir })).find((result) => result.path === collision)?.verdict).toBe('accepted');
+    expect(treeState(storeDir)).toEqual(compatibleBefore);
+    const database = new DatabaseSync(collision);
+    database.exec('UPDATE durable_schema SET version = version + 1');
+    database.close();
+    for (const hideSibling of [false, true]) {
+      if (hideSibling) renameSync(healthy, `${healthy}.hidden`);
+      const before = treeState(storeDir);
+      expect((await inspectDaemonStores({ storeDir })).find((result) => result.path === collision)?.verdict).toBe('rejected');
+      expect(await runUpgradeStoreCheckCommand({ storeDir, json: true, log: () => undefined })).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
+      expect(treeState(storeDir)).toEqual(before);
+    }
+  });
+
+  it.each([
+    ['empty database', ''],
+    ['unrelated database', 'CREATE TABLE unrelated(value TEXT)'],
+    ['malformed owner schema', 'CREATE TABLE owner(slot INTEGER, lease_id TEXT); INSERT INTO owner VALUES(1,\'lease\')'],
+    ['empty owner table', 'CREATE TABLE owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL)'],
+    ['empty owner lease', 'CREATE TABLE owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL); INSERT INTO owner VALUES(1,\'\')'],
+    ['invalid owner slot', 'CREATE TABLE owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL); PRAGMA ignore_check_constraints=ON; INSERT INTO owner VALUES(2,\'lease\')'],
+    ['multiple owner rows', 'CREATE TABLE owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL); PRAGMA ignore_check_constraints=ON; INSERT INTO owner VALUES(1,\'lease\'),(2,\'other\')'],
+    ['extra user object', 'CREATE TABLE owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL); INSERT INTO owner VALUES(1,\'lease\'); CREATE TABLE extra(value TEXT)'],
+  ])('rejects %s instead of initializing or omitting it', async (_label, sql) => {
+    const storeDir = fixtureStoreDir('main');
+    const fixture = join(storeDir, DURABLE_REPLICA_DIRNAME, 'fixture', 'durable-fixture.sqlite');
+    const candidate = join(dirname(fixture), 'durable-invalid.sqlite.lock.sqlite');
+    const database = new DatabaseSync(candidate);
+    if (sql) database.exec(sql);
+    database.close();
+    const before = treeState(storeDir);
+    expect((await inspectDaemonStores({ storeDir })).find((result) => result.path === candidate)?.verdict).toBe('rejected');
+    expect(treeState(storeDir)).toEqual(before);
+  });
+
+  it('rejects malformed SQLite at a lock-shaped name without changing originals', async () => {
+    const storeDir = fixtureStoreDir('main');
+    const candidate = join(storeDir, DURABLE_REPLICA_DIRNAME, 'fixture', 'durable-corrupt.sqlite.lock.sqlite');
+    writeFileSync(candidate, 'not a SQLite database'.repeat(20));
+    const before = treeState(storeDir);
+    expect((await inspectDaemonStores({ storeDir })).find((result) => result.path === candidate)?.verdict).toBe('rejected');
     expect(treeState(storeDir)).toEqual(before);
   });
 });

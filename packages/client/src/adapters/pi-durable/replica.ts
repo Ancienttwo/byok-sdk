@@ -8,6 +8,7 @@ import { ensureSecureDir } from '../../util/secure-dir';
 export const DURABLE_REPLICA_DIRNAME = 'durable-replicas';
 const REPLICA_FILE_PREFIX = 'durable-';
 const REPLICA_FILE_SUFFIX = '.sqlite';
+const LOCK_OWNER_SCHEMA = 'owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL)';
 
 /** The lock database `acquireReplicaLock` holds for the replica database `file`. */
 export function replicaLockPath(file: string): string {
@@ -15,14 +16,25 @@ export function replicaLockPath(file: string): string {
 }
 
 /**
- * The replica databases among the file names of one binding directory: every
- * name `admitReplica` can produce, except the exact lock name
- * (`replicaLockPath`) of another replica present in the directory.
+ * Every candidate `admitReplica` can produce. Lock names overlap valid task
+ * names, so only the database contents can identify a writer lock.
  */
 export function durableReplicaFiles(names: readonly string[]): string[] {
-  const replicas = names.filter((name) => name.startsWith(REPLICA_FILE_PREFIX) && name.endsWith(REPLICA_FILE_SUFFIX));
-  const locks = new Set(replicas.map(replicaLockPath));
-  return replicas.filter((name) => !locks.has(name));
+  return names.filter((name) => name.startsWith(REPLICA_FILE_PREFIX) && name.endsWith(REPLICA_FILE_SUFFIX));
+}
+
+/** Inspect a private copy; database errors must reach the compatibility refusal. */
+export function isReplicaWriterLock(file: string): boolean {
+  const { DatabaseSync } = loadSqliteModule();
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    const objects = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'").all();
+    const owner = objects[0];
+    if (objects.length !== 1 || owner?.type !== 'table' || owner.name !== 'owner'
+      || owner.tbl_name !== 'owner' || owner.sql !== `CREATE TABLE ${LOCK_OWNER_SCHEMA}`) return false;
+    const rows = db.prepare('SELECT slot, lease_id FROM owner').all();
+    return rows.length === 1 && rows[0]?.slot === 1 && typeof rows[0].lease_id === 'string' && rows[0].lease_id.length > 0;
+  } finally { db.close(); }
 }
 
 export interface DurableReplicaBinding {
@@ -74,7 +86,7 @@ export async function acquireReplicaLock(file: string, leaseId: string): Promise
   const { DatabaseSync } = loadSqliteModule();
   const db = new DatabaseSync(lockPath);
   try {
-    db.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE IF NOT EXISTS owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL); BEGIN EXCLUSIVE;');
+    db.exec(`PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE IF NOT EXISTS ${LOCK_OWNER_SCHEMA}; BEGIN EXCLUSIVE;`);
     db.prepare('INSERT OR REPLACE INTO owner(slot,lease_id) VALUES(1,?)').run(leaseId);
     db.exec('COMMIT');
   } catch { db.close(); throw new Error('durable replica is locked or invalid'); }
