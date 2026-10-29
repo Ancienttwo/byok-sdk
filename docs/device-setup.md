@@ -206,6 +206,18 @@ record; never clear the directory wholesale. See the
 reclamation ordering. A halted lifecycle requires its stated remedy; a crash
 may be transient and is distinct from a halt.
 
+**Keychain locked.** Every OS credential command has a deadline (15 s; 60 s for
+the Windows bridge compile). A keychain that is locked, or waiting on an unlock
+prompt that a service (LaunchAgent, systemd user unit) cannot show, ends the
+command with `DeviceCredentialCommandAbortedError` (`reason: 'deadline'`): the
+keychain may be locked or waiting for a prompt. Authentication fails until it
+is unlocked. The daemon keeps running and retrying, and `stop` still returns on
+time because shutdown cancels the command. Unlock the login keychain, or set
+`deviceCredentials.macosKeychainPath` to a keychain that stays unlocked without
+interaction; the next renewal then succeeds. Do not re-pair for this: the
+device record is intact. Only a `device_revoked` halt means the server
+confirmed the device is no longer registered.
+
 ## Directory ownership
 
 | Datum / directory | Authority | Host responsibility |

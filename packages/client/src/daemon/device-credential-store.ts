@@ -47,10 +47,15 @@ export interface DeviceCommandResult {
   readonly stderr: string;
 }
 
+/**
+ * Runs one provider command. On `signal` abort the runner kills the child and
+ * rejects at once, without waiting for its pipes to close.
+ */
 export type DeviceCommandRunner = (
   executable: string,
   args: readonly string[],
   stdin?: string,
+  signal?: AbortSignal,
 ) => Promise<DeviceCommandResult>;
 
 const ENTRY_ACCOUNT = 'device-enrollment';
@@ -58,6 +63,18 @@ const ENCODED_PREFIX = 'byok-device-credential-v1:';
 /** The Windows generic-credential blob bound, kept on every OS entry of this product. */
 export const OS_CREDENTIAL_ENTRY_MAX_BYTES = 2_400;
 const NOT_FOUND = 44;
+/**
+ * Deadline for one provider command. A locked keychain, a provider dialog
+ * that a LaunchAgent cannot show, or a waiting gnome-keyring otherwise hangs
+ * the command, and with it every auth caller and daemon shutdown (#1117).
+ */
+const OS_CREDENTIAL_COMMAND_DEADLINE_MS = 15_000;
+/**
+ * The Windows bridge compile (PowerShell 5.1 `Add-Type`) is the one slow
+ * command: the native probe measured median 3.6 s, max 9 s, and two runs
+ * past 20 s on a cold job (device-credential-store.native.test.ts).
+ */
+const WINDOWS_CREDENTIAL_COMPILE_DEADLINE_MS = 60_000;
 
 function providerDiagnostic(stderr: string): string {
   const match = /credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},hresult=-?\d{1,11})\)/u.exec(stderr);
@@ -99,13 +116,33 @@ export class DeviceCredentialInteractionRequiredError extends DeviceCredentialSt
   }
 }
 
-/** Complete enrollment custody. An injected implementation owns secret storage and its lifetime. */
+/**
+ * A provider command ended before it answered: it exceeded its deadline, or
+ * the caller cancelled it (daemon shutdown). The child process was killed.
+ * Nothing was learned about the entry, so the caller keeps its prior state.
+ */
+export class DeviceCredentialCommandAbortedError extends DeviceCredentialStoreError {
+  constructor(readonly reason: 'deadline' | 'cancelled') {
+    super(
+      reason === 'deadline'
+        ? 'operating-system credential provider did not answer before its deadline; the keychain may be locked or waiting for a prompt: unlock it, then retry'
+        : 'operating-system credential command was cancelled',
+    );
+    this.name = 'DeviceCredentialCommandAbortedError';
+  }
+}
+
+/**
+ * Complete enrollment custody. An injected implementation owns secret storage
+ * and its lifetime. `signal` cancels the operation (daemon shutdown); an
+ * implementation must stop and reject once it aborts.
+ */
 export interface DeviceCredentialBackend {
-  read(): Promise<DeviceRecord | undefined>;
-  readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
-  saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
-  replace(record: DeviceRecord): Promise<void>;
-  clear(): Promise<boolean>;
+  read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
+  readFirstPairingAttempt(signal?: AbortSignal): Promise<FirstPairingAttempt | undefined>;
+  saveFirstPairingAttempt(attempt: FirstPairingAttempt, signal?: AbortSignal): Promise<void>;
+  replace(record: DeviceRecord, signal?: AbortSignal): Promise<void>;
+  clear(signal?: AbortSignal): Promise<boolean>;
 }
 
 export interface DeviceCredentialConfig {
@@ -235,6 +272,8 @@ export interface OsCredentialEntryOptions extends DeviceCredentialConfig {
   readonly productId: string;
   readonly platform?: NodeJS.Platform;
   readonly commandRunner?: DeviceCommandRunner;
+  /** Internal test seam for the per-command deadline; production uses the fixed bound. */
+  readonly commandDeadlineMs?: number;
 }
 
 /**
@@ -254,6 +293,7 @@ export class OsCredentialEntry {
   readonly #subject: string;
   readonly #platform: NodeJS.Platform;
   readonly #run: DeviceCommandRunner;
+  readonly #commandDeadlineMs: number;
   readonly #macosKeychainPath: string | undefined;
 
   constructor(options: OsCredentialEntryOptions & { readonly account: string; readonly label: string; readonly subject: string }) {
@@ -276,11 +316,12 @@ export class OsCredentialEntry {
     }
     this.#macosKeychainPath = keychainPath;
     this.#run = options.commandRunner ?? runDeviceCommand;
+    this.#commandDeadlineMs = options.commandDeadlineMs ?? OS_CREDENTIAL_COMMAND_DEADLINE_MS;
   }
 
   /** The stored value, or `undefined` when the entry is absent. */
-  async read(): Promise<string | undefined> {
-    const result = await this.#invoke('read');
+  async read(signal?: AbortSignal): Promise<string | undefined> {
+    const result = await this.#invoke('read', undefined, signal);
     this.#checkInteraction(result);
     if (this.#absent(result)) return undefined;
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
@@ -292,8 +333,8 @@ export class OsCredentialEntry {
     return result.stdout.trimEnd();
   }
 
-  async replace(value: string): Promise<void> {
-    const result = await this.#invoke('replace', value);
+  async replace(value: string, signal?: AbortSignal): Promise<void> {
+    const result = await this.#invoke('replace', value, signal);
     this.#checkInteraction(result);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) {
@@ -304,8 +345,8 @@ export class OsCredentialEntry {
   }
 
   /** Delete the entry. An absent entry is already deleted. */
-  async delete(): Promise<void> {
-    const result = await this.#invoke('clear');
+  async delete(signal?: AbortSignal): Promise<void> {
+    const result = await this.#invoke('clear', undefined, signal);
     this.#checkInteraction(result);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0 && !this.#absent(result)) {
@@ -315,14 +356,14 @@ export class OsCredentialEntry {
     }
   }
 
-  async #invoke(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
+  async #invoke(operation: 'read' | 'replace' | 'clear', encoded: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
     switch (this.#platform) {
       case 'darwin':
-        return this.#macos(operation, encoded);
+        return this.#macos(operation, encoded, signal);
       case 'win32':
-        return this.#windows(operation, encoded);
+        return this.#windows(operation, encoded, signal);
       case 'linux':
-        return this.#linux(operation, encoded);
+        return this.#linux(operation, encoded, signal);
       default:
         throw new DeviceCredentialStoreUnavailableError(`no operating-system credential provider is supported on ${this.#platform}`);
     }
@@ -333,31 +374,50 @@ export class OsCredentialEntry {
     return result.exitCode === NOT_FOUND || (this.#platform === 'linux' && result.exitCode === 1 && result.stderr.trim().length === 0);
   }
 
+  /** Every provider command runs here, under its deadline and the caller's cancellation. */
+  async #command(
+    executable: string,
+    args: readonly string[],
+    stdin: string | undefined,
+    signal: AbortSignal | undefined,
+    deadlineMs = this.#commandDeadlineMs,
+  ): Promise<DeviceCommandResult> {
+    const deadline = AbortSignal.timeout(deadlineMs);
+    const bounded = signal === undefined ? deadline : AbortSignal.any([deadline, signal]);
+    if (bounded.aborted) throw new DeviceCredentialCommandAbortedError(deadline.aborted ? 'deadline' : 'cancelled');
+    try {
+      return await this.#run(executable, args, stdin, bounded);
+    } catch (error) {
+      if (bounded.aborted) throw new DeviceCredentialCommandAbortedError(deadline.aborted ? 'deadline' : 'cancelled');
+      throw error;
+    }
+  }
+
   #checkInteraction(result: DeviceCommandResult): void {
     if (this.#platform === 'darwin' && result.exitCode === 36) {
       throw new DeviceCredentialInteractionRequiredError();
     }
   }
 
-  #macos(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
+  #macos(operation: 'read' | 'replace' | 'clear', encoded: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
     const keychain = this.#macosKeychainPath === undefined ? [] : [this.#macosKeychainPath];
-    if (operation === 'read') return this.#run('/usr/bin/security', ['find-generic-password', '-a', this.#account, '-s', this.#service, '-w', ...keychain]);
-    if (operation === 'clear') return this.#run('/usr/bin/security', ['delete-generic-password', '-a', this.#account, '-s', this.#service, ...keychain]);
+    if (operation === 'read') return this.#command('/usr/bin/security', ['find-generic-password', '-a', this.#account, '-s', this.#service, '-w', ...keychain], undefined, signal);
+    if (operation === 'clear') return this.#command('/usr/bin/security', ['delete-generic-password', '-a', this.#account, '-s', this.#service, ...keychain], undefined, signal);
     const command = [
       'add-generic-password', '-U', '-a', quoteInteractive(this.#account), '-s', quoteInteractive(this.#service), '-w', quoteInteractive(encoded!),
       ...keychain.map(quoteInteractive),
     ].join(' ');
-    return this.#run('/usr/bin/security', ['-i'], `${command}\n`);
+    return this.#command('/usr/bin/security', ['-i'], `${command}\n`, signal);
   }
 
-  #linux(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
+  #linux(operation: 'read' | 'replace' | 'clear', encoded: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
     const attrs = ['service', this.#service, 'account', this.#account];
-    if (operation === 'read') return this.#run('secret-tool', ['lookup', ...attrs]);
-    if (operation === 'clear') return this.#run('secret-tool', ['clear', ...attrs]);
-    return this.#run('secret-tool', ['store', `--label=${this.#label}`, ...attrs], encoded);
+    if (operation === 'read') return this.#command('secret-tool', ['lookup', ...attrs], undefined, signal);
+    if (operation === 'clear') return this.#command('secret-tool', ['clear', ...attrs], undefined, signal);
+    return this.#command('secret-tool', ['store', `--label=${this.#label}`, ...attrs], encoded, signal);
   }
 
-  async #windows(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
+  async #windows(operation: 'read' | 'replace' | 'clear', encoded: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
     const directory = await createDaemonScratch(this.#storeDir, 'credential');
     const executable = path.join(directory, 'credential-bridge.exe');
     const request = [
@@ -370,13 +430,15 @@ export class OsCredentialEntry {
     let cleanupFailed = false;
 
     try {
-      const compiler = await this.#run(
+      const compiler = await this.#command(
         windowsPowerShellExecutable(),
         ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', WINDOWS_CREDENTIAL_COMPILER_SCRIPT],
         executable,
+        signal,
+        WINDOWS_CREDENTIAL_COMPILE_DEADLINE_MS,
       );
       result = compiler.exitCode === 0
-        ? await this.#run(executable, [], request)
+        ? await this.#command(executable, [], request, signal)
         : { exitCode: compiler.exitCode, stdout: '', stderr: compiler.stderr };
     } finally {
       try {
@@ -409,53 +471,75 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
     });
   }
 
-  async read(): Promise<DeviceRecord | undefined> {
-    const authority = await this.#readAuthority();
+  async read(signal?: AbortSignal): Promise<DeviceRecord | undefined> {
+    const authority = await this.#readAuthority(signal);
     return authority === undefined || isFirstPairingAttempt(authority) ? undefined : authority;
   }
 
-  async readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined> {
-    const authority = await this.#readAuthority();
+  async readFirstPairingAttempt(signal?: AbortSignal): Promise<FirstPairingAttempt | undefined> {
+    const authority = await this.#readAuthority(signal);
     return authority !== undefined && isFirstPairingAttempt(authority) ? authority : undefined;
   }
 
-  async saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void> {
+  async saveFirstPairingAttempt(attempt: FirstPairingAttempt, signal?: AbortSignal): Promise<void> {
     assertFirstPairingAttempt(attempt);
-    await this.#entry.replace(encode(attempt));
+    await this.#entry.replace(encode(attempt), signal);
   }
 
-  async #readAuthority(): Promise<DeviceCredentialAuthority | undefined> {
-    const raw = await this.#entry.read();
+  async #readAuthority(signal: AbortSignal | undefined): Promise<DeviceCredentialAuthority | undefined> {
+    const raw = await this.#entry.read(signal);
     return raw === undefined ? undefined : decode(raw);
   }
 
-  async replace(record: DeviceRecord): Promise<void> {
-    await this.#entry.replace(encode(record));
+  async replace(record: DeviceRecord, signal?: AbortSignal): Promise<void> {
+    await this.#entry.replace(encode(record), signal);
   }
 
   /** Returns true only after the sole secret authority is confirmed absent. */
-  async clear(): Promise<boolean> {
-    const before = await this.#readAuthority();
+  async clear(signal?: AbortSignal): Promise<boolean> {
+    const before = await this.#readAuthority(signal);
     if (before === undefined) return false;
-    await this.#entry.delete();
-    if ((await this.#readAuthority()) !== undefined) {
+    await this.#entry.delete(signal);
+    if ((await this.#readAuthority(signal)) !== undefined) {
       throw new DeviceCredentialStoreError('operating-system credential provider reported deletion but device credentials remain');
     }
     return true;
   }
 }
 
-export async function runDeviceCommand(executable: string, args: readonly string[], stdin?: string): Promise<DeviceCommandResult> {
-  return new Promise((resolve) => {
+export async function runDeviceCommand(
+  executable: string,
+  args: readonly string[],
+  stdin?: string,
+  signal?: AbortSignal,
+): Promise<DeviceCommandResult> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
     const child = spawn(executable, [...args], { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const settle = (finish: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      finish();
+    };
+    // Reject on abort itself, not on 'close': a grandchild that inherited the
+    // pipes can hold them open after the child is killed.
+    const onAbort = (): void => {
+      child.kill('SIGKILL');
+      settle(() => reject(signal!.reason));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => { stdout += chunk; });
     child.stderr.on('data', (chunk: string) => { stderr += chunk; });
-    child.once('error', () => resolve({ exitCode: 127, stdout: '', stderr: 'command unavailable' }));
-    child.once('close', (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+    // A killed child can no longer read stdin; its EPIPE is not a result.
+    child.stdin.on('error', () => {});
+    child.once('error', () => settle(() => resolve({ exitCode: 127, stdout: '', stderr: 'command unavailable' })));
+    child.once('close', (code) => settle(() => resolve({ exitCode: code ?? 1, stdout, stderr })));
     child.stdin.end(stdin);
   });
 }

@@ -76,7 +76,7 @@ export function formatHaltRemedy(reason: DaemonHaltReason): string {
     case 'store_owned':
       return 'another daemon owns this store: stop it first (`byok-agent service-stop`, or end the other `start`)';
     case 'device_revoked':
-      return 'device revoked — re-pair needed: run `byok-agent pair <code> --server <url>`, then start again';
+      return 'device revoked — re-pair needed: the server confirmed this device is no longer registered. Run `byok-agent pair <code> --server <url>`, then start again; pairing registers a new device id';
     case 'handshake_rejected':
       return 'the server rejected this device\'s hello: check productId and the SDK version, or pair again, then start again';
     case 'replay_cursor_too_old':

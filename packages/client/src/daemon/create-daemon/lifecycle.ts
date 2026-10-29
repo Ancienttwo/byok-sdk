@@ -2,7 +2,7 @@ import { startControlServer, AnotherControlServerRunningError } from '../control
 import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError } from '../daemon-lifecycle';
 import { InsecureServerUrlError } from '../url';
 import { DeviceRecordRePairRequiredError } from '../store';
-import { DeviceRevokedError } from '../auth-manager';
+import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager';
 import type { DaemonScope } from './scope';
 
 /** The daemon lifecycle: the serialized mutation slot, lifecycle phases, start and stop (#926). */
@@ -75,14 +75,34 @@ export function crashed(daemonScope: DaemonScope): void {
 }
 
 export async function start(daemonScope: DaemonScope): Promise<void> {
-  const { checkServerUrl, runLifecycleMutation, startUnderLease } = daemonScope;
+  const { checkServerUrl, startUnderLease } = daemonScope;
   try {
     checkServerUrl();
   } catch (err) {
     if (err instanceof InsecureServerUrlError) throw new DaemonHaltError('config_invalid', { cause: err });
     throw err;
   }
-  await runLifecycleMutation(startUnderLease);
+  await runAuthOperation(daemonScope, startUnderLease);
+}
+
+/**
+ * Resume only in the operation's lifecycle slot: an earlier shutdown must
+ * finish before auth is re-armed. A later stop invalidates the queued request
+ * synchronously, so entering its slot cannot undo that cancellation.
+ */
+export async function runAuthOperation<T>(daemonScope: DaemonScope, operation: () => Promise<T>): Promise<T> {
+  const { daemonState } = daemonScope;
+  const cancellationEpoch = daemonState.authCancellationEpoch;
+  daemonState.pendingAuthOperations += 1;
+  try {
+    return await daemonScope.runLifecycleMutation(async () => {
+      if (cancellationEpoch !== daemonState.authCancellationEpoch) throw new AuthRequestAbortedError('stopped');
+      daemonState.auth.resume();
+      return operation();
+    });
+  } finally {
+    daemonState.pendingAuthOperations -= 1;
+  }
 }
 
 /**
@@ -128,6 +148,12 @@ export async function stop(daemonScope: DaemonScope, opts: { drainTimeoutMs?: nu
   // `shuttingDown === false` for the whole duration of that predecessor.
   // Setting it here, synchronously, before the first await, closes that gap.
   daemonState.shuttingDown = true;
+  daemonState.authCancellationEpoch += 1;
+  // A start or pair may be blocked in an OS credential call (a locked
+  // keychain) and the teardown below queues behind it. Signal first: the
+  // auth manager's stop is the one cancellation for those calls; then await
+  // the operation settling.
+  if (daemonState.pendingAuthOperations > 0) void daemonState.auth.stop().catch(() => undefined);
   await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
 }
 

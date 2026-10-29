@@ -84,6 +84,10 @@ export interface DaemonState {
   sealedUploads: BlobClient | undefined;
   // A start under way opens a session, so a sealed output waits for its flags.
   startInProgress: boolean;
+  // start()/pair() calls requested and not yet settled, including one queued behind another mutation.
+  pendingAuthOperations: number;
+  // Request-order evidence: a stop cancels auth operations requested before it.
+  authCancellationEpoch: number;
   // The latest run's sealed tasks. A terminal the commit queue holds past a
   // failed stop seals through the run it runs in, never through the stopped
   // run's keyring, which its shutdown retires.

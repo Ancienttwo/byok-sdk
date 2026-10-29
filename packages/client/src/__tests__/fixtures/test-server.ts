@@ -471,7 +471,7 @@ export class TestServer {
     }
     const device = this.devicesById.get(body.deviceId);
     if (!device || device.revoked) {
-      respondJson(res, 401, { error: 'invalid or revoked device' });
+      respondJson(res, 401, { error: 'invalid or revoked device', code: 'device_not_registered' });
       return;
     }
     const nonce = randomUUID();
@@ -483,7 +483,7 @@ export class TestServer {
     const body = (await readJsonBody(req)) as { deviceId: string; nonce: string; signature: string };
     const device = this.devicesById.get(body.deviceId);
     if (!device || device.revoked) {
-      respondJson(res, 401, { error: 'invalid or revoked device' });
+      respondJson(res, 401, { error: 'invalid or revoked device', code: 'device_not_registered' });
       return;
     }
     const nonceOwner = this.pendingNonces.get(body.nonce);

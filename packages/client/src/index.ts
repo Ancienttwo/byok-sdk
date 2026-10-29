@@ -413,7 +413,7 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure';
 export type { StoragePressureState } from './daemon/retention/pressure';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store';
-export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError } from './daemon/device-credential-store';
+export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store';
 export { AuthResponseInvalidError } from './daemon/auth-manager';
 export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store';
 export type {

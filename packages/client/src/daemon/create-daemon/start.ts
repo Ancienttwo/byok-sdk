@@ -1,5 +1,7 @@
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon-owner';
 import { DaemonHaltError } from '../daemon-lifecycle';
+import { AuthRequestAbortedError } from '../auth-manager';
+import { DeviceCredentialCommandAbortedError } from '../device-credential-store';
 import path from 'node:path';
 import { TaskRunner } from '../task-runner';
 import type { DaemonScope } from './scope';
@@ -83,14 +85,20 @@ export async function runStartUnderLease(daemonScope: DaemonScope): Promise<void
     // terminal as a stop does.
     daemonState.startInProgress = false;
     const haltReason = startupHaltReason(err);
+    // stop() cancelled this start; an operator stop is not a crash.
+    const cancelledByStop = daemonState.shuttingDown && (
+      (err instanceof DeviceCredentialCommandAbortedError && err.reason === 'cancelled') ||
+      (err instanceof AuthRequestAbortedError && err.reason === 'stopped'));
     if (haltReason === undefined) {
       // #394: a crash, the one start failure a restart may fix. Recorded so
       // that a crash loop degrades operational health.
-      try {
-        await operationalHealth.startRun();
-        await operationalHealth.recordFailure('lifecycle');
-      } catch (healthError) {
-        console.warn(`[byok/client] failed to persist operational health: ${healthError instanceof Error ? healthError.message : String(healthError)}`);
+      if (!cancelledByStop) {
+        try {
+          await operationalHealth.startRun();
+          await operationalHealth.recordFailure('lifecycle');
+        } catch (healthError) {
+          console.warn(`[byok/client] failed to persist operational health: ${healthError instanceof Error ? healthError.message : String(healthError)}`);
+        }
       }
     } else if (haltReason !== 'store_owned') {
       halted(haltReason);

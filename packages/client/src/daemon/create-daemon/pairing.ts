@@ -5,6 +5,7 @@ import { acquireDaemonOwner } from '../daemon-owner';
 import { AgentEgressController } from '../agent-egress-controller';
 import { PairedWithoutMemberError } from './support';
 import type { DaemonScope } from './scope';
+import { runAuthOperation } from './lifecycle';
 
 /** Pairing and unpairing the device, each under the daemon owner lease (#926). */
 
@@ -54,7 +55,7 @@ export function checkServerUrl(daemonScope: DaemonScope): void {
 }
 
 export async function pair(daemonScope: DaemonScope, pairingCode: string, options?: { readonly verificationSecret?: string }): Promise<DeviceEnrollment> {
-  const { checkServerUrl, memberRecords, runLifecycleMutation, pairUnderLease } = daemonScope;
+  const { checkServerUrl, memberRecords, pairUnderLease } = daemonScope;
   checkServerUrl();
   const verificationSecret = options?.verificationSecret === undefined ? undefined : checkVerificationSecret(options.verificationSecret);
   if (verificationSecret !== undefined && memberRecords === undefined) {
@@ -64,7 +65,7 @@ export async function pair(daemonScope: DaemonScope, pairingCode: string, option
   // operation may borrow the daemon's retained cross-process lease, so pair,
   // start, stop, control shutdown and unpair must never decide independently
   // who releases that shared lease.
-  const record = await runLifecycleMutation(() => pairUnderLease(pairingCode, verificationSecret));
+  const record = await runAuthOperation(daemonScope, () => pairUnderLease(pairingCode, verificationSecret));
   return Object.freeze({ deviceId: record.deviceId });
 }
 
@@ -189,6 +190,8 @@ export async function unpairUnderLease(daemonScope: DaemonScope): Promise<void> 
   // entering while teardown and destructive credential cleanup span two
   // cross-process lease acquisitions.
   await runShutdownSequence('operator');
+  // Teardown stopped the auth manager; unpair still reads the identity it removes.
+  daemonState.auth.resume();
   // stop() releases only after every daemon writer settles. Reacquire before
   // destructive identity cleanup; if another daemon won the gap, fail
   // closed rather than clearing state under it.
