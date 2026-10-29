@@ -30,7 +30,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { API, SymbolFlags, TypeFlags } from 'typescript/unstable/sync';
 
 /** Bump when the shape of the generated schema (not of DaemonConfig) changes. */
@@ -46,7 +46,7 @@ export const SCHEMA_TS_PATH = path.join(here, 'schema.generated.ts');
 
 async function generate() {
   // Node strips the types of this import-free module (engines >= 24).
-  const { REMOVED_DAEMON_CONFIG_FIELDS } = await import(path.join(here, 'removed-fields.ts'));
+  const { REMOVED_DAEMON_CONFIG_FIELDS } = await import(pathToFileURL(path.join(here, 'removed-fields.ts')).href);
   const api = new API({ cwd: clientRoot });
   try {
     const snapshot = api.updateSnapshot({ openProject: tsconfig });
