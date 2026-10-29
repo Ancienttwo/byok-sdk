@@ -19,6 +19,15 @@
   root moves to `extensions/rpiv-todo/2.15.0` with unchanged locale files.
   Vendored pi-subagents stays at 0.60.0.
 
+- **Fix (cloud-dataplane, server, cloud; #1116)** — `cancelTask` on a claimed
+  task no longer throws after retention collects its acked `task.cancel` row.
+  The Postgres and SQLite stores threw a plain `Error`, which a Host surfaced
+  as a 500 on every later cancel. A repeat cancel now returns the attempt as
+  it stands (still `cancel_requested` until the device reports a terminal),
+  without a mailbox row, in all three stores. The in-memory store no longer
+  enqueues a second `task.cancel` in that case. Ending a task whose device
+  never reports a terminal is #1119.
+
 ## 0.31.0 — 2026-10-29 (published)
 
 0.31.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
