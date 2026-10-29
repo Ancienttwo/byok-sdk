@@ -86,8 +86,9 @@ const RENEW_MARGIN_MS = 60 * 1000;
  * can already sit inside {@link RENEW_MARGIN_MS} when this device's clock runs
  * ahead of the server or the server TTL is shorter than the margin; without a
  * floor every such renewal re-armed itself at delay 0 and rewrote the OS
- * credential entry in a tight loop. The floor doubles for each consecutive
- * renewal that returns such a token, up to {@link MAX_RENEW_INTERVAL_MS}.
+ * credential entry in a tight loop. The floor stays at 30s after the first
+ * such renewal and doubles from the second consecutive one, up to
+ * {@link MAX_RENEW_INTERVAL_MS}.
  */
 const MIN_RENEW_INTERVAL_MS = 30 * 1000;
 const MAX_RENEW_INTERVAL_MS = 30 * 60 * 1000;
@@ -131,9 +132,9 @@ export class AuthManager {
   private credentialMutationTail: Promise<void> = Promise.resolve();
   /** The sole cancellation authority for the request currently inside the serialized credential mutation. */
   private activeRequest: AbortController | undefined;
-  /** Monotonic time of the last successful renewal; the renewal floor counts from here. */
+  // performance.now() of the last successful renewal, and how many renewals in
+  // a row returned a token already inside the renewal margin.
   private lastRenewedAt: number | undefined;
-  /** Consecutive successful renewals whose fresh token was already inside the renewal margin. */
   private nearExpiryRenewals = 0;
 
   private readonly credentials: DeviceCredentialBackend;
