@@ -10,6 +10,7 @@ import {
   DeviceCredentialStore,
   type DeviceCommandResult,
   type DeviceCommandRunner,
+  runDeviceCommand,
 } from '../daemon/device-credential-store';
 import { DeviceStore } from '../daemon/store';
 import { createTestDeviceStore } from './fixtures/device-credentials';
@@ -250,6 +251,78 @@ describe('#1117 keychain command deadline and cancellation', () => {
 
     expect(performance.now() - stoppedAt).toBeLessThan(500);
     expect(await renewal).toMatchObject({ name: 'DeviceCredentialCommandAbortedError', reason: 'cancelled' });
+  });
+
+  it('daemon.stop() cancels a start hung in its startup keychain read and kills the child', async () => {
+    server.setTokenTtlMs(60 * 60 * 1000);
+    const keyring = linuxKeyring();
+    const storeDir = await tmpDir('byok-keychain-startup-stop-');
+    const pidFile = path.join(storeDir, 'hung-read.pid');
+    let hangReads = false;
+    let readHung!: () => void;
+    const hung = new Promise<void>((resolve) => { readHung = resolve; });
+    // A real provider child that never answers stands in for a keychain lookup blocked on an unlock prompt.
+    const run: DeviceCommandRunner = (executable, args, stdin, signal) => {
+      if (!hangReads || args[0] !== 'lookup') return keyring.run(executable, args, stdin, signal);
+      const child = runDeviceCommand(
+        process.execPath,
+        ['-e', `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`],
+        undefined,
+        signal,
+      );
+      readHung();
+      return child;
+    };
+    const commandDeadlineMs = 10_000;
+    daemon = createDaemonWithAdapters(
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
+      [new StubRuntimeAdapter()],
+      { deviceCredentials: new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: run, commandDeadlineMs }) },
+    );
+    await daemon.pair('pairing-code');
+    // A fresh daemon of the same store, as after a process restart: its start must read the keychain.
+    daemon = createDaemonWithAdapters(
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
+      [new StubRuntimeAdapter()],
+      { deviceCredentials: new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: run, commandDeadlineMs }) },
+    );
+    hangReads = true;
+    const started = daemon.start().then(() => undefined, (error: unknown) => error);
+    await hung;
+    await vi.waitFor(() => fs.access(pidFile));
+
+    const stoppedAt = performance.now();
+    await daemon.stop();
+    daemon = undefined;
+
+    expect(performance.now() - stoppedAt).toBeLessThan(2_000);
+    const outcome = await started;
+    expect(outcome).toBeInstanceOf(DeviceCredentialCommandAbortedError);
+    expect(outcome).toMatchObject({ reason: 'cancelled' });
+    const pid = Number(await fs.readFile(pidFile, 'utf8'));
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' })));
+  });
+
+  it('daemon.stop() cancels a pair hung in its keychain write', async () => {
+    const keyring = linuxKeyring();
+    const storeDir = await tmpDir('byok-keychain-pair-stop-');
+    daemon = createDaemonWithAdapters(
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
+      [new StubRuntimeAdapter()],
+      { deviceCredentials: new DeviceCredentialStore({ storeDir, productId: 'test-product', platform: 'linux', commandRunner: keyring.run }) },
+    );
+    keyring.state.hangWrites = true;
+    const paired = daemon.pair('pairing-code').then(() => undefined, (error: unknown) => error);
+    await keyring.hung;
+
+    const stoppedAt = performance.now();
+    await daemon.stop();
+    daemon = undefined;
+
+    // The default per-command deadline is 15s; returning well inside it proves cancellation.
+    expect(performance.now() - stoppedAt).toBeLessThan(2_000);
+    expect(await paired).toMatchObject({ name: 'DeviceCredentialCommandAbortedError', reason: 'cancelled' });
+    expect(server.httpRequests.filter((request) => request.pathname === '/byok/pair')).toHaveLength(0);
   });
 
   it('daemon.stop() returns in time while a renewal is stuck in a hung keychain write', async () => {

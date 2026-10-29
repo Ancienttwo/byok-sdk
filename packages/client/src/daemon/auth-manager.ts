@@ -162,16 +162,32 @@ export class AuthManager {
     return this.revoked;
   }
 
-  /** Internal signer read: always recompose metadata with the current OS secret authority. */
+  /**
+   * Internal signer read: always recompose metadata with the current OS
+   * secret authority. Like every OS read here it is a credential mutation, so
+   * {@link stop} cancels it.
+   */
   async readCurrent(): Promise<DeviceRecord | undefined> {
-    return this.loadRecord();
+    return this.runCredentialMutation((signal) => this.loadRecord(signal));
   }
 
-  /** Load a previously-paired device record from disk, if any (idempotent — a second call is a no-op once loaded). */
-  async loadExisting(): Promise<DeviceRecord | undefined> {
+  /**
+   * Re-arm after {@link stop}. The daemon calls it when a start or pair is
+   * requested, so a stop requested after that cancels the operation's own
+   * credential calls instead of being undone by them.
+   */
+  resume(): void {
     this.stopped = false;
+  }
+
+  /**
+   * Load a previously-paired device record, if any (idempotent — a second
+   * call is a no-op once loaded). The OS read runs as a credential mutation,
+   * so {@link stop} cancels a read hung on a locked keychain.
+   */
+  async loadExisting(): Promise<DeviceRecord | undefined> {
     if (!this.record) {
-      this.record = await this.loadRecord();
+      this.record = await this.runCredentialMutation((signal) => this.loadRecord(signal));
     }
     if (this.record) this.scheduleProactiveRenewal();
     return this.record;
@@ -179,7 +195,6 @@ export class AuthManager {
 
   /** `POST /byok/pair` (v2): generates a device keypair on first pair, reuses it on any subsequent (e.g. post-revocation) re-pair. */
   async pair(pairingCode: string): Promise<DeviceRecord> {
-    this.stopped = false;
     this.pairing = true;
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
     this.proactiveTimer = undefined;

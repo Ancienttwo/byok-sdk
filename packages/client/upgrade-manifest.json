@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "1d16a4177a543ebe3aeee6ab997d054bf33dff4e7c6dceabedf6a6e152235b7b"
+    "snapshotSha256": "1a071c666ace9f6bb2bf362d20b5f913fcbf2b57d940bab655b241fc14cb69a2"
   },
   "configFields": {
     "status": "tracked",
@@ -547,6 +547,16 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "export:@byok-sdk/client#DeviceCredentialBackend",
+      "change": "changed",
+      "entry": "auth-revocation-typed-keychain-deadline"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceCredentialCommandAbortedError",
+      "change": "added",
+      "entry": "auth-revocation-typed-keychain-deadline"
+    },
+    {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
       "change": "changed",
       "entry": "local-tool-approval-host-only"
@@ -685,6 +695,21 @@
       "item": "export:@byok-sdk/keys#inspectProviderProfileStore",
       "change": "added",
       "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DEVICE_NOT_REGISTERED_CODE",
+      "change": "added",
+      "entry": "auth-revocation-typed-keychain-deadline"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DeviceNotRegisteredResponse",
+      "change": "added",
+      "entry": "auth-revocation-typed-keychain-deadline"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DeviceNotRegisteredResponseSchema",
+      "change": "added",
+      "entry": "auth-revocation-typed-keychain-deadline"
     },
     {
       "item": "export:@byok-sdk/protocol#TASK_FAIL_REASON_MAX_BYTES",

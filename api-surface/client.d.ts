@@ -3163,9 +3163,23 @@ export declare class AuthManager {
     constructor(opts: AuthManagerOptions);
     get deviceId(): string | undefined;
     isRevoked(): boolean;
-    /** Internal signer read: always recompose metadata with the current OS secret authority. */
+    /**
+     * Internal signer read: always recompose metadata with the current OS
+     * secret authority. Like every OS read here it is a credential mutation, so
+     * {@link stop} cancels it.
+     */
     readCurrent(): Promise<DeviceRecord | undefined>;
-    /** Load a previously-paired device record from disk, if any (idempotent — a second call is a no-op once loaded). */
+    /**
+     * Re-arm after {@link stop}. The daemon calls it when a start or pair is
+     * requested, so a stop requested after that cancels the operation's own
+     * credential calls instead of being undone by them.
+     */
+    resume(): void;
+    /**
+     * Load a previously-paired device record, if any (idempotent — a second
+     * call is a no-op once loaded). The OS read runs as a credential mutation,
+     * so {@link stop} cancels a read hung on a locked keychain.
+     */
     loadExisting(): Promise<DeviceRecord | undefined>;
     /** `POST /byok/pair` (v2): generates a device keypair on first pair, reuses it on any subsequent (e.g. post-revocation) re-pair. */
     pair(pairingCode: string): Promise<DeviceRecord>;

@@ -82,7 +82,22 @@ export async function start(daemonScope: DaemonScope): Promise<void> {
     if (err instanceof InsecureServerUrlError) throw new DaemonHaltError('config_invalid', { cause: err });
     throw err;
   }
-  await runLifecycleMutation(startUnderLease);
+  await runAuthOperation(daemonScope, () => runLifecycleMutation(startUnderLease));
+}
+
+/**
+ * A start or pair: it re-arms the auth manager synchronously, so a stop()
+ * requested after it cancels the operation's credential calls (see stop()).
+ */
+export async function runAuthOperation<T>(daemonScope: DaemonScope, operation: () => Promise<T>): Promise<T> {
+  const { daemonState } = daemonScope;
+  daemonState.auth.resume();
+  daemonState.pendingAuthOperations += 1;
+  try {
+    return await operation();
+  } finally {
+    daemonState.pendingAuthOperations -= 1;
+  }
 }
 
 /**
@@ -128,6 +143,11 @@ export async function stop(daemonScope: DaemonScope, opts: { drainTimeoutMs?: nu
   // `shuttingDown === false` for the whole duration of that predecessor.
   // Setting it here, synchronously, before the first await, closes that gap.
   daemonState.shuttingDown = true;
+  // A start or pair may be blocked in an OS credential call (a locked
+  // keychain) and the teardown below queues behind it. Signal first: the
+  // auth manager's stop is the one cancellation for those calls; then await
+  // the operation settling.
+  if (daemonState.pendingAuthOperations > 0) void daemonState.auth.stop().catch(() => undefined);
   await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
 }
 
