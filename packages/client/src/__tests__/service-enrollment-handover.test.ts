@@ -235,15 +235,31 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
 
   it('shutdown pipelined ahead of enrollment.pair on one connection: the pair is refused and never reaches the server', async () => {
     const current = await enrolling();
+    // Hold the teardown the shutdown handler defers, so both requests reach
+    // the daemon before it destroys the connection. The two are separate
+    // writes, and a pipe may deliver the second after that teardown ran.
+    const teardowns: Array<() => void> = [];
+    const realSetImmediate = globalThis.setImmediate;
+    const held = vi.spyOn(globalThis, 'setImmediate').mockImplementation(((callback: (...args: unknown[]) => void, ...args: unknown[]) => {
+      if (String(callback).includes('performControlShutdown')) {
+        teardowns.push(() => callback(...args));
+        return realSetImmediate(() => undefined);
+      }
+      return realSetImmediate(callback, ...args);
+    }) as typeof setImmediate);
     const client = await connect();
     const shutdown = client.request('shutdown', { reason: 'unpair' });
     const pairing = client.request('enrollment.pair', { pairingCode: 'pairing-code' });
     expect(await shutdown).toEqual({ acknowledged: true });
     await expect(pairing).rejects.toMatchObject({ code: 'shutting_down' });
-    client.close();
+    expect(teardowns).toHaveLength(1);
     expect(server.pairRequests).toHaveLength(0);
-    await vi.waitFor(async () => expect(await gone()).toBe(true), { timeout: 5_000 });
+    expect(leaseHeld()).toBe(true);
+    held.mockRestore();
+    teardowns[0]!();
     await expectStoppedForGood(current);
+    expect(server.pairRequests).toHaveLength(0);
+    client.close();
   }, 15_000);
 
   it('a start that fails after promotion releases the lease before gone, and a fresh unpair then succeeds', async () => {
