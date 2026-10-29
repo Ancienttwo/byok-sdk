@@ -3829,6 +3829,33 @@ Each top-level schema field is a `config:<field>` item of the upgrade
 manifest (`docs/upgrade-manifest.md`), so adding, removing or retyping a
 field needs a manifest entry.
 
+### Recommended host layout
+
+`resolveHostLayout({ productId, productName, platform?, homeDir?, env? })`
+returns the recommended local directories of a Host product. It is pure (no
+file is read or created), so an installer can call it for any of `darwin`,
+`linux` and `win32`. It is the only definition of these paths:
+`DeviceStore.defaultDir`, `byok-agent service install` and
+`DaemonEffectiveConfig.directories` use the same functions.
+
+| Directory | Owner | darwin | linux | win32 |
+| --- | --- | --- | --- | --- |
+| `storeDir` (`DaemonConfig.storeDir`; unset means this path) | SDK | `~/.byok/<productId>` | `~/.byok/<productId>` | `%USERPROFILE%\.byok\<productId>` |
+| `hostStorageRoot` (`agentHome.hostStorageRoot`) | Host | `~/Library/Application Support/<productName>` | `$XDG_DATA_HOME/<productId>` (default `~/.local/share/<productId>`) | `%LOCALAPPDATA%\<productName>` (default `~\AppData\Local\<productName>`) |
+| `agentHomes` = `<hostStorageRoot>/agents` | SDK | | | |
+| `logDir` = `<storeDir>/service-logs` | SDK (service manager output) | | | |
+
+The Host keeps its config file and its own state outside `storeDir`. The
+store stays short on purpose: an application-data path is often too long for
+runtime Unix sockets under `<storeDir>/tmp`. The result reports where execution
+scratch goes with that store (`scratchRoot.source` `store` or `short-root`)
+and its socket-path byte budget, by the same rule the daemon applies (#493),
+on the lexical path; `config check` reports the value a daemon resolves.
+`productId` and `productName` must each be one portable path segment and
+`homeDir` must be absolute for the platform; otherwise the helper throws
+`HostLayoutInputError` (`code: 'host_layout_input_invalid'`, `field`).
+Existing stores are not moved.
+
 ### Removed DaemonConfig fields
 
 Supplying one of these raises `DaemonConfigFieldRemovedError` on every

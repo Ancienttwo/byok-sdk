@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "6e90d96c17d451e7d30bece940ff703f1eea20048c0db60692fc96e5487849ec"
+    "snapshotSha256": "b4426511671627ed2a8085870acb073948c3843e8594b53ed8b3f586c9d4962e"
   },
   "configFields": {
     "status": "tracked",
@@ -100,6 +100,19 @@
       "migration": "docs/spec.md#removed-daemonconfig-fields",
       "items": [
         "export:@byok-sdk/client#DaemonConfigFieldRemovedError"
+      ]
+    },
+    {
+      "id": "host-layout-helper",
+      "impact": "additive",
+      "summary": "resolveHostLayout({ productId, productName, platform?, homeDir?, env? }) returns the recommended storeDir (the SDK default ~/.byok/<productId>, with its #493 scratch placement and socket-path budget), hostStorageRoot (macOS ~/Library/Application Support/<productName>, Linux $XDG_DATA_HOME/<productId>, Windows %LOCALAPPDATA%\\<productName>), its agents directory and the service log directory. It is pure and throws HostLayoutInputError (code host_layout_input_invalid, with the field) on an input it cannot lay out. DaemonEffectiveConfig.directories gains logDir. Nothing to change; a Host that computes these directories itself can call the helper instead. Existing stores do not move.",
+      "migration": "docs/spec.md#recommended-host-layout",
+      "items": [
+        "export:@byok-sdk/client#HostLayout",
+        "export:@byok-sdk/client#HostLayoutInputError",
+        "export:@byok-sdk/client#HostLayoutOptions",
+        "export:@byok-sdk/client#HostLayoutPlatform",
+        "export:@byok-sdk/client#resolveHostLayout"
       ]
     }
   ],
@@ -446,6 +459,26 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#HostLayout",
+      "change": "added",
+      "entry": "host-layout-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutInputError",
+      "change": "added",
+      "entry": "host-layout-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutOptions",
+      "change": "added",
+      "entry": "host-layout-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutPlatform",
+      "change": "added",
+      "entry": "host-layout-helper"
+    },
+    {
       "item": "export:@byok-sdk/client#LocalToolApprovalPolicy",
       "change": "added",
       "entry": "local-tool-approval-host-only"
@@ -454,6 +487,11 @@
       "item": "export:@byok-sdk/client#checkDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveHostLayout",
+      "change": "added",
+      "entry": "host-layout-helper"
     },
     {
       "item": "export:@byok-sdk/client#validateDaemonConfig",

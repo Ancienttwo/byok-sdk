@@ -7,7 +7,6 @@ import {
   promises as fs,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { atomicWriteFile } from '../util/atomic-write';
@@ -21,6 +20,7 @@ import {
 } from './device-credential-store';
 import { createDeviceCredentialStore } from './device-credential-provider';
 import { foldNameAliases } from '../util/fold-name-aliases';
+import { defaultStoreDir } from './host-layout';
 
 export type { DeviceMetadata, DeviceRecord } from './device-credential-store';
 
@@ -206,8 +206,9 @@ export class DeviceStore {
     this.filePath = path.join(storeDir, 'device.json');
   }
 
+  /** `<home>/.byok/<productId>`; defined once in `defaultStoreDir`, which `resolveHostLayout` recommends. */
   static defaultDir(productId: string): string {
-    return path.join(os.homedir(), '.byok', productId);
+    return defaultStoreDir(productId);
   }
 
   /**

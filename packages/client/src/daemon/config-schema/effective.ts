@@ -6,6 +6,7 @@ import {
   AGENT_RESULT_MCP_SERVER_NAME,
 } from '../../sdk-reserved-mcp';
 import type { RuntimeAdapter } from '../../types';
+import { serviceLogDir } from '../host-layout';
 import { scratchRootSocketBudget } from '../retention/scratch';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon';
 import { DAEMON_CONFIG_SCHEMA_VERSION } from './schema.generated';
@@ -68,6 +69,8 @@ export interface DaemonEffectiveConfig {
     readonly hostStorageRoot?: string;
     /** `<hostStorageRoot>/agents`, the SDK-owned parent of every Agent home. */
     readonly agentHomes?: string;
+    /** `<storeDir>/service-logs`, where `byok-agent service install` sends the daemon's stdout and stderr. */
+    readonly logDir: string;
     /**
      * Execution scratch root (#493). `config`: `storage.scratchRoot`. `store`:
      * `<storeDir>/tmp`. `short-root`: the store path is too long for runtime
@@ -167,6 +170,7 @@ export function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput)
     directories: {
       storeDir: { path: storeDir, source: config.storeDir === undefined ? 'default' : 'config' },
       ...(hostStorageRoot === undefined ? {} : { hostStorageRoot, agentHomes: path.join(hostStorageRoot, AGENT_HOME_DIRECTORY) }),
+      logDir: serviceLogDir(storeDir),
       scratchRoot: {
         path: scratchRoot,
         source: scratchSource,

@@ -3346,6 +3346,8 @@ export interface DaemonEffectiveConfig {
         readonly hostStorageRoot?: string;
         /** `<hostStorageRoot>/agents`, the SDK-owned parent of every Agent home. */
         readonly agentHomes?: string;
+        /** `<storeDir>/service-logs`, where `byok-agent service install` sends the daemon's stdout and stderr. */
+        readonly logDir: string;
         /**
          * Execution scratch root (#493). `config`: `storage.scratchRoot`. `store`:
          * `<storeDir>/tmp`. `short-root`: the store path is too long for runtime
@@ -5292,6 +5294,20 @@ export declare class DaemonConfigFieldRemovedError extends Error {
     /** Repo-relative `.md#anchor` of the migration note (#1094). */
     migration: string);
 }
+/**
+ * `resolveHostLayout` got an input it cannot build a layout from: a product
+ * identifier that is not one portable path segment, a home directory that is
+ * not absolute, or a platform without a layout. Fix the named `field` and
+ * call it again; the call has no side effects.
+ */
+export declare class HostLayoutInputError extends Error {
+    /** The `HostLayoutOptions` field: `productId`, `productName`, `homeDir` or `platform`. */
+    readonly field: 'productId' | 'productName' | 'homeDir' | 'platform';
+    readonly code: 'host_layout_input_invalid';
+    constructor(
+    /** The `HostLayoutOptions` field: `productId`, `productName`, `homeDir` or `platform`. */
+    field: 'productId' | 'productName' | 'homeDir' | 'platform', message: string);
+}
 export type DaemonJournalProtocolRecord = 'recovery-offer' | 'pending-terminal';
 /**
  * The local journal holds envelope bytes of another wire major. This daemon
@@ -5953,6 +5969,86 @@ export declare class ExecutionRecordAccumulator {
     private openCall;
     private answerCall;
 }
+// ==== @byok-sdk/client dist/daemon/host-layout.d.ts ====
+/** Platforms `resolveHostLayout` has a layout for. */
+export type HostLayoutPlatform = 'darwin' | 'linux' | 'win32';
+export interface HostLayoutOptions {
+    /** `DaemonConfig.productId`. Names the SDK store: `<home>/.byok/<productId>`; on Linux also the Host root. */
+    readonly productId: string;
+    /** `DaemonConfig.productName`. Names the Host root on macOS and Windows, e.g. `Salesko`. */
+    readonly productName: string;
+    /** Default: `process.platform`. */
+    readonly platform?: NodeJS.Platform;
+    /** The user's home directory. Default: `os.homedir()`. */
+    readonly homeDir?: string;
+    /** Reads `XDG_DATA_HOME` (Linux) and `LOCALAPPDATA` (Windows). Default: `process.env`. */
+    readonly env?: Readonly<Record<string, string | undefined>>;
+}
+/**
+ * The recommended local directories of one Host product on one platform
+ * (#1094). Who owns what:
+ *
+ * - `storeDir` is the SDK's. Pass it as `DaemonConfig.storeDir`, or leave
+ *   that field unset: the default is the same path.
+ * - `hostStorageRoot` is the Host's. Pass it as `agentHome.hostStorageRoot`;
+ *   the SDK composes `agentHomes` (`<hostStorageRoot>/agents`) and every
+ *   `agents/<agentId>` under it. Keep Host files beside `agents/`, not in it.
+ * - `logDir` is where `byok-agent service install` sends the daemon's stdout
+ *   and stderr.
+ * - The Host keeps its config file and its own state outside `storeDir`.
+ */
+export interface HostLayout {
+    readonly platform: HostLayoutPlatform;
+    readonly storeDir: string;
+    /**
+     * Where execution scratch goes with this `storeDir` and no
+     * `storage.scratchRoot` (#493). `store`: `<storeDir>/tmp` fits the runtime
+     * Unix socket budget. `short-root`: it does not, so the daemon moves
+     * scratch to a fixed short root keyed by the store path. Computed from the
+     * lexical path; a symbolic link in an existing ancestor can change it, and
+     * `byok-agent config check` reports the value a daemon resolves.
+     */
+    readonly scratchRoot: {
+        readonly path: string;
+        readonly source: 'store' | 'short-root';
+        readonly socketPathBytes: number;
+        /** Absent on Windows, which has no socket path limit. */
+        readonly socketPathMaximumBytes?: number;
+    };
+    readonly hostStorageRoot: string;
+    readonly agentHomes: string;
+    readonly logDir: string;
+}
+/**
+ * The SDK store directory a daemon uses when `DaemonConfig.storeDir` is
+ * unset: `<homeDir>/.byok/<productId>` on every platform. `DeviceStore.defaultDir`
+ * and `resolveHostLayout` both return this; it is the only definition.
+ */
+export declare function defaultStoreDir(productId: string, homeDir?: string, platform?: NodeJS.Platform): string;
+/** Where `byok-agent service install` sends the daemon's stdout and stderr. */
+export declare function serviceLogDir(storeDir: string, platform?: NodeJS.Platform): string;
+/**
+ * The recommended `storeDir`, `hostStorageRoot` and log directory for a Host
+ * product (#1094), with the #493 scratch placement of that `storeDir`.
+ * Pure: it reads no file and creates nothing, so a Host can call it for any
+ * platform, e.g. in an installer or a test.
+ *
+ * `hostStorageRoot` follows each platform's convention for per-user
+ * application data:
+ *
+ * - macOS: `~/Library/Application Support/<productName>`
+ * - Linux: `$XDG_DATA_HOME/<productId>`, default `~/.local/share/<productId>`
+ * - Windows: `%LOCALAPPDATA%\<productName>`, default `~\AppData\Local\<productName>`
+ *
+ * `storeDir` is the SDK default, `~/.byok/<productId>`, on every platform. It
+ * is short on purpose: an application-data path is often too long for
+ * runtime Unix sockets under `<storeDir>/tmp` (#493).
+ *
+ * @throws {HostLayoutInputError} `productId` or `productName` is not one
+ * portable path segment, `homeDir` is not absolute, or the platform is not
+ * macOS, Linux or Windows.
+ */
+export declare function resolveHostLayout(options: HostLayoutOptions): HostLayout;
 // ==== @byok-sdk/client dist/daemon/input-preparation-store.d.ts ====
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_VERSION, type InputPreparationBindingV1, type InputPreparationArtifactSummaryV1, type InputPreparationCounterEvidenceV1, type InputPreparationModelV1, type InputPreparationPinV1, type InputPreparationProjectionV1, type InputPreparationResidualKeyV1, type InputPreparationStateV1 } from '../input-preparation';
 /**
@@ -8092,6 +8188,14 @@ export declare function validateScratchRoot(root: string, platform?: NodeJS.Plat
  */
 export declare function defaultScratchRoot(storeDir: string, platform?: NodeJS.Platform): string;
 /**
+ * The #493 placement rule, without filesystem access: the fixed short root
+ * for a store whose `<store>/tmp` exceeds the runtime socket budget, or
+ * `undefined` when `<store>/tmp` fits or the platform has no limit.
+ * {@link defaultScratchRoot} passes the canonical store; `resolveHostLayout`
+ * passes the lexical recommended store.
+ */
+export declare function shortScratchRoot(store: string, platform: NodeJS.Platform): string | undefined;
+/**
  * Reject aliases before changing permissions or deleting anything. With
  * `ownedLeaf`, a leaf another user created first (a root in a shared directory
  * such as /tmp) is refused before any permission change.
@@ -8530,6 +8634,7 @@ export declare class DeviceStore {
      * CI/dev machine, not just asserted.
      */
     constructor(storeDir: string, credentials: DeviceCredentialBackend, secureDirOptions?: EnsureSecureDirOptions | undefined);
+    /** `<home>/.byok/<productId>`; defined once in `defaultStoreDir`, which `resolveHostLayout` recommends. */
     static defaultDir(productId: string): string;
     /**
      * Resolve the one store pathname every daemon/CLI component must share.
@@ -10417,7 +10522,8 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonMemoryHelperResolution, } from './daemon/config-schema';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
+export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
+export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals';
