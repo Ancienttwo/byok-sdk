@@ -1,13 +1,11 @@
 import { DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME } from '../task-runner';
 import { resolveAgentEgressPolicy } from '../agent-egress-policy';
 import type { ProgressBatcherOptions } from '../progress-batcher';
-import { DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, assertPresenceHeartbeatCadence } from '../presence-publisher';
-import { resolveDeviceAssertionAudiences, resolveDeviceAssertionTtlMs } from './support';
+import { resolveDaemonOperationalConfig } from './operational-config';
 import { DeviceStore, type DeviceRecord } from '../store';
 import { resolveStorageConfig } from '../retention/config';
 import { ScratchRoot } from '../retention/scratch';
 import { StoragePressure } from '../retention/pressure';
-import { validateInputPreparationLimits } from '../../input-preparation';
 import { buildRuntimeEnv } from '../environment';
 import { createPreparedToolSurfaceAssembler } from '../prepared-tool-surface';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
@@ -40,29 +38,8 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
         flushIntervalMs: Math.min(config.progressBatch?.flushIntervalMs ?? 250, egressPolicy.activity.maxCoalesceMs),
       };
 
-  // Same up-front discipline as `maxTaskOutputBytes` above: the presence
-  // cadence is pure config, so a band violation is a construction error rather
-  // than something the heartbeat loop discovers later — see
-  // `DaemonConfig.presence`. Resolved once here so the assertion and the
-  // publisher below can never read different numbers.
-  const presenceCadence = {
-    intervalMs: config.presence?.intervalMs ?? DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS,
-    ttlMs: config.presence?.ttlMs ?? DEFAULT_PRESENCE_TTL_MS,
-    minimumIntervalMs: config.presence?.minimumIntervalMs ?? DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
-  };
-  assertPresenceHeartbeatCadence(presenceCadence);
-
-  // Plan `device-assertion-broker`: same up-front discipline as the two blocks
-  // above. This one guards a local AUTHENTICATION surface, so every rejection
-  // below is a construction error rather than a runtime refusal — a daemon
-  // that starts with a malformed allowlist is a daemon whose operator believes
-  // an allowlist is in force.
-  //
-  // Resolved into a `Set` (exact membership, no ordering, no pattern) and a
-  // number here, once, so the handler below cannot read a different allowlist
-  // or a different TTL than the one that was validated.
-  const deviceAssertionAudiences = resolveDeviceAssertionAudiences(config.deviceAssertion);
-  const deviceAssertionTtlMs = resolveDeviceAssertionTtlMs(config.deviceAssertion);
+  const { presenceCadence, deviceAssertionAudiences, deviceAssertionTtlMs, inputPreparationLimits } =
+    resolveDaemonOperationalConfig(config);
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
   const storageConfig = resolveStorageConfig(storeDir, config.storage);
@@ -70,21 +47,6 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
   const scratchRoot = new ScratchRoot(storageConfig.scratchRoot, retentionClock);
   const storagePressure = new StoragePressure(storageConfig.budget);
 
-  /**
-   * B-P2 local primitive. Three facts are resolved here, once, at construction:
-   *
-   * 1. The limits policy is VALIDATED now, not on the first call. A present but
-   *    malformed policy is a construction error (same rule as the presence
-   *    cadence and the assertion allowlist); an ABSENT section leaves the whole
-   *    surface off, and all three methods answer `input_preparation_unconfigured`.
-   * 2. The native compiler binds to the identity of the pinned official Pi
-   *    release. If the client pin does not name that release the feature does
-   *    not silently degrade to a caller-supplied identity — it answers
-   *    `runtime_identity_unavailable` and compiles nothing.
-   * 3. The service itself, which owns the durable record log under `storeDir`.
-   */
-  const inputPreparationLimits =
-    config.inputPreparation === undefined ? undefined : validateInputPreparationLimits(config.inputPreparation.limits);
   /**
    * The ONE prepared-tool-surface entry, bound to this daemon's registry
    * (`./prepared-tool-surface.ts`).

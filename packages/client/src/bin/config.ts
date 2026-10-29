@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
+import { validateDaemonConfig, type DaemonConfigIssue } from '../daemon/config-schema/validate';
+import { removedFieldError } from '../daemon/config-schema/errors';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release';
 
 /**
@@ -10,8 +12,6 @@ import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release';
  * machinery than the surface it serves. See `byok-agent.ts`'s header
  * comment for the overall command/read-model design this supports.
  */
-
-const REQUIRED_FIELDS = ['productName', 'productId', 'serverUrl'] as const;
 
 /**
  * Thrown by {@link loadConfig} on a missing/unreadable/invalid config.
@@ -27,6 +27,34 @@ export class ConfigError extends Error {
   }
 }
 
+type CliConfigInput = Omit<DaemonConfig, 'localAgentRelease'>;
+
+/**
+ * The parsed JSON of a config file, or `{}` without a path. Not validated:
+ * {@link loadConfig} and `config check` validate it.
+ */
+export function readConfigFile(configPath: string | undefined): Record<string, unknown> {
+  if (!configPath) return {};
+  let raw: string;
+  try {
+    raw = readFileSync(configPath, 'utf8');
+  } catch {
+    throw new ConfigError(`could not read config at "${configPath}"; check the path and read permissions`);
+  }
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    // SyntaxError.message may quote the config contents; the path and fixed
+    // failure category are sufficient for the operator to repair the file.
+    throw new ConfigError(`config at "${configPath}" is not valid JSON`);
+  }
+}
+
+/** One line per issue, with the migration note of a removed field. */
+export function formatConfigIssue(issue: DaemonConfigIssue): string {
+  return issue.migration === undefined ? issue.message : `${issue.message} (migration: ${issue.migration})`;
+}
+
 /**
  * Loads a `DaemonConfig` from a JSON file, if given, merged with explicit
  * overrides (e.g. `pair`'s `--server`). Every subcommand in this bin —
@@ -34,38 +62,20 @@ export class ConfigError extends Error {
  * config the same way: they all need `productId`/`storeDir`/`branding`/
  * `runtimeAllowlist` from the same one product install, so there is only
  * ever one config shape to reason about.
+ *
+ * Validated by the shared {@link validateDaemonConfig} as a `cli` config:
+ * removed fields throw `DaemonConfigFieldRemovedError`; other errors throw
+ * a {@link ConfigError}. Unknown fields pass (Q4'); the
+ * daemon logs them, and `byok-agent config check --strict` fails on them.
  */
-type CliConfigInput = Omit<DaemonConfig, 'localAgentRelease'>;
-
 export function loadConfig(configPath: string | undefined, overrides: Partial<CliConfigInput> = {}): DaemonConfig {
-  let base: Partial<CliConfigInput> & { localAgentRelease?: unknown } = {};
-  if (configPath) {
-    let raw: string;
-    try {
-      raw = readFileSync(configPath, 'utf8');
-    } catch {
-      throw new ConfigError(`could not read config at "${configPath}"; check the path and read permissions`);
-    }
-    try {
-      base = JSON.parse(raw) as Partial<CliConfigInput> & { localAgentRelease?: unknown };
-    } catch {
-      // SyntaxError.message may quote the config contents; the path and fixed
-      // failure category are sufficient for the operator to repair the file.
-      throw new ConfigError(`config at "${configPath}" is not valid JSON`);
-    }
-  }
-  if (
-    Object.prototype.hasOwnProperty.call(base, 'localAgentRelease') ||
-    Object.prototype.hasOwnProperty.call(overrides, 'localAgentRelease')
-  ) {
-    throw new ConfigError('config field "localAgentRelease" is distribution-owned and must not be supplied');
-  }
-  const merged: Partial<CliConfigInput> = { ...base, ...overrides };
-  for (const field of REQUIRED_FIELDS) {
-    if (!merged[field]) {
-      throw new ConfigError(`config is missing required field "${field}"`);
-    }
-  }
+  const { $schema: _schema, ...base } = readConfigFile(configPath);
+  const merged: Record<string, unknown> = { ...base, ...overrides };
+  const { issues } = validateDaemonConfig(merged, { source: 'cli' });
+  const removed = issues.find((issue) => issue.code === 'removed_field');
+  if (removed !== undefined) throw removedFieldError(removed.path);
+  const errors = issues.filter((issue) => issue.severity === 'error');
+  if (errors.length > 0) throw new ConfigError(errors.map(formatConfigIssue).join('; '));
   return { ...merged, localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE } as DaemonConfig;
 }
 

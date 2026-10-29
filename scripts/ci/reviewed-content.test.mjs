@@ -92,6 +92,20 @@ test('the upgrade-manifest gate admits only its exact script, test and client fi
   f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-manifest.json', 'src'] });
   assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
 });
+// #1094: the generated DaemonConfig schema is appended after the upgrade manifest, exactly.
+test('the client files list admits exactly the appended DaemonConfig schema', t => {
+  const f = fixture(t);
+  const files = ['dist', 'README.md', 'LICENSE', 'upgrade-manifest.json'];
+  f.write('packages/client/package.json', { ...f.manifest, files });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'files'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'daemon-config.schema.json'] });
+  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
+  for (const changed of [[...files, 'daemon-config.schema.json', 'src'], ['dist', 'README.md', 'LICENSE', 'daemon-config.schema.json']]) {
+    f.write('packages/client/package.json', { ...f.manifest, files: changed });
+    assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+  }
+});
 test('API entry changes select only owner and dependents; unmapped entry is refused', t => {
   const f = fixture(t);
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 2 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } } });

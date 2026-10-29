@@ -12,6 +12,8 @@ export class DaemonConfigFieldRemovedError extends Error {
     /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
     readonly field: string,
     message: string,
+    /** Repo-relative `.md#anchor` of the migration note (#1094). */
+    readonly migration: string,
   ) {
     super(message);
     this.name = 'DaemonConfigFieldRemovedError';

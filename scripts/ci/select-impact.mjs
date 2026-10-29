@@ -494,6 +494,11 @@ export function selectImpact(paths, context = {}) {
     // tarball ships. The targeted job's gate step reads both.
     if (path === 'scripts/release/upgrade-manifest/baseline.json') { scripts = true; continue; }
     if (path === 'packages/client/upgrade-manifest.json') { scripts = true; families.add('npm-release-pack'); continue; }
+    // #1094: the generated DaemonConfig schema. The client drift test regenerates
+    // it, the upgrade-manifest gate reads its config:<field> items, and the tarball ships it.
+    if (path === 'packages/client/daemon-config.schema.json') {
+      dirs.add('packages/client'); scripts = true; families.add('npm-release-pack'); continue;
+    }
     if (Object.hasOwn(reviewedScripts, path)) {
       scripts = true;
       for (const id of reviewedScripts[path].families ?? []) families.add(id);
