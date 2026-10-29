@@ -777,16 +777,9 @@ function observedCoverage(root: SchemaNode, prefix: string, samples: readonly un
  * and value (per message type) and every header path and value (the
  * `envelope-header` surface). An exemption that prunes nothing also fails.
  */
-const COMPLETENESS_EXEMPTIONS: readonly { readonly below: string; readonly reason: string }[] = [
-  {
-    below: 'http:MessagesSendRequest.messages[]',
-    reason: 'The node is exactly EnvelopeSchema; the envelope corpus covers every payload path/value per message type and every header path/value.',
-  },
-];
+const COMPLETENESS_EXEMPTIONS: readonly { readonly below: string; readonly reason: string }[] = [];
 
-const EXPECTED_EXEMPTION_PATHS: readonly string[] = [
-  'http:MessagesSendRequest.messages[]',
-];
+const EXPECTED_EXEMPTION_PATHS: readonly string[] = [];
 
 const HEADER_PREFIX = 'envelope-header';
 

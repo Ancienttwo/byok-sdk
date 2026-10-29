@@ -2926,13 +2926,14 @@ a typed, fail-closed path.
 that set — a server → daemon type (`task.offer`, `agent.egress.ack`, etc.) arriving
 inbound, or anything unrecognized — is rejected per-envelope: not dispatched
 to any handler, and not counted toward `accepted`. This never 400s the rest
-of the batch: a *structurally* invalid `Envelope` (fails schema validation
-outright) still 400s the whole request as before, but a *wrong-direction*
-type is schema-valid — a `task.offer` is a well-formed envelope regardless
-of which side sent it — and only fails this endpoint's semantic type-allow
-check, which is per-envelope. The batch itself is also capped at 256
-envelopes (`MessagesSendRequestSchema`); exceeding the cap 400s the whole
-request.
+of the batch. Neither does an envelope that fails schema validation: the
+request schema (`MessagesSendRequestSchema`) checks only the frame, and each
+entry is decoded on its own, so an undecodable entry is answered
+`rejected: payload_invalid` and the rest of the batch applies (#1121). The
+frame is what still 400s the whole request: a body that is not
+`{ messages: [...] }`, an entry whose `v` is not this wire major (the sender
+could not read this version's outcomes), an entry without a UUID `id` its
+outcome could be correlated by, or more than 256 entries.
 
 **`accepted` counts every envelope the server took in and will not ask the
 daemon to resend** — including one it recognized as an already-processed
@@ -2944,7 +2945,7 @@ is a separate, additive count — every envelope the server refused — present
 in the response only when nonzero. Every v3 answer also carries `outcomes`
 (below); a counts-only answer is not a v3 response. The type-allow check above and the ownership check
 (§9) are only two of the causes. An envelope is also rejected, among other
-reasons, for an unsupported protocol version; for a device that is revoked or lacks the
+reasons, for a device that is revoked or lacks the
 capability the type requires; for a missing or mismatched Agent or harness
 identity; for a `task.claim` that does not win ownership or contradicts the
 sealed offer; for a `task.progress` events batch or approval event that is
@@ -2954,7 +2955,9 @@ conflicts with the stored one, or a content receipt for a request the server
 does not know; for an `agent.message.publish` the server refuses (binding
 mismatch, `byteCount` over `maxBytes`, a reservation conflict, or admission
 that cannot be confirmed); for a `task.fail` whose recovery report is
-refused; and for a `conn.hello` with a product mismatch or whose
+refused; for a terminal whose task already holds a stored terminal receipt the
+server cannot read back (`state_conflict`, rather than a 500 for the whole
+batch); and for a `conn.hello` with a product mismatch or whose
 capabilities the server fails to record. These are examples, not an
 exhaustive list. `outcomes` is required and contains exactly one result per
 request envelope: `{ id: uuid, outcome: 'accepted' | 'duplicate' | 'rejected', reason?: string }`.
