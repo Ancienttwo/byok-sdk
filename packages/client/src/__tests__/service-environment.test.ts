@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +7,7 @@ import { composeRuntimeEnvironment } from '../runtime/environment';
 import { captureAndApply } from '../lifecycle/service-environment';
 import { captureLoginShellSnapshot, LOGIN_SHELL_SEED_PATH } from '../login-shell-environment';
 import { testRuntimeEnv } from './fixtures/runtime-env';
+import { resolveBunBin } from './support/test-bun-bin';
 
 const dirs: string[] = [];
 
@@ -147,7 +149,7 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     expect(runtime).not.toHaveProperty('HOST_LATE_SENTINEL');
   });
 
-  it('the passwd shell is used when none is injected (zsh/bash hosts only)', async (ctx) => {
+  it('the account shell is used when none is injected (zsh/bash hosts only)', async (ctx) => {
     const passwd = os.userInfo().shell;
     if (!passwd || !['zsh', 'bash'].includes(path.basename(passwd))) ctx.skip();
     const home = await tempDir();
@@ -158,25 +160,42 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     expect(await captureAndApply({ env })).toMatchObject({ source: 'login-shell', shell: path.basename(passwd!) });
     expect(env.PATH?.split(':')).toContain('/rc-login/bin');
   });
+
+  it('an account entry that cannot be read or does not hold: unavailable:account-shell-unavailable; an unsupported one: unsupported-shell', async () => {
+    const uid = String(process.getuid!());
+    const entry = (fields: { uid?: string; shell: string }) => `u:*:${fields.uid ?? uid}:20::0:0:u:/h:${fields.shell}`;
+    const status = (accountCommand: readonly [string, ...string[]], platform: NodeJS.Platform = process.platform) =>
+      captureAndApply({ accountCommand, env: {}, platform });
+    const unavailable = { source: 'unavailable', code: 'account-shell-unavailable' };
+    expect(await status([path.join(await tempDir(), 'missing')])).toEqual(unavailable);
+    expect(await status(['/usr/bin/false'])).toEqual(unavailable);
+    expect(await status(['/bin/echo', entry({ uid: String(Number(uid) + 1), shell: '/bin/sh' })])).toEqual(unavailable);
+    expect(await status(['/bin/echo', entry({ shell: 'zsh' })])).toEqual(unavailable);
+    expect(await status(['/bin/echo', entry({ shell: '' })])).toEqual(unavailable);
+    expect(await status(['/bin/echo', `${entry({ shell: '/bin/sh' })}\n${entry({ shell: '/bin/sh' })}`])).toEqual(unavailable);
+    expect(await captureAndApply({ env: {}, platform: 'freebsd' })).toEqual(unavailable);
+    expect(await status(['/bin/echo', entry({ shell: '/usr/local/bin/nu' })])).toEqual({ source: 'unavailable', code: 'unsupported-shell' });
+    expect(await status(['/bin/echo', entry({ shell: '/bin/sh' })])).toMatchObject({ source: 'login-shell', shell: 'sh' });
+  });
 });
 
-// Use a real fish binary and isolated rc files; the passwd seam selects it,
+// Use a real fish binary and isolated rc files; the account-command seam selects it,
 // so this also exercises the production supported-shell gate.
 const fish = (process.env.PATH ?? '').split(path.delimiter)
   .map(dir => path.join(dir, 'fish')).find(file => existsSync(file));
 describe.runIf(posix && fish !== undefined)('fish login-shell capture', () => {
+  const fishAccount: readonly [string, ...string[]] = ['/bin/echo', `u:*:${process.getuid?.()}:20::0:0:u:/h:${fish}`];
   async function fishHome(rc: string): Promise<{ home: string; env: NodeJS.ProcessEnv }> {
     const home = await tempDir();
     const config = path.join(home, '.config');
     await fs.mkdir(path.join(config, 'fish'), { recursive: true });
     await fs.writeFile(path.join(config, 'fish/config.fish'), rc);
-    vi.spyOn(os, 'userInfo').mockReturnValue({ ...os.userInfo(), shell: fish! });
     return { home, env: { HOME: home, XDG_CONFIG_HOME: config, PATH: '/usr/bin:/bin', BYOK_OWNER_VALUE: 'original' } };
   }
 
   it('captures fish PATH and multiline exports despite rc noise, isolating BYOK values', async () => {
     const { home, env } = await fishHome('echo welcome\necho warning >&2\nset -gx PATH "$HOME/fish-bin" $PATH\nset -gx RC_MULTI "line one\nline two"\nset -gx BYOK_OWNER_VALUE overwritten\nset -gx BYOK_RC_ONLY secret\n');
-    expect(await captureAndApply({ env })).toMatchObject({ source: 'login-shell', shell: 'fish' });
+    expect(await captureAndApply({ env, accountCommand: fishAccount })).toMatchObject({ source: 'login-shell', shell: 'fish' });
     expect(env.PATH?.split(':')).toContain(path.join(home, 'fish-bin'));
     expect(env.RC_MULTI).toBe('line one\nline two');
     expect(env.BYOK_OWNER_VALUE).toBe('original');
@@ -186,7 +205,44 @@ describe.runIf(posix && fish !== undefined)('fish login-shell capture', () => {
   it('bounds slow fish rc and leaves the inherited environment untouched on failure', async () => {
     const { env } = await fishHome('sleep 30\nset -gx RC_SET unexpected\n');
     const before = { ...env };
-    expect(await captureAndApply({ env, timeoutMs: 100 })).toEqual({ source: 'unavailable', code: 'timeout' });
+    expect(await captureAndApply({ env, accountCommand: fishAccount, timeoutMs: 100 })).toEqual({ source: 'unavailable', code: 'timeout' });
     expect(env).toEqual(before);
   });
+});
+
+/**
+ * The login shell is the account's, read from the account database by uid on
+ * every runtime: Bun's `os.userInfo().shell` returns `$SHELL`, so a Host's
+ * `SHELL` would otherwise choose the shell and become the snapshot authority.
+ * The vitest worker runs on Node, whose `os.userInfo()` is getpwuid, so it
+ * supplies the expected answer; each runtime then captures in a child.
+ */
+const accountShell = posix ? os.userInfo().shell ?? undefined : undefined;
+const BUN = resolveBunBin();
+const MODULE_URL = new URL('../login-shell-environment.ts', import.meta.url).href;
+const CHILD = `const { captureLoginShellSnapshot } = await import(${JSON.stringify(MODULE_URL)});
+const s = await captureLoginShellSnapshot({});
+process.stdout.write(JSON.stringify({ status: s.status, shell: s.env?.SHELL }));`;
+
+function captureIn(runtime: string, home: string, shellVar: string | undefined): Promise<{ status: { source: string; shell?: string; code?: string }; shell?: string }> {
+  const env: NodeJS.ProcessEnv = { HOME: home, ZDOTDIR: home, PATH: '/usr/bin:/bin', ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}), ...(shellVar === undefined ? {} : { SHELL: shellVar }) };
+  return new Promise((resolve, reject) => {
+    execFile(runtime, ['--input-type=module', '-e', CHILD], { env, timeout: 30_000 }, (error, stdout, stderr) => {
+      if (error) reject(new Error(`${runtime}: ${error.message}\n${stderr}`));
+      else resolve(JSON.parse(stdout));
+    });
+  });
+}
+
+describe.runIf(posix && accountShell !== undefined && path.basename(accountShell) !== 'sh')('the account shell, not $SHELL (#1095)', () => {
+  for (const [name, runtime] of [['node', process.execPath], ['bun', BUN]] as const) {
+    it.skipIf(runtime === undefined)(`${name}: SHELL=/bin/sh and SHELL unset both capture with the account shell, which is also the seeded SHELL`, async () => {
+      const home = await tempDir();
+      for (const shellVar of ['/bin/sh', undefined]) {
+        const result = await captureIn(runtime!, home, shellVar);
+        expect(result.status).toMatchObject({ source: 'login-shell', shell: path.basename(accountShell!) });
+        expect(result.shell).toBe(accountShell);
+      }
+    });
+  }
 });

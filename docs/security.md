@@ -247,11 +247,15 @@ environment, as a new terminal would; the runtime detection probes (`--version`,
 `auth status`, `app-server --help`, `login status`) get the same environment.
 Each adapter builds it under its own `RuntimeEnvironmentPolicy`
 (`runtime/environment.ts`'s `buildRuntimeEnvironment`). The base is a snapshot
-taken once per process by running the passwd login shell (see "Login-shell
-environment" below). The shell starts from a closed seed (`HOME`, `USER`,
-`LOGNAME`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `TZ`, `ZDOTDIR`, `XDG_*`,
+taken once per process by running the account's login shell (see "Login-shell
+environment" below). The shell is read from the account database by uid
+(`/usr/bin/id -P` on macOS, `/usr/bin/getent passwd` on Linux), never from
+`$SHELL`; if that lookup fails, the capture fails closed as
+`account-shell-unavailable`. The shell starts from a closed seed (`HOME`,
+`USER`, `LOGNAME`, `TMPDIR`, `LANG`, `LC_*`, `TZ`, `ZDOTDIR`, `XDG_*`,
 `SSH_AUTH_SOCK`, `DBUS_SESSION_BUS_ADDRESS`, `DISPLAY`, `WAYLAND_DISPLAY`) with
-`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, never from the daemon's `process.env`, so
+`PATH=/usr/bin:/bin:/usr/sbin:/sbin` and `SHELL` set to the account shell,
+never from the daemon's `process.env`, so
 a variable an embedding Host sets — before or after the capture — is not in it.
 A Host lists the names it wants a runtime to receive in `pass`; they are read
 from the live `process.env` at every build. The strict `allowlist` base takes

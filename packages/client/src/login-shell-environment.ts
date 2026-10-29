@@ -1,6 +1,5 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 
 /**
@@ -14,8 +13,8 @@ import path from 'node:path';
  * missing.
  *
  * #1095: this capture is also the base of every runtime environment
- * (`runtime/environment.ts`). {@link loginShellSnapshot} runs the passwd login
- * shell (`os.userInfo().shell`, never `$SHELL`) once per process as
+ * (`runtime/environment.ts`). {@link loginShellSnapshot} runs the account's
+ * login shell once per process as
  * `<shell> -i -l -c 'printf %s B; /usr/bin/env -0; printf %s E'`, with B and
  * E random per-run nonces, and keeps the NUL-separated entries found between
  * them. Bytes outside the frame — rc chatter on stdout — are ignored. The
@@ -25,10 +24,18 @@ import path from 'node:path';
  * {@link LOGIN_SHELL_ENV_MAX_BYTES}. However the capture ends, the shell's
  * whole process group is SIGKILLed.
  *
+ * The shell is read from the account database by uid, never from `$SHELL`
+ * (Bun's `os.userInfo().shell` returns `$SHELL`, so a Host variable would
+ * choose the shell): `/usr/bin/id -P <uid>` on darwin (Open Directory),
+ * `/usr/bin/getent passwd <uid>` on linux (NSS). The entry's uid field must be
+ * this process's uid and its last field an absolute path; anything else,
+ * including another platform, fails closed as `account-shell-unavailable`.
+ *
  * The shell does not start from this process's environment: an embedding
  * Host's own variables would come back out of `env -0`. It starts from
- * {@link LOGIN_SHELL_SEED_NAMES} copied from this process and `PATH` set to
- * {@link LOGIN_SHELL_SEED_PATH}, what launchd and login(1) give a session;
+ * {@link LOGIN_SHELL_SEED_NAMES} copied from this process, `PATH` set to
+ * {@link LOGIN_SHELL_SEED_PATH} and `SHELL` set to the account shell, what
+ * launchd and login(1) give a session;
  * everything else in the snapshot is what the user's rc files produced.
  * `BYOK_*` names found in the capture are dropped: rc files never set SDK
  * control variables. The snapshot never changes `process.env`.
@@ -45,6 +52,8 @@ import path from 'node:path';
 
 export const LOGIN_SHELL_ENV_TIMEOUT_MS = 10_000;
 export const LOGIN_SHELL_ENV_MAX_BYTES = 1024 * 1024;
+/** The account-database lookup's share of {@link LOGIN_SHELL_ENV_TIMEOUT_MS}. */
+const ACCOUNT_SHELL_TIMEOUT_MS = 2_000;
 
 /**
  * The names the login shell starts with, copied from this process: the
@@ -53,7 +62,7 @@ export const LOGIN_SHELL_ENV_MAX_BYTES = 1024 * 1024;
  * Every other variable of this process stays out of the capture.
  */
 export const LOGIN_SHELL_SEED_NAMES: readonly string[] = Object.freeze([
-  'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'LC_*', 'TZ', 'ZDOTDIR', 'XDG_*',
+  'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_*', 'TZ', 'ZDOTDIR', 'XDG_*',
   'SSH_AUTH_SOCK', 'DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'WAYLAND_DISPLAY',
 ]);
 
@@ -62,11 +71,12 @@ export const LOGIN_SHELL_SEED_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
 
 /**
  * Shells known to accept `-i -l -c` and this nonce-framed printf/env command.
- * fish supports the same command; nu and a missing passwd entry are refused.
+ * fish supports the same command; nu is refused.
  */
 const SUPPORTED_SHELLS = new Set(['sh', 'bash', 'zsh', 'ksh', 'dash', 'fish']);
 
 export const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES = [
+  'account-shell-unavailable',
   'unsupported-shell',
   'spawn-failed',
   'timeout',
@@ -107,8 +117,10 @@ export interface ServiceEnvironmentRecord {
  * @internal
  */
 export interface ApplyLoginShellEnvironmentOptions {
-  /** Test seam: an absolute shell path instead of the passwd shell. */
+  /** Test seam: an absolute shell path instead of the account shell, past the supported-shell gate. */
   shell?: string;
+  /** Test seam: the account-database command (absolute path, then arguments) instead of the platform's. */
+  accountCommand?: readonly [string, ...string[]];
   /** Test seam: the environment the seed is copied from (and, for `captureAndApply`, the one replaced). Defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
@@ -157,12 +169,18 @@ export function setLoginShellSnapshotSource(source: (() => Promise<LoginShellSna
 export async function captureLoginShellSnapshot(options: ApplyLoginShellEnvironmentOptions): Promise<LoginShellSnapshot> {
   const platform = options.platform ?? process.platform;
   if (platform === 'win32') return { status: { source: 'windows-session' } };
-  const shell = options.shell ?? passwdShell();
-  if (!shell || !path.isAbsolute(shell) || (options.shell === undefined && !SUPPORTED_SHELLS.has(path.basename(shell)))) {
+  const timeoutMs = options.timeoutMs ?? LOGIN_SHELL_ENV_TIMEOUT_MS;
+  const started = Date.now();
+  let shell = options.shell;
+  if (shell === undefined) {
+    shell = await accountShell(options.accountCommand ?? accountCommand(platform), Math.min(ACCOUNT_SHELL_TIMEOUT_MS, timeoutMs));
+    if (shell === undefined) return { status: { source: 'unavailable', code: 'account-shell-unavailable' } };
+    if (!SUPPORTED_SHELLS.has(path.basename(shell))) return { status: { source: 'unavailable', code: 'unsupported-shell' } };
+  } else if (!path.isAbsolute(shell)) {
     return { status: { source: 'unavailable', code: 'unsupported-shell' } };
   }
-  const started = Date.now();
-  const captured = await capture(shell, seedEnvironment(options.env ?? process.env), options.timeoutMs ?? LOGIN_SHELL_ENV_TIMEOUT_MS, options.maxBytes ?? LOGIN_SHELL_ENV_MAX_BYTES);
+  const remainingMs = Math.max(1, timeoutMs - (Date.now() - started));
+  const captured = await capture(shell, seedEnvironment(options.env ?? process.env, shell), remainingMs, options.maxBytes ?? LOGIN_SHELL_ENV_MAX_BYTES);
   if ('code' in captured) return { status: { source: 'unavailable', code: captured.code } };
   const env: Record<string, string> = {};
   for (const [name, value] of captured.entries) {
@@ -172,22 +190,44 @@ export async function captureLoginShellSnapshot(options: ApplyLoginShellEnvironm
 }
 
 
-function seedEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function seedEnvironment(env: NodeJS.ProcessEnv, shell: string): NodeJS.ProcessEnv {
   const seed: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined) continue;
     if (LOGIN_SHELL_SEED_NAMES.some((pattern) => pattern.endsWith('*') ? name.startsWith(pattern.slice(0, -1)) : name === pattern)) seed[name] = value;
   }
   seed.PATH = LOGIN_SHELL_SEED_PATH;
+  seed.SHELL = shell;
   return seed;
 }
 
-function passwdShell(): string | undefined {
-  try {
-    return os.userInfo().shell ?? undefined;
-  } catch {
-    return undefined;
-  }
+/** This process's account entry, looked up by uid; `undefined` off darwin and linux. */
+function accountCommand(platform: NodeJS.Platform): readonly [string, ...string[]] | undefined {
+  const uid = process.getuid?.();
+  if (uid === undefined) return undefined;
+  if (platform === 'darwin') return ['/usr/bin/id', '-P', String(uid)];
+  if (platform === 'linux') return ['/usr/bin/getent', 'passwd', String(uid)];
+  return undefined;
+}
+
+/**
+ * The last field of the one passwd-format line `command` prints (darwin's
+ * `id -P` has ten fields, `getent passwd` seven; both put the uid third),
+ * when its uid field is this process's uid and the shell is absolute.
+ */
+function accountShell(command: readonly [string, ...string[]] | undefined, timeoutMs: number): Promise<string | undefined> {
+  const uid = process.getuid?.();
+  if (command === undefined || uid === undefined) return Promise.resolve(undefined);
+  const [file, ...args] = command;
+  return new Promise((resolve) => {
+    execFile(file, args, { env: {}, timeout: timeoutMs, maxBuffer: 64 * 1024, encoding: 'utf8' }, (error, stdout) => {
+      if (error) return resolve(undefined);
+      const lines = stdout.split('\n').filter((line) => line.length > 0);
+      const fields = lines.length === 1 ? lines[0]!.split(':') : [];
+      const shell = fields.at(-1);
+      resolve(fields.length >= 7 && fields[2] === String(uid) && shell !== undefined && path.isAbsolute(shell) ? shell : undefined);
+    });
+  });
 }
 
 function capture(
