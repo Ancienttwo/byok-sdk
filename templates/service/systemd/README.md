@@ -14,11 +14,13 @@ platform. This is a **reference recipe**: `@byok-sdk/client` is an npm library
 byok-agent install --config /path/to/your/config.json
 ```
 
-This generates `~/.config/systemd/user/<productId>.service` (pointing at
-`node <byok-agent entry> start --config <absolute path>`), runs
-`systemctl --user daemon-reload`, then `systemctl --user enable --now` (both
-enables it to survive logout/reboot and starts it immediately). Check on it
-any time:
+This writes the launcher `~/.byok/<productId>/service/<productId>.launcher.sh`
+(which `exec`s `node <byok-agent entry> start --config <absolute path> --service`)
+and the unit `~/.config/systemd/user/<productId>.service`, which runs only that
+launcher. It then runs `systemctl --user daemon-reload`,
+`systemctl --user enable` (survives logout/reboot) and
+`systemctl --user restart` (starts it, or moves a running one onto the
+rewritten launcher). Check on it any time:
 
 ```bash
 byok-agent service-status --config /path/to/your/config.json
@@ -101,7 +103,7 @@ WantedBy=default.target
 
 | CLI command | systemctl calls |
 |---|---|
-| `install` | write unit file -> `daemon-reload` -> `enable --now` |
+| `install` | write launcher + unit file -> `daemon-reload` -> `enable` -> `restart` |
 | `uninstall` | `disable --now` (tolerates already-absent; a **real** failure aborts and leaves the unit file intact so the service is never orphaned) -> remove unit file -> `daemon-reload` (best-effort) |
 | `service-start` | `start` |
 | `service-stop` | `stop` (best-effort) |

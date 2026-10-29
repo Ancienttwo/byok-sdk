@@ -22,17 +22,26 @@ describe('lifecycle/systemd: generateSystemdUnit', () => {
       logDir: '/var/log/acme',
     });
 
-    expect(unit.startsWith('# byok-sdk-service-unit:')).toBe(true);
-    expect(unit).toContain('[Unit]\nDescription=Acme Agent');
-    // #1097: the unit names only the stable launcher — no versioned path, no args, no env.
-    expect(unit).toContain('ExecStart="/home/t/.byok/acme/service/acme-agent.launcher.sh"\n');
+    // Golden (#1097): the unit names only the stable launcher (no versioned path, no args, no
+    // env); exit-code contract: only exit 0 stops (exit-codes.ts); redirects bounded by the daemon.
+    expect(unit).toBe(`# ${SERVICE_UNIT_MARKER}
+[Unit]
+Description=Acme Agent
+
+[Service]
+Type=simple
+ExecStart="/home/t/.byok/acme/service/acme-agent.launcher.sh"
+WorkingDirectory=/home/t
+Restart=always
+RestartPreventExitStatus=0
+RestartSec=10
+StandardOutput=append:/var/log/acme/service-stdout.log
+StandardError=append:/var/log/acme/service-stderr.log
+
+[Install]
+WantedBy=default.target
+`);
     expect(unit).not.toContain('Environment');
-    expect(unit).toContain('WorkingDirectory=/home/t');
-    // Exit-code contract: only exit 0 stops (see exit-codes.ts).
-    expect(unit).toContain('Restart=always\nRestartPreventExitStatus=0\nRestartSec=10');
-    expect(unit).toContain('StandardOutput=append:/var/log/acme/service-stdout.log');
-    expect(unit).toContain('StandardError=append:/var/log/acme/service-stderr.log');
-    expect(unit).toContain('[Install]\nWantedBy=default.target');
   });
 
   it('quotes the launcher path, escaping embedded quotes/backslashes, "$" and "%" (P1 #8)', () => {
