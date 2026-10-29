@@ -3,12 +3,13 @@ import { createServiceLifecycle, UnsupportedServicePlatformError } from '../life
 import type { Runner } from '../lifecycle/exec-runner';
 import type { ServiceDefinition } from '../lifecycle/service-types';
 import { memoryServiceFs } from './support/service-fs';
+import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 function def(overrides: Partial<ServiceDefinition> = {}): ServiceDefinition {
   return {
     name: 'acme',
     program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start'] },
-    storeDir: '/store-create',
+    storeDir: '/store',
     logDir: '/tmp/acme-logs',
     owner: 'cli',
     ...overrides,
@@ -16,6 +17,8 @@ function def(overrides: Partial<ServiceDefinition> = {}): ServiceDefinition {
 }
 
 const fakeFs = memoryServiceFs();
+
+useInProcessServiceLifecycleGate();
 
 describe('lifecycle/create-service-lifecycle: createServiceLifecycle', () => {
   it('dispatches darwin -> launchd (invokes launchctl)', async () => {

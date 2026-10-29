@@ -15,6 +15,7 @@ import {
   ServiceUnitError,
   type ServiceOwnerFs,
 } from '../lifecycle/service-unit';
+import { acquireDaemonOwner, type DaemonOwnerLease } from '../daemon/daemon-owner';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs, UNMARKED_UNIT, type MemoryServiceFs } from './support/service-fs';
 
 const OWNER_RECORD = '/store/service/lifecycle-owner.json';
@@ -224,9 +225,9 @@ function outcome(result: PromiseSettledResult<unknown>): string {
 
 /**
  * #1149 review: an owner-record mutation is bound to the record this process
- * read. While one holder's read-then-mutate is in flight, another mutation of
- * the same store is refused (`lifecycle_owner_busy`), so a stale release or
- * rename can never remove or overwrite a successor's record.
+ * read. While one holder's read-then-mutate is in flight, any other
+ * owner-record mutation is refused (`lifecycle_owner_busy`), so a stale
+ * release or rename can never remove or overwrite a successor's record.
  */
 describe('lifecycle (#1097) owner record mutations across a change of owner', () => {
   async function store(): Promise<{ storeDir: string; marker: string; done: () => Promise<void> }> {
@@ -341,6 +342,43 @@ describe('lifecycle (#1097) owner record mutations across a change of owner', ()
         .toEqual({ release: 'lifecycle_owner_busy', appClaim: 'lifecycle_owner_busy', owner: null });
     } finally {
       await done();
+    }
+  });
+});
+
+/**
+ * The manager holds `service-lifecycle` while it waits on the service manager,
+ * and the daemon that manager starts or stops takes the `store` gate to
+ * publish and to release its owner lease (`daemon-owner.ts`). Holding `store`
+ * around activate would make the daemon's own acquire wait and fail.
+ */
+describe('lifecycle (#1097) service-lifecycle gate and the daemon store gate', () => {
+  it('install, repair and uninstall run while the daemon they start and stop takes and releases its store gate: no busy, no deadlock', async () => {
+    const storeDir = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'byok-owner-order-'));
+    try {
+      let lease: DaemonOwnerLease | undefined;
+      const events: string[] = [];
+      // systemctl restart stops the running daemon, then starts one; disable --now stops it.
+      const stopDaemon = async () => { if (lease) { await lease.release(); lease = undefined; events.push('daemon released store'); } };
+      const run = vi.fn<Runner>(async (_command, args) => {
+        if (args.includes('restart')) {
+          await stopDaemon();
+          lease = await acquireDaemonOwner(storeDir, 'daemon');
+          events.push('daemon took store');
+        }
+        if (args.includes('disable')) await stopDaemon();
+        return { code: 0, stdout: '', stderr: '' };
+      });
+      const fs = memoryServiceFs();
+      const lifecycle = lifecycleFor('linux', fs, run, { storeDir });
+      await lifecycle.install();
+      fs.files.set('/h/.config/systemd/user/acme.service', DRIFTED_MARKED_UNIT);
+      expect(await lifecycle.repair()).toEqual({ status: 'repaired' });
+      await lifecycle.uninstall();
+      expect(events).toEqual(['daemon took store', 'daemon released store', 'daemon took store', 'daemon released store']);
+      expect(lease).toBeUndefined();
+    } finally {
+      await nodeFs.rm(storeDir, { recursive: true, force: true });
     }
   });
 });

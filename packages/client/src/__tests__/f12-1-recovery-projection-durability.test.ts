@@ -22,7 +22,7 @@ beforeEach(() => {
   // Only the kernel path-mutation gate is replaced. Home resolution, writer
   // marker ownership, atomic rename and all file/directory syncs remain real.
   vi.spyOn(mutationGate, 'acquirePathMutationGate').mockImplementation(async input => {
-    if (input.scope === 'pi-session-rebinding') return originalGate(input);
+    if (input.targetPath === undefined) return originalGate(input);
     const targetPath = await mutationGate.resolvePathWithoutCreate(input.targetPath);
     const identity = `${input.scope}:${targetPath}`;
     if (heldGates.has(identity)) throw new mutationGate.PathMutationGateBusyError(input.scope, targetPath);

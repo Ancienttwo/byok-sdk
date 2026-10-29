@@ -4,6 +4,7 @@ import type { RunResult, Runner } from '../lifecycle/exec-runner';
 import { nodeAgentProgram, type ServiceDefinition } from '../lifecycle/service-types';
 import { SERVICE_UNIT_MARKER } from '../lifecycle/service-unit';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
+import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -11,6 +12,8 @@ function ok(stdout = ''): RunResult {
 function fail(code = 1, stderr = 'boom'): RunResult {
   return { code, stdout: '', stderr };
 }
+
+useInProcessServiceLifecycleGate();
 
 describe('lifecycle/launchd: generateLaunchdPlist', () => {
   it('renders the marker, a launcher-only ProgramArguments, RunAtLoad, KeepAlive and bounded redirect paths', () => {
@@ -46,7 +49,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     return {
       name: 'Acme Agent!!',
       program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start'] },
-      storeDir: '/store-launchd',
+      storeDir: '/store',
       logDir: '/tmp/acme-logs',
       owner: 'cli',
       ...overrides,
@@ -54,7 +57,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
   }
 
   const PLIST = '/h/Library/LaunchAgents/Acme-Agent-.plist';
-  const LAUNCHER = '/store-launchd/service/Acme-Agent-.launcher.sh';
+  const LAUNCHER = '/store/service/Acme-Agent-.launcher.sh';
   function fakeFs() {
     return memoryServiceFs();
   }

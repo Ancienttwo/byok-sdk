@@ -164,9 +164,9 @@ One lifecycle owner per store sets autostart. `install` records the CLI as the
 owner in `<storeDir>/service/lifecycle-owner.json`. If the product's App already
 holds it, `install` fails with `lifecycle_owner_conflict`; uninstall through
 the App first. While another `install`, `repair`, `uninstall` or owner claim or
-release for the same store is in progress (in any process), or the store is
-being relocated, the command fails at once with `lifecycle_owner_busy`; run it
-again when that one has finished.
+release is in progress for this user (on Windows, on this machine), in any
+process and for any store, or a store is being relocated, the command fails at
+once with `lifecycle_owner_busy`; run it again when that one has finished.
 
 Exit codes: a service exits 0 to stay stopped (a normal stop, or a halt such as
 revocation) and 1 to be restarted (a crash). The units encode this as launchd

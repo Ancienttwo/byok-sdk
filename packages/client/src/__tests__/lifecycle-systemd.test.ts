@@ -4,6 +4,7 @@ import type { RunResult, Runner } from '../lifecycle/exec-runner';
 import { nodeAgentProgram, sanitizeServiceName, type ServiceDefinition } from '../lifecycle/service-types';
 import { SERVICE_UNIT_MARKER } from '../lifecycle/service-unit';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
+import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -11,6 +12,8 @@ function ok(stdout = ''): RunResult {
 function fail(code = 1, stdout = '', stderr = 'boom'): RunResult {
   return { code, stdout, stderr };
 }
+
+useInProcessServiceLifecycleGate();
 
 describe('lifecycle/systemd: generateSystemdUnit', () => {
   it('renders the marker, a launcher-only ExecStart, the exit-code restart policy and bounded redirect paths', () => {
@@ -110,7 +113,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     return {
       name: 'Acme Agent!!',
       program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start'] },
-      storeDir: '/store-systemd',
+      storeDir: '/store',
       logDir: '/tmp/acme-logs',
       owner: 'cli',
       ...overrides,
@@ -118,7 +121,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
   }
 
   const UNIT = '/h/.config/systemd/user/Acme-Agent-.service';
-  const LAUNCHER = '/store-systemd/service/Acme-Agent-.launcher.sh';
+  const LAUNCHER = '/store/service/Acme-Agent-.launcher.sh';
   function fakeFs() {
     return memoryServiceFs();
   }

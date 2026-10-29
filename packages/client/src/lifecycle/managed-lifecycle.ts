@@ -69,7 +69,7 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
   }
 
   function install(opts: ServiceInstallOptions = {}): Promise<void> {
-    return withServiceOwnerGate(def.storeDir, async () => {
+    return withServiceOwnerGate(async () => {
       const { state } = await inspect();
       if (state === 'foreign' && opts.replaceUnmarked !== true) throw new ServiceUnitError('service_unit_unmarked');
       await requireOwner();
@@ -80,7 +80,7 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
   }
 
   function repair() {
-    return withServiceOwnerGate(def.storeDir, async () => {
+    return withServiceOwnerGate(async () => {
       const { state } = await inspect();
       if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
       if (state === 'exact' || state === 'absent') return { status: 'not-needed', state } as const;
@@ -92,7 +92,7 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
   }
 
   function uninstall(): Promise<void> {
-    return withServiceOwnerGate(def.storeDir, async () => {
+    return withServiceOwnerGate(async () => {
       const { state } = await inspect();
       if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
       await requireOwner();

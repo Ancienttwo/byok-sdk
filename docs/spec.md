@@ -922,11 +922,15 @@ another owner's `install`, `repair` or `uninstall` throws
 `lifecycle_owner_conflict`. A Host that sets autostart with its own mechanism
 claims it with `claimServiceLifecycleOwner`. Every change of the record — a
 claim, a same-owner service rename, a release, and `install`, `repair` and
-`uninstall` for their whole run — holds the store's cross-process mutation
-gate (scope `store`, which store relocation also holds), so it acts on the
-record it read and never on a successor's. A held gate fails at once with
-`lifecycle_owner_busy`, without retry; the gate frees itself when its holder
-process exits.
+`uninstall` for their whole run — holds the cross-process `service-lifecycle`
+mutation gate, so it acts on the record it read and never on a successor's.
+The gate has no target path: one per user on macOS and Linux, like the service
+manager's own per-user namespace, and one per machine on Windows, where the
+named pipe has no user. It is never the `store` gate, because a managed install
+holds it while the daemon it starts takes `store`. Local-state relocation takes
+it once, before its `store` gates, so the order is always `service-lifecycle`
+then `store`. A held gate fails at once with `lifecycle_owner_busy`, without
+retry; the gate frees itself when its holder process exits.
 
 Under `--service` everything the daemon writes to stdout and stderr goes to its
 own log, `<logDir>/daemon.log`, rotated by size while it runs at

@@ -3,6 +3,7 @@ import { createWinswLifecycle, generateWinswXml } from '../lifecycle/winsw';
 import type { RunResult, Runner } from '../lifecycle/exec-runner';
 import { nodeAgentProgram, type ServiceDefinition } from '../lifecycle/service-types';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
+import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -10,6 +11,8 @@ function ok(stdout = ''): RunResult {
 function fail(code = 1, stdout = '', stderr = 'boom'): RunResult {
   return { code, stdout, stderr };
 }
+
+useInProcessServiceLifecycleGate();
 
 describe('lifecycle/winsw: generateWinswXml', () => {
   it('renders id/name/description/executable/one <argument> per arg/logpath/log/startmode/onfailure', () => {
@@ -65,7 +68,7 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     return {
       name: 'Acme Agent!!',
       program: { command: 'C:\\node.exe', args: ['C:\\agent.js', 'start'] },
-      storeDir: '/store-winsw',
+      storeDir: 'C:\\store',
       logDir: 'C:\\acme\\logs',
       owner: 'cli',
       windows: { winswBin: 'C:\\bundled\\WinSW.exe' },
@@ -98,28 +101,13 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
   // the test on a sleep that never fires. Extra trailing advances are
   // harmless no-ops. Verified under `bun test` (jest-compat vi) AND
   // `vitest run` (what `bun run test` executes for this package).
-  //
-  // uninstall first takes the store's owner gate, which is socket I/O rather
-  // than a microtask chain, so the drain starts only once the first rm runs.
-  async function drainImageLockRetry(maxSteps: number, firstRm: Promise<void>): Promise<void> {
-    await firstRm;
+  async function drainImageLockRetry(maxSteps: number): Promise<void> {
     for (let step = 0; step < maxSteps; step += 1) {
       for (let hop = 0; hop < 10; hop += 1) {
         await Promise.resolve();
       }
       vi.advanceTimersByTime(250);
     }
-  }
-
-  /** Resolves on the first `fs.rm` call, keeping the test's own rm behavior. */
-  function firstRmCall(fs: ReturnType<typeof fakeFs>): Promise<void> {
-    const impl = fs.rm.getMockImplementation();
-    return new Promise((resolve) => {
-      fs.rm.mockImplementation(async (file: string) => {
-        resolve();
-        return impl?.(file);
-      });
-    });
   }
 
   afterEach(() => {
@@ -298,9 +286,8 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
     const lifecycle = createWinswLifecycle(def(), { run, fs });
 
-    const firstRm = firstRmCall(fs);
     const uninstalling = lifecycle.uninstall();
-    await drainImageLockRetry(4, firstRm); // 2 backoff sleeps, then attempt 3 succeeds
+    await drainImageLockRetry(4); // 2 backoff sleeps, then attempt 3 succeeds
     await uninstalling;
 
     expect(exeRmAttempts).toBe(3);
@@ -323,9 +310,8 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
     const lifecycle = createWinswLifecycle(def(), { run, fs });
 
-    const firstRm = firstRmCall(fs);
     const uninstalling = lifecycle.uninstall();
-    await drainImageLockRetry(4, firstRm); // 2 backoff sleeps, then attempt 3 succeeds
+    await drainImageLockRetry(4); // 2 backoff sleeps, then attempt 3 succeeds
     await uninstalling;
 
     expect(exeRmAttempts).toBe(3);
@@ -348,9 +334,8 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
     const lifecycle = createWinswLifecycle(def(), { run, fs });
 
-    const firstRm = firstRmCall(fs);
     const uninstalling = lifecycle.uninstall();
-    await drainImageLockRetry(4, firstRm); // 2 backoff sleeps on the xml, then success
+    await drainImageLockRetry(4); // 2 backoff sleeps on the xml, then success
     await uninstalling;
 
     expect(xmlRmAttempts).toBe(3);
@@ -376,9 +361,8 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
     const lifecycle = createWinswLifecycle(def(), { run, fs });
 
-    const firstRm = firstRmCall(fs);
     const rejection = lifecycle.uninstall().catch((error: unknown) => error);
-    await drainImageLockRetry(11, firstRm); // 9 backoff sleeps, then attempt 10 rethrows
+    await drainImageLockRetry(11); // 9 backoff sleeps, then attempt 10 rethrows
     const caught = (await rejection) as NodeJS.ErrnoException;
 
     // The budget itself: 10 attempts (initial + 9 retries) before rethrow.
