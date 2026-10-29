@@ -81,6 +81,17 @@ async function readAuthResponseJson(response: Response, route: 'challenge' | 'to
 const ASSUMED_PAIR_TOKEN_TTL_MS = 45 * 60 * 1000;
 /** Renew this long before a token's recorded expiry — both proactively (background timer) and as the "already close enough to expiry, renew now" reactive threshold. */
 const RENEW_MARGIN_MS = 60 * 1000;
+/**
+ * Floor between two renewals that no server 401 forced (#1114). A fresh token
+ * can already sit inside {@link RENEW_MARGIN_MS} when this device's clock runs
+ * ahead of the server or the server TTL is shorter than the margin; without a
+ * floor every such renewal re-armed itself at delay 0 and rewrote the OS
+ * credential entry in a tight loop. The floor stays at 30s after the first
+ * such renewal and doubles from the second consecutive one, up to
+ * {@link MAX_RENEW_INTERVAL_MS}.
+ */
+const MIN_RENEW_INTERVAL_MS = 30 * 1000;
+const MAX_RENEW_INTERVAL_MS = 30 * 60 * 1000;
 /** A bounded default for every device-auth HTTP exchange, including response-body reads. */
 const DEFAULT_AUTH_REQUEST_DEADLINE_MS = 15_000;
 
@@ -121,6 +132,10 @@ export class AuthManager {
   private credentialMutationTail: Promise<void> = Promise.resolve();
   /** The sole cancellation authority for the request currently inside the serialized credential mutation. */
   private activeRequest: AbortController | undefined;
+  // performance.now() of the last successful renewal, and how many renewals in
+  // a row returned a token already inside the renewal margin.
+  private lastRenewedAt: number | undefined;
+  private nearExpiryRenewals = 0;
 
   private readonly credentials: DeviceCredentialBackend;
   private readonly requestDeadlineMs: number;
@@ -271,6 +286,10 @@ export class AuthManager {
     // that renewal and present the same rejected bearer again.
     if (this.renewing) return this.renewing;
     if (msUntilExpiry(this.record.expiresAt) > RENEW_MARGIN_MS) return this.record.accessToken;
+    // Inside the renewal floor the cached token is the newest the server has
+    // issued; the proactive timer renews when the floor ends, and a server 401
+    // still renews at once through handleUnauthorized().
+    if (this.msUntilRenewAllowed() > 0) return this.record.accessToken;
     return this.renew();
   }
 
@@ -351,6 +370,8 @@ export class AuthManager {
     // and key cannot drift from the new token/expiry.
     await this.credentials.replace(updated);
     this.record = updated;
+    this.lastRenewedAt = performance.now();
+    this.nearExpiryRenewals = msUntilExpiry(updated.expiresAt) > RENEW_MARGIN_MS ? 0 : this.nearExpiryRenewals + 1;
     this.scheduleProactiveRenewal();
     return updated.accessToken;
   }
@@ -367,7 +388,7 @@ export class AuthManager {
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
     this.proactiveTimer = undefined;
     if (!this.record || this.revoked || this.stopped || this.pairing) return;
-    const delay = Math.max(0, msUntilExpiry(this.record.expiresAt) - RENEW_MARGIN_MS);
+    const delay = Math.max(0, msUntilExpiry(this.record.expiresAt) - RENEW_MARGIN_MS, this.msUntilRenewAllowed());
     // A far-future expiry exceeds what one timer can hold (it would fire at
     // 1 ms). Arm a capped step and re-derive the delay from `expiresAt` when
     // it elapses; renewal only runs once the real renewal point is reached.
@@ -385,6 +406,12 @@ export class AuthManager {
     }, capped ? MAX_TIMER_DELAY_MS : delay);
     timer.unref?.();
     this.proactiveTimer = timer;
+  }
+
+  private msUntilRenewAllowed(): number {
+    if (this.lastRenewedAt === undefined) return 0;
+    const interval = Math.min(MAX_RENEW_INTERVAL_MS, MIN_RENEW_INTERVAL_MS * 2 ** Math.max(0, this.nearExpiryRenewals - 1));
+    return Math.max(0, this.lastRenewedAt + interval - performance.now());
   }
 
   /**
