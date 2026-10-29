@@ -14,10 +14,12 @@
 import type { Context } from 'hono';
 import {
   ChallengeRequestSchema,
+  DEVICE_NOT_REGISTERED_CODE,
   PairRequestSchema,
   PairResponseSchema,
   TokenRequestSchema,
   type ChallengeResponse,
+  type DeviceNotRegisteredResponse,
   type PairResponse,
   type TokenResponse,
 } from '@byok-sdk/protocol';
@@ -25,6 +27,11 @@ import type { AuthPlane } from '../auth/plane';
 import { readBoundedJsonBody } from './shared';
 
 const AUTH_JSON_BODY_MAX_BYTES = 16 * 1024;
+/** One body for an unknown and a revoked device alike, so the code is no existence oracle. */
+const DEVICE_NOT_REGISTERED: DeviceNotRegisteredResponse = {
+  error: 'unknown or revoked device',
+  code: DEVICE_NOT_REGISTERED_CODE,
+};
 
 export interface AuthRouteDeps {
   readonly auth: AuthPlane;
@@ -73,7 +80,7 @@ export function challengeHandler(deps: AuthRouteDeps) {
     // contract and carries only a deviceId, so the ROW is what tells this
     // deployment which tenant the device belongs to.
     const device = await deps.auth.resolveDevice(parsed.data.deviceId);
-    if (device === undefined) return c.json({ error: 'unknown or revoked device' }, 401);
+    if (device === undefined) return c.json(DEVICE_NOT_REGISTERED, 401);
 
     const response: ChallengeResponse = { nonce: await deps.auth.issueNonce(device) };
     return c.json(response, 200);
@@ -89,7 +96,7 @@ export function tokenHandler(deps: AuthRouteDeps) {
     const { deviceId, nonce, signature } = parsed.data;
 
     const device = await deps.auth.resolveDevice(deviceId);
-    if (device === undefined) return c.json({ error: 'unknown or revoked device' }, 401);
+    if (device === undefined) return c.json(DEVICE_NOT_REGISTERED, 401);
 
     // Domain-separated (`byok-nonce-v1\n`, `auth/verify.ts`): a raw signature
     // over the bare nonce is invalid here, with no second accepted form.

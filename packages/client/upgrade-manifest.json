@@ -189,6 +189,19 @@
         "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
         "export:@byok-sdk/client/adapters#RuntimeSessionLease"
       ]
+    },
+    {
+      "id": "auth-revocation-typed-keychain-deadline",
+      "impact": "additive",
+      "summary": "Renewal halts as revoked at once only on the typed /byok/challenge or /byok/token 401 body {error, code: 'device_not_registered'}, which the reference handlers now send for an unknown or revoked device. Any other 401 backs off, rechecks once, and halts only if the recheck is rejected too. Every OS keychain command has a deadline and is killed on timeout or daemon stop (DeviceCredentialCommandAbortedError); DeviceCredentialBackend methods take an optional AbortSignal that an injected backend should honor (#1117). A custom server without the typed body still halts, after the one recheck.",
+      "migration": "docs/protocol.md#63-revocation",
+      "items": [
+        "export:@byok-sdk/client#DeviceCredentialBackend",
+        "export:@byok-sdk/client#DeviceCredentialCommandAbortedError",
+        "export:@byok-sdk/protocol#DEVICE_NOT_REGISTERED_CODE",
+        "export:@byok-sdk/protocol#DeviceNotRegisteredResponse",
+        "export:@byok-sdk/protocol#DeviceNotRegisteredResponseSchema"
+      ]
     }
   ],
   "changes": [

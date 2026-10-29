@@ -2408,9 +2408,16 @@ tells the server which tenant and product the renewed token gets bound to.
 ### 6.3 Revocation
 
 Revocation is server-side only — a dashboard/API action against the SaaS's
-own device registry. There is no wire message or HTTP body for it. A revoked
+own device registry. There is no wire message announcing it. A revoked
 device's next `/byok/challenge`, `/byok/token`, or authenticated long-poll
-request gets a `401`; the daemon's only recourse is to re-run `/byok/pair` from scratch (a
+request gets a `401`. On `/byok/challenge` and `/byok/token` that `401` carries
+the one typed body `DeviceNotRegisteredResponseSchema`:
+`{ error, code: "device_not_registered" }`. An unknown device id gets the same
+body. Every other `401` on those routes (a bad signature, a used or expired
+nonce) stays untyped. The reference client halts as revoked at once on the
+typed body. On an untyped `401` it backs off, runs the challenge once more,
+and halts only when that retry is rejected with a `401` again. The daemon's
+only recourse is to re-run `/byok/pair` from scratch (a
 fresh device keypair is not required, but re-registering the existing public
 key is the simplest implementation and is an acceptable choice for M1).
 

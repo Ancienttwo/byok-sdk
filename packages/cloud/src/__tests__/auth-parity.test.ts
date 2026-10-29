@@ -331,12 +331,14 @@ describe('token renewal (§6.2)', () => {
 
     expect(revokedChallenge).toEqual(unknownChallenge);
     expect(revokedChallenge.status).toBe(401);
-    expect(revokedChallenge.body).toEqual({ error: 'unknown or revoked device' });
+    expect(revokedChallenge.body).toEqual({ error: 'unknown or revoked device', code: 'device_not_registered' });
 
     const revokedToken = await token(harness, { deviceId: revoked.deviceId, nonce: 'n', signature: 's' });
     const unknownToken = await token(harness, { deviceId: 'dev_does-not-exist', nonce: 'n', signature: 's' });
     expect(revokedToken.status).toBe(unknownToken.status);
-    expect(await revokedToken.json()).toEqual(await unknownToken.json());
+    const revokedTokenBody: unknown = await revokedToken.json();
+    expect(revokedTokenBody).toEqual(await unknownToken.json());
+    expect(revokedTokenBody).toEqual({ error: 'unknown or revoked device', code: 'device_not_registered' });
   });
 });
 

@@ -160,9 +160,14 @@ describe('LongPollRouteError names the failing route', () => {
   });
 
   it('reports a revoked device through onRevoked only, never as a route failure', async () => {
-    // Renewal's first hop (POST /byok/challenge) answering 401 is what marks
-    // the device revoked — see AuthManager.doRenew.
-    fetchMock.mockResolvedValue({ ok: false, status: 401, text: async () => '' } as unknown as Response);
+    // Renewal's first hop (POST /byok/challenge) answering the typed
+    // device_not_registered 401 is what marks the device revoked — see
+    // AuthManager.readUnauthorized.
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => JSON.stringify({ error: 'unknown or revoked device', code: 'device_not_registered' }),
+    } as unknown as Response);
     const revokedAuth = await expiredTokenAuth();
     const onRevoked = vi.fn();
 

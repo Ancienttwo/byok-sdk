@@ -124,6 +124,21 @@ export const TokenResponseSchema = z.object({
 });
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 
+/**
+ * The one typed `401` body of `/byok/challenge` and `/byok/token`: the device
+ * id resolves to no registration (§6.3). Revocation deletes the registration,
+ * so an unknown device and a revoked one answer with this same body and stay
+ * indistinguishable. Every other `401` on these routes (bad signature, used
+ * or expired nonce) stays untyped, and a client must not read it as
+ * revocation.
+ */
+export const DEVICE_NOT_REGISTERED_CODE = 'device_not_registered';
+export const DeviceNotRegisteredResponseSchema = z.object({
+  error: z.string(),
+  code: z.literal(DEVICE_NOT_REGISTERED_CODE),
+});
+export type DeviceNotRegisteredResponse = z.infer<typeof DeviceNotRegisteredResponseSchema>;
+
 // ---------------------------------------------------------------------------
 // PUT /byok/presence — first-hop daemon observation. The body carries only
 // facts captured by the daemon's frozen start snapshot; omitted release,

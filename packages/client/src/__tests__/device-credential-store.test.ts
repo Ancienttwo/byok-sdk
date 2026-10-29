@@ -5,11 +5,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  DeviceCredentialCommandAbortedError,
   DeviceCredentialStore,
   DeviceCredentialStoreError,
   DeviceCredentialStoreUnavailableError,
   type DeviceCommandResult,
   type DeviceCommandRunner,
+  runDeviceCommand,
 } from '../daemon/device-credential-store';
 
 const credentials = {
@@ -223,5 +225,46 @@ describe('DeviceCredentialStore', () => {
       'operating-system credential provider could not read device credentials',
     );
     await expect(store.read()).rejects.not.toThrow(/secret-bearing/u);
+  });
+});
+
+describe('#1117 provider command deadline', () => {
+  it('kills a hung provider child on abort and rejects without waiting for it', async () => {
+    const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-hung-command-')), 'pid');
+    const hung = runDeviceCommand(
+      process.execPath,
+      ['-e', `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`],
+      undefined,
+      AbortSignal.timeout(1_000),
+    );
+    const startedAt = performance.now();
+    await expect(hung).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+
+    const pid = Number(await fs.readFile(pidFile, 'utf8'));
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' })));
+  });
+
+  it('a provider read past its deadline is a typed deadline error', async () => {
+    const run: DeviceCommandRunner = (_executable, _args, _stdin, signal) => new Promise((_, reject) => {
+      signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'darwin', commandRunner: run, commandDeadlineMs: 50 });
+
+    const error: unknown = await store.read().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(DeviceCredentialCommandAbortedError);
+    expect(error).toBeInstanceOf(DeviceCredentialStoreError);
+    expect(error).toMatchObject({ reason: 'deadline', message: expect.stringMatching(/keychain may be locked/u) });
+  });
+
+  it('a caller abort is a typed cancellation, and an already-aborted call spawns nothing', async () => {
+    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'linux', commandRunner: run });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(store.replace(credentials, controller.signal)).rejects.toMatchObject({ name: 'DeviceCredentialCommandAbortedError', reason: 'cancelled' });
+    expect(run).not.toHaveBeenCalled();
   });
 });

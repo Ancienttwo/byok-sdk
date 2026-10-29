@@ -16,6 +16,7 @@
  * code, undomained against a properly domained signature, revoked against a
  * device that was never revoked.
  */
+import { DeviceNotRegisteredResponseSchema } from '@byok-sdk/protocol';
 import type { DeviceSimulator, SimulatorRequest, SimulatorResponse } from './simulator';
 import { DEVICE_ROUTES } from './simulator';
 
@@ -144,7 +145,9 @@ export async function assertUndomainedSignatureRejected(
 
 /**
  * A revoked device cannot start a renewal (§6.3): its next `/byok/challenge` is
- * a 401, indistinguishable from an unknown device.
+ * a 401 with the typed `device_not_registered` body, indistinguishable from an
+ * unknown device. A 401 without that body is a failure: a client treats only
+ * the typed body as revocation.
  *
  * Does NOT revoke anything itself — revocation is the host's act, so the caller
  * revokes and then asserts. Calling it before revoking is the red form.
@@ -163,12 +166,11 @@ export async function assertRevokedDeviceChallengeRejected(
     credential: 'none',
     body: { deviceId: session.deviceId },
   });
-  return result(
-    'revoked-device-challenge-rejected',
-    'a revoked device asking for a challenge is 401',
-    response,
-    401,
-  );
+  const expected = 'a revoked device asking for a challenge is 401 code=device_not_registered';
+  if (response.status === 401 && !DeviceNotRegisteredResponseSchema.safeParse(response.body).success) {
+    return { name: 'revoked-device-challenge-rejected', ok: false, expected, actual: 'HTTP 401 without the device_not_registered body', response };
+  }
+  return result('revoked-device-challenge-rejected', expected, response, 401);
 }
 
 export interface NegativeSuiteInput {

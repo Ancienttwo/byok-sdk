@@ -3082,10 +3082,11 @@ export declare function requestTaskAssertion(options: RequestTaskAssertionOption
 import { DeviceStore, type DeviceRecord } from './store';
 import type { DeviceCredentialBackend } from './device-credential-store';
 /**
- * Thrown when the server has revoked this device: a 401 on `/byok/challenge`
- * or `/byok/token` (protocol §6.3). The only recourse is a fresh
- * `/byok/pair` — callers must surface a clear "re-pair needed" state and
- * must NOT retry the renewal in a loop.
+ * Thrown when the server has revoked this device (protocol §6.3): a
+ * `/byok/challenge` or `/byok/token` 401 with the typed
+ * `device_not_registered` body, or an untyped 401 that one rechecked exchange
+ * met again. The only recourse is a fresh `/byok/pair` — callers must surface
+ * a clear "re-pair needed" state and must NOT retry the renewal in a loop.
  */
 export declare class DeviceRevokedError extends Error {
     constructor(message?: string);
@@ -3149,8 +3150,12 @@ export declare class AuthManager {
     private stopped;
     private pairing;
     private credentialMutationTail;
-    /** The sole cancellation authority for the request currently inside the serialized credential mutation. */
-    private activeRequest;
+    /**
+     * The sole cancellation authority for the serialized credential mutation
+     * now running: its HTTP requests, back-off and OS credential commands all
+     * take this signal.
+     */
+    private activeMutation;
     private lastRenewedAt;
     private nearExpiryRenewals;
     private readonly credentials;
@@ -3171,6 +3176,14 @@ export declare class AuthManager {
     stop(): Promise<void>;
     private renew;
     private doRenew;
+    /**
+     * One challenge → token exchange. Resolves `undefined` when either step
+     * answered an untyped 401; a typed revocation 401 halts inside.
+     */
+    private exchangeToken;
+    /** A typed revocation 401 halts now; any other 401 resolves `undefined` for the one recheck. */
+    private readUnauthorized;
+    private backOff;
     /** Always throws — `never` return type lets call sites use `if (x === 401) this.markRevoked();` without an explicit `return`/`throw` of their own. */
     private markRevoked;
     private scheduleProactiveRenewal;
@@ -5647,7 +5660,11 @@ export interface DeviceCommandResult {
     readonly stdout: string;
     readonly stderr: string;
 }
-export type DeviceCommandRunner = (executable: string, args: readonly string[], stdin?: string) => Promise<DeviceCommandResult>;
+/**
+ * Runs one provider command. On `signal` abort the runner kills the child and
+ * rejects at once, without waiting for its pipes to close.
+ */
+export type DeviceCommandRunner = (executable: string, args: readonly string[], stdin?: string, signal?: AbortSignal) => Promise<DeviceCommandResult>;
 /** The Windows generic-credential blob bound, kept on every OS entry of this product. */
 export declare const OS_CREDENTIAL_ENTRY_MAX_BYTES = 2400;
 /** Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback. */
@@ -5661,13 +5678,26 @@ export declare class DeviceCredentialStoreError extends Error {
 export declare class DeviceCredentialInteractionRequiredError extends DeviceCredentialStoreError {
     constructor();
 }
-/** Complete enrollment custody. An injected implementation owns secret storage and its lifetime. */
+/**
+ * A provider command ended before it answered: it exceeded its deadline, or
+ * the caller cancelled it (daemon shutdown). The child process was killed.
+ * Nothing was learned about the entry, so the caller keeps its prior state.
+ */
+export declare class DeviceCredentialCommandAbortedError extends DeviceCredentialStoreError {
+    readonly reason: 'deadline' | 'cancelled';
+    constructor(reason: 'deadline' | 'cancelled');
+}
+/**
+ * Complete enrollment custody. An injected implementation owns secret storage
+ * and its lifetime. `signal` cancels the operation (daemon shutdown); an
+ * implementation must stop and reject once it aborts.
+ */
 export interface DeviceCredentialBackend {
-    read(): Promise<DeviceRecord | undefined>;
-    readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
-    saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
-    replace(record: DeviceRecord): Promise<void>;
-    clear(): Promise<boolean>;
+    read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
+    readFirstPairingAttempt(signal?: AbortSignal): Promise<FirstPairingAttempt | undefined>;
+    saveFirstPairingAttempt(attempt: FirstPairingAttempt, signal?: AbortSignal): Promise<void>;
+    replace(record: DeviceRecord, signal?: AbortSignal): Promise<void>;
+    clear(signal?: AbortSignal): Promise<boolean>;
 }
 export interface DeviceCredentialConfig {
     /** Explicit macOS keychain file; omitted uses the operating system's default keychain. */
@@ -5678,6 +5708,8 @@ export interface OsCredentialEntryOptions extends DeviceCredentialConfig {
     readonly productId: string;
     readonly platform?: NodeJS.Platform;
     readonly commandRunner?: DeviceCommandRunner;
+    /** Internal test seam for the per-command deadline; production uses the fixed bound. */
+    readonly commandDeadlineMs?: number;
 }
 /**
  * One named entry of this product's OS credential provider: the macOS
@@ -5694,10 +5726,10 @@ export declare class OsCredentialEntry {
         readonly subject: string;
     });
     /** The stored value, or `undefined` when the entry is absent. */
-    read(): Promise<string | undefined>;
-    replace(value: string): Promise<void>;
+    read(signal?: AbortSignal): Promise<string | undefined>;
+    replace(value: string, signal?: AbortSignal): Promise<void>;
     /** Delete the entry. An absent entry is already deleted. */
-    delete(): Promise<void>;
+    delete(signal?: AbortSignal): Promise<void>;
 }
 /**
  * Internal OS-backed authority for the bearer token and device private key,
@@ -5706,14 +5738,14 @@ export declare class OsCredentialEntry {
 export declare class DeviceCredentialStore implements DeviceCredentialBackend {
     #private;
     constructor(options: OsCredentialEntryOptions);
-    read(): Promise<DeviceRecord | undefined>;
-    readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
-    saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;
-    replace(record: DeviceRecord): Promise<void>;
+    read(signal?: AbortSignal): Promise<DeviceRecord | undefined>;
+    readFirstPairingAttempt(signal?: AbortSignal): Promise<FirstPairingAttempt | undefined>;
+    saveFirstPairingAttempt(attempt: FirstPairingAttempt, signal?: AbortSignal): Promise<void>;
+    replace(record: DeviceRecord, signal?: AbortSignal): Promise<void>;
     /** Returns true only after the sole secret authority is confirmed absent. */
-    clear(): Promise<boolean>;
+    clear(signal?: AbortSignal): Promise<boolean>;
 }
-export declare function runDeviceCommand(executable: string, args: readonly string[], stdin?: string): Promise<DeviceCommandResult>;
+export declare function runDeviceCommand(executable: string, args: readonly string[], stdin?: string, signal?: AbortSignal): Promise<DeviceCommandResult>;
 // ==== @byok-sdk/client dist/daemon/device-proof-signer.d.ts ====
 import { type DeviceProofEnvelopeV1 } from '@byok-sdk/core';
 import type { AuthManager } from './auth-manager';
@@ -10626,7 +10658,7 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure';
 export type { StoragePressureState } from './daemon/retention/pressure';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store';
-export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError } from './daemon/device-credential-store';
+export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store';
 export { AuthResponseInvalidError } from './daemon/auth-manager';
 export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/device-credential-store';
 export type { DeviceEnrollment, DeviceEnrollmentIdentity, DeviceEnrollmentIdentityStatus, DeviceEnrollmentStatus, DeviceEnrollmentStatusOptions, } from './daemon/store';
