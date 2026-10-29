@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "cb4effa4e8985981800b26de617d90ef518445e7c8939600a310cb52cb2b1da8"
+    "snapshotSha256": "a673324405ffe36969bf42b8b2875eb7bb85d0ef33b1bc8a7f24811137d78ee3"
   },
   "configFields": {
     "status": "tracked",
@@ -262,6 +262,20 @@
         "export:@byok-sdk/cloud#MintedAccessToken",
         "export:@byok-sdk/protocol#PairResponseSchema",
         "export:@byok-sdk/protocol#TokenResponseSchema"
+      ]
+    },
+    {
+      "id": "dead-letter-retention",
+      "impact": "breaking",
+      "summary": "Automatic maintenance now reaps mailbox dead letters once mailboxDeadLetterRetentionMs (default 30 days) has passed after they expired, but keeps each device's highest-seq dead letter as the recoverableFrom floor. RetentionPolicy gains mailboxDeadLetterRetentionMs, so a Host that passes a complete policy must add it. A custom MailboxStore receives the new required reapDeadLettersBefore input in collectExpired and must reap the same way. discardDeadLetter refuses the floor row with cleanup_dead_letter_is_recovery_floor. Migration 0031 adds the tenant_retention_policy column with the 30-day default and replaces outbox_tenant_bytes_idx with a pending-only partial index.",
+      "migration": "deploy/runbooks/mailbox-retention.md#expired-rows-and-the-operator-dead-letter-flow",
+      "acceptance": "accept",
+      "items": [
+        "export:@byok-sdk/cloud#RetentionPolicy",
+        "export:@byok-sdk/cloud-dataplane#CLOUD_CLEANUP_ERROR_CODES",
+        "export:@byok-sdk/cloud-dataplane/runtime#CLOUD_CLEANUP_ERROR_CODES",
+        "export:@byok-sdk/core#MailboxCollectExpiredInput",
+        "store:cloud-dataplane-postgres"
       ]
     }
   ],
@@ -803,6 +817,11 @@
       "entry": "device-route-rate-admission"
     },
     {
+      "item": "export:@byok-sdk/cloud#RetentionPolicy",
+      "change": "changed",
+      "entry": "dead-letter-retention"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TenantBoundRateLimiter",
       "change": "changed",
       "entry": "device-route-rate-admission"
@@ -813,6 +832,11 @@
       "entry": "capability-ports-two-way"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#CLOUD_CLEANUP_ERROR_CODES",
+      "change": "changed",
+      "entry": "dead-letter-retention"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
       "change": "changed",
       "entry": "dataplane-rate-limit-required"
@@ -821,6 +845,11 @@
       "item": "export:@byok-sdk/cloud-dataplane#PostgresRateLimitOptions",
       "change": "added",
       "entry": "dataplane-rate-limit-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#CLOUD_CLEANUP_ERROR_CODES",
+      "change": "changed",
+      "entry": "dead-letter-retention"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
@@ -836,6 +865,11 @@
       "item": "export:@byok-sdk/core#LocalStoreId",
       "change": "added",
       "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxCollectExpiredInput",
+      "change": "changed",
+      "entry": "dead-letter-retention"
     },
     {
       "item": "export:@byok-sdk/core#StoreCompatibility",
@@ -911,6 +945,13 @@
       "item": "export:@byok-sdk/server#inspectSqliteStore",
       "change": "added",
       "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "store:cloud-dataplane-postgres",
+      "change": "changed",
+      "before": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
+      "after": "migrations=31 last=0031_mailbox_dead_letter_retention.sql sha256=0475fb80913fc49a",
+      "entry": "dead-letter-retention"
     }
   ]
 }
