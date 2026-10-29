@@ -22,32 +22,44 @@ it('the cancellation fixture reaps its tree when its test worker is SIGKILLed be
   // not a mocked close call or parent-side process sweep, is the fixture signal.
   const workerSource = `
     const { spawn, spawnSync } = require('node:child_process');
-    const { watch, existsSync, readFileSync } = require('node:fs');
-    const { dirname } = require('node:path');
+    const { readFileSync } = require('node:fs');
+    const { createInterface } = require('node:readline');
     const [fixture, tree, trace] = process.argv.slice(1);
     let published = false;
     let stopped = false;
     const send = frame => {
       if (process.connected) process.send(frame, error => { if (error) stop(); });
     };
-    const publish = () => {
-      if (stopped || published || !existsSync(tree)) return;
-      const receipt = JSON.parse(readFileSync(tree, 'utf8'));
-      published = true;
-      send({ type: 'tree', receipt });
-      watcher.close();
-    };
-    const watcher = watch(dirname(tree), publish);
     const child = spawn(process.execPath, [fixture, 'app-server'], {
-      detached: process.platform !== 'win32', stdio: ['pipe', 'ignore', 'ignore'],
+      detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'ignore'],
       env: { PATH: process.env.PATH, T1_TREE: tree, T1_TRACE: trace, T1_SCENARIO: 'tool' },
+    });
+    // The fixture publishes the complete receipt before installing its input
+    // reader. Its initialize response is a readiness barrier, not a file event.
+    const output = createInterface({ input: child.stdout });
+    output.once('line', line => {
+      if (stopped) return;
+      try {
+        const response = JSON.parse(line);
+        if (response.id !== 1 || response.result?.userAgent !== 'task-runner-fixture') {
+          throw new Error('unexpected fixture initialize response');
+        }
+        const receipt = JSON.parse(readFileSync(tree, 'utf8'));
+        published = true;
+        send({ type: 'tree', receipt });
+        output.close();
+      } catch (error) {
+        send({ type: 'error', reason: String(error) });
+        stop();
+      }
     });
     // Parent loss can precede receipt publication or the fixture's EOF handler.
     // The launcher already owns the detached group, without needing a receipt.
     function stop() {
       if (stopped) return;
       stopped = true;
-      watcher.close();
+      output.close();
+      child.stdout.destroy();
       child.stdin.destroy();
       if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
         if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
@@ -62,7 +74,7 @@ it('the cancellation fixture reaps its tree when its test worker is SIGKILLed be
     child.on('exit', (code, signal) => {
       if (!published) send({ type: 'error', reason: 'fixture exited before receipt: ' + code + '/' + signal });
     });
-    publish();
+    child.stdin.write(JSON.stringify({ id: 1, method: 'initialize', params: {} }) + '\\n');
   `;
   const worker = spawn(process.execPath, ['-e', workerSource, fixture, tree, path.join(dir, 'trace')],
     { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
