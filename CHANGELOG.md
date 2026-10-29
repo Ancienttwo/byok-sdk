@@ -71,9 +71,12 @@
   response without `expiresIn` with `AuthResponseInvalidError` (new route
   `'pair'`) and keeps the prior credential; the assumed 45-minute pair-token
   lifetime is gone. `expiresIn` is optional in `TokenResponseSchema` and
-  `PairResponseSchema` and a strip-safe HTTP addition, so 0.31.0 devices keep
-  reading `expiresAt` and `refreshHint`, which the Host still sends. Upgrade
-  the Host before its devices. `createAuthPlane` now rejects an
+  `PairResponseSchema`, and `TokenResponse.expiresIn` is a strip-safe HTTP
+  addition, so 0.31.0 devices keep reading `expiresAt` and `refreshHint`,
+  which the Host still sends. Upgrade the Host before its devices. A device
+  upgraded from 0.31.0 treats the `expiresAt` it already stored as
+  device-local for that one token, so a skewed device renews once early or on
+  the first 401, then follows `expiresIn`. `createAuthPlane` now rejects an
   `accessTokenTtlSeconds` that is not a positive safe integer, and
   `MintedAccessToken` gains `expiresIn`.
 
