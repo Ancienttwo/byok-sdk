@@ -299,9 +299,33 @@ Committed reservations of both kinds remain protected accounting identity: PG us
 ## Terminal-task archive migration (#1120)
 
 Migration `0032_terminal_task_archive.sql` adds
-`tenant_retention_policy.terminal_task_archive_ms` (existing policies take 90
-days) and the `task` columns `archive_after`, `archived_at` and
-`archive_settled_at`. It backfills `archive_after` once for every terminal row:
+`tenant_retention_policy.terminal_task_archive_ms` and the `task` columns
+`archive_after`, `archived_at` and `archive_settled_at`.
+
+The new policy column is `NOT NULL` with no default, and an application from
+before #1120 cannot write a policy once 0032 has run. Stop every policy writer
+running an earlier release before migrating, and do not roll the application
+back below #1120 afterwards. Each stored policy gets 90 days, or its
+`mailbox_unacked_retention_ms + mailbox_dead_letter_retention_ms` when that is
+longer; its other columns stay as they were. The migration first checks every
+policy row, referenced by an entitlement or not, and stops before any change
+if one holds a window outside 1..9007199254740991 ms or two mailbox windows
+whose sum exceeds 9007199254740991 ms (`Number.MAX_SAFE_INTEGER`, the largest
+window the application accepts). Find those rows first and correct their
+windows through the policy store before migrating:
+
+```sql
+SELECT tenant_id, policy_id FROM tenant_retention_policy
+ WHERE NOT (mailbox_acked_retention_ms BETWEEN 1 AND 9007199254740991
+   AND mailbox_unacked_retention_ms BETWEEN 1 AND 9007199254740991
+   AND mailbox_dead_letter_retention_ms BETWEEN 1 AND 9007199254740991
+   AND request_receipt_retention_ms BETWEEN 1 AND 9007199254740991
+   AND object_orphan_grace_ms BETWEEN 1 AND 9007199254740991
+   AND mailbox_unacked_retention_ms::numeric + mailbox_dead_letter_retention_ms::numeric <= 9007199254740991);
+```
+
+The migration holds `ACCESS EXCLUSIVE` on `tenant_retention_policy`, one row
+per policy, until it commits. It backfills `archive_after` once for every terminal row:
 `terminal_at` where 0030 recorded it, and otherwise `updated_at`, which is
 never earlier than the real terminal instant, so no task is archived early.
 `terminal_at` stays NULL for those rows. The backfill UPDATE rewrites every

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "71f2743ff80802ea60675254624acb5d00362efa2d6c51670c0c81cfe89b138e"
+    "snapshotSha256": "5c43a83e866ca1ecca3fb3007f1322d05a852a2c388dcd821f0f5c4684222971"
   },
   "configFields": {
     "status": "tracked",
@@ -481,7 +481,7 @@
     {
       "id": "terminal-task-archive",
       "impact": "breaking",
-      "summary": "Automatic maintenance gains a tasks step (#1120), run after mailbox: a terminal task is archived terminalTaskArchiveMs (default 90 days, at least mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs) after it ended. In one store transaction its bodies become redaction tombstones, its ephemeral rows and sealed-task object references go and archived_at is set; then its board item is removed and settle deletes any rows a custom store keeps outside that transaction (archived tasks leave the board). The task row and tombstoned receipts stay as the replay fence until tenant deletion (about 1.2 KB per task on Postgres). Content reads answer task_content_redacted; status reads stay. Device replays answer as before the archive: a claim or daemon_interrupted recovery report, which needs the now-tombstoned offer, is answered from the task's claim snapshot or, for an unclaimed task, from an exact match of its terminal receipt. An explicitly redacted task still refuses both, as before. RetentionPolicy gains terminalTaskArchiveMs, so a Host passing a complete policy adds it. CloudStores gains the required taskArchive port and BoardStore gains remove (idempotent): a custom store implements both. TaskAttempt gains archivedAt. Migration 0032 adds the policy column and the task archive columns and backfills archive_after once from COALESCE(terminal_at, updated_at) for terminal rows; count terminal rows first, see the runbook. Embedded SQLite files add the columns and the same backfill on open.",
+      "summary": "Automatic maintenance gains a tasks step (#1120), run after mailbox: a terminal task is archived terminalTaskArchiveMs (default 90 days, at least mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs) after it ended. In one store transaction its bodies become redaction tombstones, its ephemeral rows and sealed-task object references go and archived_at is set; then its board item is removed and settle deletes any rows a custom store keeps outside that transaction (archived tasks leave the board). The task row and tombstoned receipts stay as the replay fence until tenant deletion (about 1.2 KB per task on Postgres). Content reads answer task_content_redacted; status reads stay. Device replays answer as before the archive: a claim or daemon_interrupted recovery report, which needs the now-tombstoned offer, is answered from the task's claim snapshot or, for an unclaimed task, from an exact match of its terminal receipt. An explicitly redacted task still refuses both, as before. RetentionPolicy gains terminalTaskArchiveMs, so a Host passing a complete policy adds it. CloudStores gains the required taskArchive port and BoardStore gains remove (idempotent): a custom store implements both. TaskAttempt gains archivedAt. Migration 0032 adds the policy column (NOT NULL, no default: stop policy writers from before #1120 first) backfilled to max(90 days, unacked + dead-letter windows) with every other window kept, refuses before any change a stored policy whose windows the application would reject or whose window sum exceeds Number.MAX_SAFE_INTEGER, and adds the task archive columns and backfills archive_after once from COALESCE(terminal_at, updated_at) for terminal rows; count terminal rows first, see the runbook. Embedded SQLite files add the columns and the same backfill on open.",
       "migration": "deploy/runbooks/cloud-cleanup.md#terminal-task-archive-migration-1120",
       "items": [
         "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
@@ -2122,7 +2122,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
-      "after": "migrations=32 last=0032_terminal_task_archive.sql sha256=9adc7c7bdc67eaac",
+      "after": "migrations=32 last=0032_terminal_task_archive.sql sha256=4a31d8addf70ddef",
       "entry": "dead-letter-retention"
     }
   ]
