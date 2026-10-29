@@ -60,6 +60,8 @@ describe('lifecycle/exit-codes (#1097): the exit-code contract', () => {
   it('start --service exits only 0 (stop, halt) — a crash throws and exits 1', () => {
     expect(daemonExitCode({ kind: 'stopped' }, true)).toBe(0);
     expect(daemonExitCode({ kind: 'stopped' }, false)).toBe(0);
+    // #1145's store_not_bound is a halt like the others: the service stays stopped.
+    expect(DAEMON_HALT_REASONS).toContain('store_not_bound');
     for (const reason of DAEMON_HALT_REASONS) {
       expect(daemonExitCode(halted(reason), true)).toBe(0);
       expect(daemonExitCode(halted(reason), false)).toBe(78);
