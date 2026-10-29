@@ -1,5 +1,5 @@
 import type { StoreCompatibility } from '@byok-sdk/core';
-import { inspectDaemonStores } from '../../upgrade-check/store-compatibility';
+import { inspectDaemonStores } from '../../diagnostics/store-compatibility';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release';
 
 /** Exit code when the check ran and at least one store would not be opened as it is. */

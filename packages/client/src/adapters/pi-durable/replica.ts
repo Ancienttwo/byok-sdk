@@ -23,18 +23,23 @@ export function durableReplicaFiles(names: readonly string[]): string[] {
   return names.filter((name) => name.startsWith(REPLICA_FILE_PREFIX) && name.endsWith(REPLICA_FILE_SUFFIX));
 }
 
-/** Inspect a private copy; database errors must reach the compatibility refusal. */
-export function isReplicaWriterLock(file: string): boolean {
+/** Inspect an existing private copy and close its read-only handle even on refusal. */
+export function inspectReplicaDatabase<T>(file: string, inspect: (db: import('node:sqlite').DatabaseSync) => T): T {
   const { DatabaseSync } = loadSqliteModule();
   const db = new DatabaseSync(file, { readOnly: true });
-  try {
+  try { return inspect(db); } finally { db.close(); }
+}
+
+/** Inspect a private copy; database errors must reach the compatibility refusal. */
+export function isReplicaWriterLock(file: string): boolean {
+  return inspectReplicaDatabase(file, (db) => {
     const objects = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'").all();
     const owner = objects[0];
     if (objects.length !== 1 || owner?.type !== 'table' || owner.name !== 'owner'
       || owner.tbl_name !== 'owner' || owner.sql !== `CREATE TABLE ${LOCK_OWNER_SCHEMA}`) return false;
     const rows = db.prepare('SELECT slot, lease_id FROM owner').all();
     return rows.length === 1 && rows[0]?.slot === 1 && typeof rows[0].lease_id === 'string' && rows[0].lease_id.length > 0;
-  } finally { db.close(); }
+  });
 }
 
 export interface DurableReplicaBinding {

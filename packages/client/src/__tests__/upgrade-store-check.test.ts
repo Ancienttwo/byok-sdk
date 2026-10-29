@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LocalStoreId, StoreCompatibility } from '@byok-sdk/core';
-import { inspectDaemonStores } from '../upgrade-check/store-compatibility';
+import { inspectDaemonStores } from '../diagnostics/store-compatibility';
 import { runUpgradeStoreCheckCommand, UPGRADE_CHECK_REFUSED_EXIT_CODE } from '../bin/commands/upgrade';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
