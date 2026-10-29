@@ -25,11 +25,11 @@ describe('Agent memory filesystem helper CI P1 regression', () => {
     expect(helperJob).toContain('os: macos-15-intel');
     expect(helperJob.match(/^    needs:.*$/gm)).toEqual(['    needs: select']);
     expect(helperJob).toContain("if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper') }}");
-    expect(helperJob).toContain('uses: actions/checkout@v7');
-    expect(helperJob).toContain('uses: actions/setup-node@v7');
+    expect(helperJob).toMatch(/^        uses: actions\/checkout@[0-9a-f]{40} # v7\.\d+\.\d+$/m);
+    expect(helperJob).toMatch(/^        uses: actions\/setup-node@[0-9a-f]{40} # v7\.\d+\.\d+$/m);
     expect(helperJob).toContain('node-version-file: .node-version');
-    expect(helperJob).toContain('uses: oven-sh/setup-bun@v2');
-    expect(helperJob).toContain('uses: actions/setup-go@v6');
+    expect(helperJob).toMatch(/^        uses: oven-sh\/setup-bun@[0-9a-f]{40} # v2\.\d+\.\d+$/m);
+    expect(helperJob).toMatch(/^        uses: actions\/setup-go@[0-9a-f]{40} # v6\.\d+\.\d+$/m);
     expect(helperJob).toContain('go-version-file: packages/client/native/agent-memory-fs/go.mod');
     expect(helperJob).toContain('run: bun ci');
     expect(helperJob).toContain('run: bun run build');
