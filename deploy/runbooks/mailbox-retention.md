@@ -20,10 +20,11 @@ not imply a remainder.
 | `acked` | `ackedBefore` | delete | `removed` |
 | `pending` | `expireUnackedBefore` | mark `expired`, retain the row | `expired` |
 
-Mailbox usage is `SUM(byteSize)` over retained rows in all states. The collector
-never reads or writes an accounting counter, and **`releasedBytes` is always
-`0n`**. Deleted rows cease contributing to the next derived usage read; dead
-letters continue to count until explicit operator discard.
+Mailbox usage is `SUM(byteSize)` over `pending` rows. The collector never reads
+or writes an accounting counter, and **`releasedBytes` is always `0n`**. `acked`
+and `expired` rows hold no quota (#1115): a row stops counting when the device
+acks it or when the collector dead-letters it, and deleting it later changes
+nothing in usage.
 
 `now` and both cutoffs must be canonical ISO-8601 UTC
 (`YYYY-MM-DDTHH:mm:ss.sssZ`). `limit` must be a positive safe integer. Validation
@@ -87,8 +88,8 @@ second queue. S4B-c adds a Postgres maintenance surface:
 - `replayDeadLetter` requires a new operator idempotency key and clones the
   bytes to a new monotonic sequence; `replay_source_seq` binds that key to the
   exact expired row while retaining the original evidence;
-- `discardDeadLetter` explicitly removes one expired row; with usage derived
-  from the retained rows, removing it is what frees its bytes.
+- `discardDeadLetter` explicitly removes one expired row; a dead letter holds
+  no quota, so removing it frees storage but no mailbox quota.
 
 Automatic retention calls none of the latter two. A non-zero
 `mailbox_expired_count`/`expiredCount` means work was dropped and must alert.

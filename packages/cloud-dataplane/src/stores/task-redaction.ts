@@ -162,7 +162,7 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
 
       let outboxRedacted = 0;
       for (const row of await readOutbox(client, tenant, taskId, task, true)) {
-        // Mailbox usage is a sum over stored rows, so the new size is the whole accounting change.
+        // Only acked/expired rows are rewritten here, and those hold no mailbox quota (#1115).
         const tombstone = await codec.tombstone(row.body);
         await client.query(
           `UPDATE outbox SET body = $4, body_hash = $5, byte_size = $6

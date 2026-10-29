@@ -8,9 +8,10 @@ import { assertCollectExpiredInput, type CollectExpiredResult } from '../retenti
  * That is the in-memory expression of §12.6.2 layer 3: there is no bare device
  * index to accidentally query.
  *
- * Mailbox bytes are never counted: usage is the sum over the retained rows,
- * and a `limited` append sums, checks and inserts without yielding, so no
- * append on another device of the same tenant can interleave with the check.
+ * Mailbox bytes are never counted: usage is the sum over the retained
+ * `pending` rows, and a `limited` append sums, checks and inserts without
+ * yielding, so no append on another device of the same tenant can interleave
+ * with the check.
  */
 import { ByokCoreError, CoreConflictError } from '../errors';
 import type {
@@ -229,7 +230,7 @@ export class InMemoryMailboxStore implements MailboxStore {
     } catch (cause) {
       throw new CollectExpiredFailure({ removed, expired, releasedBytes: 0n }, 0, undefined, { cause });
     }
-    // Mailbox usage is the retained rows, never a mutable accounting counter.
+    // Mailbox usage is the pending rows, never a mutable accounting counter, so neither phase moves it.
     return { removed, expired, releasedBytes: 0n, more };
   }
 
@@ -244,13 +245,18 @@ export class InMemoryMailboxStore implements MailboxStore {
     return entitlement.mailboxLimitBytes;
   }
 
-  /** Every retained row of the tenant, in any state, on any device. */
+  /**
+   * Every `pending` row of the tenant, on any device. Acked and dead-lettered
+   * rows are retained but hold no quota (#1115).
+   */
   #usedBytes(tenant: TenantId): bigint {
     const prefix = tenantKey(tenant, '');
     let bytes = 0n;
     for (const [key, device] of this.#devices.entries()) {
       if (!key.startsWith(prefix)) continue;
-      for (const message of device.messages) bytes += message.byteSize;
+      for (const message of device.messages) {
+        if (message.state === 'pending') bytes += message.byteSize;
+      }
     }
     return bytes;
   }

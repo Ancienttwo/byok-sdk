@@ -19,6 +19,22 @@
   root moves to `extensions/rpiv-todo/2.15.0` with unchanged locale files.
   Vendored pi-subagents stays at 0.60.0.
 
+- **Fix (core, server, cloud-dataplane; #1115)** — a tenant whose mailbox
+  holds dead letters can dispatch again. Mailbox usage
+  (`MailboxStore.readUsage`) and `limited` admission now count only `pending`
+  rows; an `acked` row releases its bytes when the device acks it, and an
+  `expired` dead letter holds no quota while it stays retained for
+  `listDeadLetters`, replay and the `recoverableFrom` floor. Before, every
+  device that went offline for longer than the unacked retention window kept
+  its dead letters counted forever, until every `limited` append was refused
+  with `storage_quota_exceeded` and device batches carrying egress
+  acknowledgements or dispositions got HTTP 507 on `POST /byok/messages`. The
+  in-memory, SQLite and Postgres stores share one conformance case. A custom
+  `MailboxStore` must apply the same rule to pass `runCoreConformance`. With
+  `limited` admission, `mailbox_limit_bytes` therefore no longer caps retained
+  dead letters; deleting them after a grace period is the follow-up on #1115.
+  No migration.
+
 ## 0.31.0 — 2026-10-29 (published)
 
 0.31.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
