@@ -43,12 +43,16 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
       const existing = this.#state.attempts.get(key);
       if (existing === undefined) return undefined;
       if (existing.cancellation !== undefined) {
+        const messageId = this.#messageIds.get(key);
+        if (messageId === undefined) {
+          throw new Error(`Task ${input.taskId} has a cancellation tombstone without its delivery id.`);
+        }
         // Append is the mailbox's only lookup by id. It materializes only a new
         // row, so a call means retention collected the acked row: the delivery
         // is settled and the throw keeps it from being enqueued again.
         const message = await this.#mailbox.append(tenant, {
           deviceId: existing.deviceId,
-          messageId: this.#messageIds.get(key) ?? input.proposedMessageId,
+          messageId,
           materialize: () => {
             throw COLLECTED;
           },
