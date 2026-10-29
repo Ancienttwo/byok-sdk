@@ -446,6 +446,44 @@
       "items": [
         "interprocess:path-mutation-gate"
       ]
+    },
+    {
+      "id": "service-units-library-api",
+      "impact": "breaking",
+      "summary": "Service units are one library API for the CLI and embedded Hosts (#1097). ServiceDefinition requires storeDir and owner; agentServiceDefinition builds the byok-agent definition that `byok-agent install` uses. A unit names only a stable launcher (<storeDir>/service/<name>.launcher.sh on macOS/Linux; the installed WinSW <name>.exe on Windows) and carries an SDK marker. ServiceLifecycle gains inspect() (absent/exact/repairable/foreign) and repair(); status() adds unit and logs. A foreign (marker-less) unit is never changed: install/repair/uninstall/start/stop throw ServiceUnitError service_unit_unmarked unless install({ replaceUnmarked: true }) (CLI --replace-unmarked). ServiceInstallOptions.program is removed; pass the program in the definition. One lifecycle owner per store (claim/read/releaseServiceLifecycleOwner, lifecycle_owner_conflict). Exit-code contract EXIT_CODE_CONTRACT: only exit 0 stops a service; systemd units now use Restart=always with RestartPreventExitStatus=0. Under --service the daemon writes its own rotated <logDir>/daemon.log (DAEMON_LOG_LIMITS); the redirect files are renamed service-stdout.log/service-stderr.log and bounded (SERVICE_REDIRECT_LIMITS); WinSW rolls by size. generateLaunchdPlist/generateSystemdUnit take launcherPath and workingDirectory instead of program. DiagnosticsSnapshot and support bundles gain log sizes (no paths); exportDeviceSupportBundle and `support-bundle` refuse an output inside the store. Migration: a unit installed by 0.31 or earlier has no marker; replace it once with `byok-agent install --replace-unmarked`, or remove it with the 0.31 CLI's `uninstall` first. A Host that built ServiceDefinition adds storeDir and owner.",
+      "migration": "docs/device-setup.md#background-service",
+      "items": [
+        "export:@byok-sdk/client#AgentServiceDefinitionInput",
+        "export:@byok-sdk/client#CreateServiceLifecycleOptions",
+        "export:@byok-sdk/client#DAEMON_LOG_LIMITS",
+        "export:@byok-sdk/client#DaemonLog",
+        "export:@byok-sdk/client#DaemonLogOptions",
+        "export:@byok-sdk/client#EXIT_CODE_CONTRACT",
+        "export:@byok-sdk/client#ExitCode",
+        "export:@byok-sdk/client#SERVICE_REDIRECT_LIMITS",
+        "export:@byok-sdk/client#ServiceDefinition",
+        "export:@byok-sdk/client#ServiceExitDisposition",
+        "export:@byok-sdk/client#ServiceInstallOptions",
+        "export:@byok-sdk/client#ServiceLifecycle",
+        "export:@byok-sdk/client#ServiceLifecycleOwnerInput",
+        "export:@byok-sdk/client#ServiceLogReport",
+        "export:@byok-sdk/client#ServiceRepairResult",
+        "export:@byok-sdk/client#ServiceStatusResult",
+        "export:@byok-sdk/client#ServiceUnitError",
+        "export:@byok-sdk/client#ServiceUnitErrorCode",
+        "export:@byok-sdk/client#ServiceUnitInspection",
+        "export:@byok-sdk/client#ServiceUnitState",
+        "export:@byok-sdk/client#agentServiceDefinition",
+        "export:@byok-sdk/client#claimServiceLifecycleOwner",
+        "export:@byok-sdk/client#generateLaunchdPlist",
+        "export:@byok-sdk/client#generateServiceLauncher",
+        "export:@byok-sdk/client#generateSystemdUnit",
+        "export:@byok-sdk/client#inspectServiceLogs",
+        "export:@byok-sdk/client#openDaemonLog",
+        "export:@byok-sdk/client#readServiceLifecycleOwner",
+        "export:@byok-sdk/client#releaseServiceLifecycleOwner",
+        "export:@byok-sdk/client#serviceExitDisposition"
+      ]
     }
   ],
   "changes": [

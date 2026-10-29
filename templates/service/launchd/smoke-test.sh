@@ -114,7 +114,7 @@ expect_state() {
   echo "PASS: unit state $1"
 }
 expect_state exact
-if ! grep -q "$WORK_DIR/store/service/$LABEL.launcher.sh" "$PLIST"; then
+if ! grep -qF "/store/service/$LABEL.launcher.sh</string>" "$PLIST"; then
   echo "FAIL: plist does not run the stable launcher"; exit 1
 fi
 plutil -lint "$PLIST"
