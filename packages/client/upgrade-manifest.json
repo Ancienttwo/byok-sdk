@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "6e90d96c17d451e7d30bece940ff703f1eea20048c0db60692fc96e5487849ec"
+    "snapshotSha256": "e227c90fb7ed3dccae63825d5c4c2b118d4a4347ef6a1ec402a7dbbb8451935b"
   },
   "configFields": {
     "status": "tracked",
@@ -100,6 +100,16 @@
       "migration": "docs/spec.md#removed-daemonconfig-fields",
       "items": [
         "export:@byok-sdk/client#DaemonConfigFieldRemovedError"
+      ]
+    },
+    {
+      "id": "auth-renewal-floor",
+      "impact": "additive",
+      "summary": "Token renewal keeps a minimum gap between proactive renewals, so a fast device clock or a server TTL under the renewal margin no longer loops renewals and keychain writes (#1114). The declarations change only by private AuthManager members; no Host action.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/pull/1131",
+      "items": [
+        "export:@byok-sdk/client#BlobClient",
+        "export:@byok-sdk/client#InstallSkillPacksOptions"
       ]
     }
   ],
@@ -366,6 +376,11 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#BlobClient",
+      "change": "changed",
+      "entry": "auth-renewal-floor"
+    },
+    {
       "item": "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
       "change": "added",
       "entry": "daemon-config-schema"
@@ -444,6 +459,11 @@
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
       "change": "changed",
       "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
+      "change": "changed",
+      "entry": "auth-renewal-floor"
     },
     {
       "item": "export:@byok-sdk/client#LocalToolApprovalPolicy",

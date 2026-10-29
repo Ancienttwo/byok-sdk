@@ -24,6 +24,7 @@ const factory: CloudCompositionFactory = {
         stores, now: () => clock.now().toISOString(), advanceTime: ms => clock.advance(ms),
         landBlobBytes: async ({ grant, bytes, reservation }) => { const response = await fetch(grant.uploadUrl, { method: 'PUT', headers: { 'content-type': reservation.contentType, 'content-length': String(bytes.byteLength) }, body: bytes as unknown as BodyInit }); if (!response.ok) throw new Error('PUT refused'); },
         commitBlob: async () => { throw new Error('Receipt/TTL retention does not commit blobs.'); },
+        retireCancellationDelivery: async () => { throw new Error('Receipt/TTL retention does not retire cancellations.'); },
         dispose: scope.dispose,
       };
     } catch (cause) { await scope.dispose(); throw cause; }

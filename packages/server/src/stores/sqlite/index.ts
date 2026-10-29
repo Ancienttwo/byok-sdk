@@ -772,14 +772,15 @@ function readCursor(db: DatabaseSync, clock: Clock, tenant: TenantId, deviceId: 
 type MailboxQuota = Pick<QuotaStore, 'readEntitlement'>;
 
 /**
- * Mailbox bytes are the retained rows, so usage is recomputed from the durable
- * table on every read and stays correct across a restart. `byte_size` is TEXT;
- * the sum is rendered back to TEXT so it never passes through a JS number.
+ * Mailbox bytes are the retained `pending` rows, so usage is recomputed from
+ * the durable table on every read and stays correct across a restart. Acked and
+ * dead-lettered rows are retained but hold no quota (#1115). `byte_size` is
+ * TEXT; the sum is rendered back to TEXT so it never passes through a JS number.
  */
 function mailboxUsedBytes(db: DatabaseSync, tenant: TenantId): bigint {
   const row = db.prepare(
     `SELECT CAST(COALESCE(SUM(CAST(byte_size AS INTEGER)), 0) AS TEXT) AS bytes
-       FROM mailbox_message WHERE tenant_id = ?`,
+       FROM mailbox_message WHERE tenant_id = ? AND state = 'pending'`,
   ).get(tenant) as { bytes: string };
   return BigInt(row.bytes);
 }
@@ -979,11 +980,8 @@ export class SqliteTaskCancellationStore implements TaskCancellationStore {
         const row = db.prepare(
           `SELECT * FROM mailbox_message WHERE tenant_id = ? AND device_id = ? AND message_id = ?`,
         ).get(tenant, existing.deviceId, existingMessageId) as MailboxRow | undefined;
-        if (row === undefined) {
-          if (existing.status === 'cancelled') return { attempt: existing };
-          throw new Error(`Cancellation delivery ${existingMessageId} is missing for task ${input.taskId}`);
-        }
-        return { attempt: existing, message: mailboxMessage(row) };
+        // Only retention deletes a row, and only once acked: a missing row was delivered.
+        return row === undefined ? { attempt: existing } : { attempt: existing, message: mailboxMessage(row) };
       }
 
       const message = await appendMailbox(db, this.clock, this.quota, tenant, {

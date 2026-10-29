@@ -252,7 +252,7 @@ export class PostgresCloudCleanup {
 
   /**
    * Explicit operator discard. Automatic retention never deletes dead letters.
-   * Mailbox usage is the sum over retained rows, so deleting one is the whole
+   * A dead letter holds no mailbox quota, so deleting one is the whole
    * operation.
    */
   async discardDeadLetter(tenant: TenantId, ref: DeadLetterRef): Promise<MailboxMessage> {

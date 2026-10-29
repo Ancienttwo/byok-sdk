@@ -19,6 +19,42 @@
   root moves to `extensions/rpiv-todo/2.15.0` with unchanged locale files.
   Vendored pi-subagents stays at 0.60.0.
 
+- **Fix (cloud-dataplane, server, cloud; #1116)** — `cancelTask` on a claimed
+  task no longer throws after retention collects its acked `task.cancel` row.
+  The Postgres and SQLite stores threw a plain `Error`, which a Host surfaced
+  as a 500 on every later cancel. A repeat cancel now returns the attempt as
+  it stands (still `cancel_requested` until the device reports a terminal),
+  without a mailbox row, in all three stores. The in-memory store no longer
+  enqueues a second `task.cancel` in that case. Ending a task whose device
+  never reports a terminal is #1119.
+
+- **Fix (client; #1114)** — token renewal no longer loops when a fresh token
+  is already within a minute of its expiry, which happened when the device
+  clock ran ahead of the server or the server TTL was under 60 seconds. Each
+  renewal re-armed itself at once and rewrote the OS credential entry every
+  time. Proactive renewals and renewals started by `getValidAccessToken()` are
+  now at least 30 seconds apart. The gap stays at 30 seconds after the first
+  renewal that returns such a token and doubles from the second one in a row,
+  up to 30 minutes. Inside that gap `getValidAccessToken()` returns the token
+  the server issued last. A server 401 still renews at once and is not
+  throttled.
+
+- **Fix (core, server, cloud-dataplane; #1115)** — a tenant whose mailbox
+  holds dead letters can dispatch again. Mailbox usage
+  (`MailboxStore.readUsage`) and `limited` admission now count only `pending`
+  rows; an `acked` row releases its bytes when the device acks it, and an
+  `expired` dead letter holds no quota while it stays retained for
+  `listDeadLetters`, replay and the `recoverableFrom` floor. Before, every
+  device that went offline for longer than the unacked retention window kept
+  its dead letters counted forever, until every `limited` append was refused
+  with `storage_quota_exceeded` and device batches carrying egress
+  acknowledgements or dispositions got HTTP 507 on `POST /byok/messages`. The
+  in-memory, SQLite and Postgres stores share one conformance case. A custom
+  `MailboxStore` must apply the same rule to pass `runCoreConformance`. With
+  `limited` admission, `mailbox_limit_bytes` therefore no longer caps retained
+  dead letters; deleting them after a grace period is the follow-up on #1115.
+  No migration.
+
 ## 0.31.0 — 2026-10-29 (published)
 
 0.31.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

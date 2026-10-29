@@ -5,7 +5,12 @@
  * published. The port method table it asserts against lives in `@byok-sdk/cloud`'s
  * shipped source (`CLOUD_PORT_METHODS`).
  */
-export { CLOUD_CONFORMANCE_PORTS, runCloudConformance, withCloudComposition } from './harness';
+export {
+  ackAndCollectMailbox,
+  CLOUD_CONFORMANCE_PORTS,
+  runCloudConformance,
+  withCloudComposition,
+} from './harness';
 export type {
   CloudCompositionFactory,
   CloudCompositionHandle,
