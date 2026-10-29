@@ -36,6 +36,10 @@ test('CLI fails closed when result JSON is absent or malformed', () => {
     assert.equal(run.status, 1, run.stdout);
   }
 });
+test('main pushes cannot cancel the scheduled full matrix', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /^  group: ci-\$\{\{ github\.workflow \}\}-\$\{\{ github\.event_name \}\}-/m);
+});
 test('workflow separates targeted, nightly and approved release validation', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.match(workflow, /push:\n    branches: \[main\]/);
