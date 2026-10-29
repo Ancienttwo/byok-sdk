@@ -7,7 +7,7 @@ import path from 'node:path';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolCall } from '../tool-authorization';
-import { startToolAuthorizationIpc, TOOL_AUTHORIZATION_GATE_ENV } from '../tool-authorization-ipc';
+import { readToolAuthorizationGateEnv, requestToolAuthorization, startToolAuthorizationIpc, TOOL_AUTHORIZATION_GATE_ENV } from '../tool-authorization-ipc';
 import { assertSubagentRunnerAuthorized } from '../subagents/tool-authorization-runner';
 import type { Session } from '../types';
 
@@ -96,6 +96,10 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     const f = await fixture();
     let approved = false;
     const g = gate(f.cwd, () => approved ? { approved } : { approved, reason: 'owner authorization required' });
+    const snapshotPath = path.join(f.root, 'gate-env.json');
+    await fs.mkdir(path.join(f.agentDir, 'extensions'));
+    await fs.writeFile(path.join(f.agentDir, 'extensions', 'capture-env.js'),
+      `import { writeFileSync } from 'node:fs'; export default () => { writeFileSync(${JSON.stringify(snapshotPath)}, JSON.stringify(process.env)); };`);
     const runtime = adapter();
     const first = await startPreparedOperation(runtime, { instruction: 'write the file' }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(first);
@@ -104,8 +108,23 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     expect(JSON.stringify(f.requests)).toContain('tool_authorization_denied: owner authorization required');
     expect(g.calls[0]).toMatchObject({ toolName: 'write', cwd: f.cwd, input: { path: f.target } });
     expect(g.summaries[0]).toContain('write-outside-workspace');
+    const childEnv = JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as Record<string, string>;
+    const gatePath = childEnv[TOOL_AUTHORIZATION_GATE_ENV]!;
+    expect(path.isAbsolute(gatePath)).toBe(true);
+    const config = JSON.parse(await fs.readFile(gatePath, 'utf8'));
+    expect(JSON.stringify(childEnv)).not.toContain(config.token);
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(gatePath)).mode & 0o777).toBe(0o600);
+      expect((await fs.stat(path.dirname(gatePath))).mode & 0o777).toBe(0o700);
+    }
+    vi.stubEnv(TOOL_AUTHORIZATION_GATE_ENV, gatePath);
+    expect(readToolAuthorizationGateEnv()).toEqual(config);
     const sessionRef = first.sessionRef;
     await first.close();
+    await expect(fs.stat(gatePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(readToolAuthorizationGateEnv).toThrow();
+    expect(await requestToolAuthorization(config, g.calls[0]!)).toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
+    vi.unstubAllEnvs();
     const resumed = await startPreparedOperation(runtime, { instruction: 'write the file again', sessionRef }, { workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization });
     sessions.push(resumed);
     await finish(resumed);
@@ -174,9 +193,11 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     const g = gate(f.cwd);
     const ipc = await startToolAuthorizationIpc(g.toolAuthorization);
     try {
+      const gatePath = path.join(f.root, 'tool-authorization.json');
+      await fs.writeFile(gatePath, JSON.stringify(ipc.config), { mode: 0o600, flag: 'wx' });
       const child = spawn(process.execPath, [path.resolve(import.meta.dirname, '../../dist/bin/byok-pi-rpc.js'), '__byok_sdk_helper', 'pi-subagent-print',
         '--model', 'hook-loopback/probe', '--mode', 'json', '-p', 'write the file'], {
-        cwd: f.cwd, env: { ...f.env, PI_SUBAGENT_CHILD: '1', [TOOL_AUTHORIZATION_GATE_ENV]: JSON.stringify(ipc.config) }, stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: f.cwd, env: { ...f.env, PI_SUBAGENT_CHILD: '1', [TOOL_AUTHORIZATION_GATE_ENV]: gatePath }, stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stdout = ''; let stderr = '';
       child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
@@ -187,6 +208,16 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
       await expect(fs.stat(f.target)).rejects.toMatchObject({ code: 'ENOENT' });
     } finally { await ipc.close(); }
   }, 30_000);
+
+  it('rejects malformed gate files and the replaced inline environment format', async () => {
+    const f = await fixture();
+    const gatePath = path.join(f.root, 'malformed-gate.json');
+    await fs.writeFile(gatePath, '{}');
+    vi.stubEnv(TOOL_AUTHORIZATION_GATE_ENV, gatePath);
+    expect(readToolAuthorizationGateEnv).toThrow('invalid tool authorization gate config');
+    vi.stubEnv(TOOL_AUTHORIZATION_GATE_ENV, JSON.stringify({ url: 'http://127.0.0.1:1/authorize-tool', token: 'a'.repeat(64), timeoutMs: 1000 }));
+    expect(readToolAuthorizationGateEnv).toThrow();
+  });
 
   it('refuses external subagent runners while a parent gate is present', () => {
     vi.stubEnv(TOOL_AUTHORIZATION_GATE_ENV, '{}');
