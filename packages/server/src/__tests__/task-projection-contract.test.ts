@@ -7,14 +7,104 @@ import {
   TEST_AGENT_DISPATCH, TEST_AGENT_REF, TEST_SESSION_REF,
 } from './test-support';
 
-/** Compare every overlapping output key, including keys added after this test. */
-function agree(projections: Record<string, object>): void {
-  const entries = Object.entries(projections);
-  for (const [index, [leftName, left]] of entries.entries()) {
-    for (const [rightName, right] of entries.slice(index + 1)) {
-      for (const key of Object.keys(left).filter(key => Object.hasOwn(right, key))) {
-        expect(Reflect.get(left, key), `${leftName}.${key} vs ${rightName}.${key}`)
-          .toEqual(Reflect.get(right, key));
+type Read<K extends 'get' | 'attempt' | 'offer' | 'deviceTerminal' | 'agentMessage' | 'messageDisposition'> =
+  NonNullable<Awaited<ReturnType<ByokServer['tasks'][K]>>>;
+type Plain<T> = Extract<T, { sealed?: undefined }>;
+type TerminalPayload<K extends Read<'deviceTerminal'>['envelope']['type']> =
+  Plain<Extract<Read<'deviceTerminal'>['envelope'], { type: K }>['payload']>;
+type TaskEvent = ReturnType<ByokServer['tasks']['events']> extends AsyncIterable<infer Entry>
+  ? Entry extends { event: infer Event } ? Event : never : never;
+type Projections = {
+  get: Read<'get'>;
+  attempt: Read<'attempt'>;
+  offer: Read<'offer'>;
+  offerPayload: Plain<Read<'offer'>['payload']>;
+  'task.complete': TerminalPayload<'task.complete'>;
+  'task.fail': TerminalPayload<'task.fail'>;
+  'task.decline': TerminalPayload<'task.decline'>;
+  'task.cancelled': TerminalPayload<'task.cancelled'>;
+  message: Read<'agentMessage'>['payload'];
+  disposition: Read<'messageDisposition'>;
+  error: Extract<TaskEvent, { kind: 'error' }>;
+  result: NonNullable<Read<'get'>['result']>;
+};
+type DeclaredFields<T> = { [K in keyof T]-?: {} extends Pick<T, K> ? false : true };
+
+/**
+ * Every declared key must be classified, including optional keys. A type
+ * addition/removal or requiredness change fails typecheck until this table is
+ * updated. True means required; false means optional, not excluded.
+ */
+const fields = {
+  get: {
+    taskId: true, state: true, deviceId: false, sessionRef: false, agentRef: false,
+    createdAt: true, updatedAt: true, result: false, pendingApprovalId: false,
+    claimedRuntime: false, claimedHarnessId: false, claimedRuntimeCapabilities: false,
+  },
+  attempt: {
+    tenantId: true, taskId: true, deviceId: true, agentRef: false, ownerDeviceId: false,
+    status: true, claimedRuntime: false, claimedHarnessId: false, claimedRuntimeCapabilities: false,
+    terminalCause: false, cancellation: false, offeredAt: false, claimedAt: false,
+    firstOutputAt: false, terminalAt: false, updatedAt: true,
+  },
+  offer: { taskId: true, deviceId: true, messageId: true, type: true, payload: true, recordedAt: true, delivered: true },
+  offerPayload: {
+    sealed: false, sealing: false, routineRef: false, instruction: false, agentRef: true,
+    session: true, preparation: false, agentMemory: false, homeAccess: false, requiredToolsets: false,
+    runtime: false, harnessId: false, dispatchSelection: false, terminalProjection: false,
+    limits: false, egressPolicy: false, messageEgress: false,
+  },
+  'task.complete': {
+    sealed: false, sealing: false, harnessId: false, summary: true, finalMessage: false,
+    sessionRef: true, artifactRefs: false, document: false, usage: false, preparedObservation: false,
+    agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false,
+  },
+  'task.fail': {
+    sealed: false, sealing: false, recovery: false, harnessId: false, reason: true,
+    retryable: false, failure: false, usage: false, preparedObservation: false,
+    agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false,
+  },
+  'task.decline': {
+    sealed: false, sealing: false, reason: true, retryable: false, agentRef: false, code: false, admission: false,
+  },
+  'task.cancelled': {
+    sealed: false, sealing: false, harnessId: false, reason: false, usage: false,
+    agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false,
+  },
+  message: {
+    agentRef: true, sessionRef: true, contract: true, messageId: true, cursor: true,
+    contentType: true, body: true, contentHash: true, byteCount: true,
+  },
+  disposition: {
+    agentRef: true, sessionRef: true, contract: true, messageId: true, cursor: true,
+    contentHash: true, outcome: true, receiptId: true, reasonCode: false,
+  },
+  error: { kind: true, reason: true, retryable: false },
+  result: {
+    state: true, summary: false, finalMessage: false, sessionRef: false, artifactRefs: false,
+    reason: false, code: false, retryable: false, failure: false, document: false,
+  },
+} satisfies { [K in keyof Projections]: DeclaredFields<Projections[K]> };
+
+function projection<K extends keyof Projections>(name: K, value: Projections[K]) {
+  return { name, value, fields: fields[name] };
+}
+
+/** Intersect declarations, never observations: omission must not erase an assertion. */
+function agree(...projections: { name: string; value: object; fields: Record<string, boolean> }[]): void {
+  for (const [index, left] of projections.entries()) {
+    for (const [key, required] of Object.entries(left.fields)) {
+      if (required) expect(Object.hasOwn(left.value, key), `${left.name}.${key} required`).toBe(true);
+    }
+    for (const right of projections.slice(index + 1)) {
+      for (const key of Object.keys(left.fields).filter(key => Object.hasOwn(right.fields, key))) {
+        const leftValue = Reflect.get(left.value, key);
+        const rightValue = Reflect.get(right.value, key);
+        if (left.fields[key] || right.fields[key] || leftValue !== undefined || rightValue !== undefined) {
+          expect(Object.hasOwn(left.value, key), `${left.name}.${key} present`).toBe(true);
+          expect(Object.hasOwn(right.value, key), `${right.name}.${key} present`).toBe(true);
+        }
+        expect(leftValue, `${left.name}.${key} vs ${right.name}.${key}`).toEqual(rightValue);
       }
     }
   }
@@ -131,8 +221,15 @@ describe('ByokServer.tasks projection contract (#1113)', () => {
     expect(offer).toBeDefined();
     expect(agentMessage).toBeDefined();
     expect(messageDisposition).toBeDefined();
-    agree({ get: get!, attempt: attempt!, offer: offer! });
-    agree({ get: get!, offer: offer!.payload, terminal: deviceTerminal!.envelope.payload, message: agentMessage!.payload });
+    if (offer!.payload.sealing !== undefined || deviceTerminal!.envelope.payload.sealed !== undefined) {
+      throw new Error('This fixture exercises plaintext projections');
+    }
+    agree(projection('get', get!), projection('attempt', attempt!), projection('offer', offer!));
+    agree(
+      projection('get', get!), projection('offerPayload', offer!.payload),
+      projection(deviceTerminal!.envelope.type, deviceTerminal!.envelope.payload),
+      projection('message', agentMessage!.payload),
+    );
     expect(deviceTerminal!.envelope.task_id).toBe(taskId);
     expect(deviceTerminal!.envelope.type).toBe(terminal.type);
     expect(deviceTerminal!.envelope.payload).toEqual(terminal.payload);
@@ -141,11 +238,13 @@ describe('ByokServer.tasks projection contract (#1113)', () => {
     expect(get!.result).toEqual({ ...resultFields(deviceTerminal!.envelope.payload), state: terminal.state });
     const stateEvents = events.filter(event => event.kind === 'state');
     expect(stateEvents.at(-1)?.state).toBe(get!.state);
-    for (const event of events.filter(event => event.kind === 'error')) agree({ event, result: get!.result! });
+    for (const event of events.filter(event => event.kind === 'error')) {
+      agree(projection('error', event), projection('result', get!.result!));
+    }
 
     expect(agentMessage!.payload).toEqual(publish.payload);
     expect(agentMessage!.disposition).toEqual(messageDisposition);
-    agree({ message: agentMessage!.payload, disposition: messageDisposition! });
+    agree(projection('message', agentMessage!.payload), projection('disposition', messageDisposition!));
     expect(messageDisposition!.outcome).toBe('accepted');
     expect(messageDraft.at(-1)).toEqual({ kind: 'ended' });
     // Terminal ingestion deletes display-only draft text; the published body survives.
