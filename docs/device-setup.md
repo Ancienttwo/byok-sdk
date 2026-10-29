@@ -105,6 +105,31 @@ cannot be encoded in CLI JSON. They remain typed Host integration points.
 Custom adapters belong in `createDaemonWithAdapters`; the effective report
 marks them `injected`, without claiming SDK-built isolation settings for them.
 
+## Runtime environment
+
+Runtimes get the user's login-shell environment, not the Host's `process.env`
+(#1095). The daemon captures it once per process from a closed seed and a
+fixed `PATH`, so the CLIs the user installed with Homebrew, nvm, bun or an
+official installer are found in both service and embedded use, and a variable
+the Host sets does not reach an agent.
+
+- A Host that wants a runtime to receive a variable it sets (before or after
+  start) lists the name in `pass`:
+  `DaemonConfig.runtimeEnvironment: { pass: ['ACME_TOKEN_FILE'] }` with
+  `createDaemon`, or the same object as each adapter's `runtimeEnvironment`
+  option with `createDaemonWithAdapters`, which rejects the `DaemonConfig`
+  field. Custom adapters implement `runtimeEnvironment()`, normally with
+  `buildRuntimeEnvironment(policy)`.
+- `{ base: 'allowlist', allow: [...] }` is the strict mode: the platform
+  baseline plus `allow`, from the live environment, with no login-shell capture.
+- If the capture fails (an rc that exits non-zero, hangs past 10 s or prints
+  more than 1 MiB), the daemon stays up, `status` shows
+  `environment: unavailable code=<code>`, every `login-shell` runtime shows
+  `refused:runtime_environment_unavailable:<code>` and offers are declined. Fix
+  the rc and restart the daemon.
+- Windows has no login shell: runtimes get the platform baseline names of the
+  live session (`windows-session`). List any other name in `pass`.
+
 ## Configuration
 
 `byok-agent config check --strict --json --config device.json` validates the

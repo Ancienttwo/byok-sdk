@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "c1b874846d1df869443bbcfe24917045b9729e243ff364578cf59c3b0118e67d"
+    "snapshotSha256": "d970c198a249785bc6e2138b26c4680c3d7b50e3c195c2faf5953b877e80c309"
   },
   "configFields": {
     "status": "tracked",
@@ -859,6 +859,12 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "config:runtimeEnvironment",
+      "change": "added",
+      "after": "optional schema-sha256=25be0c05980d06a5",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "config:runtimePreference",
       "change": "added",
       "after": "optional schema-sha256=3e8f01f4e19c710e",
@@ -936,7 +942,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=494803d4d57d5fbd",
-      "after": "K8 0.0.1 src-sha256=90dc26d44c7903d3",
+      "after": "K8 0.0.1 src-sha256=01911b29e0d5f0b7",
       "entry": "execution-core-published"
     },
     {
@@ -1010,6 +1016,26 @@
       "item": "export:@byok-sdk/client#BlobClient",
       "change": "changed",
       "entry": "device-store-default-dir-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
@@ -1142,6 +1168,26 @@
       "entry": "storage-retention-bounds"
     },
     {
+      "item": "export:@byok-sdk/client#GrokAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#HostLayout",
       "change": "added",
       "entry": "host-layout-helper"
@@ -1182,6 +1228,16 @@
       "entry": "device-resource-caps"
     },
     {
+      "item": "export:@byok-sdk/client#PiAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#PreparedRuntimeOperation",
       "change": "changed",
       "entry": "pi-session-retention-lifecycle"
@@ -1195,6 +1251,41 @@
       "item": "export:@byok-sdk/client#ResetDeviceCursorInput",
       "change": "added",
       "entry": "cursor-unreadable-halt"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentConflictRule",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentPolicy",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentUnavailableError",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeObservation",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
@@ -1220,6 +1311,21 @@
       "item": "export:@byok-sdk/client#SdkPackagingFormat",
       "change": "added",
       "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceEnvironmentStatus",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceEnvironmentUnavailableCode",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#buildRuntimeEnvironment",
+      "change": "added",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client#bundledSdkHelperHost",
@@ -1272,9 +1378,94 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
       "change": "changed",
       "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentConflictRule",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentPolicy",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentUnavailableError",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeObservation",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
@@ -1285,6 +1476,16 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeSessionLease",
       "change": "added",
       "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#buildRuntimeEnv",
+      "change": "removed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#buildRuntimeEnvironment",
+      "change": "added",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#AgentMemoryError",
@@ -1360,6 +1561,11 @@
       "item": "export:@byok-sdk/client/packaging#sdkBundleImportMetaExemptions",
       "change": "added",
       "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterBehavior",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/cloud#AllowAllRateLimiter",
