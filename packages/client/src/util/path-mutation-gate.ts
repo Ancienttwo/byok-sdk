@@ -53,6 +53,13 @@ export class PathMutationGateBusyError extends Error {
  *
  * Every other platform is refused.
  */
+/**
+ * The gate's interprocess protocol: SDK processes of one release exclude each
+ * other only when they lock the same way. Bump it with any change to how a
+ * gate is taken, so the upgrade manifest records the break (#1149).
+ */
+export const PATH_MUTATION_GATE_PROTOCOL = 2;
+
 // Fixed and environment-independent; holds the darwin lock files.
 const POSIX_GATE_ROOT = `/tmp/byok-pm-${process.getuid?.() ?? 'unknown'}`;
 // darwin <sys/fcntl.h>; Node and Bun pass open(2) flags through unchanged.

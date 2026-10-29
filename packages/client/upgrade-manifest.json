@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "ba12a7a7ac08621d77925c1069974184dc06bc9968eda791597f1cf8e039a63c"
+    "snapshotSha256": "6dafd90f5cb71f37cf2b7e6d6b4172ee7977f2c4a96f8d49ef297270676dee76"
   },
   "configFields": {
     "status": "tracked",
@@ -436,6 +436,15 @@
         "export:@byok-sdk/server/execution-core#versionSwitchDue",
         "export:@byok-sdk/server/execution-core/canonical#canonical",
         "export:@byok-sdk/server/execution-core/canonical#hash"
+      ]
+    },
+    {
+      "id": "path-mutation-gate-os-lock",
+      "impact": "breaking",
+      "summary": "The path-mutation gate (#1149), which SDK processes on one machine use to exclude each other from a store, an Agent home, a skill-pack store or a Pi session, is now an OS lock owned by one open handle: an O_EXLOCK open of /tmp/byok-pm-<uid>/<identity>.lock on macOS, an abstract unix socket on Linux, a named pipe on Windows as before. The OS frees it when its holder exits, and no SDK process removes another's gate. Releases up to 0.31 used unix socket files under /tmp/byok-pm-<uid>, which do not exclude the new locks on macOS and Linux. Migration: stop every SDK process on a store (the daemon, the CLI and an App that embeds the SDK) before upgrading any of them, and start them again only on the new release. Windows is unaffected.",
+      "migration": "docs/host-local-storage-layout.md#upgrading-from-031-or-earlier",
+      "items": [
+        "interprocess:path-mutation-gate"
       ]
     }
   ],
@@ -1829,6 +1838,12 @@
       "item": "export:@byok-sdk/server/execution-core/canonical#hash",
       "change": "added",
       "entry": "execution-core-published"
+    },
+    {
+      "item": "interprocess:path-mutation-gate",
+      "change": "added",
+      "after": "protocol=2",
+      "entry": "path-mutation-gate-os-lock"
     },
     {
       "item": "store:cloud-dataplane-postgres",

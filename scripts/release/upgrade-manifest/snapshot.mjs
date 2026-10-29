@@ -14,6 +14,7 @@
 //   store:<id>                        on-disk store format identity
 //   example:<dir>                     vendored example (K4, K8) version + source digest
 //   config:<field>                    top-level DaemonConfig field of the generated schema (#1094)
+//   interprocess:<id>                 protocol version SDK processes must share to exclude each other (#1149)
 //
 // Every extractor fails loudly when the source shape it reads is not found, so
 // a refactor that moves an authority breaks the gate instead of emptying a
@@ -135,6 +136,16 @@ export const STORES = [
       return `@earendil-works/pi-durable@${version}`;
     },
   },
+];
+
+/**
+ * Protocols between SDK processes on one machine. Processes of two releases
+ * whose versions differ do not exclude each other, so a change is breaking:
+ * stop every SDK process before the upgrade. `constant` is an exported
+ * integer in `source`.
+ */
+export const INTERPROCESS_PROTOCOLS = [
+  { id: 'path-mutation-gate', source: 'packages/client/src/util/path-mutation-gate.ts', constant: 'PATH_MUTATION_GATE_PROTOCOL' },
 ];
 
 /** Examples that Hosts copy (vendor) instead of installing. */
@@ -300,6 +311,12 @@ export function buildSnapshot(root) {
   for (const store of STORES) {
     const isFile = statSync(path.join(root, store.source)).isFile();
     add(`store:${store.id}`, store.format(root, isFile ? track(store.source) : store.source));
+  }
+
+  // Interprocess protocols.
+  for (const protocol of INTERPROCESS_PROTOCOLS) {
+    const pattern = new RegExp(`^export const ${protocol.constant} = (\\d+);$`, 'm');
+    add(`interprocess:${protocol.id}`, `protocol=${requireMatch(read(root, track(protocol.source)), pattern, protocol.source)}`);
   }
 
   // Vendored examples.

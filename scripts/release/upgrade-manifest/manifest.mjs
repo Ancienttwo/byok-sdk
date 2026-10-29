@@ -23,7 +23,7 @@ const ENTRY_KEYS = new Set(['id', 'impact', 'summary', 'migration', 'acceptance'
 const ISSUE_LINK = /^https:\/\/github\.com\/Ancienttwo\/byok-sdk\/(?:issues|pull)\/\d+$/;
 // Categories whose before/after values mean something to a reader. Export
 // digests and union markers do not, so `changes` omits them.
-const SHOW_VALUES = new Set(['bin', 'store', 'example', 'config']);
+const SHOW_VALUES = new Set(['bin', 'store', 'example', 'config', 'interprocess']);
 
 export const category = (item) => item.slice(0, item.indexOf(':'));
 

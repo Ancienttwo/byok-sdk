@@ -212,7 +212,13 @@ removes a lock path, so no process can remove another holder's gate. A held
 gate fails at once as busy. The macOS lock files stay on disk, one per gated
 path. A Linux abstract socket name has no file permissions, so another local
 user in the same network namespace could hold a name and keep that gate busy;
-it can never become a second holder.
+it can never become a second holder. The macOS lock files sit in the uid-keyed
+`/tmp/byok-pm-<uid>`, which does not depend on `HOME`, so every process of one
+user resolves the same file. A tool that deletes a lock file while its gate is
+held would split ownership: the next acquirer creates a new file and locks it.
+macOS ships no periodic `/tmp` cleaner, so only a third-party cleaner can do
+this; the long-held Pi session writer gate is the main exposure. A reboot clears
+`/tmp` with no gate held, which is harmless.
 
 #### Upgrading from 0.31 or earlier
 
