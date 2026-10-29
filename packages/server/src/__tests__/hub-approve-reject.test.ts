@@ -94,6 +94,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
   // describes as the daemon's job. Orchestrator decision: accept the kernel's
   // split (host resolves the approval, runtime owns the terminal) and document
   // the break in Step 5, or have the façade force a terminal on reject.
+  // Decision D4: https://github.com/Ancienttwo/byok-sdk/issues/1153
   it.skip('reject (with a reason) on a task currently AwaitApproval moves it to Failed with that reason', async () => {
     const { byok: instance, daemon } = await start();
 
@@ -297,6 +298,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     // 2d gap: same divergence as the outer `reject` case above — the kernel's
     // `rejectTask` resolves the approval and hands the runtime a `task.reject`;
     // it does not write a `Failed` terminal on the host's behalf.
+    // Decision D5: https://github.com/Ancienttwo/byok-sdk/issues/1153
     it.skip('reject(reason, {approvalId}) targets the CURRENT pending approval end to end through dispatch()', async () => {
       const { byok: instance, daemon } = await start();
 

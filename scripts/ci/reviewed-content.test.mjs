@@ -290,7 +290,7 @@ function commit(f, message) {
 test('the Node pin admits one exact X.Y.Z and selects every routine family, never the complete suite', t => {
   const f = fixture(t);
   f.write('.node-version', '24.21.0\n'); commit(f, 'node pin');
-  const routine = knownFamilies.filter(id => id !== 'build-test').sort();
+  const routine = knownFamilies.filter(id => id !== 'build-test' && id !== 'macos-client').sort();
   for (const value of ['24.22.1\n', '24.22.1', '26.0.0\n']) {
     f.write('.node-version', value);
     assert.deepEqual(selectImpact(['.node-version'], f), { dirs: [], files: ['.node-version'], families: routine, reason: 'impacted' });
@@ -298,7 +298,7 @@ test('the Node pin admits one exact X.Y.Z and selects every routine family, neve
   f.write('.node-version', '24.22.1\n');
   const plan = planCi({ event: 'push', sha: f.base, paths: ['.node-version'], ...f });
   assert.deepEqual(plan.families, routine);
-  const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, { result: id === 'build-test' ? 'skipped' : 'success' }]));
+  const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, { result: ['build-test', 'macos-client'].includes(id) ? 'skipped' : 'success' }]));
   assert.doesNotThrow(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd));
   needs['build-test'] = { result: 'success' };
   assert.throws(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd), /unexpectedly ran: build-test/);

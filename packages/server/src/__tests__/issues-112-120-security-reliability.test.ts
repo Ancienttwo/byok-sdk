@@ -172,29 +172,9 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
     expect(oversized.status).toBe(413);
   });
 
-  // 2d gap: this reserved an upload URL against a blob store constructed OUTSIDE
-  // the server (`new LocalDiskBlobStore()` + `CreateByokServerOptions.blobStore`)
-  // and then mounted a server whose ceiling was lower than the reservation. Both
-  // the class and the option are deleted (WP3B 2b — blob storage is the kernel's
-  // composition now), and a running instance's `maxBlobSizeBytes` cannot be
-  // changed, so a URL reserved above the current ceiling cannot be produced from
-  // the public surface. The absolute-ceiling check itself is still live code
-  // (`blobUploadContentHandler`, `expectedBytes > absoluteCeiling`); the two
-  // #114 cases above cover the declared-size half of it.
-  it.skip('#114 enforces the deployment ceiling even for a previously-reserved capability URL', () => {
-    // intentionally empty — see the 2d gap note above.
-  });
+  // The removed external blob-store injection cannot reserve above this instance ceiling; the #114 tests above cover current admission.
 
-  // 2d gap: needs TWO tenants on one instance, and an embedded server has
-  // exactly one (`createPairingCode` no longer takes a tenant), so a "foreign"
-  // blob id cannot be addressed by a device of another tenant here. Its second
-  // half drove `LocalDiskBlobStore`/`SqliteBlobStore` directly, both deleted in
-  // 2b. Tenant-scoped blob ownership — including that an unknown and a foreign
-  // id are indistinguishable — is covered at the port level by
-  // `packages/conformance/src/cloud/blobs.ts`.
-  it.skip('#115 makes a disclosed foreign blob id indistinguishable from missing at the URL-mint boundary', () => {
-    // intentionally empty — see the 2d gap note above.
-  });
+  // Foreign/unknown blob identity is covered by packages/conformance/src/cloud/blobs.ts.
 
   it('#116 returns an explicit long-poll replay-gap failure instead of a normal partial tail', async () => {
     const started = await start();

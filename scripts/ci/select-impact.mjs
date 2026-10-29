@@ -177,7 +177,7 @@ export const workspaceGraph = {
 };
 
 export const knownFamilies = Object.freeze([
-  'build-test', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
+  'build-test', 'macos-client', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
@@ -417,10 +417,10 @@ export function selectImpact(paths, context = {}) {
     }
     // #702: the Node pin is the runtime of every platform job, so a reviewed
     // exact version selects every routine family. The complete test suite
-    // stays release-validation only.
+    // stays nightly/release-validation only.
     if (path === '.node-version') {
       verifyReviewedContent(path, context);
-      for (const id of knownFamilies) if (id !== 'build-test') families.add(id);
+      for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
@@ -600,10 +600,10 @@ export function selectImpact(paths, context = {}) {
     if (path === '.gitignore' || rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     // W7: a ci.yml change can change any family job, so it selects every
     // routine family. The client suite also runs: two of its tests read this
-    // workflow. The complete test suite stays release-validation only.
+    // workflow. The complete test suite stays nightly/release-validation only.
     if (path === '.github/workflows/ci.yml') {
       scripts = true; dirs.add('packages/client');
-      for (const id of knownFamilies) if (id !== 'build-test') families.add(id);
+      for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
     }
     // W7: agent-memory-windows.yml is removed. Its checks run in the

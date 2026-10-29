@@ -90,7 +90,7 @@ const cloudFactory: CloudCompositionFactory = {
   },
 };
 
-if (isSqliteAvailable()) {
+if (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') {
   runCoreConformance('server SQLite embedded', coreFactory);
   runCloudConformance('server SQLite embedded', cloudFactory);
 }

@@ -175,6 +175,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
     // by the batch-retry test above). Orchestrator decision: accept the
     // re-emission as the honest report of a new observation, or restore
     // suppression in the relay.
+    // Decision D1: https://github.com/Ancienttwo/byok-sdk/issues/1153
     it.skip('a fresh (non-duplicate-id) task.await_approval arriving while already AwaitApproval pushes nothing further onto TaskHandle.events()', async () => {
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
@@ -374,6 +375,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
     // while the task was still live is still delivered after it goes terminal.
     // Orchestrator decision: accept the kernel's delivery semantics (packet
     // §2), or add a terminal-task filter to the kernel's events handler.
+    // Decision D2: https://github.com/Ancienttwo/byok-sdk/issues/1153
     it.skip('GET /byok/events excludes task.steer/task.approve enqueued before a task went terminal', async () => {
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {

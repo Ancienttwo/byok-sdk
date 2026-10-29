@@ -50,7 +50,7 @@ function rows(path: string): unknown[] {
   }
 }
 
-(isSqliteAvailable() ? describe : describe.skip)('SQLite mailbox protocol preflight', () => {
+((isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip)('SQLite mailbox protocol preflight', () => {
   it('fences on wire v4', () => {
     expect(PROTOCOL_VERSION).toBe(4);
   });

@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { requireCiSuccess } from './require-ci-success.mjs';
 
-const families = ['build-test', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
+const families = ['build-test', 'macos-client', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit', 'hermes-real-windows', 'runtime-contract'];
@@ -36,10 +36,12 @@ test('CLI fails closed when result JSON is absent or malformed', () => {
     assert.equal(run.status, 1, run.stdout);
   }
 });
-test('workflow separates targeted events from explicit complete release validation', () => {
+test('workflow separates targeted, nightly and approved release validation', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.match(workflow, /push:\n    branches: \[main\]/);
   assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /schedule:\n    - cron: '[^']+'/);
+  assert.ok(workflow.includes("if: needs.select.outputs.mode == 'targeted'"));
   assert.match(workflow, /workflow_dispatch:[\s\S]*release_sha:/);
   assert.doesNotMatch(workflow, /pull_request_target:/);
   const jobs = workflow.split('\njobs:\n')[1];
@@ -54,6 +56,14 @@ test('workflow separates targeted events from explicit complete release validati
   assert.match(aggregate, /^    name: CI required$/m);
   assert.match(aggregate, /^    if: \$\{\{ always\(\) \}\}$/m);
   assert.deepEqual(JSON.parse(aggregate.match(/^    needs: (.*)$/m)[1]), ['select', 'targeted', ...families]);
+  const macos = jobs.slice(jobs.indexOf('  macos-client:')).split(/\n  [a-z][a-z0-9-]+:/)[0];
+  assert.match(macos, /runs-on: macos-latest/);
+  assert.match(macos, /run: bun run --filter @byok-sdk\/client test\n/);
+  assert.match(macos, /BYOK_REQUIRE_BUN: '1'/);
+  assert.match(macos, /BYOK_REQUIRE_SQLITE: '1'/);
+  assert.match(macos, /BYOK_TEST_BUN_BIN=/);
+  const artifact = workflow.slice(workflow.indexOf('      - name: Retain the accepted release tarballs'));
+  assert.match(artifact, /if: matrix.os == 'ubuntu-latest' && needs.select.outputs.release == 'true'/);
   assert.match(aggregate, /^          CI_NEEDS: \$\{\{ toJSON\(needs\) \}\}$/m);
   assert.match(aggregate, /^        run: node scripts\/ci\/require-ci-plan.mjs$/m);
   assert.match(workflow, /if: matrix.os == 'ubuntu-latest' && needs.select.outputs.release == 'true'\n        uses: actions\/upload-artifact/);

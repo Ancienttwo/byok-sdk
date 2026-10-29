@@ -70,7 +70,7 @@ test('ci.yml selects every routine family and the client suites that read it (W7
     'packages/client/src/__tests__/support/test-bun-bin.pin.test.ts',
   ]) assert.match(readFileSync(new URL(reader, root), 'utf8'), /\.github\/workflows\/ci\.yml/, reader);
   const impact = selectImpact(['.github/workflows/ci.yml']);
-  assert.deepEqual(impact.families, knownFamilies.filter(id => id !== 'build-test').sort());
+  assert.deepEqual(impact.families, knownFamilies.filter(id => id !== 'build-test' && id !== 'macos-client').sort());
   assert.ok(impact.dirs.includes('packages/client'));
   assert.equal(impact.reason, 'impacted');
   assert.deepEqual(selectImpact(['.github/workflows/release.yml']).families, []);
@@ -381,7 +381,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 16);
+  assert.equal(knownFamilies.length, 17);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {
