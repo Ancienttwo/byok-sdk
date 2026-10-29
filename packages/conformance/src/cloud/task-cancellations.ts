@@ -58,6 +58,39 @@ export function runTaskCancellationConformance(factory: CloudCompositionFactory)
       });
     });
 
+    it('settles a repeat cancel of claimed work once its delivery row is retired', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores } = handle;
+        await stores.tasks.open(TENANT, { taskId: 'retired', deviceId: 'device-retired' });
+        await stores.tasks.claim(TENANT, { taskId: 'retired', deviceId: 'device-retired' });
+        const first = await stores.cancellations.request(TENANT, {
+          taskId: 'retired',
+          proposedMessageId: 'cancel-retired',
+          reason: 'stuck runtime',
+          materialize: async () => body('cancel-retired'),
+        });
+        expect(first?.attempt.status).toBe('cancel_requested');
+        expect(first?.message).toBeDefined();
+        await expect(handle.retireCancellationDelivery(TENANT, 'device-retired')).resolves.toBe(1);
+
+        let materializations = 0;
+        const replay = await stores.cancellations.request(TENANT, {
+          taskId: 'retired',
+          proposedMessageId: 'cancel-retired-retry',
+          reason: 'ignored retry',
+          materialize: async () => {
+            materializations += 1;
+            return body('cancel-retired-retry');
+          },
+        });
+
+        expect(replay?.attempt).toEqual(first?.attempt);
+        expect(replay?.message).toBeUndefined();
+        expect(materializations).toBe(0);
+        await expect(handle.retireCancellationDelivery(TENANT, 'device-retired')).resolves.toBe(0);
+      });
+    });
+
     it('commits neither side when materialization fails and writes nothing for an unknown task', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.tasks.open(TENANT, { taskId: 'rollback', deviceId: 'device-rollback' });
