@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
+import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { createMutableClock, contentHash, tenantId } from '@byok-sdk/core';
 import { createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MailboxWakeSubscription } from '@byok-sdk/cloud';
-import { createPostgresMailboxWake, type PostgresMailboxWake } from '../mailbox-wake';
+import { createPostgresMailboxWake, MailboxWakeProbeMissedError, type PostgresMailboxWake, type PostgresMailboxWakeOptions } from '../mailbox-wake';
 import { createPostgresCloudMaintenance } from '../cleanup';
 import { migrate } from '../migrate';
 import { createPostgresCoreStores } from '../stores/core/index';
@@ -32,7 +33,46 @@ function listenerUrl(scope: DataplaneScope): string {
 const resources: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of resources.splice(0).reverse()) await dispose(); });
 
-async function fixture() {
+interface FreezableProxy {
+  readonly url: string;
+  /** Stops forwarding on every open connection without closing it: a half-open path. New connections forward normally. */
+  freeze(): void;
+}
+
+async function freezableProxy(upstreamUrl: string): Promise<FreezableProxy> {
+  const target = new URL(upstreamUrl);
+  const pairs: Array<{ sockets: net.Socket[]; frozen: boolean }> = [];
+  const server = net.createServer((client) => {
+    const upstream = net.connect(Number(target.port), target.hostname);
+    const pair = { sockets: [client, upstream], frozen: false };
+    pairs.push(pair);
+    for (const [from, to] of [[client, upstream], [upstream, client]] as const) {
+      from.on('data', (chunk) => { if (!pair.frozen) to.write(chunk); });
+      from.on('close', () => { if (!pair.frozen) to.destroy(); });
+      from.on('error', () => { if (!pair.frozen) to.destroy(); });
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  resources.push(async () => {
+    for (const pair of pairs) for (const socket of pair.sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const url = new URL(upstreamUrl);
+  url.hostname = '127.0.0.1';
+  url.port = String((server.address() as net.AddressInfo).port);
+  return {
+    url: url.toString(),
+    freeze() {
+      for (const pair of pairs) {
+        pair.frozen = true;
+        for (const socket of pair.sockets) socket.pause();
+      }
+    },
+  };
+}
+
+async function fixture(wakeOptions: Pick<PostgresMailboxWakeOptions, 'probeIntervalMs' | 'probeTimeoutMs'> & { readonly proxy?: boolean } = {}) {
+  const { proxy: useProxy = false, ...probeOptions } = wakeOptions;
   const scope = await createDataplaneScope();
   resources.push(() => scope.dispose());
   await migrate(scope.pool, DEPLOY_SQL);
@@ -43,13 +83,14 @@ async function fixture() {
     mailboxLimitBytes: 1_000_000n, retentionPolicyId: 'wake',
   });
   const errors: Error[] = [];
-  const wake = createPostgresMailboxWake({ connectionString: listenerUrl(scope), onError: (error) => errors.push(error) });
+  const proxy = useProxy ? await freezableProxy(listenerUrl(scope)) : undefined;
+  const wake = createPostgresMailboxWake({ connectionString: proxy?.url ?? listenerUrl(scope), ...probeOptions, onError: (error) => errors.push(error) });
   resources.push(() => wake.close());
   await vi.waitFor(async () => {
     const active = await scope.pool.query("SELECT pid FROM pg_stat_activity WHERE usename = $1 AND application_name = 'byok-mailbox-wake' AND state = 'idle' AND query LIKE 'SELECT pg_notify%'", [scope.role]);
     expect(active.rowCount).toBe(1);
   });
-  return { scope, core, wake, errors };
+  return { scope, core, wake, errors, proxy };
 }
 
 function subscribe(wake: PostgresMailboxWake, device = DEVICE): MailboxWakeSubscription {
@@ -147,6 +188,39 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres post-commit mailbox wake', () => {
     const closed = await scope.pool.query("SELECT pid FROM pg_stat_activity WHERE usename = $1 AND application_name = 'byok-mailbox-wake'", [scope.role]);
     expect(closed.rowCount).toBe(0);
     expect(() => subscribe(wake)).toThrow('closed');
+  });
+
+  it('retires a half-open connection on a missed periodic probe and wakes again after reconnecting', async () => {
+    const { scope, core, wake, errors, proxy } = await fixture({ proxy: true, probeIntervalMs: 200, probeTimeoutMs: 300 });
+    const sub = subscribe(wake);
+    const listenerPids = async (): Promise<number[]> => {
+      const idle = await scope.pool.query("SELECT pid FROM pg_stat_activity WHERE usename = $1 AND application_name = 'byok-mailbox-wake' AND state = 'idle' AND query LIKE 'SELECT pg_notify%'", [scope.role]);
+      return idle.rows.map((row) => row.pid);
+    };
+    const stale = await listenerPids();
+    expect(stale).toHaveLength(1);
+    // Stay silent past one interval so the first periodic probe is observed before the path dies.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(errors).toEqual([]);
+    proxy!.freeze();
+    await vi.waitFor(() => {
+      expect(errors.some((error) => error instanceof MailboxWakeProbeMissedError)).toBe(true);
+    }, { timeout: 2_000 });
+    await vi.waitFor(async () => {
+      expect((await listenerPids()).some((pid) => !stale.includes(pid))).toBe(true);
+    }, { timeout: 3_000 });
+    await sub.next(100); // drain the hint every route gets after a reconnect
+    const started = performance.now();
+    const waiting = sub.next(5_000);
+    await core.mailbox.append(TENANT, { deviceId: DEVICE, messageId: randomUUID(), admission: 'limited', materialize: (seq) => body(seq) });
+    await waiting;
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+});
+
+describe('mailbox wake options', () => {
+  it.each([0, -1, 1.5, 2_147_483_648, Number.NaN])('rejects probeIntervalMs %s', (probeIntervalMs) => {
+    expect(() => createPostgresMailboxWake({ connectionString: 'postgres://unused', probeIntervalMs })).toThrow(RangeError);
   });
 });
 

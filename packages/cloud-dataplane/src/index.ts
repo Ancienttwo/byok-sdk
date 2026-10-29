@@ -90,5 +90,5 @@ export type {
 } from './tenant-erasure';
 
 // Resident Node session listener; deliberately excluded from ./runtime.
-export { createPostgresMailboxWake } from './mailbox-wake';
+export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake';
 export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';

@@ -468,6 +468,8 @@ export interface BoardStore {
     claim(tenant: TenantId, input: BoardClaimInput): Promise<BoardItem>;
     unclaim(tenant: TenantId, input: BoardUnclaimInput): Promise<BoardItem>;
     updateStatus(tenant: TenantId, input: BoardStatusUpdateInput): Promise<BoardItem>;
+    /** Removes the item; an absent item is not an error. The Host archive step (#1120) is the caller. */
+    remove(tenant: TenantId, itemId: string): Promise<void>;
 }
 // ==== @byok-sdk/core dist/capabilities.d.ts ====
 /**
@@ -1184,6 +1186,7 @@ export declare class InMemoryBoardStore implements BoardStore {
     create(tenant: TenantId, input: BoardItemInput): Promise<BoardItem>;
     get(tenant: TenantId, itemId: string): Promise<BoardItem | undefined>;
     list(tenant: TenantId, query: BoardListQuery): Promise<BoardPage>;
+    remove(tenant: TenantId, itemId: string): Promise<void>;
     claim(tenant: TenantId, input: BoardClaimInput): Promise<BoardItem>;
     unclaim(tenant: TenantId, input: BoardUnclaimInput): Promise<BoardItem>;
     updateStatus(tenant: TenantId, input: BoardStatusUpdateInput): Promise<BoardItem>;

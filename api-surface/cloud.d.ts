@@ -1457,11 +1457,10 @@ export declare const AGENT_HOME_CONTRACT_CAPABILITY = "agent-home-contract";
 export interface ByokCloudOptions {
     readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
     /**
-     * Prunes used device-proof request ids in maintenance. Absent, the
-     * `proofReceipts` step reports `not-configured` and every used `requestId`
-     * stays single-use for as long as its receipt is kept.
+     * Prunes used device-proof request ids in maintenance (#1120). Required: a
+     * deployment cannot keep every used `requestId` forever.
      */
-    readonly proofReceiptRetention?: ProofReceiptRetentionOptions;
+    readonly proofReceiptRetention: ProofReceiptRetentionOptions;
     readonly mailboxWake: MailboxWake;
     readonly core: CoreStores;
     readonly cloud: CloudStores;
@@ -2089,6 +2088,7 @@ import { type TokenSigner } from '../auth/tokens';
 import type { CloudCrypto } from '../crypto/port';
 import { type ByokCloud, type ByokCloudOptions } from '../cloud';
 import type { MailboxWake } from '../mailbox-wake';
+import type { ProofReceiptRetentionOptions } from '../maintenance';
 import type { BlobContentProxy, CloudStores } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from '../agent-memory-projection';
@@ -2144,6 +2144,8 @@ export interface InMemoryByokCloud {
     readonly stores: CloudStores;
     /** The byte proxy the two `/content` routes were mounted on. */
     readonly blobContentProxy: BlobContentProxy;
+    /** The retention the composition passed to `createByokCloud`, for a test that builds a second cloud on these stores. */
+    readonly proofReceiptRetention: ProofReceiptRetentionOptions;
     readonly clock: Clock;
     readonly crypto: CloudCrypto;
 }
@@ -3169,6 +3171,7 @@ export { ByokCloudError, CLOUD_ERROR_CODES, TaskOfferAppendRefusedError, isCloud
 export type { CloudErrorCode } from './errors';
 export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
+export type { TaskArchiveCounts, TaskArchiveListInput, TaskArchiveStepCounts, TaskArchiveStore, TaskArchiveStoreInput, TaskArchiveStoreResult, TaskArchiveWork, } from './task-archive';
 export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
 export { parseRecordedWriteResult } from './e2ee-member';
@@ -3288,7 +3291,9 @@ export interface MailboxWakeSubscription {
 }
 // ==== @byok-sdk/cloud dist/maintenance.d.ts ====
 import { type CollectExpiredCounts, type CollectExpiredInput, type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority, type Clock, type TenantId } from '@byok-sdk/core';
+import type { CloudCrypto } from './crypto/port';
 import type { CloudStores } from './stores/ports';
+import { type TaskArchiveStepCounts } from './task-archive';
 export interface RetentionPolicy {
     readonly mailboxAckedRetentionMs: bigint;
     readonly mailboxUnackedRetentionMs: bigint;
@@ -3301,10 +3306,19 @@ export interface RetentionPolicy {
     readonly mailboxDeadLetterRetentionMs: bigint;
     readonly requestReceiptRetentionMs: bigint;
     readonly objectOrphanGraceMs: bigint;
+    /**
+     * How long a terminal task keeps its bodies (#1120). A task whose
+     * `archive_after` (its terminal instant) is older is archived: its bodies
+     * become tombstones and its board item goes, while the task row and the
+     * tombstoned receipts stay as its identity fence. At least
+     * `mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs`, so no archived
+     * task still has a delivery the mailbox would replay.
+     */
+    readonly terminalTaskArchiveMs: bigint;
 }
 export declare const DEFAULT_RETENTION_POLICY: RetentionPolicy;
 export declare const DEFAULT_MAINTENANCE_LIMIT = 500;
-export declare const MAINTENANCE_STEPS: readonly ["mailbox", "receipts", "nonces", "pairingCodes", "presence", "activity", "approvals", "agentMessageDraft", "deviceAssertionReplay", "quota", "objects", "proofReceipts"];
+export declare const MAINTENANCE_STEPS: readonly ["mailbox", "tasks", "receipts", "nonces", "pairingCodes", "presence", "activity", "approvals", "agentMessageDraft", "deviceAssertionReplay", "quota", "objects", "proofReceipts"];
 /** Receipts of used device-proof request ids recorded before `recordedBefore` are removed. */
 export interface ProofReceiptCollectExpiredInput extends CollectExpiredInput {
     readonly recordedBefore: string;
@@ -3344,8 +3358,11 @@ export type MaintenanceStepReport = ({
     readonly committed?: CollectExpiredCounts;
     /** Absent when a failed remainder probe left this unknown. */
     readonly more?: boolean;
-} | {
-    readonly step: 'deviceAssertionReplay' | 'proofReceipts';
+} | ({
+    readonly step: 'tasks';
+    readonly status: 'ok';
+} & TaskArchiveStepCounts) | {
+    readonly step: 'deviceAssertionReplay';
     readonly status: 'not-configured';
 } | {
     readonly step: 'agentMessageDraft';
@@ -3370,8 +3387,9 @@ export declare function runMaintenanceSteps(ports: {
     readonly core: CoreStores;
     readonly cloud: CloudStores;
     readonly clock: Clock;
+    readonly crypto: Pick<CloudCrypto, 'sha256'>;
     readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
-    readonly proofReceiptRetention?: ResolvedProofReceiptRetention;
+    readonly proofReceiptRetention: ResolvedProofReceiptRetention;
 }, input: MaintenanceInput): Promise<MaintenanceReport>;
 // ==== @byok-sdk/cloud dist/receipt-retention.d.ts ====
 export type ReceiptRetentionClass = 'identity' | 'request';
@@ -3525,6 +3543,8 @@ export declare class SteerRejectedError extends Error {
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { type ActivityAppendInput, type ActivityStore, type ActivityTail } from '../../activity';
+/** Deletes the task's tail for the Host task archive (#1120); returns the rows removed. */
+export declare function deleteActivityTail(store: InMemoryActivityStore, tenant: TenantId, taskId: string): number;
 export declare class InMemoryActivityStore implements ActivityStore {
     #private;
     private readonly clock;
@@ -3579,6 +3599,8 @@ export declare class InMemoryAgentMemoryProjectionAuthorizer implements AgentMem
 // ==== @byok-sdk/cloud dist/stores/in-memory/agent-message-draft.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult } from '../../agent-message-draft';
+/** Deletes the task's draft for the Host task archive (#1120); returns the rows removed. */
+export declare function deleteAgentMessageDraft(store: InMemoryAgentMessageDraftStore, tenant: TenantId, taskId: string): number;
 export declare class InMemoryAgentMessageDraftStore implements AgentMessageDraftStore {
     #private;
     private readonly clock;
@@ -3592,6 +3614,8 @@ export declare class InMemoryAgentMessageDraftStore implements AgentMessageDraft
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline';
+/** Deletes the task's tail for the Host task archive (#1120); returns the rows removed. */
+export declare function deleteApprovalTimelineTail(store: InMemoryApprovalTimelineStore, tenant: TenantId, taskId: string): number;
 export declare class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
     #private;
     private readonly clock;
@@ -3825,8 +3849,10 @@ export { InMemoryE2eeMemberStore } from './e2ee-member';
  * without a database — which is what makes those same assertions meaningful
  * when a durable composition (S3b's journal, S4A's schema) runs them later.
  */
-import type { Clock, ObjectStore } from '@byok-sdk/core';
+import type { Clock, MailboxStore, ObjectStore, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '../../crypto/port';
+import type { ProofReceiptRetentionAuthority } from '../../maintenance';
+import type { TaskArchiveStore } from '../../task-archive';
 import type { BlobContentProxy, CloudStores } from '../ports';
 import { type InMemoryBlobBytes } from './blobs';
 export { AllowAllRateLimiter } from './rate-limiter';
@@ -3855,8 +3881,24 @@ export { InMemoryAgentEgressStore } from './agent-egress';
 export interface InMemoryCloudComposition {
     readonly stores: CloudStores;
     readonly blobContentProxy: BlobContentProxy;
+    /** The owner of the used proof `requestId`s in `stores.proofReceipts`, for `proofReceiptRetention`. */
+    readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
 }
-export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: import('@byok-sdk/core').MailboxStore, objectBytes: InMemoryBlobBytes): InMemoryCloudComposition;
+/** Deletes a task's ephemeral rows from the in-memory stores that `createInMemoryCloudStores` built; each returns the rows removed. */
+export interface InMemoryEphemeralTaskRows {
+    deleteActivity(tenant: TenantId, taskId: string): number;
+    deleteApprovals(tenant: TenantId, taskId: string): number;
+    deleteAgentMessageDraft(tenant: TenantId, taskId: string): number;
+}
+/** Builds the Host task archive for a core that is not the in-memory one. */
+export type InMemoryTaskArchiveFactory = (rows: InMemoryEphemeralTaskRows) => TaskArchiveStore;
+export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: MailboxStore, objectBytes: InMemoryBlobBytes, 
+/**
+ * Absent, the archive rewrites the in-memory core `mailbox` and `objects`,
+ * and construction throws when they are another core's. A host with another
+ * core supplies the archive that owns its rows.
+ */
+taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
 // ==== @byok-sdk/cloud dist/stores/in-memory/mailbox-wake.d.ts ====
 import type { MailboxWake } from '../../mailbox-wake';
 export declare const DEFAULT_MAILBOX_WAKE_FALLBACK_MS = 5000;
@@ -3915,8 +3957,9 @@ export declare class InMemoryPairingCodeStore implements PairingCodeStore, Pairi
     redeemAndRegister(input: PairingEnrollmentInput): Promise<DeviceRecord | undefined>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/proof-receipts.d.ts ====
-import { type Clock, type TenantId } from '@byok-sdk/core';
+import { type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type { ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '../ports';
+import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority } from '../../maintenance';
 export declare class InMemoryProofRequestReceiptStore implements ProofRequestReceiptStore {
     #private;
     constructor(clock: Clock);
@@ -3925,6 +3968,12 @@ export declare class InMemoryProofRequestReceiptStore implements ProofRequestRec
         readonly created: boolean;
     }>;
     get(tenant: TenantId, deviceId: string, requestId: string): Promise<ProofRequestReceipt | undefined>;
+}
+/** Prunes the used request ids that an {@link InMemoryProofRequestReceiptStore} records. */
+export declare class InMemoryProofReceiptRetentionAuthority implements ProofReceiptRetentionAuthority {
+    #private;
+    constructor(store: InMemoryProofRequestReceiptStore);
+    collectExpired(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/rate-limiter.d.ts ====
 /**
@@ -3952,6 +4001,13 @@ import type { ReceiptCollectExpiredInput } from '../ports';
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { RequestReceipt, RequestReceiptStore } from '../ports';
+/**
+ * The stored body, read for the Host task archive (#1120). A module function
+ * over a private registry, so the port class gains no method.
+ */
+export declare function receiptBodyOf(store: InMemoryRequestReceiptStore, tenant: TenantId, key: string): string | undefined;
+/** Replaces a stored body in place, or inserts the receipt when absent. The archive is the caller. */
+export declare function setReceiptBody(store: InMemoryRequestReceiptStore, tenant: TenantId, key: string, body: string): void;
 export declare class InMemoryRequestReceiptStore implements RequestReceiptStore {
     #private;
     constructor(clock: Clock);
@@ -4055,6 +4111,8 @@ export declare class InMemoryTaskAttemptState {
     #private;
     readonly attempts: Map<string, TaskAttempt>;
     readonly messageAdmissions: Map<string, StoredAgentMessageAdmission>;
+    /** `archive_settled_at` of archived tasks (#1120), by tenant/task key. */
+    readonly archiveSettled: Map<string, string>;
     constructor(clock: Clock);
     now(): string;
     /** Serialize every state-changing operation for one tenant/task key. */
@@ -4094,6 +4152,7 @@ export declare const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonl
 export declare const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>>;
 // ==== @byok-sdk/cloud dist/stores/ports.d.ts ====
 import type { AgentMessageDraftStore } from '../agent-message-draft';
+import type { TaskArchiveStore } from '../task-archive';
 import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
@@ -4389,6 +4448,11 @@ export interface TaskAttempt {
     readonly firstOutputAt?: string;
     /** The first entry into `complete`, `failed` or `cancelled`. */
     readonly terminalAt?: string;
+    /**
+     * Set once the archive step replaced this task's bodies with tombstones
+     * (#1120). The row and the tombstoned receipts stay as its identity fence.
+     */
+    readonly archivedAt?: string;
     readonly updatedAt: string;
 }
 /**
@@ -4785,9 +4849,10 @@ export interface CloudStores {
     readonly proofReceipts: ProofRequestReceiptStore;
     readonly blobs: CloudBlobStore;
     readonly rateLimiter: InboundRateLimiter;
+    readonly taskArchive: TaskArchiveStore;
 }
 /** Names of every port in {@link CloudStores}, in contract order. */
-export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'agentMessageDraft', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'egress', 'proofReceipts', 'blobs', 'rateLimiter'];
+export declare const CLOUD_STORE_NAMES: readonly ['activity', 'approvals', 'agentMessageDraft', 'devices', 'pairingCodes', 'pairing', 'nonces', 'dedup', 'tasks', 'cancellations', 'receipts', 'egress', 'proofReceipts', 'blobs', 'rateLimiter', 'taskArchive'];
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
 export interface ReceiptCollectExpiredInput extends CollectExpiredInput {
     readonly requestBefore: string;
@@ -4825,6 +4890,112 @@ export declare function readTaskAgentMessageBinding(stores: TenantStores, device
         };
     };
 } | undefined>;
+// ==== @byok-sdk/cloud dist/task-archive.d.ts ====
+/**
+ * Host retention for terminal tasks (#1120).
+ *
+ * A terminal task whose `archive_after` instant is older than the policy's
+ * `terminalTaskArchiveMs` is archived: in one store transaction every stored
+ * body of the task becomes the redaction tombstone, the task's ephemeral rows
+ * and object references go, and `archived_at` is set. What stays is the
+ * compact identity fence: the task row and the tombstoned receipts. A replayed
+ * body still compares equal to its tombstone and a different body is still a
+ * conflict, so every device answer stays what it was. Fences are never
+ * deleted; only tenant deletion removes them.
+ *
+ * The board item lives behind its own port, so its removal follows the
+ * transaction. `archived_at` drives it: a task archived but not yet settled is
+ * listed again by every later run until its board item is gone.
+ */
+import type { Clock, CoreStores, TenantId } from '@byok-sdk/core';
+import type { AgentRef } from '@byok-sdk/protocol';
+import type { CloudCrypto } from './crypto/port';
+import { type TaskRedactionCodec } from './task-redaction';
+import type { CloudStores } from './stores/ports';
+/** One unit of archive work, listed by {@link TaskArchiveStore.listWork}. */
+export interface TaskArchiveWork {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly agentRef?: AgentRef;
+    /** `archive`: not archived yet. `settle`: archived, and its board item may remain. */
+    readonly phase: 'archive' | 'settle';
+}
+export interface TaskArchiveListInput {
+    /** Only tasks whose `archive_after` is before this instant are listed for `archive`. */
+    readonly archiveBefore: string;
+    readonly limit: number;
+}
+export interface TaskArchiveStoreInput {
+    readonly taskId: string;
+    /** Every receipt key that holds this task's content. Cloud derives them; the store does not. */
+    readonly receiptKeys: readonly string[];
+    /** The device terminal receipt key, one of `receiptKeys`. When it is absent, the store writes `codec.absent` there. */
+    readonly terminalReceiptKey: string;
+    /** The object references this task holds. The store removes them in the same transaction. */
+    readonly releaseObjectReferences: readonly {
+        readonly refKind: string;
+        readonly refId: string;
+    }[];
+    readonly archivedAt: string;
+    readonly codec: TaskRedactionCodec;
+}
+export interface TaskArchiveCounts {
+    readonly receiptsRedacted: number;
+    readonly admissionsRedacted: number;
+    readonly outboxRedacted: number;
+    readonly ephemeralRowsDeleted: number;
+    readonly referencesReleased: number;
+}
+export type TaskArchiveStoreResult = {
+    readonly outcome: 'archived';
+    readonly counts: TaskArchiveCounts;
+} | {
+    readonly outcome: 'already_archived' | 'not_found';
+}
+/** Not archived. `pending_delivery` cannot happen under the policy floor; it is still refused, never overwritten. */
+ | {
+    readonly outcome: 'refused';
+    readonly reason: 'task_not_terminal' | 'pending_delivery';
+};
+/**
+ * Durable archive authority. Tenant-closed and safe to call again after any
+ * failure. `archive` is one transaction holding the task row lock: it refuses a
+ * task that is not terminal or still has a pending mailbox row, writes
+ * `codec.absent` under an absent `terminalReceiptKey`, replaces each body that
+ * is not a tombstone yet (receipts in `receiptKeys`, Agent message admission
+ * payload and terminal, acked and expired mailbox rows), clears the task's
+ * free-text terminal cause and cancel reason, deletes the ephemeral rows the
+ * transaction holds and the listed object references, and sets `archived_at`.
+ * Rows outside the transaction go in `settle`. It never deletes a
+ * mailbox row, so a device's recovery-floor dead letter stays (#1115).
+ */
+export interface TaskArchiveStore {
+    /** Up to `limit` units: archived tasks not yet settled first, then archivable tasks by `archive_after` ascending. */
+    listWork(tenant: TenantId, input: TaskArchiveListInput): Promise<readonly TaskArchiveWork[]>;
+    archive(tenant: TenantId, input: TaskArchiveStoreInput): Promise<TaskArchiveStoreResult>;
+    /**
+     * Runs after the board item is gone. Removes any task row the store keeps
+     * outside the archive transaction, which a rollback could not restore, then
+     * records settlement. Idempotent, and a no-op for a task not archived.
+     */
+    settle(tenant: TenantId, taskId: string, settledAt: string): Promise<void>;
+}
+/** Counts in the maintenance report's `tasks` step. */
+export interface TaskArchiveStepCounts {
+    readonly archived: number;
+    readonly settled: number;
+    /** Tasks the store refused this run; they are listed again next run. */
+    readonly refused: number;
+    readonly more: boolean;
+}
+export declare function archiveTerminalTasks(ports: {
+    readonly core: CoreStores;
+    readonly cloud: CloudStores;
+    readonly clock: Clock;
+    readonly crypto: Pick<CloudCrypto, 'sha256'>;
+}, tenant: TenantId, input: TaskArchiveListInput & {
+    readonly now: string;
+}): Promise<TaskArchiveStepCounts>;
 // ==== @byok-sdk/cloud dist/task-redaction.d.ts ====
 /**
  * Scoped row-delete for plaintext task content (#654 E5a).

@@ -1,4 +1,4 @@
-import { InMemoryAgentMessageDraftStore } from './agent-message-draft';
+import { InMemoryAgentMessageDraftStore, deleteAgentMessageDraft } from './agent-message-draft';
 export { InMemoryAgentMessageDraftStore } from './agent-message-draft';
 export { InMemoryE2eeMemberStore } from './e2ee-member';
 /**
@@ -9,8 +9,10 @@ export { InMemoryE2eeMemberStore } from './e2ee-member';
  * without a database — which is what makes those same assertions meaningful
  * when a durable composition (S3b's journal, S4A's schema) runs them later.
  */
-import type { Clock, ObjectStore } from '@byok-sdk/core';
+import type { Clock, MailboxStore, ObjectStore, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '../../crypto/port';
+import type { ProofReceiptRetentionAuthority } from '../../maintenance';
+import type { TaskArchiveStore } from '../../task-archive';
 import type { BlobContentProxy, CloudStores } from '../ports';
 import { AllowAllRateLimiter } from './rate-limiter';
 import { createInMemoryBlobs, type InMemoryBlobBytes } from './blobs';
@@ -19,11 +21,13 @@ import { InMemoryInboundDedupStore } from './dedup';
 import { InMemoryNonceStore } from './nonces';
 import { InMemoryPairingCodeStore } from './pairing-codes';
 import { InMemoryRequestReceiptStore } from './receipts';
-import { InMemoryProofRequestReceiptStore } from './proof-receipts';
+import { InMemoryProofReceiptRetentionAuthority, InMemoryProofRequestReceiptStore } from './proof-receipts';
+import { InMemoryTaskArchiveStore } from './task-archive';
+import { archiveAccessOf, type InMemoryMailboxArchiveAccess, type InMemoryObjectArchiveAccess } from './core-access';
 import { InMemoryTaskAttemptState, InMemoryTaskAttemptStore } from './task-attempts';
 import { InMemoryTaskCancellationStore } from './task-cancellations';
-import { InMemoryActivityStore } from './activity';
-import { InMemoryApprovalTimelineStore } from './approval-timeline';
+import { InMemoryActivityStore, deleteActivityTail } from './activity';
+import { InMemoryApprovalTimelineStore, deleteApprovalTimelineTail } from './approval-timeline';
 import { InMemoryAgentEgressStore } from './agent-egress';
 
 export { AllowAllRateLimiter } from './rate-limiter';
@@ -60,25 +64,48 @@ export { InMemoryAgentEgressStore } from './agent-egress';
 export interface InMemoryCloudComposition {
   readonly stores: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
+  /** The owner of the used proof `requestId`s in `stores.proofReceipts`, for `proofReceiptRetention`. */
+  readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
 }
+
+/** Deletes a task's ephemeral rows from the in-memory stores that `createInMemoryCloudStores` built; each returns the rows removed. */
+export interface InMemoryEphemeralTaskRows {
+  deleteActivity(tenant: TenantId, taskId: string): number;
+  deleteApprovals(tenant: TenantId, taskId: string): number;
+  deleteAgentMessageDraft(tenant: TenantId, taskId: string): number;
+}
+
+/** Builds the Host task archive for a core that is not the in-memory one. */
+export type InMemoryTaskArchiveFactory = (rows: InMemoryEphemeralTaskRows) => TaskArchiveStore;
 
 export function createInMemoryCloudStores(
   clock: Clock,
   crypto: CloudCrypto,
   objects: ObjectStore,
-  mailbox: import('@byok-sdk/core').MailboxStore,
+  mailbox: MailboxStore,
   objectBytes: InMemoryBlobBytes,
+  /**
+   * Absent, the archive rewrites the in-memory core `mailbox` and `objects`,
+   * and construction throws when they are another core's. A host with another
+   * core supplies the archive that owns its rows.
+   */
+  taskArchive?: InMemoryTaskArchiveFactory,
 ): InMemoryCloudComposition {
   const blobs = createInMemoryBlobs(objects, objectBytes);
   const taskState = new InMemoryTaskAttemptState(clock);
   const tasks = new InMemoryTaskAttemptStore(clock, taskState);
   const devices = new InMemoryDeviceDirectory();
   const pairing = new InMemoryPairingCodeStore(clock, devices);
+  const activity = new InMemoryActivityStore(clock);
+  const approvals = new InMemoryApprovalTimelineStore(clock);
+  const agentMessageDraft = new InMemoryAgentMessageDraftStore(clock);
+  const receipts = new InMemoryRequestReceiptStore(clock);
+  const proofReceipts = new InMemoryProofRequestReceiptStore(clock);
   return {
     stores: {
-      activity: new InMemoryActivityStore(clock),
-      approvals: new InMemoryApprovalTimelineStore(clock),
-      agentMessageDraft: new InMemoryAgentMessageDraftStore(clock),
+      activity,
+      approvals,
+      agentMessageDraft,
       devices,
       // One code/device authority, projected into issuance and consumption
       // ports so neither side exposes the other's methods.
@@ -88,12 +115,28 @@ export function createInMemoryCloudStores(
       dedup: new InMemoryInboundDedupStore(),
       tasks,
       cancellations: new InMemoryTaskCancellationStore(taskState, mailbox),
-      receipts: new InMemoryRequestReceiptStore(clock),
+      receipts,
       egress: new InMemoryAgentEgressStore(clock),
-      proofReceipts: new InMemoryProofRequestReceiptStore(clock),
+      proofReceipts,
       blobs: blobs.blobs,
       rateLimiter: new AllowAllRateLimiter(),
+      taskArchive: taskArchive === undefined
+        ? new InMemoryTaskArchiveStore({
+            state: taskState,
+            receipts,
+            activity,
+            approvals,
+            drafts: agentMessageDraft,
+            mailbox: archiveAccessOf<InMemoryMailboxArchiveAccess>(mailbox, 'mailbox'),
+            objects: archiveAccessOf<InMemoryObjectArchiveAccess>(objects, 'object'),
+          })
+        : taskArchive({
+            deleteActivity: (tenant, taskId) => deleteActivityTail(activity, tenant, taskId),
+            deleteApprovals: (tenant, taskId) => deleteApprovalTimelineTail(approvals, tenant, taskId),
+            deleteAgentMessageDraft: (tenant, taskId) => deleteAgentMessageDraft(agentMessageDraft, tenant, taskId),
+          }),
     },
     blobContentProxy: blobs.contentProxy,
+    proofReceiptAuthority: new InMemoryProofReceiptRetentionAuthority(proofReceipts),
   };
 }

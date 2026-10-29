@@ -67,6 +67,7 @@ const cloudFactory: CloudCompositionFactory = {
         proofReceipts: stores.proofReceipts,
         blobs: stores.blobs,
         rateLimiter: stores.rateLimiter,
+        taskArchive: stores.taskArchive,
       },
       now: () => clock.now().toISOString(),
       advanceTime: (ms) => clock.advance(ms),

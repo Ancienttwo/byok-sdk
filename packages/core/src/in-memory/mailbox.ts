@@ -29,6 +29,7 @@ import type {
 import type { QuotaStore } from '../quota';
 import type { Clock } from '../stores';
 import { tenantKey, type TenantId } from '../tenant';
+import { registerArchiveAccess } from './archive-access';
 import { assertCanonicalTimestamp } from '../time';
 
 const DEFAULT_READ_LIMIT = 50;
@@ -52,6 +53,17 @@ export class InMemoryMailboxStore implements MailboxStore {
   constructor(clock: Clock, quota: Pick<QuotaStore, 'readEntitlement'>) {
     this.#clock = clock;
     this.#quota = quota;
+    registerArchiveAccess(this, {
+      messagesOf: (tenant, deviceId) => this.#devices.get(tenantKey(tenant, deviceId))?.messages ?? [],
+      replaceBody: (tenant, deviceId, seq, body) => {
+        const device = this.#devices.get(tenantKey(tenant, deviceId));
+        const index = device?.messages.findIndex((message) => message.seq === seq) ?? -1;
+        if (device === undefined || index < 0) return;
+        const replaced: MailboxMessage = { ...device.messages[index]!, ...body };
+        device.messages[index] = replaced;
+        device.byMessageId.set(replaced.messageId, replaced);
+      },
+    });
   }
 
   async append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage> {

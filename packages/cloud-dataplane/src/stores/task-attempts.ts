@@ -51,11 +51,12 @@ export interface TaskRow {
   readonly claimed_at: Date | null;
   readonly first_output_at: Date | null;
   readonly terminal_at: Date | null;
+  readonly archived_at: Date | null;
   readonly updated_at: Date;
 }
 
 export const TASK_SELECT_COLUMNS =
-  'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, offered_at, claimed_at, first_output_at, terminal_at, updated_at';
+  'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, offered_at, claimed_at, first_output_at, terminal_at, archived_at, updated_at';
 
 interface AgentMessageAdmissionRow {
   readonly message_id: string;
@@ -112,6 +113,7 @@ export function taskRowToAttempt(row: TaskRow): TaskAttempt {
     ...(row.claimed_at === null ? {} : { claimedAt: row.claimed_at.toISOString() }),
     ...(row.first_output_at === null ? {} : { firstOutputAt: row.first_output_at.toISOString() }),
     ...(row.terminal_at === null ? {} : { terminalAt: row.terminal_at.toISOString() }),
+    ...(row.archived_at === null ? {} : { archivedAt: row.archived_at.toISOString() }),
     updatedAt: row.updated_at.toISOString(),
   };
 }
@@ -442,6 +444,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
           SET status = $3,
               terminal_cause = COALESCE($7, terminal_cause),
               terminal_at = CASE WHEN $3 IN ('complete', 'failed', 'cancelled') THEN COALESCE(terminal_at, $4) ELSE terminal_at END,
+              archive_after = CASE WHEN $3 IN ('complete', 'failed', 'cancelled') THEN COALESCE(archive_after, terminal_at, $4) ELSE archive_after END,
               updated_at = $4
         WHERE tenant_id = $1 AND task_id = $2
           AND (

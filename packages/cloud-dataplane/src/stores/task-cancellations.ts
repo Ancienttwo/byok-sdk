@@ -88,6 +88,7 @@ export class PostgresTaskCancellationStore implements TaskCancellationStore {
         `UPDATE task
             SET status = CASE WHEN owner_device_id IS NULL THEN 'cancelled' ELSE 'cancel_requested' END,
                 terminal_at = CASE WHEN owner_device_id IS NULL THEN COALESCE(terminal_at, $3) ELSE terminal_at END,
+                archive_after = CASE WHEN owner_device_id IS NULL THEN COALESCE(archive_after, terminal_at, $3) ELSE archive_after END,
                 cancel_requested_at = $3,
                 cancel_reason = $4,
                 cancel_message_id = $5,

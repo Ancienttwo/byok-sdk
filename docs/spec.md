@@ -2952,7 +2952,7 @@ are capped at 32. The TaskRunner unattended cancellation policy is unchanged.
 `ByokCloud.runMaintenance({ tenant, now, policy, limit })` runs a closed sequence
 of ten tenant-first `collectExpired` ports: mailbox, receipts, nonces, pairing
 codes, presence, activity, approvals, device assertion replay, quota and
-objects. Every step has one batch budget, returns removed/expired counts,
+objects, with the `tasks` archive step (below) between mailbox and receipts. Every step has one batch budget, returns removed/expired counts,
 released bigint bytes and an eligible-remainder flag, and commits independently.
 Failures retain confirmed `committed` counts and `failedRows`; step faults use
 `failedRows: 0`. Unknown counts and `more` are omitted. A remainder-probe fault
@@ -2966,9 +2966,35 @@ deployment sets that value once in `ByokCloudOptions.proofReceiptRetention`
 (default 24h); it is not part of the per-tenant policy. Construction refuses a
 value below 15 minutes: a receipt recorded at R binds a proof issued no later
 than R + 5 min of clock skew, and the verifier refuses that proof after
-R + 10 min. Within the retention a `requestId` is single-use. Without an
-authority the step reports `not-configured`; the reference server wires the
-SQLite store and leaves the memory composition unpruned.
+R + 10 min. Within the retention a `requestId` is single-use. The option is
+required (#1120): every composition prunes, and there is no unpruned mode.
+
+The `tasks` step archives terminal tasks (#1120). A task is eligible once its
+`archive_after` instant (its terminal instant; for a task that ended before
+migration 0032, its last update) is older than `terminalTaskArchiveMs`
+(default 90 days, at least the unacked plus dead-letter windows, so no
+archived task has a delivery the mailbox could replay). One store transaction
+per task replaces every stored body with the redaction tombstone (offer and
+terminal receipts, Agent message admission, acked and expired mailbox
+bodies), fences an absent terminal receipt, clears the free-text cause and
+cancel reason, deletes the ephemeral rows and the task's object references,
+and sets `archived_at`. Orphan GC then reclaims the objects. The board item is
+removed after the transaction, then `settle` deletes any task rows the store
+keeps outside that transaction (the embedded server's in-memory activity and
+draft rows, which a rollback could not restore) and records settlement; a task
+archived but not yet settled is listed again until it is. Archived tasks leave
+the board. The task row and the
+tombstoned receipts are the task's identity fence and are never deleted;
+only tenant deletion removes them. A replay of a stored body compares equal to
+its tombstone and a different body is still a conflict, so every device and
+Host answer stays what it was. A claim or `daemon_interrupted` recovery report
+needs the offer, which is now a tombstone; the inbound gate answers it from
+the retained fence instead: a claimed task's immutable claim snapshot, or for
+an unclaimed task the terminal receipt, which only an exact replay of the
+recorded recovery matches. An explicitly redacted task, which holds a redaction
+receipt, still refuses both. Content reads of an archived task fail with
+`task_content_redacted`; status reads stay. The step reports `archived`,
+`settled`, `refused` and `more`.
 
 The reference server always schedules one non-overlapping pass every five
 minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
@@ -2976,7 +3002,7 @@ minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
 before releasing SQLite. Hosted schedulers invoke the same kernel with their
 stored policy. Retention durations are positive bigint milliseconds: acked
 mailbox 24h, unacked mailbox 7d, dead letters 30d after expiry, request
-receipts 24h and orphan grace 24h.
+receipts 24h, orphan grace 24h and terminal-task archive 90d.
 There is no disable value or missing-policy substitution.
 
 Acked mailbox rows may be deleted; unacked rows become dead letters, which stay
@@ -2985,8 +3011,9 @@ highest-seq dead letter, kept so `recoverableFrom` never moves back (#1115).
 Mailbox quota counts only pending rows. Mailbox collection reports zero released bytes and never touches a
 usage counter. The sole receipt classification table protects all 11 SDK
 families and unknown keys as identity; the request projection is empty.
-Redeemed pairing code rows remain reachable identity fences. Committed reservation rows remain accounting/replay identity; only expired/aborted settled rows are GC candidates. Durable tasks,
-egress, truth, board, memory, profile and terminal history do not expire.
+Redeemed pairing code rows remain reachable identity fences. Committed reservation rows remain accounting/replay identity; only expired/aborted settled rows are GC candidates. Task identity
+fences, egress, truth, memory and profile do not expire; terminal task
+content and board items expire through the `tasks` step.
 Objects need no references or live reservation and must pass orphan grace;
 physical byte deletion and accounted settlement are one protected unit. PG
 holds the manifest row through physical deletion, and SQLite commits its SQL

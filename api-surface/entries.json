@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1862196,
+      "budgetBytes": 1863431,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -210,7 +210,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 121944,
+      "budgetBytes": 123179,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1104,7 +1104,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 505398,
+      "budgetBytes": 516986,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1157,7 +1157,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 734791,
+      "budgetBytes": 752471,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1282,7 +1282,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 698660,
+      "budgetBytes": 715428,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1490,7 +1490,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Shared contracts and validation",
-      "budgetBytes": 101948,
+      "budgetBytes": 103183,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1565,7 +1565,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Sealed payload v1 byte rules",
-      "budgetBytes": 162124,
+      "budgetBytes": 163359,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1613,7 +1613,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 237590,
+      "budgetBytes": 238825,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1935,7 +1935,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 633722,
+      "budgetBytes": 652331,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2006,7 +2006,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 390900,
+      "budgetBytes": 392135,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2133,7 +2133,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 528852,
+      "budgetBytes": 540440,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2215,7 +2215,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1810212,
+      "budgetBytes": 1811447,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2537,7 +2537,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 177551,
+      "budgetBytes": 178786,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

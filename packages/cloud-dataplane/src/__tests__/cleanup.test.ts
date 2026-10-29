@@ -34,6 +34,7 @@ import {
   SKIP_DATAPLANE,
 } from './support/dataplane';
 import { fileURLToPath } from 'node:url';
+import { PostgresProofReceiptRetentionAuthority } from '../stores/proof-receipts';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const TENANT = tenantId('tenant-cleanup');
@@ -185,6 +186,7 @@ async function configurePolicy(pool: ByokPool, clock: Clock): Promise<void> {
     mailboxDeadLetterRetentionMs: 1_000n,
     requestReceiptRetentionMs: 1_000n,
     objectOrphanGraceMs: 1_000n,
+    terminalTaskArchiveMs: 2_000n,
   });
 }
 
@@ -232,6 +234,7 @@ async function maintenanceCloud(pool: ByokPool, clock: Clock, storage: R2ObjectM
   const objectStorage = (await createObjectStorageScope()).config;
   const core = createPostgresCoreStores({ pool, clock, objectStorage });
   return createByokCloud({
+    proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
     mailboxWake: createInProcessMailboxWake(),
     core: { ...core, objects: new PostgresObjectStore(pool, clock, storage) },
     cloud: await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool, clock, crypto: createWebCrypto(), objectStorage }),

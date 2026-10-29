@@ -2,9 +2,18 @@ import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult } from '../../agent-message-draft';
 import { DEFAULT_ACTIVITY_TTL_MS } from '../../coordination';
 
+const ROWS = new WeakMap<InMemoryAgentMessageDraftStore, Map<string, AgentMessageDraftRow>>();
+
+/** Deletes the task's draft for the Host task archive (#1120); returns the rows removed. */
+export function deleteAgentMessageDraft(store: InMemoryAgentMessageDraftStore, tenant: TenantId, taskId: string): number {
+  return ROWS.get(store)!.delete(tenantKey(tenant, taskId)) ? 1 : 0;
+}
+
 export class InMemoryAgentMessageDraftStore implements AgentMessageDraftStore {
   readonly #rows = new Map<string, AgentMessageDraftRow>();
-  constructor(private readonly clock: Clock) {}
+  constructor(private readonly clock: Clock) {
+    ROWS.set(this, this.#rows);
+  }
 
   async apply(tenant: TenantId, input: AgentMessageDraftApplyInput): Promise<AgentMessageDraftApplyResult> {
     const key = tenantKey(tenant, input.taskId);

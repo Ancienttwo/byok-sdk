@@ -282,14 +282,19 @@ per step. There is no disable option.
 Each pass calls the kernel's `ByokCloud.runMaintenance` for this server's tenant.
 `await server.maintenance.runNow()` joins an in-flight pass. `await server.close()`
 clears the timer, waits for that pass to settle, then closes storage. A pass
-returns twelve ordered step results and emits `maintenance.completed`, or
+returns thirteen ordered step results and emits `maintenance.completed`, or
 `maintenance.failed` when a step failed. A failed event with `report` carries
 step results; one with `errorCode` means the pass itself could not return a report.
 
-With SQLite storage the `proofReceipts` step deletes used device-proof request
-ids recorded more than 24 hours ago; within that window a `requestId` stays
-single-use. The memory composition does not prune them: the step reports
-`not-configured` and every used `requestId` is kept for the life of the process.
+The `proofReceipts` step deletes used device-proof request ids recorded more
+than 24 hours ago, with SQLite and memory storage alike; within that window a
+`requestId` stays single-use.
+
+The `tasks` step archives a terminal task 90 days after it ended
+(`terminalTaskArchiveMs`, at least the unacked plus dead-letter mailbox
+windows). Its bodies become tombstones and its board item is removed; the
+task row and its tombstoned receipts stay as the replay fence until the
+tenant is deleted, so every device replay is answered as before.
 
 Acked rows past policy are deleted; old unacked rows become `expired` dead
 letters, moving `recoverableFrom` so lost cursors receive `409 cursor_too_old`.

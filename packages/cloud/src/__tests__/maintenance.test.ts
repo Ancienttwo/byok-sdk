@@ -28,9 +28,10 @@ describe('cloud maintenance', () => {
     vi.spyOn(composition.stores.agentMessageDraft, 'sweepExpired').mockImplementation(async () => { order.push('agentMessageDraft'); });
     const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 3 });
     expect(report.steps.map(step => step.step)).toEqual(MAINTENANCE_STEPS);
-    expect(order).toEqual(MAINTENANCE_STEPS.filter(step => step !== 'deviceAssertionReplay' && step !== 'proofReceipts'));
-    expect(report.steps[8]).toEqual({ step: 'deviceAssertionReplay', status: 'not-configured' });
-    expect(report.steps[11]).toEqual({ step: 'proofReceipts', status: 'not-configured' });
+    expect(order).toEqual(MAINTENANCE_STEPS.filter(step => step !== 'tasks' && step !== 'deviceAssertionReplay' && step !== 'proofReceipts'));
+    expect(report.steps[1]).toEqual({ step: 'tasks', status: 'ok', archived: 0, settled: 0, refused: 0, more: false });
+    expect(report.steps[9]).toEqual({ step: 'deviceAssertionReplay', status: 'not-configured' });
+    expect(report.steps[12]).toEqual({ step: 'proofReceipts', status: 'ok', removed: 0, expired: 0, releasedBytes: 0n, more: false });
     expect(composition.observed()).toBe(report);
   });
   it('commits other steps after one port fails and rejects malformed result counts', async () => {
@@ -38,10 +39,10 @@ describe('cloud maintenance', () => {
     vi.spyOn(composition.stores.receipts, 'collectExpired').mockRejectedValue(new Error('receipt outage'));
     vi.spyOn(composition.core.presence, 'collectExpired').mockResolvedValue({ removed: 3, expired: 0, releasedBytes: 0n, more: false });
     const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 2 });
-    expect(report.steps).toHaveLength(12);
-    expect(report.steps[1]).toEqual({ step: 'receipts', status: 'failed', errorCode: 'maintenance_step_failed', failedRows: 0 });
-    expect(report.steps[4]).toEqual({ step: 'presence', status: 'failed', errorCode: 'maintenance_result_invalid', failedRows: 0 });
-    expect(report.steps[10]).toMatchObject({ step: 'objects', status: 'ok' });
+    expect(report.steps).toHaveLength(13);
+    expect(report.steps[2]).toEqual({ step: 'receipts', status: 'failed', errorCode: 'maintenance_step_failed', failedRows: 0 });
+    expect(report.steps[5]).toEqual({ step: 'presence', status: 'failed', errorCode: 'maintenance_result_invalid', failedRows: 0 });
+    expect(report.steps[11]).toMatchObject({ step: 'objects', status: 'ok' });
   });
   it('preserves a full committed budget when only the remainder observation fails', async () => {
     const composition = setup();
@@ -49,9 +50,9 @@ describe('cloud maintenance', () => {
       { removed: 2, expired: 0, releasedBytes: 30n }, 0, undefined, { cause: new Error('probe failed') },
     ));
     const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 2 });
-    expect(report.steps[10]).toEqual({ step: 'objects', status: 'failed', errorCode: 'retention_collect_failed',
+    expect(report.steps[11]).toEqual({ step: 'objects', status: 'failed', errorCode: 'retention_collect_failed',
       failedRows: 0, committed: { removed: 2, expired: 0, releasedBytes: 30n } });
-    expect(report.steps[10]).not.toHaveProperty('more');
+    expect(report.steps[11]).not.toHaveProperty('more');
   });
   it('counts a failed row inside the same budget as confirmed commits', async () => {
     const composition = setup();
@@ -59,7 +60,7 @@ describe('cloud maintenance', () => {
       { removed: 1, expired: 0, releasedBytes: 10n }, 1, true, { cause: new Error('delete failed') },
     ));
     const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 2 });
-    expect(report.steps[10]).toEqual({ step: 'objects', status: 'failed', errorCode: 'retention_collect_failed',
+    expect(report.steps[11]).toEqual({ step: 'objects', status: 'failed', errorCode: 'retention_collect_failed',
       failedRows: 1, committed: { removed: 1, expired: 0, releasedBytes: 10n }, more: true });
   });
   it('rejects a failure whose committed and failed rows exceed the budget', async () => {
@@ -68,10 +69,16 @@ describe('cloud maintenance', () => {
       { removed: 2, expired: 0, releasedBytes: 20n }, 1, true,
     ));
     const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 2 });
-    expect(report.steps[10]).toEqual({ step: 'objects', status: 'failed', errorCode: 'maintenance_result_invalid', failedRows: 0 });
+    expect(report.steps[11]).toEqual({ step: 'objects', status: 'failed', errorCode: 'maintenance_result_invalid', failedRows: 0 });
   });
   it.each([0n, -1n, BigInt(Number.MAX_SAFE_INTEGER) + 1n, 24 as unknown as bigint])('rejects a disabled or invalid retention duration %s', value => {
     expect(() => resolveRetentionPolicy({ mailboxAckedRetentionMs: value })).toThrow(ByokCloudError);
+  });
+  it('keeps the terminal-task archive window at least the unacked plus dead-letter windows (#1120)', () => {
+    const floor = DEFAULT_RETENTION_POLICY.mailboxUnackedRetentionMs + DEFAULT_RETENTION_POLICY.mailboxDeadLetterRetentionMs;
+    expect(DEFAULT_RETENTION_POLICY.terminalTaskArchiveMs).toBe(90n * 86_400_000n);
+    expect(resolveRetentionPolicy({ terminalTaskArchiveMs: floor }).terminalTaskArchiveMs).toBe(floor);
+    expect(() => resolveRetentionPolicy({ terminalTaskArchiveMs: floor - 1n })).toThrow(expect.objectContaining({ code: 'maintenance_invalid_input' }));
   });
   it.each([0, -1, 5001, 1.5])('rejects invalid batch limit %s before calling a port', async limit => {
     const composition = setup();
@@ -118,7 +125,7 @@ describe('proof receipt retention', () => {
     expect(DEFAULT_PROOF_RECEIPT_RETENTION_MS).toBe(86_400_000n);
     expect(pruner.collectExpired).toHaveBeenCalledOnce();
     expect(pruner.collectExpired).toHaveBeenCalledWith(tenant, { now: NOW, limit: 3, recordedBefore: '2026-10-24T12:00:00.000Z' });
-    expect(report.steps[11]).toEqual({ step: 'proofReceipts', status: 'ok', removed: 2, expired: 0, releasedBytes: 0n, more: false });
+    expect(report.steps[12]).toEqual({ step: 'proofReceipts', status: 'ok', removed: 2, expired: 0, releasedBytes: 0n, more: false });
   });
 
   it('accepts the 15 minute floor and refuses less at construction', async () => {
@@ -136,7 +143,7 @@ describe('proof receipt retention', () => {
   it('reports a failed prune without stopping earlier steps', async () => {
     const pruner = { collectExpired: vi.fn(async () => { throw new Error('receipt outage'); }) };
     const report = await cloudWith({ authority: pruner }).runMaintenance({ tenant, now: NOW, policy: DEFAULT_RETENTION_POLICY });
-    expect(report.steps[10]).toMatchObject({ step: 'objects', status: 'ok' });
-    expect(report.steps[11]).toEqual({ step: 'proofReceipts', status: 'failed', errorCode: 'maintenance_step_failed', failedRows: 0 });
+    expect(report.steps[11]).toMatchObject({ step: 'objects', status: 'ok' });
+    expect(report.steps[12]).toEqual({ step: 'proofReceipts', status: 'failed', errorCode: 'maintenance_step_failed', failedRows: 0 });
   });
 });

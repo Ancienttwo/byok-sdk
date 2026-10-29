@@ -28,6 +28,7 @@ import { runReceiptConformance } from './receipts';
 import { runProofReceiptConformance } from './proof-receipts';
 import { runBlobConformance } from './blobs';
 import { runCloudTenantIsolationConformance } from './tenant-isolation';
+import { runTaskArchiveConformance } from './task-archive';
 
 /**
  * The cloud-local ports this suite certifies.
@@ -68,6 +69,7 @@ export const CLOUD_CONFORMANCE_PORTS = [
   'proofReceipts',
   'blobs',
   'rateLimiter',
+  'taskArchive',
 ] as const;
 
 export type CloudConformancePortName = (typeof CLOUD_CONFORMANCE_PORTS)[number];
@@ -189,5 +191,6 @@ export function runCloudConformance(name: string, factory: CloudCompositionFacto
     runBlobConformance(factory);
     runCloudTenantIsolationConformance(factory);
     runCloudRetentionConformance(name, factory);
+    runTaskArchiveConformance(factory);
   });
 }

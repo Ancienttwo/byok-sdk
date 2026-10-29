@@ -238,6 +238,7 @@ describe('the public surface', () => {
       'proofReceipts',
       'blobs',
       'rateLimiter',
+      'taskArchive',
     ]);
   });
 

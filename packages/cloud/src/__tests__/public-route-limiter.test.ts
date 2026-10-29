@@ -47,6 +47,7 @@ function composeCloud(publicRouteLimiter: PublicRouteLimiter | undefined, calls:
   const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
   const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, objectBytes);
   return createByokCloud({
+    proofReceiptRetention: { authority: composition.proofReceiptAuthority },
         mailboxWake: createInProcessMailboxWake(),
     core,
     cloud: countingStores(composition.stores, calls),

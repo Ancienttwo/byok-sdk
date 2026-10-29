@@ -234,11 +234,10 @@ export const AGENT_HOME_CONTRACT_CAPABILITY = 'agent-home-contract';
 export interface ByokCloudOptions {
   readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
   /**
-   * Prunes used device-proof request ids in maintenance. Absent, the
-   * `proofReceipts` step reports `not-configured` and every used `requestId`
-   * stays single-use for as long as its receipt is kept.
+   * Prunes used device-proof request ids in maintenance (#1120). Required: a
+   * deployment cannot keep every used `requestId` forever.
    */
-  readonly proofReceiptRetention?: ProofReceiptRetentionOptions;
+  readonly proofReceiptRetention: ProofReceiptRetentionOptions;
   readonly mailboxWake: MailboxWake;
   readonly core: CoreStores;
   readonly cloud: CloudStores;
@@ -918,7 +917,7 @@ export interface ByokCloud {
 
 export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   if (options.mailboxWake === undefined) throw new TypeError('mailboxWake is required');
-  const proofReceiptRetention = options.proofReceiptRetention === undefined ? undefined : resolveProofReceiptRetention(options.proofReceiptRetention);
+  const proofReceiptRetention = resolveProofReceiptRetention(options.proofReceiptRetention);
   const declaration = parseDeclaration(options.capabilities);
   assertDeclarationMatchesPorts(declaration, options);
   const root: CloudRootStores = { core: options.core, cloud: options.cloud, mailboxWake: options.mailboxWake };

@@ -21,6 +21,7 @@ interface RetentionPolicyRow {
   readonly mailbox_dead_letter_retention_ms: bigint;
   readonly request_receipt_retention_ms: bigint;
   readonly object_orphan_grace_ms: bigint;
+  readonly terminal_task_archive_ms: bigint;
   readonly updated_at: string;
 }
 
@@ -38,18 +39,19 @@ export class PostgresRetentionPolicyStore {
        `INSERT INTO tenant_retention_policy (
          tenant_id, policy_id, mailbox_acked_retention_ms,
          mailbox_unacked_retention_ms, mailbox_dead_letter_retention_ms,
-         request_receipt_retention_ms, object_orphan_grace_ms, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         request_receipt_retention_ms, object_orphan_grace_ms, terminal_task_archive_ms, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (tenant_id, policy_id) DO UPDATE
           SET mailbox_acked_retention_ms = EXCLUDED.mailbox_acked_retention_ms,
               mailbox_unacked_retention_ms = EXCLUDED.mailbox_unacked_retention_ms,
               mailbox_dead_letter_retention_ms = EXCLUDED.mailbox_dead_letter_retention_ms,
               request_receipt_retention_ms = EXCLUDED.request_receipt_retention_ms,
               object_orphan_grace_ms = EXCLUDED.object_orphan_grace_ms,
+              terminal_task_archive_ms = EXCLUDED.terminal_task_archive_ms,
               updated_at = EXCLUDED.updated_at
        RETURNING tenant_id, policy_id, mailbox_acked_retention_ms,
                  mailbox_unacked_retention_ms, mailbox_dead_letter_retention_ms,
-                 request_receipt_retention_ms, object_orphan_grace_ms, updated_at`,
+                 request_receipt_retention_ms, object_orphan_grace_ms, terminal_task_archive_ms, updated_at`,
       [
         tenant,
         input.policyId,
@@ -58,6 +60,7 @@ export class PostgresRetentionPolicyStore {
         input.mailboxDeadLetterRetentionMs,
         input.requestReceiptRetentionMs,
         input.objectOrphanGraceMs,
+        input.terminalTaskArchiveMs,
         this.clock.now().toISOString(),
       ],
     );
@@ -68,7 +71,7 @@ export class PostgresRetentionPolicyStore {
     const result = await this.#pool.query<RetentionPolicyRow>(
       `SELECT p.tenant_id, p.policy_id, p.mailbox_acked_retention_ms,
               p.mailbox_unacked_retention_ms, p.mailbox_dead_letter_retention_ms,
-              p.request_receipt_retention_ms, p.object_orphan_grace_ms, p.updated_at
+              p.request_receipt_retention_ms, p.object_orphan_grace_ms, p.terminal_task_archive_ms, p.updated_at
          FROM storage_entitlement e
          JOIN tenant_retention_policy p
            ON p.tenant_id = e.tenant_id AND p.policy_id = e.retention_policy_id
@@ -98,6 +101,7 @@ function toPolicy(row: RetentionPolicyRow): TenantRetentionPolicy {
     mailboxDeadLetterRetentionMs: row.mailbox_dead_letter_retention_ms,
     requestReceiptRetentionMs: row.request_receipt_retention_ms,
     objectOrphanGraceMs: row.object_orphan_grace_ms,
+    terminalTaskArchiveMs: row.terminal_task_archive_ms,
     updatedAt: row.updated_at,
   };
 }
@@ -112,6 +116,7 @@ function assertPolicy(input: TenantRetentionPolicyInput): void {
     ['mailboxDeadLetterRetentionMs', input.mailboxDeadLetterRetentionMs],
     ['requestReceiptRetentionMs', input.requestReceiptRetentionMs],
     ['objectOrphanGraceMs', input.objectOrphanGraceMs],
+    ['terminalTaskArchiveMs', input.terminalTaskArchiveMs],
   ] as const) {
     if (typeof value !== 'bigint' || value <= 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new CloudCleanupError(
@@ -119,6 +124,13 @@ function assertPolicy(input: TenantRetentionPolicyInput): void {
         `${field} must be a positive bigint duration no larger than Number.MAX_SAFE_INTEGER milliseconds.`,
       );
     }
+  }
+  // An archived task must have no delivery the mailbox could still replay (#1120).
+  if (input.terminalTaskArchiveMs < input.mailboxUnackedRetentionMs + input.mailboxDeadLetterRetentionMs) {
+    throw new CloudCleanupError(
+      'cleanup_invalid_input',
+      'terminalTaskArchiveMs must be at least mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs.',
+    );
   }
 }
 

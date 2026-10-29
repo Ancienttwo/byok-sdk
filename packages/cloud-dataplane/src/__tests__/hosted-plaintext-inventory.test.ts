@@ -66,6 +66,7 @@ import {
   type Hits,
   type Needle,
 } from './support/plaintext-scan';
+import { PostgresProofReceiptRetentionAuthority } from '../stores/proof-receipts';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const SECURITY_DOC = fileURLToPath(new URL('../../../../docs/security.md', import.meta.url));
@@ -157,6 +158,7 @@ describe.skipIf(SKIP_DATAPLANE)(`hosted plaintext inventory — ${SKIP_REASON}`,
       const consumed: string[] = [];
       const full = fullCapabilityDeclaration(undefined, { includeAgentMemoryProjection: true });
       const cloud = createByokCloud({
+        proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(scope.pool) },
         mailboxWake: createInProcessMailboxWake(),
         core,
         cloud: stores,

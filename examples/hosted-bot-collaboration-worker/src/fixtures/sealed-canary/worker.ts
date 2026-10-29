@@ -1,7 +1,7 @@
 /** Local test fixture: every control-plane call and device request executes in workerd. Never deploy this RPC surface. */
 import { createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration,
   type ByokCloudObserver } from '@byok-sdk/cloud';
-import { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresE2eeMemberStore } from '@byok-sdk/cloud-dataplane/runtime';
+import { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresE2eeMemberStore, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
 import { CANARY_METHODS, decodeCanaryRpc, encodeCanaryRpc } from '../../../../hosted-bot-collaboration/src/canary-cloud.test-support';
 
 interface Env {
@@ -24,7 +24,7 @@ export default {
       const core = createPostgresCoreStores({ pool, clock, objectStorage });
       const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 50, burst: 100 }, pool, clock, crypto, objectStorage });
       const full = fullCapabilityDeclaration(undefined, { includeE2eeMember: true });
-      const cloud = createByokCloud({ core, cloud: stores, clock, crypto,
+      const cloud = createByokCloud({ proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) }, core, cloud: stores, clock, crypto,
         mailboxWake: createInProcessMailboxWake({ fallbackMs: 100 }),
         e2eeMemberStore: new PostgresE2eeMemberStore(pool, clock),
         tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(3), clock),

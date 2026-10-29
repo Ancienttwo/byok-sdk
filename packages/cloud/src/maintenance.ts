@@ -5,7 +5,9 @@ import {
 } from '@byok-sdk/core';
 import { MAX_DEVICE_PROOF_CLOCK_SKEW_MS } from './auth/device-proof';
 import { ByokCloudError } from './errors';
+import type { CloudCrypto } from './crypto/port';
 import type { CloudStores } from './stores/ports';
+import { archiveTerminalTasks, type TaskArchiveStepCounts } from './task-archive';
 
 export interface RetentionPolicy {
   readonly mailboxAckedRetentionMs: bigint;
@@ -19,6 +21,15 @@ export interface RetentionPolicy {
   readonly mailboxDeadLetterRetentionMs: bigint;
   readonly requestReceiptRetentionMs: bigint;
   readonly objectOrphanGraceMs: bigint;
+  /**
+   * How long a terminal task keeps its bodies (#1120). A task whose
+   * `archive_after` (its terminal instant) is older is archived: its bodies
+   * become tombstones and its board item goes, while the task row and the
+   * tombstoned receipts stay as its identity fence. At least
+   * `mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs`, so no archived
+   * task still has a delivery the mailbox would replay.
+   */
+  readonly terminalTaskArchiveMs: bigint;
 }
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = Object.freeze({
   mailboxAckedRetentionMs: 86_400_000n,
@@ -26,10 +37,11 @@ export const DEFAULT_RETENTION_POLICY: RetentionPolicy = Object.freeze({
   mailboxDeadLetterRetentionMs: 30n * 86_400_000n,
   requestReceiptRetentionMs: 86_400_000n,
   objectOrphanGraceMs: 86_400_000n,
+  terminalTaskArchiveMs: 90n * 86_400_000n,
 });
 export const DEFAULT_MAINTENANCE_LIMIT = 500;
 export const MAINTENANCE_STEPS = Object.freeze([
-  'mailbox', 'receipts', 'nonces', 'pairingCodes', 'presence',
+  'mailbox', 'tasks', 'receipts', 'nonces', 'pairingCodes', 'presence',
   'activity', 'approvals', 'agentMessageDraft', 'deviceAssertionReplay', 'quota', 'objects', 'proofReceipts',
 ] as const);
 /** Receipts of used device-proof request ids recorded before `recordedBefore` are removed. */
@@ -81,7 +93,8 @@ export type MaintenanceStepReport =
       /** Absent when a failed remainder probe left this unknown. */
       readonly more?: boolean;
     }
-  | { readonly step: 'deviceAssertionReplay' | 'proofReceipts'; readonly status: 'not-configured' }
+  | ({ readonly step: 'tasks'; readonly status: 'ok' } & TaskArchiveStepCounts)
+  | { readonly step: 'deviceAssertionReplay'; readonly status: 'not-configured' }
   | { readonly step: 'agentMessageDraft'; readonly status: 'ok' };
 export interface MaintenanceReport {
   readonly tenantId: TenantId;
@@ -107,6 +120,10 @@ export function resolveRetentionPolicy(input: Partial<RetentionPolicy> = {}): Re
       throw new ByokCloudError('maintenance_invalid_input', key + ' must be positive bigint milliseconds within the safe timestamp range.');
     }
   }
+  if (policy.terminalTaskArchiveMs < policy.mailboxUnackedRetentionMs + policy.mailboxDeadLetterRetentionMs) {
+    throw new ByokCloudError('maintenance_invalid_input',
+      'terminalTaskArchiveMs must be at least mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs.');
+  }
   return Object.freeze(policy);
 }
 function assertCounts(result: CollectExpiredCounts, limit: number): void {
@@ -126,8 +143,9 @@ function assertResult(result: CollectExpiredResult, limit: number): void {
 export async function runMaintenanceSteps(
   ports: {
     readonly core: CoreStores; readonly cloud: CloudStores; readonly clock: Clock;
+    readonly crypto: Pick<CloudCrypto, 'sha256'>;
     readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
-    readonly proofReceiptRetention?: ResolvedProofReceiptRetention;
+    readonly proofReceiptRetention: ResolvedProofReceiptRetention;
   },
   input: MaintenanceInput,
 ): Promise<MaintenanceReport> {
@@ -155,10 +173,11 @@ export async function runMaintenanceSteps(
   const reapDeadLettersBefore = cutoff(policy.mailboxUnackedRetentionMs + policy.mailboxDeadLetterRetentionMs);
   const requestBefore = cutoff(policy.requestReceiptRetentionMs);
   const orphanBefore = cutoff(policy.objectOrphanGraceMs);
+  const archiveBefore = cutoff(policy.terminalTaskArchiveMs);
   const proofReceipts = ports.proofReceiptRetention;
-  const recordedBefore = proofReceipts === undefined ? undefined : cutoff(proofReceipts.proofReceiptRetentionMs);
+  const recordedBefore = cutoff(proofReceipts.proofReceiptRetentionMs);
   const startedAt = ports.clock.now().toISOString();
-  const operations: Record<Exclude<MaintenanceStep, 'deviceAssertionReplay' | 'agentMessageDraft' | 'proofReceipts'>, () => Promise<CollectExpiredResult>> = {
+  const operations: Record<Exclude<MaintenanceStep, 'tasks' | 'deviceAssertionReplay' | 'agentMessageDraft' | 'proofReceipts'>, () => Promise<CollectExpiredResult>> = {
     mailbox: () => ports.core.mailbox.collectExpired(tenant, { ...bounds, ackedBefore, expireUnackedBefore, reapDeadLettersBefore }),
     receipts: () => ports.cloud.receipts.collectExpired(tenant, { ...bounds, requestBefore }),
     nonces: () => ports.cloud.nonces.collectExpired(tenant, bounds),
@@ -171,12 +190,16 @@ export async function runMaintenanceSteps(
   };
   const steps: MaintenanceStepReport[] = [];
   for (const step of MAINTENANCE_STEPS) {
-    if ((step === 'deviceAssertionReplay' && ports.deviceAssertionReplay === undefined)
-      || (step === 'proofReceipts' && proofReceipts === undefined)) {
+    if (step === 'deviceAssertionReplay' && ports.deviceAssertionReplay === undefined) {
       steps.push({ step, status: 'not-configured' });
       continue;
     }
     try {
+      if (step === 'tasks') {
+        const counts = await archiveTerminalTasks(ports, tenant, { now, limit, archiveBefore });
+        steps.push({ step, status: 'ok', ...counts });
+        continue;
+      }
       if (step === 'agentMessageDraft') {
         await ports.cloud.agentMessageDraft.sweepExpired(now);
         steps.push({ step, status: 'ok' });
@@ -185,7 +208,7 @@ export async function runMaintenanceSteps(
       const result = step === 'deviceAssertionReplay'
         ? await ports.deviceAssertionReplay!.collectExpired(tenant, bounds)
         : step === 'proofReceipts'
-          ? await proofReceipts!.authority.collectExpired(tenant, { ...bounds, recordedBefore: recordedBefore! })
+          ? await proofReceipts.authority.collectExpired(tenant, { ...bounds, recordedBefore })
           : await operations[step]();
       assertResult(result, limit);
       steps.push({ step, status: 'ok', ...result });

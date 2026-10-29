@@ -25,6 +25,7 @@ import { ByokCoreError } from '../errors';
 import type { Clock } from '../stores';
 import { tenantKey, type TenantId } from '../tenant';
 import { assertCanonicalTimestamp } from '../time';
+import { registerArchiveAccess } from './archive-access';
 
 const DEFAULT_LIST_LIMIT = 100;
 
@@ -40,6 +41,23 @@ export class InMemoryObjectStore implements ObjectStore {
       typeof maintenance.bytes?.deleteObject !== 'function') {
       throw new ByokCoreError('retention_input_invalid', 'ObjectStore requires its shared ledger and an explicit byte authority.');
     }
+    registerArchiveAccess(this, {
+      releaseReferences: (tenant, refKind, refId) => {
+        const hashes = new Set<ContentHash>();
+        let released = 0;
+        for (const [key, reference] of this.#references) {
+          if (reference.tenantId !== tenant || reference.refKind !== refKind || reference.refId !== refId) continue;
+          this.#references.delete(key);
+          hashes.add(reference.hash);
+          released += 1;
+        }
+        for (const hash of hashes) {
+          const entry = this.#manifest.get(tenantKey(tenant, hash));
+          if (entry !== undefined) this.#recount(tenant, entry);
+        }
+        return released;
+      },
+    });
   }
 
   async putManifest(
