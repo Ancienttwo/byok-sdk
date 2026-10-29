@@ -7,9 +7,13 @@
  * claim/progress/complete behave identically no matter which transport carried
  * them.
  *
- * The batch stays tolerant at the schema level — one malformed envelope must
- * not 400 the whole request — so only a structurally invalid `Envelope` or an
- * oversized batch (`MAX_MESSAGES_PER_BATCH`) fails the request outright.
+ * The batch is decoded entry by entry: an entry that is not a valid `Envelope`
+ * is answered `rejected: payload_invalid` and the rest of the batch still
+ * applies. Only a broken frame — not an array, an entry without a UUID `id`
+ * its outcome could be correlated by, or an oversized batch
+ * (`MAX_MESSAGES_PER_BATCH`) — fails the request outright. An undecodable
+ * entry never reaches the inbound gate, so the refusal observer, which names
+ * a decoded message type, is not told about it.
  *
  * Rate admission covers the whole batch: it is charged one token per envelope
  * before the first envelope applies, and a refusal answers 429 having applied
@@ -27,6 +31,7 @@
 import type { Context } from 'hono';
 import { STORAGE_ERROR_HTTP_STATUS, isCoreError } from '@byok-sdk/core';
 import {
+  EnvelopeSchema,
   MESSAGES_SEND_MAX_BODY_BYTES,
   MessagesSendRequestSchema,
   type AgentContentReceiptPayload,
@@ -80,6 +85,7 @@ const WIRE_REFUSAL_REASONS = {
   egress_conflict: 'state_conflict',
   content_receipt_conflict: 'state_conflict',
   claim_not_won: 'state_conflict',
+  terminal_receipt_not_canonical: 'state_conflict',
   protocol_version_unsupported: 'unsupported',
   type_not_allowed: 'unsupported',
   sealed_payload_unsupported: 'unsupported',
@@ -157,7 +163,7 @@ function batchHandler(deps: MessagesRouteDeps) {
     const body = await readBoundedJsonBody(c, MESSAGES_SEND_MAX_BODY_BYTES);
     if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
     const parsed = MessagesSendRequestSchema.safeParse(body.body);
-    if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes' }, 400);
+    if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes with UUID ids' }, 400);
     const admission = await stores.rateLimiter.consume(device.deviceId, 'envelope', parsed.data.messages.length);
     if (!admission.allowed) return rateLimited(c, admission.retryAfterMs);
 
@@ -165,7 +171,14 @@ function batchHandler(deps: MessagesRouteDeps) {
     let rejected = 0;
     let handshake = false;
     const outcomes: NonNullable<MessagesSendResponse['outcomes']> = [];
-    for (const envelope of parsed.data.messages) {
+    for (const entry of parsed.data.messages) {
+      const decoded = EnvelopeSchema.safeParse(entry);
+      if (!decoded.success) {
+        outcomes.push({ id: entry.id, outcome: 'rejected', reason: 'payload_invalid' });
+        rejected += 1;
+        continue;
+      }
+      const envelope = decoded.data;
       const result = await handleInboundEnvelope(
         stores,
         device.deviceId,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createEnvelope, decodeEnvelope, PROTOCOL_VERSION } from '../index';
+import { createEnvelope, decodeEnvelope, PROTOCOL_VERSION, readDeclineCode } from '../index';
 
 function wire(payload: Record<string, unknown>): string {
   return JSON.stringify({
@@ -17,8 +17,15 @@ describe('typed home-busy decline code', () => {
     },
   );
 
-  it.each(['agent_home_busy', 'AGENT_HOME_WRITER_BUSY', '', null, 1])(
-    'rejects an unknown code %j at wire decoding', (code) => {
+  it('keeps a well-formed code it does not know verbatim and reads it as unknown (#1121)', () => {
+    const payload = { reason: 'display only', retryable: true, code: 'agent_home_busy' };
+    expect(decodeEnvelope(wire(payload)).payload).toEqual(payload);
+    expect(readDeclineCode('agent_home_busy')).toEqual({ code: 'unknown', reportedCode: 'agent_home_busy' });
+    expect(readDeclineCode('agent_home_writer_busy')).toEqual({ code: 'agent_home_writer_busy' });
+  });
+
+  it.each(['AGENT_HOME_WRITER_BUSY', '', null, 1])(
+    'rejects a malformed code %j at wire decoding', (code) => {
       expect(() => decodeEnvelope(wire({ reason: 'display only', code }))).toThrow();
     },
   );

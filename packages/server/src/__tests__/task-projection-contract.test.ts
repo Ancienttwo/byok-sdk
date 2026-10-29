@@ -82,7 +82,7 @@ const fields = {
   error: { kind: true, reason: true, retryable: false },
   result: {
     state: true, summary: false, finalMessage: false, sessionRef: false, artifactRefs: false,
-    reason: false, code: false, retryable: false, failure: false, document: false,
+    reason: false, code: false, reportedCode: false, retryable: false, failure: false, document: false,
   },
 } satisfies { [K in keyof Projections]: DeclaredFields<Projections[K]> };
 

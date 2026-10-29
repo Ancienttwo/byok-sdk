@@ -154,6 +154,8 @@ export const INBOUND_REFUSAL_REASONS = [
   'activity_batch_too_large',
   'activity_batch_invalid',
   'approval_event_invalid',
+  // terminal receipt
+  'terminal_receipt_not_canonical',
 ] as const;
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 
@@ -834,8 +836,7 @@ async function applyLifecycle(
       // same key, first-terminal-wins, and therefore a readable result.
       // Recording only the coarse `failed` status here left an attempt that a
       // reader could see reach a terminal and then find no result to read.
-      await recordTerminal(stores, taskId, envelope);
-      return;
+      return recordTerminal(stores, taskId, envelope);
     case 'task.progress': {
       const batch = activityBatchOf(taskId, envelope);
       if (batch !== undefined) await appendActivityEvents(stores.activity, batch, activityBounds);
@@ -848,14 +849,11 @@ async function applyLifecycle(
       await stores.approvals.append(approvalTimelineAppendInput(taskId, envelope)!);
       return;
     case 'task.complete':
-      await recordTerminal(stores, taskId, envelope);
-      return;
+      return recordTerminal(stores, taskId, envelope);
     case 'task.fail':
-      await recordTerminal(stores, taskId, envelope);
-      return;
+      return recordTerminal(stores, taskId, envelope);
     case 'task.cancelled':
-      await recordTerminal(stores, taskId, envelope);
-      return;
+      return recordTerminal(stores, taskId, envelope);
     case 'task.artifact': {
       // A plaintext artifact is complete as received; a sealed one may hold its ciphertext blob.
       const ref = envelope.payload.sealed === undefined ? undefined : sealedCiphertextRef(envelope.payload);
@@ -938,7 +936,7 @@ async function recordTerminal(
   stores: TenantStores,
   taskId: string,
   envelope: Envelope,
-): Promise<void> {
+): Promise<Refused | undefined> {
   const body = encodeEnvelope(envelope);
   // The task holds a sealed terminal's blob before any receipt names it.
   const ciphertextRef = sealedCiphertextRef(envelope.payload);
@@ -962,9 +960,9 @@ async function recordTerminal(
   // writes. A retry resumes from the winning receipt instead of returning just
   // because the receipt was already present.
   const winner = terminalReceiptBinding(taskId, receipt.receipt.body);
-  if (winner === undefined) {
-    throw new Error(`terminal receipt for ${taskId} is not a canonical terminal binding`);
-  }
+  // A stored receipt nothing can read back is this task's fault, not the
+  // batch's: refuse this terminal and let the rest of the batch apply (#1121).
+  if (winner === undefined) return refuse('terminal_receipt_not_canonical');
   await stores.agentMessageDraft.delete(taskId);
   const attempt = await stores.tasks.get(taskId);
   if (attempt?.cancellation !== undefined) {
