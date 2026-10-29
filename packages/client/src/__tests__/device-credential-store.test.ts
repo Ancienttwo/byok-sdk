@@ -9,8 +9,10 @@ import {
   DeviceCredentialStore,
   DeviceCredentialStoreError,
   DeviceCredentialStoreUnavailableError,
+  OS_CREDENTIAL_ENTRY_MAX_BYTES,
   type DeviceCommandResult,
   type DeviceCommandRunner,
+  type FirstPairingAttempt,
   runDeviceCommand,
 } from '../daemon/device-credential-store';
 
@@ -56,11 +58,14 @@ describe('DeviceCredentialStore', () => {
     const calls: Array<{ executable: string; args: readonly string[]; stdin?: string }> = [];
     const run: DeviceCommandRunner = async (executable, args, stdin) => {
       calls.push({ executable, args, stdin });
+      if (args[0] === 'find-generic-password' || args[0] === 'lookup' || stdin?.startsWith('read\n')) {
+        return { exitCode: 44, stdout: '', stderr: '' };
+      }
       return { exitCode: 0, stdout: '', stderr: '' };
     };
     const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform, commandRunner: run });
     await store.replace(credentials);
-    expect(calls).toHaveLength(platform === 'win32' ? 2 : 1);
+    expect(calls).toHaveLength(platform === 'win32' ? 4 : 2);
     expect(calls.flatMap((call) => call.args).join(' ')).not.toMatch(/device\.json|tmp|cache/i);
     expect(JSON.stringify(calls)).not.toContain(credentials.accessToken);
     expect(JSON.stringify(calls)).not.toContain(credentials.devicePrivateKeyPem);
@@ -225,6 +230,96 @@ describe('DeviceCredentialStore', () => {
       'operating-system credential provider could not read device credentials',
     );
     await expect(store.read()).rejects.not.toThrow(/secret-bearing/u);
+  });
+});
+
+describe('replacement pairing credential authority', () => {
+  const attempt: FirstPairingAttempt = {
+    kind: 'first-pairing-attempt-v1', deviceName: 'replacement', devicePublicKey: 'replacement-public-key',
+    devicePrivateKeyPem: 'replacement-private-key', machineId: 'replacement-machine',
+  };
+  const encoded = (value: unknown): string => `byok-device-credential-v1:${Buffer.from(JSON.stringify(value), 'utf8').toString('base64')}`;
+
+  function provider(initial?: string) {
+    let value = initial;
+    let writes = 0;
+    const run: DeviceCommandRunner = async (_executable, args, stdin) => {
+      if (args[0] === 'lookup') return { exitCode: value === undefined ? 1 : 0, stdout: value ?? '', stderr: '' };
+      if (args[0] === 'clear') value = undefined;
+      else { value = stdin; writes++; }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+    const open = () => new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'replacement-test', platform: 'linux', commandRunner: run });
+    return { open, value: () => value, writes: () => writes };
+  }
+
+  it('keeps first pairing as a standalone attempt and clears it completely', async () => {
+    const entry = provider();
+    await entry.open().saveFirstPairingAttempt(attempt);
+    expect(entry.value()).toBe(encoded(attempt));
+    await expect(entry.open().read()).resolves.toBeUndefined();
+    await expect(entry.open().readFirstPairingAttempt()).resolves.toEqual(attempt);
+    await expect(entry.open().clear()).resolves.toBe(true);
+    await expect(entry.open().readFirstPairingAttempt()).resolves.toBeUndefined();
+  });
+
+  it('stages both authorities in one entry and keeps the pending key through current enrollment renewal', async () => {
+    const entry = provider(encoded(credentials));
+    await entry.open().saveFirstPairingAttempt(attempt);
+    expect(entry.writes()).toBe(1);
+    expect(entry.value()).toBe(encoded({ kind: 'replacement-pairing-attempt-v1', record: credentials, attempt }));
+    await expect(entry.open().read()).resolves.toEqual(credentials);
+    await expect(entry.open().readFirstPairingAttempt()).resolves.toEqual(attempt);
+    const renewed = { ...credentials, accessToken: 'renewed-token', expiresAt: '2031-01-01T00:00:00.000Z' };
+    await entry.open().replace(renewed);
+    await expect(entry.open().read()).resolves.toEqual(renewed);
+    await expect(entry.open().readFirstPairingAttempt()).resolves.toEqual(attempt);
+    await expect(entry.open().clear()).resolves.toBe(true);
+    await expect(entry.open().read()).resolves.toBeUndefined();
+    await expect(entry.open().readFirstPairingAttempt()).resolves.toBeUndefined();
+  });
+
+  it.each(['deviceId', 'tenantId', 'devicePublicKey'] as const)('promotes an authenticated enrollment with a different %s', async (field) => {
+    const entry = provider(encoded({ kind: 'replacement-pairing-attempt-v1', record: credentials, attempt }));
+    const replacement = { ...credentials, [field]: `replacement-${field}` };
+    await entry.open().replace(replacement);
+    expect(entry.value()).toBe(encoded(replacement));
+    await expect(entry.open().read()).resolves.toEqual(replacement);
+    await expect(entry.open().readFirstPairingAttempt()).resolves.toBeUndefined();
+  });
+
+  it.each([
+    { record: undefined, attempt },
+    { record: credentials, attempt: undefined },
+    { record: { ...credentials, accessToken: '' }, attempt },
+    { record: credentials, attempt: { ...attempt, machineId: 1 } },
+    { record: { ...credentials, kind: 'first-pairing-attempt-v1' }, attempt },
+  ])('rejects a malformed wrapper without exposing or overwriting either member (%#)', async (members) => {
+    // Flat fields cannot turn an invalid wrapper into a usable record.
+    const raw = encoded({ ...credentials, kind: 'replacement-pairing-attempt-v1', ...members });
+    const entry = provider(raw);
+    await expect(entry.open().read()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
+    await expect(entry.open().readFirstPairingAttempt()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
+    await expect(entry.open().replace(credentials)).rejects.toBeInstanceOf(DeviceCredentialStoreError);
+    await expect(entry.open().saveFirstPairingAttempt(attempt)).rejects.toBeInstanceOf(DeviceCredentialStoreError);
+    expect(entry.writes()).toBe(0);
+    expect(entry.value()).toBe(raw);
+  });
+
+  it('refuses an oversized combined entry before writing and keeps the current enrollment', async () => {
+    const largeRecord = { ...credentials, accessToken: 'a'.repeat(800) };
+    const largeAttempt = { ...attempt, devicePrivateKeyPem: 'b'.repeat(700) };
+    expect(Buffer.byteLength(encoded(largeRecord))).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
+    expect(Buffer.byteLength(encoded(largeAttempt))).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
+    expect(Buffer.byteLength(encoded({ kind: 'replacement-pairing-attempt-v1', record: largeRecord, attempt: largeAttempt })))
+      .toBeGreaterThan(OS_CREDENTIAL_ENTRY_MAX_BYTES);
+    const raw = encoded(largeRecord);
+    const entry = provider(raw);
+    await expect(entry.open().saveFirstPairingAttempt(largeAttempt)).rejects.toThrow('exceeds the OS credential entry bound');
+    expect(entry.writes()).toBe(0);
+    expect(entry.value()).toBe(raw);
+    await expect(entry.open().read()).resolves.toEqual(largeRecord);
+    await expect(entry.open().readFirstPairingAttempt()).resolves.toBeUndefined();
   });
 });
 

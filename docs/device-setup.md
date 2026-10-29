@@ -225,8 +225,16 @@ missing or different `device.json` is `device_store_not_bound` (start halts as
 it, run `byok-agent doctor --repair restore-enrollment-metadata
 --expected-device-id <id> --expected-tenant-id <tenant> --yes`; the device id
 and mailbox are kept. Otherwise give this store its own productId. `byok-agent
-pair --replace-other-store` replaces the other store's enrollment, and that
-store then reads as not bound.
+pair --replace-other-store` stages a fresh key alongside the current enrollment
+in the same OS entry. A rejected request, network failure, or invalid response
+keeps the current enrollment usable; retrying after restart uses the staged key.
+Renewal of the current enrollment also preserves that attempt. A successful
+replacement promotes the new enrollment, and the other store then reads as not
+bound. Staging fails before writing if the combined entry exceeds the OS entry
+size bound. Older clients fail closed while the replacement attempt is pending;
+after promotion, the entry is an ordinary enrollment again. The public credential
+backend API shape is unchanged; injected backends must preserve the same staging
+and renewal semantics.
 
 ## Directory ownership
 
