@@ -394,6 +394,9 @@ func (s *session) replace(req replaceRequest) (fileState, *protocolError) {
 		return fileState{}, err
 	}
 	defer parent.Close()
+	if err := parent.cleanupTemporaries(); err != nil {
+		return fileState{}, err
+	}
 
 	before, err := parent.readState(leaf, req.MaxBytes)
 	if err != nil {
@@ -451,6 +454,9 @@ func (s *session) delete(req deleteRequest) (map[string]bool, *protocolError) {
 		return nil, err
 	}
 	defer parent.Close()
+	if err := parent.cleanupTemporaries(); err != nil {
+		return nil, err
+	}
 
 	before, err := parent.readState(leaf, maxFileBytes)
 	if err != nil {
@@ -497,6 +503,9 @@ func (s *session) append(req appendRequest) (fileState, *protocolError) {
 		return fileState{}, err
 	}
 	defer parent.Close()
+	if err := parent.cleanupTemporaries(); err != nil {
+		return fileState{}, err
+	}
 
 	file, info, exists, err := parent.openSingleLink(leaf, os.O_RDWR|os.O_APPEND)
 	if err != nil {
@@ -923,7 +932,7 @@ func validRelativePath(value string) bool {
 		return false
 	}
 	for _, part := range strings.Split(value, "/") {
-		if !validSegment(part) || !portableSegment(part) {
+		if !validSegment(part) || !portableSegment(part) || isHelperTemporary(part) {
 			return false
 		}
 	}

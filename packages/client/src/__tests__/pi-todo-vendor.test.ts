@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const root = path.resolve(import.meta.dirname, '../../vendor/rpiv-todo/2.8.0');
+const root = path.resolve(import.meta.dirname, '../../vendor/rpiv-todo/2.15.0');
 const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
   files: Array<{ path: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
 };
@@ -26,14 +26,18 @@ describe('licensed private todo source boundary', () => {
   });
 
   it('proves the guarded index annotations erase to identical JavaScript', () => {
-    for (const file of ['state/state-reducer.ts', 'todo-overlay.ts']) {
+    for (const file of ['state/state-reducer.ts', 'todo-overlay.ts', 'view/format.ts']) {
       const current = readFileSync(path.join(root, file), 'utf8');
       const original = file.startsWith('state/')
         ? current.replaceAll('state.tasks[idx]!', 'state.tasks[idx]')
-        : current.replace('lines[last]!.replace', 'lines[last].replace');
+        : file === 'view/format.ts'
+          ? current.replace('message.split("\\n")[0]!', 'message.split("\\n")[0]')
+          : current.replace('lines[last]!.replace', 'lines[last].replace');
       const upstream = original
         .replace('import type { TodoRenderPort as TUI } from "../../pi-tui/0.85.1/ports.js";\nimport { truncateToWidth } from "../../pi-tui/0.85.1/utils.js";',
-          'import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";');
+          'import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";')
+        .replace('import { Text } from "../../../pi-tui/0.85.1/components/text.js";',
+          'import { Text } from "@earendil-works/pi-tui";');
       expect(hash(upstream)).toBe(manifest.files.find(row => row.path === file)!.upstreamSha256);
       const result = spawnSync('bun', ['--eval', 'const t=new Bun.Transpiler({loader:"ts",target:"node"}); console.log(JSON.stringify(JSON.parse(await Bun.stdin.text()).map(s=>t.transformSync(s))));'],
         { input: JSON.stringify([current, original]), encoding: 'utf8' });

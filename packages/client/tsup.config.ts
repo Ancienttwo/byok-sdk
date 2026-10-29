@@ -44,7 +44,7 @@ export default defineConfig({
     options.legalComments = 'inline';
   },
   // Let our plugin annotate these external edges before tsup short-circuits them.
-  noExternal: ['pi-web-access', /^@byok-sdk\//],
+  noExternal: [/^@byok-sdk\//],
   esbuildPlugins: [workspaceExternals(), subagentsBuild(false), {
     name: 'mcp-http-core-entry',
     setup(build) {
@@ -65,8 +65,7 @@ export default defineConfig({
   external: [
     'koffi', '#byok-hermes-session', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-runtime-host-sealed', '#byok-pi-todo-runtime',
     'typebox', 'typebox/compile',
-    '@mozilla/readability', 'linkedom', 'p-limit', 'promise.try',
-    'turndown', 'unpdf', 'undici', 'jiti', 'yaml',
+    'undici', 'jiti', 'yaml',
   ],
   define: {
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),

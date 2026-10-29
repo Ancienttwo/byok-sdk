@@ -15,11 +15,11 @@
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { TodoRenderPort as TUI } from "../../pi-tui/0.85.1/ports.js";
 import { truncateToWidth } from "../../pi-tui/0.85.1/utils.js";
-import { COLLAPSE_KEY_OFF, getMaxWidgetLines, resolveCollapseKey } from "./config.js";
-import { formatStatusLabel, t } from "./state/i18n-bridge.js";
-import { selectHasActive, selectOverlayLayout, selectShowTaskIds, selectTodoCounts } from "./state/selectors.js";
-import { getRenderState } from "./state/store.js";
-import { formatOverlayTaskLine } from "./view/format.js";
+import { COLLAPSE_KEY_OFF, getMaxWidgetLines, resolveCollapseKey } from "./config.ts";
+import { formatStatusLabel, t } from "./state/i18n-bridge.ts";
+import { selectHasActive, selectOverlayLayout, selectShowTaskIds, selectTodoCounts } from "./state/selectors.ts";
+import { getRenderState } from "./state/store.ts";
+import { formatOverlayTaskLine } from "./view/format.ts";
 
 const WIDGET_KEY = "rpiv-todos";
 

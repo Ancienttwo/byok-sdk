@@ -85,6 +85,112 @@ function revertPiMove(before, after, field) {
   return true;
 }
 
+// Pi extension move: pi-web-access 0.24.1 -> 0.45.0 becomes an ordinary
+// external dependency, so the client drops the six pins it carried only for
+// the inlined TS source; rpiv-i18n and rpiv-config move 2.8.0 -> 2.15.0 with
+// the re-vendored rpiv-todo 2.15.0. EXTENSION_LOCK holds the reviewed changed
+// rows and every added row: the @modelcontextprotocol/sdk 1.x and defuddle
+// closures that pi-web-access 0.45.0 declares.
+const EXTENSION_MOVE = Object.freeze({
+  moved: Object.freeze({ 'pi-web-access': ['0.24.1', '0.45.0'], '@juicesharp/rpiv-i18n': ['2.8.0', '2.15.0'], '@juicesharp/rpiv-config': ['2.8.0', '2.15.0'] }),
+  removed: Object.freeze({ '@mozilla/readability': '0.6.0', linkedom: '0.16.11', 'p-limit': '6.2.0', 'promise.try': '2.0.1', turndown: '7.2.4', unpdf: '1.8.1' }),
+});
+export const EXTENSION_LOCK = Object.freeze({
+  changed: {
+    '@juicesharp/rpiv-config': { from: ['@juicesharp/rpiv-config@2.8.0','',{dependencies:{typebox:'^1.1.24'}},'sha512-mVQWnXw3CO8B8X4eRXq7kwkmcAjsdYOhqpS+zyTteoiipF0z/wV49kSGIN9lOpF6D2Rb1fcXiaZciFBaE+vsVg=='], to: ['@juicesharp/rpiv-config@2.15.0','',{peerDependencies:{typebox:'*'}},'sha512-S2BAGX4dJjQ2AyNYOEjC6ha04p9f6CdEfmtxpdxzSKrfDMwqIvOjjO9HiHc1IPY7jDY1q2Q8cGCtpIZWV6Y8NQ=='] },
+    '@juicesharp/rpiv-i18n': { from: ['@juicesharp/rpiv-i18n@2.8.0','',{dependencies:{'@juicesharp/rpiv-config':'^2.8.0'},peerDependencies:{'@earendil-works/pi-coding-agent':'*','@earendil-works/pi-tui':'*'}},'sha512-1qIxwN45JiyFMow7qk3OkrCAVIeH5avDbL7XJhGFyom0CSyAqptApQHPtGLQmNXQgNhu6xjN4ocNOA0IIFxUFw=='], to: ['@juicesharp/rpiv-i18n@2.15.0','',{dependencies:{'@juicesharp/rpiv-config':'^2.15.0'},peerDependencies:{'@earendil-works/pi-coding-agent':'*','@earendil-works/pi-tui':'*'}},'sha512-YpC8nN2dO/oi3slxMPvF2TQsitVY4IWdoLoT0C7EV7jxPVrySXx7Iucx9oeaP5zlO4pu2Mei5q3UFy3Ni2xwWw=='] },
+    'content-type': { from: ['content-type@2.1.0','',{},'sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=='], to: ['content-type@1.0.5','',{},'sha512-nTjqfcBFEipKdXCv4YDQWCfmcLZKm81ldF0pAopTvyrFGVbcR6P/VAAd5G7N+0tTr8QqiU0tFadD6FK4NtJwOA=='] },
+    'pi-web-access': { from: ['pi-web-access@0.24.1','',{dependencies:{'@mozilla/readability':'^0.6.0',linkedom:'^0.16.0','p-limit':'^6.1.0','promise.try':'^2.0.1',turndown:'^7.2.0',typebox:'^1.1.38',undici:'^8.9.0',unpdf:'^1.6.2'},peerDependencies:{'@earendil-works/pi-ai':'*','@earendil-works/pi-coding-agent':'*','@earendil-works/pi-tui':'*'}},'sha512-kNYVqPT2wbWbDKD2mfMsrCie1DyVsE/KYNVgpp7yqq072sG2PciKAB28PG4h0+klSO3MtCFRoPWAyA+l0CS7/A=='], to: ['pi-web-access@0.45.0','',{dependencies:{'@modelcontextprotocol/sdk':'1.32.1','@mozilla/readability':'^0.6.0',defuddle:'0.19.3',linkedom:'^0.16.0','p-limit':'^6.1.0','promise.try':'^2.0.1',turndown:'^7.2.0',undici:'^8.11.2',unpdf:'^1.6.2'},peerDependencies:{'@earendil-works/pi-ai':'*','@earendil-works/pi-coding-agent':'*','@earendil-works/pi-tui':'*',typebox:'*'},optionalPeers:['@earendil-works/pi-ai','@earendil-works/pi-coding-agent','@earendil-works/pi-tui'],bin:{'pi-web-access-mcp':'dist/mcp-cli.js'}},'sha512-AHgUKUas1vvBtdKbcv+7rWTPTIOl8xHR4E7s4dLBAz6soSGGPC4YNq1uVGuH5+bVrMx4X/fmPCm4rsOQIxexdQ=='] },
+  },
+  added: {
+    '@acemir/cssom': ['@acemir/cssom@0.9.32','',{},'sha512-OijrAUu7rrJhSIoHNg6LMPS5e344nwUHA+1EFYYjrh64D+GmytUsfBQjci45TjT+rd5Spsp8B5xsZDT+TgyXXQ=='],
+    '@modelcontextprotocol/sdk': ['@modelcontextprotocol/sdk@1.32.1','',{dependencies:{'@hono/node-server':'^1.19.9 || ^2.0.5',ajv:'^8.17.1','ajv-formats':'^3.0.1','content-type':'^1.0.5',cors:'^2.8.5','cross-spawn':'^7.0.5',eventsource:'^3.0.2','eventsource-parser':'^3.0.0',express:'^5.2.1','express-rate-limit':'^8.2.1',hono:'^4.11.4',jose:'^6.1.3','json-schema-typed':'^8.0.2','pkce-challenge':'^5.0.0','raw-body':'^3.0.0',zod:'^3.25 || ^4.0','zod-to-json-schema':'^3.25.1'},peerDependencies:{'@cfworker/json-schema':'^4.1.1'},optionalPeers:['@cfworker/json-schema']},'sha512-2DdE+SJDtzLEEWzY1ZjY7Q+VcPhcV1KisD3zI4u0XZyktsjHum1mwbMI+JaulUBi2OZk+KJAi2uPXzxichPkdw=='],
+    '@xmldom/xmldom': ['@xmldom/xmldom@0.9.12','',{},'sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A=='],
+    'accepts': ['accepts@2.0.0','',{dependencies:{'mime-types':'^3.0.0',negotiator:'^1.0.0'}},'sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng=='],
+    'ajv': ['ajv@8.20.0','',{dependencies:{'fast-deep-equal':'^3.1.3','fast-uri':'^3.0.1','json-schema-traverse':'^1.0.0','require-from-string':'^2.0.2'}},'sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA=='],
+    'ajv-formats': ['ajv-formats@3.0.1','',{dependencies:{ajv:'^8.0.0'}},'sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ=='],
+    'body-parser': ['body-parser@2.4.0','',{dependencies:{bytes:'^3.1.2','content-type':'^2.1.0',debug:'^4.4.3','http-errors':'^2.0.1','iconv-lite':'^0.7.3','on-finished':'^2.4.1',qs:'^6.16.1','raw-body':'^3.0.2','type-is':'^2.1.0'}},'sha512-Ifk1KcLrxaGt1occQagQNFNNOqRt1LFuehEnHHzB8Z6cRgIxRU1TBaiIsUiCdA+gy5PL7Y1IX31DNKkRmxtXjQ=='],
+    'body-parser/content-type': ['content-type@2.1.0','',{},'sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=='],
+    'bytes': ['bytes@3.1.2','',{},'sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg=='],
+    'content-disposition': ['content-disposition@2.0.1','',{},'sha512-e+H0ZXHSWYrENhQzw1LPuP4oF5MzVKmDU6d3hxlvaPEYLLg62MxtQNPRx4SYSuYJSBUgnQIG4HIN2tEtNv7Dog=='],
+    'cookie-signature': ['cookie-signature@1.2.2','',{},'sha512-D76uU73ulSXrD1UXF4KE2TMxVVwhsnCgfAyTg9k8P6KGZjlXKrOLe4dJQKI3Bxi5wjesZoFXJWElNWBjPZMbhg=='],
+    'cors': ['cors@2.8.6','',{dependencies:{'object-assign':'^4',vary:'^1'}},'sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw=='],
+    'defuddle': ['defuddle@0.19.3','',{dependencies:{commander:'^12.1.0'},optionalDependencies:{linkedom:'^0.18.12','mathml-to-latex':'^1.8.0',temml:'^0.13.3',turndown:'^7.2.0'},bin:{defuddle:'dist/cli.js'}},'sha512-5ZbOQ/B+iiRRqSQWwmCx/zEuqZOA/5q7gxyE2/4O2Bxq7nUC0PgKw9EdyxqWbFF1nrrrYemSeR25jg4TmA2fsA=='],
+    'defuddle/commander': ['commander@12.1.0','',{},'sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA=='],
+    'defuddle/linkedom': ['linkedom@0.18.14','',{dependencies:{'@acemir/cssom':'^0.9.32','css-select':'^7.0.0','html-escaper':'^3.0.3',htmlparser2:'^10.1.0',uhyphen:'^0.2.0'},peerDependencies:{canvas:'>= 2'},optionalPeers:['canvas']},'sha512-BRUnkOm4YR5vo+qI3j0EbungB0vZPSCue5AdnTQRaxAGSbsOZiBFRO0rh4zlo8qXUhli8pxvnpEXDklMnlq2Rg=='],
+    'defuddle/linkedom/css-select': ['css-select@7.0.0','',{dependencies:{boolbase:'^2.0.0','css-what':'^8.0.0',domhandler:'^6.0.1',domutils:'^4.0.2','nth-check':'^3.0.1'}},'sha512-snmjEVXy+1LnwXdxhYvTMj1d9tOh4HxkA1YmoayVBeeyR2C14Pum7fcxJIm4SswYspVy866eYNwlH6xC3/VH5g=='],
+    'defuddle/linkedom/css-select/boolbase': ['boolbase@2.0.0','',{},'sha512-DkVaaQHymRhpYEYo9x1oo7Q7B0Y6KJUsjm3c9eTyFDby4MHLBTwZ6ZDWBel5zrYxj1WsZgC5oLpiz+93MluXeA=='],
+    'defuddle/linkedom/css-select/css-what': ['css-what@8.0.0','',{},'sha512-DH0Bqq3DNp5tdOReuNyAA+Ev4Y2GS5FMbZpeTLP6C4CDi0h5nL0BmUPChXw3o/qbHLDWHl49sbNqQVY7bMSDdw=='],
+    'defuddle/linkedom/css-select/domhandler': ['domhandler@6.0.1','',{dependencies:{domelementtype:'^3.0.0'}},'sha512-gYzvtM72ZtxQO0T048kd6HWSbbGCNOUwcnfQ01cqIJ4X2IYKFFHZ5mKvrQETcFXxsRObZulDaKmy//R7TPtsBg=='],
+    'defuddle/linkedom/css-select/domhandler/domelementtype': ['domelementtype@3.0.0','',{},'sha512-umCQid3jKbDmVjx8jGaW7uUykm4DEUeyV21hPxNMo2nV955DhUThwqyOIDtreepP31hl84X7G5U9ZfsWvIB3Pg=='],
+    'defuddle/linkedom/css-select/domutils': ['domutils@4.0.2','',{dependencies:{'dom-serializer':'^3.0.0',domelementtype:'^3.0.0',domhandler:'^6.0.0'}},'sha512-qI4JLRKnSzqFqr7hAlS5xQDusBCjKSEG4t4+7aNrIQMHBcsC2TGEhuyABJdYkgSewL57PNLYEiibY2iPKhKpaA=='],
+    'defuddle/linkedom/css-select/domutils/dom-serializer': ['dom-serializer@3.1.1','',{dependencies:{domelementtype:'^3.0.0',domhandler:'^6.0.0',entities:'^8.0.0'}},'sha512-4MEa38/QexBob6gFNwu+EGdWvhJ1OKuNwdYY3Y3NyeWDQfnGeDYQUDfIRzWu5B5gsv03so2Uxd28YC6zrsx3Lw=='],
+    'defuddle/linkedom/css-select/domutils/dom-serializer/entities': ['entities@8.1.0','',{},'sha512-kxL7msIffSuh9aaFAMD7rxAIuTRMAHMeBtgHW2yUdWw732ZNh4MehkF2gdjvtdmikkaIP9bFDDJOPlsvm7avrA=='],
+    'defuddle/linkedom/css-select/domutils/domelementtype': ['domelementtype@3.0.0','',{},'sha512-umCQid3jKbDmVjx8jGaW7uUykm4DEUeyV21hPxNMo2nV955DhUThwqyOIDtreepP31hl84X7G5U9ZfsWvIB3Pg=='],
+    'defuddle/linkedom/css-select/nth-check': ['nth-check@3.0.1','',{dependencies:{boolbase:'^2.0.0'}},'sha512-GX0gsdbGVCgnRgbeGaubfjpBXyYRWOOCVeYh08bSQvDZqxz5ndXs1OTfAt/h36G1xvI94YIspsI0sVFqAV9+RQ=='],
+    'defuddle/linkedom/htmlparser2': ['htmlparser2@10.1.0','',{dependencies:{domelementtype:'^2.3.0',domhandler:'^5.0.3',domutils:'^3.2.2',entities:'^7.0.1'}},'sha512-VTZkM9GWRAtEpveh7MSF6SjjrpNVNNVJfFup7xTY3UpFtm67foy9HDVXneLtFVt4pMz5kZtgNcvCniNFb1hlEQ=='],
+    'defuddle/linkedom/htmlparser2/entities': ['entities@7.0.1','',{},'sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA=='],
+    'depd': ['depd@2.0.0','',{},'sha512-g7nH6P6dyDioJogAAGprGpCtVImJhpPk/roCzdb3fIh61/s/nPsfR6onyMwkCAR/OlC3yBC0lESvUoQEAssIrw=='],
+    'ee-first': ['ee-first@1.1.1','',{},'sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=='],
+    'encodeurl': ['encodeurl@2.0.0','',{},'sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg=='],
+    'escape-html': ['escape-html@1.0.3','',{},'sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow=='],
+    'etag': ['etag@1.8.1','',{},'sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg=='],
+    'express': ['express@5.3.0','',{dependencies:{accepts:'^2.0.0','body-parser':'^2.3.0','content-disposition':'^2.0.1','content-type':'^2.0.0',cookie:'^0.7.1','cookie-signature':'^1.2.1',debug:'^4.4.0',depd:'^2.0.0',encodeurl:'^2.0.0','escape-html':'^1.0.3',etag:'^1.8.1',finalhandler:'^2.1.0',fresh:'^2.0.0','http-errors':'^2.0.0','merge-descriptors':'^2.0.0','mime-types':'^3.0.0','on-finished':'^2.4.1',once:'^1.4.0',parseurl:'^1.3.3','proxy-addr':'^2.0.8',qs:'^6.16.0','range-parser':'^1.2.1',router:'^2.2.0',send:'^1.1.0','serve-static':'^2.2.0',statuses:'^2.0.1','type-is':'^2.1.0',vary:'^1.1.2'}},'sha512-qCqy1xSoaugxOD4IVHb1ZWdkvCF2W3aE2okKouWj8VwJ+ztskSiXoBnCSJqfKT+cVPJhuJqe9YLbY425+Zh00g=='],
+    'express-rate-limit': ['express-rate-limit@8.7.1','',{dependencies:{debug:'^4.4.3','ip-address':'^10.2.0'},peerDependencies:{express:'>= 4.11'}},'sha512-2FXbqkygil3mZiXzEtM0IjE/UBmBNot0J1GEVrJT4JbrvwOSoEtqtO+wHbiMQELWe1eNvHoYRg2dkjOid+6JkA=='],
+    'express/content-type': ['content-type@2.1.0','',{},'sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=='],
+    'express/cookie': ['cookie@0.7.2','',{},'sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w=='],
+    'fast-deep-equal': ['fast-deep-equal@3.1.3','',{},'sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q=='],
+    'fast-uri': ['fast-uri@3.1.9','',{},'sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ=='],
+    'finalhandler': ['finalhandler@2.1.1','',{dependencies:{debug:'^4.4.0',encodeurl:'^2.0.0','escape-html':'^1.0.3','on-finished':'^2.4.1',parseurl:'^1.3.3',statuses:'^2.0.1'}},'sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA=='],
+    'forwarded': ['forwarded@0.2.0','',{},'sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow=='],
+    'fresh': ['fresh@2.0.0','',{},'sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A=='],
+    'http-errors': ['http-errors@2.0.1','',{dependencies:{depd:'~2.0.0',inherits:'~2.0.4',setprototypeof:'~1.2.0',statuses:'~2.0.2',toidentifier:'~1.0.1'}},'sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ=='],
+    'inherits': ['inherits@2.0.4','',{},'sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ=='],
+    'ipaddr.js': ['ipaddr.js@1.9.1','',{},'sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g=='],
+    'is-promise': ['is-promise@4.0.0','',{},'sha512-hvpoI6korhJMnej285dSg6nu1+e6uxs7zG3BYAm5byqDsgJNWwxzM6z6iZiAgQR4TJ30JmBTOwqZUw3WlyH3AQ=='],
+    'json-schema-traverse': ['json-schema-traverse@1.0.0','',{},'sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug=='],
+    'json-schema-typed': ['json-schema-typed@8.0.2','',{},'sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA=='],
+    'mathml-to-latex': ['mathml-to-latex@1.8.0','',{dependencies:{'@xmldom/xmldom':'^0.9.10'}},'sha512-gQ0uK3zqB8HwlfaXJkEL5rgaZNbKUiBMmBP/B/W+b+t6KcseLSuYb1b0BjLgS9ZiQa24ePkqTX8/6FaQuDL7wQ=='],
+    'media-typer': ['media-typer@1.1.1','',{},'sha512-yz3xRaG20c6/BOzvYoDaGtPmGscs7YivItZEEqe6GbwNfHuxu9YNmvnEkMzKldAGY4/80pRcQRZSEnhquk9XuQ=='],
+    'merge-descriptors': ['merge-descriptors@2.0.0','',{},'sha512-Snk314V5ayFLhp3fkUREub6WtjBfPdCPY1Ln8/8munuLuiYhsABgBVWsozAG+MWMbVEvcdcpbi9R7ww22l9Q3g=='],
+    'mime-db': ['mime-db@1.54.0','',{},'sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ=='],
+    'mime-types': ['mime-types@3.0.2','',{dependencies:{'mime-db':'^1.54.0'}},'sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A=='],
+    'negotiator/content-type': ['content-type@2.1.0','',{},'sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=='],
+    'on-finished': ['on-finished@2.4.2','',{dependencies:{'ee-first':'1.1.1'}},'sha512-ATWUv387i+nLD49EiDoOft5scf32Vsdz3ktrQJG9bi7jRFmaXTssvyvj1EmeKVVgvesbqUtvQQvaS2TpTukAZQ=='],
+    'once': ['once@1.4.0','',{dependencies:{wrappy:'1'}},'sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=='],
+    'parseurl': ['parseurl@1.3.3','',{},'sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ=='],
+    'proxy-addr': ['proxy-addr@2.0.8','',{dependencies:{forwarded:'0.2.0','ipaddr.js':'1.9.1'}},'sha512-5nnx0yGyVUcY6t9RnWcARWtwT9F1D8O9rt08htPvnd49W1IgZtmLkhu9WfMzQj1cFxjHIO6connUNVW5k7AVyQ=='],
+    'qs': ['qs@6.17.0','',{dependencies:{'es-define-property':'^1.0.1','side-channel':'^1.1.1'}},'sha512-5LK5BZ2XDHMvcUJaf0CQ5HL3aVgKbpklvByC7qLSxYkfE8COEEbJg5xCHWCTqzqi0Gs4Jn5Mv5v3R38W6edscA=='],
+    'range-parser': ['range-parser@1.3.0','',{},'sha512-hek2mFQpPuI4E1BBKrSto+BU3e3x4xuarsbiwr3+lf7p44juvFMV0XFWQAP3xUyqXA4RrXLIoaSUGbSt056ZMw=='],
+    'raw-body': ['raw-body@3.0.2','',{dependencies:{bytes:'~3.1.2','http-errors':'~2.0.1','iconv-lite':'~0.7.0',unpipe:'~1.0.0'}},'sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA=='],
+    'require-from-string': ['require-from-string@2.0.2','',{},'sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw=='],
+    'router': ['router@2.2.0','',{dependencies:{debug:'^4.4.0',depd:'^2.0.0','is-promise':'^4.0.0',parseurl:'^1.3.3','path-to-regexp':'^8.0.0'}},'sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ=='],
+    'router/path-to-regexp': ['path-to-regexp@8.4.2','',{},'sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA=='],
+    'send': ['send@1.2.1','',{dependencies:{debug:'^4.4.3',encodeurl:'^2.0.0','escape-html':'^1.0.3',etag:'^1.8.1',fresh:'^2.0.0','http-errors':'^2.0.1','mime-types':'^3.0.2',ms:'^2.1.3','on-finished':'^2.4.1','range-parser':'^1.2.1',statuses:'^2.0.2'}},'sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ=='],
+    'serve-static': ['serve-static@2.2.1','',{dependencies:{encodeurl:'^2.0.0','escape-html':'^1.0.3',parseurl:'^1.3.3',send:'^1.2.0'}},'sha512-xRXBn0pPqQTVQiC8wyQrKs2MOlX24zQ0POGaj0kultvoOCstBQM5yvOhAVSUwOMjQtTvsPWoNCHfPGwaaQJhTw=='],
+    'setprototypeof': ['setprototypeof@1.2.0','',{},'sha512-E5LDX7Wrp85Kil5bhZv46j8jOeboKq5JMmYM3gVGdGH8xFpPWXUMsNrlODCrkoxMEeNi/XZIwuRvY4XNwYMJpw=='],
+    'statuses': ['statuses@2.0.2','',{},'sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw=='],
+    'temml': ['temml@0.13.5','',{},'sha512-aPkDDgunanpLNL0ql32HbolqLep+w8DRcVXRql7rWrMt/PhczdLgL4UBYYVU3BYjCNjkGq4EqwIicu/zWr1iOg=='],
+    'toidentifier': ['toidentifier@1.0.1','',{},'sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA=='],
+    'type-is': ['type-is@2.1.0','',{dependencies:{'content-type':'^2.0.0','media-typer':'^1.1.0','mime-types':'^3.0.0'}},'sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA=='],
+    'type-is/content-type': ['content-type@2.1.0','',{},'sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=='],
+    'unpipe': ['unpipe@1.0.0','',{},'sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ=='],
+    'vary': ['vary@1.1.2','',{},'sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg=='],
+    'wrappy': ['wrappy@1.0.2','',{},'sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=='],
+    'zod-to-json-schema': ['zod-to-json-schema@3.25.2','',{peerDependencies:{zod:'^3.25.28 || ^4'}},'sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=='],
+  },
+});
+// Restore the reviewed old client edges only when every edge moves exactly.
+function revertExtensionMove(before, after) {
+  const from = before?.dependencies, to = after?.dependencies;
+  if (!plain(from) || !plain(to)) return false;
+  if (Object.entries(EXTENSION_MOVE.moved).some(([name, [old, next]]) => from[name] !== old || to[name] !== next)) return false;
+  if (Object.entries(EXTENSION_MOVE.removed).some(([name, old]) => from[name] !== old || name in to)) return false;
+  for (const [name, [old]] of Object.entries(EXTENSION_MOVE.moved)) to[name] = old;
+  Object.assign(to, EXTENSION_MOVE.removed);
+  return true;
+}
+
 // #927 drops the protocol version from the server description and declares
 // the cloud-do test edge to client (its tests import client source).
 const SERVER_DESCRIPTION = Object.freeze({
@@ -243,6 +349,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     for (const example of PRIVATE_HOSTED) admitHostedLock(before, after, cwd, example);
     const piMoved = [];
     let oracleMoved = false;
+    let extensionMoved = false;
     for (const [dir, record] of Object.entries(before.workspaces)) {
       if (dir === '') continue;
       const current = after.workspaces?.[dir];
@@ -278,6 +385,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         && revertProtocolOracleMove(record, current)) oracleMoved = true;
       const piField = PI_FIELDS[dir];
       if (piField && manifest[piField]?.['@earendil-works/pi-ai'] === PI_MOVE.to && revertPiMove(record, current, piField)) piMoved.push(dir);
+      if (dir === 'packages/client' && manifest.dependencies?.['pi-web-access'] === EXTENSION_MOVE.moved['pi-web-access'][1]
+        && revertExtensionMove(record, current)) extensionMoved = true;
       delete record.version; delete current.version;
     }
     // Both workspace pins and the resolved package move together, or nothing moves.
@@ -310,6 +419,17 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       for (const name of PI_PACKAGES) after.packages[name] = before.packages[name];
       for (const name of PI_ADDED) delete after.packages[name];
       qualify.push(...piMoved);
+    }
+    // The client edges, the changed rows and every added row move together, or nothing moves.
+    if (extensionMoved) {
+      const rows = Object.entries(EXTENSION_LOCK.changed).every(([name, { from, to }]) =>
+        isDeepStrictEqual(before.packages?.[name], from) && isDeepStrictEqual(after.packages?.[name], to))
+        && Object.entries(EXTENSION_LOCK.added).every(([name, row]) =>
+          before.packages?.[name] === undefined && isDeepStrictEqual(after.packages?.[name], row));
+      if (!rows) throw new Error('Reviewed CI mapping required: bun.lock must move the Pi extension pins and every reviewed extension lock row together');
+      for (const name of Object.keys(EXTENSION_LOCK.changed)) after.packages[name] = before.packages[name];
+      for (const name of Object.keys(EXTENSION_LOCK.added)) delete after.packages[name];
+      qualify.push('packages/client');
     }
   } else if (path === 'examples/bot-collaboration/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The bot collaboration fixture must stay private');
@@ -433,6 +553,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     const dir = path.slice(0, -'/package.json'.length);
     if (UNDICI_FIELDS[dir] && revertUndiciMove(before, after, UNDICI_FIELDS[dir])) qualify.push(dir);
     if (dir === 'packages/protocol' && revertProtocolOracleMove(before, after)) qualify.push(dir);
+    if (dir === 'packages/client' && revertExtensionMove(before, after)) qualify.push(dir);
     if (PI_FIELDS[dir] && revertPiMove(before, after, PI_FIELDS[dir])) {
       qualify.push(dir);
       if (dir === 'packages/client') {

@@ -1,22 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { serve } from '@hono/node-server';
 import pg from 'pg';
 import { createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration, tenantId,
   type ByokCloud, type ByokCloudObserver } from '@byok-sdk/cloud';
 import { createPostgresCloudStores, createPostgresCoreStores, migrate, migrationsDir } from '@byok-sdk/cloud-dataplane';
 import { createByokPool, PostgresE2eeMemberStore } from '@byok-sdk/cloud-dataplane/runtime';
-import { createAgentHomeProjectionConsumer, createDaemonWithAdapters } from '@byok-sdk/client';
-import type { FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
-import { policy } from '@byok-sdk/example-host-execution-core/test-support';
-import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
-import { createTestKeychain } from '../../../scripts/testing/macos-keychain.mjs';
-import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
-import { HostedMember, type TaskSealing } from './e2ee-member.test-support';
+import type { BotStubAdapter } from '../../basic/goal-btw.test-support';
+import type { TaskSealing } from './e2ee-member.test-support';
+import { openHostedDevice } from './hosted-device.test-support';
 import { POSTGRES_URL } from './postgres.test-support';
-import type { HostedTaskPort } from './reconcile';
 
 // The dataplane gate: the hosted SDK composition needs Postgres and the object store endpoint.
 export const S3_ENDPOINT = process.env.BYOK_TEST_S3_ENDPOINT || undefined;
@@ -26,8 +18,6 @@ if (process.env.BYOK_REQUIRE_DATAPLANE === '1' && S3_ENDPOINT === undefined) {
     + '  export BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100');
 }
 export const SKIP_HOSTED_CLOUD = POSTGRES_URL === undefined || S3_ENDPOINT === undefined;
-
-const PRODUCT_ID = 'hosted-collaboration-test';
 
 export interface HostedCloudOptions {
   /**
@@ -56,7 +46,6 @@ export async function openHostedCloud(options: HostedCloudOptions = {}) {
   await admin.query(`CREATE SCHEMA "${schema}"`);
   // The stores read int8 columns as bigint, which only the pool from createByokPool parses.
   const pool = createByokPool({ connectionString: POSTGRES_URL!, max: 8, options: `-c search_path=${schema}` });
-  const root = await mkdtemp(path.join(tmpdir(), 'hosted-cloud-'));
   const close: (() => Promise<unknown>)[] = [];
   try {
     await migrate(pool, migrationsDir());
@@ -84,45 +73,13 @@ export async function openHostedCloud(options: HostedCloudOptions = {}) {
     if (!http.listening) await new Promise<void>(resolve => http.once('listening', resolve));
     const address = http.address();
     if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
-    const adapter = options.adapter ?? new BotStubAdapter();
-    let deviceCredentials: { macosKeychainPath: string } | undefined;
-    if (options.e2ee !== undefined && process.platform === 'darwin') {
-      const keychain = await createTestKeychain();
-      close.push(() => keychain.dispose());
-      deviceCredentials = { macosKeychainPath: keychain.path };
-    }
-    const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'Hosted collaboration', localAgentRelease: { version: '0.0.0-test' },
-      serverUrl: `http://127.0.0.1:${address.port}`, storeDir: path.join(root, 'sdk'),
-      ...(options.deviceName === undefined ? {} : { deviceName: options.deviceName }),
-      ...(deviceCredentials === undefined ? {} : { deviceCredentials }),
-      // The Host's persona hook (#793 S13): it writes the Bot persona of a home projection, so the device applies a task-free
-      // projection and advertises `agent-home-projection`.
-      agentHome: { hostStorageRoot: path.join(root, 'homes'), projection: createAgentHomeProjectionConsumer(async ({ projection, writeHomeFile }) => {
-        await writeHomeFile('AGENTS.md', String((projection as { persona?: unknown }).persona ?? ''));
-      }) },
-      agentEgress: { policy },
-    }, [adapter], options.e2ee === undefined ? { deviceCredentials: new InMemoryDeviceCredentialStore() } : {});
-    const { code } = await cloud.createPairingCode(tenant, { productId: PRODUCT_ID });
-    const member = options.e2ee === undefined ? undefined : await HostedMember.create(cloud, tenant);
-    const { deviceId } = await daemon.pair(code, member === undefined ? undefined : { verificationSecret: member.verificationSecret });
-    if (member !== undefined) await member.putScope(options.e2ee!.scopeId, await member.approve(deviceId), options.e2ee!.categories);
-    await daemon.start();
-    close.unshift(() => daemon.stop());
-    await waitForReady(daemon);
+    const device = await openHostedDevice(cloud, tenant, `http://127.0.0.1:${address.port}`, options);
+    close.unshift(() => device.close());
 
-    /** The SDK calls of the tenant, as H binds them. */
-    const port: FrozenSubmitPort & HostedTaskPort = {
-      submit: input => cloud.submitAgentExecution(tenant, input),
-      submitSealed: input => cloud.submitSealedAgentExecution(tenant, input),
-      offer: taskId => cloud.readTaskOffer(tenant, taskId),
-      attempt: taskId => cloud.readTaskAttempt(tenant, taskId),
-      deviceTerminal: taskId => cloud.readDeviceTerminal(tenant, taskId),
-      cancel: (taskId, reason) => cloud.cancelTask(tenant, taskId, reason),
-    };
     /** Read only: the SDK mailbox rows of one offer message. One offer is one row, however many submits resolved. */
     const mailboxRows = async (messageId: string) =>
       Number((await pool.query<{ n: string }>('SELECT count(*) AS n FROM outbox WHERE message_id = $1', [messageId])).rows[0]!.n);
-    return { cloud, tenant, deviceId, adapter, daemon, port, mailboxRows, member, pool, async close() { await shutdown(); } };
+    return { cloud, tenant, ...device, mailboxRows, pool, async close() { await shutdown(); } };
   } catch (error) {
     await shutdown();
     throw error;
@@ -131,7 +88,6 @@ export async function openHostedCloud(options: HostedCloudOptions = {}) {
     for (const step of close.splice(0)) await step().catch(() => {});
     await pool.end();
     await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).finally(() => admin.end());
-    await rm(root, { recursive: true, force: true });
   }
 }
 export type HostedCloud = Awaited<ReturnType<typeof openHostedCloud>>;

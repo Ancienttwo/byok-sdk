@@ -4,7 +4,7 @@
  * Keep render-time scope lookup so live applyLocale updates remain visible.
  */
 
-import type { TaskStatus } from "../tool/types.js";
+import type { TaskStatus } from "../tool/types.ts";
 
 export const I18N_NAMESPACE = "@juicesharp/rpiv-todo";
 

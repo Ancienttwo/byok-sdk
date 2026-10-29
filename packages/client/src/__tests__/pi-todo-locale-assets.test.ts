@@ -10,21 +10,21 @@ afterEach(() => { vi.unstubAllEnvs(); roots.splice(0).forEach(root => rmSync(roo
 function fixture() {
   const root = mkdtempSync(path.join(tmpdir(), 'todo-locales-')); roots.push(root);
   cpSync(path.resolve(import.meta.dirname, '../../dist/assets'), root, { recursive: true });
-  const manifestPath = path.join(root, 'extensions/rpiv-todo/2.8.0/manifest.json');
+  const manifestPath = path.join(root, 'extensions/rpiv-todo/2.15.0/manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   return { root, manifest, manifestPath };
 }
 describe('todo locale preverification', () => {
   it('verifies all nine assets', () => {
     const f = fixture(); const resolver = vi.fn(() => f.root);
-    expect(verifyTodoLocaleAssets(resolver)).toMatch(/extensions\/rpiv-todo\/2.8.0\/$/);
+    expect(verifyTodoLocaleAssets(resolver)).toMatch(/extensions\/rpiv-todo\/2.15.0\/$/);
     expect(resolver).toHaveBeenCalledTimes(1);
   });
   it('reads a single-file product asset root from PI_PACKAGE_DIR, else beside a compiled executable', () => {
     const f = fixture();
     vi.stubEnv('PI_PACKAGE_DIR', f.root);
     expect(bundledAssetRoot()).toBe(f.root);
-    expect(verifyTodoLocaleAssets(bundledAssetRoot)).toMatch(/extensions\/rpiv-todo\/2.8.0\/$/);
+    expect(verifyTodoLocaleAssets(bundledAssetRoot)).toMatch(/extensions\/rpiv-todo\/2.15.0\/$/);
     expect(locateBundledPiAssets({ piPackageDir: undefined, executable: path.join(f.root, 'product') })).toBe(f.root);
   });
 

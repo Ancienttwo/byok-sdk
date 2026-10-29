@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = new URL('../', import.meta.url);
-const vendor = new URL('vendor/rpiv-todo/2.8.0/', root);
+const vendor = new URL('vendor/rpiv-todo/2.15.0/', root);
 const layout = JSON.parse(await readFile(new URL('src/adapters/pi/todo-locale-layout.json', root), 'utf8'));
 const source = JSON.parse(await readFile(new URL('source-manifest.json', vendor), 'utf8'));
 const assets = new URL('dist/assets/', root);
