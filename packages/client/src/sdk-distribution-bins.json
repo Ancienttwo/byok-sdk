@@ -1,0 +1,11 @@
+{
+  "byok-agent": { "package": "@byok-sdk/client", "role": "cli" },
+  "byok-agent-memory-mcp": { "package": "@byok-sdk/client", "role": "reserved-helper", "kind": "agent-memory-mcp" },
+  "byok-agent-message-mcp": { "package": "@byok-sdk/client", "role": "reserved-helper", "kind": "agent-message-mcp" },
+  "byok-agent-result-mcp": { "package": "@byok-sdk/client", "role": "reserved-helper", "kind": "agent-result-mcp" },
+  "byok-agent-team-mcp": { "package": "@byok-sdk/client", "role": "reserved-helper", "kind": "agent-team-mcp" },
+  "byok-pi-durable": { "package": "@byok-sdk/client", "role": "pi-host", "kind": "pi-durable" },
+  "byok-pi-prepared": { "package": "@byok-sdk/client", "role": "pi-host", "kind": "pi-prepared" },
+  "byok-pi-provider-launcher": { "package": "@byok-sdk/keys", "role": "provider-launcher" },
+  "byok-pi-rpc": { "package": "@byok-sdk/client", "role": "pi-host", "kind": "pi-rpc" }
+}
