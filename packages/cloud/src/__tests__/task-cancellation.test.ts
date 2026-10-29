@@ -1,6 +1,7 @@
 import type { TenantId } from '@byok-sdk/core';
 import { createEnvelope, decodeEnvelope } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
+import { ackAndCollectMailbox } from '../../../conformance/src/cloud/harness';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
 import {
@@ -300,6 +301,36 @@ describe('host task cancellation', () => {
       'task.offer',
       'task.cancel',
     ]);
+  });
+
+  // #1116: a claimed task stays cancel_requested after its acked task.cancel
+  // row is collected; a repeat cancelTask returns the attempt and enqueues nothing.
+  it('returns the attempt for a repeat cancel after the claimed delivery row is retired', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+      payload: offerPayload('stuck runtime'),
+    });
+    const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
+      core: harness.core,
+      cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
+    });
+    await expect(handleInboundEnvelope(
+      stores,
+      device.deviceId,
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
+    ).then((result) => result.outcome)).resolves.toBe('accepted');
+    const first = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'stuck runtime');
+    expect(first.status).toBe('cancel_requested');
+    await ackAndCollectMailbox(harness.core.mailbox, TENANT_A, device.deviceId);
+    await expect(harness.core.mailbox.readUsage(TENANT_A)).resolves.toEqual({ bytes: 0n });
+
+    await expect(harness.cloud.cancelTask(TENANT_A, offer.taskId, 'ignored retry')).resolves.toEqual(first);
+    const mailbox = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
+    expect(mailbox.messages).toEqual([]);
+    await expect(harness.core.mailbox.readUsage(TENANT_A)).resolves.toEqual({ bytes: 0n });
   });
 
   it('coalesces truly concurrent duplicate cancellations into one tombstone and one delivery', async () => {
