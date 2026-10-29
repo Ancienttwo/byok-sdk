@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "785019275c2eb31f4300818f12f367a6f4e7ab56c0ef92ad7ae86957145beb1a"
+    "snapshotSha256": "4f36046984e20e992cfe2d07bff403d289033eb9169cf173778614190929086b"
   },
   "configFields": {
     "status": "tracked",
@@ -123,6 +123,19 @@
       "items": [
         "export:@byok-sdk/client#BlobClient",
         "export:@byok-sdk/client#InstallSkillPacksOptions"
+      ]
+    },
+    {
+      "id": "task-fail-reason-bound",
+      "impact": "breaking",
+      "summary": "The task.fail reason schema now transforms with boundFailureReason (#1124): createEnvelope and every decode redact credentials (Authorization/Bearer values, provider key shapes, *KEY/*TOKEN/*SECRET/*PASSWORD* assignments, URL userinfo) and cap the reason at TASK_FAIL_REASON_MAX_BYTES UTF-8 bytes with a truncation marker. A longer reason is truncated, never refused, and no field is removed; machine-readable failure stays in task.fail.failure. Breaking because decode no longer returns such a reason verbatim: a Host that parsed the stderr tail out of reason must read the local daemon diagnostics instead, and a terminal receipt stored before this release whose reason is unbounded is not rewritten and no longer re-encodes byte-for-byte, so settle in-flight task terminals before upgrading the cloud.",
+      "migration": "docs/security.md#runtime-operation-admission",
+      "items": [
+        "export:@byok-sdk/protocol#TASK_FAIL_REASON_MAX_BYTES",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#boundFailureReason",
+        "export:@byok-sdk/protocol/constants#TASK_FAIL_REASON_MAX_BYTES",
+        "export:@byok-sdk/protocol/constants#boundFailureReason"
       ]
     }
   ],
@@ -517,6 +530,31 @@
       "item": "export:@byok-sdk/client#validateDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TASK_FAIL_REASON_MAX_BYTES",
+      "change": "added",
+      "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+      "change": "changed",
+      "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#boundFailureReason",
+      "change": "added",
+      "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#TASK_FAIL_REASON_MAX_BYTES",
+      "change": "added",
+      "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#boundFailureReason",
+      "change": "added",
+      "entry": "task-fail-reason-bound"
     }
   ]
 }

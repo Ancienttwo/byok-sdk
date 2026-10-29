@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
-import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from './constants';
+import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason } from './constants';
 import { BlobRefSchema } from './blob';
 import {
   SEALED_DECLINE_CODES,
@@ -1304,7 +1304,13 @@ const TaskFailPlainPayloadSchema = z.object({
   /** Local interruption observation bound to the immutable offer; does not assert a cloud claim. */
   recovery: z.object({ kind: z.literal('daemon_interrupted'), offerId: z.uuid() }).strict().optional(),
   harnessId: HarnessIdSchema.optional(),
-  reason: z.string(),
+  /**
+   * Display text, bounded by `boundFailureReason` on every parse (#1124):
+   * credentials redacted, at most `TASK_FAIL_REASON_MAX_BYTES` UTF-8 bytes.
+   * `createEnvelope` and every decode apply it, so one place bounds every
+   * sender and receiver. A longer reason is truncated, never refused.
+   */
+  reason: z.string().transform(boundFailureReason),
   retryable: z.boolean().optional(),
   /** Gated on the server's `runtime-failure-class` flag. Plaintext on the sealed branch too. */
   failure: TaskFailureSchema.optional(),

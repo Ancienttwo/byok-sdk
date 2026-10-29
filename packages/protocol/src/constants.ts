@@ -2,6 +2,7 @@
 export * from './version';
 export * from './task-state';
 export * from './capability-constants';
+export * from './failure-reason';
 
 /** Maximum raw UTF-8 content bytes in one local Host Agent-memory export; no truncation. */
 export const AGENT_MEMORY_MAX_SNAPSHOT_BYTES = 1024 * 1024;
