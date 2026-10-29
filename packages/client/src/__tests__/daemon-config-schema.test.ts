@@ -50,9 +50,9 @@ afterEach(async () => {
 });
 
 describe('generated DaemonConfig schema (#1094)', () => {
-  it('is regenerated from the DaemonConfig interface (no stale or hand-edited copy)', () => {
+  it('runs the generator entrypoint across platforms from an unrelated working directory', async () => {
     // Fails with a regenerate hint when either generated file drifts from create-daemon.ts.
-    execFileSync(process.execPath, [path.join(clientRoot, 'src/daemon/config-schema/generate-schema.mjs'), '--check'], { stdio: 'pipe' });
+    execFileSync(process.execPath, [path.join(clientRoot, 'src/daemon/config-schema/generate-schema.mjs'), '--check'], { cwd: await tmpDir('byok-schema entrypoint-'), stdio: 'pipe' });
   }, 60_000);
 
   it('is versioned, shipped beside package.json, and marks the surfaces a config file cannot set', () => {
@@ -177,6 +177,61 @@ describe('effective values', () => {
       storage: { scratchRoot: testScratchRoot() }, agentMemoryMcp: 'off', ...extra,
     };
   }
+
+  const limits = {
+    revision: 'config-check-v1', maxRequestBytes: 32_000, maxArtifactBytes: 256_000,
+    maxScopeAggregateBytes: 512_000, maxInFlight: 4, maxCounterCallsPerScope: 16,
+    counterTimeoutMs: 2_000, preparationDeadlineMs: 4_000, retentionMs: 60_000,
+    retryHorizonMs: 30_000,
+  };
+  const resolveScope = vi.fn(async (): Promise<never> => { throw new Error('must not resolve authority during config check'); });
+  const resolveSource = vi.fn(async (): Promise<never> => { throw new Error('must not resolve source during config check'); });
+  const preparation = { limits, authorityResolver: { resolveScope, resolveSource } };
+
+  it.each<Partial<DaemonConfig>>([
+    { presence: { intervalMs: 0 } },
+    { presence: { intervalMs: 5_000, minimumIntervalMs: 5_000 } },
+    { presence: { intervalMs: 90_000, ttlMs: 90_000 } },
+    { deviceAssertion: { audiences: [''] } },
+    { deviceAssertion: { audiences: ['duplicate', 'duplicate'] } },
+    { deviceAssertion: { audiences: ['界'.repeat(1_000)] } },
+    { deviceAssertion: { audiences: ['audience'], ttlMs: 0 } },
+    { deviceAssertion: { audiences: ['audience'], ttlMs: Number.MAX_SAFE_INTEGER } },
+    { inputPreparation: { ...preparation, limits: { ...limits, maxInFlight: 0 } } },
+    { inputPreparation: { ...preparation, limits: { ...limits, revision: '' } } },
+    { inputPreparation: { ...preparation, limits: { ...limits, counterTimeoutMs: 5_000 } } },
+    { inputPreparation: { ...preparation, limits: { ...limits, retentionMs: 3_000 } } },
+    { inputPreparation: { ...preparation, limits: { ...limits, maxScopeAggregateBytes: 1 } } },
+  ])('refuses operational config just as construction does: %j', async (extra) => {
+    const config = await embeddedConfig(extra);
+    let constructionError: unknown;
+    try { createDaemonWithAdapters(config, []); } catch (error) { constructionError = error; }
+    expect(constructionError).toBeInstanceOf(Error);
+    const report = checkDaemonConfig(config, { source: 'embedded', adapters: [] });
+    expect(report.ok).toBe(false);
+    expect(report.effective).toBeUndefined();
+    expect(report.issues).toEqual([expect.objectContaining({
+      code: 'invalid_value', severity: 'error', message: (constructionError as Error).message,
+    })]);
+  });
+
+  it.each<Partial<DaemonConfig>>([
+    {},
+    { deviceAssertion: { audiences: [] } },
+    {
+      presence: { minimumIntervalMs: 1, intervalMs: 2, ttlMs: 3 },
+      deviceAssertion: { audiences: ['audience'], ttlMs: 1 }, inputPreparation: preparation,
+    },
+  ])('accepts defaults and valid operational bounds with construction parity: %j', async (extra) => {
+    const config = await embeddedConfig(extra);
+    const report = checkDaemonConfig(config, { source: 'embedded', adapters: [] });
+    expect(report.ok).toBe(true);
+    expect(report.issues).toEqual([]);
+    const daemon = createDaemonWithAdapters(config, []);
+    expect(report.effective).toEqual(daemon.status().config);
+    expect(resolveScope).not.toHaveBeenCalled();
+    expect(resolveSource).not.toHaveBeenCalled();
+  });
 
   it('Daemon.status().config is the report checkDaemonConfig builds, unknown fields included as warnings', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
