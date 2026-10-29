@@ -116,19 +116,9 @@
       ]
     },
     {
-      "id": "auth-renewal-floor",
-      "impact": "additive",
-      "summary": "Token renewal keeps a minimum gap between proactive renewals, so a fast device clock or a server TTL under the renewal margin no longer loops renewals and keychain writes (#1114). The declarations change only by private AuthManager members; no Host action.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/pull/1131",
-      "items": [
-        "export:@byok-sdk/client#BlobClient",
-        "export:@byok-sdk/client#InstallSkillPacksOptions"
-      ]
-    },
-    {
       "id": "device-store-default-dir-removed",
       "impact": "breaking",
-      "summary": "The static DeviceStore.defaultDir(productId) is removed; it duplicated the default store path. The class is reachable through BlobClient and InstallSkillPacksOptions. The default storeDir is still <home>/.byok/<productId> and no store moves. A Host that called DeviceStore.defaultDir uses resolveHostLayout({ productId, productName }).storeDir.",
+      "summary": "The static DeviceStore.defaultDir(productId) is removed; it duplicated the default store path. The class is reachable through BlobClient and InstallSkillPacksOptions. The default storeDir is still <home>/.byok/<productId> and no store moves. A Host that called DeviceStore.defaultDir uses resolveHostLayout({ productId, productName }).storeDir. These same exports also contain private AuthManager declaration changes for the token-renewal minimum gap (#1114): a fast device clock or short server TTL no longer loops renewals and keychain writes. That renewal fix requires no additional Host action.",
       "migration": "docs/spec.md#recommended-host-layout",
       "items": [
         "export:@byok-sdk/client#BlobClient",
@@ -401,7 +391,7 @@
     {
       "item": "export:@byok-sdk/client#BlobClient",
       "change": "changed",
-      "entry": "auth-renewal-floor"
+      "entry": "device-store-default-dir-removed"
     },
     {
       "item": "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
@@ -506,7 +496,7 @@
     {
       "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
       "change": "changed",
-      "entry": "auth-renewal-floor"
+      "entry": "device-store-default-dir-removed"
     },
     {
       "item": "export:@byok-sdk/client#LocalToolApprovalPolicy",
