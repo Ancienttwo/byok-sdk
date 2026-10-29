@@ -232,7 +232,9 @@ export const familyOwners = Object.freeze({
   'windows-client': [
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
     /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write|fold-name-aliases)\.ts|diagnostics\/|bin\/commands\/)/,
-    /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,
+    /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity|service-enrollment-handover)[^/]*$/,
+    // #1165: service enrollment's handover on a named-pipe control endpoint.
+    /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
     // #738: the Agent-home file write crash test, its child process and the code it qualifies.
     /^packages\/client\/src\/(?:agent-home\.ts|__tests__\/(?:fixtures\/)?agent-home-write-file[^/]*)$/,
     // #712: the Hermes suites this job runs on Windows, their fakes and the code they qualify.
@@ -258,6 +260,11 @@ export const familyOwners = Object.freeze({
   'windows-service-smoke': [
     /^templates\/service\/winsw\//,
     /^packages\/client\/src\/(?:lifecycle\/|util\/secure-dir\.ts$)/,
+    // #1165: the control socket check pairs, queries and unpairs a WinSW
+    // service daemon through service enrollment's handover to normal startup.
+    /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
+    /^packages\/client\/src\/bin\/(?:control-client|commands\/unpair)\.ts$/,
+    /^packages\/client\/scripts\/control-socket-check\.mjs$/,
   ],
   'ipc-smoke': [
     /^packages\/client\/src\/daemon\/(?:control-protocol|control-server|device-credential-provider|device-credential-store)\.ts$/,

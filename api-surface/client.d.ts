@@ -3104,7 +3104,7 @@ export declare class AuthManager {
     constructor(opts: AuthManagerOptions);
     get deviceId(): string | undefined;
     isRevoked(): boolean;
-    /** The skew measured by the last successful pair or renewal, if its response carried a parseable `Date`. */
+    /** The skew measured by the last successful pair or renewal, if its response carried a parseable `Date` and the device clock did not go back mid-request. */
     clockSkew(): ClockSkewObservation | undefined;
     /**
      * Internal signer read: always recompose metadata with the current OS

@@ -23,22 +23,30 @@ export async function runLifecycleMutation<T>(daemonScope: DaemonScope, operatio
   }
 }
 
+/**
+ * Serves the full or the enrollment-only method table. A running endpoint
+ * switches tables in place on its same listener and token: closing it would
+ * publish "gone" (`isControlDaemonGone`) while this daemon still holds its
+ * store lease, and a contender would then find the live mutex. Only a daemon
+ * without an endpoint binds one.
+ */
 export async function replaceControlServer(daemonScope: DaemonScope, required: boolean, enrollmentOnly = false): Promise<void> {
   const { daemonState, controlMethods, storeDir, config } = daemonScope;
+  const methods = enrollmentOnly
+    ? {
+        unary: {
+          status: controlMethods.unary.status!,
+          'enrollment.pair': controlMethods.unary['enrollment.pair']!,
+          shutdown: controlMethods.unary.shutdown!,
+        },
+        stream: {},
+      }
+    : controlMethods;
   if (daemonState.controlServerHandle) {
-    await daemonState.controlServerHandle.close();
-    daemonState.controlServerHandle = undefined;
+    daemonState.controlServerHandle.setMethods(methods);
+    return;
   }
   try {
-    const methods = enrollmentOnly
-      ? {
-          unary: {
-            status: controlMethods.unary.status!,
-            'enrollment.pair': controlMethods.unary['enrollment.pair']!,
-          },
-          stream: {},
-        }
-      : controlMethods;
     daemonState.controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods });
   } catch (err) {
     if (required || err instanceof AnotherControlServerRunningError) throw err;
@@ -90,16 +98,21 @@ export async function start(daemonScope: DaemonScope): Promise<void> {
  * Resume only in the operation's lifecycle slot: an earlier shutdown must
  * finish before auth is re-armed. A later stop invalidates the queued request
  * synchronously, so entering its slot cannot undo that cancellation.
+ * `cancellationEpoch` is the epoch the request was made in; an operation that
+ * continues an earlier request (service enrollment's start) passes that one.
  */
-export async function runAuthOperation<T>(daemonScope: DaemonScope, operation: () => Promise<T>): Promise<T> {
+export async function runAuthOperation<T>(
+  daemonScope: DaemonScope,
+  operation: (cancellationEpoch: number) => Promise<T>,
+  cancellationEpoch = daemonScope.daemonState.authCancellationEpoch,
+): Promise<T> {
   const { daemonState } = daemonScope;
-  const cancellationEpoch = daemonState.authCancellationEpoch;
   daemonState.pendingAuthOperations += 1;
   try {
     return await daemonScope.runLifecycleMutation(async () => {
       if (cancellationEpoch !== daemonState.authCancellationEpoch) throw new AuthRequestAbortedError('stopped');
       daemonState.auth.resume();
-      return operation();
+      return operation(cancellationEpoch);
     });
   } finally {
     daemonState.pendingAuthOperations -= 1;
@@ -120,11 +133,12 @@ export function startupHaltReason(daemonScope: DaemonScope, err: unknown): Daemo
   return undefined;
 }
 
-export async function startUnderLease(daemonScope: DaemonScope): Promise<void> {
+/** `requestEpoch` is the `authCancellationEpoch` the start was requested in. */
+export async function startUnderLease(daemonScope: DaemonScope, requestEpoch: number): Promise<void> {
   const { daemonState, runStartUnderLease } = daemonScope;
   daemonState.startInProgress = true;
   try {
-    await runStartUnderLease();
+    await runStartUnderLease(requestEpoch);
   } finally {
     daemonState.startInProgress = false;
   }
@@ -150,13 +164,23 @@ export async function stop(daemonScope: DaemonScope, opts: { drainTimeoutMs?: nu
   // `shuttingDown === false` for the whole duration of that predecessor.
   // Setting it here, synchronously, before the first await, closes that gap.
   daemonState.shuttingDown = true;
+  cancelAuthOperations(daemonScope);
+  await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
+}
+
+/**
+ * Cancels every start and pair requested before now, the queued and the
+ * running. Call it synchronously when a stop is requested (`stop()`, the
+ * control `shutdown` RPC), before any await.
+ */
+export function cancelAuthOperations(daemonScope: DaemonScope): void {
+  const { daemonState } = daemonScope;
   daemonState.authCancellationEpoch += 1;
   // A start or pair may be blocked in an OS credential call (a locked
-  // keychain) and the teardown below queues behind it. Signal first: the
-  // auth manager's stop is the one cancellation for those calls; then await
-  // the operation settling.
+  // keychain) and the teardown queues behind it. Signal first: the auth
+  // manager's stop is the one cancellation for those calls; then await the
+  // operation settling.
   if (daemonState.pendingAuthOperations > 0) void daemonState.auth.stop().catch(() => undefined);
-  await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
 }
 
 export function requestShutdown(daemonScope: DaemonScope, reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {

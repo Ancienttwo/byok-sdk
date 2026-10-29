@@ -916,7 +916,7 @@ function buildDaemon(
     tenantRebinding: false,
     runner: undefined,
     controlServerHandle: undefined,
-    serviceEnrollmentWaiting: false,
+    serviceEnrollmentEpoch: undefined,
     serviceEnrollmentTransitioning: false,
     daemonOwnerLease: undefined,
     presencePublisher: undefined,
