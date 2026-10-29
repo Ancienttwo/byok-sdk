@@ -52,7 +52,7 @@ afterEach(async () => {
   rmSync(directory, { force: true, recursive: true });
 });
 
-describe.skipIf(!isSqliteAvailable())('ProviderRegistry.replaceSecret golden (D4)', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('ProviderRegistry.replaceSecret golden (D4)', () => {
   it('writes only the credential store: profile bytes, revision and hash are unchanged', async () => {
     const configured = await registry().configure(OPENAI, OLD_KEY);
     const profileBefore = await profiles.get('openai');
@@ -92,7 +92,7 @@ describe.skipIf(!isSqliteAvailable())('ProviderRegistry.replaceSecret golden (D4
   });
 });
 
-describe.skipIf(!isSqliteAvailable())('registry custody (A4, A8)', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('registry custody (A4, A8)', () => {
   it('every writer leaves no pending marker behind on success', async () => {
     await registry().configure(OPENAI, OLD_KEY);
     await registry().replaceSecret('openai', NEW_KEY);

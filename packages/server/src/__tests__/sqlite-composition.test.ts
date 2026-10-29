@@ -9,7 +9,7 @@ import { isSqliteAvailable } from '../sqlite-support';
 import { serverTenantId } from '../stores';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 
 describeSqlite('createByokServer SQLite composition', () => {
   const directories: string[] = [];

@@ -8,7 +8,7 @@ import { createWebCrypto } from '@byok-sdk/cloud';
 import { isSqliteAvailable } from '../sqlite-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const TENANT = tenantId('sqlite-proof');
 const OTHER = tenantId('sqlite-proof-other');
 const binding = (requestId: string) => ({

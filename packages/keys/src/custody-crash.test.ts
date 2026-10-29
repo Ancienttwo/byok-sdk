@@ -126,7 +126,7 @@ async function launcherView(): Promise<{ refused: string } | { vendor: string; k
 }
 
 for (const runtime of RUNTIMES) {
-describe.skipIf(!isSqliteAvailable() || runtime.command === undefined)(`custody under SIGKILL (D5), child on ${runtime.name}`, () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') || runtime.command === undefined)(`custody under SIGKILL (D5), child on ${runtime.name}`, () => {
   function runChild(mode: string, args: object): ReturnType<typeof spawnSync> {
     return spawnSync(runtime.command!, [...runtime.args, mode, JSON.stringify(args)], { encoding: 'utf8', timeout: 60_000 });
   }

@@ -221,6 +221,7 @@ describe('task.approval_resolved handling', () => {
   // family as `inbound-gate.test.ts`'s own re-emission gap. Orchestrator
   // decision: accept the re-emission as the honest report of a new observation,
   // or restore approvalId-keyed suppression in the relay.
+  // Decision D3: https://github.com/Ancienttwo/byok-sdk/issues/1153
   it.skip('a redelivery carrying the SAME approvalId does not re-emit another await_approval event', async () => {
     const { byok: instance, daemon } = await start();
 

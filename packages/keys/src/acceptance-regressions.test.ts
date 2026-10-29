@@ -72,7 +72,7 @@ async function expected() {
   return { profileRef: binding.profileRef, profileRevision: binding.profileRevision, profileHash: binding.profileHash };
 }
 
-describe.skipIf(!isSqliteAvailable())('F1: a started generation fences older generations', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('F1: a started generation fences older generations', () => {
   for (const cut of ['after-pending', 'after-secret-write'] as const) {
     it(`F1 older generation is fenced by a pending newer generation (${cut})`, async () => {
       await apply(await configureRequest(sealingKey, 'k-initial', { requestId: 'initial', generation: 1 }));
@@ -97,7 +97,7 @@ describe.skipIf(!isSqliteAvailable())('F1: a started generation fences older gen
   }
 });
 
-describe.skipIf(!isSqliteAvailable())('F2: identity is re-validated inside the write critical section', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('F2: identity is re-validated inside the write critical section', () => {
   async function raceWhileLocked(change: (identity: { current: ProviderProvisioningIdentitySnapshot }) => void) {
     const request = await configureRequest(sealingKey, 'k-placement', { requestId: 'placement', generation: 1 });
     const identity = { current: placedIdentity() as ProviderProvisioningIdentitySnapshot };
@@ -152,7 +152,7 @@ describe.skipIf(!isSqliteAvailable())('F2: identity is re-validated inside the w
   });
 });
 
-describe.skipIf(!isSqliteAvailable())('F4: durable results are read before the sealing key, placement, or ciphertext', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('F4: durable results are read before the sealing key, placement, or ciphertext', () => {
   it('F4 applied + ACK lost + sealing key rotation: retry returns the stored applied result', async () => {
     const request = await configureRequest(sealingKey, 'k-ack', { requestId: 'ack-lost', generation: 1 });
     const first = await apply(request);

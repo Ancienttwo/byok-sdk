@@ -157,15 +157,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
     expect((await started.byok.machines.list()).map((machine) => machine.deviceId)).not.toContain(device.deviceId);
   });
 
-  // 2d gap: an embedded server has exactly one tenant, so two devices can no
-  // longer be paired under DIFFERENT tenants into the same instance — the input
-  // that decided it (`createPairingCode({ tenantId })`) is gone. Tenant-scoped
-  // enrollment isolation is covered at the port level by
-  // `packages/conformance/src/cloud/pairing.ts`, which registers under two
-  // tenants against one directory.
-  it.skip('keeps two devices paired under different tenants independent', () => {
-    // intentionally empty — see the 2d gap note above.
-  });
+  // Pairing claims are covered by packages/conformance/src/cloud/pairing.ts; this embedded server has one derived tenant.
 
   // -----------------------------------------------------------------------
   // I5: the registry row is the authority; token claims are lookup keys.
@@ -265,14 +257,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
   // instance config.
   // -----------------------------------------------------------------------
 
-  // 2d gap: a device row outside the instance's product cannot be brought into
-  // existence from this surface — `createPairingCode` refuses a foreign product
-  // before minting a code (see `bearer-instance-product.test.ts`), and the WS
-  // upgrade this asserted on is deleted. The kernel-side check is covered by
-  // `packages/cloud/src/__tests__/bearer-instance-product.test.ts`.
-  it.skip('refuses the upgrade for a device row outside the instance product, before any hello', () => {
-    // intentionally empty — see the 2d gap note above.
-  });
+  // Foreign-product bearer isolation is covered by packages/cloud/src/__tests__/bearer-instance-product.test.ts.
 
   it('accepts a hello whose productId matches the device row', async () => {
     const started = await startWith();

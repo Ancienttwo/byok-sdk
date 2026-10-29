@@ -26,12 +26,14 @@ name: CI
 # Routine PR/main changes run only the reviewed impact plan: the Linux
 # affected-workspace job plus the platform families whose owned paths changed
 # (scripts/ci/select-impact.mjs familyOwners). A PR never runs the complete
-# matrix. The complete matrix requires an explicit release-validation dispatch
-# on main or a release/* branch, pinned to this exact SHA.
+# matrix. Nightly main runs the full matrix without release artifacts. Release
+# validation requires an exact-SHA dispatch on main or a release/* branch.
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '43 19 * * *' # 03:43 Asia/Taipei
   workflow_dispatch:
     inputs:
       release_sha:
@@ -43,7 +45,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
@@ -53,6 +55,7 @@ jobs:
     outputs:
       plan: ${{ steps.plan.outputs.plan }}
       families: ${{ steps.plan.outputs.families }}
+      mode: ${{ steps.plan.outputs.mode }}
       release: ${{ steps.plan.outputs.release }}
       build: ${{ steps.plan.outputs.build }}
     steps:
@@ -75,10 +78,11 @@ jobs:
   targeted:
     name: Affected workspace checks
     needs: select
-    if: needs.select.outputs.release != 'true'
+    if: needs.select.outputs.mode == 'targeted'
     runs-on: ubuntu-latest
     env:
       BYOK_REQUIRE_BUN: '1'
+      BYOK_REQUIRE_SQLITE: '1'
       CI_PLAN: ${{ needs.select.outputs.plan }}
       CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       CI_PR_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -195,6 +199,7 @@ jobs:
       # instead of silently skipping — a skip is not a success conclusion
       # here. Local developers leave it unset and keep the skip convenience.
       BYOK_REQUIRE_BUN: '1'
+      BYOK_REQUIRE_SQLITE: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -284,6 +289,32 @@ jobs:
       - name: Check tests left no byok-* entries in TMPDIR
         if: ${{ always() && steps.tmpdir-snapshot.outcome == 'success' }}
         run: node scripts/ci/check-tmpdir-leaks.mjs verify "$RUNNER_TEMP/tmpdir-before.txt"
+
+  macos-client:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'macos-client') }}
+    name: Full client suite (macOS)
+    runs-on: macos-latest
+    env:
+      BYOK_REQUIRE_BUN: '1'
+      BYOK_REQUIRE_SQLITE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Verify pinned Bun archive
+        shell: node {0}
+        run: *verify-bun
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Resolve Bun for required suites
+        run: |
+          test "$(bun --version)" = "$(node -p "require('./package.json').packageManager.slice(4)")"
+          echo "BYOK_TEST_BUN_BIN=$(command -v bun)" >> "$GITHUB_ENV"
+      - run: bun ci
+      - run: bun run build
+      - name: Run every client test, including native macOS custody and recovery
+        run: bun run --filter @byok-sdk/client test
 
   agent-memory-export-linux:
     needs: select
@@ -1926,7 +1957,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "runtime-contract"]
+    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "runtime-contract"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
