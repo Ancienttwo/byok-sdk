@@ -2,6 +2,7 @@ import { assertCollectExpiredInput, InMemoryStorageLedger, type ObjectCollectExp
 import { REQUEST_RECEIPT_PREFIXES, createInMemoryBlobBytes, type ReceiptCollectExpiredInput } from '@byok-sdk/cloud';
 import {
   ByokCoreError,
+  MailboxStreamClosedError,
   CoreConflictError,
   InMemoryQuotaStore,
   assertCanonicalTimestamp,
@@ -14,6 +15,7 @@ import {
   type ContentHash,
   type CoreStores,
   type MailboxAppendInput,
+  type MailboxCloseStreamInput,
   type MailboxCursorState,
   type MailboxMessage,
   type MailboxPage,
@@ -22,6 +24,8 @@ import {
   type MailboxAdvanceCursorInput,
   type MailboxCollectExpiredInput,
   type MailboxExpirePendingInput,
+  type MailboxReopenStreamInput,
+  type MailboxStreamCloseCause,
   type CollectExpiredResult,
   type MailboxStore,
   type MailboxUsage,
@@ -78,7 +82,9 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '6';
+const SQLITE_SCHEMA_VERSION = '7';
+/** The one older version this build upgrades in place; every other one is refused. */
+const SQLITE_UPGRADABLE_SCHEMA_VERSION = '6';
 const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'] as const;
 /** Host retention instants (#1120): when a terminal task may be archived, when it was, and when its board item went. */
 const TASK_ARCHIVE_COLUMNS = ['archive_after', 'archived_at', 'archive_settled_at'] as const;
@@ -90,7 +96,7 @@ import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
 import { SqliteTaskArchiveStore } from './task-archive';
 import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
-import { abandonTask, expirePendingMailbox } from './task-retirement';
+import { abandonTask, closeMailboxStream, expirePendingMailbox, reopenMailboxStream } from './task-retirement';
 import {
   PROOF_REQUEST_RECEIPT_PROJECTION,
   PROOF_REQUEST_RECEIPT_SCHEMA,
@@ -108,6 +114,32 @@ CREATE TABLE request_receipt (
 );
 `;
 
+/**
+ * The retired-device stream tombstone (#1160), declared once for a new file
+ * and for the v6 upgrade, so both end with the same columns.
+ */
+const MAILBOX_CURSOR_CLOSED_AT = 'closed_at TEXT';
+const MAILBOX_CURSOR_CLOSED_CAUSE = "closed_cause TEXT CHECK ((closed_cause IS NULL AND closed_at IS NULL) OR " +
+  "(closed_cause IN ('device_revoked', 'device_superseded') AND closed_at IS NOT NULL))";
+
+/**
+ * The one in-place upgrade, v6 to v7, run inside the open transaction. It adds
+ * the stream tombstone and closes the stream of every device the directory no
+ * longer holds, which was retired before the upgrade, expiring its pending
+ * rows as a retirement does. Revoke and supersede were not told apart then, so
+ * those streams read as `device_revoked`.
+ */
+function upgradeSchemaFromV6(db: DatabaseSync): void {
+  db.exec(`ALTER TABLE mailbox_cursor ADD COLUMN ${MAILBOX_CURSOR_CLOSED_AT}`);
+  db.exec(`ALTER TABLE mailbox_cursor ADD COLUMN ${MAILBOX_CURSOR_CLOSED_CAUSE}`);
+  db.exec(`UPDATE mailbox_cursor SET closed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), closed_cause = 'device_revoked'
+    WHERE NOT EXISTS (SELECT 1 FROM device_directory d
+      WHERE d.tenant_id = mailbox_cursor.tenant_id AND d.device_id = mailbox_cursor.device_id)`);
+  db.exec(`UPDATE mailbox_message SET state = 'expired' WHERE state = 'pending' AND EXISTS (SELECT 1 FROM mailbox_cursor c
+    WHERE c.tenant_id = mailbox_message.tenant_id AND c.device_id = mailbox_message.device_id AND c.closed_cause IS NOT NULL)`);
+  db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(SQLITE_SCHEMA_VERSION);
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS byok_sqlite_meta (
   key TEXT PRIMARY KEY,
@@ -120,6 +152,8 @@ CREATE TABLE IF NOT EXISTS mailbox_cursor (
   delivered_seq INTEGER NOT NULL DEFAULT 0,
   acked_seq INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
+  ${MAILBOX_CURSOR_CLOSED_AT},
+  ${MAILBOX_CURSOR_CLOSED_CAUSE},
   PRIMARY KEY (tenant_id, device_id)
 );
 CREATE TABLE IF NOT EXISTS mailbox_message (
@@ -246,12 +280,15 @@ class SqliteCoordinator {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
           foundVersion = version?.value;
-          if (version?.value !== SQLITE_SCHEMA_VERSION) {
+          if (version?.value === SQLITE_UPGRADABLE_SCHEMA_VERSION) {
+            upgradeSchemaFromV6(this.db);
+          } else if (version?.value !== SQLITE_SCHEMA_VERSION) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION}. An older file is not adopted: start on a new database. A newer file needs a newer build.`);
+              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SQLITE_UPGRADABLE_SCHEMA_VERSION} in place. ` +
+              'An older file is not adopted: start on a new database. A newer file needs a newer build.');
           }
           for (const projection of [
-            'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at FROM mailbox_cursor',
+            'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at, closed_at, closed_cause FROM mailbox_cursor',
             'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at FROM mailbox_message',
             'tenant_id, task_id, device_id, agent_ref_json, owner_device_id, claimed_runtime, claimed_runtime_capabilities_json, status, terminal_cause, cancellation_requested_at, cancellation_reason, cancellation_message_id, updated_at FROM task_attempt',
             'tenant_id, task_id, message_id, payload_body, terminal_body FROM agent_message_admission',
@@ -823,6 +860,12 @@ async function appendMailbox(
   input: MailboxAppendInput,
 ): Promise<MailboxMessage> {
   ensureMailboxCursor(db, clock, tenant, input.deviceId);
+  // A closed stream refuses before the idempotency read: a retry for a
+  // retired device learns of the retirement instead of getting its old row.
+  const stream = db.prepare(
+    `SELECT closed_cause FROM mailbox_cursor WHERE tenant_id = ? AND device_id = ?`,
+  ).get(tenant, input.deviceId) as { closed_cause: MailboxStreamCloseCause | null };
+  if (stream.closed_cause !== null) throw new MailboxStreamClosedError(input.deviceId, stream.closed_cause);
   const existing = db.prepare(
     `SELECT * FROM mailbox_message WHERE tenant_id = ? AND device_id = ? AND message_id = ?`,
   ).get(tenant, input.deviceId, input.messageId) as MailboxRow | undefined;
@@ -996,6 +1039,16 @@ export class SqliteMailboxStore implements MailboxStore {
     return this.coordinator.transaction((db) => ({
       expired: expirePendingMailbox(db, tenant, input.deviceId, input.seqs),
     }));
+  }
+
+  closeStream(tenant: TenantId, input: MailboxCloseStreamInput): Promise<{ readonly expired: number }> {
+    return this.coordinator.transaction((db) => ({
+      expired: closeMailboxStream(db, tenant, input.deviceId, input.cause, this.clock.now().toISOString()),
+    }));
+  }
+
+  reopenStream(tenant: TenantId, input: MailboxReopenStreamInput): Promise<void> {
+    return this.coordinator.transaction((db) => reopenMailboxStream(db, tenant, input.deviceId));
   }
 }
 

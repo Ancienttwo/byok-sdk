@@ -443,15 +443,20 @@ fake timers.
 
 ## SQLite schema version
 
-The current schema is v6. It includes a durable approval timeline alongside the
-existing task, enrollment, receipt and wake authorities. Only a new database or
-an existing v6 file can open. Versions 1–5 and unknown versions are rejected;
-there is no migration selector or automatic adoption path.
+The current schema is v7. It includes a durable approval timeline alongside the
+existing task, enrollment, receipt and wake authorities, and the retired-device
+stream tombstone on `mailbox_cursor` (#1160). A new database, a v7 file and a
+v6 file can open. A v6 file is upgraded in place once, in the open transaction:
+the two tombstone columns are added, and the stream of every device the
+directory no longer holds is closed as `device_revoked` with its pending rows
+expired. Its pairings and other rows are kept, so no re-enrollment is needed.
+Versions 1–5 and unknown versions are rejected; there is no migration selector
+or other automatic adoption path.
 
-Preserve existing databases. Stop the previous owner and explicitly select a
-new state path and enrollment for v6. Do not delete history or edit version
-markers to make an old database open. Approval observations that existed only
-in an old process's memory cannot be recovered.
+Preserve existing databases. For a file older than v6, stop the previous owner
+and explicitly select a new state path and enrollment. Do not delete history or
+edit version markers to make an old database open. Approval observations that
+existed only in an old process's memory cannot be recovered.
 
 Open failures use `SqliteSchemaError` with `foundVersion` and `requiredVersion`:
 
@@ -459,10 +464,11 @@ Open failures use `SqliteSchemaError` with `foundVersion` and `requiredVersion`:
 - `SQLITE_SCHEMA_INVALID`: a required authority is missing or malformed.
 - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox bytes are not wire v4.
 
-A declared v6 file missing its approval table fails closed instead of silently
+A declared v7 file missing its approval table fails closed instead of silently
 recreating an empty authority. Existing database contents are not adopted,
 rewritten or deleted on a version refusal. New files create their schema and
-version marker in one transaction. Older builds cannot open v6.
+version marker in one transaction. Older builds cannot open v7, so a store
+cannot roll back past this release once it has been opened.
 
 ## Persistent host request identity
 

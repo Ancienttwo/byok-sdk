@@ -9,7 +9,7 @@ import {
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import { HarnessInventorySchema, type HarnessInfo } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
-import { retireDevice } from './task-retirement';
+import { reopenMailboxStream, retireDevice } from './task-retirement';
 
 export const DEVICE_SCHEMA = `
 CREATE TABLE device_directory (
@@ -102,6 +102,7 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
           capabilities_json = NULL, harnesses_json = NULL`)
         .run(tenant, input.deviceId, input.productId, input.machineId ?? null,
           input.deviceName, input.devicePublicKey, input.proofKeyId, input.proofKeyEpoch);
+      reopenMailboxStream(db, tenant, input.deviceId);
       return fromRow(db.prepare('SELECT * FROM device_directory WHERE tenant_id = ? AND device_id = ?').get(tenant, input.deviceId)!);
     });
   }

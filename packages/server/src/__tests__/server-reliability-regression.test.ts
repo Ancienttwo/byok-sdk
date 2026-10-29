@@ -69,6 +69,8 @@ async function cloudWithFirstMailboxAppendFailure() {
     readCursor: (tenant, deviceId) => base.mailbox.readCursor(tenant, deviceId),
     collectExpired: (tenant, input) => base.mailbox.collectExpired(tenant, input),
     expirePending: (tenant, input) => base.mailbox.expirePending(tenant, input),
+    closeStream: (tenant, input) => base.mailbox.closeStream(tenant, input),
+    reopenStream: (tenant, input) => base.mailbox.reopenStream(tenant, input),
   };
   return {
     cloud: createByokCloud({

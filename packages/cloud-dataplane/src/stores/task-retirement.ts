@@ -30,12 +30,11 @@ const UNFINISHED = [...TASK_ATTEMPT_UNFINISHED_STATUSES];
 
 /**
  * Device retirement: every unfinished attempt the devices were offered or own,
- * then their streams, closed with the stream tombstone. Pending rows are left
- * for the dead-letter retention (#1115) rather than expired here: retiring a
- * device never rewrites a row another policy already owns. Callers pass only
- * ids whose row they deleted in this transaction. Settling is a terminal
- * transition, so `archive_after` takes the `terminal_at` instant in the same
- * UPDATE and the task becomes archive work like one a device finished.
+ * then their streams, closed with the tombstone, and every pending row on them
+ * expired (no device will ack it). Callers pass only ids whose row they deleted
+ * in this transaction. Settling is a terminal transition, so `archive_after`
+ * takes the `terminal_at` instant in the same UPDATE and the task becomes
+ * archive work like one a device finished.
  */
 export async function retireDevices(
   client: Querier,
