@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildServiceDefinition } from '../bin/commands/service';
 import { HostLayoutInputError, resolveHostLayout, type DaemonConfig } from '../index';
 import { DeviceStore } from '../daemon/store';
 import { describeEffectiveDaemonConfig } from '../daemon/config-schema/effective';
-import { defaultScratchRoot, scratchRootSocketBudget } from '../daemon/retention/scratch';
+import { scratchRootSocketBudget } from '../daemon/retention/scratch';
 
 const product = { productId: 'salesko', productName: 'Salesko' } as const;
 
@@ -62,8 +63,10 @@ describe('resolveHostLayout (#1094)', () => {
     expect(layout.storeDir).toBe(`${homeDir}/.byok/salesko`);
     expect(layout.scratchRoot.source).toBe('short-root');
     expect(layout.scratchRoot.path).toMatch(/^\/private\/tmp\/byok-scratch-[0-9a-f]{16}$/u);
-    // One placement rule: the daemon's default resolves the same root for this (non-existent, link-free) store.
-    expect(layout.scratchRoot.path).toBe(defaultScratchRoot(layout.storeDir, 'darwin'));
+    // The spec #493 rule, derived with darwin path rules so the expectation holds on every host OS:
+    // /private/tmp/byok-scratch-<first 16 hex of SHA-256 of the store path>.
+    const identity = createHash('sha256').update(layout.storeDir).digest('hex').slice(0, 16);
+    expect(layout.scratchRoot.path).toBe(path.posix.join('/private/tmp', `byok-scratch-${identity}`));
     expect(layout.scratchRoot.socketPathBytes).toBeLessThanOrEqual(layout.scratchRoot.socketPathMaximumBytes!);
     expect(scratchRootSocketBudget(layout.scratchRoot.path, 'darwin')).toEqual({ bytes: layout.scratchRoot.socketPathBytes, maximumBytes: layout.scratchRoot.socketPathMaximumBytes });
     // The pre-#493 AiphaBee-style store under Application Support would not fit; the recommended one does.
