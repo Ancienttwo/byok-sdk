@@ -3,17 +3,18 @@ import path from 'node:path';
 import { inspectServiceLogs } from './service-log';
 import {
   assertServiceOwner,
-  claimServiceLifecycleOwner,
+  claimHeldServiceLifecycleOwner,
   classifyServiceUnit,
   readServiceLifecycleOwner,
-  releaseServiceLifecycleOwner,
+  releaseHeldServiceLifecycleOwner,
   ServiceUnitError,
+  withServiceOwnerGate,
   type ServiceUnitFile,
   type ServiceUnitInspection,
 } from './service-unit';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceStatusResult } from './service-types';
 
-export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod' | 'link'>;
+export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
 
 /** The platform half of a lifecycle: where its files go and how its manager loads them. */
 export interface PlatformUnit {
@@ -39,7 +40,9 @@ export interface PlatformUnit {
  * The install, repair, uninstall and status rules all three platforms share
  * (#1097): a `foreign` unit is never changed (`install` replaces it only
  * with `replaceUnmarked`), one lifecycle owner per product store, and the
- * unit and launcher are written whole on every install or repair.
+ * unit and launcher are written whole on every install or repair. install,
+ * repair and uninstall run whole inside the store's owner gate, so the owner
+ * they checked is still the owner when they write, deactivate or release.
  */
 export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs: ManagedLifecycleFs = fsp): ServiceLifecycle {
   assertServiceOwner(def.owner);
@@ -65,32 +68,38 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
     }
   }
 
-  async function install(opts: ServiceInstallOptions = {}): Promise<void> {
-    const { state } = await inspect();
-    if (state === 'foreign' && opts.replaceUnmarked !== true) throw new ServiceUnitError('service_unit_unmarked');
-    await requireOwner();
-    await claimServiceLifecycleOwner({ storeDir: def.storeDir, owner, service: unit.serviceName }, fs);
-    await writeFiles();
-    await unit.activate();
+  function install(opts: ServiceInstallOptions = {}): Promise<void> {
+    return withServiceOwnerGate(def.storeDir, async () => {
+      const { state } = await inspect();
+      if (state === 'foreign' && opts.replaceUnmarked !== true) throw new ServiceUnitError('service_unit_unmarked');
+      await requireOwner();
+      await claimHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner, service: unit.serviceName }, fs);
+      await writeFiles();
+      await unit.activate();
+    });
   }
 
-  async function repair() {
-    const { state } = await inspect();
-    if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
-    if (state === 'exact' || state === 'absent') return { status: 'not-needed', state } as const;
-    await requireOwner();
-    await writeFiles();
-    await unit.activate();
-    return { status: 'repaired' } as const;
+  function repair() {
+    return withServiceOwnerGate(def.storeDir, async () => {
+      const { state } = await inspect();
+      if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
+      if (state === 'exact' || state === 'absent') return { status: 'not-needed', state } as const;
+      await requireOwner();
+      await writeFiles();
+      await unit.activate();
+      return { status: 'repaired' } as const;
+    });
   }
 
-  async function uninstall(): Promise<void> {
-    const { state } = await inspect();
-    if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
-    await requireOwner();
-    await unit.deactivate();
-    await unit.removeFiles();
-    await releaseServiceLifecycleOwner({ storeDir: def.storeDir, owner }, fs);
+  function uninstall(): Promise<void> {
+    return withServiceOwnerGate(def.storeDir, async () => {
+      const { state } = await inspect();
+      if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
+      await requireOwner();
+      await unit.deactivate();
+      await unit.removeFiles();
+      await releaseHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner }, fs);
+    });
   }
 
   async function start(): Promise<void> {

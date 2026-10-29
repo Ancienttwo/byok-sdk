@@ -920,7 +920,13 @@ One lifecycle owner per store sets autostart: `<storeDir>/service/lifecycle-owne
 names it (`cli`, `app`, ...). `install` claims it, `uninstall` releases it, and
 another owner's `install`, `repair` or `uninstall` throws
 `lifecycle_owner_conflict`. A Host that sets autostart with its own mechanism
-claims it with `claimServiceLifecycleOwner`.
+claims it with `claimServiceLifecycleOwner`. Every change of the record — a
+claim, a same-owner service rename, a release, and `install`, `repair` and
+`uninstall` for their whole run — holds the store's cross-process mutation
+gate (scope `store`, which store relocation also holds), so it acts on the
+record it read and never on a successor's. A held gate fails at once with
+`lifecycle_owner_busy`, without retry; the gate frees itself when its holder
+process exits.
 
 Under `--service` everything the daemon writes to stdout and stderr goes to its
 own log, `<logDir>/daemon.log`, rotated by size while it runs at

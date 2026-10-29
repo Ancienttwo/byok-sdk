@@ -46,7 +46,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     return {
       name: 'Acme Agent!!',
       program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start'] },
-      storeDir: '/store',
+      storeDir: '/store-launchd',
       logDir: '/tmp/acme-logs',
       owner: 'cli',
       ...overrides,
@@ -54,7 +54,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
   }
 
   const PLIST = '/h/Library/LaunchAgents/Acme-Agent-.plist';
-  const LAUNCHER = '/store/service/Acme-Agent-.launcher.sh';
+  const LAUNCHER = '/store-launchd/service/Acme-Agent-.launcher.sh';
   function fakeFs() {
     return memoryServiceFs();
   }

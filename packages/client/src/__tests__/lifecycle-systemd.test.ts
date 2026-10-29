@@ -110,7 +110,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     return {
       name: 'Acme Agent!!',
       program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start'] },
-      storeDir: '/store',
+      storeDir: '/store-systemd',
       logDir: '/tmp/acme-logs',
       owner: 'cli',
       ...overrides,
@@ -118,7 +118,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
   }
 
   const UNIT = '/h/.config/systemd/user/Acme-Agent-.service';
-  const LAUNCHER = '/store/service/Acme-Agent-.launcher.sh';
+  const LAUNCHER = '/store-systemd/service/Acme-Agent-.launcher.sh';
   function fakeFs() {
     return memoryServiceFs();
   }

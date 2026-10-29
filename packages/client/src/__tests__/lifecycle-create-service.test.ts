@@ -8,7 +8,7 @@ function def(overrides: Partial<ServiceDefinition> = {}): ServiceDefinition {
   return {
     name: 'acme',
     program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start'] },
-    storeDir: '/store',
+    storeDir: '/store-create',
     logDir: '/tmp/acme-logs',
     owner: 'cli',
     ...overrides,

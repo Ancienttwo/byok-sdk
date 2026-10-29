@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
+import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import type { ServiceProgram } from './service-types';
 
 /**
@@ -41,6 +42,7 @@ const ERROR_MESSAGES = {
   service_unit_unmarked: 'A service unit this SDK did not generate exists at the unit path. Re-run install with replaceUnmarked (CLI: --replace-unmarked) to replace it, or remove it with the tool that installed it.',
   lifecycle_owner_conflict: 'Another lifecycle owner of this product manages autostart. Uninstall through that owner first.',
   lifecycle_owner_unreadable: 'The lifecycle owner record in the store cannot be read; preserve it for inspection.',
+  lifecycle_owner_busy: 'Another lifecycle operation or store relocation for this product store is in progress. Run it again when that one has finished.',
   invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.',
 } as const;
 
@@ -146,7 +148,7 @@ export interface ServiceLifecycleOwnerInput {
   service: string;
 }
 
-export type ServiceOwnerFs = Pick<typeof fsp, 'readFile' | 'writeFile' | 'rename' | 'rm' | 'mkdir' | 'link'>;
+export type ServiceOwnerFs = Pick<typeof fsp, 'readFile' | 'writeFile' | 'rename' | 'rm' | 'mkdir'>;
 
 function ownerRecordPath(storeDir: string): string {
   return path.join(serviceStateDir(storeDir), OWNER_RECORD_FILENAME);
@@ -178,15 +180,50 @@ export async function readServiceLifecycleOwner(storeDir: string, fs: ServiceOwn
 }
 
 /**
+ * Runs `operation` holding the store's cross-process mutation gate
+ * (`util/path-mutation-gate.ts`, scope `store`, which store relocation also
+ * holds). Every owner-record mutation reads, compares and writes inside one
+ * hold, so a remove or replace acts on the record this process read and never
+ * on a successor's. A held gate fails at once with `lifecycle_owner_busy`; the
+ * gate frees itself when its holder process exits.
+ *
+ * @internal
+ */
+export async function withServiceOwnerGate<T>(storeDir: string, operation: () => Promise<T>): Promise<T> {
+  let gate;
+  try {
+    gate = await acquirePathMutationGate({ scope: 'store', targetPath: storeDir }, { waitMs: 0 });
+  } catch (error) {
+    if (error instanceof PathMutationGateBusyError) throw new ServiceUnitError('lifecycle_owner_busy');
+    throw error;
+  }
+  try {
+    return await operation();
+  } finally {
+    await gate.release();
+  }
+}
+
+/**
  * Records `owner` as the product's lifecycle owner. Idempotent for the same
- * owner; throws `lifecycle_owner_conflict` when another owner holds it. An
- * App that sets autostart through its own mechanism (a login item) claims
- * here too, so the CLI's `install` refuses instead of adding a second one.
- * A first claim publishes the record with a hard link, which fails when the
- * record exists, so of two concurrent claimants only one wins.
+ * owner; throws `lifecycle_owner_conflict` when another owner holds it and
+ * `lifecycle_owner_busy` while another lifecycle operation on the store is in
+ * progress. An App that sets autostart through its own mechanism (a login
+ * item) claims here too, so the CLI's `install` refuses instead of adding a
+ * second one.
  */
 export async function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs: ServiceOwnerFs = fsp): Promise<void> {
   assertServiceOwner(input.owner);
+  return withServiceOwnerGate(input.storeDir, () => claimHeldServiceLifecycleOwner(input, fs));
+}
+
+/**
+ * {@link claimServiceLifecycleOwner} for a caller already inside
+ * {@link withServiceOwnerGate}.
+ *
+ * @internal
+ */
+export async function claimHeldServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs: ServiceOwnerFs): Promise<void> {
   const current = await readServiceLifecycleOwner(input.storeDir, fs);
   if (current !== undefined && current.owner !== input.owner) throw new ServiceUnitError('lifecycle_owner_conflict');
   if (current?.service === input.service) return;
@@ -196,27 +233,29 @@ export async function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInp
   const record: OwnerRecord = { version: 1, owner: input.owner, service: input.service };
   await fs.writeFile(tmp, `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600 });
   try {
-    if (current === undefined) {
-      try {
-        await fs.link(tmp, file);
-        return;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException | null)?.code !== 'EEXIST') throw error;
-      }
-      const winner = await readServiceLifecycleOwner(input.storeDir, fs);
-      if (winner?.owner !== input.owner) throw new ServiceUnitError('lifecycle_owner_conflict');
-      if (winner.service === input.service) return;
-    }
-    // The same owner changes its service name: replace its own record.
     await fs.rename(tmp, file);
   } finally {
     await fs.rm(tmp, { force: true });
   }
 }
 
-/** Removes the owner record when `owner` holds it; throws `lifecycle_owner_conflict` when another owner does. */
+/**
+ * Removes the owner record when `owner` holds it; throws
+ * `lifecycle_owner_conflict` when another owner does and `lifecycle_owner_busy`
+ * while another lifecycle operation on the store is in progress.
+ */
 export async function releaseServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs: ServiceOwnerFs = fsp): Promise<void> {
   assertServiceOwner(input.owner);
+  return withServiceOwnerGate(input.storeDir, () => releaseHeldServiceLifecycleOwner(input, fs));
+}
+
+/**
+ * {@link releaseServiceLifecycleOwner} for a caller already inside
+ * {@link withServiceOwnerGate}.
+ *
+ * @internal
+ */
+export async function releaseHeldServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs: ServiceOwnerFs): Promise<void> {
   const current = await readServiceLifecycleOwner(input.storeDir, fs);
   if (current === undefined) return;
   if (current.owner !== input.owner) throw new ServiceUnitError('lifecycle_owner_conflict');
