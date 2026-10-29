@@ -140,10 +140,18 @@ Before replacing a distribution, read its shipped
 [manifest instructions](upgrade-manifest.md). Apply each relevant migration,
 drain old protocol journals with the writing release when required, and stop
 the running service with `byok-agent service-stop --config device.json` (or
-stop the foreground process). Install the chosen distribution through your
-Host's installer/package manager, run `config check --strict`, and start it
-again. Confirm the authenticated connection and first task before declaring
-adoption complete. There is no `byok-agent upgrade` command.
+stop the foreground process). With all writers stopped, run the candidate
+build's `byok-agent upgrade check --store --json --config device.json` before
+switching distributions. It inspects private copies of the daemon journal and
+pi-durable replicas; exit 2 means at least one store needs a new path and pairing
+or is rejected. Follow the reported migration instead of switching on that
+result. See [store compatibility](upgrade-manifest.md#store-compatibility-precheck)
+for the separate embedded-server and provider-key inspectors.
+
+Install the chosen distribution through your Host's installer/package manager,
+run `config check --strict`, and start it again. Confirm the authenticated
+connection and first task before declaring adoption complete. `upgrade check`
+only inspects compatibility; it does not install or switch a distribution.
 
 ## Unpair
 
