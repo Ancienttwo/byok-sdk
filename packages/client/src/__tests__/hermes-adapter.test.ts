@@ -408,7 +408,13 @@ describe('HermesAdapter session', () => {
     const { open, root, entries } = await setup({ FAKE_HERMES_VIEWER_TAKES_SOCKET: '1' });
     await expect(open()).rejects.toMatchObject({ phase: 'start', message: 'hermes acp attached to a gateway this session does not own' });
     expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);
-    for (const entry of await entries()) expect(alive(entry.pid)).toBe(false);
+    const log = await entries();
+    const foreign = log.find((entry) => entry.mode === 'foreign-gateway');
+    expect(foreign?.pid).toEqual(expect.any(Number));
+    // SIGKILL acceptance precedes exit of the detached, unowned gateway.
+    await vi.waitFor(() => {
+      for (const entry of log) expect(alive(entry.pid)).toBe(false);
+    });
   });
 
   it.skipIf(windows)('bounds the foreign-gateway check by 10 s and by the start signal', async () => {

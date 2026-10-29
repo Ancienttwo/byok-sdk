@@ -58,7 +58,7 @@ assert.match(manifest.dependencies?.['@earendil-works/pi-coding-agent'] ?? '', E
   'client @earendil-works/pi-coding-agent pin must be an exact semver');
 assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], nativeManifest.version);
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
-assert.equal(manifest.dependencies?.['pi-web-access'], '0.24.1');
+assert.equal(manifest.dependencies?.['pi-web-access'], '0.45.0');
 assert.equal(manifest.dependencies?.['pi-subagents'], undefined);
 assert.equal(manifest.devDependencies?.['pi-subagents'], '0.60.0');
 // The MCP client this package's own core is built on. `pi-mcp-adapter` is
@@ -69,7 +69,7 @@ assert.equal(manifest.dependencies?.['@modelcontextprotocol/client'], '2.0.0');
 assert.equal(manifest.dependencies?.['@agentclientprotocol/sdk'], '1.4.0');
 assert.equal(manifest.dependencies?.['pi-mcp-adapter'], undefined);
 assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], undefined);
-assert.equal(manifest.dependencies?.['@juicesharp/rpiv-i18n'], '2.8.0');
+assert.equal(manifest.dependencies?.['@juicesharp/rpiv-i18n'], '2.15.0');
 assert.equal(manifest.dependencies?.['@earendil-works/pi-tui'], undefined);
 assert.equal(manifest.devDependencies?.['@earendil-works/pi-tui'], undefined);
 // Upstream publishes its packages in lockstep, so every direct Pi dependency

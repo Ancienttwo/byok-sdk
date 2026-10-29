@@ -405,6 +405,8 @@ const httpServer = serve({
     }
     return response;
   },
+}, (info) => {
+  process.stdout.write(`${JSON.stringify({ ready: true, url: `http://127.0.0.1:${info.port}`, tenant })}\n`);
 }) as HttpServer;
 
 /** Fresh Agent admission reads the capability snapshot the daemon's long-poll `conn.hello` records. */
@@ -501,5 +503,3 @@ lines.on('line', (line) => {
     }
   })().then((result) => respond((JSON.parse(line) as RpcRequest).id, result), (error) => respond((JSON.parse(line) as RpcRequest).id, undefined, error));
 });
-
-process.stdout.write(`${JSON.stringify({ ready: true, url: `http://127.0.0.1:${config.port}`, tenant })}\n`);

@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,14 +27,87 @@ afterEach(async () => {
   vi.restoreAllMocks();
   capture.helper.mockReset();
   capture.surface = undefined;
-  await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(removeFixtureRoot));
 });
+
+async function removeFixtureRoot(directory: string): Promise<void> {
+  // Windows can refuse unlink while an executable still has a handle/image
+  // mapping. Retry only busy-file errors; persistent locks must remain failures.
+  for (let retry = 0; ; retry++) {
+    try {
+      await fs.rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== 'EBUSY' && code !== 'EPERM') || retry === 3) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100 * (retry + 1)));
+    }
+  }
+}
 
 async function root() {
   const value = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-helper-admission-'));
   roots.push(value);
   return value;
 }
+
+describe('compiled-product fixture cleanup', () => {
+  it.each(['EBUSY', 'EPERM'])('removes the real fixture after transient %s errors stop', async code => {
+    const directory = await root();
+    const executable = path.join(directory, 'memory-product.exe');
+    await fs.writeFile(executable, 'fixture');
+    const remove = fs.rm.bind(fs);
+    const busy = Object.assign(new Error('executable is busy'), { code });
+    vi.spyOn(fs, 'rm').mockRejectedValueOnce(busy).mockRejectedValueOnce(busy).mockImplementation(remove);
+    await removeFixtureRoot(directory);
+    await expect(fs.lstat(executable)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('still reports a persistently busy fixture after the bounded attempts', async () => {
+    const directory = await root();
+    const executable = path.join(directory, 'memory-product.exe');
+    await fs.writeFile(executable, 'fixture');
+    const busy = Object.assign(new Error('executable remains busy'), { code: 'EBUSY' });
+    const remove = vi.spyOn(fs, 'rm').mockRejectedValue(busy);
+    await expect(removeFixtureRoot(directory)).rejects.toBe(busy);
+    expect(remove).toHaveBeenCalledTimes(4);
+    expect(await fs.readFile(executable, 'utf8')).toBe('fixture');
+  });
+
+  it('reports non-busy cleanup errors immediately', async () => {
+    const directory = await root();
+    const denied = Object.assign(new Error('cleanup denied'), { code: 'EACCES' });
+    const remove = vi.spyOn(fs, 'rm').mockRejectedValue(denied);
+    await expect(removeFixtureRoot(directory)).rejects.toBe(denied);
+    expect(remove).toHaveBeenCalledOnce();
+  });
+
+  it.runIf(process.platform === 'win32')('removes an executable once its real Windows image mapping is released', async () => {
+    const directory = await root();
+    const executable = path.join(directory, 'held-node.exe');
+    await fs.copyFile(process.execPath, executable);
+    const child = spawn(executable, ['-e', "process.stdin.resume();process.stdin.on('end',()=>process.exit(0));process.stdout.write('ready\\n');"], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+    let release: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once('error', reject);
+        child.stdout.once('data', () => resolve());
+        child.once('exit', code => reject(new Error(`image holder exited before ready: ${code}`)));
+      });
+      const blocked = await fs.rm(directory, { recursive: true, force: true }).then(() => undefined, error => error as NodeJS.ErrnoException);
+      expect(blocked?.code).toMatch(/^(EBUSY|EPERM)$/u);
+      release = setTimeout(() => child.stdin.end(), 100);
+      await removeFixtureRoot(directory);
+      await closed;
+      await expect(fs.lstat(executable)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      if (release !== undefined) clearTimeout(release);
+      child.kill();
+      await closed;
+    }
+  });
+});
 
 function config(directory: string) {
   return { productName: 'Availability', productId: 'availability', serverUrl: 'http://localhost:1',

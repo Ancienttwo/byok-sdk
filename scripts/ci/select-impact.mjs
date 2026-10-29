@@ -290,6 +290,9 @@ export const reviewedScripts = Object.freeze({
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and
   // runs it in every family job; #925 selects npm-release-pack alone.
   'scripts/release/execution-submit-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
+  // pack-and-smoke.mjs copies this smoke next to the installed tarballs and runs
+  // it against the packed client's Pi launcher and todo assets.
+  'scripts/release/pi-launcher-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
   'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
   'scripts/release/publish.mjs': {
     tests: [
@@ -306,14 +309,15 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/upgrade-manifest/manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/snapshot.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
 });
-// An OAR re-vendor adds one snapshot directory and deletes the previous one.
-// A snapshot path is reviewed only when that snapshot's source-manifest.json
-// lists it: read from the checkout, or from the exact comparison base for a
-// deleted snapshot. Any other path under vendor/oar still refuses.
-function oarSnapshotListed(path, { base, cwd = process.cwd() } = {}) {
-  const match = /^packages\/client\/vendor\/oar\/([a-f0-9]{7,40})\/(.+)$/.exec(path);
+// An OAR or rpiv-todo re-vendor adds one snapshot directory and deletes the
+// previous one. A snapshot path is reviewed only when that snapshot's
+// source-manifest.json lists it (or is that manifest or its PROVENANCE.md):
+// read from the checkout, or from the exact comparison base for a deleted
+// snapshot. Any other path under those vendor roots still refuses.
+function vendorSnapshotListed(path, pattern, packageName, { base, cwd = process.cwd() } = {}) {
+  const match = pattern.exec(path);
   if (!match) return false;
-  const manifestPath = `packages/client/vendor/oar/${match[1]}/source-manifest.json`;
+  const manifestPath = `${match[1]}/source-manifest.json`;
   let text;
   if (existsSync(resolve(cwd, manifestPath))) text = readFileSync(resolve(cwd, manifestPath), 'utf8');
   else if (/^[a-f0-9]{40}$/.test(base ?? '') && !/^0+$/.test(base)) {
@@ -322,8 +326,14 @@ function oarSnapshotListed(path, { base, cwd = process.cwd() } = {}) {
     } catch { return false; }
   } else return false;
   const manifest = JSON.parse(text);
-  return manifest.format === 'byok.vendor-source' && manifest.package === '@botiverse/oar'
-    && Array.isArray(manifest.files) && manifest.files.some(row => row.path === match[2]);
+  return manifest.format === 'byok.vendor-source' && manifest.package === packageName && Array.isArray(manifest.files)
+    && (manifest.files.some(row => row.path === match[2]) || match[2] === 'source-manifest.json' || match[2] === 'PROVENANCE.md');
+}
+function oarSnapshotListed(path, context) {
+  return vendorSnapshotListed(path, /^(packages\/client\/vendor\/oar\/[a-f0-9]{7,40})\/(.+)$/, '@botiverse/oar', context);
+}
+function todoSnapshotListed(path, context) {
+  return vendorSnapshotListed(path, /^(packages\/client\/vendor\/rpiv-todo\/\d+\.\d+\.\d+)\/(.+)$/, '@juicesharp/rpiv-todo', context);
 }
 // #1030: the workspaces whose vitest.config.ts uses scripts/vitest/tmp-root.mjs.
 export const vitestTmpRootConsumers = Object.freeze([
@@ -497,6 +507,8 @@ export function selectImpact(paths, context = {}) {
       dirs.add('packages/client'); continue;
     }
     if (oarSnapshotListed(path, context)) { dirs.add('packages/client'); continue; }
+    // The private todo build bundles the vendored rpiv-todo snapshot and packs its locale assets.
+    if (todoSnapshotListed(path, context)) { dirs.add('packages/client'); families.add('npm-release-pack'); continue; }
     // The client build copies vendor notices and OAR provenance into dist.
     if (path === 'packages/client/scripts/build-todo-assets.mjs' || path === 'packages/client/vendor/THIRD-PARTY.md' || path === 'packages/client/vendor/third-party-manifest.json') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;

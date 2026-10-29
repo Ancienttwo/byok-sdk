@@ -2,8 +2,8 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@juicesharp/rpiv-todo",
-  "packageVersion": "2.8.0",
-  "tarballIntegrity": "sha512-WEl9OayDrJ4G2r99FNUB1WIWKoOPphfGRuFRPpzETfwuYsaYFmpsmab5W7uieOXRMWSj9jpnrHS039vtrsOXOQ==",
+  "packageVersion": "2.15.0",
+  "tarballIntegrity": "sha512-8WfYssdgQgSWzFNsRzdw5Z6ZJIjO2ecM/YqEzYpR/ore+Hh5aNmafGVy94uFbIofAv2wGGitx5e3J/ucRrViXQ==",
   "files": [
     {
       "path": "config.ts",
@@ -12,67 +12,67 @@
     },
     {
       "path": "index.ts",
-      "upstreamSha256": "509904d71a601ba2e2694c3f0fda1f014553eaafde1515ddd99dab8bb123d85a",
-      "vendoredSha256": "75fd0d2f7b83a600ed294ce77e8be8c5ee8a46c9d08696550bc739bea5bfce8f",
+      "upstreamSha256": "3dd531ae484803e320923f5b72e9ab15cd223cb37f72a283b3232a82f70d639e",
+      "vendoredSha256": "6580b55fd249bc63de85114ca7076e62375f0a5a742c163b5dd5ac1948d3fd77",
       "delta": "Move eager locale registration to preverified SDK entry; derive shortcut key from explicit native API declaration. Overlay dynamic imports unchanged."
     },
     {
       "path": "state/i18n-bridge.ts",
-      "upstreamSha256": "b84a2076629ed7c4a123f714ce250e6988bd2d92ff0fbf5d19bb4812a13d3f2d",
-      "vendoredSha256": "7c3c102cbe243c9b022905bbea46755d274ddae17a0447ed3539f1e673a83d70",
+      "upstreamSha256": "6a76c64032f475c7663cbbbf32fc5a5ac6d09eb00b9a4c357a169d51bff00ab9",
+      "vendoredSha256": "49555b2f44d00c71611efee71cf7ee831249c36e184187658f955a9da53bc684",
       "delta": "Use real i18n dependency without optional import fallback."
     },
     {
       "path": "state/invariants.ts",
-      "upstreamSha256": "fbbafd0194a8f3dda36a85e974a485590246f6246477b533089f36fa715150c6",
-      "vendoredSha256": "fbbafd0194a8f3dda36a85e974a485590246f6246477b533089f36fa715150c6"
+      "upstreamSha256": "0d775f9ebf160e4c588337e9b5bada975ff657a20716ae9a5168f85dbefe3875",
+      "vendoredSha256": "0d775f9ebf160e4c588337e9b5bada975ff657a20716ae9a5168f85dbefe3875"
     },
     {
       "path": "state/replay.ts",
-      "upstreamSha256": "222eacd01e0ce983e2d7dd5597f31111c6344ef290908ba09f0fe9f556f8a5c0",
-      "vendoredSha256": "222eacd01e0ce983e2d7dd5597f31111c6344ef290908ba09f0fe9f556f8a5c0"
+      "upstreamSha256": "0109cfdaab08d5a4b5b615695a23eaf1aeae1180d65f8024940e14b39ac2799a",
+      "vendoredSha256": "0109cfdaab08d5a4b5b615695a23eaf1aeae1180d65f8024940e14b39ac2799a"
     },
     {
       "path": "state/selectors.ts",
-      "upstreamSha256": "9548b044bea7cdceeaceb3664e779a966fe901f7f1485c6cc2bc22281e76ded6",
-      "vendoredSha256": "9548b044bea7cdceeaceb3664e779a966fe901f7f1485c6cc2bc22281e76ded6"
+      "upstreamSha256": "88e4d8e6c83c5630f0d566ea09c0268e04561ba214e51d8f744cceef34c73b35",
+      "vendoredSha256": "88e4d8e6c83c5630f0d566ea09c0268e04561ba214e51d8f744cceef34c73b35"
     },
     {
       "path": "state/state-reducer.ts",
-      "upstreamSha256": "cd7d03b0f167920b76a72069f5b5f40ecc524bf4c4f6dd8909469f711d273dd0",
-      "vendoredSha256": "bbbec8910236b412e0e3dfa8ed9c64a5b464761994bf9c2035a46fbf8b923fde",
+      "upstreamSha256": "59a951a72738fb3476f7d070c6ba3a0b01bdbcd7aeb4e45cf87a89fce68ba58d",
+      "vendoredSha256": "def0754f30854e08849494511bb31089089f9a18b4708d33cee0c25f7e4afa1c",
       "delta": "Type-only proven-index non-null assertions."
     },
     {
       "path": "state/state.ts",
-      "upstreamSha256": "f4eba088903593409555c7305c1aa8da627520a3905caf3e81f7bd7eff708717",
-      "vendoredSha256": "f4eba088903593409555c7305c1aa8da627520a3905caf3e81f7bd7eff708717"
+      "upstreamSha256": "10bff755663a00f4876658d7b17eca5fc28a9cbce6c00b2b70dab9d84fc6b028",
+      "vendoredSha256": "10bff755663a00f4876658d7b17eca5fc28a9cbce6c00b2b70dab9d84fc6b028"
     },
     {
       "path": "state/store.ts",
-      "upstreamSha256": "6f00fc447bf79c3c56cedd80b2862ff2da24c450874cda3aa2d64b6084de4fe2",
-      "vendoredSha256": "6f00fc447bf79c3c56cedd80b2862ff2da24c450874cda3aa2d64b6084de4fe2"
+      "upstreamSha256": "f318f9b161603cafa04a486cdad4fe962d86e6c6c7e5260853f8d87a91e5efce",
+      "vendoredSha256": "f318f9b161603cafa04a486cdad4fe962d86e6c6c7e5260853f8d87a91e5efce"
     },
     {
       "path": "state/task-graph.ts",
-      "upstreamSha256": "8bf3ec428bd4796b32dea5ee5c15a2930818fb0fccda0c6ee60b777cf426075b",
-      "vendoredSha256": "8bf3ec428bd4796b32dea5ee5c15a2930818fb0fccda0c6ee60b777cf426075b"
+      "upstreamSha256": "06a385b0a776218974a8c9b0ecda8757ed851c5e232d6aa2aba25eb871cede89",
+      "vendoredSha256": "06a385b0a776218974a8c9b0ecda8757ed851c5e232d6aa2aba25eb871cede89"
     },
     {
       "path": "todo-overlay.ts",
-      "upstreamSha256": "bcc44d001ff08cc4c42d019163d78214edc9df2f3ba9219080f01f13ad8520e3",
-      "vendoredSha256": "a48118c31e467d450fcbfba78c62313f02b7828fd3f1ddcb7a3bdba18f00d6e4",
+      "upstreamSha256": "3c26991b44a5d9436ca70399555787a239bcf7554c1f985cdae467ececed75c8",
+      "vendoredSha256": "30ff3d64d4adc279c8b1a3b88c8ee6d4d011b77896392f4bb821a86ce363df52",
       "delta": "Local UI port and vendored utils import; type-only non-null assertion on nonempty lines tail."
     },
     {
       "path": "todo.ts",
-      "upstreamSha256": "44b06d99f4c7a82419447f1388e644e1e571efc6e64d0482f3d7bfb9f0c5b886",
-      "vendoredSha256": "44b06d99f4c7a82419447f1388e644e1e571efc6e64d0482f3d7bfb9f0c5b886"
+      "upstreamSha256": "ceff1cfc7ee82d0379b950a10190ee157933f48e6c7f48f2ee6e2d793c8252c7",
+      "vendoredSha256": "ceff1cfc7ee82d0379b950a10190ee157933f48e6c7f48f2ee6e2d793c8252c7"
     },
     {
       "path": "tool/response-envelope.ts",
-      "upstreamSha256": "69aa3f344092c7ab735588d6b71abbc3d3f132517a42e874a057361c9277dad3",
-      "vendoredSha256": "69aa3f344092c7ab735588d6b71abbc3d3f132517a42e874a057361c9277dad3"
+      "upstreamSha256": "238746fe633389077975977f21db1f5a29abf7967ff797f886b2b834ad7388c8",
+      "vendoredSha256": "238746fe633389077975977f21db1f5a29abf7967ff797f886b2b834ad7388c8"
     },
     {
       "path": "tool/sanitize.ts",
@@ -81,15 +81,20 @@
     },
     {
       "path": "tool/types.ts",
-      "upstreamSha256": "5f2f68579b5f563e115a7b25b52f59fbc1ceebbaacb3739b134f7a3368454572",
-      "vendoredSha256": "a0b5adfa9c74272416dc3bcf37b352d686da3f107144ca5ec80971ee760c500f",
+      "upstreamSha256": "438deadac3a723fc6abe1e6f42db3c24022d3be313253cd28c35dd3748624d04",
+      "vendoredSha256": "60041cc5649e7894f1f6d1bb14f3d06c9216166bca21944835a46f505169e2c0",
       "delta": "Use fork1005 public pure StringEnum subpath instead of root export; same function."
     },
     {
+      "path": "tool/normalize-params.ts",
+      "upstreamSha256": "1897884ac155a43f3a5adbb8183e7b09837d7d6f0250f9254616475d7b52d6bb",
+      "vendoredSha256": "1897884ac155a43f3a5adbb8183e7b09837d7d6f0250f9254616475d7b52d6bb"
+    },
+    {
       "path": "view/format.ts",
-      "upstreamSha256": "444cf33f80cb03c54ab57a78fc7d47d5c1632ffd53cade92c511eca6006ae2b6",
-      "vendoredSha256": "ff82ea149dbbc43501d9177170163b3eb6c5abb76ab0d9ec068ce158e75111af",
-      "delta": "Use the licensed local Text implementation, same upstream bytes."
+      "upstreamSha256": "a8c759b74128e9f3a2047d8a0e15496d04bef59a4180bc4fae6c336893a2aaa6",
+      "vendoredSha256": "70b2d3daf0767ca7d950e11f37798677d8e31d0014b8316431169acf9d596e40",
+      "delta": "Use the licensed local Text implementation, same upstream bytes; type-only non-null assertion on the first split segment."
     },
     {
       "path": "LICENSE",
@@ -98,8 +103,8 @@
     },
     {
       "path": "package.json",
-      "upstreamSha256": "4e173ac72b21567abd1ddcc56db94391ace3d3cd156e07f6dfbcf7f944070d48",
-      "vendoredSha256": "4e173ac72b21567abd1ddcc56db94391ace3d3cd156e07f6dfbcf7f944070d48"
+      "upstreamSha256": "971002e16d3f2c4ad20244d45eae4b4b391444974ec82286a23d4fe07e01e2fc",
+      "vendoredSha256": "971002e16d3f2c4ad20244d45eae4b4b391444974ec82286a23d4fe07e01e2fc"
     },
     {
       "path": "locales/de.json",

@@ -459,7 +459,7 @@ try {
         `const piAssets = mkdtempSync(path.join(tmpdir(), 'byok-packed-pi-assets-'));\n` +
         `try {\n` +
         `  const files = await copyPiRuntimeAssets({ outDir: piAssets, form: 'interpreter+bundle' });\n` +
-        `  for (const file of ['package.json','photon_rs_bg.wasm','dist/core/export-html/template.html','extensions/rpiv-todo/2.8.0/manifest.json']) assert.ok(files.includes(file), file);\n` +
+        `  for (const file of ['package.json','photon_rs_bg.wasm','dist/core/export-html/template.html','extensions/rpiv-todo/2.15.0/manifest.json']) assert.ok(files.includes(file), file);\n` +
         `  assert.equal(JSON.parse(readFileSync(path.join(piAssets, 'package.json'), 'utf8')).version, require('@byok-sdk/client/package.json').byok.piRuntimePin);\n` +
         `} finally {\n` +
         `  rmSync(piAssets, { recursive: true, force: true });\n` +

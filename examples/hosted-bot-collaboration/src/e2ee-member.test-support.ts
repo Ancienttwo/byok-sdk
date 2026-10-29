@@ -25,6 +25,8 @@ import {
 } from '@byok-sdk/core/sealed-payload';
 import type { AgentRef, ByokCloud } from '@byok-sdk/cloud';
 
+type MemberCloud = Pick<ByokCloud, 'appendMemberChainEntries' | 'readMemberKeyRegistration' | 'relayClientPairingMac' | 'putScopeKeyPackages'>;
+
 type JsonObject = { [key: string]: never };
 type Tenant = Parameters<ByokCloud['appendMemberChainEntries']>[0];
 /** The `sealing` of a task offer: the scope, its epoch and the sealed categories. */
@@ -43,11 +45,11 @@ export class HostedMember {
   #head: { seq: number; hash: string } | undefined;
   #scope: { readonly sealing: TaskSealing; readonly key: Uint8Array } | undefined;
 
-  private constructor(private readonly cloud: ByokCloud, private readonly tenant: Tenant, readonly keys: MemberKeys,
+  private constructor(private readonly cloud: MemberCloud, private readonly tenant: Tenant, readonly keys: MemberKeys,
     readonly member: MemberKeyBundleV1) {}
 
   /** A member with its genesis `add(self)` on the tenant's chain. */
-  static async create(cloud: ByokCloud, tenant: Tenant): Promise<HostedMember> {
+  static async create(cloud: MemberCloud, tenant: Tenant): Promise<HostedMember> {
     const keys = (await openMemberKeyRecord(await generateMemberKeyRecord({ tenantId: tenant })))!;
     const member = await createMemberKeyBundle({
       signingPublicJwk: keys.signing.publicJwk, signingPrivateKey: keys.signing.privateKey, kemPublicJwk: keys.kem.publicJwk, kemEpoch: keys.kem.epoch,
