@@ -507,9 +507,13 @@ per process to the `max_connections` budget. At shutdown await
 
 The listener reconnects with bounded exponential backoff and wakes every local
 subscription after each successful LISTEN. A self-NOTIFY probe checks each new
-connection; missing notifications and connection failures go to `onError`, or
-to the default labelled console error. `probeTimeoutMs` defaults to 5 seconds.
-`onError` must not throw. A transaction-mode PgBouncer DSN cannot keep a LISTEN
+connection and repeats every `probeIntervalMs` (default 30 seconds) so a
+half-open path, such as an idle NAT or load balancer dropping the flow without
+closing it, is retired and reconnected instead of silently losing
+notifications. Missing notifications and connection failures go to `onError`,
+or to the default labelled console error; a missed probe is a
+`MailboxWakeProbeMissedError`. `probeTimeoutMs` defaults to 5 seconds, and TCP
+keepalive is enabled on the listener socket. `onError` must not throw. A transaction-mode PgBouncer DSN cannot keep a LISTEN
 session; the probe reports this configuration failure. Hints may be lost or
 repeated, so `fallbackMs` (default 5 seconds) still bounds delivery latency.
 
