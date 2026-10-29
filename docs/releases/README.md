@@ -24,10 +24,10 @@ A release ships `packages/client/upgrade-manifest.json` with one entry per Host-
 
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility
 from evidence, not the author's judgment (see "Freeze rule" in
-`docs/protocol.md`). The wire is at major 4 (#925). No v4 release is
-published yet: `golden/v4.releases.json` has no entry and no floor, and no
-published v4 decoder exists to prove additions against, so cross-release
-gates stay unproven until one is pinned.
+`docs/protocol.md`). The wire is at major 4 (#925). The first v4
+release, 0.31.0, is published: `golden/v4.releases.json` registers its corpus
+and has no floor. No published v4 decoder is pinned as an oracle yet, so
+cross-release gates stay unproven until one is pinned.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and

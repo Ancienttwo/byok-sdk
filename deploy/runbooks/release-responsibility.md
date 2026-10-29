@@ -77,10 +77,10 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The current release is 0.30.2 for all nine packages, keys included. The
+The current release is 0.31.0 for all nine packages, keys included. The
 registry lists it as `latest`.
-See the [release notes](../../docs/releases/v0.30.2.md).
-The public registry read on 2026-10-26 at 13:36 UTC reports `latest` 0.30.2 for all nine packages.
+See the [release notes](../../docs/releases/v0.31.0.md).
+The registry readback of 2026-10-29 (UTC) reports `latest` 0.31.0 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -95,11 +95,11 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From
 0.28.2 all nine carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.30.2 for all nine packages on 2026-10-26 at 13:36 UTC.
+the dist-tag `latest`, observed at 0.31.0 for all nine packages on 2026-10-29 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the prior `latest` for all nine packages. It still records 0.30.1,
-the baseline of the 0.30.2 publication. It does not describe the current
+records the prior `latest` for all nine packages. It still records 0.30.2,
+the baseline of the 0.31.0 publication. It does not describe the current
 registry. Review it in the next release preparation.
 This train has no first publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
@@ -109,10 +109,11 @@ failed registry reads do not establish package absence.
 
 Source preparation and npm execution need separate authorization. The owner
 provided both for 0.27.0. The registry lists 0.28.0, 0.28.1, 0.28.2, 0.28.3,
-0.29.0, 0.30.0, 0.30.1 and 0.30.2 as published (2026-10-20, 2026-10-21,
-2026-10-22, 2026-10-23, 2026-10-24 and 2026-10-26, UTC). This repository
-has no publication record for these versions. Live qualification and
-production rollout remain separate operations.
+0.29.0, 0.30.0, 0.30.1, 0.30.2 and 0.31.0 as published (2026-10-20,
+2026-10-21, 2026-10-22, 2026-10-23, 2026-10-24, 2026-10-26 and 2026-10-29,
+UTC). This repository has no publication record for most of these versions;
+the [0.31.0 notes](../../docs/releases/v0.31.0.md) hold the one for 0.31.0.
+Live qualification and production rollout remain separate operations.
 The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
 the exact source, package order and completed registry readback.
 
