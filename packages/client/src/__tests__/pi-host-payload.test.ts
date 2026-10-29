@@ -245,9 +245,9 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       const home = path.join(runDir, 'home'); await fs.mkdir(home);
       // A dead loopback registry: an auto-install attempt fails instead of reaching a network.
       const deadRegistry = 'http://127.0.0.1:9';
-      // SHELL and USER: Bun's os.userInfo() reads them, and the default
-      // runtime environment is a login-shell capture (#1095).
-      const env = { PATH: process.env.PATH ?? '', HOME: home, SHELL: '/bin/sh', USER: os.userInfo().username, TMPDIR: runDir, PI_CODING_AGENT_DIR: agentDir,
+      // USER: Bun's os.userInfo() reads it. The login shell comes from the
+      // account database, so the child needs no SHELL (#1095).
+      const env = { PATH: process.env.PATH ?? '', HOME: home, USER: os.userInfo().username, TMPDIR: runDir, PI_CODING_AGENT_DIR: agentDir,
         npm_config_registry: deadRegistry, BUN_CONFIG_DEFAULT_REGISTRY: deadRegistry,
         ...(host.piPackageDir === undefined ? {} : { PI_PACKAGE_DIR: host.piPackageDir }) };
       const reportPath = path.join(runDir, 'report.json'); const inputPath = path.join(runDir, 'input.json');
