@@ -534,7 +534,7 @@ export declare function createPostgresCoreStores(options: PostgresCoreStoreOptio
  * the SQL expression of §12.6.2 layer 3: there is no bare device index to
  * accidentally query.
  */
-import { type Clock, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type MailboxCollectExpiredInput, type CollectExpiredResult, type MailboxStore, type MailboxUsage, type TenantId } from '@byok-sdk/core';
+import { type Clock, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type MailboxCollectExpiredInput, type MailboxExpirePendingInput, type CollectExpiredResult, type MailboxStore, type MailboxUsage, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from '../../pool';
 export declare const OUTBOX_COLUMNS = "tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at";
 export interface OutboxRow {
@@ -558,6 +558,9 @@ export declare class PostgresMailboxStore implements MailboxStore {
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
+    expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{
+        readonly expired: number;
+    }>;
     collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/core/objects.d.ts ====
@@ -835,6 +838,11 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * was never registered. `device_active_machine_key` (0015) is still the
  * invariant — its `NOT revoked` predicate simply never has a false row left to
  * exclude.
+ *
+ * Every removed device is also retired in the same transaction
+ * (`task-retirement.ts`): its unfinished attempts are settled and its pending
+ * mailbox rows dead-lettered. Both transactions therefore open with
+ * `BEGIN_OUTBOX_WRITE`, as every mailbox writer does.
  */
 import { type Clock, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
@@ -844,21 +852,22 @@ import type { ByokPool } from '../pool';
  * The client-scoped registration mutation shared by standalone device
  * registration and pairing enrollment. Its caller owns the transaction so the
  * guarded pairing-code update, machine supersession cleanup, and insert can
- * commit or roll back together.
+ * commit or roll back together, and opens it with `BEGIN_OUTBOX_WRITE`.
  */
-export declare function registerDeviceOnClient(client: PoolClient, tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
+export declare function registerDeviceOnClient(client: PoolClient, tenant: TenantId, input: DeviceRegistration, now: string): Promise<DeviceRecord>;
 /** Read one active device while a caller-owned transaction still holds its authority lock. */
 export declare function getDeviceOnClient(client: PoolClient, tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
 export declare class PostgresDeviceDirectory implements DeviceDirectory {
     #private;
-    constructor(pool: ByokPool, clock?: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     /**
      * Revocation removes the registration and the device-scoped state that only
-     * existed to serve it, in one transaction: a half-applied revoke that left
-     * live presence or an unspent challenge nonce behind would be state for a
-     * device the directory can no longer name.
+     * existed to serve it, and retires the device, in one transaction: a
+     * half-applied revoke that left live presence, an unspent challenge nonce
+     * or a running attempt behind would be state for a device the directory can
+     * no longer name.
      *
      * A no-op for a device this tenant does not own: revoking what you cannot
      * address deletes nothing and reports nothing back.
@@ -1576,14 +1585,15 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     }): Promise<TaskAttempt | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/task-cancellations.d.ts ====
-import type { TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore } from '@byok-sdk/cloud';
+import type { TaskAbandonRequest, TaskAttempt, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { ByokPool } from '../pool';
-/** PostgreSQL atomic authority for host cancellation state plus mailbox delivery. */
+/** PostgreSQL atomic authority for Host task termination plus its mailbox effect. */
 export declare class PostgresTaskCancellationStore implements TaskCancellationStore {
     #private;
     constructor(pool: ByokPool, clock: Clock);
     request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
+    abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/task-redaction.d.ts ====
 /**
@@ -1606,8 +1616,9 @@ export declare class PostgresTaskCancellationStore implements TaskCancellationSt
  * receipt fence keep their meaning. Only `pg` and `fetch` are used, so the
  * store runs on Workers through `./runtime`.
  */
-import type { Clock } from '@byok-sdk/core';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type { TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult } from '@byok-sdk/cloud';
+import type { PoolClient } from 'pg';
 import type { ByokPool } from '../pool';
 import type { PostgresObjectStorageOptions } from './index';
 export interface PostgresTaskRedactionStoreOptions {
@@ -1616,12 +1627,32 @@ export interface PostgresTaskRedactionStoreOptions {
     /** The bucket the blob composition writes to. */
     readonly objectStorage: PostgresObjectStorageOptions;
 }
+interface TaskRow {
+    readonly device_id: string;
+    readonly owner_device_id: string | null;
+    readonly status: string;
+}
+interface OutboxBody {
+    readonly device_id: string;
+    readonly seq: string;
+    readonly state: string;
+    readonly body: string;
+}
+type Querier = Pick<PoolClient, 'query'>;
 export declare class PostgresTaskRedactionStore implements TaskRedactionStore {
     #private;
     constructor(options: PostgresTaskRedactionStoreOptions);
     redactTask(input: TaskRedactionStoreInput): Promise<TaskRedactionTaskResult>;
 }
 export declare function createPostgresTaskRedactionStore(options: PostgresTaskRedactionStoreOptions): TaskRedactionStore;
+/**
+ * The task's mailbox rows on its target and owner devices. An envelope names
+ * its task in a top-level `task_id`; `encodeEnvelope` writes compact JSON, so
+ * the text filter narrows the scan and the parse confirms each match. A
+ * tombstone has no `task_id`, so a redacted row is not read again.
+ */
+export declare function readOutbox(db: Querier, tenant: TenantId, taskId: string, task: TaskRow, forUpdate: boolean, pendingOnly?: boolean): Promise<readonly OutboxBody[]>;
+export {};
 // ==== @byok-sdk/cloud-dataplane dist/tenant-erasure.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from './pool';

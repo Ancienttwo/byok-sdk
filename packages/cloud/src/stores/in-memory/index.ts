@@ -87,7 +87,7 @@ export function createInMemoryCloudStores(
       nonces: new InMemoryNonceStore(clock, crypto),
       dedup: new InMemoryInboundDedupStore(),
       tasks,
-      cancellations: new InMemoryTaskCancellationStore(taskState, mailbox),
+      cancellations: new InMemoryTaskCancellationStore(taskState, mailbox, devices),
       receipts: new InMemoryRequestReceiptStore(clock),
       egress: new InMemoryAgentEgressStore(clock),
       proofReceipts: new InMemoryProofRequestReceiptStore(clock),

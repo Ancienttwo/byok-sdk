@@ -54,7 +54,9 @@ export function retireDevice(
 
 /**
  * Task abandonment: the attempt, then its pending rows on its target and
- * owner devices. A row belongs to the task when its envelope names it in a
+ * owner devices that are no longer registered. A registered device keeps its
+ * rows pending, so its `recoverableFrom` never passes rows it has not read;
+ * the inbound gate refuses its later report for the settled task. A row belongs to the task when its envelope names it in a
  * top-level `task_id`; the text filter narrows the scan and the parse
  * confirms each match.
  */
@@ -70,6 +72,7 @@ export function abandonTask(
     ? [task.deviceId]
     : [task.deviceId, task.ownerDeviceId];
   for (const deviceId of devices) {
+    if (db.prepare('SELECT 1 FROM device_directory WHERE tenant_id = ? AND device_id = ?').get(tenant, deviceId) !== undefined) continue;
     const rows = db.prepare(
       `SELECT seq, body FROM mailbox_message
        WHERE tenant_id = ? AND device_id = ? AND state = 'pending' AND instr(body, ?) > 0 ORDER BY seq`,

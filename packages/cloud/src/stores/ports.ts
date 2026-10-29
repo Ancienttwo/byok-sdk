@@ -596,9 +596,11 @@ export interface TaskCancellationStore {
    * Settles an attempt no device will finish, in one transaction: an
    * unfinished attempt becomes `cancelled` with `terminalCause = cause` (and
    * `terminalAt` when it has none), and every `pending` mailbox row of the
-   * task on its target and owner devices — a row whose envelope's top-level
-   * `task_id` names it — becomes `expired`. The same transition device
-   * retirement applies ({@link DeviceDirectory}). A terminal attempt is
+   * task — a row whose envelope's top-level `task_id` names it — on a target
+   * or owner device that is no longer registered becomes `expired`. A
+   * registered device keeps its rows pending, so its `recoverableFrom` never
+   * passes a row it has not read. The same transition device retirement
+   * applies ({@link DeviceDirectory}). A terminal attempt is
    * returned unchanged and nothing is written; a cancellation tombstone stays
    * as it was. `undefined` for a task this tenant never offered.
    */

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "2050c7e36b8764a568383e4b55b2fefa763d683a81c0072dc65b5d4feb7c4a57"
+    "snapshotSha256": "5acc513051ad1472c0742ea3c329b4c5ee8e1edf829f7221396895fea8f8823b"
   },
   "configFields": {
     "status": "tracked",
@@ -241,6 +241,35 @@
         "export:@byok-sdk/client#DAEMON_HALT_REASONS",
         "export:@byok-sdk/client#Daemon",
         "export:@byok-sdk/client#DeviceStoreBindingMismatchError"
+      ]
+    },
+    {
+      "id": "device-retirement-settles-tasks",
+      "impact": "breaking",
+      "summary": "Revoking a device, or superseding it when its machine re-pairs, now settles it in the same store transaction (#1119): its unfinished tasks become cancelled with terminalCause device_revoked or device_superseded, and its pending mailbox rows become expired, freeing their quota (no row is deleted and nothing returns to pending). New ByokCloud.abandonTask(tenant, taskId, cause) (and ByokServer.tasks.abandon / TaskHandle.abandon) settles one task the same way with a TASK_ABANDON_CAUSES cause; rows of a device that is still registered stay pending for it to ack, and its later reports for the task are refused (task_settled_by_cloud, a non-halting state_conflict). abandonTask sends nothing to a device, so it does not stop a live runtime; cancelTask does. readTaskResult reports a cloud-settled task from its attempt row. Custom stores must implement MailboxStore.expirePending and TaskCancellationStore.abandon and settle on revoke/register; InMemoryDeviceDirectory, InMemoryTaskCancellationStore and the Postgres directory take new constructor arguments. On the device, a halted or crashed run now ends its active tasks itself (journaling each task.fail for the next start) and its ended connection queues nothing more.",
+      "migration": "docs/hosted-host-contract.md#abandontask",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+        "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
+        "export:@byok-sdk/cloud#TASK_ABANDON_CAUSES",
+        "export:@byok-sdk/cloud#TASK_ATTEMPT_UNFINISHED_STATUSES",
+        "export:@byok-sdk/cloud#TaskAbandonCause",
+        "export:@byok-sdk/cloud#TaskAbandonRequest",
+        "export:@byok-sdk/cloud#TaskCancellationStore",
+        "export:@byok-sdk/cloud#TenantStores",
+        "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskCancellationStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskCancellationStore",
+        "export:@byok-sdk/core#InMemoryMailboxStore",
+        "export:@byok-sdk/core#MailboxExpirePendingInput",
+        "export:@byok-sdk/core#MailboxStore",
+        "export:@byok-sdk/server#ByokServer",
+        "export:@byok-sdk/server#TaskHandle"
       ]
     }
   ],
@@ -727,6 +756,11 @@
       "entry": "device-route-rate-admission"
     },
     {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
       "change": "changed",
       "entry": "capability-ports-two-way"
@@ -737,9 +771,24 @@
       "entry": "capability-ports-two-way"
     },
     {
+      "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
       "change": "changed",
       "entry": "device-route-rate-admission"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
     },
     {
       "item": "export:@byok-sdk/cloud#InboundOutcome",
@@ -767,9 +816,39 @@
       "entry": "device-route-rate-admission"
     },
     {
+      "item": "export:@byok-sdk/cloud#TASK_ABANDON_CAUSES",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TASK_ATTEMPT_UNFINISHED_STATUSES",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAbandonCause",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAbandonRequest",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskCancellationStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TenantBoundRateLimiter",
       "change": "changed",
       "entry": "device-route-rate-admission"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantStores",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
     },
     {
       "item": "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
@@ -782,9 +861,24 @@
       "entry": "dataplane-rate-limit-required"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresRateLimitOptions",
       "change": "added",
       "entry": "dataplane-rate-limit-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskCancellationStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
@@ -792,14 +886,44 @@
       "entry": "dataplane-rate-limit-required"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresRateLimitOptions",
       "change": "added",
       "entry": "dataplane-rate-limit-required"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskCancellationStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryMailboxStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/core#LocalStoreId",
       "change": "added",
       "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxExpirePendingInput",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
     },
     {
       "item": "export:@byok-sdk/core#StoreCompatibility",
@@ -857,9 +981,19 @@
       "entry": "task-fail-reason-bound"
     },
     {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/server#SqliteSchemaErrorCode",
       "change": "changed",
       "entry": "capability-ports-two-way"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskHandle",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
     },
     {
       "item": "export:@byok-sdk/server#inspectSqliteStore",

@@ -154,11 +154,15 @@ So the device cannot send a terminal for its tasks.
 `operator`, `device_revoked` or `device_superseded`. Another value fails with `coordination_input_invalid`,
 and an unknown task fails with `task_not_found`.
 
-In one store transaction an unfinished task becomes `cancelled` with `terminalCause: cause`, and every `pending` mailbox
-row of the task on its target and owner devices becomes `expired`. Nothing is sent to a device. A terminal task is
-returned as it is. Use it for a task that was left open before device retirement settled tasks, or for a task the
-product gives up on. A dead-lettered row raises that device's `recoverableFrom`, so a device that is still paired and
-has not acknowledged that row gets `409 cursor_too_old` on its next poll (section 6).
+In one store transaction an unfinished task becomes `cancelled` with `terminalCause: cause`. Its `pending` mailbox
+rows on a target or owner device that is no longer registered (revoked, superseded or unknown) become `expired`. A
+device that is still registered keeps them `pending`: expiring a row it has not read would raise its
+`recoverableFrom` past that row and its next poll would be `409 cursor_too_old` (section 6). It reads and acks them
+as usual, and their quota frees on the ack. The inbound gate refuses every later report it sends about the task
+(`task.claim`, `task.started`, a terminal) as a `state_conflict` refusal; the refusal settles that envelope and does
+not stop or halt the device. Nothing is sent to a device, so `abandonTask` does not stop a runtime that is still
+working on the task: `cancelTask` does that. A terminal task is returned as it is. Use it for a task that was left
+open before device retirement settled tasks, or for a task the product gives up on.
 
 A device that restarts is not lost. On start it ends each task it claimed and had not finished
 with `task.fail` (`reason: daemon_interrupted`, `retryable: false`), and it never runs that task again (#924).

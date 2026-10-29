@@ -52,9 +52,13 @@ export async function retireDevice(
 }
 
 /**
- * Task abandonment: the task's pending rows on its target and owner devices,
- * then the attempt. A row belongs to the task when its envelope names it in a
- * top-level `task_id`. A terminal attempt is returned as it is.
+ * Task abandonment: the task's pending rows on its target and owner devices
+ * that are no longer registered, then the attempt. A registered device keeps
+ * its rows pending: expiring one would raise its `recoverableFrom` past rows
+ * it has not read yet. It reads and acks them as usual, and the inbound gate
+ * refuses its later report for the settled task. A row belongs to the task
+ * when its envelope names it in a top-level `task_id`. A terminal attempt is
+ * returned as it is.
  */
 export function abandonTask(
   state: InMemoryTaskAttemptState,
@@ -62,6 +66,7 @@ export function abandonTask(
   tenant: TenantId,
   key: string,
   cause: TaskAbandonCause,
+  isRegistered: (deviceId: string) => Promise<boolean>,
 ): Promise<TaskAttempt | undefined> {
   return state.mutate(key, async () => {
     const attempt = state.attempts.get(key);
@@ -70,6 +75,7 @@ export function abandonTask(
       ? [attempt.deviceId]
       : [attempt.deviceId, attempt.ownerDeviceId];
     for (const deviceId of devices) {
+      if (await isRegistered(deviceId)) continue;
       const seqs: number[] = [];
       for (let afterSeq = 0, more = true; more;) {
         const page = await mailbox.readAfter(tenant, { deviceId, afterSeq });

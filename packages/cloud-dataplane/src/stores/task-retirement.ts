@@ -62,7 +62,11 @@ export async function retireDevices(
 /**
  * Task abandonment for an attempt the caller holds under `FOR UPDATE` and has
  * found unfinished: the attempt, then its pending rows on its target and owner
- * devices, identified exactly as redaction identifies them.
+ * devices that are no longer registered, identified exactly as redaction
+ * identifies them. A registered device keeps its rows pending, so its
+ * `recoverableFrom` never passes rows it has not read; the inbound gate
+ * refuses its later report for the settled task. A concurrent revoke expires
+ * them once it reaches this task's row.
  */
 export async function abandonTask(
   client: Querier,
@@ -77,9 +81,16 @@ export async function abandonTask(
       WHERE tenant_id = $1 AND task_id = $2 AND status = ANY($5::text[])`,
     [tenant, task.task_id, cause, now, UNFINISHED],
   );
-  const devices = task.owner_device_id === null || task.owner_device_id === task.device_id
+  const candidates = task.owner_device_id === null || task.owner_device_id === task.device_id
     ? [task.device_id]
     : [task.device_id, task.owner_device_id];
+  const registered = await client.query<{ device_id: string }>(
+    'SELECT device_id FROM device WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
+    [tenant, candidates],
+  );
+  const live = new Set(registered.rows.map((row) => row.device_id));
+  const devices = candidates.filter((deviceId) => !live.has(deviceId));
+  if (devices.length === 0) return;
   await lockDeviceStreams(client, tenant, devices);
   const rows = await readOutbox(client, tenant, task.task_id, task, false, true);
   for (const deviceId of [...devices].sort()) {

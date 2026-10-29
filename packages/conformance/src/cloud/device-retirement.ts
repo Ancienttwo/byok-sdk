@@ -259,6 +259,29 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
       });
     });
 
+    it('keeps a still-registered device\'s rows pending and its floor in place until that device acks them', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, registration('live'));
+        await stores.tasks.open(TENANT, { taskId: 'live-abandoned', deviceId: 'live' });
+        await stores.tasks.open(TENANT, { taskId: 'live-neighbour', deviceId: 'live' });
+        await mailbox.append(TENANT, { deviceId: 'live', messageId: 'live-own', body: envelope('live-abandoned') });
+        await mailbox.append(TENANT, { deviceId: 'live', messageId: 'live-next', body: envelope('live-neighbour') });
+        const before = await mailbox.inspect(TENANT, 'live');
+
+        const settled = await stores.cancellations.abandon(TENANT, { taskId: 'live-abandoned', cause: 'operator' });
+
+        expect(settled).toMatchObject({ status: 'cancelled', terminalCause: 'operator' });
+        // Expiring a row the device has not read would move its floor past it.
+        await expect(mailbox.inspect(TENANT, 'live')).resolves.toEqual(before);
+        await mailbox.ack(TENANT, 'live');
+        const acked = await mailbox.inspect(TENANT, 'live');
+        expect(acked.usageBytes).toBe(0n);
+        expect(acked.recoverableFrom).toBe(before.recoverableFrom);
+      });
+    });
+
     it('leaves a terminal task and its rows alone and answers undefined for an unknown task', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox } = handle;

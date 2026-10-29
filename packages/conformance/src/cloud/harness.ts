@@ -170,6 +170,8 @@ export interface CloudConformanceMailbox {
   limit(tenant: TenantId, mailboxLimitBytes: bigint): Promise<void>;
   /** A `limited` append of `body`, exactly as an offer would be admitted. */
   append(tenant: TenantId, input: { readonly deviceId: string; readonly messageId: string; readonly body: string }): Promise<MailboxMessage>;
+  /** Delivers and acks every row the device has, as its daemon's next poll does. */
+  ack(tenant: TenantId, deviceId: string): Promise<void>;
   /** Every retained `pending` row of the device, its `recoverableFrom`, and the tenant's mailbox usage. */
   inspect(tenant: TenantId, deviceId: string): Promise<{
     readonly pending: readonly MailboxMessage[];
@@ -202,6 +204,18 @@ export function conformanceMailbox(core: Pick<CoreStores, 'mailbox' | 'quota'>):
         admission: 'limited',
         materialize: () => ({ body: input.body, bodyHash: contentHash(`sha256:${'c'.repeat(64)}`), byteSize }),
       });
+    },
+    async ack(tenant, deviceId) {
+      const { ackedSeq } = await core.mailbox.readCursor(tenant, deviceId);
+      let deliveredSeq = ackedSeq;
+      for (let afterSeq = ackedSeq, more = true; more;) {
+        const page = await core.mailbox.readAfter(tenant, { deviceId, afterSeq });
+        deliveredSeq = page.nextSeq;
+        afterSeq = page.nextSeq;
+        more = page.hasMore;
+      }
+      await core.mailbox.recordDelivery(tenant, { deviceId, deliveredSeq });
+      await core.mailbox.advanceCursor(tenant, { deviceId, ackedSeq: deliveredSeq });
     },
     async inspect(tenant, deviceId) {
       const pending: MailboxMessage[] = [];

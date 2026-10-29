@@ -764,9 +764,13 @@ export interface ByokCloud {
   /**
    * Host control plane: settle a task no device will finish. In one store
    * transaction an unfinished attempt becomes `cancelled` with
-   * `terminalCause = cause`, and the task's undelivered mailbox rows are
-   * dead-lettered, so they stop holding mailbox quota. Nothing is sent to a
-   * device. A terminal attempt is returned unchanged. `cause` must be one of
+   * `terminalCause = cause`. Its undelivered mailbox rows on a device that is
+   * no longer registered are dead-lettered, so they stop holding mailbox
+   * quota; a registered device keeps them pending (its replay floor never
+   * passes a row it has not read), acks them as usual, and has its later
+   * reports for the task refused. Nothing is sent to a device, so this does
+   * not stop a runtime still working on the task: {@link ByokCloud.cancelTask}
+   * does. A terminal attempt is returned unchanged. `cause` must be one of
    * `TASK_ABANDON_CAUSES` (`coordination_input_invalid` otherwise); an
    * unknown task throws `task_not_found`. Device revocation and machine
    * supersession apply the same transition by themselves.
