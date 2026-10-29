@@ -209,8 +209,15 @@ may be transient and is distinct from a halt.
 | Runtime login/settings directories | User | Authenticate as the daemon's OS user; SDK-built adapters inherit by default |
 | Scratch root | SDK, with optional `storage.scratchRoot` input | Use the effective report; do not infer it from store path length |
 
-TODO [#1094](https://github.com/Ancienttwo/byok-sdk/issues/1094): complete the
-`resolveHostLayout` reference after slice B lands; it is not part of this base.
+Call `resolveHostLayout({ productId, productName })` from `@byok-sdk/client`
+for the [recommended per-platform layout](spec.md#recommended-host-layout).
+Pass its `storeDir` as `DaemonConfig.storeDir` and its `hostStorageRoot` as
+`agentHome.hostStorageRoot`; the SDK composes `agentHomes`. The pure helper
+creates no directories and moves no existing stores. Its scratch result uses
+lexical paths; `config check` reports the filesystem-resolved placement and
+socket-path budget. Invalid helper input throws `HostLayoutInputError` with
+`code: 'host_layout_input_invalid'` and the named `field`; fix that input before
+constructing the daemon.
 
 ## Field tiers
 
@@ -362,7 +369,8 @@ linked JSON schema for full array/union shapes and descriptions.
 
 Generated from the [setup catalog](../packages/client/src/daemon/setup-error-catalog.json).
 Coverage checks compare it with `DaemonConfigIssueCode`, `DAEMON_HALT_REASONS`
-and coded errors in `daemon-errors.ts` / `config-schema/errors.ts`.
+and coded errors in `daemon-errors.ts` / `config-schema/errors.ts`, including
+the layout helper's input validation before daemon construction.
 “Retryable unchanged” means repeating the same operation without changing its
 input or environment. A warning does not require a startup retry; strict checks
 still need correction. Codes do not replace the reported field/path or cause.
@@ -378,6 +386,7 @@ still need correction. Codes do not replace the reported field/path or cause.
 | `distribution_owned` | no | Remove localAgentRelease from CLI JSON; the distribution supplies it. | [guide](#cli-path) |
 | `embedded_only` | no | Assemble this value in embedded code; omit it from CLI JSON. | [guide](#embedded-path) |
 | `handshake_rejected` | no | Check productId and SDK compatibility with the server, or pair again. | [guide](#troubleshooting) |
+| `host_layout_input_invalid` | no | Fix the named HostLayoutOptions field, then call resolveHostLayout again. | [guide](#directory-ownership) |
 | `invalid_type` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `invalid_value` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `missing_required` | no | Supply the required field at the reported path. | [guide](#configuration) |
@@ -418,6 +427,8 @@ Manifest transition: **0.31.0 → 0.31.0**. Versions and entries below come from
 |-------|--------|----------------------|
 | local-tool-approval-host-only | breaking | Tool-authorization approvals are Host-only by default (#1101): the control socket and byok-agent approve can no longer approve them; rejection is unaffected. Set DaemonConfig.localToolApproval: 'allow' to restore local tool-authorization approval. [Migration](../docs/security.md#3-shared-approval-path) |
 | daemon-config-schema | additive | DaemonConfig has a generated, versioned JSON schema (daemon-config.schema.json beside the client package.json) and one validator for config files and createDaemon. Unknown fields are warnings, never rejected at runtime (Q4'); `byok-agent config check [--strict] [--json]` and checkDaemonConfig validate a config and report its effective values (store, Agent-home and scratch directories with the socket budget, MCP servers, memory helper, runtime isolation, tool-authorization mode). Daemon.status().config returns the same report. Each top-level DaemonConfig field is now a config:<field> manifest item. Nothing to change; run `byok-agent config check --strict` in CI to catch typos. AgentEgressConfig.policy is optional, as config files already wrote it (`"agentEgress": {}` selects the client default policy). [Migration](../docs/spec.md#daemon-configuration-contract-1094) |
+| host-layout-helper | additive | resolveHostLayout({ productId, productName, platform?, homeDir?, env? }) returns the recommended storeDir (the SDK default ~/.byok/<productId>, with its #493 scratch placement and socket-path budget), hostStorageRoot (macOS ~/Library/Application Support/<productName>, Linux $XDG_DATA_HOME/<productId>, Windows %LOCALAPPDATA%\<productName>), its agents directory and the service log directory. It is pure and throws HostLayoutInputError (code host_layout_input_invalid, with the field) on an input it cannot lay out. DaemonEffectiveConfig.directories gains logDir. Nothing to change; a Host that computes these directories itself can call the helper instead. Existing stores do not move. [Migration](../docs/spec.md#recommended-host-layout) |
+| device-store-default-dir-removed | breaking | The static DeviceStore.defaultDir(productId) is removed; it duplicated the default store path. The class is reachable through BlobClient and InstallSkillPacksOptions. The default storeDir is still <home>/.byok/<productId> and no store moves. A Host that called DeviceStore.defaultDir uses resolveHostLayout({ productId, productName }).storeDir. These same exports also contain private AuthManager declaration changes for the token-renewal minimum gap (#1114): a fast device clock or short server TTL no longer loops renewals and keychain writes. That renewal fix requires no additional Host action. [Migration](../docs/spec.md#recommended-host-layout) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

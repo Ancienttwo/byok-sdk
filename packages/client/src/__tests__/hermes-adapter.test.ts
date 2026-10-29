@@ -28,6 +28,7 @@ vi.mock('../adapters/hermes/gateway-ownership', async (original) => {
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-hermes.mjs', import.meta.url));
 const sessions: Session[] = [];
+const openings: Promise<Session>[] = [];
 const dirs: string[] = [];
 const task: RuntimeTaskInput = { instruction: 'hello' };
 const windows = process.platform === 'win32';
@@ -73,10 +74,13 @@ async function setup(env: NodeJS.ProcessEnv = {}, options: Partial<HermesAdapter
   const receipt = path.join(await tempDir('br-'), 'receipt.jsonl');
   const adapter = new HermesAdapter({ home: root, resolveBin: () => ({ command, source: 'path' }), ...options });
   const resources = { workspaceDir, env: { PATH: process.env.PATH, HOME: os.homedir(), ...platformEnv, FAKE_HERMES_RECEIPT: receipt, ...env } };
-  const open = async (offer: RuntimeTaskInput = task, extra: Partial<typeof resources> & Record<string, unknown> = {}) => {
-    const session = await startPreparedOperation(adapter, offer, { ...resources, ...extra });
-    sessions.push(session);
-    return session;
+  const open = (offer: RuntimeTaskInput = task, extra: Partial<typeof resources> & Record<string, unknown> = {}) => {
+    const opening = startPreparedOperation(adapter, offer, { ...resources, ...extra }).then((session) => {
+      sessions.push(session);
+      return session;
+    });
+    openings.push(opening);
+    return opening;
   };
   const entries = async (): Promise<Array<Record<string, any>>> =>
     (await fs.readFile(receipt, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
@@ -107,10 +111,15 @@ const alive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true; } catch { return false; }
 };
 
-afterEach(async () => {
+async function cleanupFixtures(): Promise<void> {
+  // A test timeout does not cancel startup. Register late sessions before closing
+  // them, so no gateway can retain its profile as cwd when the roots are removed.
+  await Promise.allSettled(openings.splice(0));
   await Promise.all(sessions.splice(0).map((session) => session.close().catch(() => {})));
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
-});
+}
+
+afterEach(cleanupFixtures);
 
 describe('HermesAdapter construction and descriptor', () => {
   it('requires an absolute SDK-owned root that is not the user\'s ~/.hermes', () => {
@@ -266,6 +275,27 @@ describe('HermesAdapter prepare', () => {
 });
 
 describe('HermesAdapter session', () => {
+  it('settles an opening session before teardown removes its profile', async () => {
+    const { open, entries, root } = await setup({ FAKE_HERMES_GATEWAY_READY_DELAY_MS: '750' }, { gatewayReadyTimeoutMs: 3_000 });
+    const opening = open();
+    // Keep startup rejection observable while teardown awaits it.
+    const outcome = opening.then((session) => ({ session }), (error: unknown) => ({ error }));
+    await vi.waitFor(async () => {
+      expect((await entries()).some((entry) => entry.mode === 'gateway')).toBe(true);
+    }, { timeout: 5_000 });
+    const gateway = (await entries()).find((entry) => entry.mode === 'gateway')!;
+    expect(alive(gateway.pid)).toBe(true);
+    try {
+      await cleanupFixtures();
+      expect(await outcome).toHaveProperty('session');
+      expect(alive(gateway.pid)).toBe(false);
+      await expect(fs.stat(root)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      const result = await outcome;
+      if ('session' in result) await result.session.close();
+    }
+  });
+
   it('runs a turn through an owned gateway and an attached ACP viewer', async () => {
     const { open, entries, root, workspaceDir } = await setup({ HERMES_TUI_GATEWAY_URL: 'ws://203.0.113.1:1', HERMES_PROFILE: 'other' });
     const session = await open(task, {

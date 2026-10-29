@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "e227c90fb7ed3dccae63825d5c4c2b118d4a4347ef6a1ec402a7dbbb8451935b"
+    "snapshotSha256": "785019275c2eb31f4300818f12f367a6f4e7ab56c0ef92ad7ae86957145beb1a"
   },
   "configFields": {
     "status": "tracked",
@@ -103,10 +103,23 @@
       ]
     },
     {
-      "id": "auth-renewal-floor",
+      "id": "host-layout-helper",
       "impact": "additive",
-      "summary": "Token renewal keeps a minimum gap between proactive renewals, so a fast device clock or a server TTL under the renewal margin no longer loops renewals and keychain writes (#1114). The declarations change only by private AuthManager members; no Host action.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/pull/1131",
+      "summary": "resolveHostLayout({ productId, productName, platform?, homeDir?, env? }) returns the recommended storeDir (the SDK default ~/.byok/<productId>, with its #493 scratch placement and socket-path budget), hostStorageRoot (macOS ~/Library/Application Support/<productName>, Linux $XDG_DATA_HOME/<productId>, Windows %LOCALAPPDATA%\\<productName>), its agents directory and the service log directory. It is pure and throws HostLayoutInputError (code host_layout_input_invalid, with the field) on an input it cannot lay out. DaemonEffectiveConfig.directories gains logDir. Nothing to change; a Host that computes these directories itself can call the helper instead. Existing stores do not move.",
+      "migration": "docs/spec.md#recommended-host-layout",
+      "items": [
+        "export:@byok-sdk/client#HostLayout",
+        "export:@byok-sdk/client#HostLayoutInputError",
+        "export:@byok-sdk/client#HostLayoutOptions",
+        "export:@byok-sdk/client#HostLayoutPlatform",
+        "export:@byok-sdk/client#resolveHostLayout"
+      ]
+    },
+    {
+      "id": "device-store-default-dir-removed",
+      "impact": "breaking",
+      "summary": "The static DeviceStore.defaultDir(productId) is removed; it duplicated the default store path. The class is reachable through BlobClient and InstallSkillPacksOptions. The default storeDir is still <home>/.byok/<productId> and no store moves. A Host that called DeviceStore.defaultDir uses resolveHostLayout({ productId, productName }).storeDir. These same exports also contain private AuthManager declaration changes for the token-renewal minimum gap (#1114): a fast device clock or short server TTL no longer loops renewals and keychain writes. That renewal fix requires no additional Host action.",
+      "migration": "docs/spec.md#recommended-host-layout",
       "items": [
         "export:@byok-sdk/client#BlobClient",
         "export:@byok-sdk/client#InstallSkillPacksOptions"
@@ -378,7 +391,7 @@
     {
       "item": "export:@byok-sdk/client#BlobClient",
       "change": "changed",
-      "entry": "auth-renewal-floor"
+      "entry": "device-store-default-dir-removed"
     },
     {
       "item": "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
@@ -461,9 +474,29 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#HostLayout",
+      "change": "added",
+      "entry": "host-layout-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutInputError",
+      "change": "added",
+      "entry": "host-layout-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutOptions",
+      "change": "added",
+      "entry": "host-layout-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client#HostLayoutPlatform",
+      "change": "added",
+      "entry": "host-layout-helper"
+    },
+    {
       "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
       "change": "changed",
-      "entry": "auth-renewal-floor"
+      "entry": "device-store-default-dir-removed"
     },
     {
       "item": "export:@byok-sdk/client#LocalToolApprovalPolicy",
@@ -474,6 +507,11 @@
       "item": "export:@byok-sdk/client#checkDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#resolveHostLayout",
+      "change": "added",
+      "entry": "host-layout-helper"
     },
     {
       "item": "export:@byok-sdk/client#validateDaemonConfig",

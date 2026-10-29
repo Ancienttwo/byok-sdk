@@ -22,6 +22,11 @@ export interface ExecutionScratch {
   release(): Promise<void>;
 }
 
+/** Path rules of `platform`, so a layout for another platform computes the same bytes on any host. */
+function platformPath(platform: NodeJS.Platform): path.PlatformPath {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
 /** sockaddr_un.sun_path size, including the terminating NUL. Windows has no limit. */
 const SOCKET_PATH_MAXIMUM: Partial<Record<NodeJS.Platform, number>> = { darwin: 104, linux: 108 };
 // A runtime binds under exec/<token>/runtime; reserve 16 bytes for its socket name and one NUL.
@@ -33,7 +38,7 @@ const SOCKET_SUFFIX_BYTES = Buffer.byteLength(path.join('/', 'exec', '0'.repeat(
  */
 export function scratchRootSocketBudget(root: string, platform: NodeJS.Platform = process.platform): { readonly bytes: number; readonly maximumBytes?: number } {
   const maximum = SOCKET_PATH_MAXIMUM[platform];
-  const bytes = Buffer.byteLength(path.resolve(root));
+  const bytes = Buffer.byteLength(platformPath(platform).resolve(root));
   return maximum === undefined ? { bytes } : { bytes, maximumBytes: maximum - SOCKET_SUFFIX_BYTES };
 }
 
@@ -58,15 +63,27 @@ export function validateScratchRoot(root: string, platform: NodeJS.Platform = pr
  */
 export function defaultScratchRoot(storeDir: string, platform: NodeJS.Platform = process.platform): string {
   const natural = path.join(path.resolve(storeDir), 'tmp');
-  const maximum = SOCKET_PATH_MAXIMUM[platform];
-  if (maximum === undefined) return natural;
-  const store = canonicalStore(storeDir);
+  if (SOCKET_PATH_MAXIMUM[platform] === undefined) return natural;
   // All aliases of a long store must select its fixed root. A long alias of a
   // short store must fail validation instead of selecting a second root.
   // Keep the natural path lexical so retention uses the configured namespace.
-  if (Buffer.byteLength(path.join(store, 'tmp')) + SOCKET_SUFFIX_BYTES <= maximum) return validateScratchRoot(natural, platform);
+  return shortScratchRoot(canonicalStore(storeDir), platform) ?? validateScratchRoot(natural, platform);
+}
+
+/**
+ * The #493 placement rule, without filesystem access: the fixed short root
+ * for a store whose `<store>/tmp` exceeds the runtime socket budget, or
+ * `undefined` when `<store>/tmp` fits or the platform has no limit.
+ * {@link defaultScratchRoot} passes the canonical store; `resolveHostLayout`
+ * passes the lexical recommended store.
+ */
+export function shortScratchRoot(store: string, platform: NodeJS.Platform): string | undefined {
+  const maximum = SOCKET_PATH_MAXIMUM[platform];
+  if (maximum === undefined) return undefined;
+  const rules = platformPath(platform);
+  if (Buffer.byteLength(rules.join(store, 'tmp')) + SOCKET_SUFFIX_BYTES <= maximum) return undefined;
   const identity = createHash('sha256').update(store).digest('hex').slice(0, 16);
-  return path.join(platform === 'darwin' ? '/private/tmp' : '/tmp', `byok-scratch-${identity}`);
+  return rules.join(platform === 'darwin' ? '/private/tmp' : '/tmp', `byok-scratch-${identity}`);
 }
 
 /**

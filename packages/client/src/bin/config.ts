@@ -81,8 +81,8 @@ export function loadConfig(configPath: string | undefined, overrides: Partial<Cl
 
 /**
  * Same `storeDir` resolution `create-daemon.ts` uses internally
- * (`config.storeDir ?? DeviceStore.defaultDir(config.productId)`) — reused
- * here via `DeviceStore`'s own static helper (not reimplemented) so a query
+ * (`DeviceStore.resolveDir`, whose default is `defaultStoreDir`) — reused
+ * here, not reimplemented, so a query
  * subcommand always looks in the exact same place `createDaemon`/
  * `createDaemonWithAdapters` would persist to.
  */

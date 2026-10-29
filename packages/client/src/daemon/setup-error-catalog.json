@@ -88,5 +88,10 @@
     "retryable": false,
     "nextStep": "Drain the journal with the release that wrote it before upgrading.",
     "anchor": "#upgrade"
+  },
+  "host_layout_input_invalid": {
+    "retryable": false,
+    "nextStep": "Fix the named HostLayoutOptions field, then call resolveHostLayout again.",
+    "anchor": "#directory-ownership"
   }
 }
