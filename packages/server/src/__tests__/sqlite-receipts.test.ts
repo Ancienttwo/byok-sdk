@@ -184,7 +184,7 @@ describe('SQLite receipt recovery', () => {
       const deviceTerminal = await runtime.cloud.readDeviceTerminal(tenant, taskId);
       await runtime.stores.core.mailbox.recordDelivery(tenant, { deviceId, deliveredSeq: first.seq });
       await runtime.stores.core.mailbox.advanceCursor(tenant, { deviceId, ackedSeq: first.seq });
-      await runtime.stores.core.mailbox.collectExpired(tenant, { now: '2999-01-01T00:00:00.000Z', limit: 500, ackedBefore: '2999-01-01T00:00:00.000Z', expireUnackedBefore: '2999-01-01T00:00:00.000Z' });
+      await runtime.stores.core.mailbox.collectExpired(tenant, { now: '2999-01-01T00:00:00.000Z', limit: 500, ackedBefore: '2999-01-01T00:00:00.000Z', expireUnackedBefore: '2999-01-01T00:00:00.000Z', reapDeadLettersBefore: '1970-01-01T00:00:00.000Z' });
       await runtime.stores.close(); runtime = open();
       expect(await runtime.cloud.readTaskResult(tenant, taskId)).toEqual(result);
       expect(await runtime.cloud.readDeviceTerminal(tenant, taskId)).toEqual(deviceTerminal);

@@ -143,6 +143,7 @@ export async function ackAndCollectMailbox(
     limit: 500,
     ackedBefore: farFuture,
     expireUnackedBefore: '1970-01-01T00:00:00.000Z',
+    reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
   });
   return collected.removed;
 }

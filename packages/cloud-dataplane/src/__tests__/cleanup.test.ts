@@ -182,6 +182,7 @@ async function configurePolicy(pool: ByokPool, clock: Clock): Promise<void> {
     policyId: 'default',
     mailboxAckedRetentionMs: 1_000n,
     mailboxUnackedRetentionMs: 1_000n,
+    mailboxDeadLetterRetentionMs: 1_000n,
     requestReceiptRetentionMs: 1_000n,
     objectOrphanGraceMs: 1_000n,
   });
@@ -243,7 +244,7 @@ function step(report: MaintenanceReport, name: string) {
   if (result === undefined) throw new Error('Missing maintenance step ' + name);
   return result;
 }
-const bounds = (clock: Clock) => ({ now: clock.now().toISOString(), limit: 100, ackedBefore: new Date(clock.now().getTime() - 1000).toISOString(), expireUnackedBefore: new Date(clock.now().getTime() - 1000).toISOString() });
+const bounds = (clock: Clock) => ({ now: clock.now().toISOString(), limit: 100, ackedBefore: new Date(clock.now().getTime() - 1000).toISOString(), expireUnackedBefore: new Date(clock.now().getTime() - 1000).toISOString(), reapDeadLettersBefore: new Date(clock.now().getTime() - 2000).toISOString() });
 const objectBounds = (clock: Clock, limit = 100) => ({ now: clock.now().toISOString(), limit, orphanBefore: new Date(clock.now().getTime() - 1000).toISOString() });
 
 describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
@@ -395,6 +396,61 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       expect(result.removed).toBe(2);
       expect(result.releasedBytes).toBe(0n);
       expect((await mailbox.readUsage(TENANT)).bytes).toBe(0n);
+    } finally {
+      await scope.dispose();
+    }
+  });
+
+  it('lists dead letters until their grace passes, then reaps all but each device floor row (#1115)', async () => {
+    const scope = await createDataplaneScope(4);
+    const clock = new MutableClock('2026-01-01T00:00:00.000Z');
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const quota = new PostgresQuotaStore(scope.pool, clock);
+      const mailbox = new PostgresMailboxStore(scope.pool, clock);
+      const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: new FakeObjectMaintenance() });
+      await seedEntitlement(quota, 20_000n, 20_000n);
+      for (let n = 1; n <= 3; n++) {
+        await mailbox.append(TENANT, { deviceId: 'device-reap', messageId: `reap-${n}`, admission: 'limited', materialize: replayableOffer(40 + n) });
+      }
+      await mailbox.append(TENANT, { deviceId: 'device-reap-other', messageId: 'reap-other-1', admission: 'limited', materialize: replayableOffer(50) });
+      const floor = async (deviceId: string) => (await mailbox.readAfter(TENANT, { deviceId, afterSeq: 0 })).recoverableFrom;
+      const deadSeqs = async () => (await cleanup.listDeadLetters(TENANT)).messages.map(message => `${message.deviceId}/${message.seq}`);
+
+      clock.set('2026-01-01T00:00:02.000Z');
+      expect(await mailbox.collectExpired(TENANT, bounds(clock))).toEqual({ removed: 0, expired: 4, releasedBytes: 0n, more: false });
+      expect(await deadSeqs()).toEqual(['device-reap/1', 'device-reap/2', 'device-reap/3', 'device-reap-other/1']);
+      expect([await floor('device-reap'), await floor('device-reap-other')]).toEqual([4, 2]);
+      // A replay before the reap: the clone records its source seq as plain
+      // provenance (no foreign key), so reaping the source leaves it intact.
+      const replayed = await cleanup.replayDeadLetter(TENANT, { deviceId: 'device-reap', seq: 2, replayMessageId: 'reap-replay' });
+      expect(replayed).toMatchObject({ seq: 4, state: 'pending' });
+
+      clock.set('2026-01-01T00:00:03.000Z');
+      // Two sweeps race over the same snapshot; neither may take a floor row.
+      const swept = await Promise.all([mailbox.collectExpired(TENANT, bounds(clock)), mailbox.collectExpired(TENANT, bounds(clock))]);
+      expect(swept.reduce((sum, result) => sum + result.removed, 0)).toBe(2);
+      expect(swept.every(result => result.expired === 0 && !result.more)).toBe(true);
+      expect(await deadSeqs()).toEqual(['device-reap/3', 'device-reap-other/1']);
+      expect([await floor('device-reap'), await floor('device-reap-other')]).toEqual([4, 2]);
+      await expect(scope.pool.query(
+        `SELECT seq::int AS seq, state, replay_source_seq::int AS source FROM outbox
+          WHERE tenant_id = $1 AND device_id = 'device-reap' ORDER BY seq`,
+        [TENANT],
+      )).resolves.toMatchObject({ rows: [{ seq: 3, state: 'expired', source: null }, { seq: 4, state: 'pending', source: 2 }] });
+      expect((await mailbox.readUsage(TENANT)).bytes).toBe(replayed.byteSize);
+      // The reaped source is gone for replay too; the clone already delivered it.
+      await expect(cleanup.replayDeadLetter(TENANT, { deviceId: 'device-reap', seq: 2, replayMessageId: 'reap-replay' }))
+        .rejects.toMatchObject({ code: 'cleanup_dead_letter_not_found' });
+
+      // Once the clone expires it becomes the floor, and the old floor row is
+      // reaped only after its own grace — never before the floor has moved up.
+      clock.set('2026-01-01T00:00:04.000Z');
+      expect(await mailbox.collectExpired(TENANT, bounds(clock))).toEqual({ removed: 0, expired: 1, releasedBytes: 0n, more: true });
+      expect(await floor('device-reap')).toBe(5);
+      expect(await mailbox.collectExpired(TENANT, bounds(clock))).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+      expect(await deadSeqs()).toEqual(['device-reap/4', 'device-reap-other/1']);
+      expect([await floor('device-reap'), await floor('device-reap-other')]).toEqual([5, 2]);
     } finally {
       await scope.dispose();
     }

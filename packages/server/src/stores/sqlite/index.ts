@@ -937,18 +937,30 @@ export class SqliteMailboxStore implements MailboxStore {
     assertCollectExpiredInput(input);
     assertCanonicalTimestamp(input.ackedBefore, 'ackedBefore');
     assertCanonicalTimestamp(input.expireUnackedBefore, 'expireUnackedBefore');
+    assertCanonicalTimestamp(input.reapDeadLettersBefore, 'reapDeadLettersBefore');
+    // A dead letter is reapable only below a higher `expired` sibling: the
+    // device's highest-seq dead letter is the recoverableFrom floor and stays.
+    const reapable = `m.tenant_id = ? AND m.state = 'expired' AND m.appended_at < ?
+      AND EXISTS (SELECT 1 FROM mailbox_message h WHERE h.tenant_id = m.tenant_id AND h.device_id = m.device_id
+        AND h.state = 'expired' AND h.seq > m.seq)`;
     return this.coordinator.transaction((db) => {
-      const removed = Number(db.prepare(`DELETE FROM mailbox_message WHERE rowid IN
+      const deleted = Number(db.prepare(`DELETE FROM mailbox_message WHERE rowid IN
         (SELECT rowid FROM mailbox_message WHERE tenant_id = ? AND state = 'acked' AND appended_at < ? ORDER BY appended_at, rowid LIMIT ?)`)
         .run(tenant, input.ackedBefore, input.limit).changes);
-      const remaining = input.limit - removed;
+      // Reaped before this call's expiry, so only rows already `expired` qualify.
+      const reaped = Number(db.prepare(`DELETE FROM mailbox_message WHERE rowid IN
+        (SELECT m.rowid FROM mailbox_message m WHERE ${reapable} ORDER BY m.appended_at, m.rowid LIMIT ?)`)
+        .run(tenant, input.reapDeadLettersBefore, input.limit - deleted).changes);
+      const remaining = input.limit - deleted - reaped;
       const expired = Number(db.prepare(`UPDATE mailbox_message SET state = 'expired' WHERE rowid IN
         (SELECT rowid FROM mailbox_message WHERE tenant_id = ? AND state = 'pending' AND appended_at < ? ORDER BY appended_at, rowid LIMIT ?)`)
         .run(tenant, input.expireUnackedBefore, remaining).changes);
       const more = db.prepare(`SELECT 1 FROM mailbox_message WHERE tenant_id = ? AND
         ((state = 'acked' AND appended_at < ?) OR (state = 'pending' AND appended_at < ?)) LIMIT 1`)
-        .get(tenant, input.ackedBefore, input.expireUnackedBefore) !== undefined;
-      return { removed, expired, releasedBytes: 0n, more };
+        .get(tenant, input.ackedBefore, input.expireUnackedBefore) !== undefined
+        || db.prepare(`SELECT 1 FROM mailbox_message m WHERE ${reapable} LIMIT 1`)
+          .get(tenant, input.reapDeadLettersBefore) !== undefined;
+      return { removed: deleted + reaped, expired, releasedBytes: 0n, more };
     });
   }
 

@@ -1685,7 +1685,7 @@ sequenceDiagram
 
 | 数据 | 建议默认 | 自动删除条件 |
 | --- | --- | --- |
-| mailbox | time-bounded window，按 tenant/device 配置 | 已 ack；未 ack 的过期项先进入 expired/dead-letter 状态，不静默丢失 |
+| mailbox | time-bounded window，按 tenant/device 配置 | 已 ack；未 ack 的过期项先进入 expired/dead-letter 状态，不静默丢失；dead letter 过期后保留 `mailboxDeadLetterRetentionMs`（默认 30 天）可查询，之后自动删除，但每个 device seq 最高的 dead letter 保留为 `recoverableFrom` floor |
 | inbound dedup | 至少覆盖 mailbox 最大重投窗口 | expiry 到期 |
 | request receipts | 至少覆盖 proof clock skew 加 client retry horizon | expiry 到期 |
 | pairing/auth nonce | 10 分钟量级 | used 或 expired |
@@ -1795,7 +1795,9 @@ receipt 的唯一分类表保护全部 11 个 SDK families 和未知 key；reque
 为空。redeemed pairing code 是 completion fence 的入口，因此保留到 tenant
  erasure。quota 先 expire reserved，再按剩余 budget 清理过期的 expired/aborted rows；
 committed rows 是 accounting/replay identity，不能被 TTL 清除。
-mailbox 只删 acked；unacked 只标 expired，`releasedBytes` 恒为 0，不读写 usage。
+mailbox 删 acked，再删超过 dead-letter 窗口的 expired（每个 device seq 最高的那条保留为
+recovery floor，计入 `removed`），最后把 unacked 标 expired；quota 只计 pending，
+`releasedBytes` 恒为 0，不读写 usage。
 对象的 tombstone、retry、physical delete 和 settle 共享一个 distinct-object
 budget；PG 在删除期间持有 manifest row lock，SQLite 同步 commit SQL 与 ledger
 release，避免同 hash 重建或 reservation 插入观察到半完成状态。

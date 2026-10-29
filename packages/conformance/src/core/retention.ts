@@ -14,7 +14,7 @@ export function runCoreRetentionConformance(name: string, factory: CoreCompositi
         await stores.mailbox.recordDelivery(TENANT_A, { deviceId: 'retention-device', deliveredSeq: 1 });
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: 'retention-device', ackedSeq: 1 });
         await handle.advanceTime(1);
-        const input = { now: handle.now(), limit: 2, ackedBefore: handle.now(), expireUnackedBefore: handle.now() };
+        const input = { now: handle.now(), limit: 2, ackedBefore: handle.now(), expireUnackedBefore: handle.now(), reapDeadLettersBefore: '1970-01-01T00:00:00.000Z' };
         const floor = async () => (await stores.mailbox.readAfter(TENANT_A, { deviceId: 'retention-device', afterSeq: 0 })).recoverableFrom;
         expect(await stores.mailbox.collectExpired(TENANT_A, input)).toEqual({ removed: 1, expired: 1, releasedBytes: 0n, more: true });
         expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(1n);
@@ -23,6 +23,49 @@ export function runCoreRetentionConformance(name: string, factory: CoreCompositi
         expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
         expect(await floor()).toBe(4);
         expect(await stores.mailbox.collectExpired(TENANT_A, input)).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
+      });
+    });
+    it('reaps dead letters past their cutoff but keeps each device floor row, so recoverableFrom never moves back (#1115)', async () => {
+      await withComposition(factory, async handle => {
+        const { stores } = handle;
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        const append = (deviceId: string, n: number) => stores.mailbox.append(TENANT_A, {
+          deviceId, messageId: `${deviceId}-${n}`, admission: 'limited',
+          materialize: seq => ({ body: String(seq), bodyHash: hashOf(n), byteSize: 1n }),
+        });
+        for (const n of [1, 2, 3]) await append('reap-a', n);
+        await append('reap-b', 4);
+        await handle.advanceTime(1);
+        const youngAt = handle.now();
+        for (const n of [5, 6]) await append('reap-a', n);
+        await handle.advanceTime(1);
+        const epoch = '1970-01-01T00:00:00.000Z';
+        const base = { now: handle.now(), limit: 10, ackedBefore: epoch, expireUnackedBefore: epoch, reapDeadLettersBefore: epoch };
+        const floors = async () => Promise.all(['reap-a', 'reap-b'].map(async deviceId =>
+          (await stores.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0 })).recoverableFrom));
+        expect(await stores.mailbox.collectExpired(TENANT_A, { ...base, expireUnackedBefore: handle.now() }))
+          .toEqual({ removed: 0, expired: 6, releasedBytes: 0n, more: false });
+        expect(await floors()).toEqual([6, 2]);
+        // Older than the cutoff: reap-a seq 1-3. reap-a seq 4 is younger, and
+        // reap-a seq 5 and reap-b seq 1 are their device's floor rows.
+        const reapOld = { ...base, reapDeadLettersBefore: youngAt, limit: 2 };
+        expect(await stores.mailbox.collectExpired(TENANT_A, reapOld)).toEqual({ removed: 2, expired: 0, releasedBytes: 0n, more: true });
+        expect(await stores.mailbox.collectExpired(TENANT_A, reapOld)).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+        expect(await floors()).toEqual([6, 2]);
+        expect(await stores.mailbox.collectExpired(TENANT_A, { ...base, reapDeadLettersBefore: handle.now() }))
+          .toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+        expect(await floors()).toEqual([6, 2]);
+        // A row this call expires is not reaped by the same call, but the old
+        // floor row it outranks is reported as remaining work.
+        await append('reap-a', 7);
+        await handle.advanceTime(1);
+        const sweep = { ...base, now: handle.now(), expireUnackedBefore: handle.now(), reapDeadLettersBefore: handle.now() };
+        expect(await stores.mailbox.collectExpired(TENANT_A, sweep)).toEqual({ removed: 0, expired: 1, releasedBytes: 0n, more: true });
+        expect(await floors()).toEqual([7, 2]);
+        expect(await stores.mailbox.collectExpired(TENANT_A, sweep)).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+        expect(await stores.mailbox.collectExpired(TENANT_A, sweep)).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
+        expect(await floors()).toEqual([7, 2]);
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
       });
     });
     it('bounds presence expiry and preserves another tenant at the exact TTL boundary', async () => {

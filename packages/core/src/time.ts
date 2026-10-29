@@ -20,7 +20,7 @@
  * Store-produced timestamps are canonical by construction (they come from
  * `Clock.now().toISOString()`); this module guards the *inbound* direction —
  * `downgradeGraceUntil`, `deletePendingBefore`, `ackedBefore`,
- * `expireUnackedBefore`.
+ * `expireUnackedBefore`, `reapDeadLettersBefore`.
  *
  * No `node:` import and no clock read: validation is pure, so a Workers
  * composition and the constraint test (`Date.now()` is banned package-wide)

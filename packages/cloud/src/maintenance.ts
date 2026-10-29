@@ -10,12 +10,20 @@ import type { CloudStores } from './stores/ports';
 export interface RetentionPolicy {
   readonly mailboxAckedRetentionMs: bigint;
   readonly mailboxUnackedRetentionMs: bigint;
+  /**
+   * How long a dead letter stays queryable after it expired. The reap cutoff is
+   * `now - mailboxUnackedRetentionMs - mailboxDeadLetterRetentionMs` on
+   * `appended_at`; each device's highest-seq dead letter is kept regardless,
+   * as the `recoverableFrom` floor.
+   */
+  readonly mailboxDeadLetterRetentionMs: bigint;
   readonly requestReceiptRetentionMs: bigint;
   readonly objectOrphanGraceMs: bigint;
 }
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = Object.freeze({
   mailboxAckedRetentionMs: 86_400_000n,
   mailboxUnackedRetentionMs: 7n * 86_400_000n,
+  mailboxDeadLetterRetentionMs: 30n * 86_400_000n,
   requestReceiptRetentionMs: 86_400_000n,
   objectOrphanGraceMs: 86_400_000n,
 });
@@ -144,13 +152,14 @@ export async function runMaintenanceSteps(
   };
   const ackedBefore = cutoff(policy.mailboxAckedRetentionMs);
   const expireUnackedBefore = cutoff(policy.mailboxUnackedRetentionMs);
+  const reapDeadLettersBefore = cutoff(policy.mailboxUnackedRetentionMs + policy.mailboxDeadLetterRetentionMs);
   const requestBefore = cutoff(policy.requestReceiptRetentionMs);
   const orphanBefore = cutoff(policy.objectOrphanGraceMs);
   const proofReceipts = ports.proofReceiptRetention;
   const recordedBefore = proofReceipts === undefined ? undefined : cutoff(proofReceipts.proofReceiptRetentionMs);
   const startedAt = ports.clock.now().toISOString();
   const operations: Record<Exclude<MaintenanceStep, 'deviceAssertionReplay' | 'agentMessageDraft' | 'proofReceipts'>, () => Promise<CollectExpiredResult>> = {
-    mailbox: () => ports.core.mailbox.collectExpired(tenant, { ...bounds, ackedBefore, expireUnackedBefore }),
+    mailbox: () => ports.core.mailbox.collectExpired(tenant, { ...bounds, ackedBefore, expireUnackedBefore, reapDeadLettersBefore }),
     receipts: () => ports.cloud.receipts.collectExpired(tenant, { ...bounds, requestBefore }),
     nonces: () => ports.cloud.nonces.collectExpired(tenant, bounds),
     pairingCodes: () => ports.cloud.pairingCodes.collectExpired(tenant, bounds),

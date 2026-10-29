@@ -199,8 +199,12 @@ usage rebuild are host operations, not device blob capabilities.
 The Host scheduler calls `cloud.runMaintenance({ tenant, now, policy, limit })`.
 Read the existing policy with
 `new PostgresRetentionPolicyStore(pool, clock).readRetentionPolicy(tenant)`
-from `@byok-sdk/cloud-dataplane/runtime` and pass it directly: its four fields
-use the kernel's bigint milliseconds. Policy writes use the same store; a missing
+from `@byok-sdk/cloud-dataplane/runtime` and pass it directly: its five fields
+use the kernel's bigint milliseconds. `mailboxDeadLetterRetentionMs` (stored by
+`0031_mailbox_dead_letter_retention.sql`, 30 days for existing policies) is how
+long a dead letter stays listable after it expired; the sweep then reaps it,
+except each device's highest-seq dead letter, which stays as the
+`recoverableFrom` floor. Policy writes use the same store; a missing
 entitlement-selected policy fails closed.
 `createPostgresCoreStores` requires the real `objectStorage` configuration;
 standalone `PostgresObjectStore` requires a physical deletion authority.

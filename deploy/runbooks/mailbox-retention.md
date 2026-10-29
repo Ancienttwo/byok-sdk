@@ -9,16 +9,24 @@ contract in `packages/core/src/mailbox.ts`, and the Postgres implementation in
 
 ## What the sweep does
 
-`MailboxStore.collectExpired(tenant, { now, limit, ackedBefore, expireUnackedBefore })`
+`MailboxStore.collectExpired(tenant, { now, limit, ackedBefore, expireUnackedBefore, reapDeadLettersBefore })`
 is the tenant-wide mailbox collector. One call mutates at most `limit` rows:
-acked rows are deleted first, then the remaining slots mark old pending rows
-`expired`. `more` reports a further eligible row; reaching the limit alone does
-not imply a remainder.
+acked rows are deleted first, then old dead letters are reaped, then the
+remaining slots mark old pending rows `expired`. Only rows that were already
+`expired` when the call started can be reaped. `more` reports a further
+eligible row, including one this call's expiry made reapable; reaching the
+limit alone does not imply a remainder.
 
 | Row state | Cutoff | Action | Report field |
 | --- | --- | --- | --- |
 | `acked` | `ackedBefore` | delete | `removed` |
+| `expired` | `reapDeadLettersBefore` | delete, except the device's highest-seq `expired` row | `removed` |
 | `pending` | `expireUnackedBefore` | mark `expired`, retain the row | `expired` |
+
+The device's highest-seq dead letter is never reaped: `recoverableFrom` is one
+past it, so keeping that row keeps the floor where it was. Once a newer row of
+the same device expires, the old floor row becomes an ordinary dead letter and
+is reaped after its own cutoff.
 
 Mailbox usage is `SUM(byteSize)` over `pending` rows. The collector never reads
 or writes an accounting counter, and **`releasedBytes` is always `0n`**. `acked`
@@ -26,16 +34,19 @@ and `expired` rows hold no quota (#1115): a row stops counting when the device
 acks it or when the collector dead-letters it, and deleting it later changes
 nothing in usage.
 
-`now` and both cutoffs must be canonical ISO-8601 UTC
+`now` and all three cutoffs must be canonical ISO-8601 UTC
 (`YYYY-MM-DDTHH:mm:ss.sssZ`). `limit` must be a positive safe integer. Validation
 precedes mutations. There is no device-specific collection argument.
 
 ## Who runs it
 
-`ByokCloud.runMaintenance({ tenant, now, policy, limit })` computes the two
+`ByokCloud.runMaintenance({ tenant, now, policy, limit })` computes the three
 cutoffs and calls this collector as one of its ten fixed steps. The defaults
-are 24 hours for acked rows, 7 days for unacked rows and 500 rows per step.
-Unacked expiry is evidence of lost work, not permission to delete that work.
+are 24 hours for acked rows, 7 days for unacked rows, 30 more days for dead
+letters (`mailboxDeadLetterRetentionMs`, so the reap cutoff is
+`now - mailboxUnackedRetentionMs - mailboxDeadLetterRetentionMs` on
+`appended_at`) and 500 rows per step. Unacked expiry is evidence of lost work;
+the dead-letter window is how long that evidence stays queryable.
 
 The reference server schedules maintenance every 5 minutes with ±20% jitter.
 `server.maintenance.runNow()` joins an in-flight pass; `server.close()` stops
@@ -81,17 +92,23 @@ rate, not the mean.
 
 ## `expired` rows and the operator dead-letter flow
 
-`expired` remains the durable dead-letter row; it is not silently moved to a
-second queue. S4B-c adds a Postgres maintenance surface:
+`expired` remains the dead-letter row; it is not silently moved to a second
+queue. It stays queryable for the dead-letter window after it expired, then
+the sweep reaps it, except each device's highest-seq dead letter, which stays
+as the recovery floor. S4B-c adds a Postgres maintenance surface:
 
-- `listDeadLetters` pages expired rows for operator inspection;
+- `listDeadLetters` pages expired rows for operator inspection, so inspect
+  and replay within the dead-letter window;
 - `replayDeadLetter` requires a new operator idempotency key and clones the
   bytes to a new monotonic sequence; `replay_source_seq` binds that key to the
   exact expired row while retaining the original evidence;
 - `discardDeadLetter` explicitly removes one expired row; a dead letter holds
-  no quota, so removing it frees storage but no mailbox quota.
+  no quota, so removing it frees storage but no mailbox quota. Unlike the
+  reap, it can remove a device's highest-seq dead letter, which lowers that
+  device's `recoverableFrom`.
 
-Automatic retention calls none of the latter two. A non-zero
+Automatic retention calls none of the latter two. A replay clone outlives the
+reap of its source: `replay_source_seq` is provenance, not a foreign key. A non-zero
 `mailbox_expired_count`/`expiredCount` means work was dropped and must alert.
 Direct SQL remains a read-only support surface:
 

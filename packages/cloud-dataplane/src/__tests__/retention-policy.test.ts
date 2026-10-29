@@ -6,11 +6,11 @@ import { PostgresRetentionPolicyStore, type TenantRetentionPolicyInput } from '.
 const tenant = tenantId('maintenance-policy');
 const input: TenantRetentionPolicyInput = {
   policyId: 'tenant-policy', mailboxAckedRetentionMs: 1n, mailboxUnackedRetentionMs: 2n,
-  requestReceiptRetentionMs: 3n, objectOrphanGraceMs: 4n,
+  mailboxDeadLetterRetentionMs: 5n, requestReceiptRetentionMs: 3n, objectOrphanGraceMs: 4n,
 };
 const row = {
   tenant_id: tenant, policy_id: input.policyId, mailbox_acked_retention_ms: 1n,
-  mailbox_unacked_retention_ms: 2n, request_receipt_retention_ms: 3n,
+  mailbox_unacked_retention_ms: 2n, mailbox_dead_letter_retention_ms: 5n, request_receipt_retention_ms: 3n,
   object_orphan_grace_ms: 4n, updated_at: '2026-10-14T00:00:00.000Z',
 };
 
@@ -21,7 +21,7 @@ describe('Worker retention policy authority', () => {
     await expect(store.readRetentionPolicy(tenant)).rejects.toMatchObject({ code: 'cleanup_policy_missing' });
     expect(query).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('JOIN tenant_retention_policy'), [tenant]);
   });
-  it('reads the four authoritative durations without defaults', async () => {
+  it('reads the five authoritative durations without defaults', async () => {
     const query = vi.fn().mockResolvedValue({ rows: [row] });
     const store = new PostgresRetentionPolicyStore({ query } as unknown as ByokPool, createMutableClock());
     expect(await store.readRetentionPolicy(tenant)).toEqual({ ...input, tenantId: tenant, updatedAt: row.updated_at });

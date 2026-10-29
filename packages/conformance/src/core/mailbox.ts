@@ -332,6 +332,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         const result = await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: '2999-01-01T00:00:00.000Z',
           expireUnackedBefore: '2999-01-01T00:00:00.000Z',
+          reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
         });
 
         expect(result.removed).toBe(1);
@@ -370,6 +371,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         const swept = await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: cutoff,
           expireUnackedBefore: cutoff,
+          reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
         });
         expect(swept).toMatchObject({ removed: 0, expired: 2 });
 
@@ -399,6 +401,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         const swept = await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: '2999-01-01T00:00:00.000Z',
           expireUnackedBefore: '2999-01-01T00:00:00.000Z',
+          reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
         });
         expect(swept).toMatchObject({ removed: 2, expired: 0 });
 
@@ -433,6 +436,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         const swept = await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: '2999-01-01T00:00:00.000Z',
           expireUnackedBefore: '2999-01-01T00:00:00.000Z',
+          reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
         });
         expect(swept).toMatchObject({ removed: 1, expired: 2, releasedBytes: 0n });
         // Dead letters stay visible but hold no quota.
@@ -457,6 +461,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         const swept = await stores.mailbox.collectExpired(TENANT_A, { now: cutoff, limit: 500,
           ackedBefore: cutoff,
           expireUnackedBefore: cutoff,
+          reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
         });
         expect(swept).toMatchObject({ removed: 0, expired: 1 });
 

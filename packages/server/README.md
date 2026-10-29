@@ -291,9 +291,12 @@ ids recorded more than 24 hours ago; within that window a `requestId` stays
 single-use. The memory composition does not prune them: the step reports
 `not-configured` and every used `requestId` is kept for the life of the process.
 
-Acked rows past policy are deleted; old unacked rows become retained `expired`
-rows, moving `recoverableFrom` so lost cursors receive `409 cursor_too_old`.
-Mailbox collection never changes accounting counters. Orphan collection deletes
+Acked rows past policy are deleted; old unacked rows become `expired` dead
+letters, moving `recoverableFrom` so lost cursors receive `409 cursor_too_old`.
+A dead letter is kept for `mailboxDeadLetterRetentionMs` (default 30 days)
+after it expired, then deleted, except each device's highest-seq dead letter,
+which stays so `recoverableFrom` never moves back. Mailbox quota counts only
+pending rows, and mailbox collection never changes accounting counters. Orphan collection deletes
 real bytes before settling their charge. Identity receipts and redeemed pairing
 codes stay protected. See the [migration](../../docs/migrations/412-retention-maintenance.md)
 and [runbook](../../deploy/runbooks/cloud-cleanup.md) for the port contract.

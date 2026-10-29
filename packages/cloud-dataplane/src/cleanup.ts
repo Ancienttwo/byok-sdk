@@ -251,9 +251,10 @@ export class PostgresCloudCleanup {
   }
 
   /**
-   * Explicit operator discard. Automatic retention never deletes dead letters.
-   * A dead letter holds no mailbox quota, so deleting one is the whole
-   * operation.
+   * Explicit operator discard, before the automatic reap reaches the row. A
+   * dead letter holds no mailbox quota, so deleting one is the whole
+   * operation. Unlike the reap, this can delete a device's highest-seq dead
+   * letter, which lowers that device's `recoverableFrom`.
    */
   async discardDeadLetter(tenant: TenantId, ref: DeadLetterRef): Promise<MailboxMessage> {
     assertDeadLetterRef(ref);

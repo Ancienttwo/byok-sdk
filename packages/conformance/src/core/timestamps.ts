@@ -89,6 +89,7 @@ export function runTimestampConformance(factory: CoreCompositionFactory): void {
             stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
               ackedBefore: candidate,
               expireUnackedBefore: canonical,
+              reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
             }),
           );
           expect(
@@ -100,11 +101,24 @@ export function runTimestampConformance(factory: CoreCompositionFactory): void {
             stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
               ackedBefore: canonical,
               expireUnackedBefore: candidate,
+              reapDeadLettersBefore: '1970-01-01T00:00:00.000Z',
             }),
           );
           expect(
             isCoreError(badUnacked, 'timestamp_not_canonical'),
             `expected expireUnackedBefore ${JSON.stringify(candidate)} to be rejected`,
+          ).toBe(true);
+
+          const badReap = await captureError(
+            stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
+              ackedBefore: canonical,
+              expireUnackedBefore: canonical,
+              reapDeadLettersBefore: candidate,
+            }),
+          );
+          expect(
+            isCoreError(badReap, 'timestamp_not_canonical'),
+            `expected reapDeadLettersBefore ${JSON.stringify(candidate)} to be rejected`,
           ).toBe(true);
         }
       });
@@ -125,6 +139,7 @@ export function runTimestampConformance(factory: CoreCompositionFactory): void {
         await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: now,
           expireUnackedBefore: now,
+          reapDeadLettersBefore: now,
         });
       });
     });
