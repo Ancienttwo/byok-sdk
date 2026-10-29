@@ -206,11 +206,6 @@ export class DeviceStore {
     this.filePath = path.join(storeDir, 'device.json');
   }
 
-  /** `<home>/.byok/<productId>`; defined once in `defaultStoreDir`, which `resolveHostLayout` recommends. */
-  static defaultDir(productId: string): string {
-    return defaultStoreDir(productId);
-  }
-
   /**
    * Resolve the one store pathname every daemon/CLI component must share.
    * A configured relative path is anchored once at process entry rather than
@@ -221,7 +216,7 @@ export class DeviceStore {
    * roots from one spelling.
    */
   static resolveDir(productId: string, configured?: string): string {
-    return foldNameAliases(configured ?? DeviceStore.defaultDir(productId));
+    return foldNameAliases(configured ?? defaultStoreDir(productId));
   }
 
   async load(): Promise<DeviceMetadata | undefined> {

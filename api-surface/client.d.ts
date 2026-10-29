@@ -6024,8 +6024,8 @@ export interface HostLayout {
 }
 /**
  * The SDK store directory a daemon uses when `DaemonConfig.storeDir` is
- * unset: `<homeDir>/.byok/<productId>` on every platform. `DeviceStore.defaultDir`
- * and `resolveHostLayout` both return this; it is the only definition.
+ * unset: `<homeDir>/.byok/<productId>` on every platform. `DeviceStore.resolveDir`
+ * and `resolveHostLayout` both use it; it is the only definition.
  */
 export declare function defaultStoreDir(productId: string, homeDir?: string, platform?: NodeJS.Platform): string;
 /** Where `byok-agent service install` sends the daemon's stdout and stderr. */
@@ -8637,8 +8637,6 @@ export declare class DeviceStore {
      * CI/dev machine, not just asserted.
      */
     constructor(storeDir: string, credentials: DeviceCredentialBackend, secureDirOptions?: EnsureSecureDirOptions | undefined);
-    /** `<home>/.byok/<productId>`; defined once in `defaultStoreDir`, which `resolveHostLayout` recommends. */
-    static defaultDir(productId: string): string;
     /**
      * Resolve the one store pathname every daemon/CLI component must share.
      * A configured relative path is anchored once at process entry rather than

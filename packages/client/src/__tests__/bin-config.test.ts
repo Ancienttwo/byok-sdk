@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { argValue, ConfigError, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from '../bin/config';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../bin/official-release';
 import { DeviceStore } from '../daemon/store';
+import { defaultStoreDir } from '../daemon/host-layout';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -125,8 +126,9 @@ describe('bin/config: resolveStoreDir', () => {
     expect(resolveStoreDir({ storeDir: '/custom/dir', productId: 'acme' })).toBe('/custom/dir');
   });
 
-  it('falls back to DeviceStore.defaultDir(productId) — the exact same resolution create-daemon.ts uses internally', () => {
-    expect(resolveStoreDir({ productId: 'acme' })).toBe(DeviceStore.defaultDir('acme'));
+  it('falls back to defaultStoreDir(productId) — the exact same resolution create-daemon.ts uses internally', () => {
+    expect(resolveStoreDir({ productId: 'acme' })).toBe(DeviceStore.resolveDir('acme'));
+    expect(resolveStoreDir({ productId: 'acme' })).toBe(defaultStoreDir('acme'));
   });
 
   it('resolves a relative storeDir exactly as DeviceStore.resolveDir does (#1030)', () => {

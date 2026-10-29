@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1829177,
+      "budgetBytes": 1829093,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -206,7 +206,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 121560,
+      "budgetBytes": 121476,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2134,7 +2134,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1774378,
+      "budgetBytes": 1774294,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

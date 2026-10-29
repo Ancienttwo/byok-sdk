@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "506c3095cb0b787070291053f48b261057816b8e8bc5dbd006e14cc355ce71f3"
+    "snapshotSha256": "785019275c2eb31f4300818f12f367a6f4e7ab56c0ef92ad7ae86957145beb1a"
   },
   "configFields": {
     "status": "tracked",
@@ -120,6 +120,16 @@
       "impact": "additive",
       "summary": "Token renewal keeps a minimum gap between proactive renewals, so a fast device clock or a server TTL under the renewal margin no longer loops renewals and keychain writes (#1114). The declarations change only by private AuthManager members; no Host action.",
       "migration": "https://github.com/Ancienttwo/byok-sdk/pull/1131",
+      "items": [
+        "export:@byok-sdk/client#BlobClient",
+        "export:@byok-sdk/client#InstallSkillPacksOptions"
+      ]
+    },
+    {
+      "id": "device-store-default-dir-removed",
+      "impact": "breaking",
+      "summary": "The static DeviceStore.defaultDir(productId) is removed; it duplicated the default store path. The class is reachable through BlobClient and InstallSkillPacksOptions. The default storeDir is still <home>/.byok/<productId> and no store moves. A Host that called DeviceStore.defaultDir uses resolveHostLayout({ productId, productName }).storeDir.",
+      "migration": "docs/spec.md#recommended-host-layout",
       "items": [
         "export:@byok-sdk/client#BlobClient",
         "export:@byok-sdk/client#InstallSkillPacksOptions"
