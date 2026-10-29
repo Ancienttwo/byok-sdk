@@ -28,10 +28,22 @@ export function readPairInput(input: string, e2ee: boolean): { readonly code: st
  * `verificationSecret` is the base32 `pv` of an E2EE pairing (#654 §7.2): the
  * device keeps it and sends only the code to the Host.
  */
-export async function runPairCommand(config: DaemonConfig, code: string, deps: PairDeps = {}, verificationSecret?: string): Promise<void> {
+/**
+ * `replaceOtherStore` is `--replace-other-store`: replace an enrollment that
+ * another storeDir of this productId paired. A daemon reachable over control
+ * is waiting for its first enrollment, so it holds none to replace.
+ */
+export async function runPairCommand(
+  config: DaemonConfig,
+  code: string,
+  deps: PairDeps = {},
+  verificationSecret?: string,
+  replaceOtherStore = false,
+): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const options = verificationSecret === undefined ? undefined : { verificationSecret };
-  const pair = (daemon: Pick<Daemon, 'pair'>) => (options === undefined ? daemon.pair(code) : daemon.pair(code, options));
+  const pairOptions = { ...options, ...(replaceOtherStore ? { replaceOtherStore } : {}) };
+  const pair = (daemon: Pick<Daemon, 'pair'>) => (Object.keys(pairOptions).length === 0 ? daemon.pair(code) : daemon.pair(code, pairOptions));
   if (deps.daemon) {
     const result = await pair(deps.daemon);
     log(`paired: deviceId=${result.deviceId}`);

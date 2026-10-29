@@ -624,8 +624,14 @@ export interface Daemon {
    * `verificationSecret`, the base32 secret the web client shows after the
    * pairing code (#654 §7.2), the device also enrolls as an E2EE member; the
    * secret never reaches the Host. Without it the device pairs without E2EE.
+   *
+   * Pairing refuses with `DeviceStoreBindingMismatchError`
+   * (`device_store_not_bound`) while the OS credential entry of this
+   * productId holds an enrollment this storeDir did not pair.
+   * `replaceOtherStore: true` is the operator's explicit intent to replace
+   * that enrollment; the other store then reads as not bound.
    */
-  pair(pairingCode: string, options?: { readonly verificationSecret?: string }): Promise<DeviceEnrollment>;
+  pair(pairingCode: string, options?: { readonly verificationSecret?: string; readonly replaceOtherStore?: boolean }): Promise<DeviceEnrollment>;
   /**
    * Resolves once local startup is done — store ownership, storage, journal
    * recovery, the control socket and the task runner — with the reconnect

@@ -13,6 +13,8 @@ export const DAEMON_HALT_REASONS = [
   'unpaired',
   /** The device record on disk is unusable and only a fresh `pair` replaces it. */
   're_pair_required',
+  /** The OS enrollment of this productId was not paired by this storeDir (`device_store_not_bound`). */
+  'store_not_bound',
   /** Another daemon owns this store. Thrown by `start()`; never reported through `lifecycle`. */
   'store_owned',
   /** The server revoked this device. */

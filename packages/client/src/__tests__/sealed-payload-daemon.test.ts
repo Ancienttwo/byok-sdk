@@ -51,6 +51,7 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import { E2eeWebClient } from './fixtures/e2ee-web-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { resetTestDeviceCredentials } from './fixtures/credential-backend';
 import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 
@@ -117,6 +118,8 @@ async function start(options: {
   egress?: false;
   beforeStart?: (storeDir: string, deviceId: string, member: ScopeMember, device: { readonly memberId: string }) => Promise<void>;
 } = {}) {
+  // Each daemon is its own machine: one productId's OS entry belongs to one storeDir (#1094).
+  await resetTestDeviceCredentials();
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
   dirs.push(root);
   server ??= await TestServer.start();

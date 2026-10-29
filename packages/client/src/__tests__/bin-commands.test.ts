@@ -266,6 +266,15 @@ describe('bin/commands/pair: runPairCommand', () => {
     await runPairCommand(baseConfig('/service-store'), 'opaque-pair-code', { log: collectLog().log, connectControl }, 'PV-TEXT');
     expect(handleRequest).toHaveBeenCalledWith('enrollment.pair', { pairingCode: 'opaque-pair-code', verificationSecret: 'PV-TEXT' });
   });
+
+  it('passes --replace-other-store to daemon.pair only as the explicit replaceOtherStore intent (#1094)', async () => {
+    const pair = vi.fn().mockResolvedValue({ deviceId: 'dev-10' } as DeviceEnrollment);
+    await runPairCommand(baseConfig('/unused'), 'the-code', { log: collectLog().log, daemon: { pair } }, undefined, true);
+    expect(pair).toHaveBeenCalledWith('the-code', { replaceOtherStore: true });
+    pair.mockClear();
+    await runPairCommand(baseConfig('/unused'), 'the-code', { log: collectLog().log, daemon: { pair } });
+    expect(pair).toHaveBeenCalledWith('the-code');
+  });
 });
 
 describe('bin/commands/approve-reject (M4 Phase 2: control socket, not a live in-process Daemon)', () => {

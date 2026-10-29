@@ -22,3 +22,14 @@ export function testDeviceMemberCustody(productId: string): InMemoryDeviceMember
   if (backend === undefined) { backend = new InMemoryDeviceMemberCustody(); memberCustody.set(productId, backend); }
   return backend;
 }
+
+/**
+ * Each test starts on a fresh machine: the OS entry is keyed by productId
+ * alone, so an enrollment left by an earlier test would otherwise belong to
+ * another storeDir of the same productId (#1094). Backends are emptied, not
+ * replaced, so a daemon built before the reset keeps its one instance.
+ */
+export async function resetTestDeviceCredentials(): Promise<void> {
+  await Promise.all([...credentials.values()].map((backend) => backend.clear()));
+  for (const custody of memberCustody.values()) custody.entries.clear();
+}

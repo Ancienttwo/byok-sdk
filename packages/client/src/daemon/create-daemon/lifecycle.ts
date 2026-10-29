@@ -2,6 +2,7 @@ import { startControlServer, AnotherControlServerRunningError } from '../control
 import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError } from '../daemon-lifecycle';
 import { InsecureServerUrlError } from '../url';
 import { DeviceRecordRePairRequiredError } from '../store';
+import { DeviceStoreBindingMismatchError } from '../daemon-errors';
 import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager';
 import type { DaemonScope } from './scope';
 
@@ -114,6 +115,7 @@ export function startupHaltReason(daemonScope: DaemonScope, err: unknown): Daemo
   if (err instanceof DaemonHaltError) return err.reason;
   if (err instanceof AnotherControlServerRunningError) return 'store_owned';
   if (err instanceof DeviceRecordRePairRequiredError) return 're_pair_required';
+  if (err instanceof DeviceStoreBindingMismatchError) return 'store_not_bound';
   if (err instanceof DeviceRevokedError) return 'device_revoked';
   return undefined;
 }

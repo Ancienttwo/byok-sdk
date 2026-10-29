@@ -14,6 +14,11 @@ The public `diagnoseDevice` API accepts the host's actual adapters.
 action) restores missing/valid-stale non-secret enrollment metadata from its
 existing OS authority, with confirmation, exact expected tenant/device and
 exclusive store ownership. It does not renew credentials or prove Agent readiness.
+It is the only recovery for `DeviceStoreBindingMismatchError`
+(`device_store_not_bound`) when this storeDir owns the enrollment: startup,
+status and pairing never adopt an OS enrollment that this storeDir's
+`device.json` does not name. Pairing over another store's enrollment needs
+`byok-agent pair --replace-other-store` (`Daemon.pair(code, { replaceOtherStore: true })`).
 
 ## Exact provider-profile admission
 
@@ -812,7 +817,9 @@ Hosts that need cold setup or diagnostic state use
 complete SDK-owned record but returns only `unpaired`, `paired` with
 `deviceId`, or `re_pair_required`; tenant, token, expiry and device keys are
 never projected. Only explicit pairing may replace `re_pair_required` state,
-while filesystem-safety failures remain errors.
+while filesystem-safety failures remain errors, and so does
+`DeviceStoreBindingMismatchError` for an OS enrollment this storeDir did not
+pair.
 
 A host that must address this device itself (for example to register the
 sealed-provisioning sealing key) reads the non-secret enrollment identity with

@@ -55,8 +55,12 @@ describe('credential-blind authenticated enrollment status', () => {
       devicePublicKey: record.devicePublicKey,
     });
 
+    // #1094: without its pair-time device.json this storeDir no longer owns
+    // the OS enrollment; a status read never adopts it.
     await createTestDeviceStore(storeDir, undefined, options.productId).remove();
-    expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 'paired', deviceId: 'device-status' });
+    await expect(readDeviceEnrollmentStatus(options)).rejects.toMatchObject({
+      name: 'DeviceStoreBindingMismatchError', code: 'device_store_not_bound', stored: { deviceId: 'device-status' }, bound: undefined,
+    });
 
     await createTestDeviceStore(storeDir, undefined, options.productId).credentials.clear();
     expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 'unpaired' });

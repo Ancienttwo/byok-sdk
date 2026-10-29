@@ -1,5 +1,6 @@
 import { assertServerUrlAllowed, formatServerUrl } from '../url';
 import { type DeviceEnrollment, type DeviceRecord, DeviceRecordRePairRequiredError } from '../store';
+import { DeviceStoreBindingMismatchError } from '../daemon-errors';
 import { checkVerificationSecret, enrollDeviceMember } from '../device-member';
 import { acquireDaemonOwner } from '../daemon-owner';
 import { AgentEgressController } from '../agent-egress-controller';
@@ -54,7 +55,11 @@ export function checkServerUrl(daemonScope: DaemonScope): void {
   }
 }
 
-export async function pair(daemonScope: DaemonScope, pairingCode: string, options?: { readonly verificationSecret?: string }): Promise<DeviceEnrollment> {
+export async function pair(
+  daemonScope: DaemonScope,
+  pairingCode: string,
+  options?: { readonly verificationSecret?: string; readonly replaceOtherStore?: boolean },
+): Promise<DeviceEnrollment> {
   const { checkServerUrl, memberRecords, pairUnderLease } = daemonScope;
   checkServerUrl();
   const verificationSecret = options?.verificationSecret === undefined ? undefined : checkVerificationSecret(options.verificationSecret);
@@ -65,11 +70,17 @@ export async function pair(daemonScope: DaemonScope, pairingCode: string, option
   // operation may borrow the daemon's retained cross-process lease, so pair,
   // start, stop, control shutdown and unpair must never decide independently
   // who releases that shared lease.
-  const record = await runAuthOperation(daemonScope, () => pairUnderLease(pairingCode, verificationSecret));
+  const replaceOtherStore = options?.replaceOtherStore === true;
+  const record = await runAuthOperation(daemonScope, () => pairUnderLease(pairingCode, verificationSecret, replaceOtherStore));
   return Object.freeze({ deviceId: record.deviceId });
 }
 
-export async function pairUnderLease(daemonScope: DaemonScope, pairingCode: string, verificationSecret?: string): Promise<DeviceRecord> {
+export async function pairUnderLease(
+  daemonScope: DaemonScope,
+  pairingCode: string,
+  verificationSecret?: string,
+  replaceOtherStore = false,
+): Promise<DeviceRecord> {
   const {
     daemonState, storeDir, config, egressPolicy, runShutdownSequence, cursorStore, observer,
     memberRecords, memberClient, logMember,
@@ -95,10 +106,14 @@ export async function pairUnderLease(daemonScope: DaemonScope, pairingCode: stri
       previous = await daemonState.auth.readCurrent();
     } catch (error) {
       // Pairing may replace a legacy/tampered record, but must not derive a
-      // cursor/device identity from an untrusted file.
-      if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+      // cursor/device identity from an untrusted file. Another store's
+      // enrollment is replaced only on the operator's explicit request, and
+      // its cursor belongs to that store.
+      const replaceable = error instanceof DeviceRecordRePairRequiredError ||
+        (error instanceof DeviceStoreBindingMismatchError && replaceOtherStore);
+      if (!replaceable) throw error;
     }
-    const record = await daemonState.auth.pair(pairingCode);
+    const record = await daemonState.auth.pair(pairingCode, { replaceOtherStore });
     replacementPersisted = true;
     // No stopped daemon operation may continue using a superseded binding
     // between re-pair and the next start. startUnderLease will construct the

@@ -62,15 +62,19 @@ describe('public enrollment metadata repair', () => {
     expect(JSON.stringify(result) + await bytes()).not.toMatch(/secret-token-marker|secret-private-key-marker/);
   });
 
-  it('restores valid stale metadata using the same primitive as startup', async () => {
+  it('restores valid stale metadata that startup refuses to adopt (#1094)', async () => {
     await seed();
     await store.save({ deviceId: 'old-device', tenantId: 'old-tenant', devicePublicKey: 'old-key' });
+    const auth = new AuthManager({ serverUrl: config.serverUrl, store });
+    await expect(auth.readCurrent()).rejects.toMatchObject({ code: 'device_store_not_bound', bound: { deviceId: 'old-device' } });
+    expect(JSON.parse(await bytes())).toMatchObject({ deviceId: 'old-device' });
+
     expect(await repairDeviceEnrollmentMetadata(config, target)).toMatchObject({ status: 'repaired' });
     const restored = await bytes();
-    await fs.unlink(path.join(root, 'device.json'));
-    const auth = new AuthManager({ serverUrl: config.serverUrl, store });
     expect(await auth.readCurrent()).toEqual(authority);
     expect(await bytes()).toBe(restored);
+    await fs.unlink(path.join(root, 'device.json'));
+    await expect(auth.readCurrent()).rejects.toMatchObject({ code: 'device_store_not_bound', bound: undefined });
     expect(fetch).not.toHaveBeenCalled();
   });
 

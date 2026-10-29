@@ -137,6 +137,7 @@ export {
 export {
   DaemonConfigFieldRemovedError,
   DaemonJournalProtocolUnsupportedError,
+  DeviceStoreBindingMismatchError,
   HostLayoutInputError,
   type DaemonJournalProtocolRecord,
 } from './daemon/daemon-errors';
