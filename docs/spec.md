@@ -3772,6 +3772,23 @@ memory-helper authority; on Windows x64 the returned `agent-memory-fs`
 subdirectory is a valid value for it. Native target metadata is not platform qualification;
 Windows SEA qualification requires the actual Windows CI process-ownership fixture.
 
+#### Single-file packaging (#1104)
+
+`sdkDistributionManifest` also gives `nodeEngine` (the client `engines.node`), a
+role for every published bin (`bins`: `cli`, `reserved-helper`, `pi-host`, or
+`provider-launcher` for the keys custody launcher), the three single-file formats
+(`formats`: ESM, CommonJS, SEA) and their shared asset layout. A new bin without a
+role fails CI. `@byok-sdk/client/packaging` is the build-time helper:
+`byokSdkPackaging` (an esbuild plugin with no esbuild dependency) sets each
+format's module `require` or `import.meta.url` and fails the build on any empty
+`import.meta` except the reviewed third-party `sdkBundleImportMetaExemptions`.
+In a CommonJS or SEA bundle, unpdf's exemption means PDF reads lose its standard
+font and CMap defaults. `copySdkPackagingAssets` writes the Pi runtime and native
+assets of one target. `bundledSdkHelperHost()` is the running bundle's or SEA's
+`sdkHelperHost`. The packaging consistency CI lane runs a complete embedded Host
+in each format on macOS, Linux and Windows. A Host that does not use these is
+unchanged.
+
 ### Embedded Agent-home projection completion waiting
 
 `ByokServer.awaitAgentHomeProjection(deviceId, agentRef, requestId, { signal })`
