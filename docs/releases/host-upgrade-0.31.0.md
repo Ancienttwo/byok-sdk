@@ -12,8 +12,8 @@ it, is ready for production. The product loop gate (#977) and the checklist
 acceptance (#978) stay pinned to the published 0.30.2, and AiphaBee candidate
 acceptance is not done for 0.31.0 (owner decision, 2026-10-29).
 
-0.31.0 is not published. The release preparation record is
-[`docs/releases/v0.31.0.md`](v0.31.0.md).
+0.31.0 is published on npm `latest` for all nine packages. The release
+record is [`docs/releases/v0.31.0.md`](v0.31.0.md).
 
 ## Version policy
 
@@ -41,7 +41,7 @@ All nine public packages move together. Pin each one to exactly 0.31.0.
 | Release field | Value |
 | --- | --- |
 | Git tag | `v0.31.0` |
-| Release commit SHA | The exact merged `main` SHA of the 0.31.0 release preparation, recorded at release |
+| Release commit SHA | `982aa2d7933292acfdb545e3619413a2bea5658b` |
 
 The install command for each install set is in the README
 [install sets](../../README.md#install-sets) section. That block is checked

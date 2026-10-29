@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.31.0 — source candidate
+## 0.31.0 — 2026-10-29 (published)
 
 0.31.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 It moves the envelope wire to v4 (#925) and adds Postgres migration 0030. A v3
@@ -27,8 +27,12 @@ changes of #925 and #1036 are also breaking for a Host that copies them.
 Client also stops relaying tool approval through Claude and Codex
 `nativeInteractions` (#1061, #1078): the new `DaemonConfig.toolAuthorization`
 (`auto` and `all`) replaces it, Claude and some Pi lanes support `auto`, and
-Codex has no `auto` gate in this release. This candidate is
-not published. See the [release notes](docs/releases/v0.31.0.md) for scope,
+Codex has no `auto` gate in this release. The npm registry lists
+all nine public packages at 0.31.0 as `latest`, published on 2026-10-29
+(UTC), and the registry readback of all nine passed. The release commit is
+`982aa2d7` on the branch `release/0.31`, and the annotated tag `v0.31.0` and
+its GitHub Release point to it. This release does not say that 0.31.0, or a
+Host on it, is ready for production. See the [release notes](docs/releases/v0.31.0.md) for scope,
 what is not in 0.31.0 and the known limits, and the [Host upgrade
 checklist](docs/releases/host-upgrade-0.31.0.md) for the upgrade steps. All
 nine public manifests and their lock records move to 0.31.0.

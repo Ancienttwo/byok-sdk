@@ -323,7 +323,7 @@ wire v4 cutover in protocol, client, server and cloud, the SQLite store schema
 v6 in server, and in client the removal of tool approval from Claude and Codex
 `nativeInteractions`, which `DaemonConfig.toolAuthorization` replaces for Claude
 and Pi but not for Codex. See the
-[0.31.0 candidate notes](releases/v0.31.0.md).
+[0.31.0 release notes](releases/v0.31.0.md).
 
 0.30.2 used a one-release exception. The owner's release decisions, recorded
 on issues #978 and #977 on 2026-10-25 and 2026-10-26, selected PATCH (0.30.2
@@ -362,17 +362,19 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-Public registry metadata read on 2026-10-26 at 13:36 UTC reports `latest`
-0.30.2 for all nine packages. The keys 0.30.2 package depends on exactly
-`@byok-sdk/core` 0.30.2. The same read lists 0.30.1, 0.30.0, 0.29.0, 0.28.3,
-0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0 as the earlier
-published versions. The registry publication times are 2026-10-20 (UTC) for
+The registry readback of 2026-10-29 (UTC) reports `latest` 0.31.0 for all nine
+packages. The earlier published versions are 0.30.2, 0.30.1, 0.30.0, 0.29.0,
+0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for
 0.28.0 / keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22
 (UTC) for 0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, 2026-10-24 (UTC)
-for 0.30.0 and 0.30.1, and 2026-10-26 (UTC) for 0.30.2. The tag `v0.30.2`
-and its GitHub Release point to `b1469e5a`, the merge of #1006. The tag
-`v0.30.1` points to `142acbe2`, the merge of #916. The 0.28.0 to 0.30.2
-source-candidate notes are preparation history. They are not publication records. This read confirms registry
+for 0.30.0 and 0.30.1, 2026-10-26 (UTC) for 0.30.2, and 2026-10-29 (UTC) for
+0.31.0. The tag `v0.31.0` and its GitHub Release point to `982aa2d7`, the
+release commit on the branch `release/0.31`, which is not on main. The tag
+`v0.30.2` points to `b1469e5a`, the merge of #1006. The tag `v0.30.1` points
+to `142acbe2`, the merge of #916. The 0.28.0 to 0.31.0
+source-candidate notes are preparation history. They are not publication
+records, except that the [0.31.0 notes](releases/v0.31.0.md) also hold the
+0.31.0 publication record. This read confirms registry
 availability. It does not establish isolated-install qualification. A later
 release needs the accepted final-commit CI artifact and separate owner
 authorization.
