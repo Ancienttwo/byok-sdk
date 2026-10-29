@@ -273,6 +273,11 @@ export const familyOwners = Object.freeze({
 // tests that need installed packages, so the targeted job installs first;
 // `families` are the family jobs that the path selects.
 export const reviewedScripts = Object.freeze({
+  'scripts/architecture/dependency-graph.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
+  'scripts/architecture/dependency-graph.test.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
+  'scripts/architecture/dependency-baseline.json': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
+  'scripts/docs/device-setup.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
+  'scripts/docs/device-setup.test.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
@@ -494,6 +499,11 @@ export function selectImpact(paths, context = {}) {
     // tarball ships. The targeted job's gate step reads both.
     if (path === 'scripts/release/upgrade-manifest/baseline.json') { scripts = true; continue; }
     if (path === 'packages/client/upgrade-manifest.json') { scripts = true; families.add('npm-release-pack'); continue; }
+    // #1094: the generated DaemonConfig schema. The client drift test regenerates
+    // it, the upgrade-manifest gate reads its config:<field> items, and the tarball ships it.
+    if (path === 'packages/client/daemon-config.schema.json') {
+      dirs.add('packages/client'); scripts = true; families.add('npm-release-pack'); continue;
+    }
     if (Object.hasOwn(reviewedScripts, path)) {
       scripts = true;
       for (const id of reviewedScripts[path].families ?? []) families.add(id);
@@ -538,6 +548,7 @@ export function selectImpact(paths, context = {}) {
     }
     // #654: the dataplane job runs hosted-plaintext-inventory.test.ts, which
     // checks the inventory table in this doc against real Postgres and S3.
+    if (path === 'docs/device-setup.md') { dirs.add('packages/client'); continue; }
     if (path === 'docs/security.md') { families.add('dataplane'); continue; }
     // #654 E2c: `deploy/sql` is the only authored copy of the Postgres
     // migrations. cloud-dataplane builds it into `dist/sql`, its suites migrate

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { run } from './check-upgrade-manifest.mjs';
 import { packageSurface, splitStatements } from './upgrade-manifest/dts-surface.mjs';
 import { BASELINE_PATH, MANIFEST_PATH, breakingAllowed, bumpKind, markdownAnchors, renderManifest, serialize } from './upgrade-manifest/manifest.mjs';
-import { PUBLIC_PACKAGES, STORES, VENDORED_EXAMPLES, buildSnapshot } from './upgrade-manifest/snapshot.mjs';
+import { CONFIG_SCHEMA_PATH, PUBLIC_PACKAGES, STORES, VENDORED_EXAMPLES, buildSnapshot } from './upgrade-manifest/snapshot.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DOC = 'docs/migration.md';
@@ -30,6 +30,7 @@ function fixture(t) {
   for (const pkg of PUBLIC_PACKAGES) copy(`packages/${pkg}/package.json`);
   for (const store of STORES) copy(store.source);
   copy('packages/keys/src');
+  copy(CONFIG_SCHEMA_PATH);
   for (const example of VENDORED_EXAMPLES) {
     copy(`examples/${example.id}/package.json`);
     copy(`examples/${example.id}/src`);
@@ -121,6 +122,26 @@ test('changing an exported signature demands an entry; a comment-only edit does 
   assert.equal(f.gate().status, 0);
   f.edit('api-surface/core.d.ts', (text) => text.replace('"x-byok-device-proof";', '"x-byok-device-proof-v2";'));
   assert.match(f.gate().output, /export:@byok-sdk\/core#DEVICE_PROOF_HEADER changed since/);
+});
+
+test('a DaemonConfig field change demands an entry; a doc-only edit does not (#1094)', (t) => {
+  const f = fixture(t);
+  const schemaOf = (text, change) => { const schema = JSON.parse(text); change(schema); return `${JSON.stringify(schema, null, 2)}\n`; };
+  f.edit(CONFIG_SCHEMA_PATH, (text) => schemaOf(text, (schema) => { schema.properties.storeDir.description = 'reworded'; }));
+  assert.equal(f.gate().status, 0);
+  f.edit(CONFIG_SCHEMA_PATH, (text) => schemaOf(text, (schema) => {
+    schema.properties.storeDir = { type: 'number' };
+    schema.properties.newField = { type: 'string' };
+    delete schema.properties.deviceName;
+  }));
+  const { status, output } = f.gate();
+  assert.equal(status, 1);
+  assert.match(output, /config:storeDir changed since \S+ without a manifest entry/);
+  assert.match(output, /config:newField added since \S+ without a manifest entry/);
+  assert.match(output, /config:deviceName removed since \S+ without a manifest entry/);
+  assert.match(buildSnapshot(f.root).items['config:productId'], /^required schema-sha256=[0-9a-f]{16}$/);
+  assert.match(buildSnapshot(f.root).items['config:toolAuthorization'], /^optional embedded-only schema-sha256=/);
+  assert.match(buildSnapshot(f.root).items['config:localAgentRelease'], /^optional distribution-owned schema-sha256=/);
 });
 
 test('adding an event union member demands an entry', (t) => {

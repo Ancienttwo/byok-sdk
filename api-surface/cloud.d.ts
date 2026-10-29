@@ -3114,7 +3114,6 @@ export declare function handleAgentMessagePublish(stores: TenantStores, deviceId
 }>;
 /** Reads only a terminal immutable admission; pending rows have no disposition to acknowledge. */
 export declare function readAgentMessageDisposition(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
-export declare function parseAgentMessageDisposition(payload: AgentMessagePublishPayload, terminalBody: string): AgentMessageDispositionPayload;
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */
 export declare function terminalReceiptKey(taskId: string): string;
 export declare function handleInboundEnvelope(stores: TenantStores, deviceId: string, envelope: Envelope, activityBounds?: ActivityBounds, agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4], observer?: ByokCloudObserver, now?: string): Promise<InboundResult>;

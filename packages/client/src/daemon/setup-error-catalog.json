@@ -1,0 +1,97 @@
+{
+  "not_an_object": {
+    "retryable": false,
+    "nextStep": "Supply a JSON object.",
+    "anchor": "#configuration"
+  },
+  "missing_required": {
+    "retryable": false,
+    "nextStep": "Supply the required field at the reported path.",
+    "anchor": "#configuration"
+  },
+  "invalid_type": {
+    "retryable": false,
+    "nextStep": "Fix the reported field or construction constraint, then run config check.",
+    "anchor": "#configuration"
+  },
+  "invalid_value": {
+    "retryable": false,
+    "nextStep": "Fix the reported field or construction constraint, then run config check.",
+    "anchor": "#configuration"
+  },
+  "daemon_config_invalid": {
+    "retryable": false,
+    "nextStep": "Fix the reported field or construction constraint, then run config check.",
+    "anchor": "#configuration"
+  },
+  "config_invalid": {
+    "retryable": false,
+    "nextStep": "Fix the reported field or construction constraint, then run config check.",
+    "anchor": "#configuration"
+  },
+  "unknown_field": {
+    "retryable": false,
+    "nextStep": "Remove or correct the unknown field; startup warns, while --strict rejects warnings.",
+    "anchor": "#configuration"
+  },
+  "removed_field": {
+    "retryable": false,
+    "nextStep": "Remove the field and follow its migration; do not rename it to an unknown field.",
+    "anchor": "#removed-fields"
+  },
+  "daemon_config_field_removed": {
+    "retryable": false,
+    "nextStep": "Remove the field and follow its migration; do not rename it to an unknown field.",
+    "anchor": "#removed-fields"
+  },
+  "embedded_only": {
+    "retryable": false,
+    "nextStep": "Assemble this value in embedded code; omit it from CLI JSON.",
+    "anchor": "#embedded-path"
+  },
+  "distribution_owned": {
+    "retryable": false,
+    "nextStep": "Remove localAgentRelease from CLI JSON; the distribution supplies it.",
+    "anchor": "#cli-path"
+  },
+  "unpaired": {
+    "retryable": false,
+    "nextStep": "Obtain a fresh pairing code from the Host, pair this device, then start.",
+    "anchor": "#reset"
+  },
+  "re_pair_required": {
+    "retryable": false,
+    "nextStep": "Obtain a fresh pairing code from the Host, pair this device, then start.",
+    "anchor": "#reset"
+  },
+  "device_revoked": {
+    "retryable": false,
+    "nextStep": "Obtain a fresh pairing code from the Host, pair this device, then start.",
+    "anchor": "#reset"
+  },
+  "store_owned": {
+    "retryable": false,
+    "nextStep": "Stop the daemon that owns this store before starting another.",
+    "anchor": "#troubleshooting"
+  },
+  "handshake_rejected": {
+    "retryable": false,
+    "nextStep": "Check productId and SDK compatibility with the server, or pair again.",
+    "anchor": "#troubleshooting"
+  },
+  "replay_cursor_too_old": {
+    "retryable": false,
+    "nextStep": "Pair again or use the Host operator recovery procedure for expired history.",
+    "anchor": "#reset"
+  },
+  "daemon_journal_protocol_unsupported": {
+    "retryable": false,
+    "nextStep": "Drain the journal with the release that wrote it before upgrading.",
+    "anchor": "#upgrade"
+  },
+  "host_layout_input_invalid": {
+    "retryable": false,
+    "nextStep": "Fix the named HostLayoutOptions field, then call resolveHostLayout again.",
+    "anchor": "#directory-ownership"
+  }
+}

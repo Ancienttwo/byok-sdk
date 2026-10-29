@@ -1,0 +1,878 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DaemonConfig",
+  "description": "Configuration of one @byok-sdk/client daemon (byok-agent config file or createDaemon argument). Generated from the DaemonConfig TypeScript interface; do not edit.",
+  "x-byok-schemaVersion": 1,
+  "type": "object",
+  "properties": {
+    "nativeAssetRoot": {
+      "type": "string",
+      "description": "Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option."
+    },
+    "toolAuthorization": {
+      "x-byok-surface": "embedded-only",
+      "not": {},
+      "description": "Per-task tool authorization, decided by this Host for every runtime:\n`all` (default) never blocks and emits a `tool-reminder` event for each\nhigh-risk call; `auto` asks the user through the task's approval path\nbefore a high-risk call runs and is declined before claim on a runtime\nwithout `toolAuthorizationAuto`. Called once per offer; a throw or any\nother value declines the offer. Not an OS sandbox or file scope."
+    },
+    "localToolApproval": {
+      "const": "allow",
+      "description": "Who may approve a `tool-authorization` approval (an `auto` high-risk tool\ncall). Absent (default): only the Host — a wire `task.approve` or an\nin-process Daemon.approve. The control socket's\n`approvals.resolve` (`byok-agent approve`) can only reject it, and an\napprove fails with the control error code `approval_requires_host`\n(APPROVAL_REQUIRES_HOST). `'allow'` lets the control socket\napprove it too. Any same-user process that can read `control.token`,\nincluding the agent whose tool call waits, can then approve it, and the\nserver records it as a local approval. `task-terminal` approvals are not\naffected. See `docs/security.md`."
+    },
+    "deviceCredentials": {
+      "type": "object",
+      "properties": {
+        "macosKeychainPath": {
+          "type": "string",
+          "description": "Explicit macOS keychain file; omitted uses the operating system's default keychain."
+        }
+      },
+      "description": "Select an explicit macOS keychain for device enrollment custody."
+    },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "scratchRoot": {
+          "type": "string"
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "maxStoreBytes": {
+              "type": "number"
+            },
+            "minFreeBytes": {
+              "type": "number"
+            },
+            "softMinFreeBytes": {
+              "type": "number"
+            },
+            "softBudgetRatio": {
+              "type": "number"
+            },
+            "hardBudgetRatio": {
+              "type": "number"
+            },
+            "ackCriticalReserveBytes": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "maxStoreBytes",
+            "minFreeBytes"
+          ]
+        },
+        "skillPackDataDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Exact SDK skill-pack dataDir roots used by installSkillPacks."
+        },
+        "retention": {
+          "type": "object",
+          "properties": {
+            "sweepIntervalMs": {
+              "type": "number"
+            },
+            "pressureSweepIntervalMs": {
+              "type": "number"
+            },
+            "maxDeletionsPerPass": {
+              "type": "number"
+            },
+            "maxPassDurationMs": {
+              "type": "number"
+            },
+            "ttlMs": {
+              "type": "object",
+              "properties": {
+                "agent-result": {
+                  "type": "number"
+                },
+                "confirmed-journal": {
+                  "type": "number"
+                },
+                "daemon-temp": {
+                  "type": "number"
+                },
+                "durable-replica": {
+                  "type": "number"
+                },
+                "exec-runtime": {
+                  "type": "number"
+                },
+                "exec-sdk": {
+                  "type": "number"
+                },
+                "home-temp": {
+                  "type": "number"
+                },
+                "input-preparation": {
+                  "type": "number"
+                },
+                "reader-run": {
+                  "type": "number"
+                },
+                "session-ledger": {
+                  "type": "number"
+                },
+                "skill-pack-old": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        },
+        "journal": {
+          "type": "object",
+          "properties": {
+            "busyTimeoutMs": {
+              "type": "number",
+              "description": "Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound."
+            },
+            "maxRecordBytes": {
+              "type": "number",
+              "description": "Per-record byte bound. Defaults to the journal's own bound (256 KiB); oversized records are refused, never truncated.\nAn inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),\nso a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is\nnot stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other\nenvelope is dropped (#826)."
+            }
+          },
+          "description": "Every daemon journals tasks durably in `<storeDir>/daemon.db` before it acks them."
+        }
+      }
+    },
+    "localAgentRelease": {
+      "x-byok-surface": "distribution-owned",
+      "not": {},
+      "description": "Distribution-owned application release; observability only, never a protocol/capability gate."
+    },
+    "productName": {
+      "type": "string"
+    },
+    "productId": {
+      "type": "string"
+    },
+    "serverUrl": {
+      "type": "string"
+    },
+    "authRequestDeadlineMs": {
+      "type": "number",
+      "description": "Bounds one AuthManager pair/challenge/token exchange, including response-body reads."
+    },
+    "deviceName": {
+      "type": "string"
+    },
+    "machineId": {
+      "x-byok-surface": "embedded-only",
+      "not": {},
+      "description": "Optional override for the client-hashed physical machine identity sent\nwith `POST /byok/pair` (protocol §6.1). Defaults to `resolveMachineId`\nover this product id, which probes one OS identifier and hashes it; a\nhost that has its own machine authority can supply it here, and one that\nwants no supersession at all supplies `async () => undefined`."
+    },
+    "agentHome": {
+      "type": "object",
+      "properties": {
+        "hostStorageRoot": {
+          "type": "string"
+        },
+        "projection": {
+          "x-byok-surface": "embedded-only",
+          "not": {}
+        }
+      },
+      "required": [
+        "hostStorageRoot"
+      ],
+      "description": "Strict Agent execution boundary. The host selects one absolute branded\nstorage root; the SDK alone composes `agents/<agentId>`, initializes the\ndurable home, and binds it as runtime cwd. `projection` may write opaque,\nredacted host content into the canonical home supplied by the SDK."
+    },
+    "agentMemoryMcp": {
+      "enum": [
+        "auto",
+        "off"
+      ],
+      "description": "Task memory MCP admission. Absent/auto preserves platform-based admission; off disables both ordinary and prepared memory tools,\nand drops the Agent memory guidance from Agent task instructions. `status().agentMemoryMcp` reports the effective admission.\nThis does not disable explicit hosted projection/intent transports, and is not a filesystem sandbox."
+    },
+    "agentMemory": {
+      "type": "object",
+      "properties": {
+        "capability": {
+          "const": "agent.memory.projection"
+        },
+        "grant": {
+          "type": "object",
+          "properties": {
+            "grantRef": {
+              "type": "string"
+            },
+            "writerEpoch": {
+              "type": "number"
+            },
+            "policyRevision": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "grantRef",
+            "writerEpoch",
+            "policyRevision"
+          ]
+        },
+        "redactor": {
+          "x-byok-surface": "embedded-only",
+          "not": {}
+        },
+        "port": {
+          "x-byok-surface": "embedded-only",
+          "not": {}
+        }
+      },
+      "description": "Optional, one-way hosted projection. Without all guards it has zero network activity."
+    },
+    "agentMemoryExport": {
+      "const": true,
+      "description": "Explicit raw local Host export opt-in. No control/wire endpoint, upload, or projection callback. Requires agentHome and the admitted Linux, macOS or Windows x64 memory backend."
+    },
+    "agentMemoryHelperAssetRoot": {
+      "type": "string",
+      "description": "Absolute directory copied by copyAgentMemoryHelperAssets. Only SDK release assets are admitted; not a helper executable or digest override."
+    },
+    "sdkHelperHost": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "self-executable",
+          "description": "Run SDK-reserved helpers by re-entering the product's single-file/SEA\nexecutable. The product entrypoint must call\nrunSdkReservedHelperCommand before its own argument parser."
+        },
+        "executable": {
+          "type": "string",
+          "description": "Absolute product executable path. Defaults to this process's executable."
+        },
+        "entry": {
+          "type": "string",
+          "description": "Absolute SDK-bearing entry script when executable is an interpreter."
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "description": "Explicit composition for SDK-reserved MCP helpers when this daemon is\nembedded in a single-file/SEA product executable. The product entrypoint\nmust also call `runSdkReservedHelperCommand()` before its own CLI parser."
+    },
+    "maxConcurrentReaderAttemptsPerAgentHome": {
+      "type": "number",
+      "description": "How many `homeAccess: 'memory-reader'` Attempts this daemon lets run\nCONCURRENTLY in one canonical Agent home, across every lane and every\nsession. Default DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME (4).\n\nReaders are counted apart from the writer. A home has at most one writer\nAttempt, fixed: the writer runs in the home itself, so a second writer\nwould co-write `MEMORY.md`, `notes/` and `.git`. Each reader runs in its\nown run directory, `<home>/.byok/runs/<taskId>/`. An offer over either\nlimit is declined retryably before adapter preparation, the claim, or any\nprocess side effect.\n\nValidated up front, the same way `maxTaskOutputBytes` is: a positive safe\ninteger, so `0`, a negative number, `NaN` and a non-integer are\nconstruction errors rather than a silently reinterpreted \"unlimited\".\n\nThe removed `maxConcurrentMutableSessionsPerAgentHome` is a construction\nerror: a value above 1 let Attempts co-write one home, which reader\nAttempts replace."
+    },
+    "agentEgress": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "type": "object",
+          "properties": {
+            "policyRevision": {
+              "type": "string"
+            },
+            "activity": {
+              "type": "object",
+              "properties": {
+                "delivery": {
+                  "const": "latest-value"
+                },
+                "maxCoalesceMs": {
+                  "type": "number"
+                },
+                "maxEventBytes": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "delivery",
+                "maxCoalesceMs",
+                "maxEventBytes"
+              ]
+            },
+            "reliable": {
+              "type": "object",
+              "properties": {
+                "maxPendingEventsPerAgent": {
+                  "type": "number"
+                },
+                "maxPendingBytesPerAgent": {
+                  "type": "number"
+                },
+                "maxPendingBytesPerTenant": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "maxPendingEventsPerAgent",
+                "maxPendingBytesPerAgent",
+                "maxPendingBytesPerTenant"
+              ]
+            },
+            "transfers": {
+              "type": "object",
+              "properties": {
+                "workspace": {
+                  "anyOf": [
+                    {
+                      "const": "disabled"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "maxBytes": {
+                          "type": "number"
+                        },
+                        "allowedMimeTypes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "maxBytes",
+                        "allowedMimeTypes"
+                      ]
+                    }
+                  ]
+                },
+                "transcript": {
+                  "anyOf": [
+                    {
+                      "const": "disabled"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "maxBytes": {
+                          "type": "number"
+                        },
+                        "allowedMimeTypes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "maxBytes",
+                        "allowedMimeTypes"
+                      ]
+                    }
+                  ]
+                },
+                "artifact": {
+                  "anyOf": [
+                    {
+                      "const": "disabled"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "maxBytes": {
+                          "type": "number"
+                        },
+                        "allowedMimeTypes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "maxBytes",
+                        "allowedMimeTypes"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "workspace",
+                "transcript",
+                "artifact"
+              ]
+            }
+          },
+          "required": [
+            "policyRevision",
+            "activity",
+            "reliable",
+            "transfers"
+          ],
+          "description": "Exact policy the daemon is willing to consume from an Agent offer.\nAbsent: the client default policy, as a config file's `\"agentEgress\": {}`."
+        },
+        "contentRead": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "type": "object",
+              "properties": {
+                "root": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "agent-home"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "runtime-allowlisted"
+                        },
+                        "root": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "root"
+                      ]
+                    }
+                  ]
+                },
+                "maxTextBytes": {
+                  "type": "number"
+                },
+                "textMimeTypes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sensitiveNames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "root",
+                "maxTextBytes",
+                "textMimeTypes"
+              ]
+            },
+            "transcript": {
+              "type": "object",
+              "properties": {
+                "root": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "agent-home"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "runtime-allowlisted"
+                        },
+                        "root": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "root"
+                      ]
+                    }
+                  ]
+                },
+                "maxTextBytes": {
+                  "type": "number"
+                },
+                "textMimeTypes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sensitiveNames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "root",
+                "maxTextBytes",
+                "textMimeTypes"
+              ]
+            },
+            "artifact": {
+              "type": "object",
+              "properties": {
+                "root": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "agent-home"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "runtime-allowlisted"
+                        },
+                        "root": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "root"
+                      ]
+                    }
+                  ]
+                },
+                "maxTextBytes": {
+                  "type": "number"
+                },
+                "textMimeTypes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sensitiveNames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "root",
+                "maxTextBytes",
+                "textMimeTypes"
+              ]
+            },
+            "runtimeAllowlistedRoots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Device-local additions required to make one server-selected transfer\npolicy executable. These values only supplement `policy.transfers`: a\nlocally configured surface never enables a server-disabled transfer, and\ncannot widen its maxBytes or MIME authority."
+        }
+      },
+      "description": "Explicit Agent-local/cloud egress selection. Omission still enforces the\nSDK metadata/status projection, but does not advertise or admit the new\npolicy/reliable protocol surface."
+    },
+    "runtimeAllowlist": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = all three bundled adapters\n— pi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildDefaultAdapters`), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
+    },
+    "durablePi": {
+      "type": "boolean",
+      "description": "Disabled by default. Requires Agent homes, journal and custody launcher."
+    },
+    "piByokLauncher": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional fixed launcher arguments, before BYOK's required arguments."
+        },
+        "profileDbPath": {
+          "type": "string"
+        },
+        "sessionDir": {
+          "type": "string"
+        },
+        "macosKeychainPath": {
+          "type": "string"
+        },
+        "secretServicePrefix": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "profileDbPath",
+        "sessionDir"
+      ]
+    },
+    "runtimePreference": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "claude",
+          "codex",
+          "pi"
+        ]
+      },
+      "description": "M5 batch-3 (workstream 1): explicit auto-select priority order for\n`TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)\n— tried in listed order; the first candidate that is both PRESENT\n(`adapter.detect()`) and CAPABLE (declares MCP toolset projection when\nthe offer requires it) wins. Unset defaults to\n`DEFAULT_RUNTIME_PREFERENCE` (`task-runner.ts`): `['claude', 'codex',\n'pi']` — pi LAST, deliberately.\n\nProduct decision: pi is this SDK's FALLBACK runtime, not its default.\nBefore this field existed, the auto-select path had no notion of\npriority at all — it simply walked `deps.adapters` in whatever order\n`buildDefaultAdapters`/the embedder constructed them, which for\n`createDaemon`'s bundled set meant `ALL_RUNTIME_IDS`'s construction\norder (`['pi', 'claude', 'codex']`) doubled as the de-facto selection\npriority — silently making pi the default winner whenever it was\npresent, for no better reason than being listed first in an array never\nmeant to encode a priority. This field makes the real priority an\nexplicit, independently-configurable decision instead of an accident of\nconstruction order — see `ALL_RUNTIME_IDS`'s own doc comment below for\nthe construction-vs-selection-order split this introduces.\n\nOnly affects the auto-select (no `task.offer.runtime`) path — an offer\nnaming an explicit runtime is unaffected (unchanged semantics: that\nexact adapter is used, or the offer is declined; never a fallback\nsubstitution). Independent of `runtimeAllowlist` above (which restricts\nWHICH runtimes are eligible at all): this only orders the attempt\nsequence among whatever that allowlist, if set, already let through."
+    },
+    "storeDir": {
+      "type": "string"
+    },
+    "serviceEnrollment": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "const": true
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "description": "Opt-in host composition for a daemon launched under a different OS\nprincipal than the interactive CLI (notably a WinSW service). When true,\nan unpaired daemon holds the normal writer lease and exposes only the\nexisting HMAC-authenticated local control surface so `enrollment.pair`\ncan persist the credential under the daemon's own OS token. Absent by\ndefault: ordinary foreground `start()` keeps rejecting an unpaired device."
+    },
+    "branding": {
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "description": "Product/company name for banners, prompts, audit log entries, etc."
+        },
+        "supportUrl": {
+          "type": "string",
+          "description": "Support/help URL surfaced alongside branding."
+        },
+        "accent": {
+          "type": "string",
+          "description": "Brand accent color (any CSS-color-like string — hex, name, etc.); not parsed or validated here."
+        }
+      },
+      "description": "Optional white-label branding — see `DaemonBranding`. Carried through verbatim to `status().branding`."
+    },
+    "codexSandbox": {
+      "enum": [
+        "danger-full-access",
+        "inherit",
+        "read-only",
+        "workspace-write"
+      ],
+      "description": "Codex sandbox for the bundled Codex adapter that `createDaemon` builds,\nas OAR's `OAR_CODEX_SANDBOX`. Default `danger-full-access`. `inherit`\npasses no sandbox override, so the user's own `config.toml` applies.\n`createDaemon` throws a TypeError for any other value.\n`createDaemonWithAdapters` rejects this key, even when undefined.\nConfigure the injected CodexAdapter with its own sandbox option."
+    },
+    "mcpToolsets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "mcpServers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "env": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "SDK-reserved task-scoped servers may receive child-only context. Host toolset configuration rejects this field."
+                },
+                "approveTools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Exact Host-approved tool names; omitted or empty adds no approval. Local configuration only."
+                }
+              },
+              "required": [
+                "command"
+              ]
+            }
+          }
+        },
+        "required": [
+          "mcpServers"
+        ]
+      },
+      "description": "Device-local registry behind wire-level `requiredToolsets` ids. Only\nlogical ids cross the SaaS wire; MCP executable definitions stay here.\nThe first slice supports stdio servers (`command` + `args`) only and\ndeliberately has no task-provided env/header/secret surface."
+    },
+    "dangerouslyAllowInsecureRemote": {
+      "type": "boolean",
+      "description": "M5: explicit escape hatch for `url.ts`'s `assertServerUrlAllowed` — see\nthat function's own doc comment for the full allow/deny rule. Default\n(unset/`false`): a `serverUrl` using plaintext `http:` is only\naccepted when its host is loopback (`localhost`/`*.localhost`,\n`127.0.0.0/8`, `::1`); anything else over plaintext throws a typed\n`InsecureServerUrlError` from `pair()`/`start()` below, BEFORE any\nnetwork call is attempted, rather than silently sending the pairing\ncode / device credentials to a remote host in the clear. Set this\n`true` only when you have deliberately decided to accept that risk\n(e.g. a trusted private network with no TLS terminator in front of the\nserver) — doing so also logs a loud `console.warn` (see\n`checkServerUrl`, this file) every time it actually changes the\noutcome. Never overrides an unsupported scheme (anything other than\n`http:`/`https:`), which is refused unconditionally."
+    },
+    "maxTaskOutputBytes": {
+      "type": "number",
+      "description": "M5 batch-3 (workstream 2): caps accumulated (approximate,\nserialized-event-length) agent-event output bytes this daemon will\ntolerate for a single task before tearing it down as a resource-limit\nviolation (`task.fail`, `retryable: false`, reason prefixed\n`resource limit exceeded: maxTaskOutputBytes` — see\n`MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX`, `task-runner.ts`) — see\n`TaskRunner.pump`'s own doc comment for exactly what's counted and what\nisn't. Default DEFAULT_MAX_TASK_OUTPUT_BYTES (64 MiB) when\nunset.\n\n`0` or a negative number is a config validation error, thrown\nsynchronously from `createDaemonWithAdapters`/`createDaemon` — NOT a\nsupported way to disable the cap. Pass `Number.POSITIVE_INFINITY`\nexplicitly instead to opt out of enforcement altogether."
+    },
+    "artifactLimits": {
+      "type": "object",
+      "properties": {
+        "maxFileBytes": {
+          "type": "number"
+        },
+        "maxTaskBytes": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "maxFileBytes",
+        "maxTaskBytes"
+      ],
+      "description": "Legacy artifact bytes only: default 16 MiB/file and 64 MiB/task, independent of event output limits."
+    },
+    "startupTimeoutMs": {
+      "type": "number",
+      "description": "Admission and startup deadline, including pure detect/prepare waits; unresolved process owners remain quarantined. Default 30 seconds."
+    },
+    "maxInlineEventBytes": {
+      "type": "number",
+      "description": "Per-EVENT inline ceiling (default DEFAULT_MAX_INLINE_EVENT_BYTES,\n64 KiB) for the two `AgentEvent` fields a runtime authors freely:\n`tool_use.input` and `tool_result.output`. An event whose serialization\nexceeds this leaves `TaskRunner.pump` with that field replaced by a\nUTF-8-safe head/tail preview (`{ preview: { head, tail } }`) and an\nadditive `spill` descriptor; the full JSON serialization is uploaded to\nthe blob plane under an idempotent, content-addressed key, and\n`spill.blob` is where a consumer reads it back. If the upload fails the\npreview still ships, carrying `spill.unstoredReason` instead — omission\nis always described, never silent.\n\nThis is a per-event bound, orthogonal to `maxTaskOutputBytes` (a\nwhole-task total, counted AFTER spilling) and to\nthe server-advertised activity ingress budget.\n\n**Consumer contract:** `spill`'s presence is the only signal that the\ninline field is a preview. A consumer that renders `tool_result.output`\nwithout checking `spill` renders a truncation as the whole result.\n\nMust be a positive safe integer of at least\nMIN_MAX_INLINE_EVENT_BYTES (4096) — below that a legitimate\n`spill` descriptor no longer fits inside the cap it exists to enforce.\nAnything else (0, negative, non-integer, `NaN`,\n`Number.POSITIVE_INFINITY`) is a config validation error thrown\nsynchronously from `createDaemonWithAdapters`/`createDaemon`; there is\nno opt-out, because \"unbounded event\" is exactly the state this exists\nto prevent."
+    },
+    "progressBatch": {
+      "type": "object",
+      "properties": {
+        "maxBatchSize": {
+          "type": "number",
+          "description": "Flush immediately once this many events are buffered. Default 10."
+        },
+        "flushIntervalMs": {
+          "type": "number",
+          "description": "Otherwise flush at most this often (ms) while events are pending. Default 250 (~4/sec)."
+        }
+      },
+      "description": "Timing and event-count batching policy. The server owns the byte ceiling."
+    },
+    "shutdownGraceMs": {
+      "type": "number",
+      "description": "M5 batch-3 (workstream 2): deadline bound on the graceful-shutdown\nsequence's own wait for `TaskRunner.shutdownActiveTasks` to finish\ninterrupting/failing every active task before this daemon proceeds to\nactually stop regardless — see `runShutdownSequence`'s own doc comment\nfor the full sequence this bounds, and for why every graceful-shutdown\npath (`stop()`, `unpair()`, the control socket's `shutdown` RPC) now\nshares it. Default 10s (`SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS`) — the same\nbound the control-socket shutdown path already used before this field\nexisted."
+    },
+    "presence": {
+      "type": "object",
+      "properties": {
+        "intervalMs": {
+          "type": "number",
+          "description": "Heartbeat cadence. Default 30s."
+        },
+        "ttlMs": {
+          "type": "number",
+          "description": "The deployment's presence hint TTL. Default 90s (core §12.7.5 suggests 60-120s)."
+        },
+        "minimumIntervalMs": {
+          "type": "number",
+          "description": "The deployment's minimum interval between accepted publications. Default 5s."
+        }
+      },
+      "description": "Cadence for the `online` presence heartbeat (§12.3), when — and only when\n— the deployment's capability declaration contains `presence.hints` (see\n`capabilities-client.ts`; a deployment that declares nothing, or one this\ndaemon could not read a declaration from, publishes nothing at all).\n\nEvery field is optional and defaults to `presence-publisher.ts`'s own\nconstants, which are chosen against the hosted defaults. `ttlMs` and\n`minimumIntervalMs` describe THE DEPLOYMENT's hint TTL and publication\nthrottle as this operator understands them: the daemon never learns either\nfrom the wire, and uses them only to validate `intervalMs` sits strictly\nbetween them — a cadence outside that band is rejected synchronously here,\nthe same way `maxTaskOutputBytes` is above, rather than degrading into a\nrate-limited or flickering hint nobody sees an error for."
+    },
+    "deviceAssertion": {
+      "type": "object",
+      "properties": {
+        "audiences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The EXACT audience strings this daemon will mint for. Matched with\n`Set.has` — exact string equality, never a prefix or suffix or subdomain\nrule.\n\nPrefix matching is the classic hole here: an allowlist entry of\n`salesko-api` under a `startsWith` rule also admits `salesko-api.evil.com`,\nand a suffix rule admits `evil-salesko-api`. There is no configuration\nthat turns this into a pattern match, because there is no pattern-matching\ncode to configure.\n\nAn empty list means the feature is off (see\n`DaemonConfig.deviceAssertion`). Duplicate entries, empty entries, and\nentries over 256 UTF-8 bytes are construction errors — a duplicate is\nusually a copy-paste that hid a typo'd second entry, and silently\nde-duplicating it would hide it for good."
+        },
+        "ttlMs": {
+          "type": "number",
+          "description": "Assertion lifetime, ms. Default\n`DEVICE_ASSERTION_DEFAULT_TTL_MS` (120s), hard ceiling\n`DEVICE_ASSERTION_MAX_TTL_MS` (300s) — both from `@byok-sdk/core`, which\nenforces the same ceiling again at verification time, so a daemon patched\nto ignore this one still cannot get a longer-lived assertion accepted.\n\nDeliberately NOT caller-selectable over the control socket: a lifetime a\ncaller can ask for is a lifetime every caller asks the maximum of."
+        }
+      },
+      "required": [
+        "audiences"
+      ],
+      "description": "Plan `device-assertion-broker`: opt-in local assertion broker — lets a\nsibling process on this same machine (typically the host's own CLI,\ninstalled alongside this daemon) ask the daemon, over the already\nauthenticated control socket, to mint a short-lived audience-scoped\nassertion signed with the paired device key. See\nDeviceAssertionConfig.\n\nOFF by default, and off is expressed two ways that mean the same thing: an\nabsent section, or a present one with an empty `audiences` list. Both make\n`assertion.issue` answer `assertion_disabled` without looking at anything\nelse. A new local authentication surface does not get to be on because\nsomeone left a config key behind."
+    },
+    "inputPreparation": {
+      "x-byok-surface": "embedded-only",
+      "not": {},
+      "description": "B-P2 local primitive: the task-free `input_preparation.*` control surface\n(`docs/researches/runtime-input-preparation-contract.md` §10.3).\n\nOFF by default. An absent section keeps the whole feature disabled and\nmakes all three methods answer `input_preparation_unconfigured` — there is\nno default limits policy and no default authority, by the Owner-approved\nlimits boundary of 2026-09-14. The counter inside the section is\nOPTIONAL: without one, preparations settle on the compiler's own byte\nevidence. A PRESENT section with an\ninvalid policy is a construction error, the same discipline\n`deviceAssertion` and the presence cadence already follow: a daemon that\nstarts with an allowance nobody validated is a daemon whose operator\nbelieves a limit is in force."
+    },
+    "providerProvisioning": {
+      "x-byok-surface": "embedded-only",
+      "not": {},
+      "description": "Host consumer for the task-free `provider.provisioning.available` notice\n(sealed provider provisioning). See ProviderProvisioningHandler.\n\nOFF by default, and the `provider-provisioning.v1` capability is advertised\nonly while a handler is present, so a Host never enqueues a notice this\ndaemon cannot consume. A notice that arrives anyway (a stale row, or a\nsender that ignored the capability) is NOT acknowledged: the daemon throws,\nthe mailbox row is retained and the cursor stays behind it.\n\nThe handler receives only `{ requestId }` and resolves with the Host's\ndurable terminal readback; the cursor advances only after that readback\nvalidates against this tenant, device and request."
+    },
+    "agentMemoryIntents": {
+      "x-byok-surface": "embedded-only",
+      "not": {},
+      "description": "Host transport for the task-free `agent.memory.intent.available` notice\n(Host-approved Agent memory intents). See AgentMemoryIntentTransport.\n\nOFF by default. The `agent-memory-intent.v1` capability is advertised only\nwhile this transport is present AND `agentHome` is configured AND the\nsecure memory filesystem is available AND that backend's ledger write is\na proven durable barrier (temp sync, rename, directory sync). Linux uses\nnative descriptors. macOS uses the verified SDK helper after a strict\nfull-sync volume probe. Windows does not advertise: its helper has no\nOS-crash or power-loss proof. A notice that arrives without the capability is NOT\nacknowledged: it fails `transport_unconfigured` or\n`filesystem_unavailable` before any fetch. There is no control-socket\nmethod for intents; the only entry is the mailbox notice."
+    }
+  },
+  "required": [
+    "productName",
+    "productId",
+    "serverUrl"
+  ],
+  "x-byok-removedFields": [
+    {
+      "path": "permissionDefaults",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "agentEgress.sanitizer",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "mcpLaunchCwd",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "toolImplementationAuthority",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "hostedJournal",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "strictAgentOnly",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "gitWorkspace",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "workspaceRoot",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "resultDocument",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "maxConcurrentMutableSessionsPerAgentHome",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "agentMemoryFilesystem",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    }
+  ]
+}

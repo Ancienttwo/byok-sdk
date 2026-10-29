@@ -13,7 +13,7 @@
 //   union:<union>#<member>            member of a Host-visible union type
 //   store:<id>                        on-disk store format identity
 //   example:<dir>                     vendored example (K4, K8) version + source digest
-//   config:<field>                    reserved for the #1094 DaemonConfig schema
+//   config:<field>                    top-level DaemonConfig field of the generated schema (#1094)
 //
 // Every extractor fails loudly when the source shape it reads is not found, so
 // a refactor that moves an authority breaks the gate instead of emptying a
@@ -144,17 +144,38 @@ export const VENDORED_EXAMPLES = [
 ];
 
 /**
- * Placeholder hook for #1094: the DaemonConfig schema becomes the authority
- * for `config:<field>` items. Until it lands this contributes no items.
+ * `config:<field>` items (#1094): one per top-level `DaemonConfig` field of
+ * the generated, checked-in schema. The value is the field's tier
+ * (required/optional, and its surface when restricted) and a digest of its
+ * schema without documentation, so a doc-comment edit is not a change.
  *
  * @typedef {{ id: `config:${string}`, value: string }} ConfigFieldItem
- * @param {string} _root
+ * @param {string} root
+ * @param {(file: string) => string} track
  * @returns {ConfigFieldItem[]}
  */
-export function configFieldItems(_root) {
-  return [];
+export function configFieldItems(root, track = (file) => file) {
+  const schema = readJson(root, track(CONFIG_SCHEMA_PATH));
+  if (schema?.type !== 'object' || schema.properties === null || typeof schema.properties !== 'object') {
+    throw new Error(`${CONFIG_SCHEMA_PATH}: expected a generated DaemonConfig object schema`);
+  }
+  const required = new Set(schema.required ?? []);
+  const fields = Object.entries(schema.properties);
+  if (fields.length === 0) throw new Error(`${CONFIG_SCHEMA_PATH}: DaemonConfig has no properties`);
+  return fields.map(([field, property]) => {
+    const surface = property['x-byok-surface'];
+    const tier = [required.has(field) ? 'required' : 'optional', ...(surface === undefined ? [] : [surface])].join(' ');
+    return { id: `config:${field}`, value: `${tier} schema-sha256=${sha256(JSON.stringify(withoutDocs(property))).slice(0, 16)}` };
+  });
 }
-export const CONFIG_FIELDS_STATUS = { status: 'pending', owner: '#1094' };
+export const CONFIG_SCHEMA_PATH = 'packages/client/daemon-config.schema.json';
+export const CONFIG_FIELDS_STATUS = { status: 'tracked', source: CONFIG_SCHEMA_PATH, owner: '#1094' };
+
+function withoutDocs(value) {
+  if (Array.isArray(value)) return value.map(withoutDocs);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'description').map(([key, child]) => [key, withoutDocs(child)]));
+}
 
 function matchAll(text, pattern) {
   return [...text.matchAll(pattern)].map((match) => match[1]);
@@ -291,7 +312,7 @@ export function buildSnapshot(root) {
     add(`example:${example.id}`, `${example.label} ${manifest.version} src-sha256=${digest.slice(0, 16)}`);
   }
 
-  for (const item of configFieldItems(root)) add(item.id, item.value);
+  for (const item of configFieldItems(root, track)) add(item.id, item.value);
 
   return {
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,

@@ -4,7 +4,7 @@ import {
   type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload,
 } from '@byok-sdk/protocol';
 import type { TenantStores } from './tenant-stores';
-import { parseAgentMessageDisposition } from './inbound';
+import { parseAgentMessageDisposition } from './agent-message-disposition';
 import { assertTaskContentPresent } from './task-redaction';
 
 /** SDK transmission evidence; payload remains untrusted and never authors a Host product message. */
