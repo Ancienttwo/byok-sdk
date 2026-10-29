@@ -1,18 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { agentMemoryIntentOperationDigest } from '@byok-sdk/core';
 import {
-  AgentMemoryIntentCompletionSchema, AgentMemoryIntentReadbackSchema, AgentMemoryIntentV1Schema,
+  AgentMemoryIntentCompletionSchema,
+  AgentMemoryIntentReadbackSchema,
+  AgentMemoryIntentV1Schema,
   AgentMemoryProjectionMutationSchema,
-  type AgentMemoryIntentCompletion, type AgentMemoryIntentReadback, type AgentMemoryIntentV1,
-  type AgentMemoryExport,
-  type AgentMemoryIntentTransport,
+  type AgentMemoryIntentCompletion,
+  type AgentMemoryIntentReadback,
+  type AgentMemoryIntentV1,
   type AgentMemoryProjectionMutation,
-  type AgentMemoryProjectionPort,
 } from '@byok-sdk/protocol';
 import { HostLedger } from './ledger';
 import { MemoryRestoreCoordinator, memoryRestoreBlocked, recordRestoreTerminal, type MemoryRestoreInput, type MemoryRestoreResult, type MemoryRestoreRow } from './memory-restore';
 import { canonical, hash } from './model';
 import type { LedgerState } from './model';
+import type { AgentMemoryExport, AgentMemoryIntentTransport, AgentMemoryProjectionPort } from '@byok-sdk/protocol/agent-memory';
 
 // Only repairable projection failures can hold an Agent queue.
 export class MemoryBlockedError extends Error {}

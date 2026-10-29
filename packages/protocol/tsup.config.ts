@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/constants.ts'],
+  entry: ['src/index.ts', 'src/constants.ts', 'src/agent-memory.ts'],
   format: ['esm'],
   target: 'es2022',
   platform: 'neutral',

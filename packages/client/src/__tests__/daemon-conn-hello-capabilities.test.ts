@@ -13,11 +13,12 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 import { TestServer } from './fixtures/test-server';
 import { fakeHermesCommand } from './fixtures/fake-hermes-command';
-import { AGENT_MEMORY_INTENT_CAPABILITY, createEnvelope, type AgentMemoryIntentTransport } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_INTENT_CAPABILITY, createEnvelope } from '@byok-sdk/protocol';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import * as memoryRuntime from '../daemon/agent-memory';
 import { CursorStore } from '../daemon/cursor-store';
 import * as helperClient from '../daemon/agent-memory-fs-helper';
+import type { AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 const helperBuilt = builtAgentMemoryFilesystemHelperBin() !== undefined;
 const itProvenBackend = process.platform === 'darwin' && !helperBuilt ? it.skip : it;

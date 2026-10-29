@@ -695,7 +695,7 @@ Hosted projection is not on this entry. An embedded host gets the local
 snapshot and no way to send it anywhere from this package.
 
 The base `AgentMemoryError` and `AgentMemoryValidationError`, and
-`validateAgentMemoryPath`, come from `@byok-sdk/protocol`, so `instanceof`
+`validateAgentMemoryPath`, come from `@byok-sdk/protocol/agent-memory`, so `instanceof`
 against them holds from either entry. Each entry bundles the subclasses this
 package defines separately, so `AgentMemoryRevisionConflictError` imported from
 `@byok-sdk/client/agent-memory` and from `@byok-sdk/client` are distinct

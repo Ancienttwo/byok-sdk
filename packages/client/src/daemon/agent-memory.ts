@@ -6,18 +6,13 @@ import {
   AGENT_MEMORY_PROJECTION_CAPABILITY,
   AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
-  AgentMemoryError,
   AgentMemoryProjectionMutationSchema,
-  AgentMemoryValidationError,
-  validateAgentMemoryPath,
-  type AgentMemoryFile,
   type AgentMemoryProjectionMutation,
-  type AgentMemoryProjectionPort,
-  type AgentMemorySnapshot,
 } from '@byok-sdk/protocol';
 import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES as PROTOCOL_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES as PROTOCOL_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
 import { AGENT_HOME_INTERNAL_DIRECTORY, type AgentHomeLease, type AgentRef } from '../agent-home';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
+import { AgentMemoryError, AgentMemoryValidationError, validateAgentMemoryPath, type AgentMemoryFile, type AgentMemoryProjectionPort, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
 
 export const AGENT_MEMORY_AUDIT_FILENAME = 'agent-memory-audit-v1.jsonl';
 /** v2 is one atomically replaced state file, never an append-only log. */

@@ -80,7 +80,7 @@ import { bindDaemonFunctions } from './create-daemon/functions';
 import { createControlMethods } from './create-daemon/control-methods';
 import type { ToolAuthorizationResolver } from '../tool-authorization';
 import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './config-schema/effective';
-import { type AgentMemoryExport, type AgentMemoryIntentTransport } from '@byok-sdk/protocol';
+import type { AgentMemoryExport, AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 /**
  * Optional white-label product display info — purely opaque passthrough

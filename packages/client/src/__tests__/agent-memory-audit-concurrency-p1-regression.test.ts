@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { AGENT_MEMORY_PROJECTION_CAPABILITY, AgentMemoryError, type AgentMemoryProjectionPort } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_PROJECTION_CAPABILITY } from '@byok-sdk/protocol';
 
 import {
   AGENT_MEMORY_AUDIT_FILENAME,
@@ -17,6 +17,7 @@ import type {
   AgentMemoryFilesystem,
   AgentMemoryFilesystemFileState,
 } from '../daemon/agent-memory-filesystem';
+import { AgentMemoryError, type AgentMemoryProjectionPort } from '@byok-sdk/protocol/agent-memory';
 
 const AUDIT_PATH = `.byok/${AGENT_MEMORY_AUDIT_FILENAME}`;
 const OUTBOX_PATH = `.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`;

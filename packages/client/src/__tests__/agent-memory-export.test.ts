@@ -3,13 +3,14 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES, type AgentRef, AgentMemoryValidationError } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES, type AgentRef } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeManager } from '../agent-home';
 import { AgentMemoryService, AgentMemorySnapshotLimitError } from '../daemon/agent-memory';
 import { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { testScratchRoot } from './fixtures/execution-scratch';
+import { AgentMemoryValidationError } from '@byok-sdk/protocol/agent-memory';
 
 const AGENT: AgentRef = { agentId: 'export-synthetic', profileRevision: '3' };
 const sha = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;

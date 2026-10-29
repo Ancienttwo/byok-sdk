@@ -27,8 +27,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AgentMemoryError } from '@byok-sdk/protocol';
 import * as agentMemoryEntry from '../agent-memory/index';
+import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
 const SRC_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const ENTRY = path.join(SRC_ROOT, 'agent-memory', 'index.ts');

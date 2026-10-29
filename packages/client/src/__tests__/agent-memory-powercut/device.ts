@@ -17,7 +17,7 @@ import {
   type PowercutLink,
 } from './protocol';
 import { takeDeviceSnapshot } from './snapshot';
-import { type AgentMemoryIntentTransport } from '@byok-sdk/protocol';
+import type { AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 /**
  * The backend the production daemon would pick, with one test-only seam: on

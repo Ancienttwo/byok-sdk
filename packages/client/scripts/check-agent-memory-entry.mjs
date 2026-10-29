@@ -59,11 +59,11 @@ assert.equal(agentMemory.prependAgentMemoryGuidance('do the thing').endsWith('\n
 // tsup emits each entry as its own bundle (`splitting: false`), so a class
 // defined in this package is a distinct constructor per entry and `instanceof`
 // does NOT hold across entries. The base `AgentMemoryError` is defined once in
-// `@byok-sdk/protocol`, which both entries import externally, so `instanceof`
+// `@byok-sdk/protocol/agent-memory`, which both entries import externally, so `instanceof`
 // against it holds from either entry. `.name` stays the cross-entry
 // discriminator for the subclasses; this asserts both halves.
 const root = await import(new URL('../dist/index.js', import.meta.url));
-const { AgentMemoryError } = await import('@byok-sdk/protocol');
+const { AgentMemoryError } = await import('@byok-sdk/protocol/agent-memory');
 assert.notEqual(agentMemory.AgentMemoryRevisionConflictError, root.AgentMemoryRevisionConflictError);
 const entryError = new agentMemory.AgentMemoryRevisionConflictError('a', 'b');
 assert.equal(entryError instanceof root.AgentMemoryRevisionConflictError, false);

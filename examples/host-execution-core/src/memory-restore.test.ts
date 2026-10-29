@@ -4,7 +4,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { AgentMemoryExport } from '@byok-sdk/protocol';
 import {
   HostLedger,
   MIN_TOMBSTONE_RETENTION_MS,
@@ -19,6 +18,7 @@ import {
   type ExecutionServer,
 } from '@byok-sdk/server/execution-core';
 import { template } from './test-support';
+import type { AgentMemoryExport } from '@byok-sdk/protocol/agent-memory';
 const binding = { deviceId: 'device', agentRef: { agentId: 'main', profileRevision: '1' } };
 function snapshot(values: Record<string, string>): AgentMemoryExport {
   const files = Object.entries(values).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)

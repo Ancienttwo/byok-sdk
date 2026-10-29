@@ -17,10 +17,6 @@ import {
   type AgentMemoryIntentReadbackDisposition,
   type AgentMemoryIntentV1,
   type AgentRef,
-  AgentMemoryValidationError,
-  validateAgentMemoryPath,
-  type AgentMemoryIntentFetchInput,
-  type AgentMemoryIntentTransport,
 } from '@byok-sdk/protocol';
 
 import { AgentHomeManager, type AgentHomeLease } from '../agent-home';
@@ -61,6 +57,7 @@ import { formatDaemonEventLine } from '../bin/format';
 import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { AgentMemoryValidationError, validateAgentMemoryPath, type AgentMemoryIntentFetchInput, type AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 /*
  * WP2I-S2 — the daemon half of Host-approved Agent memory intents

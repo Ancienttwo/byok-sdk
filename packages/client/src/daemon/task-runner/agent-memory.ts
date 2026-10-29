@@ -5,7 +5,7 @@ import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
 import type { ActiveTask } from './support';
 import { errorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
-import { AgentMemoryError } from '@byok-sdk/protocol';
+import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
 export function activeMemoryContext(this: TaskRunner, contextToken: string): AgentMemoryTaskContext {
   const registered = this['memoryContextByToken'].get(contextToken);

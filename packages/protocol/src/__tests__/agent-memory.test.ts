@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { AgentMemoryError, AgentMemoryValidationError, validateAgentMemoryPath } from '../index';
+import { AgentMemoryError, AgentMemoryValidationError, validateAgentMemoryPath } from '../agent-memory';
 
 describe('validateAgentMemoryPath', () => {
   it('admits MEMORY.md and safe notes paths unchanged', () => {
@@ -39,7 +39,7 @@ describe('validateAgentMemoryPath', () => {
   });
 
   it('imports no node: builtin', () => {
-    const source = readFileSync(new URL('../agent-memory-files.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../agent-memory.ts', import.meta.url), 'utf8');
     expect(source).not.toMatch(/from\s+'node:|require\('node:|import\('node:/);
   });
 });

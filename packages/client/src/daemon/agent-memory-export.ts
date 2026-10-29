@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import { AgentMemoryValidationError, type AgentMemoryExport } from '@byok-sdk/protocol';
 import type { AgentHomeManager, AgentRef } from '../agent-home';
 import { captureAgentMemoryHomeSnapshot } from './agent-memory';
 import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
+import { AgentMemoryValidationError, type AgentMemoryExport } from '@byok-sdk/protocol/agent-memory';
 
 export interface AgentMemoryExportOptions { readonly signal?: AbortSignal; }
 

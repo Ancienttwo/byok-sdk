@@ -6,7 +6,6 @@ import { serve } from '@hono/node-server';
 import { createInMemoryByokCloud } from '@byok-sdk/cloud';
 import { tenantId } from '@byok-sdk/core';
 import { createDaemonWithAdapters, AgentHomeManager } from '@byok-sdk/client';
-import type { AgentMemoryExport } from '@byok-sdk/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady, waitForTaskCleanup } from '../../basic/goal-btw.test-support';
@@ -20,6 +19,7 @@ import {
   type MemoryApproval,
 } from '@byok-sdk/server/execution-core';
 import { policy, template } from './test-support';
+import type { AgentMemoryExport } from '@byok-sdk/protocol/agent-memory';
 
 async function openMemoryHost(mode: 'cloud' | 'embedded') {
   const root = await mkdtemp(path.join(tmpdir(), 'memory-e2e-'));

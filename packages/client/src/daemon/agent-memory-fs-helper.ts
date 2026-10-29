@@ -5,7 +5,7 @@ import type { AgentHomeLease } from '../agent-home';
 import { verifyAgentMemoryFilesystemHelper } from './agent-memory-helper-release';
 import { AgentMemoryRevisionConflictError } from './agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
-import { AgentMemoryError } from '@byok-sdk/protocol';
+import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
 export const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 2;
 export const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = '2';
