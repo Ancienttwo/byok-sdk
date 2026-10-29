@@ -1194,7 +1194,8 @@ missing or revoked. The mailbox message id is derived from
 intentId })`, so while the original mailbox row is retained a retried enqueue
 returns the existing row and seq, and a retry that names a different `agentRef`
 for the same intent fails `mailbox_receipt_mismatch`. After acked-row retention
-cleanup (`mailboxAckedRetentionMs`) a retry appends a new row with a new seq
+cleanup (`mailboxAckedRetentionMs`) or a dead-letter reap
+(`mailboxDeadLetterRetentionMs`) a retry appends a new row with a new seq
 and `agentRef` is no longer compared, so the Host must keep `agentRef` fixed
 per `intentId`. The device replays safely (ledger idempotent readback, or the
 terminal fetch after prune). A mismatched `agentId`, or a mismatched

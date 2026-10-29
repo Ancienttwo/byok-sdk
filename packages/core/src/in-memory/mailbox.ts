@@ -199,26 +199,36 @@ export class InMemoryMailboxStore implements MailboxStore {
     assertCollectExpiredInput(input);
     assertCanonicalTimestamp(input.ackedBefore, 'ackedBefore');
     assertCanonicalTimestamp(input.expireUnackedBefore, 'expireUnackedBefore');
+    assertCanonicalTimestamp(input.reapDeadLettersBefore, 'reapDeadLettersBefore');
     let removed = 0, expired = 0, more = false;
+    // The reap runs before this call's expiry, so only rows that were already
+    // `expired` qualify, and never the device's highest-seq dead letter: that
+    // row is the recoverableFrom floor.
+    const reapable = (device: DeviceMailbox, message: MailboxMessage): boolean =>
+      message.state === 'expired' && message.appendedAt < input.reapDeadLettersBefore
+      && device.messages.some((other) => other.state === 'expired' && other.seq > message.seq);
     try {
-      phases: for (const phase of ['acked', 'pending'] as const) {
+      phases: for (const phase of ['acked', 'reap', 'pending'] as const) {
         for (const [key, device] of this.#devices) {
           if (!key.startsWith(tenantKey(tenant, ''))) continue;
           const collected = device.mutationTail.then(() => {
             for (let index = 0; index < device.messages.length;) {
               const message = device.messages[index]!;
-              const cutoff = phase === 'acked' ? input.ackedBefore : input.expireUnackedBefore;
-              if (message.state !== phase || message.appendedAt >= cutoff) { index++; continue; }
+              const eligible = phase === 'reap'
+                ? reapable(device, message)
+                : message.state === phase
+                  && message.appendedAt < (phase === 'acked' ? input.ackedBefore : input.expireUnackedBefore);
+              if (!eligible) { index++; continue; }
               if (removed + expired === input.limit) { more = true; return; }
-              if (phase === 'acked') {
-                device.messages.splice(index, 1);
-                device.byMessageId.delete(message.messageId);
-                removed++;
-              } else {
+              if (phase === 'pending') {
                 const retired: MailboxMessage = { ...message, state: 'expired' };
                 device.messages[index] = retired;
                 device.byMessageId.set(retired.messageId, retired);
                 expired++; index++;
+              } else {
+                device.messages.splice(index, 1);
+                device.byMessageId.delete(message.messageId);
+                removed++;
               }
             }
           });
@@ -227,10 +237,15 @@ export class InMemoryMailboxStore implements MailboxStore {
           if (more) break phases;
         }
       }
+      // This call's expiry can leave rows reapable for the next call.
+      if (!more) {
+        more = [...this.#devices].some(([key, device]) => key.startsWith(tenantKey(tenant, ''))
+          && device.messages.some((message) => reapable(device, message)));
+      }
     } catch (cause) {
       throw new CollectExpiredFailure({ removed, expired, releasedBytes: 0n }, 0, undefined, { cause });
     }
-    // Mailbox usage is the pending rows, never a mutable accounting counter, so neither phase moves it.
+    // Mailbox usage is the pending rows, never a mutable accounting counter, so no phase moves it.
     return { removed, expired, releasedBytes: 0n, more };
   }
 

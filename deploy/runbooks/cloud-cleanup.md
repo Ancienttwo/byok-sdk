@@ -27,7 +27,8 @@ const report = await cloud.runMaintenance({ tenant, now, policy, limit: 500 });
 There is no policy translator: `TenantRetentionPolicyInput` extends the kernel
 `RetentionPolicy`. Its fields are positive bigint milliseconds:
 `mailboxAckedRetentionMs` (default 24h), `mailboxUnackedRetentionMs` (7d),
-`requestReceiptRetentionMs` (24h), `objectOrphanGraceMs` (24h). The reference
+`mailboxDeadLetterRetentionMs` (30d), `requestReceiptRetentionMs` (24h),
+`objectOrphanGraceMs` (24h). The reference
 server uses these defaults every 5 minutes ±20%, always enabled. Hosted code
 supplies the stored policy directly and owns scheduling.
 
@@ -44,9 +45,14 @@ migration after no supported Host consumes its historical rows.
 
 ## What a pass may collect
 
-- Acked mailbox rows past policy are deleted; old pending rows become retained
-  dead letters. Mailbox collection reports `releasedBytes: 0n` and touches no
-  usage counter.
+- Acked mailbox rows past policy are deleted; old pending rows become dead
+  letters. A dead letter stays queryable for `mailboxDeadLetterRetentionMs`
+  after it expired (cutoff on `appended_at`: now minus the unacked plus the
+  dead-letter window), then it is deleted, except each device's highest-seq
+  dead letter, which stays as that device's `recoverableFrom` floor. Reaped
+  dead letters count in `removed`. One budget covers the pass: acked deletes
+  first, then dead-letter reaps, then new expiries. Mailbox collection reports
+  `releasedBytes: 0n` and touches no usage counter.
 - Spent or strictly expired nonces, strictly expired **unused** pairing codes,
   and expired presence/activity/approval tails are deleted. Redeemed pairing
   codes remain protected identity state: all drivers require the code row to
@@ -145,15 +151,25 @@ SELECT hash, state, ref_count, updated_at, delete_pending_at,
 
 ## Dead-letter operator surface
 
-`listDeadLetters` pages `expired` rows. `replayDeadLetter` requires an
+`listDeadLetters` pages `expired` rows: every dead letter until its grace
+passes, then each device's highest-seq dead letter. `replayDeadLetter` requires an
 operator-issued idempotency key, clones the original bytes to a new monotonic
 sequence, binds the new row to the exact source via `replay_source_seq`, and
 keeps the original as evidence. The clone is a limited mailbox append: it is
 refused with `storage_quota_exceeded` when it does not fit `mailboxLimitBytes`,
 and with `storage_entitlement_missing` when the tenant has no entitlement.
 `discardDeadLetter` is the only explicit delete; it removes one expired row.
-Automatic cleanup never calls discard. A dead letter holds no mailbox quota
-(#1115), so discarding it frees no quota; only stored rows go away.
+Automatic cleanup never calls discard; it reaps old dead letters itself. Both
+keep each device's highest-seq dead letter, the `recoverableFrom` floor:
+discarding that row is refused with `cleanup_dead_letter_is_recovery_floor`
+and nothing is deleted, while a missing row is
+`cleanup_dead_letter_not_found`. The floor check and the delete are one
+statement. Tenant erasure removes every row, floor rows included. After a
+reap, a replay of the reaped row is refused with
+`cleanup_dead_letter_not_found`; a clone made earlier stays, since
+`replay_source_seq` is provenance, not a foreign key. A dead letter holds no
+mailbox quota (#1115), so discarding it frees no quota; only stored rows go
+away.
 
 ## Rollback and usage rebuild
 
@@ -201,9 +217,19 @@ The old `storage_usage.mailbox_bytes` counter is gone: migration
 "Rollback and usage rebuild" before rolling the application back past this
 release.
 
-Migration `0023_mailbox_usage_index.sql` builds a covering index for that sum.
-It runs inside the migration transaction (no `CONCURRENTLY`), so outbox writes
-block while it builds; the build time grows with the retained outbox.
+Migration `0031_mailbox_dead_letter_retention.sql` replaces 0023's covering
+index over every retained row with `outbox_tenant_pending_bytes_idx`, a partial
+covering index on `(tenant_id) INCLUDE (byte_size) WHERE state = 'pending'`
+that matches that sum. Like 0023, it runs inside the migration transaction (no
+`CONCURRENTLY`). The build scans the whole outbox heap, every row in every
+state, and dead letters were never deleted before this release, so its time
+grows with the retained outbox, not the pending rows. Outbox writes wait for
+the build (SHARE lock); reads continue. The old index is dropped after the new
+one is built, so reads block only briefly at that final drop. 0031 also adds
+`tenant_retention_policy.mailbox_dead_letter_retention_ms`; existing policies
+take 30 days. That column is added first, so `tenant_retention_policy` stays
+locked for the whole build: maintenance and tenant erasure wait for the
+migration to commit, while device and Host requests do not read that table.
 
 Before upgrading, run this audit. Every tenant it returns has its next limited
 append refused right after the upgrade, so raise its `mailboxLimitBytes`,

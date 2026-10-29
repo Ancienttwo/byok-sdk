@@ -2963,11 +2963,14 @@ minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
 `maintenance.runNow()` to join an in-flight pass. Shutdown awaits collection
 before releasing SQLite. Hosted schedulers invoke the same kernel with their
 stored policy. Retention durations are positive bigint milliseconds: acked
-mailbox 24h, unacked mailbox 7d, request receipts 24h and orphan grace 24h.
+mailbox 24h, unacked mailbox 7d, dead letters 30d after expiry, request
+receipts 24h and orphan grace 24h.
 There is no disable value or missing-policy substitution.
 
-Acked mailbox rows may be deleted; unacked rows only become retained dead
-letters. Mailbox collection reports zero released bytes and never touches a
+Acked mailbox rows may be deleted; unacked rows become dead letters, which stay
+queryable for the dead-letter window and are then deleted, except each device's
+highest-seq dead letter, kept so `recoverableFrom` never moves back (#1115).
+Mailbox quota counts only pending rows. Mailbox collection reports zero released bytes and never touches a
 usage counter. The sole receipt classification table protects all 11 SDK
 families and unknown keys as identity; the request projection is empty.
 Redeemed pairing code rows remain reachable identity fences. Committed reservation rows remain accounting/replay identity; only expired/aborted settled rows are GC candidates. Durable tasks,

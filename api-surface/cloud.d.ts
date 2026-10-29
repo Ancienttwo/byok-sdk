@@ -3292,6 +3292,13 @@ import type { CloudStores } from './stores/ports';
 export interface RetentionPolicy {
     readonly mailboxAckedRetentionMs: bigint;
     readonly mailboxUnackedRetentionMs: bigint;
+    /**
+     * How long a dead letter stays queryable after it expired. The reap cutoff is
+     * `now - mailboxUnackedRetentionMs - mailboxDeadLetterRetentionMs` on
+     * `appended_at`; each device's highest-seq dead letter is kept regardless,
+     * as the `recoverableFrom` floor.
+     */
+    readonly mailboxDeadLetterRetentionMs: bigint;
     readonly requestReceiptRetentionMs: bigint;
     readonly objectOrphanGraceMs: bigint;
 }

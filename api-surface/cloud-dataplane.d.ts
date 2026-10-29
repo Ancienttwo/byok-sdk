@@ -63,9 +63,13 @@ export declare class PostgresCloudCleanup {
      */
     replayDeadLetter(tenant: TenantId, input: DeadLetterReplayInput): Promise<MailboxMessage>;
     /**
-     * Explicit operator discard. Automatic retention never deletes dead letters.
-     * A dead letter holds no mailbox quota, so deleting one is the whole
-     * operation.
+     * Explicit operator discard, before the automatic reap reaches the row. A
+     * dead letter holds no mailbox quota, so deleting one is the whole
+     * operation. Like the reap, it never deletes the device's highest-seq dead
+     * letter: that row is the `recoverableFrom` floor, so the guard sits in the
+     * same statement as the DELETE. A dead letter leaves `expired` only by
+     * deletion, so the true highest row has no higher sibling in any snapshot.
+     * The probe after a refused DELETE only picks the error; it decides nothing.
      */
     discardDeadLetter(tenant: TenantId, ref: DeadLetterRef): Promise<MailboxMessage>;
     /**
@@ -138,6 +142,7 @@ export declare const CLOUD_CLEANUP_ERROR_CODES: {
     readonly cleanup_invalid_input: 'cleanup_invalid_input';
     readonly cleanup_policy_missing: 'cleanup_policy_missing';
     readonly cleanup_dead_letter_not_found: 'cleanup_dead_letter_not_found';
+    readonly cleanup_dead_letter_is_recovery_floor: 'cleanup_dead_letter_is_recovery_floor';
     readonly cleanup_accounting_drift: 'cleanup_accounting_drift';
 };
 export type CloudCleanupErrorCode = (typeof CLOUD_CLEANUP_ERROR_CODES)[keyof typeof CLOUD_CLEANUP_ERROR_CODES];
@@ -519,11 +524,13 @@ export declare function createPostgresCoreStores(options: PostgresCoreStoreOptio
  * regression and future cursors are refused with the cursor state they lost
  * to rather than re-delivering or silently skipping work.
  *
- * `collectExpired` deletes acked rows and **marks** unacked ones `expired`. It
- * never deletes an unacked row. §12.7.5 requires an envelope that aged out
- * before anyone consumed it to stay visible; deleting it would make "we dropped
- * work" indistinguishable from "there was no work", and dead-lettering those
- * rows is S4B's job (O-009), not this one's.
+ * `collectExpired` deletes acked rows and **marks** unacked ones `expired`.
+ * It never deletes a `pending` row. §12.7.5 requires an envelope that aged out
+ * before anyone consumed it to stay visible, so a dead letter stays queryable
+ * until its grace period (`reapDeadLettersBefore`) passes. Then it is reaped,
+ * except the device's highest-seq dead letter: that row is the
+ * `recoverableFrom` floor, so losing work stays distinguishable from having
+ * had none.
  *
  * Rows are written only by `outbox-writer.ts`, which also admits them against
  * `mailboxLimitBytes`. Mailbox usage is the sum over the `pending` rows, so

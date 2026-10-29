@@ -1685,7 +1685,7 @@ sequenceDiagram
 
 | 数据 | 建议默认 | 自动删除条件 |
 | --- | --- | --- |
-| mailbox | time-bounded window，按 tenant/device 配置 | 已 ack；未 ack 的过期项先进入 expired/dead-letter 状态，不静默丢失 |
+| mailbox | time-bounded window，按 tenant/device 配置 | 已 ack；未 ack 的过期项先进入 expired/dead-letter 状态，不静默丢失；dead letter 过期后保留 `mailboxDeadLetterRetentionMs`（默认 30 天）可查询，之后自动删除，但每个 device seq 最高的 dead letter 保留为 `recoverableFrom` floor |
 | inbound dedup | 至少覆盖 mailbox 最大重投窗口 | expiry 到期 |
 | request receipts | 至少覆盖 proof clock skew 加 client retry horizon | expiry 到期 |
 | pairing/auth nonce | 10 分钟量级 | used 或 expired |
@@ -1722,7 +1722,7 @@ interface TenantStorageUsage {
 }
 ```
 
-mailbox bytes 不在 `TenantStorageUsage` 里。它只有一个权威：保留的 mailbox 行。用量由 `MailboxStore.readUsage(tenant)` 对租户的 `pending` 行求 `SUM(byteSize)`；`acked` 与 `expired` 行仍保留，但不占配额，丢弃死信也不释放配额（#1115）；`limited` 追加在插入行的同一个串行单元里检查 `mailboxLimitBytes`，超限返回 `storage_quota_exceeded`，没有 entitlement 返回 `storage_entitlement_missing`。只有任务的取消行（`cancellation`）豁免限额，但仍计入用量。删除行不做任何记账（#411）。
+mailbox bytes 不在 `TenantStorageUsage` 里。它只有一个权威：保留的 mailbox 行。用量由 `MailboxStore.readUsage(tenant)` 对租户的 `pending` 行求 `SUM(byteSize)`；`acked` 行与 dead-letter 窗口内的 `expired` 行仍保留，但不占配额，丢弃或回收死信也不释放配额（#1115）；`limited` 追加在插入行的同一个串行单元里检查 `mailboxLimitBytes`，超限返回 `storage_quota_exceeded`，没有 entitlement 返回 `storage_entitlement_missing`。只有任务的取消行（`cancellation`）豁免限额，但仍计入用量。删除行不做任何记账（#411）。
 
 Host 侧的 offer 追加被拒时，attempt 已经先于追加打开（`offered`），设备还看不到它。cloud 抛 `TaskOfferAppendRefusedError`（code `task_offer_append_refused`），`taskId` 指向这个 attempt，`cause` 保留存储层原错误（如 `storage_quota_exceeded`）。Host 没传 `taskId` 时也能拿到 cloud 分配的 id：用同一 `taskId` 和同一 payload 重试，会收敛到同一个 offer 和同一个 message id；也可以直接 `cancelTask`，取消不受限额约束（#387）。
 
@@ -1774,7 +1774,7 @@ task admission 必须按 `limits.maxOutputBytes` 或产品给定预算预留 ter
 | 达 hard limit | 拒绝新的 durable object/inline write；允许读、删、导出、usage 查询、套餐更新与已预留的提交 |
 | 套餐降级后超限 | 进入配置的 grace；不删现有数据；grace 结束后阻止新写，直到用户删除或扩容 |
 
-自动 cleanup 只回收：expired hints/nonces、分类表中的 request receipts（当前为空）、已 ack mailbox、expired reservation、R2 orphan，以及明确过期的 cache/temporary object。用户的 durable truth、board、memory、profile 与 terminal 不因为 quota 满而被自动删除。
+自动 cleanup 只回收：expired hints/nonces、分类表中的 request receipts（当前为空）、已 ack mailbox、超过 dead-letter 窗口的 mailbox 死信（每个 device seq 最高的一条除外）、expired reservation、R2 orphan，以及明确过期的 cache/temporary object。用户的 durable truth、board、memory、profile 与 terminal 不因为 quota 满而被自动删除。
 
 R2 GC 使用 tombstone 加 reconcile：
 
@@ -1795,7 +1795,9 @@ receipt 的唯一分类表保护全部 11 个 SDK families 和未知 key；reque
 为空。redeemed pairing code 是 completion fence 的入口，因此保留到 tenant
  erasure。quota 先 expire reserved，再按剩余 budget 清理过期的 expired/aborted rows；
 committed rows 是 accounting/replay identity，不能被 TTL 清除。
-mailbox 只删 acked；unacked 只标 expired，`releasedBytes` 恒为 0，不读写 usage。
+mailbox 删 acked，再删超过 dead-letter 窗口的 expired（每个 device seq 最高的那条保留为
+recovery floor，计入 `removed`），最后把 unacked 标 expired；quota 只计 pending，
+`releasedBytes` 恒为 0，不读写 usage。
 对象的 tombstone、retry、physical delete 和 settle 共享一个 distinct-object
 budget；PG 在删除期间持有 manifest row lock，SQLite 同步 commit SQL 与 ledger
 release，避免同 hash 重建或 reservation 插入观察到半完成状态。
