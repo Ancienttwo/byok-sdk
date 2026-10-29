@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { hash, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { classifyInbound, inboundKey, isOwner, type InboundMessage, type Principal } from './channel';
 import { stateOf } from './model';

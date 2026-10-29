@@ -4,13 +4,13 @@ import { code, imports } from './import-scan.test-support';
 
 /**
  * #606 §5.5: `rules/` can be copied alone. Its files import only `@byok-sdk/protocol`, `@byok-sdk/core`,
- * `hash` and `canonical` of the K4 `/canonical` entry, and other files in `rules/`. Rule tests can also import vitest.
+ * `hash` and `canonical` of the K4 `@byok-sdk/server/execution-core/canonical` entry, and other files in `rules/`. Rule tests can also import vitest.
  * So no rule and no rule test reaches `LedgerState`, `HostLedger`, `stateOf` or `CollaborationState`.
  * #884: the K4 root entry loads `node:sqlite` and `node:async_hooks`, so the rules never import it.
  */
 const RULES = new URL('./rules/', import.meta.url);
-const K4_ROOT = new URL('../../host-execution-core/', import.meta.url);
-const K4 = '@byok-sdk/example-host-execution-core/canonical';
+const K4_CANONICAL = new URL('../../../packages/server/src/execution-core/canonical.ts', import.meta.url);
+const K4 = '@byok-sdk/server/execution-core/canonical';
 const K4_NAMES = new Set(['hash', 'canonical']);
 const HOST_STATE = /\b(?:LedgerState|HostLedger|stateOf|CollaborationState)\b/;
 
@@ -31,28 +31,26 @@ it('keeps every rule and rule test inside the import boundary', () => {
 
 it('finds a boundary break in each import form that it reads', () => {
   const sample = [
-    "import {\n  hash,\n  HostLedger,\n} from '@byok-sdk/example-host-execution-core';",
+    "import {\n  hash,\n  HostLedger,\n} from '@byok-sdk/server/execution-core';",
     "import type { Turn } from '../model';",
     "export { roomContext } from '../rooms';",
-    "import * as k4 from '@byok-sdk/example-host-execution-core';",
+    "import * as k4 from '@byok-sdk/server/execution-core';",
     "import { expect } from 'vitest';",
     "import 'node:fs';",
     "const team = await import('./../team');",
   ].join('\r\n');
   expect(violations('sample.ts', sample)).toEqual([
-    'sample.ts: @byok-sdk/example-host-execution-core {hash, HostLedger}', 'sample.ts: ../model {Turn}', 'sample.ts: ../rooms {roomContext}',
-    'sample.ts: @byok-sdk/example-host-execution-core', 'sample.ts: vitest {expect}', 'sample.ts: node:fs', 'sample.ts: ./../team',
+    'sample.ts: @byok-sdk/server/execution-core {hash, HostLedger}', 'sample.ts: ../model {Turn}', 'sample.ts: ../rooms {roomContext}',
+    'sample.ts: @byok-sdk/server/execution-core', 'sample.ts: vitest {expect}', 'sample.ts: node:fs', 'sample.ts: ./../team',
     'sample.ts: names Host ledger state',
   ]);
-  expect(violations('sample.test.ts', "import { expect } from 'vitest';\nimport { canonical, hash } from '@byok-sdk/example-host-execution-core/canonical';")).toEqual([]);
-  expect(violations('sample.ts', "import { hash } from '@byok-sdk/example-host-execution-core';"))
-    .toEqual(['sample.ts: @byok-sdk/example-host-execution-core {hash}']);
+  expect(violations('sample.test.ts', "import { expect } from 'vitest';\nimport { canonical, hash } from '@byok-sdk/server/execution-core/canonical';")).toEqual([]);
+  expect(violations('sample.ts', "import { hash } from '@byok-sdk/server/execution-core';"))
+    .toEqual(['sample.ts: @byok-sdk/server/execution-core {hash}']);
 });
 
 it('#884: the K4 entry of the rules loads only node:crypto', () => {
-  const exports = (JSON.parse(readFileSync(new URL('package.json', K4_ROOT), 'utf8')) as { exports: Record<string, string> }).exports;
-  const entry = new URL(exports['./canonical']!, K4_ROOT);
-  expect(imports(readFileSync(entry, 'utf8'))).toEqual([{ from: 'node:crypto', names: ['createHash'] }]);
+  expect(imports(readFileSync(K4_CANONICAL, 'utf8'))).toEqual([{ from: 'node:crypto', names: ['createHash'] }]);
 });
 
 it('holds the #739 D1 pure modules under the boundary', () => {

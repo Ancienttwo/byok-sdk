@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { CompactVetoError, HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, type ExecutionServer, type ExecutionTemplate, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { CompactVetoError, HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, type ExecutionServer, type ExecutionTemplate, type LedgerState } from '@byok-sdk/server/execution-core';
 import { template as k4template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';

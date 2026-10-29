@@ -1,4 +1,4 @@
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { hash } from '@byok-sdk/server/execution-core';
 import type { Mentions } from './rooms';
 
 /** A sender that the channel adapter took from authenticated platform data (docs/host-im-adapter.md R2). */

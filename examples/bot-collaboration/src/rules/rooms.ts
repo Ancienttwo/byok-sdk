@@ -1,5 +1,5 @@
 import type { BotTurnOutcome, RoomFields } from '@byok-sdk/protocol';
-import { canonical, hash } from '@byok-sdk/example-host-execution-core/canonical';
+import { canonical, hash } from '@byok-sdk/server/execution-core/canonical';
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
 import type { TurnFields, TurnsState } from './turn';
 

@@ -1,7 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { WAKE_MAX_FUTURE_MS } from '@byok-sdk/server';
-import { hash } from './model';
-import { nextIntervalOccurrence } from './schedule';
+import { hash, nextIntervalOccurrence } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from './test-support';
 
 let host: TestHost;

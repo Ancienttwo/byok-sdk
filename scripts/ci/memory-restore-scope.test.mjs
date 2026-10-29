@@ -6,9 +6,13 @@ import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
 const id = 'agent-memory-export-linux';
 const sha = 'a'.repeat(40);
-for (const name of ['memory.ts', 'memory-restore.ts', 'memory-restore.test.ts', 'memory-linux.test.ts', 'fixtures/memory-restore-crash.ts']) {
-  const file = `examples/host-execution-core/src/${name}`;
-  test(`${name} requires native restore qualification and aggregate success`, () => {
+// #1106: the K4 memory source moved into the server execution core; its Linux tests stay in the K4 demo.
+for (const file of [
+  'packages/server/src/execution-core/memory.ts', 'packages/server/src/execution-core/memory-restore.ts',
+  'examples/host-execution-core/src/memory-restore.test.ts', 'examples/host-execution-core/src/memory-linux.test.ts',
+  'examples/host-execution-core/src/fixtures/memory-restore-crash.ts',
+]) {
+  test(`${file} requires native restore qualification and aggregate success`, () => {
     assert.deepEqual(selectImpact([file]).families, ['adapter-lifecycle-smoke', id, 'dataplane']);
     for (const event of ['push', 'pull_request']) {
       const plan = planCi({ event, sha, paths: [file] });
@@ -27,6 +31,9 @@ for (const name of ['memory.ts', 'memory-restore.ts', 'memory-restore.test.ts', 
 test('unrelated K4 sources do not fan out to Linux memory qualification', () => {
   for (const name of ['index.ts', 'memory-other.ts', 'memory-restore.test-support.ts', 'fixtures/memory-restore-other.ts', 'fixtures/memory-restore-crash-extra.ts', 'fixtures/nested/memory-restore-crash.ts']) {
     assert.deepEqual(selectImpact([`examples/host-execution-core/src/${name}`]).families, ['adapter-lifecycle-smoke', 'dataplane']);
+  }
+  for (const name of ['index.ts', 'ledger.ts', 'memory-other.ts', 'memory.test.ts']) {
+    assert.deepEqual(selectImpact([`packages/server/src/execution-core/${name}`]).families, ['adapter-lifecycle-smoke', 'dataplane']);
   }
 });
 test('selected Linux family forces restore qualification', () => {

@@ -10,7 +10,7 @@ export { DEFAULT_RETRY, frozenInput, isOccurrenceIntentKey, occurrenceIntentKey,
 export type { IntentInput, LedgerIntentInput, Intent, ExecutionTemplate, SealedExecutionTemplate, IntentExecution, SealedAgentExecutionInput, FrozenExecutionInput, RetryPolicy, AgentRoutineDefinition, HostJobRoutineDefinition, HostJobSpec, HostJobRun, HostJobResult, HostJobHandler,
   HostOccurrenceRoutineDefinition, HostOccurrenceRun, RoutineDefinition, Routine, Occurrence, Conclusion, Json } from './model';
 
-export { HostMemoryPage, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_MAX_BYTES } from './memory';
+export { HostMemoryPage, MemoryBlockedError, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_MAX_BYTES } from './memory';
 export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } from './memory';
 export { hash, canonical, isSealed, project, time, validateJson } from './model';
 export type { LedgerState, IgnoredWakeAudit } from './model';

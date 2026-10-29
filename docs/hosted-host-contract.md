@@ -370,8 +370,8 @@ What the kept rows hold:
 | `agent_message_admission` row | The full publish payload, with the message `body`, in `payload_body` (`NOT NULL`). The payload again in `terminal_body`, with the disposition. | `deploy/sql/0017_agent_message_admission.sql:16-17`, `packages/cloud/src/inbound.ts:262-268`, `packages/cloud/src/inbound.ts:289-296`, `packages/protocol/src/messages.ts:488-499` |
 | `task` row | Status, owner, claim snapshot and cancel marker | `packages/cloud-dataplane/src/stores/task-attempts.ts:53` |
 
-- The SDK has no ContextPack field. The K4 example adds its ContextPack to the inline instruction
-  (`examples/host-execution-core/src/core.ts:498-500`).
+- The SDK has no ContextPack field. The K4 execution core (`@byok-sdk/server/execution-core`) adds its ContextPack to the inline instruction
+  (`packages/server/src/execution-core/core.ts:655-663`).
   So the cloud keeps that ContextPack, with its resident memory text, as long as it keeps the offer receipt.
 - An `agent_message_admission` row goes only when its `task` row goes (`deploy/sql/0017_agent_message_admission.sql:20-22`).
 - The receipt store writes each body as it gets it (`packages/cloud-dataplane/src/stores/receipts.ts:63-73`).

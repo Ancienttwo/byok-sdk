@@ -5,7 +5,7 @@ import { afterEach, expect, it } from 'vitest';
 import * as protocol from '@byok-sdk/protocol';
 import { createByokServer } from '@byok-sdk/server';
 import { openTeam, type TestTeam } from './team.test-support';
-import { hash, HostLedger } from '@byok-sdk/example-host-execution-core';
+import { hash, HostLedger } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import { stateOf, type CollaborationState, type Turn } from './model';

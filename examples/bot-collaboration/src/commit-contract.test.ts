@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
-import { canonical, hash, HostLedger, project, taskId, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, HostLedger, project, taskId, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState } from './model';
 import { admitUserInput, projectInputBatches, sealDueBatches } from './coalesce';
 import { coalescePolicy, type CoalescePolicy } from './rules/coalesce';

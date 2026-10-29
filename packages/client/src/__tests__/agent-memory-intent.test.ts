@@ -25,13 +25,11 @@ import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AgentMemoryIoError,
   AgentMemoryRevisionConflictError,
-  AgentMemoryValidationError,
   agentMemoryHomeBinding,
   appendAgentMemoryHomeAudit,
   compareAndSwapAgentMemoryHomeFile,
   isAgentMemorySecureFilesystemAvailable,
   replaceAgentMemoryHomeInternalFileStrict,
-  validateAgentMemoryPath,
 } from '../daemon/agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
@@ -50,10 +48,8 @@ import {
   parseAgentMemoryIntentLedger,
   serializeAgentMemoryIntentLedger,
   type AgentMemoryIntentBackend,
-  type AgentMemoryIntentFetchInput,
   type AgentMemoryIntentLedgerRecord,
   type AgentMemoryIntentNoticeFailureReason,
-  type AgentMemoryIntentTransport,
 } from '../daemon/agent-memory-intent';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
@@ -61,6 +57,7 @@ import { formatDaemonEventLine } from '../bin/format';
 import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { AgentMemoryValidationError, validateAgentMemoryPath, type AgentMemoryIntentFetchInput, type AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 /*
  * WP2I-S2 — the daemon half of Host-approved Agent memory intents

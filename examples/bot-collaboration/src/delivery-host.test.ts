@@ -5,7 +5,7 @@ import { freezeRuntimeAdapterDescriptor } from '@byok-sdk/client';
 import { BotStubAdapter } from '../../basic/goal-btw.test-support';
 import { afterEach, expect, it, vi } from 'vitest';
 import { tenantId } from '@byok-sdk/core';
-import { HostLedger } from '@byok-sdk/example-host-execution-core';
+import { HostLedger } from '@byok-sdk/server/execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
 import { inboundKey, type ChannelPort, type InboundMessage } from './channel';

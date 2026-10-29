@@ -29,6 +29,10 @@
     "./constants": {
       "types": "./dist/constants.d.ts",
       "import": "./dist/constants.js"
+    },
+    "./agent-memory": {
+      "types": "./dist/agent-memory.d.ts",
+      "import": "./dist/agent-memory.js"
     }
   },
   "files": [

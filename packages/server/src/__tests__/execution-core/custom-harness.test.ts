@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
-import { HostExecutionCore, type ExecutionServer } from './core';
-import { HostLedger } from './ledger';
-import { validateInput, type IntentInput, type ExecutionTemplate } from './model';
+import { HostExecutionCore, type ExecutionServer } from '../../execution-core/core';
+import { HostLedger } from '../../execution-core/ledger';
+import { validateInput, type IntentInput, type ExecutionTemplate } from '../../execution-core/model';
 
 function input(selection: Record<string, unknown>): IntentInput {
   return { key: 'message', source: 'user', waitUntil: 60_000, execution: { deviceId: 'device', payload: {

@@ -1,4 +1,4 @@
-import { canonical } from '@byok-sdk/example-host-execution-core/canonical';
+import { canonical } from '@byok-sdk/server/execution-core/canonical';
 
 /** Bound of one canonical metadata line in the Request section, asserted when the line is built. */
 export const REPLY_META_MAX_BYTES = 2048;

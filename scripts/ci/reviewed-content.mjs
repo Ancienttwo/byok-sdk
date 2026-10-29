@@ -261,10 +261,20 @@ const K8_HOSTED_EXPORTS = Object.freeze({
   './team': './src/team.ts',
   './test-support': './src/commit-vectors.test-support.ts',
 });
-// #884: the K4 entries before the I/O-free entry, and that entry. It exports only
-// hash and canonical and imports only node:crypto, so K8 rules/ loads no ledger.
-const K4_EXPORTS = Object.freeze({ '.': './src/index.ts', './test-support': './src/test-support.ts' });
-const K4_CANONICAL_EXPORTS = Object.freeze({ './canonical': './src/canonical.ts' });
+// #1106: K4 moves into @byok-sdk/server/execution-core. The example keeps only
+// its daemon-backed test harness entry and a description that says so.
+const K4_EXPORTS = Object.freeze({ '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' });
+const K4_DEMO_EXPORTS = Object.freeze({ './test-support': './src/test-support.ts' });
+const K4_DESCRIPTION = Object.freeze({
+  from: 'Copy-and-own Host execution core with a durable FIFO, routine ledger and outbox',
+  to: 'Demo Host composing @byok-sdk/server/execution-core with a real daemon; integration qualification for the published execution core',
+});
+// #1106: the published K4 entries, and the loader the server's forked K4 crash fixtures run under.
+const SERVER_EXECUTION_CORE_EXPORTS = Object.freeze({
+  './execution-core': { types: './dist/execution-core/index.d.ts', import: './dist/execution-core/index.js' },
+  './execution-core/canonical': { types: './dist/execution-core/canonical.d.ts', import: './dist/execution-core/canonical.js' },
+});
+const SERVER_TSX = '^4.19.2';
 // #793 D2g: the K8 retention rule and its shared vectors, added to the hosted
 // entries for H's retention slice (owner question §53d).
 const K8_RETENTION_EXPORTS = Object.freeze({
@@ -412,6 +422,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         && manifest.devDependencies?.esbuild === '0.28.1') {
         delete current.devDependencies.esbuild;
       }
+      if (dir === 'packages/server'
+        && record.devDependencies?.tsx === undefined
+        && current.devDependencies?.tsx === SERVER_TSX
+        && manifest.devDependencies?.tsx === SERVER_TSX) {
+        delete current.devDependencies.tsx;
+      }
       if (dir === 'packages/cloud-do'
         && record.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === undefined
         && current.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === 'workspace:*'
@@ -497,9 +513,10 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     }
   } else if (path === 'examples/host-execution-core/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The host execution core example must stay private');
-    // #884: only the ./canonical entry, only on top of exactly the existing entries.
-    if (isDeepStrictEqual(before.exports, K4_EXPORTS) && isDeepStrictEqual(after.exports, { ...K4_EXPORTS, ...K4_CANONICAL_EXPORTS })) {
-      after.exports = before.exports;
+    // #1106: the core entries leave together with the description, from exactly the old entries.
+    if (isDeepStrictEqual(before.exports, K4_EXPORTS) && isDeepStrictEqual(after.exports, K4_DEMO_EXPORTS)
+      && before.description === K4_DESCRIPTION.from && after.description === K4_DESCRIPTION.to) {
+      after.exports = before.exports; after.description = before.description;
     }
   } else if (path === 'package.json') {
     // repo-harness owns its generated command scripts. Admit additions, removals
@@ -582,6 +599,19 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     if (path === 'packages/server/package.json'
       && before.description === SERVER_DESCRIPTION.from && after.description === SERVER_DESCRIPTION.to) {
       after.description = before.description;
+    }
+    if (path === 'packages/protocol/package.json') {
+      // #1106: the zod-free Agent memory Host contract, one runtime definition shared by client and server.
+      const entry = { types: './dist/agent-memory.d.ts', import: './dist/agent-memory.js' };
+      if (before.exports?.['./agent-memory'] === undefined && isDeepStrictEqual(after.exports?.['./agent-memory'], entry)) delete after.exports['./agent-memory'];
+    }
+    if (path === 'packages/server/package.json') {
+      // #1106: the two K4 subpaths, added together, and tsx for the forked K4 crash fixtures.
+      if (Object.keys(SERVER_EXECUTION_CORE_EXPORTS).every(key => before.exports?.[key] === undefined
+        && isDeepStrictEqual(after.exports?.[key], SERVER_EXECUTION_CORE_EXPORTS[key]))) {
+        for (const key of Object.keys(SERVER_EXECUTION_CORE_EXPORTS)) delete after.exports[key];
+      }
+      if (before.devDependencies?.tsx === undefined && after.devDependencies?.tsx === SERVER_TSX) delete after.devDependencies.tsx;
     }
     if (path === 'packages/cloud-do/package.json'
       && before.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === undefined

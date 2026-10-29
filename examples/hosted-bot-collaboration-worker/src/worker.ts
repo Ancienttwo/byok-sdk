@@ -26,7 +26,7 @@ import { CLOUD_CAPABILITIES, createByokCloud, createHmacTokenSigner, createInPro
   tenantId, type ByokCloud, type ByokCloudObserver, type TenantId } from '@byok-sdk/cloud';
 import { createByokPool, createPostgresCloudStores, createPostgresCoreStores } from '@byok-sdk/cloud-dataplane/runtime';
 import { COALESCE_DEFAULTS } from '@byok-sdk/example-bot-collaboration/coalesce';
-import type { FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
+import type { FrozenSubmitPort } from '@byok-sdk/server/execution-core';
 import { EntryRefusedError, HostedCollaborationStore, HostedCommandEntry, HostedDeviceObserver, HostedDueScheduler, HostedReconciler,
   HostedReplyChecker, HostedRoutineScheduler, HostedSubmitter, hostedMessageConsumer, UnauthenticatedError, type HostedSyncOptions,
   type HostedTaskPort } from '@byok-sdk/example-hosted-bot-collaboration/src/index';

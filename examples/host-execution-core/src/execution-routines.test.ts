@@ -1,6 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { HostExecutionCore, type OutcomeTransaction } from './core';
-import { hash, type HostJobRoutineDefinition, type Json, type RoutineDefinition } from './model';
+import {
+  HostExecutionCore,
+  hash,
+  type OutcomeTransaction,
+  type HostJobRoutineDefinition,
+  type Json,
+  type RoutineDefinition,
+} from '@byok-sdk/server/execution-core';
 import { openHost, type TestHost } from './test-support';
 
 // #954: `HostOptions.executionRoutines: 'refuse'` is for a Host that has no owner for an occurrence intent (K8 L).

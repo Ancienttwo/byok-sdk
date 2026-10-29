@@ -41,7 +41,6 @@ assert.deepEqual(Object.keys(agentMemory).sort(), [
   'AGENT_MEMORY_GUIDANCE',
   'AGENT_MEMORY_RECALL_TOOL_NAME',
   'AGENT_MEMORY_SAVE_TOOL_NAME',
-  'AgentMemoryError',
   'AgentMemoryRevisionConflictError',
   'AgentMemoryService',
   'captureAgentMemorySnapshot',
@@ -50,27 +49,25 @@ assert.deepEqual(Object.keys(agentMemory).sort(), [
   'openAgentMemoryFilesystemHelper',
   'prependAgentMemoryGuidance',
   'serveAgentMemoryMcpOverStdio',
-  'validateAgentMemoryPath',
 ]);
 
 assert.equal(agentMemory.AGENT_MEMORY_RECALL_TOOL_NAME, 'memory_recall');
 assert.equal(agentMemory.AGENT_MEMORY_SAVE_TOOL_NAME, 'memory_save');
-assert.equal(agentMemory.validateAgentMemoryPath('MEMORY.md'), 'MEMORY.md');
-assert.throws(() => agentMemory.validateAgentMemoryPath('../escape.md'), /memory path/);
 assert.equal(typeof agentMemory.isAgentMemorySecureFilesystemAvailable(false), 'boolean');
 assert.equal(agentMemory.prependAgentMemoryGuidance('do the thing').endsWith('\n\ndo the thing'), true);
 
-// tsup emits each entry as its own bundle (`splitting: false`), so the two
-// `AgentMemoryError` classes are distinct constructors. `instanceof` therefore
-// does NOT hold across entries — the same reason `check-adapters-entry.mjs`
-// crosses entries through `isRuntimeExecutionFailure` rather than `instanceof`.
-// `.name` is the stable cross-entry discriminator, and this asserts both halves
-// so the trade-off cannot silently change shape.
+// tsup emits each entry as its own bundle (`splitting: false`), so a class
+// defined in this package is a distinct constructor per entry and `instanceof`
+// does NOT hold across entries. The base `AgentMemoryError` is defined once in
+// `@byok-sdk/protocol/agent-memory`, which both entries import externally, so `instanceof`
+// against it holds from either entry. `.name` stays the cross-entry
+// discriminator for the subclasses; this asserts both halves.
 const root = await import(new URL('../dist/index.js', import.meta.url));
-assert.notEqual(agentMemory.AgentMemoryError, root.AgentMemoryError);
-const entryError = new agentMemory.AgentMemoryError('probe');
-assert.equal(entryError instanceof root.AgentMemoryError, false);
-assert.equal(entryError.name, 'AgentMemoryError');
+const { AgentMemoryError } = await import('@byok-sdk/protocol/agent-memory');
+assert.notEqual(agentMemory.AgentMemoryRevisionConflictError, root.AgentMemoryRevisionConflictError);
+const entryError = new agentMemory.AgentMemoryRevisionConflictError('a', 'b');
+assert.equal(entryError instanceof root.AgentMemoryRevisionConflictError, false);
+assert.equal(entryError instanceof AgentMemoryError, true);
 assert.equal(new agentMemory.AgentMemoryRevisionConflictError('a', 'b').name, 'AgentMemoryRevisionConflictError');
 
 console.log(JSON.stringify({

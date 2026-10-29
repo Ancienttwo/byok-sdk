@@ -1,7 +1,7 @@
 import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '@byok-sdk/core';
 import { TaskOfferSealedPayloadSchema, type CreateRoutineAction, type RoutineScheduleFields, type UpdateRoutineAction } from '@byok-sdk/protocol';
 import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceOfIntentKey, type ExecutionTemplate, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState,
-  type NextOccurrence, type Routine } from '@byok-sdk/example-host-execution-core';
+  type NextOccurrence, type Routine } from '@byok-sdk/server/execution-core';
 import { addTurn, json, type Authority, type CollaborationState, type Turn } from './model';
 import { SYSTEM_PROMPT } from './rules/schema';
 import type { SealedRoutineTemplate } from './rules/sync';

@@ -1,5 +1,5 @@
 import type { ByokServer } from '@byok-sdk/server';
-import { HostLedger, project } from '@byok-sdk/example-host-execution-core';
+import { HostLedger, project } from '@byok-sdk/server/execution-core';
 import { stateOf } from './model';
 import { deviceRefusal, homeSent } from './topology';
 import { applyHomeTerminal, checkHomeReadback, failHomeFlush, homeEnqueued, homeHead, homeRequests, planHomeRetry, type HomeReadback } from './team';

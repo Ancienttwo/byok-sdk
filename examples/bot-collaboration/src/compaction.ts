@@ -1,4 +1,4 @@
-import { hash, type CompactVeto, type HostLedger, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { hash, type CompactVeto, type HostLedger, type LedgerState } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Turn } from './model';
 import { routineOccurrence } from './routines';
 import { compactVeto } from './rules/commands';

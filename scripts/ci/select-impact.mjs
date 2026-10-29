@@ -60,7 +60,8 @@ export const workspaceGraph = {
       "@byok-sdk/cloud-dataplane",
       "@byok-sdk/core",
       "@byok-sdk/example-bot-collaboration",
-      "@byok-sdk/example-host-execution-core"
+      "@byok-sdk/example-host-execution-core",
+      "@byok-sdk/server"
     ]
   },
   "examples/hosted-bot-collaboration-worker": {
@@ -71,7 +72,8 @@ export const workspaceGraph = {
       "@byok-sdk/cloud-dataplane",
       "@byok-sdk/example-bot-collaboration",
       "@byok-sdk/example-host-execution-core",
-      "@byok-sdk/example-hosted-bot-collaboration"
+      "@byok-sdk/example-hosted-bot-collaboration",
+      "@byok-sdk/server"
     ]
   },
   "examples/live-activity-host": {
@@ -190,8 +192,8 @@ export const knownFamilies = Object.freeze([
 export const familyOwners = Object.freeze({
   'agent-memory-export-linux': [
     /^examples\/host-execution-core\/src\/fixtures\/memory-restore-crash\.ts$/,
-    /^examples\/host-execution-core\/src\/memory\.ts$/,
-    /^examples\/host-execution-core\/src\/memory-restore\.ts$/,
+    // #1106: the K4 memory source now lives in the server execution core.
+    /^packages\/server\/src\/execution-core\/memory(?:-restore)?\.ts$/,
     /^examples\/host-execution-core\/src\/memory-restore\.test\.ts$/,
     /^examples\/host-execution-core\/src\/memory-linux\.test\.ts$/,
     /^packages\/client\/src\/daemon\/agent-memory-(?:export|filesystem|fs-helper)\.ts$/,
@@ -221,6 +223,8 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
     /^packages\/client\/scripts\/adapter-task-smoke\.mjs$/,
     /^examples\/(?:host-execution-core|bot-collaboration)\//,
+    // #1106: the K4 source the K4 Windows qualification runs against.
+    /^packages\/server\/src\/execution-core\//,
     /^examples\/basic\/goal-btw\.test-support\.ts$/,
     /^scripts\/ci\/run-windows-bot-tests\.mjs$/,
     /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,

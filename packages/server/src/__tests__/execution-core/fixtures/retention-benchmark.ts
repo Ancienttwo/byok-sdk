@@ -1,12 +1,12 @@
 // Bounded synthetic measurement. Creates and removes only its own temporary databases.
-// Run from this example: node --import tsx src/fixtures/retention-benchmark.ts [baseline-ledger-module-url]
+// Run from packages/server: node --import tsx src/__tests__/execution-core/fixtures/retention-benchmark.ts [baseline-ledger-module-url]
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from '../ledger';
-import { hash, type IntentInput } from '../model';
-import { enqueue, settle } from '../transitions';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from '../../../execution-core/ledger';
+import { hash, type IntentInput } from '../../../execution-core/model';
+import { enqueue, settle } from '../../../execution-core/transitions';
 
 const Ledger = process.argv[2] ? (await import(process.argv[2])).HostLedger as typeof HostLedger : HostLedger;
 const root = mkdtempSync(join(tmpdir(), 'k4-retention-benchmark-'));

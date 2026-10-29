@@ -8,7 +8,7 @@ test('reviewed K4 plan is documentation while implementation retains its qualifi
   assert.equal(docs.reason, 'docs-only');
   assert.deepEqual(docs.dirs, []);
   assert.deepEqual(docs.families, []);
-  const code = selectImpact([path, 'examples/host-execution-core/src/core.ts']);
+  const code = selectImpact([path, 'packages/server/src/execution-core/core.ts']);
   assert.ok(code.dirs.includes('examples/host-execution-core'));
   assert.ok(code.dirs.includes('examples/byok-mcp-server'));
   assert.ok(code.families.includes('adapter-lifecycle-smoke'));

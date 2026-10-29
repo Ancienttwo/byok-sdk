@@ -1,9 +1,9 @@
 // Test process only. In crash mode the occurrence hook kills this process inside the occurrence commit.
 import { appendFileSync } from 'node:fs';
 import path from 'node:path';
-import { createByokServer } from '@byok-sdk/server';
-import { HostExecutionCore } from '../core';
-import { HostLedger } from '../ledger';
+import { createByokServer } from '../../../index';
+import { HostExecutionCore } from '../../../execution-core/core';
+import { HostLedger } from '../../../execution-core/ledger';
 
 const root = process.argv[2]!;
 const crash = process.argv[3] === 'crash';

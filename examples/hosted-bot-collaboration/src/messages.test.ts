@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ByokCloudOptions } from '@byok-sdk/cloud';
-import { taskId } from '@byok-sdk/example-host-execution-core';
+import { taskId } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent } from './intents';

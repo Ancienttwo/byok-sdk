@@ -1,16 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { agentMemoryIntentOperationDigest } from '@byok-sdk/core';
 import {
-  AgentMemoryIntentCompletionSchema, AgentMemoryIntentReadbackSchema, AgentMemoryIntentV1Schema,
+  AgentMemoryIntentCompletionSchema,
+  AgentMemoryIntentReadbackSchema,
+  AgentMemoryIntentV1Schema,
   AgentMemoryProjectionMutationSchema,
-  type AgentMemoryIntentCompletion, type AgentMemoryIntentReadback, type AgentMemoryIntentV1,
+  type AgentMemoryIntentCompletion,
+  type AgentMemoryIntentReadback,
+  type AgentMemoryIntentV1,
   type AgentMemoryProjectionMutation,
 } from '@byok-sdk/protocol';
-import type { AgentMemoryExport, AgentMemoryIntentTransport, AgentMemoryProjectionPort } from '@byok-sdk/client';
 import { HostLedger } from './ledger';
 import { MemoryRestoreCoordinator, memoryRestoreBlocked, recordRestoreTerminal, type MemoryRestoreInput, type MemoryRestoreResult, type MemoryRestoreRow } from './memory-restore';
 import { canonical, hash } from './model';
 import type { LedgerState } from './model';
+import type { AgentMemoryExport, AgentMemoryIntentTransport, AgentMemoryProjectionPort } from '@byok-sdk/protocol/agent-memory';
 
 // Only repairable projection failures can hold an Agent queue.
 export class MemoryBlockedError extends Error {}
@@ -76,7 +80,7 @@ function sameIdentity(intent: AgentMemoryIntentV1, completion: AgentMemoryIntent
     && intent.path === completion.path && intent.operation === completion.operation && intent.operationDigest === completion.operationDigest;
 }
 
-/** Copy-and-own Host logic. Public commands require authenticated Host approval. */
+/** Host memory authority over the execution ledger. Public commands require authenticated Host approval. */
 export class HostMemoryPage {
   private readonly listeners = new Set<(binding: MemoryBinding) => Promise<void>>();
   onChange(listener: (binding: MemoryBinding) => Promise<void>): () => void {

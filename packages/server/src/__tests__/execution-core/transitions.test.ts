@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { agentKey, fifoHeads, hash, HostExecutionCore, HostLedger, queuedExpiry, type ExecutionServer, type IntentInput } from './index';
+import { agentKey, fifoHeads, hash, HostExecutionCore, HostLedger, queuedExpiry, type ExecutionServer, type IntentInput } from '../../execution-core/index';
 
 describe('queuedExpiry', () => {
   const open = { waitUntil: 100 };

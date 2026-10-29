@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { hash, taskId, type Conclusion, type FrozenInput, type FrozenSubmitPort, type Intent, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId, type Conclusion, type FrozenInput, type FrozenSubmitPort, type Intent, type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { routineVectors, type OccurrenceRow, type RoutineSubject } from '@byok-sdk/example-bot-collaboration/routine-vectors';
