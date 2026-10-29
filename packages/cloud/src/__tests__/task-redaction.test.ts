@@ -117,6 +117,7 @@ function createFixture(withStore = true): Fixture {
   const { store, calls } = receiptRedactionStore(base);
   const consumed: string[] = [];
   const cloud = createByokCloud({
+    proofReceiptRetention: base.proofReceiptRetention,
     core: base.core,
     cloud: base.stores,
     mailboxWake: base.mailboxWake,

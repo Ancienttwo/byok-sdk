@@ -76,6 +76,7 @@ function createFullHarness(): FullHarness {
     tokenSigner: createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(32)), base.clock),
     clock: base.clock,
     longPollHoldMs: 20,
+    proofReceiptRetention: base.proofReceiptRetention,
     capabilities: capabilityDeclarationForPorts(ports),
     ...ports,
   });

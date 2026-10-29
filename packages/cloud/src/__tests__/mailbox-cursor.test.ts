@@ -310,6 +310,7 @@ describe('enqueueAgentOffer', () => {
       },
     };
     const skewed = createByokCloud({
+      proofReceiptRetention: base.proofReceiptRetention,
       core: skewedCore,
       cloud: base.stores,
       mailboxWake: base.mailboxWake,

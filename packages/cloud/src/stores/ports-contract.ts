@@ -49,6 +49,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   // in this table (docs/researches/s4a-dataplane-design.md §6).
   blobs: ['createUpload', 'observeUpload', 'getDownloadUrl'],
   rateLimiter: ['consume'],
+  taskArchive: ['listWork', 'archive', 'settle'],
 };
 
 /** The interface each port name is declared as, for a source-side scan. */
@@ -68,4 +69,5 @@ export const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>> = {
   proofReceipts: 'ProofRequestReceiptStore',
   blobs: 'CloudBlobStore',
   rateLimiter: 'InboundRateLimiter',
+  taskArchive: 'TaskArchiveStore',
 };

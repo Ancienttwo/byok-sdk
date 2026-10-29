@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "a673324405ffe36969bf42b8b2875eb7bb85d0ef33b1bc8a7f24811137d78ee3"
+    "snapshotSha256": "c50bcac00f74dcd37de989c6c0438d46096cb80c0aba85f09465947b2ddc9196"
   },
   "configFields": {
     "status": "tracked",
@@ -276,6 +276,54 @@
         "export:@byok-sdk/cloud-dataplane/runtime#CLOUD_CLEANUP_ERROR_CODES",
         "export:@byok-sdk/core#MailboxCollectExpiredInput",
         "store:cloud-dataplane-postgres"
+      ]
+    },
+    {
+      "id": "terminal-task-archive",
+      "impact": "breaking",
+      "summary": "Automatic maintenance gains a tasks step (#1120), run after mailbox: a terminal task is archived terminalTaskArchiveMs (default 90 days, at least mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs) after it ended. In one store transaction its bodies become redaction tombstones, its ephemeral rows and sealed-task object references go and archived_at is set; then its board item is removed (archived tasks leave the board). The task row and tombstoned receipts stay as the replay fence until tenant deletion (about 1.2 KB per task on Postgres). Content reads answer task_content_redacted; status reads stay. A replayed winning task.claim is now rejected not_permitted, as after redaction. RetentionPolicy gains terminalTaskArchiveMs, so a Host passing a complete policy adds it. CloudStores gains the required taskArchive port and BoardStore gains remove (idempotent): a custom store implements both. TaskAttempt gains archivedAt. Migration 0032 adds the policy column and the task archive columns and backfills archive_after once from COALESCE(terminal_at, updated_at) for terminal rows; count terminal rows first, see the runbook. Embedded SQLite files add the columns and the same backfill on open.",
+      "migration": "deploy/runbooks/cloud-cleanup.md#terminal-task-archive-migration-1120",
+      "items": [
+        "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
+        "export:@byok-sdk/cloud#CloudStores",
+        "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+        "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
+        "export:@byok-sdk/cloud#MAINTENANCE_STEPS",
+        "export:@byok-sdk/cloud#MaintenanceStepReport",
+        "export:@byok-sdk/cloud#TaskArchiveCounts",
+        "export:@byok-sdk/cloud#TaskArchiveListInput",
+        "export:@byok-sdk/cloud#TaskArchiveStepCounts",
+        "export:@byok-sdk/cloud#TaskArchiveStore",
+        "export:@byok-sdk/cloud#TaskArchiveStoreInput",
+        "export:@byok-sdk/cloud#TaskArchiveStoreResult",
+        "export:@byok-sdk/cloud#TaskArchiveWork",
+        "export:@byok-sdk/cloud#TaskAttempt",
+        "export:@byok-sdk/cloud#createInMemoryCloudStores",
+        "export:@byok-sdk/cloud-dataplane#PostgresBoardStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresBoardStore",
+        "export:@byok-sdk/core#BoardStore",
+        "export:@byok-sdk/core#InMemoryBoardStore"
+      ]
+    },
+    {
+      "id": "proof-receipt-retention-required",
+      "impact": "breaking",
+      "summary": "ByokCloudOptions.proofReceiptRetention is required (#1120): every deployment prunes used device-proof request ids, so the proofReceipts maintenance step never reports not-configured. A Host that omitted it passes its ProofReceiptRetentionAuthority (Postgres: PostgresProofReceiptRetentionAuthority; in-memory compositions now carry InMemoryProofReceiptRetentionAuthority as proofReceiptAuthority).",
+      "migration": "docs/spec.md#cloud-maintenance-contract",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloudOptions",
+        "export:@byok-sdk/cloud#InMemoryByokCloud",
+        "export:@byok-sdk/cloud#InMemoryCloudComposition"
+      ]
+    },
+    {
+      "id": "mailbox-wake-probe",
+      "impact": "additive",
+      "summary": "The Postgres mailbox wake LISTEN connection enables TCP keepalive and probes itself every probeIntervalMs (default 30 s); a probe that is not observed reconnects and reports a MailboxWakeProbeMissedError through onError (#1120). No Host change is needed.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1120",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions"
       ]
     }
   ],
@@ -772,9 +820,19 @@
       "entry": "device-route-rate-admission"
     },
     {
+      "item": "export:@byok-sdk/cloud#ByokCloudOptions",
+      "change": "changed",
+      "entry": "proof-receipt-retention-required"
+    },
+    {
       "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
       "change": "changed",
       "entry": "capability-ports-two-way"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
+      "change": "changed",
+      "entry": "terminal-task-archive"
     },
     {
       "item": "export:@byok-sdk/cloud#CapabilityPorts",
@@ -782,9 +840,34 @@
       "entry": "capability-ports-two-way"
     },
     {
+      "item": "export:@byok-sdk/cloud#CloudStores",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
       "change": "changed",
       "entry": "device-route-rate-admission"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryByokCloud",
+      "change": "changed",
+      "entry": "proof-receipt-retention-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryCloudComposition",
+      "change": "changed",
+      "entry": "proof-receipt-retention-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
     },
     {
       "item": "export:@byok-sdk/cloud#InboundOutcome",
@@ -800,6 +883,16 @@
       "item": "export:@byok-sdk/cloud#InboundResult",
       "change": "changed",
       "entry": "device-route-rate-admission"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MAINTENANCE_STEPS",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MaintenanceStepReport",
+      "change": "changed",
+      "entry": "terminal-task-archive"
     },
     {
       "item": "export:@byok-sdk/cloud#MintedAccessToken",
@@ -822,6 +915,46 @@
       "entry": "dead-letter-retention"
     },
     {
+      "item": "export:@byok-sdk/cloud#TaskArchiveCounts",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveListInput",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveStepCounts",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveStore",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveStoreInput",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveStoreResult",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveWork",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttempt",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TenantBoundRateLimiter",
       "change": "changed",
       "entry": "device-route-rate-admission"
@@ -832,14 +965,34 @@
       "entry": "capability-ports-two-way"
     },
     {
+      "item": "export:@byok-sdk/cloud#createInMemoryCloudStores",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#CLOUD_CLEANUP_ERROR_CODES",
       "change": "changed",
       "entry": "dead-letter-retention"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+      "change": "added",
+      "entry": "mailbox-wake-probe"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresBoardStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
       "change": "changed",
       "entry": "dataplane-rate-limit-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+      "change": "changed",
+      "entry": "mailbox-wake-probe"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresRateLimitOptions",
@@ -852,6 +1005,11 @@
       "entry": "dead-letter-retention"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresBoardStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
       "change": "changed",
       "entry": "dataplane-rate-limit-required"
@@ -860,6 +1018,16 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresRateLimitOptions",
       "change": "added",
       "entry": "dataplane-rate-limit-required"
+    },
+    {
+      "item": "export:@byok-sdk/core#BoardStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryBoardStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
     },
     {
       "item": "export:@byok-sdk/core#LocalStoreId",
@@ -950,7 +1118,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
-      "after": "migrations=31 last=0031_mailbox_dead_letter_retention.sql sha256=0475fb80913fc49a",
+      "after": "migrations=32 last=0032_terminal_task_archive.sql sha256=9adc7c7bdc67eaac",
       "entry": "dead-letter-retention"
     }
   ]

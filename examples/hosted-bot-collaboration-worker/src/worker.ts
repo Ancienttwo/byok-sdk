@@ -24,7 +24,7 @@
 import pg from 'pg';
 import { CLOUD_CAPABILITIES, createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration,
   tenantId, type ByokCloud, type ByokCloudObserver, type TenantId } from '@byok-sdk/cloud';
-import { createByokPool, createPostgresCloudStores, createPostgresCoreStores } from '@byok-sdk/cloud-dataplane/runtime';
+import { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresProofReceiptRetentionAuthority } from '@byok-sdk/cloud-dataplane/runtime';
 import { COALESCE_DEFAULTS } from '@byok-sdk/example-bot-collaboration/coalesce';
 import type { FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import { EntryRefusedError, HostedCollaborationStore, HostedCommandEntry, HostedDeviceObserver, HostedDueScheduler, HostedReconciler,
@@ -163,7 +163,7 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
     const consumer = hostedMessageConsumer(store, { scopeOf });
     const observer: ByokCloudObserver = { onInboundCommitted: () => { notify(); } };
     const declared = fullCapabilityDeclaration();
-    const cloud = createByokCloud({ core, cloud: stores, clock, crypto, observer,
+    const cloud = createByokCloud({ proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(sdkPool) }, core, cloud: stores, clock, crypto, observer,
       mailboxWake: createInProcessMailboxWake({ fallbackMs: 1_000 }),
       tokenSigner: createHmacTokenSigner(hexBytes(env.BYOK_TOKEN_SECRET), clock),
       // An object-storage composition hands out presigned URLs, so it declares no byte proxy.

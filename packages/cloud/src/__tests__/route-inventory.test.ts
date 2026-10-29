@@ -292,6 +292,7 @@ function cloudWith(options: { readonly capabilities: CapabilityDeclaration; read
     objectBytes,
   );
   return createByokCloud({
+    proofReceiptRetention: { authority: composition.proofReceiptAuthority },
         mailboxWake: createInProcessMailboxWake(),
     core,
     cloud: composition.stores,

@@ -350,12 +350,11 @@ Current behavior:
 - So the mailbox copy of an acked offer goes.
   The mailbox copy of an offer that the device never acked stays as a dead letter for the dead-letter window.
   The receipt copy stays in both cases.
-- Used device-proof request ids live in `proof_request_receipt`. The `proofReceipts` step prunes them only when the Host
-  passes `proofReceiptRetention: { authority }` to `createByokCloud`; the authority is a `PostgresProofReceiptRetentionAuthority`
+- Used device-proof request ids live in `proof_request_receipt`. The Host must pass
+  `proofReceiptRetention: { authority }` to `createByokCloud` (#1120); the authority is a `PostgresProofReceiptRetentionAuthority`
   from `@byok-sdk/cloud-dataplane/runtime`, over the same table as the `proofReceipts` port
-  (`packages/cloud/src/cloud.ts:311`, `packages/cloud-dataplane/src/stores/proof-receipts.ts:104`).
-  Without it the step reports `not-configured` and the table keeps every row.
-  With it the step deletes rows recorded more than `proofReceiptRetentionMs` before `now`: 24 hours by default,
+  (`packages/cloud-dataplane/src/stores/proof-receipts.ts:104`).
+  The step deletes rows recorded more than `proofReceiptRetentionMs` before `now`: 24 hours by default,
   at least 15 minutes, checked at construction (`packages/cloud/src/maintenance.ts:48-70`).
   Within the retention a `requestId` stays single-use.
 
@@ -374,6 +373,11 @@ What the kept rows hold:
   (`examples/host-execution-core/src/core.ts:498-500`).
   So the cloud keeps that ContextPack, with its resident memory text, as long as it keeps the offer receipt.
 - An `agent_message_admission` row goes only when its `task` row goes (`deploy/sql/0017_agent_message_admission.sql:20-22`).
+- The `tasks` maintenance step archives a terminal task once its `archive_after` is older than `terminalTaskArchiveMs`
+  (default 90 days) (#1120). Every body in the table above becomes a body-free tombstone (hash, byte length, envelope type),
+  the free-text terminal cause and cancel reason are cleared, and the board item is removed. The rows themselves stay as
+  the task's identity fence and are never deleted; only tenant erasure removes them. Archived tasks leave the board.
+  See [the cleanup runbook](../deploy/runbooks/cloud-cleanup.md) for migration 0032's backfill.
 - The receipt store writes each body as it gets it (`packages/cloud-dataplane/src/stores/receipts.ts:63-73`).
   For a task whose offer has `sealing`, a body of a sealed category holds the sealed member, so the store keeps ciphertext ([protocol §2.5](protocol.md#25-sealed-payload-v1-654-gated-addition)).
   Every other body is plaintext. [security.md, Sealed tasks](security.md#sealed-tasks) lists what a sealed task still shows the Host.

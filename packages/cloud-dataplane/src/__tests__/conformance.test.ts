@@ -42,6 +42,7 @@ import {
   SKIP_DATAPLANE,
   SKIP_REASON,
 } from './support/dataplane';
+import { PostgresProofReceiptRetentionAuthority } from '../stores/proof-receipts';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const OFFER_TENANT = tenantId('tenant-offer-sequence');
@@ -126,6 +127,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
       });
       const full = fullCapabilityDeclaration();
       const cloud = createByokCloud({
+        proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(scope.pool) },
         mailboxWake: createInProcessMailboxWake(),
         core,
         cloud: stores,

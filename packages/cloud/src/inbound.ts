@@ -81,6 +81,7 @@ import { isCloudError } from './errors';
 import { projectTerminalToReview } from './board-projection';
 import { agentReliabilityKey } from './agent-reliability';
 import type { TenantStores } from './tenant-stores';
+import type { TaskAttempt } from './stores/ports';
 import { isTaskRedactionTombstone, taskRedactionReceiptKey } from './task-redaction';
 import {
   releaseSealedCiphertext,
@@ -723,13 +724,13 @@ async function applyInboundGate(
   ) {
     return refuse('agent_identity_mismatch');
   }
-  // A redacted task keeps no new content. A late progress, approval or
-  // artifact report is complete as received, the same as one stored and then
-  // redacted. So is a terminal that names its ciphertext blob: redaction
-  // deleted the blob, and the terminal receipt is already a tombstone.
+  // A redacted or archived task keeps no new content. A late progress,
+  // approval or artifact report is complete as received, the same as one
+  // stored and then redacted. So is a terminal that names its ciphertext blob:
+  // its references are gone, and the terminal receipt is already a tombstone.
   if ((REDACTABLE_REPORT_TYPES.includes(envelope.type) || ciphertextRef !== undefined)
     && TERMINAL_TASK_STATUSES.includes(attempt.status)
-    && await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
+    && await taskContentRemoved(stores, attempt)) {
     return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
   }
   const sealingRefusal = await sealedOutputRefusal(stores, deviceId, taskId, attempt.agentRef, envelope);
@@ -1003,6 +1004,11 @@ async function recordTerminal(
 }
 
 /** The ciphertext blob hash a stored terminal names; none for a plaintext terminal or a tombstone. */
+/** Redaction writes an audit receipt; the archive step (#1120) sets `archivedAt`. Either removed the task's content. */
+async function taskContentRemoved(stores: TenantStores, attempt: TaskAttempt): Promise<boolean> {
+  return attempt.archivedAt !== undefined || await stores.receipts.get(taskRedactionReceiptKey(attempt.taskId)) !== undefined;
+}
+
 function storedCiphertextHash(body: string): string | undefined {
   try {
     return sealedCiphertextRef(decodeEnvelope(body).payload)?.contentHash;
