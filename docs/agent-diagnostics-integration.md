@@ -74,6 +74,8 @@ byok-agent support-bundle --output /absolute/new-support-bundle.json --config /a
 | control `offline` | 显示“无法连接本地服务”，引导检查服务 | control online 只证明可连接；offline 不能证明进程已退出 |
 | `lifecycle` 检查 `fail`（`phase=halted`） | 显示 `reason` 与检查给出的修复方法（例如 `device_revoked` 需重新配对），不自动重启服务 | 修复后重新 `start`；halt 不会因重启消失，`--service` 下进程以 0 退出并保持停止 |
 | `lifecycle` 检查 `warn`（unknown） | 显示“尚无生命周期记录” | 只表示 `audit.jsonl` 里没有 lifecycle 事件，不代表 daemon 健康或已停止 |
+| `clock-skew` 检查 `warn`（测量值超出窗口） | 显示设备时钟比服务端快或慢多少，提示用户校准系统时间 | 超出的是默认 60 秒窗口（Host 可放宽到 5 分钟），超出窗口的设备 proof 会被服务端拒绝；读数只在 daemon 的 pair 或 token 续期时更新，校准后要等下一次续期才会变 |
+| `clock-skew` 检查 `warn`（unknown） | 显示“尚未测得” | 原因是 daemon 离线，或启动后没有可解析的服务端 `Date`；doctor 不联网也不读凭证，不代表时钟正常 |
 | health `corrupt` | 提供“隔离损坏的健康记录” | 仅适用下一节流程，不宣称修复 Agent、journal 或业务任务 |
 | health/journal `unavailable` | 显示“无法完成检查”，导出材料并排查访问条件 | 不等同 corrupt，不启用破坏性修复 |
 | journal `corrupt` | 停止继续派发相关工作，保留证据并升级处理 | 无 doctor rebuild；需要明确的数据恢复方案，不能删库重配 |
