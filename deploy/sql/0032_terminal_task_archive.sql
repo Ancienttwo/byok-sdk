@@ -1,10 +1,20 @@
 -- #1120: terminal tasks are archived after a retention window.
 --
 -- 1. `tenant_retention_policy.terminal_task_archive_ms` is how long a terminal
---    task keeps its bodies. Existing policies take the 90-day column default.
---    The application always writes the column and checks that it is at least
---    mailbox_unacked_retention_ms + mailbox_dead_letter_retention_ms; the
---    default stays so a rolled-back application can still write a policy.
+--    task keeps its bodies, at least mailbox_unacked_retention_ms +
+--    mailbox_dead_letter_retention_ms. Each stored policy gets 90 days, or
+--    that sum when it is longer; its other columns are not changed. The
+--    column is NOT NULL with no default: the application writes it
+--    explicitly, and an application from before #1120 cannot write a policy
+--    on this schema, so stop those writers before migrating
+--    (deploy/runbooks/cloud-cleanup.md).
+--
+--    Preflight, under the table lock: every stored policy row, referenced by
+--    an entitlement or not, must already hold windows the application accepts
+--    (each 0 < ms <= 9007199254740991, Number.MAX_SAFE_INTEGER) with a sum of
+--    the two mailbox windows that is itself at most 9007199254740991. A row
+--    that does not stops the migration before any change and names the
+--    tenant and policy; the operator corrects those windows first.
 --
 -- 2. `task.archive_after` is the instant a terminal task becomes eligible:
 --    its terminal instant, set with `terminal_at` from now on. `archived_at`
@@ -23,18 +33,43 @@
 --
 -- Locks and duration. `CONCURRENTLY` is not available here: the runner
 -- applies each file in one transaction (packages/cloud-dataplane
--- `src/migrate.ts`). The ADD COLUMNs are catalog-only. The backfill UPDATE
+-- `src/migrate.ts`). The policy table stays locked until commit; it holds one
+-- row per tenant policy. The task ADD COLUMNs are catalog-only. The backfill UPDATE
 -- rewrites every terminal task row and holds ROW EXCLUSIVE on `task` with row
 -- locks on those rows until commit, so a status write to an already terminal
 -- task waits for it; new tasks are not blocked. Each index build scans the
 -- `task` heap under a SHARE lock, so task writes wait for it while reads
 -- continue. Count first: SELECT count(*) FROM task WHERE status IN
 -- ('complete', 'failed', 'cancelled'); deploy/runbooks/cloud-cleanup.md has
--- the procedure. Migrations are forward-only. Roll back the application;
--- this stays.
+-- the procedure. Migrations are forward-only: an application from before
+-- #1120 cannot write a retention policy on this schema.
 
-ALTER TABLE tenant_retention_policy
-  ADD COLUMN terminal_task_archive_ms bigint NOT NULL DEFAULT 7776000000;
+LOCK TABLE tenant_retention_policy IN ACCESS EXCLUSIVE MODE;
+
+DO $$
+DECLARE
+  rejected text;
+BEGIN
+  SELECT string_agg(tenant_id || '/' || policy_id, ', ' ORDER BY tenant_id, policy_id) INTO rejected
+    FROM tenant_retention_policy
+   WHERE NOT (mailbox_acked_retention_ms BETWEEN 1 AND 9007199254740991
+     AND mailbox_unacked_retention_ms BETWEEN 1 AND 9007199254740991
+     AND mailbox_dead_letter_retention_ms BETWEEN 1 AND 9007199254740991
+     AND request_receipt_retention_ms BETWEEN 1 AND 9007199254740991
+     AND object_orphan_grace_ms BETWEEN 1 AND 9007199254740991
+     AND mailbox_unacked_retention_ms::numeric + mailbox_dead_letter_retention_ms::numeric <= 9007199254740991);
+  IF rejected IS NOT NULL THEN
+    RAISE EXCEPTION '0032: these retention policies hold a window outside 1..9007199254740991 ms, or unacked plus dead-letter windows above it, so no archive window can cover them: %', rejected;
+  END IF;
+END $$;
+
+ALTER TABLE tenant_retention_policy ADD COLUMN terminal_task_archive_ms bigint;
+
+UPDATE tenant_retention_policy
+   SET terminal_task_archive_ms = GREATEST(7776000000::numeric,
+         mailbox_unacked_retention_ms::numeric + mailbox_dead_letter_retention_ms::numeric)::bigint;
+
+ALTER TABLE tenant_retention_policy ALTER COLUMN terminal_task_archive_ms SET NOT NULL;
 
 ALTER TABLE tenant_retention_policy
   DROP CONSTRAINT tenant_retention_policy_nonnegative;
