@@ -276,6 +276,8 @@ export const reviewedScripts = Object.freeze({
   'scripts/architecture/dependency-graph.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/architecture/dependency-graph.test.mjs': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
   'scripts/architecture/dependency-baseline.json': { tests: ['scripts/architecture/dependency-graph.test.mjs'], install: true },
+  'scripts/docs/device-setup.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
+  'scripts/docs/device-setup.test.mjs': { tests: ['scripts/docs/device-setup.test.mjs'] },
   'scripts/api-surface/check-version-authority.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/api-surface/check-version-authority.test.mjs': { tests: ['scripts/api-surface/check-version-authority.test.mjs'] },
   'scripts/release/beta-release.test.mjs': { tests: ['scripts/release/beta-release.test.mjs'] },
@@ -546,6 +548,7 @@ export function selectImpact(paths, context = {}) {
     }
     // #654: the dataplane job runs hosted-plaintext-inventory.test.ts, which
     // checks the inventory table in this doc against real Postgres and S3.
+    if (path === 'docs/device-setup.md') { dirs.add('packages/client'); continue; }
     if (path === 'docs/security.md') { families.add('dataplane'); continue; }
     // #654 E2c: `deploy/sql` is the only authored copy of the Postgres
     // migrations. cloud-dataplane builds it into `dist/sql`, its suites migrate

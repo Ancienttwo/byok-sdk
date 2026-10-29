@@ -914,3 +914,21 @@ test('reviewed protocol oracle move admits only the exact edges and both lock ro
     assert.throws(() => selectImpact([path], context), pattern, reason);
   }
 });
+
+
+test('setup documentation admits only exact additive generator commands and its test', t => {
+  const f = fixture(t);
+  f.write('scripts/docs/device-setup.test.mjs', '');
+  const scripts = {
+    ...f.rootManifest.scripts,
+    'docs:device-setup': 'node scripts/docs/device-setup.mjs --write',
+    'check:device-setup': 'node scripts/docs/device-setup.mjs',
+    'test:scripts': f.rootManifest.scripts['test:scripts'] + ' scripts/docs/device-setup.test.mjs',
+  };
+  f.write('package.json', { ...f.rootManifest, scripts });
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const name of ['docs:device-setup', 'check:device-setup']) {
+    f.write('package.json', { ...f.rootManifest, scripts: { ...scripts, [name]: scripts[name] + ' ; echo bypass' } });
+    assert.throws(() => selectImpact(['package.json'], f));
+  }
+});
