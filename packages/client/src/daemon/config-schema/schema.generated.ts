@@ -107,6 +107,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "input-preparation": {
                   "type": "number"
                 },
+                "pi-session-dir": {
+                  "type": "number"
+                },
                 "reader-run": {
                   "type": "number"
                 },
@@ -114,6 +117,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                   "type": "number"
                 },
                 "skill-pack-old": {
+                  "type": "number"
+                },
+                "terminal-evidence": {
                   "type": "number"
                 }
               }

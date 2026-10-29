@@ -168,10 +168,10 @@ export async function handleOffer(
     let taskMcpServers = runtime.taskMcpServers;
 
     const workspace = await bindOfferWorkspace.call(this, phase, held, {
-      agentRef, readerAttempt, sessionRef, homeAccess, homeBusyCode, pick, messageRequirement, terminalProjection,
+      agentRef, readerAttempt, sessionRef, homeAccess, homeBusyCode, pick, prepared, messageRequirement, terminalProjection,
     });
     if (workspace === undefined) return;
-    const { agentBinding, workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline } = workspace;
+    const { agentBinding, sessionLease, workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline } = workspace;
 
     const sealed = await sealOfferManifest.call(this, phase, {
       agentBinding, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
@@ -189,7 +189,7 @@ export async function handleOffer(
     ({ taskMcpServers } = claimed);
 
     await startOfferRuntime.call(this, phase, held, {
-      agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
+      agentBinding, sessionLease, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
       preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
     }, {
       agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation, toolAuthorization,

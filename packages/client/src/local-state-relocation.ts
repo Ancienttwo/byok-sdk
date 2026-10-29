@@ -10,7 +10,7 @@ import {
   PathMutationGateBusyError,
   resolvePathWithoutCreate,
   type PathMutationGate,
-} from './daemon/path-mutation-gate';
+} from './util/path-mutation-gate';
 
 export class LocalStateRelocationError extends Error {
   constructor(message: string) {

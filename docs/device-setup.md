@@ -268,9 +268,11 @@ linked JSON schema for full array/union shapes and descriptions.
 | `storage.retention.ttlMs.exec-sdk` | advanced | number |
 | `storage.retention.ttlMs.home-temp` | advanced | number |
 | `storage.retention.ttlMs.input-preparation` | advanced | number |
+| `storage.retention.ttlMs.pi-session-dir` | advanced | number |
 | `storage.retention.ttlMs.reader-run` | advanced | number |
 | `storage.retention.ttlMs.session-ledger` | advanced | number |
 | `storage.retention.ttlMs.skill-pack-old` | advanced | number |
+| `storage.retention.ttlMs.terminal-evidence` | advanced | number |
 | `storage.journal` | advanced | object |
 | `storage.journal.busyTimeoutMs` | advanced | number |
 | `storage.journal.maxRecordBytes` | advanced | number |

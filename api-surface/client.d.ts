@@ -633,7 +633,7 @@ export declare function hermesCustodyArgs(launcher: HermesByokLauncher, binding:
 export declare function prepareHermesCustody(launcher: HermesByokLauncher, offer: RuntimeAdapterPrepareInput['offer']): Promise<PreparedHermesCustody>;
 export {};
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types';
 export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection';
 export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
@@ -1047,33 +1047,6 @@ export declare const AGENT_HOME_READER_RUN_MAX_AGE_MS: number;
  * non-empty wire string, so the SDK accepts only one plain path segment.
  */
 export declare function isReaderRunName(taskId: string): boolean;
-/**
- * Removes old reader run directories. Inputs are canonical absolute paths.
- *
- * - A directory in `active` is never removed.
- * - A directory that a reader session handoff points to stays while that
- *   record's last update is within the age limit.
- * - Other directories older than the age limit are removed.
- * - Then, while more than `maxRetained` directories remain, the oldest
- *   unprotected directory is removed first.
- *
- * Age is the directory's own modification time. Before each removal it
- * checks again that `runsRoot` resolves to itself, so a swapped symbolic link
- * cannot redirect a removal outside the home.
- */
-export declare function pruneReaderRuns(input: {
-    readonly runsRoot: string;
-    readonly active: ReadonlySet<string>;
-    readonly referenced: ReadonlyMap<string, number>;
-    readonly nowMs: number;
-    readonly maxRetained?: number;
-    readonly maxAgeMs?: number;
-    readonly maxDeletions?: number;
-    readonly entries?: AsyncIterable<import('node:fs').Dirent>;
-    readonly canRemove?: () => boolean;
-    readonly beforeRemove?: (directory: string) => Promise<void>;
-    readonly afterRemove?: (directory: string) => void;
-}): Promise<readonly string[]>;
 /** Relative path (with `/` separators) -> content fingerprint of one memory file. */
 export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
 /**
@@ -8067,9 +8040,11 @@ export declare function resolveStorageConfig(storeDir: string, input?: StorageCo
         "exec-sdk": number;
         "home-temp": number;
         "input-preparation": number;
+        "pi-session-dir": number;
         "reader-run": number;
         "session-ledger": number;
         "skill-pack-old": number;
+        "terminal-evidence": number;
     }>;
 }>;
 export type ResolvedStorageConfig = ReturnType<typeof resolveStorageConfig>;
@@ -8099,8 +8074,8 @@ export declare class StoragePressure {
     assertAckCriticalAllowed(): void;
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
-export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger'];
-export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'terminal-evidence', 'agent-content', 'byok-authority', 'agent-home-lease', 'retired-namespace', 'pi-session-dir', 'skill-pack-current', 'store-authority'];
+export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir'];
+export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
 export type RetentionClassId = ExpiringClassId | ProtectedClassId;
@@ -8132,12 +8107,34 @@ export interface SweepBudget {
     removed(bytes: number): void;
     truncate(): void;
 }
+/**
+ * How a class stays finite. An expiring class is deleted by TTL, optionally also by count. A protected
+ * class either has a fixed count, or states why it cannot be bounded, who clears it and through which API.
+ */
+export type RetentionBound = {
+    readonly kind: 'ttl';
+    readonly ttlMs: number;
+    readonly maxEntries?: number;
+} | {
+    readonly kind: 'count';
+    readonly maxEntries: number;
+    readonly per: 'agent-home' | 'skill-pack';
+} | {
+    readonly kind: 'exempt';
+    readonly reason: string;
+    readonly cleanedBy: 'sdk' | 'host' | 'operator';
+    readonly api: string;
+};
+export type ProtectedRetentionBound = Exclude<RetentionBound, {
+    readonly kind: 'ttl';
+}>;
+/** The declared bound of every protected class; a new class does not compile without one. */
+export declare const PROTECTED_CLASS_BOUNDS: Readonly<Record<ProtectedClassId, ProtectedRetentionBound>>;
 export interface ClassAuthority {
     readonly roots: readonly string[];
     readonly owner: 'sdk' | 'host';
     readonly scope: 'store' | 'agent-home' | 'replica' | 'host';
-    readonly ttlMs?: number;
-    readonly maxEntries?: number;
+    readonly bound: RetentionBound;
 }
 export type RetentionClass = {
     readonly authority: ClassAuthority;
@@ -10535,7 +10532,7 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -13813,6 +13810,8 @@ export interface DurableLifecycle {
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
     readonly scratch: ExecutionScratch;
+    /** Exact local resource acquired by this operation before resume handoff validation; never serialized. */
+    readonly sessionLease?: RuntimeSessionLease;
     /** Trusted parent-only recovery authority; never serialized into the worker. */
     readonly durableContext?: {
         readonly tenantId: string;
@@ -13872,8 +13871,19 @@ export interface RuntimeOperationPreparedStartInput extends RuntimeOperationStar
  * a compile error rather than a silently ignored field.
  */
 export type RuntimeOperationStartInput = RuntimeOperationInstructionStartInput | RuntimeOperationPreparedStartInput;
+/** Retains runtime-owned session data until runtime disposal succeeds. Release is idempotent. */
+export interface RuntimeSessionLease {
+    readonly sessionRef: string;
+    release(): Promise<void>;
+}
 /** A pinned provider/runtime decision. `start()` receives resources only, never a raw offer. */
 export interface PreparedRuntimeOperation {
+    /**
+     * Acquire before validating a resume handoff. The caller retains this resource across
+     * admission/startup and passes the exact object to start; release only after disposal,
+     * or on an offer that never started. Absent when the runtime owns no swept session data.
+     */
+    acquireSessionLease?(sessionRef: string): Promise<RuntimeSessionLease | undefined>;
     /** Resource phase after workspace resolution and before claim; never reads a credential. */
     resolveRuntimeLaunch?(input: {
         kind: 'instruction' | 'prepared';

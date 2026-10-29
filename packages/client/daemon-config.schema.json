@@ -110,6 +110,9 @@
                 "input-preparation": {
                   "type": "number"
                 },
+                "pi-session-dir": {
+                  "type": "number"
+                },
                 "reader-run": {
                   "type": "number"
                 },
@@ -117,6 +120,9 @@
                   "type": "number"
                 },
                 "skill-pack-old": {
+                  "type": "number"
+                },
+                "terminal-evidence": {
                   "type": "number"
                 }
               }

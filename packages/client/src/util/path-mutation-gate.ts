@@ -2,14 +2,18 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
-import { ensureSecureDir } from '../util/secure-dir';
+import { ensureSecureDir } from './secure-dir';
 
-export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store';
+export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'pi-session-discovery' | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
 
-export interface PathMutationGateInput {
-  readonly scope: PathMutationGateScope;
+export type PathMutationGateInput = {
+  readonly scope: Exclude<PathMutationGateScope, 'pi-session-rebinding'>;
   readonly targetPath: string;
-}
+} | {
+  /** Only mutable Pi setup callbacks need a barrier before their target path is known. */
+  readonly scope: 'pi-session-rebinding';
+  readonly targetPath?: never;
+};
 
 export interface PathMutationGateAcquireOptions {
   /** Bounded wait for another conforming short-lived writer; relocation uses zero. */
@@ -138,8 +142,13 @@ async function clearProvenStaleEndpoint(
   await fs.rm(endpoint, { force: true });
 }
 
+function resolveGateTarget(input: PathMutationGateInput): Promise<string> {
+  // One fixed cross-process identity, including on Windows with multiple drives.
+  return input.scope === 'pi-session-rebinding' ? Promise.resolve('*') : resolvePathWithoutCreate(input.targetPath);
+}
+
 async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGate> {
-  const canonicalTarget = await resolvePathWithoutCreate(input.targetPath);
+  const canonicalTarget = await resolveGateTarget(input);
   const identity = gateIdentity(input.scope, canonicalTarget);
   const endpoint = gateEndpoint(identity);
   await assertPrivateGateRoot();
@@ -165,7 +174,7 @@ async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGat
   server.unref();
 
   try {
-    const rechecked = await resolvePathWithoutCreate(input.targetPath);
+    const rechecked = await resolveGateTarget(input);
     if (rechecked !== canonicalTarget) {
       throw new Error(`path mutation gate target changed during acquisition: ${input.targetPath}`);
     }
@@ -204,14 +213,15 @@ async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGat
 /** Acquire multiple path gates in one deterministic order to prevent deadlock. */
 export async function acquirePathMutationGates(inputs: readonly PathMutationGateInput[]): Promise<readonly PathMutationGate[]> {
   const resolved = await Promise.all(inputs.map(async (input) => {
-    const targetPath = await resolvePathWithoutCreate(input.targetPath);
-    return { ...input, targetPath, identity: gateIdentity(input.scope, targetPath) };
+    const targetPath = await resolveGateTarget(input);
+    const canonicalInput: PathMutationGateInput = input.scope === 'pi-session-rebinding' ? input : { ...input, targetPath };
+    return { input: canonicalInput, targetPath, identity: gateIdentity(input.scope, targetPath) };
   }));
-  const unique = [...new Map(resolved.map((item) => [`${item.scope}\0${item.targetPath}`, item])).values()]
+  const unique = [...new Map(resolved.map((item) => [`${item.input.scope}\0${item.targetPath}`, item])).values()]
     .sort((left, right) => left.identity.localeCompare(right.identity));
   const acquired: PathMutationGate[] = [];
   try {
-    for (const input of unique) acquired.push(await acquireOne(input));
+    for (const item of unique) acquired.push(await acquireOne(item.input));
     return Object.freeze(acquired.slice());
   } catch (error) {
     await Promise.allSettled(acquired.reverse().map((gate) => gate.release()));

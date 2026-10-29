@@ -1,4 +1,3 @@
-import { selectReaderRuns } from './agent-home-reader-retention';
 import { createHash } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -30,50 +29,6 @@ const READER_RUN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
  */
 export function isReaderRunName(taskId: string): boolean {
   return READER_RUN_NAME.test(taskId) && taskId !== '.' && taskId !== '..';
-}
-
-/**
- * Removes old reader run directories. Inputs are canonical absolute paths.
- *
- * - A directory in `active` is never removed.
- * - A directory that a reader session handoff points to stays while that
- *   record's last update is within the age limit.
- * - Other directories older than the age limit are removed.
- * - Then, while more than `maxRetained` directories remain, the oldest
- *   unprotected directory is removed first.
- *
- * Age is the directory's own modification time. Before each removal it
- * checks again that `runsRoot` resolves to itself, so a swapped symbolic link
- * cannot redirect a removal outside the home.
- */
-export async function pruneReaderRuns(input: {
-  readonly runsRoot: string;
-  readonly active: ReadonlySet<string>;
-  readonly referenced: ReadonlyMap<string, number>;
-  readonly nowMs: number;
-  readonly maxRetained?: number;
-  readonly maxAgeMs?: number;
-  readonly maxDeletions?: number;
-  readonly entries?: AsyncIterable<import('node:fs').Dirent>;
-  readonly canRemove?: () => boolean;
-  readonly beforeRemove?: (directory: string) => Promise<void>;
-  readonly afterRemove?: (directory: string) => void;
-}): Promise<readonly string[]> {
-  const candidates = selectReaderRuns(input);
-  const removed: string[] = [];
-  const remove = async (dir: string): Promise<boolean> => {
-    if (removed.length >= (input.maxDeletions ?? Number.MAX_SAFE_INTEGER) || input.canRemove?.() === false) return false;
-    if (await fs.realpath(input.runsRoot) !== input.runsRoot) {
-      throw new Error('the reader runs directory changed through a symbolic link during retention');
-    }
-    await input.beforeRemove?.(dir);
-    await fs.rm(dir, { recursive: true, force: true });
-    removed.push(dir);
-    input.afterRemove?.(dir);
-    return true;
-  };
-  for await (const run of candidates) await remove(run.dir);
-  return removed;
 }
 
 /** Relative path (with `/` separators) -> content fingerprint of one memory file. */

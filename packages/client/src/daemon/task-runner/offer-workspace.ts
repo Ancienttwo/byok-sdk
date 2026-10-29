@@ -7,9 +7,12 @@ import type { ActiveTask, OfferPhaseContext } from './support';
 import { errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { OfferHeld, OfferRequest, OfferRuntime } from './offer';
+import type { RuntimeSessionLease } from '../../types';
+import { PathMutationGateBusyError } from '../../util/path-mutation-gate';
 
 export interface OfferWorkspaceInput extends Pick<OfferRequest, 'agentRef' | 'readerAttempt' | 'sessionRef' | 'homeAccess' | 'homeBusyCode'> {
   readonly pick: OfferRuntime['pick'];
+  readonly prepared: OfferRuntime['prepared'];
   readonly messageRequirement: ActiveTask['messageRequirement'];
   readonly terminalProjection: ActiveTask['terminalProjection'];
 }
@@ -58,8 +61,18 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
   const workspaceDir = agentBinding.lease.cwd;
   let appliedAgentHomeProjection: TerminalAgentHomeProjection | undefined;
   let readerMemoryBaseline: ActiveTask['readerMemoryBaseline'];
+  let sessionLease: RuntimeSessionLease | undefined;
   if (sessionRef !== undefined) {
     try {
+      sessionLease = await input.prepared.operation.acquireSessionLease?.(sessionRef);
+      if (sessionLease !== undefined) {
+        const baseLease = agentBinding.lease, retainedSession = sessionLease;
+        agentBinding = { ...agentBinding, lease: Object.freeze({ ...baseLease, release: async () => {
+          await baseLease.release();
+          await retainedSession.release();
+        } }) };
+        held.agentBinding = agentBinding;
+      }
       await this['deps'].agentSessionHandoffs!.requireMatch({
         agentRef: agentBinding.resolution.agentRef,
         sessionRef,
@@ -71,7 +84,7 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
     } catch (error) {
       await agentBinding.lease.release().catch(() => {});
       held.agentBinding = undefined;
-      decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, false);
+      decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, error instanceof PathMutationGateBusyError);
       return;
     }
   }
@@ -142,5 +155,5 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
       return;
     }
   }
-  return { agentBinding, workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline };
+  return { agentBinding, sessionLease, workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline };
 }

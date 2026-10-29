@@ -96,14 +96,84 @@ has a byte budget. The default root and its short-root fallback follow
 symbolic-link ancestors; daemon temps remain in the store. A shared external
 root is refused. A root owned by another user is refused before permission changes. Each
 retention class records its root, SDK/Host owner, store/home/replica scope and
-TTL/count limit. The registry serves GC, pressure, status and support readback.
+bound (see [Retention bounds](#retention-bounds)). The registry serves GC, pressure, status and support readback.
 The store lease covers scratch recovery; the shared home base lease plus the
 agents-root mutation gate covers readers and exact memory/projection temp
 names. Gate acquisition is per home with a bounded walk and round-robin
 cursor, so maintenance does not reserve the entire root for a full pass.
-Memory-delete tombstones, opaque Agent files and `.byok` records other than reader runs (`.byok/runs/`), staged result records (`.byok/results/`) and session ledgers (`.byok/runtime-sessions/<runtime>-<session-hash>.jsonl`, not `-task-` terminal evidence) are protected.
+Memory-delete tombstones, opaque Agent files and `.byok` records other than reader runs (`.byok/runs/`), staged result records (`.byok/results/`), session ledgers (`.byok/runtime-sessions/<runtime>-<session-hash>.jsonl`) and terminal evidence (`.byok/runtime-sessions/<runtime>-task-<task-hash>.jsonl`) are protected.
 Skill-pack roots outside the store must be listed in `storage.skillPackDataDirs`;
 only non-current hash revisions past 24h are deleted under the install gate.
+
+### Retention bounds
+
+Every retention class declares how its storage stays finite (#1105). An
+expiring class has a TTL and sometimes a count; a protected class has a fixed
+count, or an exemption that says why it cannot be bounded, who clears it and
+through which API. The registry refuses a class without a declaration, and the
+type of `PROTECTED_CLASS_BOUNDS` makes a new protected class fail to compile
+until it has one. TTLs are `storage.retention.ttlMs[<class>]`.
+
+| Class | Bound | Cleared by |
+| --- | --- | --- |
+| `exec-sdk`, `durable-replica`, `input-preparation` | TTL 0 (removed at release or terminal) | SDK |
+| `daemon-temp`, `home-temp` | TTL 1 hour | SDK |
+| `exec-runtime`, `skill-pack-old` | TTL 24 hours | SDK |
+| `reader-run` | TTL 7 days, 32 per home | SDK, idle home |
+| `agent-result` | TTL 7 days, 256 per home | SDK, idle home |
+| `confirmed-journal` | TTL 30 days (must exceed 7 days) | SDK |
+| `session-ledger` | TTL 30 days by last append | SDK, idle home |
+| `terminal-evidence` | TTL 30 days by last append | SDK, idle home |
+| `pi-session-dir` | TTL 31 days by last write; at least `session-ledger` plus one day | SDK |
+| `agent-home-lease` | 1 per home | SDK |
+| `skill-pack-current` | 1 revision per installed pack | Host, by uninstalling the pack |
+| `journal` | Exempt: live-task ack and recovery rows; confirmed rows expire as `confirmed-journal` and maintenance compacts the file | SDK |
+| `durable-replica-live` | Exempt: one replica per non-terminal durable Pi task, which becomes `durable-replica` at terminal | SDK |
+| `owned-processes` | Exempt: one record per live runtime process; crash residue the SDK could not end stays | Operator (`owned-process-residue`) |
+| `quarantine` | Exempt: the only evidence of a corrupt journal or health file; one entry per corruption event, not per task | Operator, after `byok-agent doctor` |
+| `agent-content` | Exempt: Host product data | Host |
+| `byok-authority` | Exempt: a fixed set of SDK records per home with bounded log tails; grows with Agent count, not task count | Host, with the Agent home |
+| `store-authority` | Exempt: fixed device records and self-bounded logs (`audit.jsonl` rewrites past 10 MiB) | SDK, with the store |
+| `runtime-session-external` | Exempt: Claude, Codex, Grok and Pi-login session records under the runtime's own config directory, mixed with the user's sessions; never measured or deleted | Host: `ClaudeAdapterOptions.agentSessionPersistence: 'disabled'` for Claude, the runtime's own session management otherwise |
+
+`pi-session-dir` is `DaemonConfig.piByokLauncher.sessionDir`. The SDK deletes
+only Pi's own session files there, flat `<ISO time>_<session id>.jsonl` names,
+once their last write is older than the TTL; other names, folders and symbolic
+links stay. Age alone never proves that a session is idle. Before validating a
+resume ledger, TaskRunner obtains the prepared operation's `RuntimeSessionLease`
+and retains it through startup and disposal. Standalone PiAdapter uses the same
+admission gate. The actual Pi RPC host holds a separate writer gate for its
+session file, so a surviving child stays protected even if its parent is killed.
+The gates use canonical paths and coordinate all stores sharing the directory.
+A short discovery gate covers native session opening and replacement; different
+sessions run concurrently. Cleanup must acquire discovery, admission and writer
+gates, then recheck last-write time. Native `newSession.setup` receives a mutable
+session manager and may synchronously select another directory. Only that
+callback holds the shared Pi rebinding barrier, through confirmation of its
+final file's writer lease, including callback failure. Nested setup calls reuse
+the same barrier. A callback that never returns delays Pi session cleanup and
+other setup callbacks, but does not stop already running sessions or other
+retention classes. Normal turns never hold this barrier. Files whose header id disagrees with their
+filename, or whose header identity cannot be determined within the bounded
+header read, are retained. A config whose `pi-session-dir` TTL is less than the
+`session-ledger` TTL plus one day fails with `LocalStorageConfigError`. A
+resume whose file was already reclaimed fails like a resume of an expired ledger.
+
+Custom adapters that own swept session data implement
+`PreparedRuntimeOperation.acquireSessionLease(sessionRef)`. A custom caller must
+acquire it before handoff validation, pass the exact returned object as
+`RuntimeOperationStartInput.sessionLease`, and release it only after confirmed
+runtime disposal, or when declining an offer that never started. The Pi token
+is bound to its prepared operation and directory; a fabricated or released token
+is rejected. Prepared in-memory and external login sessions have no such lease.
+
+Migration from 0.31: a Host that trimmed this folder itself, such as
+AiphaBee's `pruneLocalPiSessions` in `apps/local-agent/src/pi-provider-launcher.ts`,
+deletes that code. A Host that raised `ttlMs['session-ledger']` also raises
+`ttlMs['pi-session-dir']` to at least one day more. Terminal evidence now
+expires after 30 days; a Host that reads it keeps it with
+`ttlMs['terminal-evidence']`. The never-populated `retired-namespace` class is
+gone.
 
 ## Responsibility matrix
 
@@ -116,7 +186,7 @@ only non-current hash revisions past 24h are deleted under the install gate.
 | Memory and notes | Create if missing and preserve existing bytes | Define and evolve their content |
 | Agent files | Enforce home containment and cross-Agent isolation only | Own names, formats, directories, and business semantics |
 | Runtime | Seal AgentRef, canonical cwd, runtime/session and lease in the manifest | Select allowed runtimes and product policy |
-| Sessions | Persist append-only exact-match handoff and terminal evidence under `.byok/runtime-sessions`; report bounded write exhaustion without stranding the cloud task or lease; remove session ledgers from an idle home by retention once their last append is 30 days old by default, and keep `-task-` terminal evidence | Treat mismatch as a product-visible failed admission and surface the host audit signal; do not invent migration semantics; resume within the window or start fresh, and tune only `storage.retention.ttlMs['session-ledger']` |
+| Sessions | Persist append-only exact-match handoff and terminal evidence under `.byok/runtime-sessions`; report bounded write exhaustion without stranding the cloud task or lease; remove session ledgers and `-task-` terminal evidence from an idle home by retention once their last append is 30 days old by default | Treat mismatch as a product-visible failed admission and surface the host audit signal; do not invent migration semantics; resume within the window or start fresh, and tune only `storage.retention.ttlMs['session-ledger']` and `ttlMs['terminal-evidence']` |
 | Egress | Send Agent events as the runtime produced them (ADR-037 D4); own the per-Agent reliable spool, cursor/ack/retry, quota and typed drop facts | Select one exact policy revision; decide what to store and show |
 | Explicit reads | Own per-surface capability, canonical path policy, per-Agent audit journal and BlobRef receipt fidelity | Author tenant/actor authz plus narrower root/MIME/text/size policy; never infer authorization from file presence |
 | Concurrency | Enforce one writer Attempt per canonical Agent home, and at most `maxConcurrentReaderAttemptsPerAgentHome` (default 4) `memory-reader` Attempts, each in its own `.byok/runs/<taskId>/`; report reader memory changes in `agentHomeMemoryChange` without enforcing read-only memory; remove reader run directories by retention (32 per home, 7 days, never an active one or one a recent reader handoff points to) | Send concurrent memory-reading work as reader offers and keep memory writes in the writer; do not write memory files while readers run if the attribution matters; do not schedule around or bypass a busy decline |

@@ -7,6 +7,7 @@ export type {
   RuntimeAdapterRejectedOperation,
   RuntimeAdapterPreparedOperation,
   PreparedRuntimeOperation,
+  RuntimeSessionLease,
   RuntimeOperationManifest,
   RuntimeOperationStartInput,
   RuntimeCapabilities,

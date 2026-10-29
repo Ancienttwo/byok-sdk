@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "1156c42a6a72db8a2b41a7e276afb8890a205711452ee5d0020e8da467cc7fe2"
+    "snapshotSha256": "1d16a4177a543ebe3aeee6ab997d054bf33dff4e7c6dceabedf6a6e152235b7b"
   },
   "configFields": {
     "status": "tracked",
@@ -163,6 +163,31 @@
         "export:@byok-sdk/protocol#boundFailureReason",
         "export:@byok-sdk/protocol/constants#TASK_FAIL_REASON_MAX_BYTES",
         "export:@byok-sdk/protocol/constants#boundFailureReason"
+      ]
+    },
+    {
+      "id": "storage-retention-bounds",
+      "impact": "breaking",
+      "summary": "Every retention class declares a bound (#1105). The SDK now expires Pi's own session files in DaemonConfig.piByokLauncher.sessionDir (class pi-session-dir, 31 days by last write) and -task- terminal evidence in each Agent home (class terminal-evidence, 30 days); both moved from ProtectedClassId to ExpiringClassId, and the never-populated retired-namespace class is gone. New protected class runtime-session-external registers runtime session records outside the Agent home. storage.retention.ttlMs['pi-session-dir'] must be at least ttlMs['session-ledger'] plus one day, else LocalStorageConfigError. A Host that trimmed the Pi session folder itself deletes that code; a Host that raised the session-ledger TTL raises the pi-session-dir TTL too.",
+      "migration": "docs/host-local-storage-layout.md#retention-bounds",
+      "items": [
+        "export:@byok-sdk/client#ExpiringClassId",
+        "export:@byok-sdk/client#ProtectedClassId",
+        "export:@byok-sdk/client#resolveStorageConfig"
+      ]
+    },
+    {
+      "id": "pi-session-retention-lifecycle",
+      "impact": "additive",
+      "summary": "Prepared operations that own swept session data expose acquireSessionLease. TaskRunner acquires it before validating a resume handoff and passes the exact local RuntimeSessionLease to start; callers retain it until confirmed disposal. Pi admission and actual child writer gates coordinate shared session directories, including parent crashes and native session replacement.",
+      "migration": "docs/host-local-storage-layout.md#retention-bounds",
+      "items": [
+        "export:@byok-sdk/client#PreparedRuntimeOperation",
+        "export:@byok-sdk/client#RuntimeOperationStartInput",
+        "export:@byok-sdk/client#RuntimeSessionLease",
+        "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
+        "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+        "export:@byok-sdk/client/adapters#RuntimeSessionLease"
       ]
     }
   ],
@@ -398,7 +423,7 @@
     {
       "item": "config:storage",
       "change": "added",
-      "after": "optional schema-sha256=ed95bb4ee17281a3",
+      "after": "optional schema-sha256=072bdde0810d910b",
       "entry": "daemon-config-schema"
     },
     {
@@ -514,6 +539,11 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#ExpiringClassId",
+      "change": "changed",
+      "entry": "storage-retention-bounds"
+    },
+    {
       "item": "export:@byok-sdk/client#HostLayout",
       "change": "added",
       "entry": "host-layout-helper"
@@ -549,6 +579,26 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#PreparedRuntimeOperation",
+      "change": "changed",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client#ProtectedClassId",
+      "change": "changed",
+      "entry": "storage-retention-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeSessionLease",
+      "change": "added",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
       "item": "export:@byok-sdk/client#checkDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
@@ -564,9 +614,29 @@
       "entry": "host-layout-helper"
     },
     {
+      "item": "export:@byok-sdk/client#resolveStorageConfig",
+      "change": "changed",
+      "entry": "storage-retention-bounds"
+    },
+    {
       "item": "export:@byok-sdk/client#validateDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
+      "change": "changed",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeSessionLease",
+      "change": "added",
+      "entry": "pi-session-retention-lifecycle"
     },
     {
       "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",

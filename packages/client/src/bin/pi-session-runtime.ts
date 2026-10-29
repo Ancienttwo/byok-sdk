@@ -1,6 +1,9 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
+import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter, type PiSessionRetentionLease } from '../util/pi-session-retention';
+import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mutation-gate';
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
   getAgentDir, ModelRuntime, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
@@ -8,6 +11,11 @@ import {
 } from '@earendil-works/pi-coding-agent';
 
 function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}`); }
+
+/** Native path normalization only: no file is opened and no session identity is claimed. */
+function resolveNativePiSessionPath(raw: string): string {
+  return SessionManager.inMemory(raw).getCwd();
+}
 
 /**
  * Pi 1.4 restores a resumed transcript's recorded tool loadout. It activates
@@ -80,9 +88,73 @@ export async function runPiSessionRuntime(options: {
   const credentialAgentDir = getAgentDir();
   const agentDir = options.resourceAgentDir ?? credentialAgentDir;
   const initialSettings = SettingsManager.create(options.cwd, credentialAgentDir);
-  const sessionManager = await openPiRpcSession(options.cwd, options.session, options.sessionDir ?? initialSettings.getSessionDir(), options.reject);
+  // The writer owns its socket, independently of the adapter process. A dead
+  // adapter must not make a still-running Pi transcript eligible for deletion.
+  const writers = new Map<string, PiSessionRetentionLease>();
+  const discoveryGates = new Map<string, { gate: PathMutationGate; references: number }>();
+  const replacementContext = new AsyncLocalStorage<{ active: boolean; releaseDiscovery(): Promise<void> }>();
+  let rebinding: { gate: PathMutationGate; references: number } | undefined;
+  const retainRebinding = async (): Promise<() => Promise<void>> => {
+    // A nested withSession/setup belongs to the same mutation. Reuse its one
+    // path-gate authority instead of trying to acquire our own socket again.
+    if (rebinding === undefined) rebinding = { gate: await acquirePiSessionRebinding(15_000), references: 0 };
+    rebinding.references += 1;
+    let released = false;
+    return async () => {
+      if (released) return;
+      if (rebinding!.references === 1) { await rebinding!.gate.release(); rebinding = undefined; }
+      else rebinding!.references -= 1;
+      released = true;
+    };
+  };
+  const discover = async (directories: readonly string[]): Promise<() => Promise<void>> => {
+    const held: string[] = [];
+    const release = async (): Promise<void> => {
+      while (held.length > 0) {
+        const directory = held[held.length - 1]!, entry = discoveryGates.get(directory)!;
+        if (entry.references === 1) { await entry.gate.release(); discoveryGates.delete(directory); }
+        else entry.references -= 1;
+        held.pop();
+      }
+    };
+    if (options.sessionDir === undefined) return release;
+    const canonical = [...new Set(await Promise.all(directories.map(resolvePathWithoutCreate)))].sort();
+    try {
+      for (const directory of canonical) {
+        const existing = discoveryGates.get(directory);
+        if (existing !== undefined) existing.references += 1;
+        else discoveryGates.set(directory, { gate: await acquirePiSessionDiscovery(directory, 15_000), references: 1 });
+        held.push(directory);
+      }
+      return release;
+    } catch (error) { await release(); throw error; }
+  };
+  const retainWriter = async (manager: SessionManager): Promise<string> => {
+    const file = manager.getSessionFile();
+    if (file === undefined) options.reject('retained Pi runtime requires a persisted session');
+    const canonical = await resolvePathWithoutCreate(file);
+    if (!writers.has(canonical)) writers.set(canonical, await acquirePiSessionWriter(canonical));
+    return canonical;
+  };
+  const retireWriters = async (current: string): Promise<void> => {
+    for (const [file, lease] of writers) if (file !== current) {
+      await lease.release(); writers.delete(file);
+    }
+  };
+  const releaseInitialDiscovery = await discover([...(options.sessionDir === undefined ? [] : [options.sessionDir]),
+    ...(options.session !== undefined && isAbsolute(options.session) ? [dirname(options.session)] : [])]);
+  let sessionManager: SessionManager;
+  try {
+    sessionManager = await openPiRpcSession(options.cwd, options.session, options.sessionDir ?? initialSettings.getSessionDir(), options.reject);
+  } catch (error) { await releaseInitialDiscovery(); throw error; }
   const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
     if (cwd !== options.cwd || sessionManager.getCwd() !== options.cwd) options.reject('session replacement cannot change authorized cwd');
+    if (options.sessionDir !== undefined) {
+      await retainWriter(sessionManager);
+      // The file now has its writer gate. Model loading and agent turns do
+      // not hold the directory discovery barrier.
+      await (replacementContext.getStore()?.releaseDiscovery() ?? releaseInitialDiscovery());
+    }
     // The excluded resource loader has no user/global/project settings. Its
     // model runtime independently opens only Pi's model/auth stores.
     const isolated = options.resourceAgentDir !== undefined;
@@ -139,5 +211,76 @@ export async function runPiSessionRuntime(options: {
     }
     return { ...created, services, diagnostics: services.diagnostics };
   };
-  await runRpcMode(await createAgentSessionRuntime(createRuntime, { cwd: options.cwd, agentDir, sessionManager }));
+  let runtime: Awaited<ReturnType<typeof createAgentSessionRuntime>>;
+  try {
+    runtime = await createAgentSessionRuntime(createRuntime, { cwd: options.cwd, agentDir, sessionManager });
+  } finally { await releaseInitialDiscovery(); }
+  if (options.sessionDir !== undefined) {
+    // Native replacement opens/creates the next SessionManager BEFORE invoking
+    // createRuntime. Guard that interval too, including foreign-directory
+    // switch targets. Serialize replacements only within this one host.
+    let replacementTail: Promise<unknown> = Promise.resolve();
+    const replace = <T>(extraDirectories: readonly string[], action: () => Promise<T>): Promise<T> => {
+      const run = async (): Promise<T> => {
+        const releaseDiscovery = await discover([runtime.session.sessionManager.getSessionDir(), ...extraDirectories]);
+        const context = {active:true, releaseDiscovery};
+        return replacementContext.run(context, async () => {
+          try {
+            const result = await action();
+            // Native replacement disposed the outgoing session and finished
+            // setup/withSession callbacks. Its final file may differ from the
+            // factory's file, and a withSession callback may replace it again.
+            await retireWriters(await retainWriter(runtime.session.sessionManager));
+            return result;
+          } finally { context.active = false; await releaseDiscovery(); }
+        });
+      };
+      // withSession can recursively request another replacement. It belongs to
+      // this operation and must not wait on its own receipt; independent RPC
+      // requests still execute in order within this host.
+      if (replacementContext.getStore()?.active === true) return run();
+      const pending = replacementTail.then(run);
+      replacementTail = pending.catch(() => undefined);
+      return pending;
+    };
+    const switchSession = runtime.switchSession.bind(runtime);
+    runtime.switchSession = (...args) => {
+      // Reuse Pi's public in-memory constructor solely for native path
+      // normalization (relative, tilde, file URL, platform conventions). It
+      // does not open a file and is never a session-identity authority.
+      const normalized = resolveNativePiSessionPath(args[0]);
+      return replace([dirname(normalized)], () => switchSession(...args));
+    };
+    const newSession = runtime.newSession.bind(runtime);
+    runtime.newSession = (input) => {
+      const setup = input?.setup;
+      const guarded = setup === undefined ? input : { ...input, setup: async (manager: SessionManager) => {
+        // Unlike withSession's readonly context, setup receives the mutable
+        // manager and can replace its file after createRuntime has returned.
+        const releaseRebinding = await retainRebinding();
+        try { await setup(manager); }
+        finally {
+          // Native already applied this manager, even if setup throws. Its
+          // synchronous setter can move to an arbitrary directory before an
+          // await, so only this callback holds the global Pi rebinding barrier.
+          // A failed writer acquisition retains protection until host disposal.
+          await retainWriter(manager);
+          await releaseRebinding();
+        }
+      } };
+      return replace([], () => newSession(guarded));
+    };
+    const fork = runtime.fork.bind(runtime);
+    runtime.fork = (...args) => replace([], () => fork(...args));
+    const importFromJsonl = runtime.importFromJsonl.bind(runtime);
+    runtime.importFromJsonl = (...args) => replace([dirname(resolveNativePiSessionPath(args[0]))], () => importFromJsonl(...args));
+    const dispose = runtime.dispose.bind(runtime);
+    runtime.dispose = async () => {
+      await replacementTail;
+      await dispose();
+      for (const [file, lease] of writers) { await lease.release(); writers.delete(file); }
+      if (rebinding !== undefined) { await rebinding.gate.release(); rebinding = undefined; }
+    };
+  }
+  await runRpcMode(runtime);
 }

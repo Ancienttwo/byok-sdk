@@ -20,7 +20,7 @@ import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
   type PathMutationGate,
-} from './daemon/path-mutation-gate';
+} from './util/path-mutation-gate';
 
 export type { AgentRef } from '@byok-sdk/protocol';
 

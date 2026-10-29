@@ -11,7 +11,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import * as mutationGate from '../daemon/path-mutation-gate';
+import * as mutationGate from '../util/path-mutation-gate';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -23,6 +23,7 @@ beforeEach(() => {
   // The sandbox cannot bind the native Unix mutation-gate socket. Keep the
   // real home/lease/filesystem implementation and inject only this test port.
   vi.spyOn(mutationGate, 'acquirePathMutationGate').mockImplementation(async input => {
+    if (input.scope === 'pi-session-rebinding') return acquireNativeGate(input);
     const targetPath = await mutationGate.resolvePathWithoutCreate(input.targetPath);
     const identity = `${input.scope}:${targetPath}`;
     if (heldGates.has(identity)) throw new mutationGate.PathMutationGateBusyError(input.scope, targetPath);

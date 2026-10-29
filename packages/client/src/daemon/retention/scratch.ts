@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { acquirePathMutationGate } from '../path-mutation-gate';
+import { acquirePathMutationGate } from '../../util/path-mutation-gate';
 import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { RuntimeDisposalFailure } from '../../runtime-failure';

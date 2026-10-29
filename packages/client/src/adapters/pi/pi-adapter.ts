@@ -51,6 +51,7 @@ import {
 } from '../provider-credential-environment';
 import { probePiAuthPresent } from './auth-presence';
 import { startToolAuthorizationIpc } from '../../tool-authorization-ipc';
+import { acquirePiSessionRetention, type PiSessionRetentionLease } from '../../util/pi-session-retention';
 
 async function disposePiStartup(rpc: PiRpcClient | undefined, scratch: ExecutionScratch, cause?: unknown): Promise<void> {
   const retry = async (): Promise<void> => {
@@ -384,9 +385,18 @@ export class PiAdapter implements RuntimeAdapter {
     }
 
     let boundRuntime: PiRuntimeLaunchResources | undefined;
+    let sessionLease: PiSessionRetentionLease | undefined;
+    const sessionDir = pinnedSelection === undefined || this.options.durablePi === true ? undefined : this.options.byokLauncher!.sessionDir;
+    const acquireSessionLease = async (sessionRef: string) => {
+      if (sessionDir === undefined) return undefined;
+      if (sessionLease !== undefined) throw authorityFailure('Pi operation already owns a session retention lease');
+      sessionLease = await acquirePiSessionRetention(sessionDir, sessionRef);
+      return sessionLease;
+    };
     return {
       kind: 'prepared',
       operation: {
+        acquireSessionLease,
         resolveRuntimeLaunch: async (resources) => {
           if (boundRuntime !== undefined) throw authorityFailure('runtime launch resources were already resolved');
           if (this.options.durablePi === true && resources.kind === 'prepared') throw authorityFailure('durable Pi does not admit the prepared lane');
@@ -515,17 +525,33 @@ export class PiAdapter implements RuntimeAdapter {
             });
           }
           const resumeSessionId = startInput.manifest.sessionRef;
+          if (startInput.sessionLease !== undefined && (startInput.sessionLease !== sessionLease || sessionLease?.sessionRef !== resumeSessionId)) {
+            throw authorityFailure("Pi start requires this operation's exact session retention lease");
+          }
+          if (sessionLease !== undefined) {
+            if (startInput.sessionLease !== sessionLease) throw authorityFailure('Pi resume lease was not passed to start');
+            sessionLease.assertHeld();
+          } else if (resumeSessionId !== undefined) {
+            // Standalone callers have no daemon handoff stage, but share its retention authority.
+            await acquireSessionLease(resumeSessionId);
+          }
           let mcpConfigDir: string | undefined;
           let runtimeEnv = { ...runtimeLaunch.env };
           const taskMcpServers = startInput.mcpServers ?? {};
           let hostConfigDigest: string;
           let hostConfigPath: string;
-          let scratch = startInput.scratch;
+          let scratch = Object.freeze({ ...startInput.scratch, release: async () => {
+            await startInput.scratch.release();
+            // An admission caller owns its token through terminal persistence;
+            // standalone/fresh starts own theirs through runtime disposal.
+            if (startInput.sessionLease === undefined) await sessionLease?.release();
+          } });
           try {
             const gate = startInput.toolAuthorization === undefined ? undefined : await startToolAuthorizationIpc(startInput.toolAuthorization);
+            const retainedScratch = scratch;
             if (gate !== undefined) scratch = Object.freeze({ ...scratch, release: async () => {
               await gate.close();
-              await startInput.scratch.release();
+              await retainedScratch.release();
             } });
             // mkdtemp creates the directory 0700. Launch files in it are
             // created 0600 ('wx': a new file, so the mode applies at creation)
@@ -596,6 +622,19 @@ export class PiAdapter implements RuntimeAdapter {
             }, { cause });
           }
 
+          // The host owns its writer lease before serving get_state. The parent
+          // retains admission too, before allowing the first prompt.
+          let sessionRef: string;
+          try {
+            sessionRef = await resolveAuthoritativeSessionId(rpc);
+            if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
+              throw authorityFailure('pi resumed a different authoritative session than requested');
+            }
+            if (sessionDir !== undefined && sessionLease === undefined) await acquireSessionLease(sessionRef);
+          } catch (cause) {
+            await disposePiStartup(rpc, scratch, cause);
+            throw cause;
+          }
           let response: PiRpcMessage;
           try {
             response = await rpc.send({ type: 'prompt', message: startInput.instruction });
@@ -615,20 +654,6 @@ export class PiAdapter implements RuntimeAdapter {
             });
           }
 
-          let sessionRef: string;
-          try {
-            sessionRef = await resolveAuthoritativeSessionId(rpc);
-          } catch (err) {
-            await disposePiStartup(rpc, scratch);
-            throw err;
-          }
-          if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
-            await disposePiStartup(rpc, scratch);
-            throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'authority', retry: 'non-retryable',
-              reason: 'pi resumed a different authoritative session than requested',
-            });
-          }
           return new PiSession(sessionRef, rpc, manifestSelection, scratch, undefined, mcpEventIdentities(startInput.mcpToolsetTools));
         },
       },
@@ -1044,8 +1069,8 @@ function sameDispatchSelection(
  * `Session.sessionRef` reports something a *future* follow-up can actually
  * resume via `--session <id>`. `get_state.data.sessionId` is populated from
  * the moment pi's RPC process boots (confirmed live: present even before
- * any prompt is sent, with `messageCount: 0`), so this is safe to call
- * right after the initial prompt is accepted.
+ * any prompt is sent, with `messageCount: 0`), so this is called
+ * before the initial prompt. The host already holds its writer lease.
  *
  * Finding F8 (fabricated sessionRef): this used to fall back to
  * `crypto.randomUUID()` whenever `get_state` failed, timed out, or omitted

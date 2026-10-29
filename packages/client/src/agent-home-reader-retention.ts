@@ -1,7 +1,19 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { AGENT_HOME_READER_RUN_MAX_RETAINED, AGENT_HOME_READER_RUN_MAX_AGE_MS, isReaderRunName } from './agent-home-readers';
-/** Both full deletion and bounded retention use this one eligibility policy. */
+/**
+ * The reader-run retention policy. Inputs are canonical absolute paths.
+ *
+ * - A directory in `active` is never selected.
+ * - A directory that a reader session handoff points to stays while that
+ *   record's last update is within the age limit.
+ * - Other directories older than the age limit are selected.
+ * - Then, while more than `maxRetained` directories remain, the oldest
+ *   unprotected directory is selected first.
+ *
+ * Age is the directory's own modification time. The `reader-run` retention
+ * class removes what this yields, under its root identity checks.
+ */
 export async function* selectReaderRuns(input: {
  readonly runsRoot: string; readonly active: ReadonlySet<string>; readonly referenced: ReadonlyMap<string, number>;
  readonly nowMs: number; readonly maxRetained?: number; readonly maxAgeMs?: number;

@@ -17,8 +17,8 @@ import {
   AGENT_HOME_READER_RUN_MAX_AGE_MS,
   compareAgentHomeMemory,
   digestAgentHomeMemory,
-  pruneReaderRuns,
 } from '../agent-home-readers';
+import { selectReaderRuns } from '../agent-home-reader-retention';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -618,20 +618,23 @@ describe('reader run retention (#317)', () => {
     for (const name of names) await fs.mkdir(path.join(runs, name));
     return runs;
   }
+  async function selected(input: Parameters<typeof selectReaderRuns>[0]): Promise<string[]> {
+    const dirs: string[] = [];
+    for await (const run of selectReaderRuns(input)) dirs.push(run.dir);
+    return dirs;
+  }
 
-  it('removes unprotected directories older than the age limit and never an active one', async () => {
+  it('selects unprotected directories older than the age limit and never an active one', async () => {
     const runs = await runsWith(['old', 'active-old', 'fresh']);
     await age(path.join(runs, 'old'), AGENT_HOME_READER_RUN_MAX_AGE_MS + DAY_MS);
     await age(path.join(runs, 'active-old'), AGENT_HOME_READER_RUN_MAX_AGE_MS + DAY_MS);
 
-    const removed = await pruneReaderRuns({
+    expect(await selected({
       runsRoot: runs,
       active: new Set([path.join(runs, 'active-old')]),
       referenced: new Map(),
       nowMs: Date.now(),
-    });
-    expect(removed).toEqual([path.join(runs, 'old')]);
-    expect((await fs.readdir(runs)).sort()).toEqual(['active-old', 'fresh']);
+    })).toEqual([path.join(runs, 'old')]);
   });
 
   it('keeps a directory a recent handoff points to, until that record is older than the limit', async () => {
@@ -639,7 +642,7 @@ describe('reader run retention (#317)', () => {
     for (const name of ['recent-ref', 'expired-ref']) await age(path.join(runs, name), AGENT_HOME_READER_RUN_MAX_AGE_MS + DAY_MS);
     const nowMs = Date.now();
 
-    await pruneReaderRuns({
+    expect(await selected({
       runsRoot: runs,
       active: new Set(),
       referenced: new Map([
@@ -647,35 +650,22 @@ describe('reader run retention (#317)', () => {
         [path.join(runs, 'expired-ref'), nowMs - AGENT_HOME_READER_RUN_MAX_AGE_MS - DAY_MS],
       ]),
       nowMs,
-    });
-    expect(await fs.readdir(runs)).toEqual(['recent-ref']);
+    })).toEqual([path.join(runs, 'expired-ref')]);
   });
 
-  it('over the count limit removes the oldest unprotected directories first', async () => {
+  it('over the count limit selects the oldest unprotected directories first', async () => {
     const runs = await runsWith(['a', 'b', 'c', 'd', 'e']);
     // a is oldest and active; b and c are the next oldest unprotected ones.
     const ages: Record<string, number> = { a: 5, b: 4, c: 3, d: 2, e: 1 };
     for (const [name, days] of Object.entries(ages)) await age(path.join(runs, name), days * DAY_MS);
 
-    await pruneReaderRuns({
+    expect(await selected({
       runsRoot: runs,
       active: new Set([path.join(runs, 'a')]),
       referenced: new Map(),
       nowMs: Date.now(),
       maxRetained: 3,
-    });
-    expect((await fs.readdir(runs)).sort()).toEqual(['a', 'd', 'e']);
-  });
-
-  it('removes nothing when the runs directory does not resolve to itself', async () => {
-    const runs = await runsWith(['old']);
-    await age(path.join(runs, 'old'), AGENT_HOME_READER_RUN_MAX_AGE_MS + DAY_MS);
-    const link = path.join(await fs.realpath(await temp('byok-reader-runs-link-')), 'runs');
-    await fs.symlink(runs, link);
-
-    await expect(pruneReaderRuns({ runsRoot: link, active: new Set(), referenced: new Map(), nowMs: Date.now() }))
-      .rejects.toThrow(/changed through a symbolic link/);
-    expect(await fs.readdir(runs)).toEqual(['old']);
+    })).toEqual([path.join(runs, 'b'), path.join(runs, 'c')]);
   });
 });
 
