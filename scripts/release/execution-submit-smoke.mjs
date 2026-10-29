@@ -246,7 +246,7 @@ const childArg = (flag) => {
  * BEFORE finalize (file absent) and a replaying child finalized (file present).
  */
 async function composeReopened(handoff, consume, finalizeProbePath) {
-  const { createByokPool, createPostgresCloudStores, createPostgresCoreStores } = await import('@byok-sdk/cloud-dataplane');
+  const { createByokPool, createPostgresCloudStores, createPostgresCoreStores, PostgresProofReceiptRetentionAuthority } = await import('@byok-sdk/cloud-dataplane');
   const clock = { now: () => new Date() };
   const crypto = createWebCrypto();
   const tokenSecret = new Uint8Array(Buffer.from(handoff.tokenSecretB64, 'base64'));
@@ -262,6 +262,7 @@ async function composeReopened(handoff, consume, finalizeProbePath) {
   }
   const full = fullCapabilityDeclaration();
   const cloud = createByokCloud({
+    proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
     core: createPostgresCoreStores({ pool, clock, objectStorage: handoff.objectStorage }),
     mailboxWake: createInProcessMailboxWake(),
     cloud: cloudStores,
@@ -662,7 +663,7 @@ if (dataplaneRequired && !substrateConfigured) {
 
 if (substrateConfigured) {
   const self = fileURLToPath(import.meta.url);
-  const { createByokPool, createPostgresCloudStores, createPostgresCoreStores, migrate, migrationsDir } = await import('@byok-sdk/cloud-dataplane');
+  const { createByokPool, createPostgresCloudStores, createPostgresCoreStores, migrate, migrationsDir, PostgresProofReceiptRetentionAuthority } = await import('@byok-sdk/cloud-dataplane');
   const durableTenantName = 'packed-recurring-durable';
   const durableTenant = tenantId(durableTenantName);
   const durableRef = { agentId: 'packed-agent', profileRevision: 'profile' };
@@ -687,6 +688,7 @@ if (substrateConfigured) {
   function composeDurable(core, cloudStores, signer, consumer) {
     const full = fullCapabilityDeclaration();
     return createByokCloud({
+      proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
       mailboxWake: createInProcessMailboxWake(),
       core,
       cloud: cloudStores,
