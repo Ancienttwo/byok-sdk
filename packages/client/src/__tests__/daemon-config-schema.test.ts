@@ -17,6 +17,7 @@ import {
   type DaemonConfig,
 } from '../index';
 import { describeEffectiveDaemonConfig } from '../daemon/config-schema/effective';
+import { AgentEgressPolicyError, DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { REMOVED_DAEMON_CONFIG_FIELDS } from '../daemon/config-schema/removed-fields';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -150,7 +151,10 @@ describe('removed workspaceRoot (#925) is a typed error with its migration note'
     const config = { productName: 'AiphaBee', productId: 'aiphabee', serverUrl: 'http://127.0.0.1:1', workspaceRoot: '/tmp/ws' };
     expect(validateDaemonConfig(config, { source: 'cli' }).issues).toEqual([expect.objectContaining({ code: 'removed_field', path: 'workspaceRoot', migration })]);
     const file = await writeConfig(config);
-    expect(() => loadConfig(file)).toThrow(`DaemonConfig.workspaceRoot was removed: since wire v4 every offer runs in its SDK-owned Agent home, never in a workspaceRoot/<taskId> directory; configure agentHome (migration: ${migration})`);
+    let thrown: unknown;
+    try { loadConfig(file); } catch (error) { thrown = error; }
+    expect(thrown).toBeInstanceOf(DaemonConfigFieldRemovedError);
+    expect(thrown).toMatchObject({ code: 'daemon_config_field_removed', field: 'workspaceRoot', migration });
     expect(runCheck(await writeConfig(config)).code).toBe(1);
   });
 
@@ -177,6 +181,29 @@ describe('effective values', () => {
       storage: { scratchRoot: testScratchRoot() }, agentMemoryMcp: 'off', ...extra,
     };
   }
+
+  it('rejects invalid egress policy values at their path with construction parity', async () => {
+    const config = await embeddedConfig({
+      agentHome: testAgentHomeConfig(),
+      agentEgress: { policy: {
+        ...DEFAULT_AGENT_EGRESS_POLICY,
+        activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxCoalesceMs: -1 },
+      } },
+    });
+    expect(validateDaemonConfig(config, { source: 'embedded' }).ok).toBe(true);
+    let thrown: unknown;
+    try { createDaemonWithAdapters(config, []); } catch (error) { thrown = error; }
+    expect(thrown).toBeInstanceOf(AgentEgressPolicyError);
+    expect((thrown as AgentEgressPolicyError).issues).toEqual([
+      { path: ['activity', 'maxCoalesceMs'], message: expect.any(String) },
+    ]);
+    expect(checkDaemonConfig(config, { source: 'embedded', adapters: [] })).toEqual({
+      ok: false, issues: [{
+        severity: 'error', code: 'invalid_value', path: 'agentEgress.policy.activity.maxCoalesceMs',
+        message: (thrown as AgentEgressPolicyError).issues[0]!.message,
+      }],
+    });
+  });
 
   const limits = {
     revision: 'config-check-v1', maxRequestBytes: 32_000, maxArtifactBytes: 256_000,

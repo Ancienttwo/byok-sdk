@@ -2072,7 +2072,14 @@ export interface AgentEgressStatus {
  */
 export declare const DEFAULT_AGENT_EGRESS_POLICY: Readonly<AgentEgressPolicy>;
 export declare class AgentEgressPolicyError extends Error {
-    constructor(message: string);
+    readonly issues: readonly {
+        path: readonly (string | number)[];
+        message: string;
+    }[];
+    constructor(message: string, issues: readonly {
+        path: readonly (string | number)[];
+        message: string;
+    }[]);
 }
 /** Resolve/validate once at construction; unknown policy shapes never become an implicit default. */
 export declare function resolveAgentEgressPolicy(policy: AgentEgressPolicy | undefined): Readonly<AgentEgressPolicy>;

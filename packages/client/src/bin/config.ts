@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
 import { validateDaemonConfig, type DaemonConfigIssue } from '../daemon/config-schema/validate';
+import { removedFieldError } from '../daemon/config-schema/errors';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release';
 
 /**
@@ -63,13 +64,16 @@ export function formatConfigIssue(issue: DaemonConfigIssue): string {
  * ever one config shape to reason about.
  *
  * Validated by the shared {@link validateDaemonConfig} as a `cli` config:
- * any error throws a {@link ConfigError}. Unknown fields pass (Q4'); the
+ * removed fields throw `DaemonConfigFieldRemovedError`; other errors throw
+ * a {@link ConfigError}. Unknown fields pass (Q4'); the
  * daemon logs them, and `byok-agent config check --strict` fails on them.
  */
 export function loadConfig(configPath: string | undefined, overrides: Partial<CliConfigInput> = {}): DaemonConfig {
   const { $schema: _schema, ...base } = readConfigFile(configPath);
   const merged: Record<string, unknown> = { ...base, ...overrides };
   const { issues } = validateDaemonConfig(merged, { source: 'cli' });
+  const removed = issues.find((issue) => issue.code === 'removed_field');
+  if (removed !== undefined) throw removedFieldError(removed.path);
   const errors = issues.filter((issue) => issue.severity === 'error');
   if (errors.length > 0) throw new ConfigError(errors.map(formatConfigIssue).join('; '));
   return { ...merged, localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE } as DaemonConfig;
