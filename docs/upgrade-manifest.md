@@ -121,11 +121,56 @@ validation. It fails when:
    empty manifest from that version. It refuses a version that is not newer
    than the current baseline.
 
+## Store compatibility precheck
+
+The manifest states what a release does with a store an older release wrote.
+The precheck applies that to the stores actually on a machine: run the
+*candidate* build against the current stores before switching to it (#1097
+does this before a switch). Each store is checked by the package that owns it,
+which copies the files to a private temporary directory and runs its own open
+on the copy. The store code therefore stays the only authority on what it
+accepts, and the originals are only read, never opened, locked or changed.
+
+| Store | Inspector |
+| --- | --- |
+| `client-journal`, `pi-durable` | `inspectDaemonStores({ storeDir })` in `@byok-sdk/client`; also `byok-agent upgrade check --store [--json] [--config <path>]` |
+| `server-sqlite` | `inspectSqliteStore(path)` in `@byok-sdk/server` |
+| `keys-profile-store` | `inspectProviderProfileStore(path)` in `@byok-sdk/keys` |
+
+`@byok-sdk/client` cannot depend on `@byok-sdk/keys` (`check:release-graph`)
+or on `@byok-sdk/server` (device/SaaS boundary), so a Host that has those
+stores calls their inspectors itself. Every inspector returns the
+`StoreCompatibility` type from `@byok-sdk/core`, with one `verdict`:
+
+- `accepted`: the build opens the store and keeps its data. pi-durable
+  migrates an older replica forward on open; the old build cannot read it
+  afterwards.
+- `new-path-repair`: refused as an older format (server `schema_version`,
+  keys `PROVIDER_STORE_SCHEMA_STALE`). Start on a new path and pair or
+  provision again.
+- `rejected`: refused for another reason, such as a newer format, a damaged
+  file, or a journal from before `withheld_bytes`. `code` and `reason` carry
+  what the store reported, and the operator resolves it.
+- `absent`: no store at the path.
+
+The CLI exits 0 when every store is `accepted` or `absent`, and 2 otherwise.
+Stop the owner of a store before checking it: a file that changes while it is
+copied makes the check fail with an error instead of a verdict.
+
+`scripts/release/fixtures/stores/` holds the stores each recent release writes
+on first open. `generate.mjs` installs the release from npm, or uses this
+workspace for `main`, and writes them. `index.json` lists the fixtures with
+the verdict this tree gives each store (`expected`). The server, keys and
+client tests check every fixture against `expected`. They also check that a
+store written by the baseline release gets either `accepted` or the
+`acceptance` of the manifest entry for that store. After a rebaseline, the
+new baseline release therefore needs a fixture:
+`node scripts/release/fixtures/stores/generate.mjs --release <version>`.
+When a store format changes on `main`, regenerate the `main` fixture with
+`--main` and update `expected`.
+
 ## Not covered yet
 
-- The store compatibility precheck (`byok-agent upgrade check --store` and
-  its library function, with fixture stores of recent releases) is a
-  follow-up of #1102.
 - `config:` items wait for the #1094 schema.
 - CLI subcommands and flags, and the SDK reserved helper kinds (#1104), are
   not items yet.

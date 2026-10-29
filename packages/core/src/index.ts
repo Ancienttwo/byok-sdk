@@ -389,6 +389,9 @@ export type { CollectExpiredInput, CollectExpiredCounts, CollectExpiredResult } 
 export type { QuotaCollectExpiredInput } from './quota';
 export type { ObjectCollectExpiredInput } from './blob';
 
+// Store compatibility precheck result (#1102)
+export type { LocalStoreId, StoreCompatibility, StoreCompatibilityVerdict } from './store-compatibility';
+
 export { InMemoryStorageLedger } from './in-memory/storage-ledger';
 export type { InMemoryObjectBytes } from './in-memory/blob';
 

@@ -311,6 +311,19 @@ test('upgrade-manifest data files select the script checks', () => {
   assert.throws(() => selectImpact(['scripts/release/upgrade-manifest/other.json']), /reviewed CI mapping required/i);
 });
 
+// #1102: the store precheck fixtures run the suites of the three inspectors (and their dependents).
+test('store precheck fixtures select the server, keys and client suites', () => {
+  for (const path of ['scripts/release/fixtures/stores/index.json', 'scripts/release/fixtures/stores/generate.mjs',
+    'scripts/release/fixtures/stores/0.30.2/server-sqlite.db',
+    'scripts/release/fixtures/stores/main/daemon-store/durable-replicas/fixture/durable-fixture.sqlite']) {
+    const { dirs } = selectImpact([path]);
+    for (const dir of ['packages/server', 'packages/keys', 'packages/client']) assert.ok(dirs.includes(dir), `${path} selects ${dir}`);
+  }
+  for (const path of ['scripts/release/fixtures/stores/notes.txt', 'scripts/release/fixtures/stores/next/server-sqlite.db']) {
+    assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i);
+  }
+});
+
 test('release script siblings outside the reviewed list still fail closed', () => {
   for (const path of ['scripts/release/publish.test.mjs', 'scripts/release/pg-migrate-smoke.mjs', 'scripts/release/registry-contract.mjs',
     'scripts/release/nested/publish.mjs', 'scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/check-version-authority.js']) {

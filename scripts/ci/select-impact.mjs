@@ -494,6 +494,11 @@ export function selectImpact(paths, context = {}) {
     // tarball ships. The targeted job's gate step reads both.
     if (path === 'scripts/release/upgrade-manifest/baseline.json') { scripts = true; continue; }
     if (path === 'packages/client/upgrade-manifest.json') { scripts = true; families.add('npm-release-pack'); continue; }
+    // #1102: the store precheck fixtures, their index and generator. The server,
+    // keys and client suites check every fixture against its `expected` verdicts.
+    if (/^scripts\/release\/fixtures\/stores\/(?:generate\.mjs|index\.json|(?:\d+\.\d+\.\d+|main)\/[a-z0-9/-]+\.(?:db|sqlite))$/.test(path)) {
+      dirs.add('packages/server'); dirs.add('packages/keys'); dirs.add('packages/client'); continue;
+    }
     if (Object.hasOwn(reviewedScripts, path)) {
       scripts = true;
       for (const id of reviewedScripts[path].families ?? []) families.add(id);

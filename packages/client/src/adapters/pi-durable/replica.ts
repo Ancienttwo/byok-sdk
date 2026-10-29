@@ -4,6 +4,17 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { ensureSecureDir } from '../../util/secure-dir';
 
+/** `<storeDir>/durable-replicas`: the replica root the daemon hands pi-durable. */
+export const DURABLE_REPLICA_DIRNAME = 'durable-replicas';
+const REPLICA_FILE_PREFIX = 'durable-';
+const REPLICA_FILE_SUFFIX = '.sqlite';
+const REPLICA_LOCK_SUFFIX = '.lock.sqlite';
+
+/** Whether a file name under a replica binding directory is a replica database (not its lock or WAL). */
+export function isDurableReplicaFile(name: string): boolean {
+  return name.startsWith(REPLICA_FILE_PREFIX) && name.endsWith(REPLICA_FILE_SUFFIX) && !name.endsWith(REPLICA_LOCK_SUFFIX);
+}
+
 export interface DurableReplicaBinding {
   readonly agentRef: Readonly<{ tenantId: string; agentId: string; profileRevision: string }>;
   readonly taskId: string;
@@ -40,12 +51,12 @@ export async function admitReplica(root: string, binding: DurableReplicaBinding)
   // taskId remains the request identity; percent encoding is only a filename representation.
   const name = encodeURIComponent(binding.taskId);
   if (Buffer.byteLength(name) > 180) throw new Error('durable task id exceeds filename budget');
-  return path.join(directory, `durable-${name}.sqlite`);
+  return path.join(directory, `${REPLICA_FILE_PREFIX}${name}${REPLICA_FILE_SUFFIX}`);
 }
 
 /** SQLite locking_mode=EXCLUSIVE retains the OS lock until close, including after commit. */
 export async function acquireReplicaLock(file: string, leaseId: string): Promise<{ release(): void }> {
-  const lockPath = `${file}.lock.sqlite`;
+  const lockPath = `${file}${REPLICA_LOCK_SUFFIX}`;
   try {
     const stat = await fs.lstat(lockPath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('invalid durable replica lock file');

@@ -380,6 +380,8 @@ export type {
 } from './daemon/journal/journal';
 export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
 export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
+export { inspectDaemonStores } from './upgrade-check/store-compatibility';
+export type { InspectDaemonStoresInput } from './upgrade-check/store-compatibility';
 
 export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config';
 export type { StorageConfig, StorageBudgetInput } from './daemon/retention/config';
