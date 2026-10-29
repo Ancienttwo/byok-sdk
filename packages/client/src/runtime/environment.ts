@@ -200,7 +200,8 @@ export type RuntimeEnvironmentPolicy =
 
 /**
  * An adapter's conflict rule: given the names `pass` actually supplied, the
- * names (or `*` prefixes) to remove from the base.
+ * names (or `*` prefixes) to remove from the base. On win32 the supplied
+ * names arrive in upper case and the removed names match case-insensitively.
  */
 export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => readonly string[];
 
@@ -281,7 +282,8 @@ export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput)
   for (const [name, value] of Object.entries(live)) {
     if (value !== undefined && matchesAny(name, passPatterns, caseInsensitive) && !matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) passed.set(name, value);
   }
-  const removed = input.conflicts?.(new Set(passed.keys())) ?? [];
+  // win32 names are case-insensitive, so a rule sees them in upper case and its exact-name triggers match any spelling.
+  const removed = input.conflicts?.(new Set([...passed.keys()].map((name) => caseInsensitive ? name.toUpperCase() : name))) ?? [];
   const result: Record<string, string> = {};
   for (const [name, value] of Object.entries(base)) {
     if (!matchesAny(name, removed, caseInsensitive)) result[name] = value;

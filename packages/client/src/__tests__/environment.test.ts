@@ -265,6 +265,13 @@ describe('composeRuntimeEnvironment (#1095)', () => {
       .toEqual({ PATH: '/usr/bin', ANTHROPIC_BASE_URL: 'https://gw.example', ...LOOPBACK });
   });
 
+  it('win32: a conflict rule sees a mixed-case passed name in upper case, so its trigger fires', () => {
+    const rule = (passed: ReadonlySet<string>) => passed.has('ANTHROPIC_API_KEY') ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK'] : [];
+    const live = { Path: 'C:\\Windows', Claude_Code_Use_Bedrock: '1', Anthropic_Api_Key: 'sk-ant-host' };
+    expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['CLAUDE_CODE_*'], pass: ['ANTHROPIC_API_KEY'] }, live, platform: 'win32', conflicts: rule }))
+      .toEqual({ Path: 'C:\\Windows', Anthropic_Api_Key: 'sk-ant-host', NO_PROXY: '127.0.0.1,localhost' });
+  });
+
   it('NO_PROXY: merges both spellings with the loopback names, without duplicates', () => {
     expect(compose({}, { NO_PROXY: 'corp.example, localhost', no_proxy: '.internal,corp.example', HTTPS_PROXY: 'http://proxy:3128' }, {}))
       .toEqual({ HTTPS_PROXY: 'http://proxy:3128', NO_PROXY: 'corp.example,localhost,.internal,127.0.0.1', no_proxy: 'corp.example,localhost,.internal,127.0.0.1' });
