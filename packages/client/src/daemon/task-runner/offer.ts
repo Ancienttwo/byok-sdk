@@ -236,6 +236,7 @@ export async function handleOffer(
     } finally {
       this['inFlightBlobAborts'].delete(taskId);
       this['inFlightOffers'].delete(taskId);
+      this['deviceTaskReservations'].delete(taskId);
       this['claimedHarnesses'].delete(taskId);
     }
   }

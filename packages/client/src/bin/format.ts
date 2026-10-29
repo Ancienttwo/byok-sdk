@@ -83,6 +83,8 @@ export function formatHaltRemedy(reason: DaemonHaltReason): string {
       return 'the server rejected this device\'s hello: check productId and the SDK version, or pair again, then start again';
     case 'replay_cursor_too_old':
       return 'the server no longer holds this device\'s undelivered history: pair again (or run operator recovery), then start again';
+    case 'cursor_unreadable':
+      return 'the delivery cursor file is unreadable: run `byok-agent doctor --repair reset-cursor --yes`, then start again; the server replays this device\'s retained history and already-handled work is not run twice';
     case 'config_invalid':
       return 'the configuration is invalid: fix it, then start again';
   }
@@ -334,7 +336,7 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
   ];
   for (const toolset of live.toolsets.toolsets) lines.push(formatToolsetStatusLine('live-toolset', toolset));
   const outbound = live.outbound;
-  lines.push(`live-outbound: accepted=${outbound.accepted} duplicate=${outbound.duplicate} rejected=${outbound.rejected} rejectedTerminals=${outbound.rejectedTerminals}`);
+  lines.push(`live-outbound: accepted=${outbound.accepted} duplicate=${outbound.duplicate} rejected=${outbound.rejected} rejectedTerminals=${outbound.rejectedTerminals} droppedEphemeral=${outbound.droppedEphemeral}`);
   const health = live.operationalHealth;
   if (health.availability === 'unavailable') {
     lines.push(`live-operational-health: unavailable reason=${quote(health.reason)}`);

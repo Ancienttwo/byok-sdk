@@ -24,6 +24,20 @@ import { atomicWriteFile } from '../util/atomic-write';
  * `clear()` additionally lets `create-daemon.ts`'s `pair()` proactively wipe
  * the previous device's entry for this `serverUrl` as a hygiene measure.
  */
+/**
+ * #1121: the cursor file exists but holds no usable cursor, or cannot be read.
+ * Never read as "no cursor": a missing cursor means a fresh device, and a
+ * fresh device must not be inferred from a damaged store. Startup halts with
+ * `cursor_unreadable`; the operator resets the cursor with
+ * `byok-agent doctor --repair reset-cursor --yes` (or `resetDeviceCursor`).
+ */
+export class CursorUnreadableError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super('the durable delivery cursor is unreadable', options);
+    this.name = 'CursorUnreadableError';
+  }
+}
+
 export class CursorStore {
   constructor(private readonly storeDir: string) {}
 
@@ -32,32 +46,29 @@ export class CursorStore {
     return path.join(this.storeDir, `cursor-${key}.json`);
   }
 
+  /**
+   * `undefined` only when no cursor file exists. A file that cannot be read,
+   * or that holds anything but a nonnegative integer cursor (the same guard
+   * the server applies to `GET /byok/events?cursor=`), throws
+   * {@link CursorUnreadableError}.
+   */
   async load(serverUrl: string, deviceId: string): Promise<number | undefined> {
     let raw: string;
     try {
       raw = await fs.readFile(this.fileFor(serverUrl, deviceId), 'utf8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw err;
+      throw new CursorUnreadableError({ cause: err });
     }
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(raw) as { cursor?: unknown };
-      const v = parsed.cursor;
-      // Wave 2 hardening: a corrupt/tampered/hand-edited cursor file (a
-      // negative number, a float, NaN/Infinity via a prior bad write, etc.)
-      // must not be trusted as a redelivery cursor — reporting a bogus value
-      // as `conn.hello.cursor` could make the server's `seq > cursor` filter
-      // behave unpredictably. Falling back to `undefined` (treated the same
-      // as "no cursor file yet") is always safe under at-least-once delivery
-      // (protocol §9): worst case, more gets redelivered than strictly
-      // necessary, never less. Mirrors the nonnegative-integer guard Wave 1
-      // already added server-side for `EventsPollQuerySchema`/`GET
-      // /byok/events`'s `cursor` query param (`http.ts`) — this is the
-      // client-file half of the same hardening.
-      return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined;
-    } catch {
-      return undefined;
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new CursorUnreadableError({ cause: err });
     }
+    const v = typeof parsed === 'object' && parsed !== null ? (parsed as { cursor?: unknown }).cursor : undefined;
+    if (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0) return v;
+    throw new CursorUnreadableError();
   }
 
   async save(serverUrl: string, deviceId: string, cursor: number): Promise<void> {

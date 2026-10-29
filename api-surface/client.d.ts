@@ -3556,6 +3556,11 @@ import type { DaemonHaltReason } from './daemon-lifecycle';
 import { type FleetJitter } from './deterministic-jitter';
 export { ReplayCursorTooOldError } from './replay-cursor';
 /**
+ * #1121: the most bytes of droppable envelopes the outbox holds while the
+ * Host is unreachable. Past it the oldest of them are dropped unsent.
+ */
+export declare const MAX_OUTBOX_EPHEMERAL_BYTES: number;
+/**
  * The daemon's one long-poll session: `open` from the moment the server
  * accepts this session's `conn.hello` until any route fails, `connecting`
  * otherwise.
@@ -3593,6 +3598,8 @@ export interface ConnectionManagerOptions {
     /** Await durable disposition before retiring the exact accepted/rejected bytes. */
     onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
     onOutboundQueued?: (envelope: Envelope) => void;
+    /** An ephemeral envelope left the outbox unsent because the outbox passed {@link MAX_OUTBOX_EPHEMERAL_BYTES}. */
+    onOutboundDropped?: (envelope: Envelope) => void;
     beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
     /**
      * Base of the capped exponential backoff (`backoffCeilingMs`) before each
@@ -3699,6 +3706,13 @@ export declare class ConnectionManager {
      * separately from `this.outbox` at all.
      */
     private inFlightBatch;
+    /**
+     * Every id in `outbox` or `inFlightBatch`, mapped to its encoded size when
+     * the envelope is droppable and 0 otherwise. `send()` dedups against it in
+     * O(1), and `ephemeralBytes` is the sum of its values.
+     */
+    private readonly queuedIds;
+    private ephemeralBytes;
     private draining;
     private stopped;
     private haltReason;
@@ -3773,6 +3787,17 @@ export declare class ConnectionManager {
      * outbox cannot grow; a terminal is journaled before it is sent (#1119).
      */
     send(envelope: Envelope): void;
+    /** The envelope left the outbox for good: settled, filtered out, or dropped. */
+    private forget;
+    /**
+     * #1121: an outage must not grow the outbox without bound. Over the cap, the
+     * oldest queued `task.progress` and `agent.message.draft` envelopes are
+     * dropped until it fits again. Nothing else is ever dropped: terminals are
+     * journaled and resent from the journal, and claim, started and approval
+     * envelopes carry task state. The Host tolerates a gap in progress seqs.
+     * An envelope already in flight is not dropped.
+     */
+    private dropOldestEphemeral;
     /** Publish a fresh local configuration snapshot while this daemon is running. */
     refreshHello(): void;
     /**
@@ -4704,6 +4729,29 @@ export interface DaemonConfig {
      */
     maxConcurrentReaderAttemptsPerAgentHome?: number;
     /**
+     * How many tasks this daemon runs at once, across every Agent home, lane and
+     * runtime. Default {@link DEFAULT_MAX_CONCURRENT_TASKS} (8).
+     *
+     * Active tasks and offers already admitted but still starting both count.
+     * An offer over the cap is declined retryably (`task.decline` with
+     * `retryable: true` and no code) before adapter preparation, the claim, or
+     * any process side effect, so the Host can offer it again later or to
+     * another device.
+     *
+     * Validated up front: a positive safe integer. There is no "uncapped"
+     * value; `0`, a negative number, `NaN` and a non-integer are construction
+     * errors.
+     */
+    maxConcurrentTasks?: number;
+    /**
+     * Wall-clock limit, in milliseconds, for a task whose offer carries no
+     * `limits.maxDurationMs`. An offer's own limit always wins. Enforced the
+     * same way: the task fails with `resource limit exceeded: maxDurationMs`.
+     * Omitted, a task without an offer limit runs until it ends or is
+     * cancelled. Validated up front: a positive safe integer.
+     */
+    defaultMaxDurationMs?: number;
+    /**
      * Explicit Agent-local/cloud egress selection. Omission still enforces the
      * SDK metadata/status projection, but does not advertise or admit the new
      * policy/reliable protocol surface.
@@ -5314,10 +5362,28 @@ export declare function createDaemon(config: DaemonConfig, overrides?: DaemonOve
  * `clear()` additionally lets `create-daemon.ts`'s `pair()` proactively wipe
  * the previous device's entry for this `serverUrl` as a hygiene measure.
  */
+/**
+ * #1121: the cursor file exists but holds no usable cursor, or cannot be read.
+ * Never read as "no cursor": a missing cursor means a fresh device, and a
+ * fresh device must not be inferred from a damaged store. Startup halts with
+ * `cursor_unreadable`; the operator resets the cursor with
+ * `byok-agent doctor --repair reset-cursor --yes` (or `resetDeviceCursor`).
+ */
+export declare class CursorUnreadableError extends Error {
+    constructor(options?: {
+        cause?: unknown;
+    });
+}
 export declare class CursorStore {
     private readonly storeDir;
     constructor(storeDir: string);
     private fileFor;
+    /**
+     * `undefined` only when no cursor file exists. A file that cannot be read,
+     * or that holds anything but a nonnegative integer cursor (the same guard
+     * the server applies to `GET /byok/events?cursor=`), throws
+     * {@link CursorUnreadableError}.
+     */
     load(serverUrl: string, deviceId: string): Promise<number | undefined>;
     save(serverUrl: string, deviceId: string, cursor: number): Promise<void>;
     /** Remove any persisted cursor for (serverUrl, deviceId) — a no-op if none exists. Called from `pair()` (finding F5) so a device that's about to be replaced never leaves a cursor a future, unrelated device could somehow inherit. */
@@ -5424,6 +5490,8 @@ export declare const DAEMON_HALT_REASONS: readonly [
 'handshake_rejected', 
 /** The server no longer retains the history after this device's acknowledged cursor. */
 'replay_cursor_too_old', 
+/** The durable delivery cursor file is unreadable: run `doctor --repair reset-cursor`. */
+'cursor_unreadable', 
 /** The configuration cannot work; a restart with the same configuration fails the same way. Thrown by `start()`; never reported through `lifecycle`. */
 'config_invalid'];
 export type DaemonHaltReason = (typeof DAEMON_HALT_REASONS)[number];
@@ -7949,6 +8017,8 @@ export interface OutboundStatus {
     rejected: number;
     rejectedByReason: Partial<Record<OutboundRefusalReason, number>>;
     rejectedTerminals: number;
+    /** `task.progress` / `agent.message.draft` envelopes dropped unsent because the outbox passed its byte cap. */
+    droppedEphemeral: number;
     lastRejection?: OutboundRejection;
 }
 // ==== @byok-sdk/client dist/daemon/prepared-agent-memory.d.ts ====
@@ -8991,6 +9061,11 @@ export declare const DEFAULT_MAX_TASK_OUTPUT_BYTES: number;
  * second writer would co-write `MEMORY.md`, `notes/` and `.git`.
  */
 export declare const DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME = 4;
+/**
+ * Default number of tasks one daemon runs at once, across every Agent home and
+ * runtime: active tasks plus offers already admitted past this cap.
+ */
+export declare const DEFAULT_MAX_CONCURRENT_TASKS = 8;
 export interface TaskRunnerDeps {
     adapters: RuntimeAdapter[];
     runtimeAllowlist?: string[];
@@ -9051,6 +9126,13 @@ export interface TaskRunnerDeps {
      * The writer limit is fixed at one.
      */
     maxConcurrentReaderAttemptsPerAgentHome?: number;
+    /**
+     * Device-wide task cap — see `DaemonConfig.maxConcurrentTasks`. Unset
+     * defaults to {@link DEFAULT_MAX_CONCURRENT_TASKS}.
+     */
+    maxConcurrentTasks?: number;
+    /** Wall-clock limit for an offer without `limits.maxDurationMs` — see `DaemonConfig.defaultMaxDurationMs`. */
+    defaultMaxDurationMs?: number;
     /** Exact host-selected policy accepted by a `task.offer` that carries `egressPolicy`. */
     agentEgressPolicy?: Readonly<AgentEgressPolicy>;
     /** Latest-value activity lane and reliable spool for Agent egress offers. */
@@ -9455,6 +9537,8 @@ export declare class TaskRunner {
     private readonly sealedOpening;
     private readonly claimedHarnesses;
     private readonly homeReservations;
+    /** Offers admitted past the device-wide task cap that are not yet active; cleared when `handleOffer` returns. */
+    private readonly deviceTaskReservations;
     private readonly startupOwnership;
     /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
     private readonly inFlightBlobAborts;
@@ -9526,6 +9610,8 @@ export declare class TaskRunner {
     private get maxInlineEventBytes();
     /** Effective per-canonical-Agent-home reader cap — see {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}. */
     private get maxConcurrentReaderAttemptsPerAgentHome();
+    /** Effective device-wide task cap — see {@link DEFAULT_MAX_CONCURRENT_TASKS}. */
+    private get maxConcurrentTasks();
     /**
      * M4 Phase 4 (part B.3, observability): per-active-task queue watermarks
      * for the control socket's `status` result — see
@@ -10485,6 +10571,38 @@ export declare class DeviceMetadataRepairError extends Error {
  * Ordinary doctor remains credential-blind; only this confirmed action opens the OS store.
  */
 export declare function repairDeviceEnrollmentMetadata(config: DaemonConfig, input: RepairDeviceEnrollmentMetadataInput): Promise<DeviceMetadataRepairResult>;
+export interface ResetDeviceCursorInput {
+    confirmed: true;
+}
+export interface DeviceCursorResetResult {
+    action: 'reset-cursor';
+    scope: 'device';
+    /** The cursor file now holds 0; nothing was replayed yet. */
+    status: 'reset';
+}
+declare const CURSOR_RESET_MESSAGES: {
+    readonly 'confirmation-required': 'Explicit confirmation is required to reset the delivery cursor.';
+    readonly 'daemon-running': 'Stop the daemon before resetting the delivery cursor.';
+    readonly 'store-busy': 'The store is owned by another operation; cursor reset refused.';
+    readonly unpaired: 'No readable device record exists; pair this device instead of resetting its cursor.';
+    readonly 'reset-failed': 'The delivery cursor could not be reset; inspect the store before retrying.';
+};
+export type DeviceCursorResetErrorCode = keyof typeof CURSOR_RESET_MESSAGES;
+/** Closed diagnostics only, like {@link DeviceMetadataRepairError}. */
+export declare class DeviceCursorResetError extends Error {
+    readonly code: DeviceCursorResetErrorCode;
+    constructor(code: DeviceCursorResetErrorCode);
+}
+/**
+ * #1121: the operator recovery for the `cursor_unreadable` halt. Rewrites the
+ * paired device's delivery cursor as 0, so the next start asks the server to
+ * replay everything it still retains for this device. Replay is safe: a
+ * redelivered offer this device journaled is matched by its id, and the
+ * server suppresses offers whose task already ended. If the server no longer
+ * retains seq 1, the next start halts `replay_cursor_too_old` as for any
+ * expired cursor. Refused while the daemon runs; takes the store's owner lease.
+ */
+export declare function resetDeviceCursor(config: DaemonConfig, input: ResetDeviceCursorInput): Promise<DeviceCursorResetResult>;
 // ==== @byok-sdk/client dist/diagnostics/operator-actions.d.ts ====
 import { type AgentRef } from '@byok-sdk/protocol';
 import type { DaemonConfig } from '../daemon/create-daemon';
@@ -10828,8 +10946,8 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
 export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
-export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
-export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
+export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor';
+export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
 export { NativeInteractionController, NativeInteractionError } from './native-interactions';
