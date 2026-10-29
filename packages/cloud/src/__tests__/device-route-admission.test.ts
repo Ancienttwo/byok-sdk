@@ -1,20 +1,29 @@
 /**
  * #1118: every Host route is bounded and every device route is rate-admitted.
  *
- * Both checks walk the router's own inventory (`cloud.routes`), so a route
- * added tomorrow is covered without editing this file: it either reads its
- * body under a ceiling and admits through the device budget, or this suite
- * fails.
+ * The checks walk the router's own inventory (`cloud.routes`) of a composition
+ * that supplies every port-bound capability, so an optional route (truth
+ * records, E2EE members, skill packs, Agent-memory projection) is covered the
+ * same way as a default one, and a route added tomorrow is covered without
+ * editing this file. Body reads are detected by what a route actually pulls
+ * from its request stream: `c.req.json()`, `c.req.raw.arrayBuffer()` and every
+ * other read API drain the same stream, so no API escapes the measurement.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createEnvelope, type CreateBlobResponse } from '@byok-sdk/protocol';
+import { InMemorySkillPackStore, type TenantId } from '@byok-sdk/core';
+import { createEnvelope, type CreateBlobResponse, type PairResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
+import { createHmacTokenSigner } from '../auth/tokens';
+import { CAPABILITY_PORTS, capabilityDeclarationForPorts, type CapabilityPorts } from '../capabilities';
+import { createByokCloud, type ByokCloud } from '../cloud';
+import { createInMemoryByokCloud } from '../composition/in-memory';
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { routeKey } from '../router/registry';
-import type { InboundRateLimiter, RateLimitUnit } from '../stores/ports';
-import { CLOUD_ORIGIN, TENANT_A, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
+import { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore } from '../stores/in-memory/agent-memory-projection';
+import { InMemoryE2eeMemberStore } from '../stores/in-memory/e2ee-member';
+import type { CloudStores, InboundRateLimiter, RateLimitUnit } from '../stores/ports';
+import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
+import { CLOUD_ORIGIN, PRODUCT_ID, TENANT_A, createDeviceKeys } from './support/harness';
 
 const MESSAGES_ROUTE = 'POST /byok/messages';
 
@@ -22,6 +31,80 @@ const MESSAGES_ROUTE = 'POST /byok/messages';
 const PULL_ALLOWANCE_BYTES = 8 * 1024 * 1024;
 const OVERSIZED_TOTAL_BYTES = 48 * 1024 * 1024;
 const CHUNK_BYTES = 64 * 1024;
+
+/** Mounts the truth routes; every request in this file is refused before it reaches truth. */
+const UNREACHED_TRUTH: TruthCommitter & TruthObjectDownloads = {
+  commit: () => Promise.reject(new Error('truth unreached')),
+  getRecord: () => Promise.reject(new Error('truth unreached')),
+  listManifest: () => Promise.reject(new Error('truth unreached')),
+  getDownloadUrl: () => Promise.reject(new Error('truth unreached')),
+};
+
+interface PairedDevice {
+  readonly deviceId: string;
+  readonly authorization: { readonly authorization: string };
+}
+
+interface FullHarness {
+  readonly cloud: ByokCloud;
+  readonly stores: CloudStores;
+  request(path: string, init?: RequestInit): Promise<Response>;
+  pairDevice(tenant: TenantId): Promise<PairedDevice>;
+}
+
+/**
+ * Every port in `CAPABILITY_PORTS` is supplied — `Required<CapabilityPorts>`
+ * stops this file compiling when a new port-bound capability is added — and
+ * the declaration is derived from those ports, so every optional route mounts.
+ */
+function createFullHarness(): FullHarness {
+  const base = createInMemoryByokCloud({ longPollHoldMs: 20, mailboxWake: createInProcessMailboxWake({ fallbackMs: 5 }) });
+  const ports: Required<CapabilityPorts> = {
+    blobContentProxy: base.blobContentProxy,
+    truthCommitter: UNREACHED_TRUTH,
+    truthObjectDownloads: UNREACHED_TRUTH,
+    skillPacks: new InMemorySkillPackStore(),
+    agentMemoryProjectionAuthorizer: new InMemoryAgentMemoryProjectionAuthorizer(),
+    agentMemoryProjectionStore: new InMemoryAgentMemoryProjectionStore(base.clock, base.crypto),
+    e2eeMemberStore: new InMemoryE2eeMemberStore(base.stores.receipts),
+  };
+  const cloud = createByokCloud({
+    core: base.core,
+    cloud: base.stores,
+    mailboxWake: base.mailboxWake,
+    crypto: base.crypto,
+    tokenSigner: createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(32)), base.clock),
+    clock: base.clock,
+    longPollHoldMs: 20,
+    capabilities: capabilityDeclarationForPorts(ports),
+    ...ports,
+  });
+  const request = (path: string, init: RequestInit = {}): Promise<Response> =>
+    Promise.resolve(cloud.fetch(new Request(`${CLOUD_ORIGIN}${path}`, init)));
+  return {
+    cloud,
+    stores: base.stores,
+    request,
+    async pairDevice(tenant) {
+      if ((await base.core.quota.readEntitlement(tenant)) === undefined) {
+        await base.core.quota.writeEntitlement(tenant, {
+          version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
+          maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test',
+        });
+      }
+      const keys = createDeviceKeys();
+      const pairing = await cloud.createPairingCode(tenant, { productId: PRODUCT_ID });
+      const response = await request('/byok/pair', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'drift-device', devicePublicKey: keys.publicKeyBase64Url }),
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as PairResponse;
+      return { deviceId: body.deviceId, authorization: { authorization: `Bearer ${body.accessToken}` } };
+    },
+  };
+}
 
 function concretePath(route: string): string {
   return route.replace(/:(\w+)/gu, (_, name: string) => `${name}-1`);
@@ -31,7 +114,7 @@ function sha256(bytes: Uint8Array): string {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 }
 
-async function createBlob(harness: CloudHarness, device: PairedDevice, bytes: Uint8Array, key: string): Promise<CreateBlobResponse> {
+async function createBlob(harness: FullHarness, device: PairedDevice, bytes: Uint8Array, key: string): Promise<CreateBlobResponse> {
   const created = await harness.request('/byok/blobs', {
     method: 'POST',
     headers: { ...device.authorization, 'content-type': 'application/json', 'idempotency-key': key },
@@ -60,7 +143,7 @@ function oversizedStream(): { readonly body: ReadableStream<Uint8Array>; pulled(
 
 describe('device route rate admission (#1118)', () => {
   it('every device route except POST /byok/messages spends exactly one request unit and answers 429 + Retry-After', async () => {
-    const harness = createHarness();
+    const harness = createFullHarness();
     const device = await harness.pairDevice(TENANT_A);
     const debits: RateLimitUnit[] = [];
     const deny: InboundRateLimiter = {
@@ -94,7 +177,7 @@ describe('device route rate admission (#1118)', () => {
   });
 
   it('an unauthenticated device request spends nothing', async () => {
-    const harness = createHarness();
+    const harness = createFullHarness();
     const debits: RateLimitUnit[] = [];
     Object.assign(harness.stores, {
       rateLimiter: { async consume(_t: unknown, _d: unknown, unit: RateLimitUnit) { debits.push(unit); return { allowed: true }; } },
@@ -105,15 +188,28 @@ describe('device route rate admission (#1118)', () => {
   });
 });
 
+describe('full-capability inventory (#1118)', () => {
+  it('declares every port-bound capability, so every optional route is mounted', async () => {
+    const harness = createFullHarness();
+    const response = await harness.request('/byok/capabilities');
+    const declaration = (await response.json()) as { capabilities: string[] };
+    for (const capability of Object.keys(CAPABILITY_PORTS)) {
+      expect(declaration.capabilities, capability).toContain(capability);
+    }
+  });
+});
+
 describe('Host request bodies are bounded (#1118)', () => {
   it('no route pulls an oversized streamed body past its own ceiling', async () => {
-    const harness = createHarness();
+    const harness = createFullHarness();
     const device = await harness.pairDevice(TENANT_A);
     // The presigned route verifies its signature before the body, so it needs a real grant.
     const grant = await createBlob(harness, device, new Uint8Array(16), 'drift-blob');
 
     const bodyRoutes = harness.cloud.routes.filter((route) => route.method !== 'GET');
-    expect(bodyRoutes.length).toBeGreaterThan(0);
+    // Every isolation class that takes a body is in the walk, including the
+    // optional proof routes (truth records, E2EE member writes).
+    expect(new Set(bodyRoutes.map((route) => route.class))).toEqual(new Set(['public', 'device', 'proof', 'presigned']));
     for (const route of bodyRoutes) {
       const key = routeKey(route);
       const target = route.class === 'presigned' ? grant.uploadUrl : concretePath(route.path);
@@ -130,7 +226,7 @@ describe('Host request bodies are bounded (#1118)', () => {
   });
 
   it('answers 413 for an over-limit body on every formerly unbounded JSON device route', async () => {
-    const harness = createHarness();
+    const harness = createFullHarness();
     const device = await harness.pairDevice(TENANT_A);
     const routes = [
       ['PUT', '/byok/presence'],
@@ -153,28 +249,10 @@ describe('Host request bodies are bounded (#1118)', () => {
       expect(await response.json(), target).toEqual({ error: 'request body too large' });
     }
   });
-
-  it('no handler source reads a request body without a ceiling', () => {
-    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-    const unbounded = /\.req\.(json|text|arrayBuffer|blob|formData|parseBody)\(/u;
-    const offenders: string[] = [];
-    const walk = (dir: string): void => {
-      for (const name of readdirSync(dir)) {
-        const full = path.join(dir, name);
-        if (statSync(full).isDirectory()) {
-          if (name !== '__tests__') walk(full);
-        } else if (name.endsWith('.ts') && unbounded.test(readFileSync(full, 'utf8'))) {
-          offenders.push(path.relative(root, full));
-        }
-      }
-    };
-    walk(root);
-    expect(offenders).toEqual([]);
-  });
 });
 
 describe('presigned upload claims (#1118)', () => {
-  async function slowUpload(harness: CloudHarness, uploadUrl: string, bytes: Uint8Array, end: Promise<'close' | 'abort'>) {
+  async function slowUpload(harness: FullHarness, uploadUrl: string, bytes: Uint8Array, end: Promise<'close' | 'abort'>) {
     const body = new ReadableStream<Uint8Array>({
       async start(controller) {
         controller.enqueue(bytes.subarray(0, 4));
@@ -191,7 +269,7 @@ describe('presigned upload claims (#1118)', () => {
   }
 
   it('holds at most one in-flight upload per blob and releases it on success', async () => {
-    const harness = createHarness();
+    const harness = createFullHarness();
     const device = await harness.pairDevice(TENANT_A);
     const bytes = new TextEncoder().encode('one upload at a time');
     const grant = await createBlob(harness, device, bytes, 'claim-success');
@@ -211,7 +289,7 @@ describe('presigned upload claims (#1118)', () => {
   });
 
   it('releases the claim when the uploading client disconnects', async () => {
-    const harness = createHarness();
+    const harness = createFullHarness();
     const device = await harness.pairDevice(TENANT_A);
     const bytes = new TextEncoder().encode('aborted then retried');
     const grant = await createBlob(harness, device, bytes, 'claim-abort');
@@ -226,17 +304,20 @@ describe('presigned upload claims (#1118)', () => {
     expect((await harness.request(grant.uploadUrl, { method: 'PUT', body: bytes })).status).toBe(204);
   });
 
-  it('releases the claim when the request is aborted while its body is pending', async () => {
-    const harness = createHarness();
+  it.each([
+    ['after its first bytes', 4],
+    ['before any byte', 0],
+  ] as const)('releases the claim when the request is aborted while its body is pending (%s)', async (_label, sent) => {
+    const harness = createFullHarness();
     const device = await harness.pairDevice(TENANT_A);
     const bytes = new TextEncoder().encode('aborted by its signal');
-    const grant = await createBlob(harness, device, bytes, 'claim-signal-abort');
+    const grant = await createBlob(harness, device, bytes, `claim-signal-abort-${sent}`);
 
-    // A peer that sends a few bytes and then goes silent: the body never
-    // errors or closes on its own, only the request's signal ends it.
+    // A peer that goes silent: the body never errors or closes on its own,
+    // only the request's signal ends it.
     const silent = new ReadableStream<Uint8Array>({
-      start(controller) { controller.enqueue(bytes.subarray(0, 4)); },
-    });
+      start(controller) { if (sent > 0) controller.enqueue(bytes.subarray(0, sent)); },
+    }, { highWaterMark: 0 });
     const controller = new AbortController();
     const pending = Promise.resolve(harness.cloud.fetch(new Request(`${CLOUD_ORIGIN}${grant.uploadUrl}`, {
       method: 'PUT', body: silent, duplex: 'half', signal: controller.signal,
@@ -250,5 +331,20 @@ describe('presigned upload claims (#1118)', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect((await harness.request(grant.uploadUrl, { method: 'PUT', body: bytes })).status).toBe(204);
     expect((await pending)?.status ?? 400).toBeGreaterThanOrEqual(400);
+  });
+
+  it('releases the claim of a request that was aborted before the handler read it', async () => {
+    const harness = createFullHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const bytes = new TextEncoder().encode('already aborted');
+    const grant = await createBlob(harness, device, bytes, 'claim-pre-aborted');
+
+    const controller = new AbortController();
+    controller.abort();
+    const aborted = await Promise.resolve(harness.cloud.fetch(new Request(`${CLOUD_ORIGIN}${grant.uploadUrl}`, {
+      method: 'PUT', body: new ReadableStream<Uint8Array>(), duplex: 'half', signal: controller.signal,
+    } as RequestInit))).catch(() => undefined);
+    expect(aborted?.status ?? 400).toBeGreaterThanOrEqual(400);
+    expect((await harness.request(grant.uploadUrl, { method: 'PUT', body: bytes })).status).toBe(204);
   });
 });
