@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1807063,
+      "budgetBytes": 1810847,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -44,8 +44,10 @@
         "#byok-acp-runtime",
         "#byok-hermes-session",
         "#byok-pi-runtime-host",
+        "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-durable/storage/sqlite/node",
         "http",
         "koffi"
       ],
@@ -102,7 +104,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 337661,
+      "budgetBytes": 337759,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -365,7 +367,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 323116,
+      "budgetBytes": 323214,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1667,7 +1669,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 235033,
+      "budgetBytes": 237122,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1688,6 +1690,7 @@
         "child_process",
         "crypto",
         "fs",
+        "os",
         "path",
         "zod"
       ],
@@ -1702,6 +1705,7 @@
           "child_process",
           "crypto",
           "fs",
+          "os",
           "path"
         ],
         "thirdParty": []
@@ -1955,7 +1959,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 632720,
+      "budgetBytes": 635162,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1981,6 +1985,7 @@
         "fs",
         "hono",
         "http",
+        "os",
         "path",
         "zod"
       ],
@@ -1998,6 +2003,7 @@
           "crypto",
           "fs",
           "http",
+          "os",
           "path"
         ],
         "thirdParty": [
@@ -2134,7 +2140,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1751814,
+      "budgetBytes": 1756783,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2170,8 +2176,10 @@
       ],
       "lazyImports": [
         "#byok-pi-runtime-host",
+        "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-durable/storage/sqlite/node",
         "http",
         "koffi"
       ],

@@ -402,14 +402,14 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 1807063 B |
-| `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 337661 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 1810847 B |
+| `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 337759 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 62414 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 121409 B |
 | `@byok-sdk/client/mcp-server` | Tools-only MCP server | — | forbidden | 13135 B |
 | `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 28384 B |
 | `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 4943 B |
-| `@byok-sdk/client/testing` | Runtime adapter test doubles; no daemon | — | forbidden | 323116 B |
+| `@byok-sdk/client/testing` | Runtime adapter test doubles; no daemon | — | forbidden | 323214 B |
 | `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok) | `@agentclientprotocol/sdk`, `zod` | allowed | 75757 B |
 | `@byok-sdk/client#byok-hermes-session` | Private Hermes session runtime; loaded only when starting an execution | — | forbidden | 14606 B |
 | `@byok-sdk/client#byok-pi-runtime-host` | Private Pi runtime host | `@cfworker/json-schema`, `@earendil-works/chord`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp`, `@earendil-works/pi-telemetry`, `@earendil-works/pi-tui`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `balanced-match`, `brace-expansion`, `chalk`, `cross-spawn`, `diff`, `eventsource`, `eventsource-parser`, `get-east-asian-width`, `graceful-fs`, `grok-mermaid`, `highlight.js`, `hosted-git-info`, `ignore`, `isexe`, `lru-cache`, `marked`, `marked-cjk-friendly`, `minimatch`, `openai`, `p-limit`, `partial-json`, `path-key`, `pi-web-access`, `pkce-challenge`, `proper-lockfile`, `retry`, `semver`, `shebang-command`, `shebang-regex`, `signal-exit`, `typebox`, `undici`, `which`, `yaml`, `yocto-queue`, `zod` | allowed | 4176933 B |
@@ -425,18 +425,18 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 101480 B |
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1403 B |
 | `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 161656 B |
-| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 235033 B |
+| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 237122 B |
 | `@byok-sdk/keys/model-route` | Headless Pi model route: choices, linkage, field errors and submission | `zod` | allowed | 309769 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1553 B |
 | `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 282849 B |
 | `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 123545 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 4946 B |
 | `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1417 B |
-| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 632720 B |
+| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 635162 B |
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1455 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 520388 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1215 B |
-| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 1751814 B |
+| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 1756783 B |
 | `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 41586 B |
 | `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 41590 B |
 | `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 41586 B |

@@ -10,6 +10,7 @@ import { inspectDaemonStores } from '../upgrade-check/store-compatibility';
 import { runUpgradeStoreCheckCommand, UPGRADE_CHECK_REFUSED_EXIT_CODE } from '../bin/commands/upgrade';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
+import { acquireReplicaLock, admitReplica, DURABLE_REPLICA_DIRNAME } from '../adapters/pi-durable/replica';
 
 /** #1102: the daemon store precheck (journal + pi-durable replicas) and `byok-agent upgrade check --store`. */
 
@@ -146,6 +147,31 @@ describeSqlite('inspectDaemonStores', () => {
     database.close();
     const results = await inspectDaemonStores({ storeDir });
     expect(results.find((result) => result.store === 'pi-durable')).toMatchObject({ verdict: 'rejected' });
+  });
+
+  it('inspects a replica whose task id makes its name end in .lock.sqlite, and skips only real locks', async () => {
+    // byokreview B1: taskId 'fixture.lock' is a valid writer path, durable-fixture.lock.sqlite.
+    const storeDir = fixtureStoreDir('main');
+    const home = join(tempDir(), 'home');
+    mkdirSync(home);
+    const binding = { agentRef: { tenantId: 't', agentId: 'a', profileRevision: '1' }, leaseId: 'lease', canonicalHome: home };
+    const root = join(storeDir, DURABLE_REPLICA_DIRNAME);
+    const healthy = await admitReplica(root, { ...binding, taskId: 'fixture' });
+    cpSync(join(FIXTURES, index.fixtures.main!.stores['pi-durable']!), healthy);
+    const lock = await acquireReplicaLock(healthy, 'lease');
+    lock.release();
+    const damaged = await admitReplica(root, { ...binding, taskId: 'fixture.lock' });
+    expect(damaged.endsWith('durable-fixture.lock.sqlite')).toBe(true);
+    writeFileSync(damaged, 'not a sqlite database, only text that is long enough to have a header'.repeat(10));
+
+    const replicas = (await inspectDaemonStores({ storeDir })).filter((result) => result.store === 'pi-durable');
+    expect(replicas.map((result) => [relative(root, result.path).split('/').pop(), result.verdict]).sort()).toEqual([
+      ['durable-fixture.lock.sqlite', 'rejected'],
+      ['durable-fixture.sqlite', 'accepted'],
+      ['durable-fixture.sqlite', 'accepted'],
+    ]);
+    const code = await runUpgradeStoreCheckCommand({ storeDir, json: true, log: () => undefined });
+    expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
   });
 
   it('leaves every file in the store directory unchanged, and creates nothing in it', async () => {

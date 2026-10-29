@@ -5,7 +5,7 @@ import type { StoreCompatibility } from '@byok-sdk/core';
 import { JournalCorruptError, JournalUnavailableError } from '../daemon/journal/journal';
 import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { loadSqliteModule } from '../daemon/journal/sqlite-support';
-import { DURABLE_REPLICA_DIRNAME, isDurableReplicaFile } from '../adapters/pi-durable/replica';
+import { DURABLE_REPLICA_DIRNAME, durableReplicaFiles } from '../adapters/pi-durable/replica';
 import { openLocalDurableStorage } from '../adapters/pi-durable/storage';
 
 /** A SQLite store is its main file plus a WAL or a hot rollback journal. `-shm` is rebuilt from the WAL. */
@@ -98,9 +98,8 @@ function listReplicas(root: string): string[] {
   for (const binding of readDirectory(root)) {
     if (!binding.isDirectory()) continue;
     const directory = join(root, binding.name);
-    for (const entry of readDirectory(directory)) {
-      if (entry.isFile() && isDurableReplicaFile(entry.name)) replicas.push(join(directory, entry.name));
-    }
+    const files = readDirectory(directory).filter((entry) => entry.isFile()).map((entry) => entry.name);
+    for (const name of durableReplicaFiles(files)) replicas.push(join(directory, name));
   }
   return replicas.sort();
 }

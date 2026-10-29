@@ -8,11 +8,21 @@ import { ensureSecureDir } from '../../util/secure-dir';
 export const DURABLE_REPLICA_DIRNAME = 'durable-replicas';
 const REPLICA_FILE_PREFIX = 'durable-';
 const REPLICA_FILE_SUFFIX = '.sqlite';
-const REPLICA_LOCK_SUFFIX = '.lock.sqlite';
 
-/** Whether a file name under a replica binding directory is a replica database (not its lock or WAL). */
-export function isDurableReplicaFile(name: string): boolean {
-  return name.startsWith(REPLICA_FILE_PREFIX) && name.endsWith(REPLICA_FILE_SUFFIX) && !name.endsWith(REPLICA_LOCK_SUFFIX);
+/** The lock database `acquireReplicaLock` holds for the replica database `file`. */
+export function replicaLockPath(file: string): string {
+  return `${file}.lock.sqlite`;
+}
+
+/**
+ * The replica databases among the file names of one binding directory: every
+ * name `admitReplica` can produce, except the exact lock name
+ * (`replicaLockPath`) of another replica present in the directory.
+ */
+export function durableReplicaFiles(names: readonly string[]): string[] {
+  const replicas = names.filter((name) => name.startsWith(REPLICA_FILE_PREFIX) && name.endsWith(REPLICA_FILE_SUFFIX));
+  const locks = new Set(replicas.map(replicaLockPath));
+  return replicas.filter((name) => !locks.has(name));
 }
 
 export interface DurableReplicaBinding {
@@ -56,7 +66,7 @@ export async function admitReplica(root: string, binding: DurableReplicaBinding)
 
 /** SQLite locking_mode=EXCLUSIVE retains the OS lock until close, including after commit. */
 export async function acquireReplicaLock(file: string, leaseId: string): Promise<{ release(): void }> {
-  const lockPath = `${file}${REPLICA_LOCK_SUFFIX}`;
+  const lockPath = replicaLockPath(file);
   try {
     const stat = await fs.lstat(lockPath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('invalid durable replica lock file');

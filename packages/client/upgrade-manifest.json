@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "0ad053424402a9d34940effadd63f41dff3457a23a62bf675888f15ce6b15fa5"
+    "snapshotSha256": "68fa42a3cf1105887b991078d3148abfe9136c6cbd7734ae21dfe407c3282195"
   },
   "configFields": {
     "status": "pending",
@@ -35,6 +35,21 @@
       "items": [
         "export:@byok-sdk/client#BlobClient",
         "export:@byok-sdk/client#InstallSkillPacksOptions"
+      ]
+    },
+    {
+      "id": "store-compatibility-precheck",
+      "impact": "additive",
+      "summary": "Read-only store compatibility precheck (#1102). Before switching versions, run the candidate build's inspectors to learn whether it accepts each local store, needs a new path and pairing (new-path-repair), or refuses it (rejected): inspectDaemonStores (@byok-sdk/client, journal and pi-durable replicas; also `byok-agent upgrade check --store [--json]`, exit 2 when a store would be refused), inspectSqliteStore (@byok-sdk/server) and inspectProviderProfileStore (@byok-sdk/keys), all returning the StoreCompatibility type from @byok-sdk/core. Each one opens only a private temporary copy of the files.",
+      "migration": "docs/upgrade-manifest.md#store-compatibility-precheck",
+      "items": [
+        "export:@byok-sdk/client#InspectDaemonStoresInput",
+        "export:@byok-sdk/client#inspectDaemonStores",
+        "export:@byok-sdk/core#LocalStoreId",
+        "export:@byok-sdk/core#StoreCompatibility",
+        "export:@byok-sdk/core#StoreCompatibilityVerdict",
+        "export:@byok-sdk/keys#inspectProviderProfileStore",
+        "export:@byok-sdk/server#inspectSqliteStore"
       ]
     }
   ],
@@ -65,6 +80,11 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#InspectDaemonStoresInput",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
       "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
       "change": "changed",
       "entry": "auth-renewal-floor"
@@ -73,6 +93,36 @@
       "item": "export:@byok-sdk/client#LocalToolApprovalPolicy",
       "change": "added",
       "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#inspectDaemonStores",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/core#LocalStoreId",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/core#StoreCompatibility",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/core#StoreCompatibilityVerdict",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/keys#inspectProviderProfileStore",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/server#inspectSqliteStore",
+      "change": "added",
+      "entry": "store-compatibility-precheck"
     }
   ]
 }
