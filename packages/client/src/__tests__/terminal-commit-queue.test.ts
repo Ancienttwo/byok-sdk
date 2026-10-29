@@ -59,6 +59,14 @@ describe('terminal commit receipts', () => {
       const before = write.mock.calls.length;
       await vi.advanceTimersByTimeAsync(base);
       expect(write.mock.calls.length).toBe(before + 1);
+
+      // Grow the schedule, then restart the run: the first retry is back at the base.
+      await vi.advanceTimersByTimeAsync(2 * base + 4 * base);
+      await queue.stop().catch(() => undefined);
+      queue.resume();
+      const afterResume = write.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(base);
+      expect(write.mock.calls.length).toBe(afterResume + 1);
       await queue.stop().catch(() => undefined);
     } finally {
       vi.useRealTimers();

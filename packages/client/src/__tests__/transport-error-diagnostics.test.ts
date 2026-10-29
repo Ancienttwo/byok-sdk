@@ -82,7 +82,7 @@ describe('LongPollRouteError names the failing route', () => {
   }
 
   it('warns once with /byok/events + 503 when the poll route is rejected', async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 503 } as Response);
+    fetchMock.mockResolvedValue(new Response('', { status: 503 }));
 
     const client = new LongPollClient({
       serverUrl: 'http://example.invalid',
@@ -110,7 +110,7 @@ describe('LongPollRouteError names the failing route', () => {
   });
 
   it('warns with /byok/messages when postBatch is rejected', async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 503 } as Response);
+    fetchMock.mockResolvedValue(new Response('', { status: 503 }));
 
     const client = new LongPollClient({
       serverUrl: 'http://example.invalid',

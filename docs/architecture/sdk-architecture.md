@@ -2004,7 +2004,7 @@ automatic retry 的节奏只有一个 authority，`packages/client/src/daemon/de
 - reconnect 与 upload 的第 n 次重试（失败后从 0 计，成功即归零）等待 `backoffCeilingMs(n, base) = base × 2^min(n, 5)`，再乘 domain-separated SHA-256 stream 给出的 ±20% 确定性系数；jitter 在封顶之后施加，所以停在上限的整个 fleet 仍然错开。默认 base 2 s，上限 64 s；
 - maintenance 是周期调度而非重试，只用 `deterministicJitterMs` 的 ±20% 系数，不随序号增长；
 - 任一路由的非 2xx 响应带合法 `Retry-After`（delta-seconds 或 IMF-fixdate，上限 1 小时）时，下一次握手至少等这么久；
-- `TerminalCommitQueue` 的自动重试同样走 `backoffCeilingMs`（base 1 s，上限 32 s），任一 commit 成功后归零；它不加 fleet jitter，每台设备第一次失败的时刻取决于自己的任务；
+- `TerminalCommitQueue` 的自动重试同样走 `backoffCeilingMs`（base 1 s，上限 32 s），任一 commit 成功或 daemon 重新启动后归零；它不加 fleet jitter，每台设备第一次失败的时刻取决于自己的任务；
 - automatic long-poll reconnect/failure/stall、outbox upload retry 与 storage maintenance 共用该 authority；显式 `connect({auto:false})` 不延迟；
 - 10,000-device fleet simulation 直接调用 production function 并约束 peak bucket；同 seed/domain/sequence 重算逐字一致；
 - revoked device 进入终态，不进入无限 reconnect；manual probe 也不接管 automatic scheduler；

@@ -46,8 +46,10 @@ export class TerminalCommitQueue {
 
   retry(taskId: string): Promise<void> { return this.attempt(taskId); }
 
+  /** A new run starts a fresh retry schedule; the backoff only spans one run's consecutive failures. */
   resume(): void {
     this.stopped = false;
+    this.retryAttempt = 0;
     if (this.pending.size > 0) this.armRetry();
   }
 
