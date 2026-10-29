@@ -25,7 +25,10 @@ export function expirePendingMailbox(
   ).run(tenant, deviceId, ...(seqs === 'all' ? [] : seqs)).changes);
 }
 
-/** Settles the unfinished attempts the filter selects; terminal attempts and tombstones are left as they are. */
+/**
+ * Settles the unfinished attempts the filter selects; terminal attempts and tombstones are left as they are.
+ * `archive_after` takes the terminal instant in the same UPDATE, as every terminal transition sets it.
+ */
 function abandonAttempts(
   db: DatabaseSync,
   tenant: TenantId,
@@ -35,9 +38,10 @@ function abandonAttempts(
   parameters: readonly string[],
 ): void {
   db.prepare(
-    `UPDATE task_attempt SET status = 'cancelled', terminal_cause = ?, terminal_at = COALESCE(terminal_at, ?), updated_at = ?
+    `UPDATE task_attempt SET status = 'cancelled', terminal_cause = ?, terminal_at = COALESCE(terminal_at, ?),
+       archive_after = COALESCE(archive_after, terminal_at, ?), updated_at = ?
      WHERE tenant_id = ? AND status IN (${UNFINISHED}) AND (${filter})`,
-  ).run(cause, now, now, tenant, ...TASK_ATTEMPT_UNFINISHED_STATUSES, ...parameters);
+  ).run(cause, now, now, now, tenant, ...TASK_ATTEMPT_UNFINISHED_STATUSES, ...parameters);
 }
 
 /** Device retirement: the device's unfinished attempts, then every pending row addressed to it. */

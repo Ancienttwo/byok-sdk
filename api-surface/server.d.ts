@@ -1139,6 +1139,8 @@ export interface ByokServer {
         messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
         /** Request cancellation through the kernel without a process-owned TaskHandle. */
         cancel(taskId: string, reason?: string): Promise<void>;
+        /** Settle a task no device will finish through the kernel (`ByokCloud.abandonTask`), without a process-owned TaskHandle. */
+        abandon(taskId: string, cause: import('@byok-sdk/cloud').TaskAbandonCause): Promise<void>;
         /**
          * Approve the task's pending approval without a process-owned TaskHandle,
          * such as a task `executions.submit` created. The same decision and
@@ -1758,7 +1760,7 @@ import type { StoreCompatibility } from '@byok-sdk/core';
  */
 export declare function inspectSqliteStore(path: string): Promise<StoreCompatibility>;
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
-import { type ByokCloud, type SteerRejectionCode, type TenantId } from '@byok-sdk/cloud';
+import { type ByokCloud, type SteerRejectionCode, type TaskAbandonCause, type TaskAttempt, type TenantId } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay';
 import { type ServerTaskEvent, type TaskEventEntry, type TaskHandle, type TaskResult } from './types';
@@ -1862,12 +1864,19 @@ export declare function rejectPendingApproval(deps: ApprovalDeps, taskId: string
  * same fact rather than two copies that can disagree. Nothing about the task is
  * cached here.
  */
+/**
+ * Announces the `Cancelled` transition an abandonment recorded. An attempt that
+ * was already terminal comes back with its own terminal, so only one settled
+ * under this cause is announced; a cancelled task already announced it when
+ * its tombstone was written, and the relay keeps the first terminal anyway.
+ */
+export declare function noteAbandoned(relay: TaskEventRelay, attempt: TaskAttempt, cause: TaskAbandonCause): void;
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
 export {};
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
-import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types';
 import type { RateLimiterOptions } from './rate-limiter';
@@ -2218,6 +2227,8 @@ export interface TaskHandle {
      */
     events(): AsyncIterable<ServerTaskEvent>;
     cancel(reason?: string): Promise<void>;
+    /** Settle this task as one no device will finish (`ByokCloud.abandonTask`); a terminal task is left as it is. */
+    abandon(cause: TaskAbandonCause): Promise<void>;
     /**
      * M5 (approval targeting, docs/protocol.md §5.3): `opts.approvalId`
      * targets a SPECIFIC pending approval rather than "whichever one is

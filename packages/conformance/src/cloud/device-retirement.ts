@@ -13,7 +13,7 @@
  * full mailbox stayed full and every new offer was refused.
  */
 import { contentHash, isCoreError, tenantId, type MailboxMessage } from '@byok-sdk/core';
-import type { TaskAttempt } from '@byok-sdk/cloud';
+import type { TaskArchiveStoreInput, TaskAttempt, TaskRedactionCodec } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
 import { registration } from './fixtures';
 import {
@@ -459,6 +459,106 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const after = await mailbox.inspect(TENANT, 'device-c');
         expect(after.pending).toEqual([]);
         expect(after.recoverableFrom).toBe(requested!.message!.seq + 1);
+      });
+    });
+  });
+
+  // #1119 x #1120: settling a task is a terminal transition, so the task
+  // becomes archive work at its terminal instant like one a device finished.
+  describe('settled tasks and the archive', () => {
+    const codec: TaskRedactionCodec = {
+      async tombstone(body) {
+        const tombstone = `{"byokRedacted":1,"length":${body.length}}`;
+        return { body: tombstone, bodyHash: contentHash(`sha256:${'0'.repeat(64)}`), byteSize: BigInt(tombstone.length) };
+      },
+      absent: '{"byokRedacted":1,"absent":true}',
+      isTombstone: (body) => body.startsWith('{"byokRedacted":1,'),
+      blobHashes: () => [],
+    };
+    const archiveInput = (taskId: string, archivedAt: string): TaskArchiveStoreInput => ({
+      taskId,
+      receiptKeys: [`task:${taskId}:terminal`],
+      terminalReceiptKey: `task:${taskId}:terminal`,
+      releaseObjectReferences: [],
+      archivedAt,
+      codec,
+    });
+    const after = (instant: string) => new Date(Date.parse(instant) + 1).toISOString();
+
+    /** The settled attempt is archive work from just after its terminal instant, and not at it. */
+    async function expectArchiveWorkAt(handle: CloudCompositionHandle, taskId: string): Promise<string> {
+      const attempt = await handle.stores.tasks.get(TENANT, taskId);
+      expect(attempt, taskId).toMatchObject({ status: 'cancelled' });
+      const terminalAt = attempt!.terminalAt!;
+      const listed = async (archiveBefore: string) =>
+        (await handle.stores.taskArchive.listWork(TENANT, { archiveBefore, limit: 100 })).map((unit) => unit.taskId);
+      expect(await listed(terminalAt), taskId).not.toContain(taskId);
+      expect(await listed(after(terminalAt)), taskId).toContain(taskId);
+      return terminalAt;
+    }
+
+    it('a revoked device\'s settled tasks are archive work and archive', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, registration('archived-revoke'));
+        await stores.tasks.open(TENANT, { taskId: 'revoke-offered', deviceId: 'archived-revoke' });
+        await mailbox.append(TENANT, { deviceId: 'archived-revoke', messageId: 'revoke-offer', body: envelope('revoke-offered') });
+        await stores.tasks.open(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke' });
+        await stores.tasks.claim(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke' });
+
+        await stores.devices.revoke(TENANT, 'archived-revoke');
+
+        for (const taskId of ['revoke-offered', 'revoke-claimed']) {
+          await expect(stores.tasks.get(TENANT, taskId)).resolves.toMatchObject({ status: 'cancelled', terminalCause: 'device_revoked' });
+          const terminalAt = await expectArchiveWorkAt(handle, taskId);
+          await expect(stores.taskArchive.archive(TENANT, archiveInput(taskId, after(terminalAt))), taskId)
+            .resolves.toMatchObject({ outcome: 'archived' });
+        }
+      });
+    });
+
+    it('a superseded device\'s settled tasks are archive work and archive', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, { ...registration('archived-first'), machineId: MACHINE });
+        await stores.tasks.open(TENANT, { taskId: 'supersede-offered', deviceId: 'archived-first' });
+        await mailbox.append(TENANT, { deviceId: 'archived-first', messageId: 'supersede-offer', body: envelope('supersede-offered') });
+
+        await stores.devices.register(TENANT, { ...registration('archived-second'), machineId: MACHINE });
+
+        await expect(stores.tasks.get(TENANT, 'supersede-offered')).resolves.toMatchObject({ terminalCause: 'device_superseded' });
+        const terminalAt = await expectArchiveWorkAt(handle, 'supersede-offered');
+        await expect(stores.taskArchive.archive(TENANT, archiveInput('supersede-offered', after(terminalAt))))
+          .resolves.toMatchObject({ outcome: 'archived' });
+      });
+    });
+
+    it('an abandoned task archives at once when its device is gone, and after the ack while it is registered', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.tasks.open(TENANT, { taskId: 'abandon-gone', deviceId: 'never-registered' });
+        await mailbox.append(TENANT, { deviceId: 'never-registered', messageId: 'abandon-gone-offer', body: envelope('abandon-gone') });
+        await stores.devices.register(TENANT, registration('archived-live'));
+        await stores.tasks.open(TENANT, { taskId: 'abandon-live', deviceId: 'archived-live' });
+        await mailbox.append(TENANT, { deviceId: 'archived-live', messageId: 'abandon-live-offer', body: envelope('abandon-live') });
+
+        await stores.cancellations.abandon(TENANT, { taskId: 'abandon-gone', cause: 'operator' });
+        await stores.cancellations.abandon(TENANT, { taskId: 'abandon-live', cause: 'operator' });
+
+        const goneAt = await expectArchiveWorkAt(handle, 'abandon-gone');
+        await expect(stores.taskArchive.archive(TENANT, archiveInput('abandon-gone', after(goneAt))))
+          .resolves.toMatchObject({ outcome: 'archived' });
+
+        // The registered device still has to read its offer: archiving waits for its ack.
+        const liveAt = await expectArchiveWorkAt(handle, 'abandon-live');
+        await expect(stores.taskArchive.archive(TENANT, archiveInput('abandon-live', after(liveAt))))
+          .resolves.toEqual({ outcome: 'refused', reason: 'pending_delivery' });
+        await mailbox.ack(TENANT, 'archived-live');
+        await expect(stores.taskArchive.archive(TENANT, archiveInput('abandon-live', after(liveAt))))
+          .resolves.toMatchObject({ outcome: 'archived' });
       });
     });
   });

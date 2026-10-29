@@ -31,7 +31,9 @@ const UNFINISHED = [...TASK_ATTEMPT_UNFINISHED_STATUSES];
 /**
  * Device retirement: every unfinished attempt the devices were offered or own,
  * then every pending row addressed to them. Callers pass only ids whose row
- * they deleted in this transaction.
+ * they deleted in this transaction. Settling is a terminal transition, so
+ * `archive_after` takes the `terminal_at` instant in the same UPDATE and the
+ * task becomes archive work like one a device finished.
  */
 export async function retireDevices(
   client: Querier,
@@ -50,7 +52,8 @@ export async function retireDevices(
         ORDER BY task_id FOR UPDATE
      )
      UPDATE task t
-        SET status = 'cancelled', terminal_cause = $4, terminal_at = COALESCE(t.terminal_at, $5), updated_at = $5
+        SET status = 'cancelled', terminal_cause = $4, terminal_at = COALESCE(t.terminal_at, $5),
+            archive_after = COALESCE(t.archive_after, t.terminal_at, $5), updated_at = $5
        FROM locked
       WHERE t.tenant_id = $1 AND t.task_id = locked.task_id AND t.status = ANY($2::text[])`,
     [tenant, UNFINISHED, ids, cause, now],
@@ -77,7 +80,8 @@ export async function abandonTask(
 ): Promise<void> {
   await client.query(
     `UPDATE task
-        SET status = 'cancelled', terminal_cause = $3, terminal_at = COALESCE(terminal_at, $4), updated_at = $4
+        SET status = 'cancelled', terminal_cause = $3, terminal_at = COALESCE(terminal_at, $4),
+            archive_after = COALESCE(archive_after, terminal_at, $4), updated_at = $4
       WHERE tenant_id = $1 AND task_id = $2 AND status = ANY($5::text[])`,
     [tenant, task.task_id, cause, now, UNFINISHED],
   );
