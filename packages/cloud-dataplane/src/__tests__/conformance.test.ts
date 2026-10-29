@@ -94,10 +94,37 @@ const postgresFactory: CloudCompositionFactory = {
       },
       retireCancellationDelivery: (tenant, deviceId) => ackAndCollectMailbox(core.mailbox, tenant, deviceId),
       mailbox: conformanceMailbox(core),
+      // Triggers on this scope's `outbox`: retirement's expiry is SQL inside
+      // the directory transaction, not a call through the mailbox port.
+      failMailboxExpiry: async () => {
+        await scope.pool.query(`CREATE OR REPLACE FUNCTION conformance_fail_expiry() RETURNS trigger LANGUAGE plpgsql
+          AS $$ BEGIN RAISE EXCEPTION 'injected mailbox expiry failure'; END $$`);
+        await scope.pool.query(`CREATE TRIGGER conformance_fail_expiry BEFORE UPDATE ON outbox FOR EACH ROW
+          WHEN (OLD.state = 'pending' AND NEW.state = 'expired') EXECUTE FUNCTION conformance_fail_expiry()`);
+        return async () => {
+          await scope.pool.query('DROP TRIGGER conformance_fail_expiry ON outbox');
+        };
+      },
+      // The retirement transaction waits on a session advisory lock this case holds.
+      holdMailboxExpiry: async () => {
+        const holder = await scope.pool.connect();
+        await holder.query(`SELECT pg_advisory_lock(${HOLD_EXPIRY_LOCK})`);
+        await scope.pool.query(`CREATE OR REPLACE FUNCTION conformance_hold_expiry() RETURNS trigger LANGUAGE plpgsql
+          AS $$ BEGIN PERFORM pg_advisory_xact_lock(${HOLD_EXPIRY_LOCK}); RETURN NEW; END $$`);
+        await scope.pool.query(`CREATE OR REPLACE TRIGGER conformance_hold_expiry BEFORE UPDATE ON outbox FOR EACH ROW
+          WHEN (OLD.state = 'pending' AND NEW.state = 'expired') EXECUTE FUNCTION conformance_hold_expiry()`);
+        return async () => {
+          await holder.query(`SELECT pg_advisory_unlock(${HOLD_EXPIRY_LOCK})`);
+          holder.release();
+        };
+      },
       dispose: () => scope.dispose(),
     };
   },
 };
+
+/** Advisory lock key the hold above shares with its trigger; one case holds it at a time. */
+const HOLD_EXPIRY_LOCK = 1119;
 
 if (SKIP_DATAPLANE) {
   // `runCloudConformance` opens its own `describe`, so the skip has to be

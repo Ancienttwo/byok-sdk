@@ -16,7 +16,11 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  *
  * A removed device is retired through the task state and the mailbox the
  * composition hands in: its unfinished attempts are settled and its pending
- * rows dead-lettered (see `DeviceDirectory` in `../ports`).
+ * rows dead-lettered (see `DeviceDirectory` in `../ports`). Registration and
+ * revocation run one at a time, so a retirement never overlaps a later
+ * registration of the same device id, and a failed mailbox expiry puts the
+ * registrations back before anything else moved: the in-memory stand-in for
+ * the SQL stores' one transaction (#1119).
  */
 import {
   PRESENCE_LEVELS,
@@ -29,20 +33,25 @@ import {
 } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports';
 import type { InMemoryTaskAttemptState } from './task-attempts';
-import { retireDevice } from './task-retirement';
+import { settleDeviceAttempts } from './task-retirement';
 
 export class InMemoryDeviceDirectory implements DeviceDirectory {
   readonly #byTenant = new Map<string, DeviceRecord>();
   readonly #byDeviceId = new Map<string, string>();
   readonly #tasks: InMemoryTaskAttemptState;
   readonly #mailbox: MailboxStore;
+  #mutationTail: Promise<void> = Promise.resolve();
 
   constructor(tasks: InMemoryTaskAttemptState, mailbox: MailboxStore) {
     this.#tasks = tasks;
     this.#mailbox = mailbox;
   }
 
-  async register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
+  register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
+    return this.#serialized(() => this.#register(tenant, input));
+  }
+
+  async #register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
     const record: DeviceRecord = {
       tenantId: tenant,
       productId: input.productId,
@@ -67,22 +76,30 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     //
     // The device being registered is skipped: re-pairing the SAME deviceId is
     // an in-place replacement below, not a supersession of itself.
-    const superseded: string[] = [];
+    const superseded: Array<readonly [string, DeviceRecord]> = [];
     if (input.machineId !== undefined) {
       for (const [key, existing] of [...this.#byTenant]) {
         if (existing.deviceId === record.deviceId) continue;
         if (existing.tenantId !== tenant) continue;
         if (existing.productId !== input.productId) continue;
         if (existing.machineId !== input.machineId) continue;
-        this.#forget(key, existing.deviceId);
-        superseded.push(existing.deviceId);
+        superseded.push([key, existing]);
       }
     }
     const key = tenantKey(tenant, record.deviceId);
-    this.#byTenant.set(key, record);
-    this.#byDeviceId.set(record.deviceId, key);
-    for (const deviceId of superseded) {
-      await retireDevice(this.#tasks, this.#mailbox, tenant, deviceId, 'device_superseded');
+    const replaced = this.#byTenant.get(key);
+    for (const [supersededKey, existing] of superseded) this.#forget(supersededKey, existing.deviceId);
+    this.#remember(key, record);
+    try {
+      for (const [, existing] of superseded) await this.#mailbox.expirePending(tenant, { deviceId: existing.deviceId, seqs: 'all' });
+    } catch (caught) {
+      if (replaced === undefined) this.#forget(key, record.deviceId);
+      else this.#remember(key, replaced);
+      for (const [supersededKey, existing] of superseded) this.#remember(supersededKey, existing);
+      throw caught;
+    }
+    for (const [, existing] of superseded) {
+      await settleDeviceAttempts(this.#tasks, tenant, existing.deviceId, 'device_superseded');
     }
     return record;
   }
@@ -95,11 +112,32 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
    * Revocation removes the registration. A no-op for a device this tenant does
    * not own: revoking what you cannot address changes nothing.
    */
-  async revoke(tenant: TenantId, deviceId: string): Promise<void> {
-    const key = tenantKey(tenant, deviceId);
-    if (!this.#byTenant.has(key)) return;
-    this.#forget(key, deviceId);
-    await retireDevice(this.#tasks, this.#mailbox, tenant, deviceId, 'device_revoked');
+  revoke(tenant: TenantId, deviceId: string): Promise<void> {
+    return this.#serialized(async () => {
+      const key = tenantKey(tenant, deviceId);
+      const record = this.#byTenant.get(key);
+      if (record === undefined) return;
+      this.#forget(key, deviceId);
+      try {
+        await this.#mailbox.expirePending(tenant, { deviceId, seqs: 'all' });
+      } catch (caught) {
+        this.#remember(key, record);
+        throw caught;
+      }
+      await settleDeviceAttempts(this.#tasks, tenant, deviceId, 'device_revoked');
+    });
+  }
+
+  /** Runs registrations and revocations one at a time, whatever the previous one's outcome. */
+  #serialized<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.#mutationTail.then(operation, operation);
+    this.#mutationTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  #remember(key: string, record: DeviceRecord): void {
+    this.#byTenant.set(key, record);
+    this.#byDeviceId.set(record.deviceId, key);
   }
 
   /**

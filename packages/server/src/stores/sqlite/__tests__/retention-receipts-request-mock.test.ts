@@ -18,6 +18,7 @@ const factory: CloudCompositionFactory = {
       commitBlob: async (tenant, reservation, observation) => { await composition.core.objects.commit(tenant, { hash: reservation.contentHash, ...observation }); },
       retireCancellationDelivery: (tenant, deviceId) => ackAndCollectMailbox(composition.core.mailbox, tenant, deviceId),
       mailbox: conformanceMailbox(composition.core),
+      holdMailboxExpiry: async () => { throw new Error('Receipt/TTL retention does not retire devices.'); },
       dispose: () => composition.close(),
     };
   },

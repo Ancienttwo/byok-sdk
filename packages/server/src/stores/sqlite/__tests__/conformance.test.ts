@@ -84,6 +84,10 @@ const cloudFactory: CloudCompositionFactory = {
       retireCancellationDelivery: (tenant, deviceId) =>
         ackAndCollectMailbox(composition.core.mailbox, tenant, deviceId),
       mailbox: conformanceMailbox(composition.core),
+      // No failMailboxExpiry: this composition holds its file EXCLUSIVE, and its
+      // retirement is one coordinator transaction that any throw rolls back.
+      // Every SQLite write is one serialized transaction: nothing interleaves with a retirement.
+      holdMailboxExpiry: async () => async () => undefined,
       dispose: async () => {
         await composition.close();
         database.remove();

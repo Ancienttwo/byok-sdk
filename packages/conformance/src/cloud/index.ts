@@ -8,6 +8,7 @@
 export {
   ackAndCollectMailbox,
   conformanceMailbox,
+  mailboxExpiryFaults,
   CLOUD_CONFORMANCE_PORTS,
   runCloudConformance,
   withCloudComposition,

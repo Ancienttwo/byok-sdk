@@ -5,6 +5,8 @@
  * through `expirePending`, which serializes on the device's own chain: the
  * reference has no cross-store transaction, so it orders the two halves the
  * way the cancellation port does, mailbox first and the attempt write last.
+ * The fallible half runs first, so a failed expiry leaves the attempts as
+ * they were.
  */
 import type { MailboxStore, TenantId } from '@byok-sdk/core';
 import {
@@ -30,10 +32,9 @@ function abandoned(attempt: TaskAttempt, cause: TaskAbandonCause, now: string): 
   };
 }
 
-/** Device retirement: every unfinished attempt the device was offered or owns, then every pending row addressed to it. */
-export async function retireDevice(
+/** Device retirement, attempt half: every unfinished attempt the device was offered or owns. Never throws. */
+export async function settleDeviceAttempts(
   state: InMemoryTaskAttemptState,
-  mailbox: Retirement,
   tenant: TenantId,
   deviceId: string,
   cause: Extract<TaskAbandonCause, 'device_revoked' | 'device_superseded'>,
@@ -48,7 +49,6 @@ export async function retireDevice(
       if (attempt !== undefined && unfinished(attempt)) state.attempts.set(key, abandoned(attempt, cause, state.now()));
     });
   }
-  await mailbox.expirePending(tenant, { deviceId, seqs: 'all' });
 }
 
 /**

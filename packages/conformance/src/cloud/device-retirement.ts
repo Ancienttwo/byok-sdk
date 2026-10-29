@@ -224,6 +224,72 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         expect(final.pending.map((message) => message.seq)).toEqual([next.seq]);
       });
     });
+    it('a retirement whose mailbox expiry fails changes nothing, and a retry completes it', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox, failMailboxExpiry } = handle;
+        // A composition without the seam rolls retirement back as one transaction.
+        if (failMailboxExpiry === undefined) return;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, registration('faulted'));
+        const before = await seedDevice(handle, 'faulted');
+        const rowsBefore = await mailbox.inspect(TENANT, 'faulted');
+        const registered = await stores.devices.get(TENANT, 'faulted');
+
+        const restore = await failMailboxExpiry();
+        try {
+          await expect(stores.devices.revoke(TENANT, 'faulted')).rejects.toThrow();
+        } finally {
+          await restore();
+        }
+
+        await expect(stores.devices.get(TENANT, 'faulted')).resolves.toEqual(registered);
+        for (const position of [...UNFINISHED, 'complete'] as const) {
+          await expect(stores.tasks.get(TENANT, `faulted-${position}`), position).resolves.toEqual(before[position]);
+        }
+        await expect(mailbox.inspect(TENANT, 'faulted')).resolves.toEqual(rowsBefore);
+
+        await stores.devices.revoke(TENANT, 'faulted');
+        await expectRetired(handle, 'faulted', before, rowsBefore.pending, 'device_revoked');
+        await expect(stores.devices.get(TENANT, 'faulted')).resolves.toBeUndefined();
+      });
+    });
+
+    it('a re-registration racing a revoke of the same device id keeps its own later rows and floor', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, registration('racing'));
+        await stores.tasks.open(TENANT, { taskId: 'racing-old', deviceId: 'racing' });
+        await mailbox.append(TENANT, { deviceId: 'racing', messageId: 'racing-old', body: envelope('racing-old') });
+
+        const release = await handle.holdMailboxExpiry();
+        const revoking = stores.devices.revoke(TENANT, 'racing');
+        const registering = stores.devices.register(TENANT, registration('racing'));
+        const settledEarly = await Promise.race([
+          registering.then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 50)),
+        ]);
+        if (!settledEarly) {
+          await release();
+          await registering;
+        }
+        // Everything from here on is addressed to the registration that just resolved.
+        await stores.tasks.open(TENANT, { taskId: 'racing-fresh', deviceId: 'racing' });
+        const fresh = await mailbox.append(TENANT, { deviceId: 'racing', messageId: 'racing-fresh', body: envelope('racing-fresh') });
+        const floor = (await mailbox.inspect(TENANT, 'racing')).recoverableFrom;
+        if (settledEarly) await release();
+        await revoking;
+
+        // Revoke and register serialize, in either order. When the device ends
+        // registered, the retirement belonged to the registration before it.
+        if (await stores.devices.get(TENANT, 'racing') !== undefined) {
+          await expect(stores.tasks.get(TENANT, 'racing-fresh')).resolves.toMatchObject({ status: 'offered' });
+          const after = await mailbox.inspect(TENANT, 'racing');
+          expect(after.pending.map((message) => message.seq)).toContain(fresh.seq);
+          expect(after.recoverableFrom).toBe(floor);
+        }
+      });
+    });
   });
 
   describe('task abandonment', () => {

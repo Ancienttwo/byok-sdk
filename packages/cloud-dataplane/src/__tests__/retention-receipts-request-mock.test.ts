@@ -27,6 +27,7 @@ const factory: CloudCompositionFactory = {
         commitBlob: async () => { throw new Error('Receipt/TTL retention does not commit blobs.'); },
         retireCancellationDelivery: async () => { throw new Error('Receipt/TTL retention does not retire cancellations.'); },
         mailbox: conformanceMailbox(createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config })),
+        holdMailboxExpiry: async () => { throw new Error('Receipt/TTL retention does not retire devices.'); },
         dispose: scope.dispose,
       };
     } catch (cause) { await scope.dispose(); throw cause; }
