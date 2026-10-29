@@ -21,7 +21,7 @@ import {
 } from '@byok-sdk/cloud';
 import type { TenantId } from '@byok-sdk/core';
 import type { PoolClient } from 'pg';
-import { expirePendingRows, lockDeviceStreams } from './core/outbox-writer';
+import { closeDeviceStreams, expirePendingRows, lockDeviceStreams } from './core/outbox-writer';
 import { readOutbox } from './task-redaction';
 
 type Querier = Pick<PoolClient, 'query'>;
@@ -30,10 +30,12 @@ const UNFINISHED = [...TASK_ATTEMPT_UNFINISHED_STATUSES];
 
 /**
  * Device retirement: every unfinished attempt the devices were offered or own,
- * then every pending row addressed to them. Callers pass only ids whose row
- * they deleted in this transaction. Settling is a terminal transition, so
- * `archive_after` takes the `terminal_at` instant in the same UPDATE and the
- * task becomes archive work like one a device finished.
+ * then their streams, closed with the stream tombstone. Pending rows are left
+ * for the dead-letter retention (#1115) rather than expired here: retiring a
+ * device never rewrites a row another policy already owns. Callers pass only
+ * ids whose row they deleted in this transaction. Settling is a terminal
+ * transition, so `archive_after` takes the `terminal_at` instant in the same
+ * UPDATE and the task becomes archive work like one a device finished.
  */
 export async function retireDevices(
   client: Querier,
@@ -58,8 +60,7 @@ export async function retireDevices(
       WHERE t.tenant_id = $1 AND t.task_id = locked.task_id AND t.status = ANY($2::text[])`,
     [tenant, UNFINISHED, ids, cause, now],
   );
-  await lockDeviceStreams(client, tenant, ids);
-  for (const deviceId of ids) await expirePendingRows(client, tenant, deviceId, 'all');
+  await closeDeviceStreams(client, tenant, ids, cause, now);
 }
 
 /**

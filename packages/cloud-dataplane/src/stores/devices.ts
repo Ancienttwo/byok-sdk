@@ -34,7 +34,7 @@ import {
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
 import type { ByokPool } from '../pool';
-import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer';
+import { BEGIN_OUTBOX_WRITE, reopenDeviceStream } from './core/outbox-writer';
 import { retireDevices } from './task-retirement';
 
 interface DeviceRow {
@@ -222,6 +222,9 @@ export async function registerDeviceOnClient(
       input.machineId ?? null,
     ],
   );
+  // A fresh grant for an id that was retired reopens its stream; the rows,
+  // cursor and seq it kept stay as they are.
+  await reopenDeviceStream(client, tenant, input.deviceId);
   return toRecord(result.rows[0]!);
 }
 

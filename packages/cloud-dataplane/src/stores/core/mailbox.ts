@@ -29,11 +29,13 @@ import { assertCollectExpiredInput } from '@byok-sdk/core';
 import {
   ByokCoreError,
   CoreConflictError,
+  MailboxStreamClosedError,
   assertCanonicalTimestamp,
   type Clock,
   type ContentHash,
   type MailboxAdvanceCursorInput,
   type MailboxAppendInput,
+  type MailboxCloseStreamInput,
   type MailboxCursorState,
   type MailboxMessage,
   type MailboxMessageState,
@@ -42,19 +44,23 @@ import {
   type MailboxRecordDeliveryInput,
   type MailboxCollectExpiredInput,
   type MailboxExpirePendingInput,
+  type MailboxReopenStreamInput,
   type CollectExpiredResult,
   type MailboxStore,
+  type MailboxStreamCloseCause,
   type MailboxUsage,
   type TenantId,
 } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type { ByokPool } from '../../pool';
 import {
   BEGIN_OUTBOX_WRITE,
+  closeDeviceStreams,
   expirePendingRows,
   insertOutboxRow,
   lockDeviceStreams,
   readMailboxBytes,
+  reopenDeviceStream,
 } from './outbox-writer';
 
 const DEFAULT_READ_LIMIT = 50;
@@ -119,15 +125,21 @@ export class PostgresMailboxStore implements MailboxStore {
       await client.query(BEGIN_OUTBOX_WRITE);
 
       // An existing `messageId` answers before any lock or admission check, so
-      // a retry against a full mailbox is never refused.
-      const existing = await client.query<OutboxRow>(
-        `SELECT ${OUTBOX_COLUMNS} FROM outbox
+      // a retry against a full mailbox is never refused; a closed stream still
+      // refuses it. This lock-free read writes nothing, so a close it misses is
+      // one that commits after it.
+      const existing = await client.query<OutboxRow & { readonly closed_cause: MailboxStreamCloseCause | null }>(
+        `SELECT ${OUTBOX_COLUMNS},
+                (SELECT s.closed_cause FROM device_stream s
+                  WHERE s.tenant_id = outbox.tenant_id AND s.device_id = outbox.device_id) AS closed_cause
+           FROM outbox
           WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
         [tenant, input.deviceId, input.messageId],
       );
       const replayed = existing.rows[0];
       if (replayed !== undefined) {
         await client.query('COMMIT');
+        if (replayed.closed_cause !== null) throw new MailboxStreamClosedError(input.deviceId, replayed.closed_cause);
         return toMailboxMessage(replayed);
       }
 
@@ -326,13 +338,31 @@ export class PostgresMailboxStore implements MailboxStore {
 
   async expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{ readonly expired: number }> {
     this.#requireDeviceId(input.deviceId);
+    return this.#streamWrite(async (client) => {
+      await lockDeviceStreams(client, tenant, [input.deviceId]);
+      return { expired: await expirePendingRows(client, tenant, input.deviceId, input.seqs) };
+    });
+  }
+
+  async closeStream(tenant: TenantId, input: MailboxCloseStreamInput): Promise<{ readonly expired: number }> {
+    this.#requireDeviceId(input.deviceId);
+    return this.#streamWrite(async (client) => ({
+      expired: await closeDeviceStreams(client, tenant, [input.deviceId], input.cause, this.#now()),
+    }));
+  }
+
+  async reopenStream(tenant: TenantId, input: MailboxReopenStreamInput): Promise<void> {
+    this.#requireDeviceId(input.deviceId);
+    await this.#streamWrite((client) => reopenDeviceStream(client, tenant, input.deviceId));
+  }
+
+  async #streamWrite<T>(write: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.#pool.connect();
     try {
       await client.query(BEGIN_OUTBOX_WRITE);
-      await lockDeviceStreams(client, tenant, [input.deviceId]);
-      const expired = await expirePendingRows(client, tenant, input.deviceId, input.seqs);
+      const result = await write(client);
       await client.query('COMMIT');
-      return { expired };
+      return result;
     } catch (cause) {
       await client.query('ROLLBACK').catch(() => {});
       throw cause;

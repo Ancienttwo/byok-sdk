@@ -19,6 +19,12 @@
  * outside retention (`expirePendingRows`) takes only the stream row: it can
  * only lower the sum a limited append is checked against.
  *
+ * The stream row also carries the retirement tombstone (`closed_cause`, 0033).
+ * The append reads it from the row version its own upsert locked, never from
+ * an earlier snapshot, so an append that waited behind a retirement sees the
+ * close, and a first append for a device conflicts on the stream key with the
+ * retirement that created the row closed (`closeDeviceStreams`).
+ *
  * - The tenant lock is a transaction-scoped advisory lock. A `limited` limit
  *   check reads an aggregate over other devices' rows, and under READ
  *   COMMITTED a single statement cannot serialize against inserts it does not
@@ -39,8 +45,10 @@
  */
 import {
   ByokCoreError,
+  MailboxStreamClosedError,
   type MailboxAdmission,
   type MailboxBody,
+  type MailboxStreamCloseCause,
   type TenantId,
 } from '@byok-sdk/core';
 import type { PoolClient } from 'pg';
@@ -113,18 +121,21 @@ export async function insertOutboxRow(
     ]);
   }
 
-  // A no-op upsert takes the device row lock and reads the next sequence in
-  // one statement. The sequence is only advanced after the row is inserted,
-  // so an idempotent return or a refusal consumes no number.
-  const stream = await client.query<{ readonly next_seq: bigint }>(
+  // A no-op upsert takes the device row lock and reads the next sequence and
+  // the tombstone in one statement. The sequence is only advanced after the
+  // row is inserted, so an idempotent return or a refusal consumes no number.
+  const stream = await client.query<{ readonly next_seq: bigint; readonly closed_cause: MailboxStreamCloseCause | null }>(
     `INSERT INTO device_stream (tenant_id, device_id, next_seq, acked_seq, acked_at)
      VALUES ($1, $2, 1, 0, $3)
      ON CONFLICT (tenant_id, device_id) DO UPDATE
         SET next_seq = device_stream.next_seq
-     RETURNING next_seq`,
+     RETURNING next_seq, closed_cause`,
     [tenant, input.deviceId, input.now],
   );
-  const seq = stream.rows[0]!.next_seq;
+  const { next_seq: seq, closed_cause: closedCause } = stream.rows[0]!;
+  // A closed stream refuses before the idempotency read: a retry for a
+  // retired device learns of the retirement instead of getting its old row.
+  if (closedCause !== null) throw new MailboxStreamClosedError(input.deviceId, closedCause);
 
   // Re-read the idempotency key behind both locks. A caller's earlier
   // lock-free check can lose to a writer that committed while it waited.
@@ -199,6 +210,48 @@ export async function lockDeviceStreams(
     `SELECT 1 FROM device_stream WHERE tenant_id = $1 AND device_id = ANY($2::text[])
       ORDER BY device_id FOR UPDATE`,
     [tenant, [...deviceIds]],
+  );
+}
+
+/**
+ * Closes each retired device's stream, in `device_id` order, and dead-letters
+ * every `pending` row on it. The upsert creates a closed stream row for a
+ * device that never had mail, so its first append conflicts with this one on
+ * the stream key instead of slipping past a lock on a row that did not exist.
+ * A closed stream keeps its first `closed_at`; the cause is the latest.
+ */
+export async function closeDeviceStreams(
+  client: Pick<PoolClient, 'query'>,
+  tenant: TenantId,
+  deviceIds: readonly string[],
+  cause: MailboxStreamCloseCause,
+  now: string,
+): Promise<number> {
+  let expired = 0;
+  for (const deviceId of [...deviceIds].sort()) {
+    await client.query(
+      `INSERT INTO device_stream (tenant_id, device_id, next_seq, acked_seq, acked_at, closed_at, closed_cause)
+       VALUES ($1, $2, 1, 0, $3, $3, $4)
+       ON CONFLICT (tenant_id, device_id) DO UPDATE
+          SET closed_at = COALESCE(device_stream.closed_at, EXCLUDED.closed_at),
+              closed_cause = EXCLUDED.closed_cause`,
+      [tenant, deviceId, now, cause],
+    );
+    expired += await expirePendingRows(client, tenant, deviceId, 'all');
+  }
+  return expired;
+}
+
+/** Reopens a device's stream for its new registration; rows, cursor and seq stay. */
+export async function reopenDeviceStream(
+  client: Pick<PoolClient, 'query'>,
+  tenant: TenantId,
+  deviceId: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE device_stream SET closed_at = NULL, closed_cause = NULL
+      WHERE tenant_id = $1 AND device_id = $2 AND closed_at IS NOT NULL`,
+    [tenant, deviceId],
   );
 }
 
