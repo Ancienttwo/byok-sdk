@@ -84,7 +84,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       byokLauncher:{command:'/opt/byok-pi-provider-launcher',profileDbPath:'/private/providers.sqlite',sessionDir:dir}});
     const task:RuntimeTaskInput={...baseTask,sessionRef:'fake-session-1',dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'}};
     let retained:import('../types').RuntimeSessionLease|undefined;
-    const wrapped:import('../types').RuntimeAdapter={descriptor:adapter.descriptor,detect:()=>adapter.detect(),prepare:async input=>{
+    const wrapped:import('../types').RuntimeAdapter={descriptor:adapter.descriptor,runtimeEnvironment:()=>adapter.runtimeEnvironment(),detect:()=>adapter.detect(),prepare:async input=>{
       const result=await adapter.prepare(input);if(result.kind!=='prepared')return result;
       retained=await result.operation.acquireSessionLease!(task.sessionRef!);
       return {...result,operation:{...result.operation,start:input=>result.operation.start({...input,sessionLease:{sessionRef:task.sessionRef!,release:async()=>{}}})}};

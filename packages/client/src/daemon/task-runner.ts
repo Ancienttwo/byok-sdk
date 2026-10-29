@@ -523,7 +523,7 @@ export interface TaskRunnerDeps {
   /**
    * Production pre-runtime executability/handshake gate for the exact message
    * helper config. `env` is the same child environment the runtime
-   * gets (`buildRuntimeEnv`), so the helper is proved under the environment
+   * gets (`RuntimeAdapter.runtimeEnvironment`), so the helper is proved under the environment
    * it will actually run in.
    */
   agentMessageMcpPreflight?: (

@@ -78,7 +78,8 @@ if (process.argv[2] !== 'task') {
   try {
     try { await import(input.piSpecifier); report.lookup = 'resolved'; } catch (error) { report.lookup = String(error); }
     report.defaultDetect = await new sdk.PiAdapter().detect();
-    const adapter = new sdk.PiAdapter({ sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
+    // The Host sets PI_CODING_AGENT_DIR itself, so the runtime gets it only through pass (#1095).
+    const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
       ...(input.bundleEntry ? { entry: process.argv[1] } : {}) } });
     report.stage = 'detect'; report.detect = await adapter.detect();
     report.stage = 'prepare';
@@ -244,7 +245,9 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       const home = path.join(runDir, 'home'); await fs.mkdir(home);
       // A dead loopback registry: an auto-install attempt fails instead of reaching a network.
       const deadRegistry = 'http://127.0.0.1:9';
-      const env = { PATH: process.env.PATH ?? '', HOME: home, TMPDIR: runDir, PI_CODING_AGENT_DIR: agentDir,
+      // SHELL and USER: Bun's os.userInfo() reads them, and the default
+      // runtime environment is a login-shell capture (#1095).
+      const env = { PATH: process.env.PATH ?? '', HOME: home, SHELL: '/bin/sh', USER: os.userInfo().username, TMPDIR: runDir, PI_CODING_AGENT_DIR: agentDir,
         npm_config_registry: deadRegistry, BUN_CONFIG_DEFAULT_REGISTRY: deadRegistry,
         ...(host.piPackageDir === undefined ? {} : { PI_PACKAGE_DIR: host.piPackageDir }) };
       const reportPath = path.join(runDir, 'report.json'); const inputPath = path.join(runDir, 'input.json');

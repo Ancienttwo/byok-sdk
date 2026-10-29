@@ -1,3 +1,4 @@
+import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { ToolAuthorizationGate } from './tool-authorization';
@@ -46,7 +47,8 @@ export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', '
 export type RuntimeDetectResult =
   | { readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory }
   | { readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'> }
-  | { readonly kind: 'refused'; readonly reason: RuntimeDetectionRefusalReason };
+  | { readonly kind: 'refused'; readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable'> }
+  | { readonly kind: 'refused'; readonly reason: 'runtime_environment_unavailable'; readonly code: ServiceEnvironmentUnavailableCode };
 
 /**
  * A local agent updates itself, so a version the SDK was not qualified against
@@ -60,8 +62,9 @@ export interface RuntimeDetectionAdvisory {
 /**
  * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
  * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.
+ * `runtime_environment_unavailable`: the login-shell capture failed (`code`), so the runtime has no environment to start in (#1095).
  */
-export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported';
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported' | 'runtime_environment_unavailable';
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
@@ -555,6 +558,14 @@ export interface RuntimeAdapter {
   /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
   detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+  /**
+   * The environment every child process of this runtime's tasks receives
+   * (#1095): a fresh object, built under the adapter's own
+   * `RuntimeEnvironmentPolicy` (`buildRuntimeEnvironment`). Rejects with
+   * `RuntimeEnvironmentUnavailableError` when that policy has no environment
+   * to build from; the daemon then refuses the runtime.
+   */
+  runtimeEnvironment(): Promise<Record<string, string>>;
 }
 
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */

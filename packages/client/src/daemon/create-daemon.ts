@@ -1,7 +1,7 @@
 import type { OutboundStatus } from './outbound-settlement';
 import { TerminalCommitQueue } from './terminal-commit-queue';
 import { type RuntimeObservation } from '../runtime-detection';
-import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../login-shell-environment';
 import type {
   AgentEgressPolicy,
   Envelope,
@@ -24,6 +24,7 @@ import {
   type LocalAgentReleaseIdentity,
 } from '../release-identity';
 import { assertCodexSandboxSetting, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
+import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../runtime/environment';
 import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals';
 import { AuthManager } from './auth-manager';
 import { resolveMachineId } from './machine-id';
@@ -210,6 +211,14 @@ export interface DaemonConfig {
    * unchanged from M1/M2.
    */
   runtimeAllowlist?: string[];
+  /**
+   * The environment every runtime `createDaemon` builds gives its children
+   * (#1095): by default the user's login-shell snapshot, so a variable the
+   * Host sets in `process.env` reaches a runtime only when `pass` names it.
+   * `createDaemonWithAdapters` refuses this field: each injected adapter
+   * takes its own `runtimeEnvironment` option.
+   */
+  runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /**
    * Separate-process Pi BYOK credential boundary. Required only for a
    * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
@@ -756,6 +765,9 @@ export function createDaemonWithAdapters(
   if (Object.hasOwn(config, 'codexSandbox')) {
     throw new TypeError('DaemonConfig.codexSandbox is only supported by createDaemon; configure the injected Codex adapter directly');
   }
+  if (Object.hasOwn(config, 'runtimeEnvironment')) {
+    throw new TypeError('DaemonConfig.runtimeEnvironment is only supported by createDaemon; pass runtimeEnvironment to each injected adapter');
+  }
   return buildDaemonWithAdapters(config, adapters, overrides);
 }
 
@@ -796,7 +808,7 @@ function buildDaemon(
     agentHomeReaderLimit, egressPolicy, egressBatcherOptions, presenceCadence, deviceAssertionAudiences,
     deviceAssertionTtlMs, storeDir, storageConfig, retentionClock, scratchRoot, storagePressure,
     inputPreparationLimits, preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf,
-  } = composeDaemonStores({ config, overrides, agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, toolsetRegistry, agentMemoryDescribeBin });
+  } = composeDaemonStores({ config, overrides, agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, toolsetRegistry, agentMemoryDescribeBin, adapters });
   // Config-derived, so resolved once; `byok-agent config check` builds the same report.
   const effectiveConfig = describeEffectiveDaemonConfig({
     config, warnings: configWarnings, memoryHelper, agentMemoryMcpAdmission, storeDir,
@@ -1005,5 +1017,6 @@ function buildDaemon(
  */
 export function createDaemon(config: DaemonConfig, overrides: DaemonOverrides = {}): Daemon {
   if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
+  assertRuntimeEnvironmentPolicy(config.runtimeEnvironment, 'DaemonConfig.runtimeEnvironment');
   return buildDaemon(config, (piByokLauncher) => buildDefaultAdapters(config, piByokLauncher), 'sdk-built', overrides, undefined);
 }

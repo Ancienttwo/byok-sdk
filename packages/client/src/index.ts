@@ -511,9 +511,12 @@ export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
 // Issue #392: one-time login-shell environment capture for service-launched (or Dock-launched) hosts.
-export { applyLoginShellEnvironment, serviceEnvironmentStatus } from './lifecycle/service-environment';
+export { applyLoginShellEnvironment } from './lifecycle/service-environment';
+export { serviceEnvironmentStatus } from './login-shell-environment';
+export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
+export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from './runtime/environment';
 export type { RuntimeObservation } from './runtime-detection';
-export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './lifecycle/service-environment';
+export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 
 // Finding F7: the storeDir-hardening chokepoint (`DeviceStore.save()`/
 // `control-server.ts`'s `startControlServer` both funnel through this) —

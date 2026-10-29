@@ -20,7 +20,7 @@ import {
 } from '../../types';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { buildAllowlistedEnv, buildRuntimeEnv } from '../../daemon/environment';
+import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { classifyDetectError } from '../detect-outcome';
 import type { ResolvedBin } from '../codex/resolve-bin';
@@ -60,6 +60,8 @@ export interface HermesModelSelection {
 export interface HermesAdapterOptions {
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
+  /** The environment Hermes and its MCP servers get (#1095). Default: the login-shell snapshot. A `byokLauncher` narrows it further. */
+  runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /**
    * Absolute path of the Hermes root that this SDK owns, for example under the
    * Host's store directory. Each execution runs in a fresh profile home below
@@ -191,6 +193,7 @@ const authority = (reason: string) =>
 export class HermesAdapter implements RuntimeAdapter {
   private readonly root: string;
   private readonly options: HermesAdapterOptions;
+  private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
   private readonly liveHomes = new Set<string>();
 
@@ -216,6 +219,7 @@ export class HermesAdapter implements RuntimeAdapter {
     assertDeadline(options.probeTimeoutMs, 'Hermes probe timeout');
     assertDeadline(options.gatewayReadyTimeoutMs, 'Hermes gateway ready timeout');
     assertDeadline(options.interruptTimeoutMs, 'Hermes interrupt timeout');
+    this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'HermesAdapterOptions.runtimeEnvironment');
     this.root = root;
     this.options = { ...options, ...(options.byokLauncher === undefined ? {} : { byokLauncher: ownHermesLauncher(options.byokLauncher) }), ...(options.model === undefined ? {} : { model: Object.freeze({ ...options.model }) }) };
   }
@@ -224,8 +228,18 @@ export class HermesAdapter implements RuntimeAdapter {
     return (this.options.resolveBin ?? resolveHermesBin)().command;
   }
 
-  private rootEnvironment(): Record<string, string> {
-    return hermesEnvironment(this.options.byokLauncher ? buildAllowlistedEnv({ ambient: process.env }) : buildRuntimeEnv({ ambient: process.env }), this.root);
+  runtimeEnvironment(): Promise<Record<string, string>> {
+    return buildRuntimeEnvironment(this.environmentPolicy);
+  }
+
+  /** The custody launcher's lane is the platform baseline of the runtime environment. */
+  private async launchEnvironment(): Promise<Record<string, string>> {
+    const env = await this.runtimeEnvironment();
+    return this.options.byokLauncher ? buildAllowlistedEnv({ ambient: env }) : env;
+  }
+
+  private async rootEnvironment(): Promise<Record<string, string>> {
+    return hermesEnvironment(await this.launchEnvironment(), this.root);
   }
 
   /**
@@ -241,7 +255,7 @@ export class HermesAdapter implements RuntimeAdapter {
       const command = this.command();
       await ensureHermesRoot(this.root);
       await sweepStaleHermesProfiles(this.root, this.liveHomes, Date.now(), this.options.nativeAssetRoot);
-      const version = await probeHermesVersion(command, this.rootEnvironment());
+      const version = await probeHermesVersion(command, await this.rootEnvironment());
       if (version.kind !== 'available') return version;
       const probe = await this.probeAcp(command, signal);
       if (probe.kind !== 'available') return probe;
@@ -257,9 +271,10 @@ export class HermesAdapter implements RuntimeAdapter {
   }
 
   private async probeAcp(command: string, signal: AbortSignal | undefined): Promise<{ kind: 'available'; authPresent: boolean } | ProbeFailure> {
+    const launchEnv = await this.launchEnvironment();
     const home = await createHermesProfile(this.root, `detect-${randomBytes(6).toString('hex')}`, this.options.model);
     const child = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn })(command, ['acp'], {
-      cwd: home, env: hermesEnvironment(this.options.byokLauncher ? buildAllowlistedEnv({ ambient: process.env }) : buildRuntimeEnv({ ambient: process.env }), home),
+      cwd: home, env: hermesEnvironment(launchEnv, home),
     });
     let timedOut = false;
     try {
@@ -292,7 +307,7 @@ export class HermesAdapter implements RuntimeAdapter {
     if (input.offer.sessionRef !== undefined) return { kind: 'reject', reason: 'hermes does not resume native sessions', retryable: false };
     const command = this.command();
     await ensureHermesRoot(this.root);
-    const version = await probeHermesVersion(command, this.rootEnvironment());
+    const version = await probeHermesVersion(command, await this.rootEnvironment());
     if (version.kind !== 'available') {
       return { kind: 'reject', reason: `hermes installation refused: ${version.kind === 'refused' ? version.reason : version.kind}`, retryable: false };
     }

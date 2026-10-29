@@ -2,8 +2,10 @@ import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildRuntimeEnv } from '../daemon/environment';
+import { composeRuntimeEnvironment } from '../runtime/environment';
 import { captureAndApply } from '../lifecycle/service-environment';
+import { captureLoginShellSnapshot, LOGIN_SHELL_SEED_PATH } from '../login-shell-environment';
+import { testRuntimeEnv } from './fixtures/runtime-env';
 
 const dirs: string[] = [];
 
@@ -91,7 +93,7 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     const dir = await tempDir();
     expect(await captureAndApply({ shell: path.join(dir, 'missing'), env: {} })).toEqual({ source: 'unavailable', code: 'spawn-failed' });
     expect(await captureAndApply({ shell: 'zsh', env: {} })).toEqual({ source: 'unavailable', code: 'unsupported-shell' });
-    expect(await captureAndApply({ platform: 'win32', env: {} })).toEqual({ source: 'inherited' });
+    expect(await captureAndApply({ platform: 'win32', env: {} })).toEqual({ source: 'windows-session' });
   });
 
   it('an rc that swallows stdout leaves no frame: unavailable:bad-frame', async () => {
@@ -106,7 +108,7 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     expect(env.BYOK_CONFIG).toBe('/own/config.json');
     expect(env.BYOK_CLAUDE_BIN).toBeUndefined();
     expect(env.RC_SET).toBe('1');
-    expect(Object.keys(buildRuntimeEnv({ ambient: env, platform: 'darwin' })).filter((name) => name.startsWith('BYOK_'))).toEqual([]);
+    expect(Object.keys(testRuntimeEnv(env, 'darwin')).filter((name) => name.startsWith('BYOK_'))).toEqual([]);
   });
 
   it('the login shell never sees this process\'s BYOK_* values; they are restored afterwards', async () => {
@@ -115,6 +117,34 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     expect(await captureAndApply({ shell, env })).toMatchObject({ source: 'login-shell' });
     expect(env.SAW_BYOK).toBe('unset');
     expect(env.BYOK_TEST_SECRET).toBe('s3cret');
+  });
+
+  it('#1095: a Host variable set before the capture never enters the snapshot; the seed is a closed list with a fixed PATH', async () => {
+    const { home, env } = await fixtureHome('export RC_DEFINED=from-rc\nexport SAW_SEED_PATH="$PATH"\nexport SAW_HOST="${HOST_ONLY_SENTINEL-unset}"\n');
+    env.HOST_ONLY_SENTINEL = 'not-a-secret';
+    env.LANG = 'en_US.UTF-8';
+    env.PATH = '/host/bundle/bin:/usr/bin:/bin';
+    const snapshot = await captureLoginShellSnapshot({ shell, env });
+    expect(snapshot.status).toMatchObject({ source: 'login-shell' });
+    expect(snapshot.env?.HOST_ONLY_SENTINEL).toBeUndefined();
+    expect(snapshot.env?.SAW_HOST).toBe('unset');
+    // /etc/profile (path_helper on macOS) may extend the seed PATH; the Host's entry is never in it.
+    expect(snapshot.env?.SAW_SEED_PATH?.split(':')).toEqual(expect.arrayContaining(LOGIN_SHELL_SEED_PATH.split(':')));
+    expect(snapshot.env?.SAW_SEED_PATH?.split(':')).not.toContain('/host/bundle/bin');
+    expect(snapshot.env?.RC_DEFINED).toBe('from-rc');
+    expect(snapshot.env?.HOME).toBe(home);
+    expect(snapshot.env?.LANG).toBe('en_US.UTF-8');
+    expect(env.HOST_ONLY_SENTINEL).toBe('not-a-secret');
+  });
+
+  it('#1095: after the capture, a Host variable reaches the runtime only when pass names it', async () => {
+    const { env } = await fixtureHome('export RC_DEFINED=from-rc\n');
+    const snapshot = await captureLoginShellSnapshot({ shell, env });
+    const live = { ...env, HOST_LATE_SENTINEL: 'late', HOST_PASSED_SENTINEL: 'passed' };
+    const runtime = composeRuntimeEnvironment({ policy: { pass: ['HOST_PASSED_SENTINEL'] }, snapshot, live, platform: 'darwin' });
+    expect(runtime.RC_DEFINED).toBe('from-rc');
+    expect(runtime.HOST_PASSED_SENTINEL).toBe('passed');
+    expect(runtime).not.toHaveProperty('HOST_LATE_SENTINEL');
   });
 
   it('the passwd shell is used when none is injected (zsh/bash hosts only)', async (ctx) => {

@@ -12,7 +12,7 @@ import {
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { ExecutionRecord } from './execution-record';
 import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a

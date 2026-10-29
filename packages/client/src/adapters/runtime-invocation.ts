@@ -14,10 +14,11 @@ export interface RuntimeInvocationHost {
   readFile(file: string): string;
 }
 
-function nodeHost(): RuntimeInvocationHost {
+/** This process's platform and filesystem, searching `env` — the runtime environment the command will run in (#1095). */
+export function runtimeInvocationHost(env: Readonly<Record<string, string>>): RuntimeInvocationHost {
   return {
     platform: process.platform,
-    env: process.env,
+    env,
     isFile: file => { try { return statSync(file).isFile(); } catch { return false; } },
     readFile: file => readFileSync(file, 'utf8'),
   };
@@ -43,7 +44,7 @@ const BATCH = new Set(['.bat', '.cmd']);
  * error names no local path: a prepare rejection reason leaves the device.
  * Other platforms are unchanged.
  */
-export function resolveRuntimeInvocation(command: string, host: RuntimeInvocationHost = nodeHost()): RuntimeInvocation {
+export function resolveRuntimeInvocation(command: string, host: RuntimeInvocationHost): RuntimeInvocation {
   if (host.platform !== 'win32') return { command, args: [] };
   const file = findWindowsCommand(command, host, runnableExtensions(host.env));
   if (file === undefined) throw spawnError('ENOENT', 'the runtime command was not found');

@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { fakeRuntimeAdapter } from '../testing';
 import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { TestServer } from './fixtures/test-server';
 
@@ -93,7 +94,8 @@ it('reports the effective memory MCP admission in status', async () => {
 });
 
 it('refuses prepared memory selections when disabled, without degrading them to none', async () => {
-  daemon = createDaemonWithAdapters(await config('off'), []);
+  // The prepared lane binds the Pi adapter's runtime environment (#1095).
+  daemon = createDaemonWithAdapters(await config('off'), [fakeRuntimeAdapter('pi')]);
   for (const agentMemory of ['read', 'read-write'] as const) {
     expect(await capture.surface!.resolveBinding({ requiredToolsets: [], agentMemory })).toMatchObject({
       ok: false, code: 'unsupported_input', detail: 'agent_memory_unavailable',
@@ -101,6 +103,13 @@ it('refuses prepared memory selections when disabled, without degrading them to 
   }
   expect(await capture.surface!.resolveBinding({ requiredToolsets: [], agentMemory: 'none' })).toMatchObject({ ok: true });
   expect(capture.helper).not.toHaveBeenCalled();
+});
+
+it('refuses every prepared binding on a daemon without a Pi adapter (#1095)', async () => {
+  daemon = createDaemonWithAdapters(await config('off'), []);
+  expect(await capture.surface!.resolveBinding({ requiredToolsets: [], agentMemory: 'none' })).toMatchObject({
+    ok: false, code: 'unsupported_input', detail: 'pi_runtime_unconfigured',
+  });
 });
 
 // Explicit transports retain their own helper requirement even with task tools off.

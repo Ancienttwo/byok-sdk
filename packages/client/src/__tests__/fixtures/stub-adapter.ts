@@ -1,3 +1,4 @@
+import { testRuntimeEnv } from './runtime-env';
 import type { RuntimeTaskInput } from '../../types';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import {
@@ -256,6 +257,10 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       trajectoryEvidence,
       capabilities,
     });
+  }
+
+  async runtimeEnvironment(): Promise<Record<string, string>> {
+    return testRuntimeEnv();
   }
 
   async detect(): Promise<RuntimeDetectResult> {

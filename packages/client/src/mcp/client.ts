@@ -159,7 +159,7 @@ export interface McpStdioClientOptions {
   readonly label?: string;
   /**
    * The exact base environment the RUNTIME child of this task receives
-   * (`buildRuntimeEnv`) — never `process.env`. Required, deliberately: a
+   * (`RuntimeAdapter.runtimeEnvironment`) — never `process.env`. Required, deliberately: a
    * caller that forgets it fails to compile rather than passing this SDK's
    * own `BYOK_*` control-plane variables.
    */

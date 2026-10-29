@@ -175,7 +175,7 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
 
   const assembled = await createPreparedToolSurfaceAssembler({
     toolsetRegistry: toolsets,
-    runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+    runtimeEnv: async () => ({ PATH: process.env.PATH ?? '' }),
   }).assemble({
     agentMemory: 'none',
     requiredToolsets: [RUNTIME_IDENTITY_TOOLSET],
@@ -218,7 +218,7 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
     agentMemory: 'none',requiredToolsets: [RUNTIME_IDENTITY_TOOLSET] };
   const service = createInputPreparationService({ storeDir: input.storeDir,limits,
     compiler: { runtime: compiler.runtime,async compile(request) { compiled = await compiler.compile(request); return compiled; } },
-    toolSurface: createPreparedToolSurfaceAssembler({ toolsetRegistry: toolsets,runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }) }),
+    toolSurface: createPreparedToolSurfaceAssembler({ toolsetRegistry: toolsets,runtimeEnv: async () => ({ PATH: process.env.PATH ?? '' }) }),
     authorityResolver: {
       async resolveScope(claim) { return { authorized: true,grant: { scopeId: 'offline-capture',agentMemory: 'none',...claim } }; },
       async resolveSource({ source }) { return { authorized: true,source }; },
