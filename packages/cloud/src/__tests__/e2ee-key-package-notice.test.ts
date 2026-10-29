@@ -34,7 +34,7 @@ function setup() {
     crypto: base.crypto,
     tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock),
     clock,
-    capabilities: fullCapabilityDeclaration(),
+    capabilities: fullCapabilityDeclaration(1, { includeE2eeMember: true }),
     e2eeMemberStore: store,
   });
 

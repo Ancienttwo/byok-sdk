@@ -100,7 +100,7 @@ export function outboundStatus(daemonScope: DaemonScope): OutboundStatus {
 export function status(daemonScope: DaemonScope): DaemonStatus {
   const {
     daemonState, buildStorageStatus, localAgentRelease, terminalCommits, config, operationalHealth,
-    outboundStatus, toolsetRegistry, agentHomeExecutionStatus, agentMemoryMcpAdmission,
+    outboundStatus, toolsetRegistry, agentHomeExecutionStatus, agentMemoryMcpAdmission, effectiveConfig,
   } = daemonScope;
   return {
     environment: { ...daemonState.resolvedEnvironment },
@@ -120,5 +120,6 @@ export function status(daemonScope: DaemonScope): DaemonStatus {
     egress: daemonState.agentEgress.status(),
     agentHomeExecution: agentHomeExecutionStatus(),
     agentMemoryMcp: agentMemoryMcpAdmission,
+    config: effectiveConfig,
   };
 }

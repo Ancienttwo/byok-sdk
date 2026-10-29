@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { argValue, ConfigError, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from '../bin/config';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../bin/official-release';
 import { DeviceStore } from '../daemon/store';
+import { defaultStoreDir } from '../daemon/host-layout';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -103,7 +104,7 @@ describe('bin/config: loadConfig', () => {
       const cases: Array<[() => unknown, string]> = [
         [() => loadConfig(configPath), `config at "${configPath}" is not valid JSON`],
         [() => loadConfig(path.join(dir, 'missing.json')), `could not read config at "${path.join(dir, 'missing.json')}"; check the path and read permissions`],
-        [() => loadConfig(undefined, { productName: sentinel }), 'config is missing required field "productId"'],
+        [() => loadConfig(undefined, { productName: sentinel }), 'config is missing required field "productId"; config is missing required field "serverUrl"'],
         [() => loadConfig(undefined, { ...base, localAgentRelease: { version: sentinel } } as never), 'config field "localAgentRelease" is distribution-owned and must not be supplied'],
       ];
       for (const [load, message] of cases) {
@@ -125,8 +126,9 @@ describe('bin/config: resolveStoreDir', () => {
     expect(resolveStoreDir({ storeDir: '/custom/dir', productId: 'acme' })).toBe('/custom/dir');
   });
 
-  it('falls back to DeviceStore.defaultDir(productId) — the exact same resolution create-daemon.ts uses internally', () => {
-    expect(resolveStoreDir({ productId: 'acme' })).toBe(DeviceStore.defaultDir('acme'));
+  it('falls back to defaultStoreDir(productId) — the exact same resolution create-daemon.ts uses internally', () => {
+    expect(resolveStoreDir({ productId: 'acme' })).toBe(DeviceStore.resolveDir('acme'));
+    expect(resolveStoreDir({ productId: 'acme' })).toBe(defaultStoreDir('acme'));
   });
 
   it('resolves a relative storeDir exactly as DeviceStore.resolveDir does (#1030)', () => {

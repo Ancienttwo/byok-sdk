@@ -8,7 +8,6 @@ import {
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import { HarnessInventorySchema, type HarnessInfo } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
-import { deleteE2eeDeviceState } from './e2ee-member';
 
 export const DEVICE_SCHEMA = `
 CREATE TABLE device_directory (
@@ -80,9 +79,8 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
       const owner = db.prepare('SELECT tenant_id FROM device_directory WHERE device_id = ?').get(input.deviceId);
       if (owner !== undefined && owner.tenant_id !== tenant) throw new Error('Device ID already belongs to another tenant');
       if (input.machineId !== undefined) {
-        const superseded = db.prepare('DELETE FROM device_directory WHERE tenant_id = ? AND product_id = ? AND machine_id = ? AND device_id <> ? RETURNING device_id')
-          .all(tenant, input.productId, input.machineId, input.deviceId);
-        deleteE2eeDeviceState(db, tenant, superseded.map(row => row.device_id as string));
+        db.prepare('DELETE FROM device_directory WHERE tenant_id = ? AND product_id = ? AND machine_id = ? AND device_id <> ?')
+          .run(tenant, input.productId, input.machineId, input.deviceId);
       }
       db.prepare(`INSERT INTO device_directory
         (tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch)
@@ -107,8 +105,7 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
 
   revoke(tenant: TenantId, deviceId: string): Promise<void> {
     return this.coordinator.transaction(db => {
-      const removed = db.prepare('DELETE FROM device_directory WHERE tenant_id = ? AND device_id = ? RETURNING device_id').all(tenant, deviceId);
-      deleteE2eeDeviceState(db, tenant, removed.map(row => row.device_id as string));
+      db.prepare('DELETE FROM device_directory WHERE tenant_id = ? AND device_id = ?').run(tenant, deviceId);
     });
   }
 

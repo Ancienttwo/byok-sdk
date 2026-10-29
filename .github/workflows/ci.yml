@@ -1791,10 +1791,40 @@ jobs:
           if (-not (Test-Path $env:BYOK_HERMES_REAL_BIN)) { Write-Error "BYOK_HERMES_REAL_BIN is not set to the installed Hermes"; exit 1 }
           bun run --filter @byok-sdk/client test -- src/__tests__/hermes-real.test.ts
 
+  # #1103: the runtime contract suite, one leg per adapter, against the
+  # qualified CLI that scripts/ci/runtime-contract-install.mjs reads from the
+  # adapter's own QUALIFIED_* constant (Pi: byok.piRuntimePin, bundled). Model
+  # traffic ends at a loopback provider; no credential or paid call is used.
+  # runtime-contract-nightly.yml runs the same suite against the latest CLIs.
+  runtime-contract:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'runtime-contract') }}
+    name: runtime contract (${{ matrix.runtime }}, qualified)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [pi, claude, codex, grok, hermes]
+    env:
+      BYOK_RUNTIME_CONTRACT: qualified
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+      - run: bun ci
+      - run: bun run build
+      - name: Install the qualified runtime CLI
+        run: node scripts/ci/runtime-contract-install.mjs ${{ matrix.runtime }} qualified
+      - name: Run the runtime contract suite
+        run: bun run --filter @byok-sdk/client test:runtime-contract -- src/__tests__/runtime-contract/${{ matrix.runtime }}.contract.ts
+
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows"]
+    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "runtime-contract"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

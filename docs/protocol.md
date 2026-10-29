@@ -1565,7 +1565,8 @@ They add no envelope type. The Host checks shapes and the first-writer rules
 only; members verify every signature (design §7.3). A deployment mounts the
 routes only when its capability declaration has `e2ee.member` and the
 composition supplies an `E2eeMemberStore`. Declaring `e2ee.member` without a
-store fails at construction. `fullCapabilityDeclaration()` leaves it out
+store, or supplying a store without declaring it, fails at construction. The
+embedded `createByokServer` supplies none (#1096). `fullCapabilityDeclaration()` leaves it out
 unless `includeE2eeMember` is set.
 
 `e2ee.member.kem-epoch` (#654 E5b-2, owner batch §77a) is declared exactly

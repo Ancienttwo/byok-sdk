@@ -57,6 +57,7 @@ test('release graph requires keys to carry the release train version', (t) => {
     for (const name of readdirSync(path.join(repoRoot, 'scripts/release'))) {
       if (name.endsWith('.mjs')) copy(`scripts/release/${name}`);
     }
+    copy('scripts/architecture/dependency-graph.mjs');
     for (const name of ['official-pi-installation.mjs', 'official-pi-closure.json']) copy(`packages/client/src/adapters/pi/${name}`);
     for (const relative of ['LICENSE', 'packages/client/tsup.config.ts']) copy(relative);
     for (const directory of workspaces) copy(`${directory}/package.json`);
@@ -70,7 +71,11 @@ test('release graph requires keys to carry the release train version', (t) => {
     writeFileSync(keysManifestPath, `${JSON.stringify({ ...manifestOf('packages/keys'), version: keysVersion }, null, 2)}\n`);
     // Keep the lock record equal to the manifest, so only the version rule can fail.
     writeFileSync(path.join(root, 'bun.lock'), lockText.replace(keysRecord, `$1${keysVersion}$2`));
-    return spawnSync(process.execPath, ['scripts/release/check-package-graph.mjs'], { cwd: root, encoding: 'utf8' });
+    // This synthetic manifest fixture has no Git history; CI_BASE belongs to
+    // the real checkout, whose shrink-only history check runs separately.
+    const env = { ...process.env };
+    delete env.CI_BASE;
+    return spawnSync(process.execPath, ['scripts/release/check-package-graph.mjs'], { cwd: root, encoding: 'utf8', env });
   };
 
   const aligned = runGraph(releaseVersion);
