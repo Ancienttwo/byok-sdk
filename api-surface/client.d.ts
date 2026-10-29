@@ -1047,33 +1047,6 @@ export declare const AGENT_HOME_READER_RUN_MAX_AGE_MS: number;
  * non-empty wire string, so the SDK accepts only one plain path segment.
  */
 export declare function isReaderRunName(taskId: string): boolean;
-/**
- * Removes old reader run directories. Inputs are canonical absolute paths.
- *
- * - A directory in `active` is never removed.
- * - A directory that a reader session handoff points to stays while that
- *   record's last update is within the age limit.
- * - Other directories older than the age limit are removed.
- * - Then, while more than `maxRetained` directories remain, the oldest
- *   unprotected directory is removed first.
- *
- * Age is the directory's own modification time. Before each removal it
- * checks again that `runsRoot` resolves to itself, so a swapped symbolic link
- * cannot redirect a removal outside the home.
- */
-export declare function pruneReaderRuns(input: {
-    readonly runsRoot: string;
-    readonly active: ReadonlySet<string>;
-    readonly referenced: ReadonlyMap<string, number>;
-    readonly nowMs: number;
-    readonly maxRetained?: number;
-    readonly maxAgeMs?: number;
-    readonly maxDeletions?: number;
-    readonly entries?: AsyncIterable<import('node:fs').Dirent>;
-    readonly canRemove?: () => boolean;
-    readonly beforeRemove?: (directory: string) => Promise<void>;
-    readonly afterRemove?: (directory: string) => void;
-}): Promise<readonly string[]>;
 /** Relative path (with `/` separators) -> content fingerprint of one memory file. */
 export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
 /**
@@ -7672,9 +7645,11 @@ export declare function resolveStorageConfig(storeDir: string, input?: StorageCo
         "exec-sdk": number;
         "home-temp": number;
         "input-preparation": number;
+        "pi-session-dir": number;
         "reader-run": number;
         "session-ledger": number;
         "skill-pack-old": number;
+        "terminal-evidence": number;
     }>;
 }>;
 export type ResolvedStorageConfig = ReturnType<typeof resolveStorageConfig>;
@@ -7704,8 +7679,8 @@ export declare class StoragePressure {
     assertAckCriticalAllowed(): void;
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
-export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger'];
-export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'terminal-evidence', 'agent-content', 'byok-authority', 'agent-home-lease', 'retired-namespace', 'pi-session-dir', 'skill-pack-current', 'store-authority'];
+export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old', 'session-ledger', 'terminal-evidence', 'pi-session-dir'];
+export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'agent-content', 'byok-authority', 'agent-home-lease', 'skill-pack-current', 'store-authority', 'runtime-session-external'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
 export type RetentionClassId = ExpiringClassId | ProtectedClassId;
@@ -7737,12 +7712,34 @@ export interface SweepBudget {
     removed(bytes: number): void;
     truncate(): void;
 }
+/**
+ * How a class stays finite. An expiring class is deleted by TTL, optionally also by count. A protected
+ * class either has a fixed count, or states why it cannot be bounded, who clears it and through which API.
+ */
+export type RetentionBound = {
+    readonly kind: 'ttl';
+    readonly ttlMs: number;
+    readonly maxEntries?: number;
+} | {
+    readonly kind: 'count';
+    readonly maxEntries: number;
+    readonly per: 'agent-home' | 'skill-pack';
+} | {
+    readonly kind: 'exempt';
+    readonly reason: string;
+    readonly cleanedBy: 'sdk' | 'host' | 'operator';
+    readonly api: string;
+};
+export type ProtectedRetentionBound = Exclude<RetentionBound, {
+    readonly kind: 'ttl';
+}>;
+/** The declared bound of every protected class; a new class does not compile without one. */
+export declare const PROTECTED_CLASS_BOUNDS: Readonly<Record<ProtectedClassId, ProtectedRetentionBound>>;
 export interface ClassAuthority {
     readonly roots: readonly string[];
     readonly owner: 'sdk' | 'host';
     readonly scope: 'store' | 'agent-home' | 'replica' | 'host';
-    readonly ttlMs?: number;
-    readonly maxEntries?: number;
+    readonly bound: RetentionBound;
 }
 export type RetentionClass = {
     readonly authority: ClassAuthority;
