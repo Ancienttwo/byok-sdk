@@ -100,7 +100,7 @@ describe('pending-mailbox wire-major fence (substrate-free)', () => {
     const stores = await compose(pool);
     expect(Object.keys(stores).sort()).toEqual([
       'activity', 'agentMessageDraft', 'approvals', 'blobs', 'cancellations', 'dedup', 'devices', 'egress', 'nonces',
-      'pairing', 'pairingCodes', 'proofReceipts', 'rateLimiter', 'receipts', 'tasks',
+      'pairing', 'pairingCodes', 'proofReceipts', 'rateLimiter', 'receipts', 'taskArchive', 'tasks',
     ]);
     expect(queries).toHaveLength(1);
   });
