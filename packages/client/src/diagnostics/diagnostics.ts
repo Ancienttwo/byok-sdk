@@ -1,3 +1,5 @@
+import { inspectServiceLogs } from '../lifecycle/service-log';
+import { serviceLogDir } from '../daemon/host-layout';
 import { createDaemonScratch } from '../daemon/retention/scratch';
 import type { DiagnosticCheck, DiagnosticsSnapshot } from './types';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeDetectResult } from '../types';
@@ -694,7 +696,7 @@ export async function collectDiagnostics(
 ): Promise<DiagnosticsSnapshot> {
   const resolvedStoreDir = path.resolve(storeDir);
   const connectControl = options.connectControl ?? connectControlClient;
-  const [device, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment] = await Promise.all([
+  const [device, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment, serviceLogs] = await Promise.all([
     inspectDevice(resolvedStoreDir),
     inspectOperationalHealthFile(resolvedStoreDir),
     inspectJournal(resolvedStoreDir),
@@ -702,6 +704,7 @@ export async function collectDiagnostics(
     connectControl({ storeDir: resolvedStoreDir, productId: config.productId }),
     readLastLifecycleRecord(resolvedStoreDir).catch(() => undefined),
     readLastEnvironmentRecord(resolvedStoreDir).catch(() => undefined),
+    inspectServiceLogs(serviceLogDir(resolvedStoreDir)),
   ]);
 
   let control: DiagnosticsSnapshot['control'];
@@ -785,6 +788,14 @@ export async function collectDiagnostics(
     health,
     journal,
     quarantine,
+    // #1097: sizes only. The location is `serviceLogDir(storeDir)`; file
+    // names can carry the service id, so the snapshot keeps the kind.
+    logs: {
+      status: serviceLogs.status,
+      totalBytes: serviceLogs.totalBytes,
+      files: serviceLogs.files.map(({ kind, sizeBytes }) => ({ kind, sizeBytes })),
+      truncated: serviceLogs.truncated,
+    },
   };
   return { ...withoutChecks, checks: checksFor(withoutChecks) };
 }

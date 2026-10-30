@@ -23,7 +23,7 @@ beforeEach(() => {
   // The sandbox cannot bind the native Unix mutation-gate socket. Keep the
   // real home/lease/filesystem implementation and inject only this test port.
   vi.spyOn(mutationGate, 'acquirePathMutationGate').mockImplementation(async input => {
-    if (input.scope === 'pi-session-rebinding') return acquireNativeGate(input);
+    if (input.targetPath === undefined) return acquireNativeGate(input);
     const targetPath = await mutationGate.resolvePathWithoutCreate(input.targetPath);
     const identity = `${input.scope}:${targetPath}`;
     if (heldGates.has(identity)) throw new mutationGate.PathMutationGateBusyError(input.scope, targetPath);

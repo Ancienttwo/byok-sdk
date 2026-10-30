@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AgentHomeBusyError,
   AgentHomeManager,
@@ -10,6 +10,9 @@ import {
   localStateRelocation,
 } from '../index';
 import { acquireDaemonOwner } from '../daemon/daemon-owner';
+import { claimServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError } from '../lifecycle/service-unit';
+import * as mutationGate from '../util/path-mutation-gate';
+import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 const roots: string[] = [];
 
@@ -33,6 +36,8 @@ function relocationInput(root: string) {
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
+
+useInProcessServiceLifecycleGate();
 
 describe('localStateRelocation', () => {
   it('refuses an active Agent writer with no destination effect, then excludes new writers until exact idempotent release', async () => {
@@ -103,6 +108,36 @@ describe('localStateRelocation', () => {
 
     await expect(localStateRelocation.acquire(input)).rejects.toBeInstanceOf(LocalStateRelocationBusyError);
     await expect(fs.readFile(marker, 'utf8')).resolves.toBe('{broken');
+  });
+
+  it('takes service-lifecycle once and before any store gate, and holds it until release (#1097)', async () => {
+    const root = await makeRoot();
+    const input = relocationInput(root);
+    const storeGates = vi.spyOn(mutationGate, 'acquirePathMutationGates');
+    const ownerBusy = async () => {
+      const claimed = await claimServiceLifecycleOwner({ storeDir: input.sourceStoreDir, owner: 'cli', service: 'acme' })
+        .then(() => 'claimed', (error: unknown) => (error instanceof ServiceUnitError ? error.code : String(error)));
+      if (claimed === 'claimed') await releaseServiceLifecycleOwner({ storeDir: input.sourceStoreDir, owner: 'cli' });
+      return claimed;
+    };
+
+    // A lifecycle operation in progress: relocation is busy before any store gate.
+    const lifecycle = await mutationGate.acquirePathMutationGate({ scope: 'service-lifecycle' });
+    await expect(localStateRelocation.acquire(input)).rejects.toBeInstanceOf(LocalStateRelocationBusyError);
+    expect(storeGates).not.toHaveBeenCalled();
+    await lifecycle.release();
+
+    // A held store gate: relocation is busy and has given service-lifecycle back.
+    const store = await mutationGate.acquirePathMutationGate({ scope: 'store', targetPath: input.sourceStoreDir });
+    await expect(localStateRelocation.acquire(input)).rejects.toBeInstanceOf(LocalStateRelocationBusyError);
+    expect(storeGates).toHaveBeenCalledTimes(1);
+    await store.release();
+    expect(await ownerBusy()).toBe('claimed');
+
+    const relocation = await localStateRelocation.acquire(input);
+    expect(await ownerBusy()).toBe('lifecycle_owner_busy');
+    await relocation.release();
+    expect(await ownerBusy()).toBe('claimed');
   });
 
   it('serializes reverse-order requests without deadlock', async () => {

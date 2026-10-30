@@ -55,6 +55,8 @@ describe('public device operator boundaries', () => {
     await expect(archiveAgentTerminalMessages(config, { ...target, confirmed: false, archiveDirectory: root } as never)).rejects.toMatchObject({ code: 'confirmation-required' });
     await expect(archiveAgentTerminalMessages(config, { ...target, agentRef: { agentId: '../escape', profileRevision: '1' }, archiveDirectory: root })).rejects.toMatchObject({ code: 'invalid-input' });
     await expect(exportDeviceSupportBundle(config, { outputPath: 'relative' })).rejects.toMatchObject({ code: 'invalid-input' });
+    // #1097: never into the store itself.
+    await expect(exportDeviceSupportBundle(config, { outputPath: path.join(config.storeDir!, 'support.json') })).rejects.toMatchObject({ code: 'invalid-input' });
     expect(connectControlClient).not.toHaveBeenCalled();
     expect(await fs.readdir(root)).toEqual([]);
   });

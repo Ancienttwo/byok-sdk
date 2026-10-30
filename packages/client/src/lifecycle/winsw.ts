@@ -1,7 +1,10 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
+import { createManagedLifecycle, type ManagedLifecycleFs } from './managed-lifecycle';
+import { SERVICE_REDIRECT_LIMITS } from './service-log';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceLifecycle, type ServiceProgram } from './service-types';
+import { SERVICE_UNIT_MARKER } from './service-unit';
 
 /**
  * Genuine-failure text that must NEVER be reclassified as "service already
@@ -50,6 +53,18 @@ const WINSW_NOT_INSTALLED: IdempotentAbsence = {
 const WINSW_ALREADY_STOPPED: IdempotentAbsence = {
   codes: [1062, ...(WINSW_NOT_INSTALLED.codes ?? [])],
   patterns: [/not running/i, /has not been started/i, ...WINSW_NOT_INSTALLED.patterns],
+  neverAbsence: WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE,
+};
+
+/**
+ * `winsw install` on a service the SCM already has: Windows's own
+ * `ERROR_SERVICE_EXISTS` is 1073. A re-install or repair keeps that
+ * registration (it names only the stable `<id>.exe`) and restarts onto the
+ * rewritten descriptor.
+ */
+const WINSW_ALREADY_INSTALLED: IdempotentAbsence = {
+  codes: [1073],
+  patterns: [/already exists/i, /already installed/i],
   neverAbsence: WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE,
 };
 
@@ -109,7 +124,7 @@ async function rmWithImageLockRetry(fs: Pick<typeof fsp, 'rm'>, p: string): Prom
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface WinswDeps {
   run?: Runner;
-  fs?: Pick<typeof fsp, 'mkdir' | 'writeFile' | 'rm' | 'stat' | 'copyFile'>;
+  fs?: ManagedLifecycleFs & Pick<typeof fsp, 'copyFile'>;
 }
 
 function xmlEscape(value: string): string {
@@ -124,35 +139,39 @@ function xmlEscape(value: string): string {
  * actually runs `winsw install` against generated output on a real
  * `windows-latest` runner — this macOS dev box cannot execute WinSW at all.
  *
+ * On Windows the SCM registration is the unit and names only the stable
+ * `<id>.exe` (#1097); this descriptor, which WinSW reads at every start, is
+ * the launcher. The {@link SERVICE_UNIT_MARKER} comment marks it as ours.
+ *
  * Each argument becomes its own `<argument>` element (WinSW's supported
  * repeatable-element form) rather than a single space-joined `<arguments>`
  * string — this sidesteps shell-style quoting entirely for a config path
- * containing spaces, the exact same concern the pi adapter's
- * `execFile`-without-`shell` note raises for Windows (see
- * `templates/packaging/sea/README.md`'s "Windows note": WinSW itself
- * launches `<executable>` directly, no shell involved, so an unescaped
- * space in a single `<arguments>` string would be split in the wrong
- * place — one `<argument>` per token has no such ambiguity).
+ * containing spaces (WinSW launches `<executable>` directly, no shell
+ * involved).
  *
- * `<onfailure action="restart" delay="10 sec"/>` (with a second, longer
- * backoff on repeated failure) is the crash-restart M3-4 asks for,
- * delegated entirely to WinSW/the Windows SCM — nothing in this SDK
- * supervises the process itself. `<startmode>Automatic</startmode>` mirrors
- * launchd's `RunAtLoad`/systemd's `WantedBy=default.target`: the service
- * also starts automatically on the next machine boot, not just right now.
+ * `<onfailure action="restart">` fires on a non-zero exit only: the
+ * exit-code contract in `exit-codes.ts`. `<log mode="roll-by-size">` bounds
+ * WinSW's stdout/stderr redirect the same way the daemon's start bounds the
+ * launchd/systemd one (`SERVICE_REDIRECT_LIMITS`).
+ * `<startmode>Automatic</startmode>` mirrors launchd's `RunAtLoad`/systemd's
+ * `WantedBy=default.target`.
  */
 export function generateWinswXml(def: { id: string; displayName: string; program: ServiceProgram; logDir: string }): string {
   const { id, displayName, program, logDir } = def;
   const argXml = program.args.map((a) => `  <argument>${xmlEscape(a)}</argument>`).join('\n');
   const cwdXml = program.cwd ? `\n  <workingdirectory>${xmlEscape(program.cwd)}</workingdirectory>` : '';
-  return `<service>
+  return `<!-- ${SERVICE_UNIT_MARKER} -->
+<service>
   <id>${xmlEscape(id)}</id>
   <name>${xmlEscape(displayName)}</name>
-  <description>${xmlEscape(displayName)} (managed by byok-agent; see templates/service/winsw/README.md)</description>
+  <description>${xmlEscape(displayName)} (managed by @byok-sdk/client)</description>
   <executable>${xmlEscape(program.command)}</executable>
 ${argXml}${cwdXml}
   <logpath>${xmlEscape(logDir)}</logpath>
-  <log mode="roll"></log>
+  <log mode="roll-by-size">
+    <sizeThreshold>${SERVICE_REDIRECT_LIMITS.maxBytes / 1024}</sizeThreshold>
+    <keepFiles>${SERVICE_REDIRECT_LIMITS.maxFiles}</keepFiles>
+  </log>
   <startmode>Automatic</startmode>
   <onfailure action="restart" delay="10 sec"/>
   <onfailure action="restart" delay="30 sec"/>
@@ -175,15 +194,10 @@ ${argXml}${cwdXml}
  * convention is that its executable and XML config share a basename in the
  * same directory (`<id>.exe` + `<id>.xml`), so `install()` copies the
  * product-supplied binary into place under that name rather than invoking
- * it in place — this is the version-agnostic approach documented across
- * WinSW v2/v3, unlike relying on a specific `--config` CLI flag that may
- * differ between major versions.
+ * it in place.
  *
  * `status()` queries `sc.exe` (the real Windows SCM query tool, always
- * present) rather than parsing WinSW's own `status` subcommand text —
- * authoritative ground truth independent of WinSW's own output, and the
- * exact tool `templates/service/winsw/smoke-test.mjs` / the CI job also
- * assert against.
+ * present) rather than parsing WinSW's own `status` subcommand text.
  */
 export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {}): ServiceLifecycle {
   const run = deps.run ?? defaultRunner;
@@ -193,9 +207,6 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
   if (!windows) {
     throw new Error('WinSW service lifecycle requires `ServiceDefinition.windows.winswBin` (the product-bundled WinSW executable path)');
   }
-  // Captured as their own bindings (not read off `windows` again below) so
-  // TS's narrowing of the `if (!windows) throw` above — which does not
-  // survive into the nested `writeFiles` closure — doesn't matter.
   const winswBin = windows.winswBin;
   const id = sanitizeServiceName(def.name);
   const installDir = windows.installDir ?? def.logDir;
@@ -204,71 +215,105 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
 
   async function fileExists(p: string): Promise<boolean> {
     try {
-      await fs.stat(p);
+      await fs.readFile(p);
       return true;
     } catch {
       return false;
     }
   }
 
-  async function writeFiles(program: ServiceProgram): Promise<void> {
-    const xml = generateWinswXml({ id, displayName: def.displayName ?? def.name, program, logDir: def.logDir });
-    await fs.mkdir(installDir, { recursive: true });
-    await fs.mkdir(def.logDir, { recursive: true });
-    await fs.copyFile(winswBin, exePath);
-    await fs.writeFile(xmlPath, xml, 'utf8');
-  }
-
-  async function install(opts: ServiceInstallOptions = {}): Promise<void> {
-    await writeFiles(opts.program ?? def.program);
-    await runOrThrow(run, exePath, ['install'], 'winsw install');
-    await runOrThrow(run, exePath, ['start'], 'winsw start');
-  }
-
-  async function uninstall(): Promise<void> {
-    // Tolerant of "wasn't running/installed" (fine), but a REAL failure
-    // (access denied, the exe locked/busy, a WinSW/SCM fault) at EITHER
-    // step must NOT be masked: only delete the exe+xml once we know the
-    // service is actually stopped and unregistered (or was never there),
-    // so a still-running service never loses its control files and
-    // becomes an orphan nobody can stop/uninstall (cross-model-review P1
-    // #7).
-    await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_NOT_INSTALLED);
-    await runIdempotent(run, exePath, ['uninstall'], 'winsw uninstall', WINSW_NOT_INSTALLED);
-    await rmWithImageLockRetry(fs, exePath);
-    await rmWithImageLockRetry(fs, xmlPath);
-  }
-
-  async function start(): Promise<void> {
-    if (!(await fileExists(xmlPath))) {
-      throw new Error(`service "${id}" is not installed (no config at ${xmlPath}) — call install() first`);
+  /** The installed `<id>.exe` against `winswBin`. Only a missing `<id>.exe` is not an error. */
+  async function installedWrapper(): Promise<'exact' | 'missing' | 'differs'> {
+    let installed;
+    try {
+      installed = await fs.readFile(exePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return 'missing';
+      throw error;
     }
-    await runOrThrow(run, exePath, ['start'], 'winsw start');
+    return Buffer.from(await fs.readFile(winswBin)).equals(Buffer.from(installed)) ? 'exact' : 'differs';
   }
 
-  async function stop(): Promise<void> {
-    // Tolerant of "already stopped/not installed" (fine — nothing to
-    // stop), but a REAL failure (access denied, the exe locked/busy, an SCM
-    // fault) must be surfaced rather than silently reported as "stopped"
-    // (cross-model-review P1 #7, round 2, second half).
-    await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_ALREADY_STOPPED);
-  }
-
-  async function status(): Promise<ServiceStatusResult> {
-    const installed = await fileExists(xmlPath);
+  /**
+   * Stops the service before a missing or differing `<id>.exe` is replaced.
+   * WinSW v2 loads only the same-basename `<id>.xml`, so the installed exe is
+   * the only stop path, and it runs only while the SCM reports it RUNNING.
+   * Otherwise the SCM must report the service STOPPED or not installed
+   * (1060); a pending, paused, unparsed or denied query fails closed before
+   * anything is written.
+   */
+  async function stopForWrapperReplacement(wrapper: 'missing' | 'differs'): Promise<void> {
     const result = await run('sc.exe', ['query', id]);
-    const detail = (result.stdout || result.stderr).trim();
-    const running = result.code === 0 && /\bSTATE\b.*\bRUNNING\b/i.test(detail);
-    // Finding P1 #2 (residual, round 3): see `systemd.ts`'s `status()` for
-    // the full rationale — reuses this file's own
-    // `WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE` so callers can tell a
-    // confirmed result (including a clean "does not exist", code 1060 —
-    // unaffected, since that text never matches this pattern list) apart
-    // from a query the SCM/WinSW could not even answer — see
-    // `service-types.ts`'s `ServiceStatusResult.determinate`.
-    const determinate = running || !WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
-    return { installed, running, determinate, detail };
+    const detail = [result.stdout, result.stderr].map((stream) => stream.trim()).filter(Boolean).join('\n');
+    const denied = WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
+    const match = result.code === 0 ? /\bSTATE\s*:\s*(\d+)\s+(\w+)/i.exec(detail) : null;
+    const state = match ? `${match[1]} ${match[2]!.toUpperCase()}` : undefined;
+    if (!denied && wrapper === 'differs' && state === '4 RUNNING') {
+      await runIdempotent(run, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
+      return;
+    }
+    if (!denied && (state === '1 STOPPED' || result.code === 1060)) return;
+    const problem = wrapper === 'missing' ? 'is missing' : 'differs from winswBin';
+    throw new Error(
+      `winsw wrapper ${exePath} ${problem}; service "${id}" must be stopped in the Service Control Manager before repair (sc.exe query exit ${result.code}): ${detail}`,
+    );
   }
 
-  return { install, uninstall, start, stop, status };
+  return createManagedLifecycle(def, {
+    serviceName: id,
+    unitPath: xmlPath,
+    launcherPath: exePath,
+    files: () => [{ path: xmlPath, content: generateWinswXml({ id, displayName: def.displayName ?? def.name, program: def.program, logDir: def.logDir }) }],
+    async prepare() {
+      // `<id>.exe` is the running service's own image. `stopwait`, unlike
+      // `stop`, returns only once the SCM reports the service stopped, and
+      // the image is rewritten only when its bytes differ, so a descriptor
+      // repair never writes over the wrapper. A missing or differing wrapper
+      // is never run unless the SCM reports it running.
+      const wrapper = await installedWrapper();
+      if (await fileExists(xmlPath)) {
+        if (wrapper === 'exact') await runIdempotent(run, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
+        else await stopForWrapperReplacement(wrapper);
+      }
+      await fs.mkdir(installDir, { recursive: true });
+      if (wrapper !== 'exact') await fs.copyFile(winswBin, exePath);
+    },
+    async preparedArtifactsExact() {
+      return (await installedWrapper()) === 'exact';
+    },
+    async activate() {
+      await runIdempotent(run, exePath, ['install'], 'winsw install', WINSW_ALREADY_INSTALLED);
+      await runOrThrow(run, exePath, ['start'], 'winsw start');
+    },
+    async deactivate() {
+      // Tolerant of "wasn't running/installed", but a REAL failure (access
+      // denied, the exe locked/busy, a WinSW/SCM fault) at EITHER step must
+      // NOT be masked: the exe+xml are only deleted once the service is
+      // stopped and unregistered (cross-model-review P1 #7).
+      await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_NOT_INSTALLED);
+      await runIdempotent(run, exePath, ['uninstall'], 'winsw uninstall', WINSW_NOT_INSTALLED);
+    },
+    async removeFiles() {
+      await rmWithImageLockRetry(fs, exePath);
+      await rmWithImageLockRetry(fs, xmlPath);
+    },
+    async start() {
+      await runOrThrow(run, exePath, ['start'], 'winsw start');
+    },
+    async stop() {
+      // Tolerant of "already stopped/not installed", but a REAL failure
+      // must be surfaced rather than reported as "stopped" (P1 #7, round 2).
+      await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_ALREADY_STOPPED);
+    },
+    async query() {
+      const result = await run('sc.exe', ['query', id]);
+      const detail = (result.stdout || result.stderr).trim();
+      const running = result.code === 0 && /\bSTATE\b.*\bRUNNING\b/i.test(detail);
+      // Finding P1 #2 (residual, round 3): a clean "does not exist" (1060)
+      // is determinate; a query the SCM could not answer is not — see
+      // `service-types.ts`'s `ServiceStatusResult.determinate`.
+      const determinate = running || !WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
+      return { running, determinate, detail };
+    },
+  }, fs);
 }

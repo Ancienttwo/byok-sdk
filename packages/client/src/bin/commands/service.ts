@@ -1,8 +1,7 @@
-import path from 'node:path';
-import { createServiceLifecycle, nodeAgentProgram, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index';
+import { createServiceLifecycle, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index';
+import { agentServiceDefinition } from '../../lifecycle/agent-service';
 import { readLastLifecycleRecord } from '../audit-log';
-import { serviceLogDir } from '../../daemon/host-layout';
-import { argValue, resolveStoreDir } from '../config';
+import { argValue, hasFlag, resolveStoreDir } from '../config';
 import { formatLifecycle, formatLifecycleRemedy } from '../format';
 
 export interface ServiceCommandDeps {
@@ -11,72 +10,36 @@ export interface ServiceCommandDeps {
   lifecycle?: ServiceLifecycle;
 }
 
+/** The lifecycle owner `byok-agent install` records (#1097). An App of the same product records its own. */
+export const CLI_SERVICE_OWNER = 'cli';
+
+/** `install --replace-unmarked`: replace a unit this SDK did not generate (a 0.31 unit, or a hand-written one). */
+export const REPLACE_UNMARKED_FLAG = '--replace-unmarked';
+
 /**
- * Builds the SAME `ServiceDefinition` every one of `install`/`uninstall`/
- * `service-start`/`service-stop`/`service-status` derives — critical so
- * `uninstall`/`service-stop`/`service-status` compute the exact same
- * service name (and, on Windows, install directory) `install` used,
- * without requiring the operator to re-supply identical ad hoc flags to
- * five separate invocations. `--name`/`--agent-bin`/`--node-bin`/
- * `--winsw-bin`/`--winsw-install-dir` are override escape hatches; every
- * default is derived deterministically from `config` alone (mirrors
- * `bin/config.ts`'s own doc comment: every subcommand loads config the same
- * way).
- *
- * `agentBin` defaults to `process.argv[1]` — the actual script path Node is
- * currently running, always correct regardless of how this CLI was
- * invoked (global install, `npx`, a product's own `node_modules/.bin`
- * symlink) — NOT an `import.meta`-based guess; see
- * `lifecycle/create-service-lifecycle.ts`'s doc comment for why this
- * module family never tries to resolve that path itself. A product
- * shipping a single compiled binary (`templates/packaging/`) instead of
- * `node + byok-agent.js` should pass `--agent-bin`/`--node-bin` explicitly,
- * or construct a `ServiceDefinition` directly via `createServiceLifecycle`
- * rather than this convenience CLI subcommand.
- *
- * `configPath` is resolved to an ABSOLUTE path before being baked into the
- * generated service's `--config <path>` argument: a service launched by
- * launchd/systemd/WinSW starts with the OS service manager's OWN minimal
- * environment and working directory, not the operator's interactive shell
- * — a relative path here would resolve against whatever cwd the service
- * manager happens to choose, not where the operator ran `install` from.
- *
- * Every platform's program carries `--service`: issue #392 (login-shell
- * environment on macOS and Linux; win32 has none) and issue #394 (a halt
- * exits 0, the one exit status every supervisor treats as "do not restart").
+ * The CLI's arguments for {@link agentServiceDefinition}, the library
+ * implementation an embedded Host calls too. `--name`/`--agent-bin`/
+ * `--node-bin`/`--winsw-bin`/`--winsw-install-dir` override its defaults.
+ * `agentBin` defaults to `process.argv[1]`, the script Node is running —
+ * see `lifecycle/create-service-lifecycle.ts`'s doc comment for why this
+ * module family never resolves it itself.
  */
-export function buildServiceDefinition(
-  config: DaemonConfig,
-  configPath: string,
-  rest: string[],
-): ServiceDefinition {
-  const name = argValue(rest, '--name') ?? config.productId;
-  const agentBin = argValue(rest, '--agent-bin') ?? process.argv[1] ?? 'byok-agent';
-  const nodeBin = argValue(rest, '--node-bin') ?? process.execPath;
-  const absoluteConfigPath = path.resolve(configPath);
-  const logDir = serviceLogDir(resolveStoreDir(config));
-
-  const definition: ServiceDefinition = {
-    name,
-    displayName: config.branding?.displayName ?? config.productName,
-    // Issue #392: launchd and systemd start the daemon with their own
-    // minimal environment; `--service` makes `start` adopt the user's
-    // login-shell environment. Issue #394: under `--service` a halt exits 0,
-    // so no supervisor restarts a daemon a restart cannot fix.
-    program: nodeAgentProgram({ agentBin, configPath: absoluteConfigPath, nodeBin, service: true }),
-    logDir,
-  };
-
+export function cliServiceDefinition(config: DaemonConfig, configPath: string, rest: string[]): ServiceDefinition {
   const winswBin = argValue(rest, '--winsw-bin');
-  if (winswBin) {
-    const installDir = argValue(rest, '--winsw-install-dir');
-    definition.windows = installDir ? { winswBin, installDir } : { winswBin };
-  }
-  return definition;
+  const installDir = argValue(rest, '--winsw-install-dir');
+  return agentServiceDefinition({
+    config,
+    configPath,
+    agentBin: argValue(rest, '--agent-bin') ?? process.argv[1] ?? 'byok-agent',
+    nodeBin: argValue(rest, '--node-bin') ?? process.execPath,
+    owner: CLI_SERVICE_OWNER,
+    ...(argValue(rest, '--name') === undefined ? {} : { name: argValue(rest, '--name') }),
+    ...(winswBin ? { windows: installDir ? { winswBin, installDir } : { winswBin } } : {}),
+  });
 }
 
 function buildLifecycle(config: DaemonConfig, configPath: string, rest: string[], deps: ServiceCommandDeps): ServiceLifecycle {
-  return deps.lifecycle ?? createServiceLifecycle(buildServiceDefinition(config, configPath, rest));
+  return deps.lifecycle ?? createServiceLifecycle(cliServiceDefinition(config, configPath, rest));
 }
 
 function serviceNameFor(config: DaemonConfig, rest: string[]): string {
@@ -84,9 +47,10 @@ function serviceNameFor(config: DaemonConfig, rest: string[]): string {
 }
 
 /**
- * Generates the platform service definition (plist/unit/WinSW xml),
- * registers it with the OS service manager, and starts it — see
+ * Writes the unit and its stable launcher, registers them with the OS
+ * service manager, and starts the service — see
  * `lifecycle/create-service-lifecycle.ts` for the per-platform mechanics.
+ * Refuses a unit this SDK did not generate unless `--replace-unmarked`.
  * On Windows, `--winsw-bin <path>` is required (the product-bundled WinSW
  * executable — Decision-6: this SDK never bundles/downloads it itself; see
  * `templates/service/winsw/README.md`).
@@ -94,7 +58,7 @@ function serviceNameFor(config: DaemonConfig, rest: string[]): string {
 export async function runInstallCommand(config: DaemonConfig, configPath: string, rest: string[], deps: ServiceCommandDeps = {}): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const lifecycle = buildLifecycle(config, configPath, rest, deps);
-  await lifecycle.install();
+  await lifecycle.install(hasFlag(rest, REPLACE_UNMARKED_FLAG) ? { replaceUnmarked: true } : {});
   log(`service installed and started: ${serviceNameFor(config, rest)}`);
 }
 
@@ -136,6 +100,11 @@ export async function runServiceStatusCommand(config: DaemonConfig, configPath: 
   const runningLabel = status.running ? 'yes' : status.determinate ? 'no' : 'unknown (could not query the service manager)';
   log(`running: ${runningLabel}`);
   log(`detail: ${status.detail.trim() || '(none)'}`);
+  // #1097: how the installed unit compares with the one install writes.
+  log(`unit: ${status.unit.state} path=${status.unit.unitPath}${status.unit.owner === undefined ? '' : ` owner=${status.unit.owner}`}`);
+  log(`launcher: ${status.unit.launcherPath}`);
+  log(`logs: ${status.logs.dir} ${status.logs.status} totalBytes=${status.logs.totalBytes}`);
+  for (const file of status.logs.files) log(`log-file: ${file.name} kind=${file.kind} bytes=${file.sizeBytes}`);
   // Issue #394: a halted service exits 0 and stays stopped; its last
   // lifecycle event says why and what to do.
   const last = await readLastLifecycleRecord(resolveStoreDir(config));

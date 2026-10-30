@@ -897,9 +897,7 @@ or `device_superseded`), so the journaled fail of such a task is refused there.
 `byok-agent start` maps the run's end to its exit code: 0 for a normal stop,
 78 for a halt, 1 for a crash (a `crashed` lifecycle included). Under `--service` a halt exits 0, the one status
 launchd, systemd and WinSW all leave stopped; a crash still exits 1 and is
-restarted by the OS supervisor, which is the only crash retry. `byok-agent
-install` writes `--service` into the launchd plist, systemd unit and WinSW
-XML. The last `lifecycle` event is kept in `audit.jsonl` (also across
+restarted by the OS supervisor, which is the only crash retry. The last `lifecycle` event is kept in `audit.jsonl` (also across
 rotation); offline `status`, `service-status` and the `doctor` `lifecycle`
 check read it, and a halted or crashed daemon fails that check with its
 remedy.
@@ -915,6 +913,61 @@ within 60 seconds (the default device-proof window; a Host may widen it up to
 5 minutes) and warns beyond that. An offline `doctor` reports it as unknown:
 it keeps no state file and sends no request. The reading never sets a token
 lifetime.
+
+### Service units (#1097)
+
+`EXIT_CODE_CONTRACT` (`lifecycle/exit-codes.ts`) lists every exit status the
+client executables use and what a service manager does with it: only 0 stops a
+service; any other status, a signal included, restarts it. Every generated unit
+encodes that one rule: launchd `KeepAlive.SuccessfulExit = false`, systemd
+`Restart=always` with `RestartPreventExitStatus=0`, and WinSW
+`<onfailure action="restart">`, which fires on a non-zero exit only. A test
+scans `src/bin` and fails on an exit status the contract does not list.
+
+`createServiceLifecycle` is the one service implementation; `byok-agent
+install` builds its definition with the same `agentServiceDefinition` an
+embedded Host calls. A unit names only a stable launcher: on macOS and Linux
+`<storeDir>/service/<name>.launcher.sh`, which execs the program; on Windows the
+SCM registration names the installed `<name>.exe`, and the WinSW descriptor it
+reads at each start names the program. No unit holds a versioned path or an
+environment variable; `start --service` captures the login-shell environment
+(#392). Every generated unit carries the SDK marker comment. `inspect()`
+classifies the installed unit as `absent`, `exact`, `repairable` (marked, but
+it or its launcher differs) or `foreign` (no marker). On Windows the installed
+`<name>.exe` is part of the unit: missing, or not the `winswBin` bytes, it is
+repairable. Repair runs that exe only while the SCM reports the service
+RUNNING; otherwise the SCM must report it STOPPED or not installed, and a
+pending, paused or unreadable state fails before anything is written.
+`install()` and `repair()` rewrite a repairable unit whole. Nothing changes a foreign unit:
+`install`, `repair`, `uninstall`, `start` and `stop` throw `ServiceUnitError`
+`service_unit_unmarked`, and only `install({ replaceUnmarked: true })` (CLI
+`--replace-unmarked`) replaces it. No marker-less unit is adopted by content.
+
+One lifecycle owner per store sets autostart: `<storeDir>/service/lifecycle-owner.json`
+names it (`cli`, `app`, ...). `install` claims it, `uninstall` releases it, and
+another owner's `install`, `repair` or `uninstall` throws
+`lifecycle_owner_conflict`. A Host that sets autostart with its own mechanism
+claims it with `claimServiceLifecycleOwner`. Every change of the record — a
+claim, a same-owner service rename, a release, and `install`, `repair` and
+`uninstall` for their whole run — holds the cross-process `service-lifecycle`
+mutation gate, so it acts on the record it read and never on a successor's.
+The gate has no target path: one per user on macOS and Linux, like the service
+manager's own per-user namespace, and one per machine on Windows, where the
+named pipe has no user. It is never the `store` gate, because a managed install
+holds it while the daemon it starts takes `store`. Local-state relocation takes
+it once, before its `store` gates, so the order is always `service-lifecycle`
+then `store`. A held gate fails at once with `lifecycle_owner_busy`, without
+retry; the gate frees itself when its holder process exits.
+
+Under `--service` everything the daemon writes to stdout and stderr goes to its
+own log, `<logDir>/daemon.log`, rotated by size while it runs at
+`DAEMON_LOG_LIMITS` (10 MiB, 5 files). The service manager's
+`service-stdout.log`/`service-stderr.log` receive only output from before that
+log opens and a fatal error Node prints itself; each service start rotates one over 1 MiB to a single `.1` copy, and
+WinSW rolls its redirect by the same limit (`SERVICE_REDIRECT_LIMITS`).
+`ServiceLifecycle.status()` and `inspectServiceLogs` report the log directory
+and every log file's size; the diagnostics snapshot and support bundle carry
+the sizes only.
 
 ## Runtime operation authority
 
@@ -1036,8 +1089,8 @@ counts, never raw adapter/library errors or stacks. SDK-authored actionable
 configuration templates retain their configured path and repair guidance;
 parser errors cannot inject config excerpts into those templates. The library
 still rejects with the original error object, and the CLI retains crash exit 1,
-halt exit 78 (0 under `--service`) and the halt remedy. Existing service log
-files are not rewritten or removed by this change.
+halt exit 78 (0 under `--service`) and the halt remedy. Under `--service` these
+diagnostics go to the daemon log (#1097).
 
 ### Explicit local device diagnostics and metadata repair
 
@@ -3943,7 +3996,7 @@ file is read or created), so an installer can call it for any of `darwin`,
 | `storeDir` (`DaemonConfig.storeDir`; unset means this path) | SDK | `~/.byok/<productId>` | `~/.byok/<productId>` | `%USERPROFILE%\.byok\<productId>` |
 | `hostStorageRoot` (`agentHome.hostStorageRoot`) | Host | `~/Library/Application Support/<productName>` | `$XDG_DATA_HOME/<productId>` (default `~/.local/share/<productId>`) | `%LOCALAPPDATA%\<productName>` (default `~\AppData\Local\<productName>`) |
 | `agentHomes` = `<hostStorageRoot>/agents` | SDK | | | |
-| `logDir` = `<storeDir>/service-logs` | SDK (service manager output) | | | |
+| `logDir` = `<storeDir>/service-logs` | SDK (daemon log, service manager redirect) | | | |
 
 The Host keeps its config file and its own state outside `storeDir`. The
 store stays short on purpose: an application-data path is often too long for

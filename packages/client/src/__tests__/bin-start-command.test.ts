@@ -9,7 +9,8 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { DaemonEventListener } from '../daemon/observer';
 import type { DaemonRecord } from '../daemon/daemon-record';
 import { auditLogPath, readAuditRecords } from '../bin/audit-log';
-import { DaemonCrashedError, formatStartErrorReason, runStartCommand, startExitCode } from '../bin/commands/start';
+import { DaemonCrashedError, formatStartErrorReason, runStartCommand } from '../bin/commands/start';
+import { daemonExitCode } from '../lifecycle/exit-codes';
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { createSupportBundle } from '../diagnostics/support-bundle';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
@@ -34,6 +35,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * hand-built stub, the way daemon-observer.test.ts already does for the
  * underlying `DaemonObserver` itself.
  */
+
 describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
@@ -330,8 +332,8 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     );
 
     expect(outcome).toEqual({ kind: 'halted', reason: 'device_revoked' });
-    expect(startExitCode(outcome, false)).toBe(78);
-    expect(startExitCode(outcome, true)).toBe(0);
+    expect(daemonExitCode(outcome, false)).toBe(78);
+    expect(daemonExitCode(outcome, true)).toBe(0);
     expect(server.httpRequests.filter((request) => request.pathname === '/byok/challenge').length - challengesBefore).toBe(1);
     expect(errors.some((line) => line.startsWith('daemon halted: reason=device_revoked'))).toBe(true);
     const audit = await readAuditRecords(storeDir);
@@ -408,16 +410,5 @@ describe('bin/commands/start: a crash after start (#394)', () => {
     expect(listeners.size).toBe(0);
     const audit = await readAuditRecords(storeDir);
     expect(audit.filter((record) => record.kind === 'lifecycle').at(-1)).toMatchObject({ lifecycle: { phase: 'crashed' } });
-  });
-});
-
-describe('bin/commands/start: startExitCode (#394)', () => {
-  it('maps stopped to 0 and a halt to 78 in the foreground, and both to 0 under --service', () => {
-    expect(startExitCode({ kind: 'stopped' }, false)).toBe(0);
-    expect(startExitCode({ kind: 'stopped' }, true)).toBe(0);
-    for (const reason of ['unpaired', 're_pair_required', 'store_owned', 'device_revoked', 'handshake_rejected', 'replay_cursor_too_old', 'config_invalid'] as const) {
-      expect(startExitCode({ kind: 'halted', reason }, false)).toBe(78);
-      expect(startExitCode({ kind: 'halted', reason }, true)).toBe(0);
-    }
   });
 });

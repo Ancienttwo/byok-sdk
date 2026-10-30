@@ -4,16 +4,29 @@ import { createServer, type Server } from 'node:net';
 import path from 'node:path';
 import { ensureSecureDir } from './secure-dir';
 
-export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'pi-session-discovery' | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
+export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store' | 'pi-session-rebinding' | 'service-lifecycle' | 'pi-session-discovery' | `pi-session-admission:${string}` | `pi-session-writer:${string}`;
+
+/**
+ * Scopes with one fixed identity and no target path.
+ * - `pi-session-rebinding`: mutable Pi setup callbacks need a barrier before
+ *   their target path is known.
+ * - `service-lifecycle`: the OS service manager's per-user namespace (#1097).
+ *   An owner-record change or a managed install/repair/uninstall holds it,
+ *   and local-state relocation takes it before any store gate.
+ */
+type PathlessScope = 'pi-session-rebinding' | 'service-lifecycle';
 
 export type PathMutationGateInput = {
-  readonly scope: Exclude<PathMutationGateScope, 'pi-session-rebinding'>;
+  readonly scope: Exclude<PathMutationGateScope, PathlessScope>;
   readonly targetPath: string;
 } | {
-  /** Only mutable Pi setup callbacks need a barrier before their target path is known. */
-  readonly scope: 'pi-session-rebinding';
+  readonly scope: PathlessScope;
   readonly targetPath?: never;
 };
+
+function isPathless(input: PathMutationGateInput): input is Extract<PathMutationGateInput, { readonly scope: PathlessScope }> {
+  return input.scope === 'pi-session-rebinding' || input.scope === 'service-lifecycle';
+}
 
 export interface PathMutationGateAcquireOptions {
   /** Bounded wait for another conforming short-lived writer; relocation uses zero. */
@@ -104,7 +117,7 @@ async function assertPrivateGateRoot(): Promise<void> {
 
 function resolveGateTarget(input: PathMutationGateInput): Promise<string> {
   // One fixed cross-process identity, including on Windows with multiple drives.
-  return input.scope === 'pi-session-rebinding' ? Promise.resolve('*') : resolvePathWithoutCreate(input.targetPath);
+  return isPathless(input) ? Promise.resolve('*') : resolvePathWithoutCreate(input.targetPath);
 }
 
 /** Takes the OS lock for `identity`; resolves to the function that drops it, or `undefined` when another handle holds it. */
@@ -186,7 +199,7 @@ async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGat
 export async function acquirePathMutationGates(inputs: readonly PathMutationGateInput[]): Promise<readonly PathMutationGate[]> {
   const resolved = await Promise.all(inputs.map(async (input) => {
     const targetPath = await resolveGateTarget(input);
-    const canonicalInput: PathMutationGateInput = input.scope === 'pi-session-rebinding' ? input : { ...input, targetPath };
+    const canonicalInput: PathMutationGateInput = isPathless(input) ? input : { ...input, targetPath };
     return { input: canonicalInput, targetPath, identity: gateIdentity(input.scope, targetPath) };
   }));
   const unique = [...new Map(resolved.map((item) => [`${item.input.scope}\0${item.targetPath}`, item])).values()]

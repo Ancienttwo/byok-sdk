@@ -2,7 +2,10 @@ import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
+import { createManagedLifecycle, type ManagedLifecycleFs } from './managed-lifecycle';
+import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceLifecycle } from './service-types';
+import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit';
 
 /**
  * Genuine-failure text that must NEVER be reclassified as "job already
@@ -48,7 +51,7 @@ const LAUNCHD_NOT_LOADED: IdempotentAbsence = {
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment for why a mocked `run` is enough to unit-test all of this file's install/uninstall/start/stop/status logic on any host OS. */
 export interface LaunchdDeps {
   run?: Runner;
-  fs?: Pick<typeof fsp, 'mkdir' | 'writeFile' | 'rm' | 'stat'>;
+  fs?: ManagedLifecycleFs;
   homedir?: () => string;
   /** Defaults to `process.getuid` — macOS/Linux only; this module is never constructed on `win32` (see `create-service-lifecycle.ts`). */
   getuid?: () => number;
@@ -63,34 +66,25 @@ function plistString(value: string): string {
 }
 
 /**
- * Generates a launchd LaunchAgent plist for `label` running `program`,
- * logging to `logDir`. Pure/no I/O — unit-tested directly for exact content
- * shape.
+ * Generates a launchd LaunchAgent plist for `label` that runs only the
+ * stable `launcherPath` (#1097), logging to `logDir`. Pure/no I/O.
  *
+ * - The {@link SERVICE_UNIT_MARKER} comment marks the plist as ours; see `service-unit.ts`.
  * - `RunAtLoad`: true — starts immediately on `launchctl bootstrap`.
- * - `KeepAlive.SuccessfulExit: false` — the standard, widely-documented
- *   launchd idiom for "restart only on crash/non-zero-or-signaled exit, do
- *   NOT restart after a clean `exit(0)`". This is the crash-restart M3-4
- *   asks for, delegated entirely to launchd — nothing in this SDK
- *   supervises the process itself.
- * - `ThrottleInterval: 10` — matches the WinSW recipe's `onfailure delay="10
- *   sec"` (see `winsw.ts`) so a crash-looping process backs off at a
- *   comparable rate on every platform, rather than launchd's own default
- *   (which is already 10s, but left implicit is easy to mistake for
- *   "unthrottled").
- * - `StandardOutPath`/`StandardErrorPath` under `logDir` — this is what M3-4
- *   asks for explicitly ("StandardOut/Error paths under storeDir"), unlike
- *   `systemd.ts`'s unit (which ALSO writes append-mode log files under
- *   `logDir` for cross-platform parity, even though systemd's own native
- *   idiom is the journal).
+ * - `KeepAlive.SuccessfulExit: false` — restart after any exit but 0, the
+ *   exit-code contract in `exit-codes.ts`. Nothing in this SDK supervises
+ *   the process itself.
+ * - `ThrottleInterval: 10` — matches systemd `RestartSec=10` and WinSW's
+ *   first `onfailure` delay.
+ * - `StandardOutPath`/`StandardErrorPath` receive only early-boot crash
+ *   output; the daemon writes its own rotated log (`service-log.ts`).
  */
-export function generateLaunchdPlist(def: { label: string; program: ServiceProgram; logDir: string }): string {
-  const { label, program, logDir } = def;
-  const args = [program.command, ...program.args];
-  const cwd = program.cwd ?? os.homedir();
-  const outLog = path.join(logDir, `${label}.out.log`);
-  const errLog = path.join(logDir, `${label}.err.log`);
+export function generateLaunchdPlist(def: { label: string; launcherPath: string; workingDirectory: string; logDir: string }): string {
+  const { label, launcherPath, workingDirectory, logDir } = def;
+  const outLog = path.join(logDir, SERVICE_REDIRECT_STDOUT_FILENAME);
+  const errLog = path.join(logDir, SERVICE_REDIRECT_STDERR_FILENAME);
   return `<?xml version="1.0" encoding="UTF-8"?>
+<!-- ${SERVICE_UNIT_MARKER} -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -98,10 +92,10 @@ export function generateLaunchdPlist(def: { label: string; program: ServiceProgr
   ${plistString(label)}
   <key>ProgramArguments</key>
   <array>
-${args.map((a) => `    ${plistString(a)}`).join('\n')}
+    ${plistString(launcherPath)}
   </array>
   <key>WorkingDirectory</key>
-  ${plistString(cwd)}
+  ${plistString(workingDirectory)}
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -150,82 +144,61 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
     });
 
   const label = sanitizeServiceName(def.name);
-  const plistPath = () => path.join(homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+  const plistPath = path.join(homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+  const launcherPath = serviceLauncherPath(def.storeDir, label, 'darwin');
   const domainTarget = () => `gui/${getuid()}`;
   const serviceTarget = () => `${domainTarget()}/${label}`;
 
-  async function fileExists(p: string): Promise<boolean> {
-    try {
-      await fs.stat(p);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async function writePlist(program: ServiceProgram): Promise<void> {
-    const xml = generateLaunchdPlist({ label, program, logDir: def.logDir });
-    await fs.mkdir(path.dirname(plistPath()), { recursive: true });
-    await fs.mkdir(def.logDir, { recursive: true });
-    await fs.writeFile(plistPath(), xml, 'utf8');
-  }
-
-  async function install(opts: ServiceInstallOptions = {}): Promise<void> {
-    await writePlist(opts.program ?? def.program);
-    // Best-effort: clear any stale prior load first (e.g. a re-install)
-    // — "not currently loaded" is an expected, ignorable outcome, not a
-    // real failure (see `exec-runner.ts`'s `RunResult` doc comment).
-    await run('launchctl', ['bootout', serviceTarget()]);
-    await runOrThrow(run, 'launchctl', ['bootstrap', domainTarget(), plistPath()], 'launchctl bootstrap');
-    await runOrThrow(run, 'launchctl', ['enable', serviceTarget()], 'launchctl enable');
-    // RunAtLoad already starts it on bootstrap; kickstart -k guarantees a
-    // fresh start even if bootstrap raced with a leftover instance.
-    // Best-effort: RunAtLoad is the load-bearing guarantee here.
-    await run('launchctl', ['kickstart', '-k', serviceTarget()]);
-  }
-
-  async function uninstall(): Promise<void> {
-    // Tolerant of "wasn't loaded" (fine — nothing to stop/unregister), but a
-    // REAL failure (permission denied, launchd itself misbehaving) must NOT
-    // be masked: only delete the plist once we know the job is actually
-    // gone from the domain, so a still-running job never loses its control
-    // file and becomes an orphan nobody can stop/uninstall
-    // (cross-model-review P1 #7).
-    await runIdempotent(run, 'launchctl', ['bootout', serviceTarget()], 'launchctl bootout', LAUNCHD_NOT_LOADED);
-    await fs.rm(plistPath(), { force: true });
-  }
-
-  async function start(): Promise<void> {
-    if (!(await fileExists(plistPath()))) {
-      throw new Error(`service "${label}" is not installed (no plist at ${plistPath()}) — call install() first`);
-    }
-    await run('launchctl', ['bootstrap', domainTarget(), plistPath()]); // best-effort — "already bootstrapped" is fine
-    await runOrThrow(run, 'launchctl', ['kickstart', '-k', serviceTarget()], 'launchctl kickstart');
-  }
-
-  async function stop(): Promise<void> {
-    // Tolerant of "already stopped/not loaded" (fine — nothing to stop),
-    // but a REAL failure (permission denied, an unreachable GUI domain)
-    // must be surfaced rather than silently reported as "stopped"
-    // (cross-model-review P1 #7, round 2, second half).
-    await runIdempotent(run, 'launchctl', ['bootout', serviceTarget()], 'launchctl bootout', LAUNCHD_NOT_LOADED);
-  }
-
-  async function status(): Promise<ServiceStatusResult> {
-    const installed = await fileExists(plistPath());
-    const result = await run('launchctl', ['print', serviceTarget()]);
-    const detail = result.stdout || result.stderr;
-    const running = result.code === 0 && /\bstate\s*=\s*running\b/i.test(detail);
-    // Finding P1 #2 (residual, round 3): see `systemd.ts`'s `status()` for
-    // the full rationale — reuses this file's own
-    // `LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE` (an unreachable GUI
-    // domain or a permission failure on THIS query is not evidence of "not
-    // running") so callers can tell a confirmed result apart from one the
-    // manager could not even answer — see `service-types.ts`'s
-    // `ServiceStatusResult.determinate`.
-    const determinate = running || !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
-    return { installed, running, determinate, detail };
-  }
-
-  return { install, uninstall, start, stop, status };
+  return createManagedLifecycle(def, {
+    serviceName: label,
+    unitPath: plistPath,
+    launcherPath,
+    files: () => [
+      { path: plistPath, content: generateLaunchdPlist({ label, launcherPath, workingDirectory: homedir(), logDir: def.logDir }) },
+      { path: launcherPath, content: generateServiceLauncher(def.program), mode: 0o755 },
+    ],
+    async activate() {
+      // Best-effort: clear any stale prior load first (e.g. a re-install)
+      // — "not currently loaded" is an expected, ignorable outcome, not a
+      // real failure (see `exec-runner.ts`'s `RunResult` doc comment).
+      await run('launchctl', ['bootout', serviceTarget()]);
+      await runOrThrow(run, 'launchctl', ['bootstrap', domainTarget(), plistPath], 'launchctl bootstrap');
+      await runOrThrow(run, 'launchctl', ['enable', serviceTarget()], 'launchctl enable');
+      // RunAtLoad already starts it on bootstrap; kickstart -k guarantees a
+      // fresh start even if bootstrap raced with a leftover instance.
+      // Best-effort: RunAtLoad is the load-bearing guarantee here.
+      await run('launchctl', ['kickstart', '-k', serviceTarget()]);
+    },
+    async deactivate() {
+      // Tolerant of "wasn't loaded", but a REAL failure (permission denied,
+      // launchd itself misbehaving) must NOT be masked: the plist is only
+      // deleted once the job is gone from the domain, so a still-running
+      // job never loses its control file (cross-model-review P1 #7).
+      await runIdempotent(run, 'launchctl', ['bootout', serviceTarget()], 'launchctl bootout', LAUNCHD_NOT_LOADED);
+    },
+    async removeFiles() {
+      await fs.rm(plistPath, { force: true });
+      await fs.rm(launcherPath, { force: true });
+    },
+    async start() {
+      await run('launchctl', ['bootstrap', domainTarget(), plistPath]); // best-effort — "already bootstrapped" is fine
+      await runOrThrow(run, 'launchctl', ['kickstart', '-k', serviceTarget()], 'launchctl kickstart');
+    },
+    async stop() {
+      // Tolerant of "already stopped/not loaded", but a REAL failure
+      // (permission denied, an unreachable GUI domain) must be surfaced
+      // rather than silently reported as "stopped" (P1 #7, round 2).
+      await runIdempotent(run, 'launchctl', ['bootout', serviceTarget()], 'launchctl bootout', LAUNCHD_NOT_LOADED);
+    },
+    async query() {
+      const result = await run('launchctl', ['print', serviceTarget()]);
+      const detail = result.stdout || result.stderr;
+      const running = result.code === 0 && /\bstate\s*=\s*running\b/i.test(detail);
+      // Finding P1 #2 (residual, round 3): an unreachable GUI domain or a
+      // permission failure on THIS query is not evidence of "not running";
+      // see `service-types.ts`'s `ServiceStatusResult.determinate`.
+      const determinate = running || !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
+      return { running, determinate, detail };
+    },
+  }, fs);
 }

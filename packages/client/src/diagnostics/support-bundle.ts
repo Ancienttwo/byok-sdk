@@ -69,6 +69,8 @@ export interface SupportBundle {
     truncated: boolean;
     entries: DiagnosticsSnapshot['quarantine']['entries'];
   };
+  /** #1097: log sizes only — never a path, a file name or log content. */
+  logs: DiagnosticsSnapshot['logs'];
   checks: Array<Pick<DiagnosticsSnapshot['checks'][number], 'id' | 'status'>>;
   recentEvents: {
     status: 'available' | 'missing' | 'unavailable';
@@ -246,6 +248,7 @@ export async function createSupportBundle(
       truncated: snapshot.quarantine.truncated,
       entries: snapshot.quarantine.entries,
     },
+    logs: snapshot.logs,
     checks: snapshot.checks.map(({ id, status }) => ({ id, status })),
     recentEvents,
     redaction: {
@@ -256,6 +259,7 @@ export async function createSupportBundle(
         'control token and provider credentials',
         'task, prompt, tool input/output and approval text',
         'raw audit and quarantine contents',
+        'service log paths, file names and contents',
       ],
       transformed: ['productName/productId/deviceId/runtimeId/quarantine filenames -> SHA-256', 'audit events -> closed kind/timestamp only'],
     },
@@ -267,6 +271,32 @@ export async function createSupportBundle(
  * hard-link makes publication atomic and `EEXIST`-safe: no reader can see a
  * partial JSON file and an existing operator artifact is never overwritten.
  */
+/**
+ * #1097: a bundle written into the store would be swept, archived or shipped
+ * with the store itself. The CLI and `exportDeviceSupportBundle` both refuse it.
+ */
+export async function isSupportBundleOutputInStore(storeDir: string, outputPath: string): Promise<boolean> {
+  const [store, output] = await Promise.all([realPathOf(storeDir), realPathOf(outputPath)]);
+  const relative = path.relative(store, output);
+  return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
+}
+
+/** The real path of the deepest existing ancestor (symlinks resolved) joined with the segments that do not exist yet. */
+async function realPathOf(target: string): Promise<string> {
+  const missing: string[] = [];
+  let current = path.resolve(target);
+  for (;;) {
+    try {
+      return path.join(await fs.realpath(current), ...missing.reverse());
+    } catch (error) {
+      const parent = path.dirname(current);
+      if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT' || parent === current) throw error;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 export async function writeSupportBundle(
   outputPath: string,
   bundle: SupportBundle,

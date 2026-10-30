@@ -511,6 +511,21 @@ export type {
 export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
+// #1097: one service implementation for the CLI and embedded Hosts — the stable
+// launcher, unit classification and repair, the lifecycle owner, the exit-code
+// contract and the daemon-owned rotated log.
+export { agentServiceDefinition } from './lifecycle/agent-service';
+export type { AgentServiceDefinitionInput } from './lifecycle/agent-service';
+export {
+  claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError,
+} from './lifecycle/service-unit';
+export type {
+  ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState,
+} from './lifecycle/service-unit';
+export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
+export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes';
+export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log';
+export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log';
 // Issue #392: one-time login-shell environment capture for service-launched (or Dock-launched) hosts.
 export { applyLoginShellEnvironment } from './lifecycle/service-environment';
 export { serviceEnvironmentStatus } from './login-shell-environment';

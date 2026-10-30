@@ -10649,7 +10649,7 @@ export type DeviceHealthQuarantineResult = OperationalHealthFixResult & {
     scope: 'device';
 };
 export interface ExportDeviceSupportBundleInput extends DiagnoseDeviceOptions {
-    /** Absolute, previously unused file in an existing directory. */
+    /** Absolute, previously unused file in an existing directory outside the device store. */
     outputPath: string;
 }
 export interface DeviceSupportBundleExportResult {
@@ -10813,6 +10813,16 @@ export interface DiagnosticsSnapshot {
         }>;
         reason?: string;
     };
+    /** #1097: the daemon log and the service manager's redirect files under `serviceLogDir(storeDir)`. */
+    logs: {
+        status: 'present' | 'missing' | 'unavailable';
+        totalBytes: number;
+        files: Array<{
+            kind: 'daemon' | 'service-manager';
+            sizeBytes: number;
+        }>;
+        truncated: boolean;
+    };
     checks: DiagnosticCheck[];
 }
 export type OperationalHealthFixResult = {
@@ -10960,6 +10970,14 @@ export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions,
 export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
+export { agentServiceDefinition } from './lifecycle/agent-service';
+export type { AgentServiceDefinitionInput } from './lifecycle/agent-service';
+export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit';
+export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit';
+export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
+export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes';
+export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log';
+export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log';
 export { applyLoginShellEnvironment } from './lifecycle/service-environment';
 export { serviceEnvironmentStatus } from './login-shell-environment';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
@@ -11979,6 +11997,34 @@ export interface PreparedToolSurfaceDigestInputV1 {
 }
 /** The whole observed surface: the schemas and the executors. */
 export declare function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string;
+// ==== @byok-sdk/client dist/lifecycle/agent-service.d.ts ====
+import type { DaemonConfig } from '../daemon/create-daemon';
+import { type ServiceDefinition } from './service-types';
+export interface AgentServiceDefinitionInput {
+    config: Pick<DaemonConfig, 'productId' | 'productName' | 'storeDir' | 'branding'>;
+    /** The config file `byok-agent start` loads; resolved to an absolute path, since the service starts in the manager's own working directory. */
+    configPath: string;
+    /** Absolute path of the `byok-agent` entry script. */
+    agentBin: string;
+    /** Node executable that runs `agentBin`. Default: `process.execPath`. */
+    nodeBin?: string;
+    /** See {@link ServiceDefinition.owner}. */
+    owner: string;
+    /** Default: `config.productId`. */
+    name?: string;
+    windows?: ServiceDefinition['windows'];
+}
+/**
+ * The service definition for `node <agentBin> start --config <configPath>
+ * --service` (#1097): the one implementation `byok-agent install` and an
+ * embedded Host share. Every default derives from `config`, so install,
+ * uninstall and status compute the same name, store and log directory.
+ *
+ * `--service` makes `start` capture the login-shell environment (#392) and
+ * exit 0 on a halt (#394, `exit-codes.ts`). The log directory is
+ * `resolveHostLayout`'s `logDir` for this store.
+ */
+export declare function agentServiceDefinition(input: AgentServiceDefinitionInput): ServiceDefinition;
 // ==== @byok-sdk/client dist/lifecycle/create-service-lifecycle.d.ts ====
 import { type LaunchdDeps } from './launchd';
 import { type SystemdDeps } from './systemd';
@@ -12181,43 +12227,84 @@ export declare function isIdempotentAbsence(result: RunResult, absence: Idempote
  * (cross-model-review P1 #7, round 2, second half).
  */
 export declare function runIdempotent(run: Runner, command: string, args: string[], label: string, absence: IdempotentAbsence): Promise<RunResult>;
+// ==== @byok-sdk/client dist/lifecycle/exit-codes.d.ts ====
+/**
+ * The process exit-code contract of `byok-agent` and its helper
+ * executables (#394, #1097). Every exit status the source uses is a key
+ * here; `exit-codes.test.ts` scans `src/bin` and fails on any other.
+ *
+ * `service` is what a service manager does when the process exits with
+ * that status. Only 0 stops a service, and every generated unit says so:
+ * launchd `KeepAlive.SuccessfulExit = false`, systemd `Restart=always` with
+ * `RestartPreventExitStatus=0`, WinSW `<onfailure action="restart">` (which
+ * fires on a non-zero exit only). A service runs `start --service`, which
+ * exits only 0 (stopped or halted) or 1 (crashed).
+ */
+export declare const EXIT_CODE_CONTRACT: Readonly<{
+    readonly 0: {
+        readonly meaning: 'success: a command finished, or the daemon stopped or (under --service) halted';
+        readonly service: 'stop';
+    };
+    readonly 1: {
+        readonly meaning: 'failure: a command failed, or the daemon crashed';
+        readonly service: 'restart';
+    };
+    readonly 2: {
+        readonly meaning: 'upgrade check --store: a store would be refused';
+        readonly service: 'restart';
+    };
+    readonly 78: {
+        readonly meaning: 'EX_CONFIG: the daemon halted outside --service, or a helper refused its configuration';
+        readonly service: 'restart';
+    };
+}>;
+export type ExitCode = keyof typeof EXIT_CODE_CONTRACT;
+export type ServiceExitDisposition = (typeof EXIT_CODE_CONTRACT)[ExitCode]['service'];
+export declare const EXIT_SUCCESS = 0;
+export declare const EXIT_FAILURE = 1;
+export declare const EXIT_CONFIG = 78;
+/** What a service manager does after `code`; a status outside the contract (a signal, an unknown code) restarts. */
+export declare function serviceExitDisposition(code: number): ServiceExitDisposition;
+/** How `start` ended without crashing; a crash is a throw and exits {@link EXIT_FAILURE}. */
+export interface DaemonExitOutcome {
+    readonly kind: 'stopped' | 'halted';
+}
+/**
+ * `start`'s exit status: 0 for a stop, {@link EXIT_CONFIG} for a halt (a
+ * restart cannot fix it). Under `--service` a halt exits 0, the one status
+ * every supported service manager leaves stopped.
+ */
+export declare function daemonExitCode(outcome: DaemonExitOutcome, service: boolean): ExitCode;
 // ==== @byok-sdk/client dist/lifecycle/launchd.d.ts ====
-import { promises as fsp } from 'node:fs';
 import { type Runner } from './exec-runner';
-import { type ServiceDefinition, type ServiceLifecycle, type ServiceProgram } from './service-types';
+import { type ManagedLifecycleFs } from './managed-lifecycle';
+import { type ServiceDefinition, type ServiceLifecycle } from './service-types';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment for why a mocked `run` is enough to unit-test all of this file's install/uninstall/start/stop/status logic on any host OS. */
 export interface LaunchdDeps {
     run?: Runner;
-    fs?: Pick<typeof fsp, 'mkdir' | 'writeFile' | 'rm' | 'stat'>;
+    fs?: ManagedLifecycleFs;
     homedir?: () => string;
     /** Defaults to `process.getuid` — macOS/Linux only; this module is never constructed on `win32` (see `create-service-lifecycle.ts`). */
     getuid?: () => number;
 }
 /**
- * Generates a launchd LaunchAgent plist for `label` running `program`,
- * logging to `logDir`. Pure/no I/O — unit-tested directly for exact content
- * shape.
+ * Generates a launchd LaunchAgent plist for `label` that runs only the
+ * stable `launcherPath` (#1097), logging to `logDir`. Pure/no I/O.
  *
+ * - The {@link SERVICE_UNIT_MARKER} comment marks the plist as ours; see `service-unit.ts`.
  * - `RunAtLoad`: true — starts immediately on `launchctl bootstrap`.
- * - `KeepAlive.SuccessfulExit: false` — the standard, widely-documented
- *   launchd idiom for "restart only on crash/non-zero-or-signaled exit, do
- *   NOT restart after a clean `exit(0)`". This is the crash-restart M3-4
- *   asks for, delegated entirely to launchd — nothing in this SDK
- *   supervises the process itself.
- * - `ThrottleInterval: 10` — matches the WinSW recipe's `onfailure delay="10
- *   sec"` (see `winsw.ts`) so a crash-looping process backs off at a
- *   comparable rate on every platform, rather than launchd's own default
- *   (which is already 10s, but left implicit is easy to mistake for
- *   "unthrottled").
- * - `StandardOutPath`/`StandardErrorPath` under `logDir` — this is what M3-4
- *   asks for explicitly ("StandardOut/Error paths under storeDir"), unlike
- *   `systemd.ts`'s unit (which ALSO writes append-mode log files under
- *   `logDir` for cross-platform parity, even though systemd's own native
- *   idiom is the journal).
+ * - `KeepAlive.SuccessfulExit: false` — restart after any exit but 0, the
+ *   exit-code contract in `exit-codes.ts`. Nothing in this SDK supervises
+ *   the process itself.
+ * - `ThrottleInterval: 10` — matches systemd `RestartSec=10` and WinSW's
+ *   first `onfailure` delay.
+ * - `StandardOutPath`/`StandardErrorPath` receive only early-boot crash
+ *   output; the daemon writes its own rotated log (`service-log.ts`).
  */
 export declare function generateLaunchdPlist(def: {
     label: string;
-    program: ServiceProgram;
+    launcherPath: string;
+    workingDirectory: string;
     logDir: string;
 }): string;
 /**
@@ -12237,6 +12324,41 @@ export declare function generateLaunchdPlist(def: {
  * an ALREADY-loaded job.
  */
 export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: LaunchdDeps): ServiceLifecycle;
+// ==== @byok-sdk/client dist/lifecycle/managed-lifecycle.d.ts ====
+import { promises as fsp } from 'node:fs';
+import { type ServiceUnitFile } from './service-unit';
+import type { ServiceDefinition, ServiceLifecycle, ServiceStatusResult } from './service-types';
+export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
+/** The platform half of a lifecycle: where its files go and how its manager loads them. */
+export interface PlatformUnit {
+    serviceName: string;
+    unitPath: string;
+    launcherPath: string;
+    /** The unit first, then the launcher, with their exact expected content. */
+    files(): ServiceUnitFile[];
+    /** Runs after the files are written: register with the manager and start. Throws if it does not end running. */
+    activate(): Promise<void>;
+    /** Stops and unregisters. Tolerates only a known "not loaded"; a real failure throws and the files stay. */
+    deactivate(): Promise<void>;
+    /** Removes every file `files()` lists, plus platform extras. Runs only after `deactivate()` succeeded. */
+    removeFiles(): Promise<void>;
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    query(): Promise<Pick<ServiceStatusResult, 'running' | 'determinate' | 'detail'>>;
+    /** Extra preparation before the files are written (WinSW copies its executable). */
+    prepare?(): Promise<void>;
+    /** Whether what `prepare()` puts in place is already exact; asked only once `files()` classify exact. */
+    preparedArtifactsExact?(): Promise<boolean>;
+}
+/**
+ * The install, repair, uninstall and status rules all three platforms share
+ * (#1097): a `foreign` unit is never changed (`install` replaces it only
+ * with `replaceUnmarked`), one lifecycle owner per product store, and the
+ * unit and launcher are written whole on every install or repair. install,
+ * repair and uninstall run whole inside the store's owner gate, so the owner
+ * they checked is still the owner when they write, deactivate or release.
+ */
+export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs): ServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/service-environment.d.ts ====
 import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment';
 /**
@@ -12263,17 +12385,95 @@ export declare function applyLoginShellEnvironment(): Promise<ServiceEnvironment
  * @internal
  */
 export declare function captureAndApply(options: ApplyLoginShellEnvironmentOptions): Promise<ServiceEnvironmentStatus>;
-// ==== @byok-sdk/client dist/lifecycle/service-types.d.ts ====
+// ==== @byok-sdk/client dist/lifecycle/service-log.d.ts ====
 /**
- * What the OS service manager should actually execute to run the daemon in
- * the background. Deliberately requires an explicit `command` (an absolute
- * path is strongly recommended, not just a bare command name) rather than
- * ever trying to auto-resolve one internally — see
- * `create-service-lifecycle.ts`'s module doc comment for why. A bare
- * command name relies on the OS service manager's own minimal PATH, which
- * commonly does NOT include nvm/volta/homebrew node install directories —
- * a frequent real-world "service can't find node" bug on every one of the
- * three platforms this module supports.
+ * The daemon log `byok-agent start --service` writes itself (#1097): its
+ * record lines and diagnostics. Rotated by size; `maxFiles` counts the
+ * active file and its rotated copies (`daemon.log.1` is the newest copy).
+ */
+export declare const DAEMON_LOG_FILENAME = "daemon.log";
+export declare const DAEMON_LOG_LIMITS: Readonly<{
+    maxBytes: number;
+    maxFiles: 5;
+}>;
+/**
+ * The service manager's stdout/stderr redirect (launchd `StandardOutPath`,
+ * systemd `append:`). Once {@link routeProcessOutputToDaemonLog} runs only a
+ * fatal error Node writes to fd 2 itself still lands there, and each service
+ * start rotates a file over this size to one `.1` copy. WinSW rolls its own redirect by the same limit
+ * (`roll-by-size`).
+ */
+export declare const SERVICE_REDIRECT_STDOUT_FILENAME = "service-stdout.log";
+export declare const SERVICE_REDIRECT_STDERR_FILENAME = "service-stderr.log";
+export declare const SERVICE_REDIRECT_LIMITS: Readonly<{
+    maxBytes: number;
+    maxFiles: 2;
+}>;
+export interface DaemonLogOptions {
+    /** `resolveHostLayout(...).logDir`; created if missing. */
+    logDir: string;
+    maxBytes?: number;
+    maxFiles?: number;
+}
+export interface DaemonLog {
+    /** The active file. */
+    readonly path: string;
+    /** Appends one line (a trailing newline is added). Rotates first when the line would cross `maxBytes`. */
+    write(line: string): void;
+    close(): void;
+}
+/**
+ * Opens the daemon log in `logDir`. Writes are synchronous so lines keep
+ * their order and survive a crash right after them. A single line longer
+ * than `maxBytes` is still written whole, into a fresh file.
+ */
+export declare function openDaemonLog(options: DaemonLogOptions): DaemonLog;
+/**
+ * Routes everything this process writes to `process.stdout` and
+ * `process.stderr` (every `console.*` call included) into the daemon log
+ * until `close()`, so no runtime path can grow the service manager's
+ * redirect while the daemon runs (#1097). Only output Node writes to fd 2
+ * itself, such as a fatal error, still reaches the redirect, once per
+ * process; {@link boundServiceRedirectLogs} bounds it at the next start.
+ * Child processes are spawned with piped stdio and never share fd 1 or 2.
+ */
+export declare function routeProcessOutputToDaemonLog(options: DaemonLogOptions): {
+    readonly path: string;
+    close(): void;
+};
+/**
+ * Bounds the service manager's redirect files at service start: each file
+ * over {@link SERVICE_REDIRECT_LIMITS}.maxBytes becomes its single `.1` copy.
+ * The manager reopens the path on the next spawn.
+ */
+export declare function boundServiceRedirectLogs(logDir: string): void;
+export interface ServiceLogReport {
+    /** The inspected log directory. */
+    dir: string;
+    status: 'present' | 'missing' | 'unavailable';
+    totalBytes: number;
+    /** `daemon`: the daemon log and its rotated copies. `service-manager`: the launchd/systemd/WinSW redirect files. */
+    files: Array<{
+        name: string;
+        kind: 'daemon' | 'service-manager';
+        sizeBytes: number;
+    }>;
+    truncated: boolean;
+}
+/** Location and size of every regular file in `logDir` (#1097: `status` and `doctor` report them). Read-only. */
+export declare function inspectServiceLogs(logDir: string): Promise<ServiceLogReport>;
+// ==== @byok-sdk/client dist/lifecycle/service-types.d.ts ====
+import type { ServiceLogReport } from './service-log';
+import type { ServiceRepairResult, ServiceUnitInspection } from './service-unit';
+/**
+ * What the stable launcher executes (#1097). The unit never names it: on
+ * macOS and Linux the unit runs `<storeDir>/service/<name>.launcher.sh`,
+ * which execs this program; on Windows the SCM runs the installed WinSW
+ * executable, whose descriptor names it. Changing the program rewrites the
+ * launcher, never the unit's own path or arguments.
+ *
+ * `command` should be absolute: a bare name resolves against the service
+ * manager's minimal PATH, which rarely includes nvm/volta/homebrew Node.
  */
 export interface ServiceProgram {
     command: string;
@@ -12292,7 +12492,7 @@ export interface ServiceProgram {
      * program with {@link NodeAgentProgramOptions.service} on every platform.
      */
     args: string[];
-    /** Working directory for the running service process. Each platform generator has its own documented default (see `launchd.ts`/`systemd.ts`/`winsw.ts`) when omitted. */
+    /** Working directory for the running service process; the launcher `cd`s into it. Default: the user's home (macOS, Linux), the WinSW install directory (Windows). */
     cwd?: string;
 }
 export interface NodeAgentProgramOptions {
@@ -12325,10 +12525,18 @@ export interface ServiceDefinition {
     name: string;
     /** Human-readable display name — systemd `Description=`, WinSW `<name>`/`<description>`. Defaults to `name` if omitted. */
     displayName?: string;
-    /** What to run — see {@link ServiceProgram}. */
+    /** What the launcher runs — see {@link ServiceProgram}. */
     program: ServiceProgram;
-    /** Directory the service's stdout/stderr logs are written under (created if missing). On Windows this also doubles as the default WinSW install directory — see `windows.installDir`. */
+    /** The product's SDK store (`DaemonConfig.storeDir` or its default). Holds the launcher and the lifecycle owner record under `<storeDir>/service`. */
+    storeDir: string;
+    /** `resolveHostLayout(...).logDir`: the daemon log and the service manager's redirect files (created if missing). On Windows also the default WinSW install directory — see `windows.installDir`. */
     logDir: string;
+    /**
+     * The lifecycle owner, e.g. `cli` or `app` (1-32 of `a-z`, `0-9`, `-`).
+     * One owner per product store sets autostart; another owner's `install`,
+     * `repair` and `uninstall` throw `ServiceUnitError` `lifecycle_owner_conflict`.
+     */
+    owner: string;
     /**
      * Windows/WinSW-only inputs. Required when actually constructing a
      * lifecycle on `win32` (`create-service-lifecycle.ts` throws a clear
@@ -12347,9 +12555,10 @@ export interface ServiceDefinition {
         installDir?: string;
     };
 }
-/** Options for {@link ServiceLifecycle.install} — an escape hatch for the rare case of reinstalling with a changed program (e.g. after an upgrade moved the agent binary) without reconstructing the whole lifecycle object. Omit to reuse the program given to `createServiceLifecycle`. */
+/** Options for {@link ServiceLifecycle.install}. */
 export interface ServiceInstallOptions {
-    program?: ServiceProgram;
+    /** Replace a `foreign` unit (one without the SDK marker) at the unit path. Explicit operator intent only; never a default. */
+    replaceUnmarked?: boolean;
 }
 export interface ServiceStatusResult {
     /** Whether the platform's own service manager has this service registered at all (a plist/unit/WinSW-config file present — checked directly, not inferred from `running`). */
@@ -12386,6 +12595,10 @@ export interface ServiceStatusResult {
     determinate: boolean;
     /** Raw human-readable output from the underlying platform tool, for the `service-status` CLI subcommand and debugging. Never parsed further than the booleans above. */
     detail: string;
+    /** How the installed unit compares with this definition's (#1097). */
+    unit: ServiceUnitInspection;
+    /** Location and size of the daemon log and the redirect files. */
+    logs: ServiceLogReport;
 }
 /**
  * The lifecycle API M3-4 asks for: `install(opts) / uninstall() / start() /
@@ -12396,7 +12609,8 @@ export interface ServiceStatusResult {
  * `start`/`stop`/`status` always act on that one already-known service.
  *
  * Crash-restart is ALWAYS delegated to the OS supervisor (launchd
- * `KeepAlive`, systemd `Restart=on-failure`, WinSW `<onfailure>`) — no
+ * `KeepAlive`, systemd `Restart=always` + `RestartPreventExitStatus=0`,
+ * WinSW `<onfailure>`) under the exit-code contract in `exit-codes.ts` — no
  * implementation of this interface runs an in-process supervisor loop of
  * its own.
  *
@@ -12424,9 +12638,18 @@ export interface ServiceStatusResult {
  * orphan nobody can stop/uninstall (cross-model-review P1 #7).
  */
 export interface ServiceLifecycle {
-    /** Writes the platform service definition and registers + starts it with the OS service manager. Safe to call again later (e.g. after an upgrade): overwrites the definition and reloads it. */
+    /**
+     * Writes the unit and launcher, claims the lifecycle owner record and
+     * registers + starts the service. Safe to call again: rewrites both and
+     * reloads. Throws `ServiceUnitError` `service_unit_unmarked` for a
+     * `foreign` unit unless `replaceUnmarked` is set.
+     */
     install(opts?: ServiceInstallOptions): Promise<void>;
-    /** Stops (if running) and fully removes the service registration + generated definition file. Safe to call when not installed. Throws — and leaves the control file in place — if the underlying service manager reports a genuine failure rather than success/"not installed"; see this interface's own doc comment. */
+    /** Rewrites and reloads a `repairable` unit; `exact` and `absent` are `not-needed`. Throws `service_unit_unmarked` for a `foreign` unit, which it never changes. */
+    repair(): Promise<ServiceRepairResult>;
+    /** Classifies the installed unit: absent / exact / repairable / foreign. Read-only. */
+    inspect(): Promise<ServiceUnitInspection>;
+    /** Stops (if running) and fully removes the service registration, unit, launcher and owner record. Safe to call when not installed; refuses a `foreign` unit. Throws — and leaves the control file in place — if the underlying service manager reports a genuine failure rather than success/"not installed"; see this interface's own doc comment. */
     uninstall(): Promise<void>;
     /** Starts an already-installed service. Throws a clear error if it isn't installed. */
     start(): Promise<void>;
@@ -12454,36 +12677,168 @@ export interface ServiceLifecycle {
  * dispatcher.
  */
 export declare function sanitizeServiceName(name: string): string;
-// ==== @byok-sdk/client dist/lifecycle/systemd.d.ts ====
+// ==== @byok-sdk/client dist/lifecycle/service-unit.d.ts ====
 import { promises as fsp } from 'node:fs';
+import type { ServiceProgram } from './service-types';
+/**
+ * Every unit this SDK generates carries this text (an XML comment in a
+ * plist or WinSW descriptor, a `#` comment in a systemd unit). It is the
+ * only ownership evidence `inspect()` accepts: a file at our unit path
+ * without it is `foreign` and never changed, unless the operator passes
+ * `install({ replaceUnmarked: true })`.
+ */
+export declare const SERVICE_UNIT_MARKER = "byok-sdk-service-unit: generated by @byok-sdk/client; repair() reverts local edits";
+/**
+ * How an installed unit compares with the one this definition generates (#1097):
+ *
+ * - `absent`: no unit file at the unit path.
+ * - `exact`: the unit and its launcher match byte for byte.
+ * - `repairable`: the unit carries {@link SERVICE_UNIT_MARKER} but it, or
+ *   its launcher, differs. `repair()` and `install()` rewrite both.
+ * - `foreign`: a unit file without the marker. Nothing changes it.
+ */
+export type ServiceUnitState = 'absent' | 'exact' | 'repairable' | 'foreign';
+export interface ServiceUnitInspection {
+    state: ServiceUnitState;
+    /** The plist, systemd unit or WinSW descriptor. */
+    unitPath: string;
+    /** The stable launcher the unit runs (macOS and Linux); on Windows the SCM runs the installed WinSW executable. */
+    launcherPath: string;
+    /** The lifecycle owner recorded in the store, when one is. */
+    owner?: string;
+}
+export type ServiceRepairResult = {
+    status: 'repaired';
+} | {
+    status: 'not-needed';
+    state: 'exact' | 'absent';
+};
+declare const ERROR_MESSAGES: {
+    readonly service_unit_unmarked: 'A service unit this SDK did not generate exists at the unit path. Re-run install with replaceUnmarked (CLI: --replace-unmarked) to replace it, or remove it with the tool that installed it.';
+    readonly lifecycle_owner_conflict: 'Another lifecycle owner of this product manages autostart. Uninstall through that owner first.';
+    readonly lifecycle_owner_unreadable: 'The lifecycle owner record in the store cannot be read; preserve it for inspection.';
+    readonly lifecycle_owner_busy: 'Another service lifecycle operation or local-state relocation is in progress. Run it again when that one has finished.';
+    readonly invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.';
+};
+export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
+/** Closed codes only; the message never carries a path or OS text. */
+export declare class ServiceUnitError extends Error {
+    readonly code: ServiceUnitErrorCode;
+    constructor(code: ServiceUnitErrorCode);
+}
+export declare function assertServiceOwner(owner: unknown): asserts owner is string;
+/** `<storeDir>/service`: the SDK-owned directory for the launcher and the lifecycle owner record. */
+export declare function serviceStateDir(storeDir: string, platform?: NodeJS.Platform): string;
+/** The stable launcher path a macOS or Linux unit runs. */
+export declare function serviceLauncherPath(storeDir: string, serviceName: string, platform?: NodeJS.Platform): string;
+/**
+ * The POSIX launcher every macOS and Linux unit runs. The unit names only
+ * this file, so a new program (a moved binary, a new Node, a new `current`)
+ * rewrites the launcher and never the unit. It sets no environment:
+ * `byok-agent start --service` captures the login-shell environment at
+ * start (#392).
+ */
+export declare function generateServiceLauncher(program: ServiceProgram): string;
+export interface ServiceUnitFile {
+    path: string;
+    content: string;
+    mode?: number;
+}
+export type ServiceUnitFs = Pick<typeof fsp, 'readFile'>;
+/** Compares the installed files with `expected`; `expected[0]` is the unit. */
+export declare function classifyServiceUnit(fs: ServiceUnitFs, expected: readonly ServiceUnitFile[]): Promise<ServiceUnitState>;
+export interface ServiceLifecycleOwnerInput {
+    storeDir: string;
+    /** Who sets autostart for this product, e.g. `cli` or `app`. */
+    owner: string;
+    /** The service name the owner registers. */
+    service: string;
+}
+export type ServiceOwnerFs = Pick<typeof fsp, 'readFile' | 'writeFile' | 'rename' | 'rm' | 'mkdir'>;
+/**
+ * The lifecycle owner recorded for this product's store (#1097): the one
+ * party (the CLI, or the product's App) that sets autostart. Undefined when
+ * no owner holds it.
+ */
+export declare function readServiceLifecycleOwner(storeDir: string, fs?: ServiceOwnerFs): Promise<{
+    owner: string;
+    service: string;
+} | undefined>;
+/**
+ * Runs `operation` holding the cross-process `service-lifecycle` mutation
+ * gate (`util/path-mutation-gate.ts`): one per user, with no target path,
+ * like the per-user namespace of the service manager it guards. Every
+ * owner-record mutation reads, compares and writes inside one hold, so a
+ * remove or replace acts on the record this process read and never on a
+ * successor's. It is never the `store` gate: a managed install holds this one
+ * while it waits for the daemon it starts, and that daemon takes `store`.
+ * Local-state relocation takes this gate before `store`, so the order is
+ * always `service-lifecycle` then `store`. A held gate fails at once with
+ * `lifecycle_owner_busy`; the gate frees itself when its holder process exits.
+ *
+ * @internal
+ */
+export declare function withServiceOwnerGate<T>(operation: () => Promise<T>): Promise<T>;
+/**
+ * Records `owner` as the product's lifecycle owner. Idempotent for the same
+ * owner; throws `lifecycle_owner_conflict` when another owner holds it and
+ * `lifecycle_owner_busy` while another service lifecycle operation or a
+ * local-state relocation is in progress. An App that sets autostart through its own mechanism (a login
+ * item) claims here too, so the CLI's `install` refuses instead of adding a
+ * second one.
+ */
+export declare function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs?: ServiceOwnerFs): Promise<void>;
+/**
+ * {@link claimServiceLifecycleOwner} for a caller already inside
+ * {@link withServiceOwnerGate}.
+ *
+ * @internal
+ */
+export declare function claimHeldServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs: ServiceOwnerFs): Promise<void>;
+/**
+ * Removes the owner record when `owner` holds it; throws
+ * `lifecycle_owner_conflict` when another owner does and `lifecycle_owner_busy`
+ * while another service lifecycle operation or a local-state relocation is in
+ * progress.
+ */
+export declare function releaseServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs?: ServiceOwnerFs): Promise<void>;
+/**
+ * {@link releaseServiceLifecycleOwner} for a caller already inside
+ * {@link withServiceOwnerGate}.
+ *
+ * @internal
+ */
+export declare function releaseHeldServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs: ServiceOwnerFs): Promise<void>;
+export {};
+// ==== @byok-sdk/client dist/lifecycle/systemd.d.ts ====
 import { type Runner } from './exec-runner';
-import { type ServiceDefinition, type ServiceLifecycle, type ServiceProgram } from './service-types';
+import { type ManagedLifecycleFs } from './managed-lifecycle';
+import { type ServiceDefinition, type ServiceLifecycle } from './service-types';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface SystemdDeps {
     run?: Runner;
-    fs?: Pick<typeof fsp, 'mkdir' | 'writeFile' | 'rm' | 'stat'>;
+    fs?: ManagedLifecycleFs;
     homedir?: () => string;
 }
 /**
- * Generates a systemd user unit for `name` running `program`, logging to
- * `logDir`. Pure/no I/O — unit-tested directly for exact content shape, and
- * (locally, when `systemd-analyze` is available) verified with
- * `systemd-analyze verify` — see `templates/service/systemd/README.md`.
+ * Generates a systemd user unit for `name` that runs only the stable
+ * `launcherPath` (#1097), logging to `logDir`. Pure/no I/O — unit-tested
+ * directly for exact content shape, and (locally, when `systemd-analyze` is
+ * available) verified with `systemd-analyze verify` — see
+ * `templates/service/systemd/README.md`.
  *
- * `Restart=on-failure` + `RestartSec=10` is the crash-restart M3-4 asks for,
- * delegated entirely to systemd. `StandardOutput`/`StandardError` are
- * pointed at append-mode files under `logDir` for parity with the launchd
- * plist's `StandardOutPath`/`StandardErrorPath` and the WinSW `<logpath>` —
- * systemd's own native idiom (the journal, `journalctl --user -u <name>`)
- * still works unconditionally alongside this (systemd always journals
- * unit's output; explicitly setting `StandardOutput=append:...` needs
- * systemd >= 240, present on every currently-supported distro this SDK
- * targets) and is documented in the README as the alternative.
+ * `Restart=always` + `RestartPreventExitStatus=0` + `RestartSec=10` is the
+ * exit-code contract in `exit-codes.ts`: any exit but 0 restarts.
+ * `StandardOutput`/`StandardError` append to redirect files under `logDir`
+ * that receive only early-boot crash output; the daemon writes its own
+ * rotated log (`service-log.ts`). The journal (`journalctl --user -u
+ * <name>`) still records the unit's output alongside.
  */
 export declare function generateSystemdUnit(def: {
     name: string;
     displayName: string;
-    program: ServiceProgram;
+    launcherPath: string;
+    workingDirectory: string;
     logDir: string;
 }): string;
 /**
@@ -12504,11 +12859,12 @@ export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: Sy
 // ==== @byok-sdk/client dist/lifecycle/winsw.d.ts ====
 import { promises as fsp } from 'node:fs';
 import { type Runner } from './exec-runner';
+import { type ManagedLifecycleFs } from './managed-lifecycle';
 import { type ServiceDefinition, type ServiceLifecycle, type ServiceProgram } from './service-types';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface WinswDeps {
     run?: Runner;
-    fs?: Pick<typeof fsp, 'mkdir' | 'writeFile' | 'rm' | 'stat' | 'copyFile'>;
+    fs?: ManagedLifecycleFs & Pick<typeof fsp, 'copyFile'>;
 }
 /**
  * Generates a WinSW (https://github.com/winsw/winsw) service descriptor XML
@@ -12518,22 +12874,22 @@ export interface WinswDeps {
  * actually runs `winsw install` against generated output on a real
  * `windows-latest` runner — this macOS dev box cannot execute WinSW at all.
  *
+ * On Windows the SCM registration is the unit and names only the stable
+ * `<id>.exe` (#1097); this descriptor, which WinSW reads at every start, is
+ * the launcher. The {@link SERVICE_UNIT_MARKER} comment marks it as ours.
+ *
  * Each argument becomes its own `<argument>` element (WinSW's supported
  * repeatable-element form) rather than a single space-joined `<arguments>`
  * string — this sidesteps shell-style quoting entirely for a config path
- * containing spaces, the exact same concern the pi adapter's
- * `execFile`-without-`shell` note raises for Windows (see
- * `templates/packaging/sea/README.md`'s "Windows note": WinSW itself
- * launches `<executable>` directly, no shell involved, so an unescaped
- * space in a single `<arguments>` string would be split in the wrong
- * place — one `<argument>` per token has no such ambiguity).
+ * containing spaces (WinSW launches `<executable>` directly, no shell
+ * involved).
  *
- * `<onfailure action="restart" delay="10 sec"/>` (with a second, longer
- * backoff on repeated failure) is the crash-restart M3-4 asks for,
- * delegated entirely to WinSW/the Windows SCM — nothing in this SDK
- * supervises the process itself. `<startmode>Automatic</startmode>` mirrors
- * launchd's `RunAtLoad`/systemd's `WantedBy=default.target`: the service
- * also starts automatically on the next machine boot, not just right now.
+ * `<onfailure action="restart">` fires on a non-zero exit only: the
+ * exit-code contract in `exit-codes.ts`. `<log mode="roll-by-size">` bounds
+ * WinSW's stdout/stderr redirect the same way the daemon's start bounds the
+ * launchd/systemd one (`SERVICE_REDIRECT_LIMITS`).
+ * `<startmode>Automatic</startmode>` mirrors launchd's `RunAtLoad`/systemd's
+ * `WantedBy=default.target`.
  */
 export declare function generateWinswXml(def: {
     id: string;
@@ -12555,15 +12911,10 @@ export declare function generateWinswXml(def: {
  * convention is that its executable and XML config share a basename in the
  * same directory (`<id>.exe` + `<id>.xml`), so `install()` copies the
  * product-supplied binary into place under that name rather than invoking
- * it in place — this is the version-agnostic approach documented across
- * WinSW v2/v3, unlike relying on a specific `--config` CLI flag that may
- * differ between major versions.
+ * it in place.
  *
  * `status()` queries `sc.exe` (the real Windows SCM query tool, always
- * present) rather than parsing WinSW's own `status` subcommand text —
- * authoritative ground truth independent of WinSW's own output, and the
- * exact tool `templates/service/winsw/smoke-test.mjs` / the CI job also
- * assert against.
+ * present) rather than parsing WinSW's own `status` subcommand text.
  */
 export declare function createWinswLifecycle(def: ServiceDefinition, deps?: WinswDeps): ServiceLifecycle;
 // ==== @byok-sdk/client dist/local-state-relocation.d.ts ====

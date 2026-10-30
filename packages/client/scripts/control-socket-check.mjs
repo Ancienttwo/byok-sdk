@@ -121,7 +121,9 @@ try {
     name,
     displayName: 'BYOK control socket check',
     program: nodeAgentProgram({ agentBin: byokAgentBin, configPath, nodeBin: process.execPath }),
+    storeDir,
     logDir,
+    owner: 'smoke',
     ...(winswBin ? { windows: { winswBin } } : {}),
   });
   await lifecycle.install();

@@ -170,6 +170,74 @@ them beyond that. Terminals, claims, starts and approval requests are never
 dropped. The Host sees a gap in that task's progress seqs. `status` reports
 the count as `droppedEphemeral`.
 
+### Background service
+
+```sh
+byok-agent install --config device.json
+byok-agent service-status --config device.json
+```
+
+`install` writes two files and registers the service with launchd (macOS),
+systemd `--user` (Linux) or WinSW (Windows, `--winsw-bin <WinSW.exe>`):
+
+- The unit (plist, systemd unit, WinSW descriptor) names only a stable
+  launcher, `<storeDir>/service/<name>.launcher.sh` on macOS and Linux; on
+  Windows the SCM runs the installed `<logDir>/<name>.exe`. The unit holds no
+  versioned path and no environment. `start --service` captures the user's
+  login-shell environment when it starts.
+- The launcher runs `node <byok-agent> start --config <path> --service`. A new
+  Node or a moved binary changes the launcher, not the unit.
+
+`service-status` classifies the installed unit: `absent`, `exact`,
+`repairable` (an SDK unit or launcher that changed, or on Windows an installed
+`<name>.exe` that is missing or not the `--winsw-bin` bytes) or `foreign` (a unit at the
+same path without the SDK marker). Running `install` again rewrites a
+repairable unit. The SDK never changes a foreign unit: `install` refuses it
+with `ServiceUnitError` `service_unit_unmarked` until you pass
+`--replace-unmarked`, and `uninstall`, `service-start` and `service-stop`
+refuse it too. A unit installed by 0.31 or earlier has no marker; replace it
+once with `byok-agent install --replace-unmarked --config device.json`.
+
+One lifecycle owner per store sets autostart. `install` records the CLI as the
+owner in `<storeDir>/service/lifecycle-owner.json`. If the product's App already
+holds it, `install` fails with `lifecycle_owner_conflict`; uninstall through
+the App first. While another `install`, `repair`, `uninstall` or owner claim or
+release is in progress for this user (on Windows, on this machine), in any
+process and for any store, or a store is being relocated, the command fails at
+once with `lifecycle_owner_busy`; run it again when that one has finished.
+
+Exit codes: a service exits 0 to stay stopped (a normal stop, or a halt such as
+revocation) and 1 to be restarted (a crash). The units encode this as launchd
+`KeepAlive.SuccessfulExit = false`, systemd `Restart=always` with
+`RestartPreventExitStatus=0`, and WinSW `<onfailure action="restart">`.
+Outside `--service`, a halt exits 78.
+
+Logs live in `resolveHostLayout(...).logDir` (`<storeDir>/service-logs`). The
+daemon routes everything it writes to stdout and stderr into `daemon.log` and
+rotates it by size while it runs, at 10 MiB, keeping 5 files. The service
+manager's `service-stdout.log` and `service-stderr.log` keep only output from
+before the daemon log opens, such as a config error, and a fatal error Node
+prints itself; each start rotates one over 1 MiB to a single `.1` copy, and WinSW rolls
+its own at the same size. `service-status` lists each log file and its size;
+`doctor` reports the directory and the total.
+
+An embedded Host uses the same implementation:
+
+```ts
+import { agentServiceDefinition, createServiceLifecycle } from '@byok-sdk/client';
+
+const lifecycle = createServiceLifecycle(agentServiceDefinition({
+  config, configPath, agentBin, owner: 'app',
+}));
+const unit = await lifecycle.inspect(); // absent | exact | repairable | foreign
+if (unit.state === 'repairable') await lifecycle.repair();
+```
+
+A Host whose binary is not `byok-agent` passes its own `ServiceDefinition`
+(`program`, `storeDir`, `logDir`, `owner`). A Host that sets autostart through
+its own mechanism, such as a login item, calls `claimServiceLifecycleOwner`
+so the CLI's `install` refuses instead of adding a second autostart.
+
 ## Upgrade
 
 Before replacing a distribution, read its shipped
@@ -205,8 +273,9 @@ routine reset step. Resolve unknown state before retrying.
 
 ## Uninstall
 
-`byok-agent uninstall --config device.json` removes the OS service registration.
-Unpair first if enrollment must be removed. Remove the installed application
+`byok-agent uninstall --config device.json` removes the OS service registration,
+the unit, the launcher and the lifecycle owner record. It refuses a foreign
+unit. Unpair first if enrollment must be removed. Remove the installed application
 through the Host's installer/package manager. Service uninstall is not a promise
 to erase the SDK store, Agent files, provider keys or runtime login directories.
 
@@ -252,7 +321,10 @@ byok-agent status --config device.json
 daemon's runtime observations; offline probes are labeled `local-shell`.
 `doctor --fix --yes` applies supported repairs, not an arbitrary storage reset.
 Read the diagnosis before choosing a repair, and inspect a support bundle before
-sharing it. Uncoded filesystem, keychain, runtime and construction exceptions
+sharing it. A support bundle reports log sizes, never log paths, names or
+content, and refuses an output path inside the store. An embedded Host calls
+the same operations as `diagnoseDevice`, `exportDeviceSupportBundle` and
+`quarantineDeviceOperationalHealth`. Uncoded filesystem, keychain, runtime and construction exceptions
 retain their diagnostic messages; they are not invented catalog codes.
 
 On POSIX, startup reconciles process groups recorded in

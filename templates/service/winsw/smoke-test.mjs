@@ -76,9 +76,19 @@ const lifecycle = createServiceLifecycle({
   name,
   displayName: 'BYOK WinSW smoke test',
   program: { command: process.execPath, args: ['-e', 'setInterval(() => {}, 60000)'] },
+  storeDir: path.join(workDir, 'store'),
   logDir,
+  owner: 'smoke',
   windows: { winswBin },
 });
+const xmlPath = path.join(logDir, `${name}.xml`);
+const exePath = path.join(logDir, `${name}.exe`);
+
+async function expectUnitState(expected) {
+  const { state } = await lifecycle.inspect();
+  if (state !== expected) throw new Error(`expected unit state ${expected}, got ${state}`);
+  console.log(`PASS: unit state ${expected}`);
+}
 
 async function scQuery() {
   try {
@@ -177,6 +187,14 @@ try {
   }
   console.log('PASS: lifecycle.status() agrees with sc.exe (installed:true running:true)');
 
+  // #1097: a hand-edited descriptor is repairable; repair restarts onto the rewritten one.
+  await expectUnitState('exact');
+  await fs.appendFile(xmlPath, '<!-- hand edit -->\n');
+  await expectUnitState('repairable');
+  console.log(`    repair(): ${JSON.stringify(await lifecycle.repair())}`);
+  await waitForScState('RUNNING');
+  await expectUnitState('exact');
+
   console.log('==> stopping via the lifecycle API');
   await lifecycle.stop();
   await waitForScState('STOPPED');
@@ -195,6 +213,23 @@ try {
   if (!restarted) throw new Error('expected the service to be RUNNING again after an explicit start');
   console.log('PASS: RUNNING again after explicit start');
 
+  // #1097: the wrapper exe is part of the installed unit. A stopped service
+  // whose <id>.exe is missing, or holds other bytes, is repairable, and repair
+  // puts winswBin back without running the bad exe. The stopped image is
+  // renamed aside (Windows releases a stopped image asynchronously; a rename
+  // does not wait for that) into this smoke's own workDir.
+  for (const [index, corrupt] of [[1, undefined], [2, 'not a WinSW executable']]) {
+    console.log(`==> cold repair ${index}: stopped service, wrapper exe ${corrupt === undefined ? 'missing' : 'replaced with invalid bytes'}`);
+    await lifecycle.stop();
+    await waitForScState('STOPPED');
+    await fs.rename(exePath, path.join(workDir, `moved-wrapper-${index}.exe`));
+    if (corrupt !== undefined) await fs.writeFile(exePath, corrupt);
+    await expectUnitState('repairable');
+    console.log(`    repair(): ${JSON.stringify(await lifecycle.repair())}`);
+    await waitForScState('RUNNING');
+    await expectUnitState('exact');
+  }
+
   console.log('==> uninstalling');
   await lifecycle.uninstall();
   const afterUninstall = await scQuery();
@@ -203,6 +238,20 @@ try {
     throw new Error(`expected sc.exe to report the service gone after uninstall, got:\n${afterUninstall}`);
   }
   console.log('PASS: service removed from the SCM after uninstall');
+
+  // #1097: a marker-less descriptor at our path is foreign and never touched.
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(xmlPath, '<service><id>someone-else</id></service>\n');
+  await expectUnitState('foreign');
+  try {
+    await lifecycle.install();
+    throw new Error('install accepted a foreign unit');
+  } catch (error) {
+    if (error?.code !== 'service_unit_unmarked') throw error;
+  }
+  if (!(await fs.readFile(xmlPath, 'utf8')).includes('someone-else')) throw new Error('install changed a foreign unit');
+  await fs.rm(xmlPath);
+  console.log('PASS: foreign unit refused and left untouched');
 
   console.log('==> WinSW service lifecycle smoke: PASS');
 

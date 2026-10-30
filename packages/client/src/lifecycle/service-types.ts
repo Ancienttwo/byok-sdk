@@ -1,15 +1,16 @@
 import { SERVICE_FLAG } from './service-environment';
+import type { ServiceLogReport } from './service-log';
+import type { ServiceRepairResult, ServiceUnitInspection } from './service-unit';
 
 /**
- * What the OS service manager should actually execute to run the daemon in
- * the background. Deliberately requires an explicit `command` (an absolute
- * path is strongly recommended, not just a bare command name) rather than
- * ever trying to auto-resolve one internally — see
- * `create-service-lifecycle.ts`'s module doc comment for why. A bare
- * command name relies on the OS service manager's own minimal PATH, which
- * commonly does NOT include nvm/volta/homebrew node install directories —
- * a frequent real-world "service can't find node" bug on every one of the
- * three platforms this module supports.
+ * What the stable launcher executes (#1097). The unit never names it: on
+ * macOS and Linux the unit runs `<storeDir>/service/<name>.launcher.sh`,
+ * which execs this program; on Windows the SCM runs the installed WinSW
+ * executable, whose descriptor names it. Changing the program rewrites the
+ * launcher, never the unit's own path or arguments.
+ *
+ * `command` should be absolute: a bare name resolves against the service
+ * manager's minimal PATH, which rarely includes nvm/volta/homebrew Node.
  */
 export interface ServiceProgram {
   command: string;
@@ -28,7 +29,7 @@ export interface ServiceProgram {
    * program with {@link NodeAgentProgramOptions.service} on every platform.
    */
   args: string[];
-  /** Working directory for the running service process. Each platform generator has its own documented default (see `launchd.ts`/`systemd.ts`/`winsw.ts`) when omitted. */
+  /** Working directory for the running service process; the launcher `cd`s into it. Default: the user's home (macOS, Linux), the WinSW install directory (Windows). */
   cwd?: string;
 }
 
@@ -71,10 +72,18 @@ export interface ServiceDefinition {
   name: string;
   /** Human-readable display name — systemd `Description=`, WinSW `<name>`/`<description>`. Defaults to `name` if omitted. */
   displayName?: string;
-  /** What to run — see {@link ServiceProgram}. */
+  /** What the launcher runs — see {@link ServiceProgram}. */
   program: ServiceProgram;
-  /** Directory the service's stdout/stderr logs are written under (created if missing). On Windows this also doubles as the default WinSW install directory — see `windows.installDir`. */
+  /** The product's SDK store (`DaemonConfig.storeDir` or its default). Holds the launcher and the lifecycle owner record under `<storeDir>/service`. */
+  storeDir: string;
+  /** `resolveHostLayout(...).logDir`: the daemon log and the service manager's redirect files (created if missing). On Windows also the default WinSW install directory — see `windows.installDir`. */
   logDir: string;
+  /**
+   * The lifecycle owner, e.g. `cli` or `app` (1-32 of `a-z`, `0-9`, `-`).
+   * One owner per product store sets autostart; another owner's `install`,
+   * `repair` and `uninstall` throw `ServiceUnitError` `lifecycle_owner_conflict`.
+   */
+  owner: string;
   /**
    * Windows/WinSW-only inputs. Required when actually constructing a
    * lifecycle on `win32` (`create-service-lifecycle.ts` throws a clear
@@ -94,9 +103,10 @@ export interface ServiceDefinition {
   };
 }
 
-/** Options for {@link ServiceLifecycle.install} — an escape hatch for the rare case of reinstalling with a changed program (e.g. after an upgrade moved the agent binary) without reconstructing the whole lifecycle object. Omit to reuse the program given to `createServiceLifecycle`. */
+/** Options for {@link ServiceLifecycle.install}. */
 export interface ServiceInstallOptions {
-  program?: ServiceProgram;
+  /** Replace a `foreign` unit (one without the SDK marker) at the unit path. Explicit operator intent only; never a default. */
+  replaceUnmarked?: boolean;
 }
 
 export interface ServiceStatusResult {
@@ -134,6 +144,10 @@ export interface ServiceStatusResult {
   determinate: boolean;
   /** Raw human-readable output from the underlying platform tool, for the `service-status` CLI subcommand and debugging. Never parsed further than the booleans above. */
   detail: string;
+  /** How the installed unit compares with this definition's (#1097). */
+  unit: ServiceUnitInspection;
+  /** Location and size of the daemon log and the redirect files. */
+  logs: ServiceLogReport;
 }
 
 /**
@@ -145,7 +159,8 @@ export interface ServiceStatusResult {
  * `start`/`stop`/`status` always act on that one already-known service.
  *
  * Crash-restart is ALWAYS delegated to the OS supervisor (launchd
- * `KeepAlive`, systemd `Restart=on-failure`, WinSW `<onfailure>`) — no
+ * `KeepAlive`, systemd `Restart=always` + `RestartPreventExitStatus=0`,
+ * WinSW `<onfailure>`) under the exit-code contract in `exit-codes.ts` — no
  * implementation of this interface runs an in-process supervisor loop of
  * its own.
  *
@@ -173,9 +188,18 @@ export interface ServiceStatusResult {
  * orphan nobody can stop/uninstall (cross-model-review P1 #7).
  */
 export interface ServiceLifecycle {
-  /** Writes the platform service definition and registers + starts it with the OS service manager. Safe to call again later (e.g. after an upgrade): overwrites the definition and reloads it. */
+  /**
+   * Writes the unit and launcher, claims the lifecycle owner record and
+   * registers + starts the service. Safe to call again: rewrites both and
+   * reloads. Throws `ServiceUnitError` `service_unit_unmarked` for a
+   * `foreign` unit unless `replaceUnmarked` is set.
+   */
   install(opts?: ServiceInstallOptions): Promise<void>;
-  /** Stops (if running) and fully removes the service registration + generated definition file. Safe to call when not installed. Throws — and leaves the control file in place — if the underlying service manager reports a genuine failure rather than success/"not installed"; see this interface's own doc comment. */
+  /** Rewrites and reloads a `repairable` unit; `exact` and `absent` are `not-needed`. Throws `service_unit_unmarked` for a `foreign` unit, which it never changes. */
+  repair(): Promise<ServiceRepairResult>;
+  /** Classifies the installed unit: absent / exact / repairable / foreign. Read-only. */
+  inspect(): Promise<ServiceUnitInspection>;
+  /** Stops (if running) and fully removes the service registration, unit, launcher and owner record. Safe to call when not installed; refuses a `foreign` unit. Throws — and leaves the control file in place — if the underlying service manager reports a genuine failure rather than success/"not installed"; see this interface's own doc comment. */
   uninstall(): Promise<void>;
   /** Starts an already-installed service. Throws a clear error if it isn't installed. */
   start(): Promise<void>;

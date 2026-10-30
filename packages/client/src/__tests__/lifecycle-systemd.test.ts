@@ -1,8 +1,10 @@
-import os from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { createSystemdLifecycle, generateSystemdUnit } from '../lifecycle/systemd';
 import type { RunResult, Runner } from '../lifecycle/exec-runner';
 import { nodeAgentProgram, sanitizeServiceName, type ServiceDefinition } from '../lifecycle/service-types';
+import { SERVICE_UNIT_MARKER } from '../lifecycle/service-unit';
+import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
+import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -11,63 +13,51 @@ function fail(code = 1, stdout = '', stderr = 'boom'): RunResult {
   return { code, stdout, stderr };
 }
 
+useInProcessServiceLifecycleGate();
+
 describe('lifecycle/systemd: generateSystemdUnit', () => {
-  it('renders Description/ExecStart/WorkingDirectory/Restart/log paths/WantedBy', () => {
+  it('renders the marker, a launcher-only ExecStart, the exit-code restart policy and bounded redirect paths', () => {
     const unit = generateSystemdUnit({
       name: 'acme-agent',
       displayName: 'Acme Agent',
-      program: { command: '/usr/bin/node', args: ['/opt/agent/byok-agent.js', 'start', '--config', '/etc/agent/config.json'], cwd: '/opt/agent' },
+      launcherPath: '/home/t/.byok/acme/service/acme-agent.launcher.sh',
+      workingDirectory: '/home/t',
       logDir: '/var/log/acme',
     });
 
-    expect(unit).toContain('[Unit]\nDescription=Acme Agent');
-    expect(unit).toContain(
-      'ExecStart="/usr/bin/node" "/opt/agent/byok-agent.js" "start" "--config" "/etc/agent/config.json"',
-    );
-    expect(unit).toContain('WorkingDirectory=/opt/agent');
-    expect(unit).toContain('Restart=on-failure');
-    expect(unit).toContain('RestartSec=10');
-    expect(unit).toContain('StandardOutput=append:/var/log/acme/acme-agent.out.log');
-    expect(unit).toContain('StandardError=append:/var/log/acme/acme-agent.err.log');
-    expect(unit).toContain('[Install]\nWantedBy=default.target');
+    // Golden (#1097): the unit names only the stable launcher (no versioned path, no args, no
+    // env); exit-code contract: only exit 0 stops (exit-codes.ts); redirects bounded by the daemon.
+    expect(unit).toBe(`# ${SERVICE_UNIT_MARKER}
+[Unit]
+Description=Acme Agent
+
+[Service]
+Type=simple
+ExecStart="/home/t/.byok/acme/service/acme-agent.launcher.sh"
+WorkingDirectory=/home/t
+Restart=always
+RestartPreventExitStatus=0
+RestartSec=10
+StandardOutput=append:/var/log/acme/service-stdout.log
+StandardError=append:/var/log/acme/service-stderr.log
+
+[Install]
+WantedBy=default.target
+`);
+    expect(unit).not.toContain('Environment');
   });
 
-  it('defaults WorkingDirectory to the homedir when program.cwd is omitted', () => {
-    const unit = generateSystemdUnit({ name: 'x', displayName: 'X', program: { command: 'node', args: [] }, logDir: '/tmp/logs' });
-    expect(unit).toContain(`WorkingDirectory=${os.homedir()}`);
-  });
-
-  it('quotes every ExecStart token unconditionally, escaping embedded quotes/backslashes', () => {
-    const unit = generateSystemdUnit({
-      name: 'x',
-      displayName: 'X',
-      program: { command: 'node', args: ['--path', 'C:\\some "quoted" path'] },
-      logDir: '/tmp/logs',
-    });
-    expect(unit).toContain('ExecStart="node" "--path" "C:\\\\some \\"quoted\\" path"');
-  });
-
-  it('escapes "$" and "%" in ExecStart tokens so systemd never expands them as a variable/specifier (P1 #8)', () => {
-    const unit = generateSystemdUnit({
-      name: 'x',
-      displayName: 'X',
-      program: { command: 'node', args: ['--config', '/etc/$HOME/100%done.json'] },
-      logDir: '/tmp/logs',
-    });
-    expect(unit).toContain('ExecStart="node" "--config" "/etc/$$HOME/100%%done.json"');
+  it('quotes the launcher path, escaping embedded quotes/backslashes, "$" and "%" (P1 #8)', () => {
+    const unit = generateSystemdUnit({ name: 'x', displayName: 'X', launcherPath: '/s "q"\\/$HOME/100%.sh', workingDirectory: '/h', logDir: '/tmp/logs' });
+    expect(unit).toContain('ExecStart="/s \\"q\\"\\\\/$$HOME/100%%.sh"');
   });
 
   it('escapes a literal "%" in Description/WorkingDirectory/StandardOutput/StandardError so systemd specifiers are never expanded (P1 #8)', () => {
-    const unit = generateSystemdUnit({
-      name: 'x',
-      displayName: '100% Agent',
-      program: { command: 'node', args: [], cwd: '/opt/50%agent' },
-      logDir: '/var/log/50%dir',
-    });
+    const unit = generateSystemdUnit({ name: 'x', displayName: '100% Agent', launcherPath: '/l.sh', workingDirectory: '/opt/50%agent', logDir: '/var/log/50%dir' });
     expect(unit).toContain('Description=100%% Agent');
     expect(unit).toContain('WorkingDirectory=/opt/50%%agent');
-    expect(unit).toContain('StandardOutput=append:/var/log/50%%dir/x.out.log');
-    expect(unit).toContain('StandardError=append:/var/log/50%%dir/x.err.log');
+    expect(unit).toContain('StandardOutput=append:/var/log/50%%dir/service-stdout.log');
+    expect(unit).toContain('StandardError=append:/var/log/50%%dir/service-stderr.log');
   });
 
   it('rejects a newline embedded in displayName instead of letting it inject an extra unit directive (P1 #8)', () => {
@@ -75,40 +65,32 @@ describe('lifecycle/systemd: generateSystemdUnit', () => {
       generateSystemdUnit({
         name: 'x',
         displayName: 'Evil\n[Service]\nExecStartPost=/bin/rm -rf /',
-        program: { command: 'node', args: [] },
+        launcherPath: '/l.sh',
+        workingDirectory: '/h',
         logDir: '/tmp/logs',
       }),
     ).toThrow(/control characters/);
   });
 
-  it('rejects a newline embedded in program.cwd (P1 #8)', () => {
+  it('rejects a newline embedded in the working directory (P1 #8)', () => {
     expect(() =>
-      generateSystemdUnit({
-        name: 'x',
-        displayName: 'X',
-        program: { command: 'node', args: [], cwd: '/tmp\nExecStartPost=evil' },
-        logDir: '/tmp/logs',
-      }),
+      generateSystemdUnit({ name: 'x', displayName: 'X', launcherPath: '/l.sh', workingDirectory: '/tmp\nExecStartPost=evil', logDir: '/tmp/logs' }),
     ).toThrow(/control characters/);
   });
 
-  it('rejects a newline embedded in an ExecStart arg (P1 #8)', () => {
+  it('rejects a newline embedded in the launcher path (P1 #8)', () => {
     expect(() =>
-      generateSystemdUnit({
-        name: 'x',
-        displayName: 'X',
-        program: { command: 'node', args: ['--config', 'safe\nExecStartPost=evil'] },
-        logDir: '/tmp/logs',
-      }),
+      generateSystemdUnit({ name: 'x', displayName: 'X', launcherPath: '/l\nExecStartPost=evil', workingDirectory: '/h', logDir: '/tmp/logs' }),
     ).toThrow(/control characters/);
   });
 
-  it('rejects a newline reaching the logDir-derived log paths via `name` (P1 #8)', () => {
+  it('rejects a newline in `name` (P1 #8)', () => {
     expect(() =>
       generateSystemdUnit({
         name: 'x\nExecStartPost=evil',
         displayName: 'X',
-        program: { command: 'node', args: [] },
+        launcherPath: '/l.sh',
+        workingDirectory: '/h',
         logDir: '/tmp/logs',
       }),
     ).toThrow(/control characters/);
@@ -131,18 +113,20 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     return {
       name: 'Acme Agent!!',
       program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start'] },
+      storeDir: '/store',
       logDir: '/tmp/acme-logs',
+      owner: 'cli',
       ...overrides,
     };
   }
 
+  const UNIT = '/h/.config/systemd/user/Acme-Agent-.service';
+  const LAUNCHER = '/store/service/Acme-Agent-.launcher.sh';
   function fakeFs() {
-    return {
-      mkdir: vi.fn().mockResolvedValue(undefined),
-      writeFile: vi.fn().mockResolvedValue(undefined),
-      rm: vi.fn().mockResolvedValue(undefined),
-      stat: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
-    };
+    return memoryServiceFs();
+  }
+  function installedFs() {
+    return memoryServiceFs({ [UNIT]: DRIFTED_MARKED_UNIT });
   }
 
   it('sanitizes the service name into a safe unit filename', async () => {
@@ -157,10 +141,10 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
       expect.any(String),
       'utf8',
     );
-    expect(run).toHaveBeenCalledWith('systemctl', ['--user', 'enable', '--now', 'Acme-Agent-.service']);
+    expect(run).toHaveBeenCalledWith('systemctl', ['--user', 'enable', 'Acme-Agent-.service']);
   });
 
-  it('install() writes the unit then daemon-reload + enable --now, in order', async () => {
+  it('install() writes the unit then daemon-reload + enable + restart, in order', async () => {
     const calls: string[] = [];
     const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
       calls.push(`${cmd} ${args.join(' ')}`);
@@ -173,13 +157,13 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
 
     expect(fs.mkdir).toHaveBeenCalledWith('/home/tester/.config/systemd/user', { recursive: true });
     expect(fs.mkdir).toHaveBeenCalledWith('/tmp/acme-logs', { recursive: true });
-    expect(calls).toEqual(['systemctl --user daemon-reload', 'systemctl --user enable --now Acme-Agent-.service']);
+    expect(calls).toEqual(['systemctl --user daemon-reload', 'systemctl --user enable Acme-Agent-.service', 'systemctl --user restart Acme-Agent-.service']);
   });
 
-  it('install() throws a clear error when enable --now fails', async () => {
+  it('install() throws a clear error when enable fails', async () => {
     const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args.includes('enable') ? fail(1, '', 'Unit not found') : ok()));
     const lifecycle = createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' });
-    await expect(lifecycle.install()).rejects.toThrow(/systemctl enable --now failed \(exit 1\): Unit not found/);
+    await expect(lifecycle.install()).rejects.toThrow(/systemctl enable failed \(exit 1\): Unit not found/);
   });
 
   it('install() throws when daemon-reload itself fails (before ever calling enable)', async () => {
@@ -189,30 +173,19 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it('issue #392: a Host program is written verbatim; nodeAgentProgram({ service: true }) carries --service last', async () => {
+  it('issue #392/#1097: the launcher execs the Host program verbatim; the unit never changes with it', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(ok());
     const fs = fakeFs();
-    const lifecycle = createSystemdLifecycle(
-      def({ program: { command: '/opt/host/bin/host-agent', args: ['run', '--profile', 'default'] } }),
+    await createSystemdLifecycle(def({ program: { command: '/opt/host/bin/host-agent', args: ['run', '--profile', 'default'], cwd: "/opt/it's" } }), { run, fs, homedir: () => '/h' }).install();
+    expect(fs.files.get(LAUNCHER)).toBe(`#!/bin/sh\n# ${SERVICE_UNIT_MARKER}\ncd '/opt/it'\\''s' || exit 1\nexec '/opt/host/bin/host-agent' 'run' '--profile' 'default'\n`);
+    const unit = fs.files.get(UNIT);
+
+    await createSystemdLifecycle(
+      def({ program: nodeAgentProgram({ agentBin: '/opt/agent.js', configPath: '/etc/agent.json', nodeBin: '/usr/bin/node', service: true }) }),
       { run, fs, homedir: () => '/h' },
-    );
-    await lifecycle.install();
-    const written = fs.writeFile.mock.calls[0]?.[1] as string;
-    expect(written).toContain('ExecStart="/opt/host/bin/host-agent" "run" "--profile" "default"\n');
-    expect(written).not.toContain('--service');
-
-    await lifecycle.install({ program: nodeAgentProgram({ agentBin: '/opt/agent.js', configPath: '/etc/agent.json', nodeBin: '/usr/bin/node', service: true }) });
-    const rewritten = fs.writeFile.mock.calls[1]?.[1] as string;
-    expect(rewritten).toContain('ExecStart="/usr/bin/node" "/opt/agent.js" "start" "--config" "/etc/agent.json" "--service"\n');
-  });
-
-  it('install() opts.program overrides the definition program for that call only', async () => {
-    const run = vi.fn<Runner>().mockResolvedValue(ok());
-    const fs = fakeFs();
-    const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
-    await lifecycle.install({ program: { command: '/other/node', args: ['x'] } });
-    const written = fs.writeFile.mock.calls[0]?.[1] as string;
-    expect(written).toContain('ExecStart="/other/node" "x"');
+    ).install();
+    expect(fs.files.get(LAUNCHER)).toContain(`exec '/usr/bin/node' '/opt/agent.js' 'start' '--config' '/etc/agent.json' '--service'\n`);
+    expect(fs.files.get(UNIT)).toBe(unit);
   });
 
   it('uninstall() disables (idempotent "not loaded") and removes the unit file, then reloads', async () => {
@@ -228,6 +201,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
 
     expect(calls).toEqual(['systemctl --user disable --now Acme-Agent-.service', 'systemctl --user daemon-reload']);
     expect(fs.rm).toHaveBeenCalledWith('/h/.config/systemd/user/Acme-Agent-.service', { force: true });
+    expect(fs.rm).toHaveBeenCalledWith(LAUNCHER, { force: true });
   });
 
   it('uninstall() throws and does NOT delete the unit file when disable --now fails for a real reason (P1 #7)', async () => {
@@ -292,7 +266,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
 
     await lifecycle.install();
 
-    expect(run).toHaveBeenCalledWith('systemctl', ['--user', 'enable', '--now', 'rm-rf-everything.service']);
+    expect(run).toHaveBeenCalledWith('systemctl', ['--user', 'enable', 'rm-rf-everything.service']);
   });
 
   it('start() throws "not installed" when the unit file does not exist on disk', async () => {
@@ -303,8 +277,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
   });
 
   it('start() calls systemctl --user start when the unit file exists, and throws if that fails', async () => {
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const runOk = vi.fn<Runner>().mockResolvedValue(ok());
     const lifecycleOk = createSystemdLifecycle(def(), { run: runOk, fs, homedir: () => '/h' });
     await lifecycleOk.start();
@@ -335,18 +308,16 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
   });
 
   it('status() reports installed=true/running=true when the unit file exists and is-active reports "active" with exit 0', async () => {
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const run = vi.fn<Runner>().mockResolvedValue(ok('active\n'));
     const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
 
     const status = await lifecycle.status();
-    expect(status).toEqual({ installed: true, running: true, determinate: true, detail: 'active' });
+    expect(status).toMatchObject({ installed: true, running: true, determinate: true, detail: 'active', unit: { state: 'repairable', unitPath: UNIT } });
   });
 
   it('status() reports running=false, determinate=true when is-active exits non-zero (inactive/failed), even though installed', async () => {
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'inactive\n'));
     const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
 
@@ -365,8 +336,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
   });
 
   it('finding P1 #2 (residual, round 3): status() reports determinate=false (never a confirmed "not running") on a bus-connect failure (no --user D-Bus session)', async () => {
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const run = vi.fn<Runner>().mockResolvedValue(fail(1, '', 'Failed to connect to bus: No such file or directory'));
     const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
 
@@ -376,8 +346,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
   });
 
   it('finding P1 #2 (residual, round 3): status() reports determinate=false on a permission-denied query', async () => {
-    const fs = fakeFs();
-    fs.stat.mockResolvedValue({} as never);
+    const fs = installedFs();
     const run = vi.fn<Runner>().mockResolvedValue(fail(1, '', 'Access denied'));
     const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
 

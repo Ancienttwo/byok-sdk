@@ -163,7 +163,7 @@ Wire v4 removed the local Git checkpoint mode and the daemon's task workspace ro
 | Device metadata projection | `<storeDir>/device.json` (0600), exactly `{deviceId, tenantId, devicePublicKey}` | Credential-blind CLI/status and diagnostics only. It is deterministically repaired from the OS authority and never authors enrollment or secret bytes. |
 | Pairing code | Server-side only, minted out of band by the SaaS's own auth/device-flow UI | Server mints it already bound to `{tenantId, productId}` (S1); single-use, ~10min TTL. `PairRequest` carries neither field, so a device can never choose or influence the tenant it lands in (`@byok-sdk/cloud` pairing authority, `docs/protocol.md` §6.1) |
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
-| Durable sinks: audit log and `start` stdout | `<storeDir>/audit.jsonl` (0600), and `byok-agent start` stdout (a durable, unrotated file under launchd/systemd) | Both hold the same content-free `DaemonRecord` JSON lines and nothing else (#395) — see below. Library stderr (the service's `err.log`) follows the same rule. Full task content travels only over the authenticated control socket |
+| Durable sinks: audit log and `start` output | `<storeDir>/audit.jsonl` (0600), and `byok-agent start` stdout — under `--service`, the daemon's own rotated `<storeDir>/service-logs/daemon.log` (0600, #1097) | Both hold the same content-free `DaemonRecord` JSON lines and nothing else (#395) — see below. Library stderr (`daemon.log` under `--service`; the bounded `service-stderr.log` before it opens) follows the same rule. Full task content travels only over the authenticated control socket |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
 | BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only `@byok-sdk/keys` provider clients or the separate `byok-pi-provider-launcher` (or a host launcher executable built on `runPiProviderLauncher`) read it. Profile metadata may use a tenant-bound `TruthStore`, but truth bodies, hashes, labels, status, protocol, server, cloud provider code, and the client daemon never receive the value. The launcher keeps its explicit read-only SQLite profile composition and hands the key only to its Pi child: over private IPC into Pi's model memory for the rpc host and the durable worker, and through the environment only of the prepared host, which runs no native tool; `auth_mode: none` never constructs a keychain backend |
 | The daemon's own ambient environment (`process.env` — may hold secrets the Host put there: provider API keys, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc.) | Whatever process/container/service manager launched the daemon, including an embedding Host | **Not inherited by task children (#1095).** A child gets the user's login-shell snapshot; a live variable reaches it only when the adapter's `runtimeEnvironment.pass` names it. `CLAUDECODE` and `BYOK_*` are always removed — see the environment paragraph below |
@@ -596,8 +596,10 @@ elsewhere in this system, not a new one.
 
 `packages/client/src/lifecycle/{launchd,systemd,winsw}.ts`, driven by
 `bin/commands/service.ts`. Crash-restart is delegated entirely to the OS
-supervisor (`KeepAlive`/`Restart=on-failure`/`<onfailure>`) — none of them
-runs an in-process supervisor loop. Generated unit/plist/XML files
+supervisor (`KeepAlive`/`Restart=always` with `RestartPreventExitStatus=0`/`<onfailure>`,
+the exit-code contract in `lifecycle/exit-codes.ts`) — none of them
+runs an in-process supervisor loop. A unit runs only the stable launcher in
+`<storeDir>/service/` and is never changed without the SDK marker (#1097). Generated unit/plist/XML files
 tokenize and escape every argument (quoting + backslash/`$`-escaping in
 `systemd.ts`) rather than interpolating a shell command line, so a
 `productId`/path containing shell metacharacters can't inject into the

@@ -103,7 +103,7 @@ export interface UnpairDeps {
    * Finding P1 #2: an already-constructed lifecycle for the OS background
    * service this product MIGHT be installed as — `byok-agent.ts`'s `unpair`
    * dispatch builds this the same way `bin/commands/service.ts` does
-   * (`buildServiceDefinition` + `createServiceLifecycle`) and passes it
+   * (`cliServiceDefinition` + `createServiceLifecycle`) and passes it
    * through. `undefined` means "could not even check" (unsupported
    * platform, or Windows without `--winsw-bin`) — this is NOT the same as
    * "confirmed not running": see {@link UnpairUnknownDaemonStateError} and

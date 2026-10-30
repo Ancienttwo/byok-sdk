@@ -6,6 +6,7 @@ import {
   DaemonOwnerActiveError,
 } from './daemon/daemon-owner';
 import {
+  acquirePathMutationGate,
   acquirePathMutationGates,
   PathMutationGateBusyError,
   resolvePathWithoutCreate,
@@ -211,12 +212,16 @@ async function acquire(input: LocalStateRelocationInput): Promise<LocalStateRelo
 
   let gates: readonly PathMutationGate[] | undefined;
   try {
-    gates = await acquirePathMutationGates([
+    // `service-lifecycle` once, before every `store` gate: a managed service
+    // install holds it while the daemon it starts takes `store`, so taking
+    // `store` first could wait on that install (#1097).
+    gates = [await acquirePathMutationGate({ scope: 'service-lifecycle' }, { waitMs: 0 })];
+    gates = [...gates, ...await acquirePathMutationGates([
       { scope: 'store', targetPath: canonical.sourceStoreDir },
       { scope: 'store', targetPath: canonical.destinationStoreDir },
       { scope: 'agent-home-root', targetPath: path.join(canonical.sourceHostStorageRoot, AGENT_HOME_DIRECTORY) },
       { scope: 'agent-home-root', targetPath: path.join(canonical.destinationHostStorageRoot, AGENT_HOME_DIRECTORY) },
-    ]);
+    ])];
 
     await assertRequestedPathsRemainCanonical(requestedPaths, canonicalPaths);
     await assertDaemonStoreQuiescent(canonical.sourceStoreDir);
