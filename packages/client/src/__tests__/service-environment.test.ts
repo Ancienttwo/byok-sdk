@@ -143,10 +143,12 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     const { env } = await fixtureHome('export RC_DEFINED=from-rc\n');
     const snapshot = await captureLoginShellSnapshot({ shell, env });
     const live = { ...env, HOST_LATE_SENTINEL: 'late', HOST_PASSED_SENTINEL: 'passed' };
-    const runtime = composeRuntimeEnvironment({ policy: { pass: ['HOST_PASSED_SENTINEL'] }, snapshot, live, platform: 'darwin' });
+    const { env: runtime, report } = composeRuntimeEnvironment({ policy: { pass: ['HOST_PASSED_SENTINEL'] }, snapshot, live, platform: 'darwin' });
     expect(runtime.RC_DEFINED).toBe('from-rc');
     expect(runtime.HOST_PASSED_SENTINEL).toBe('passed');
     expect(runtime).not.toHaveProperty('HOST_LATE_SENTINEL');
+    expect(report.names).toEqual(expect.arrayContaining([{ name: 'RC_DEFINED', source: 'login-shell' }, { name: 'HOST_PASSED_SENTINEL', source: 'pass' }]));
+    expect(report.names.map(({ name }) => name)).not.toContain('HOST_LATE_SENTINEL');
   });
 
   it('the account shell is used when none is injected (zsh/bash hosts only)', async (ctx) => {

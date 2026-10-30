@@ -1,4 +1,4 @@
-import { composeRuntimeEnvironment } from '../../runtime/environment';
+import { composeRuntimeEnvironment, type RuntimeEnvironment } from '../../runtime/environment';
 import type { LoginShellSnapshot } from '../../login-shell-environment';
 
 /**
@@ -12,7 +12,12 @@ export const TEST_LOGIN_SHELL_SNAPSHOT: LoginShellSnapshot = Object.freeze({
   get env() { return process.env; },
 });
 
-/** The default runtime environment an adapter builds over {@link TEST_LOGIN_SHELL_SNAPSHOT}, from `live`. */
-export function testRuntimeEnv(live: Readonly<Record<string, string | undefined>> = process.env, platform?: NodeJS.Platform): Record<string, string> {
+/** The default runtime environment, with its report, an adapter builds over {@link TEST_LOGIN_SHELL_SNAPSHOT}, from `live`. */
+export function testRuntimeEnvironment(live: Readonly<Record<string, string | undefined>> = process.env, platform?: NodeJS.Platform): RuntimeEnvironment {
   return composeRuntimeEnvironment({ policy: {}, snapshot: { status: TEST_LOGIN_SHELL_SNAPSHOT.status, env: live }, live, ...(platform === undefined ? {} : { platform }) });
+}
+
+/** The `env` of {@link testRuntimeEnvironment}. */
+export function testRuntimeEnv(live: Readonly<Record<string, string | undefined>> = process.env, platform?: NodeJS.Platform): Record<string, string> {
+  return testRuntimeEnvironment(live, platform).env;
 }

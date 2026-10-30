@@ -61,6 +61,8 @@ export interface SupportBundle {
   health: DiagnosticsSnapshot['health'];
   /** Issue #392: the last `start`'s `environment-resolved` record — closed values and a shell basename only. */
   environment: DiagnosticsSnapshot['environment'];
+  /** #1095: each runtime environment's name and removal counts — never a name or value. */
+  runtimeEnvironment: DiagnosticsSnapshot['runtimeEnvironment'];
   journal: DiagnosticsSnapshot['journal'];
   quarantine: {
     status: DiagnosticsSnapshot['quarantine']['status'];
@@ -240,6 +242,7 @@ export async function createSupportBundle(
     lifecycle: projectLifecycle(snapshot.lifecycle),
     health: snapshot.health,
     environment: snapshot.environment,
+    runtimeEnvironment: snapshot.runtimeEnvironment,
     journal: snapshot.journal,
     quarantine: {
       status: snapshot.quarantine.status,
@@ -260,6 +263,7 @@ export async function createSupportBundle(
         'task, prompt, tool input/output and approval text',
         'raw audit and quarantine contents',
         'service log paths, file names and contents',
+        'runtime environment variable names and values',
       ],
       transformed: ['productName/productId/deviceId/runtimeId/quarantine filenames -> SHA-256', 'audit events -> closed kind/timestamp only'],
     },

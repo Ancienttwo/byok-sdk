@@ -14,6 +14,9 @@ import { mintDeviceAssertion, mintTaskAssertion } from '../device-assertion-sign
 import { toHttpBase } from '../url';
 import { HOST_MCP_TASK_CONTEXT_CAPABILITY } from '@byok-sdk/protocol';
 import type { DaemonScope } from './scope';
+import { RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult } from '../control-protocol';
+import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment';
+import type { RuntimeAdapter } from '../../types';
 
 /** The control-socket methods of one daemon (#926). */
 
@@ -24,6 +27,7 @@ export function createControlMethods(daemonScope: DaemonScope): ControlMethods {
       ...operationControlMethods(daemonScope),
       ...deviceAssertionControlMethods(daemonScope),
       ...taskAssertionControlMethods(daemonScope),
+      [RUNTIMES_ENVIRONMENT_METHOD]: () => describeRuntimeEnvironments(daemonScope.adapters),
       shutdown: (params) => {
         // Plan `device-assertion-broker` (codex F1): arm the minting latch
         // SYNCHRONOUSLY, as the very first statement of this handler, BEFORE
@@ -73,6 +77,24 @@ export function createControlMethods(daemonScope: DaemonScope): ControlMethods {
         }),
     },
   };
+}
+
+/**
+ * #1095: each adapter builds its environment now, under its own policy, and
+ * only the report leaves this process: names and sources, never a value.
+ */
+async function describeRuntimeEnvironments(adapters: readonly RuntimeAdapter[]): Promise<ControlRuntimesEnvironmentResult> {
+  const runtimes = await Promise.all(adapters.map(async (adapter): Promise<ControlRuntimeEnvironment> => {
+    const runtimeId = adapter.descriptor.id;
+    try {
+      const { report } = await adapter.runtimeEnvironment();
+      return { runtimeId, status: 'built', names: report.names, removed: report.removed };
+    } catch (error) {
+      if (error instanceof RuntimeEnvironmentUnavailableError) return { runtimeId, status: 'unavailable', code: error.reason };
+      return { runtimeId, status: 'failed' };
+    }
+  }));
+  return { runtimes };
 }
 
 /** Enrollment, input preparation, toolset, approval, team workspace and Agent message, result and memory methods. */

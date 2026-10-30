@@ -121,7 +121,8 @@ the Host sets does not reach an agent.
   `createDaemon`, or the same object as each adapter's `runtimeEnvironment`
   option with `createDaemonWithAdapters`, which rejects the `DaemonConfig`
   field. Custom adapters implement `runtimeEnvironment()`, normally with
-  `buildRuntimeEnvironment(policy)`.
+  `buildRuntimeEnvironment(policy)`, which returns `{ env, report }`. A caller
+  of `runtimeEnvironment()` reads `.env`.
 - `{ base: 'allowlist', allow: [...] }` is the strict mode: the platform
   baseline plus `allow`, from the live environment, with no login-shell capture.
 - If the capture fails (an rc that exits non-zero, hangs past 10 s or prints
@@ -131,6 +132,11 @@ the Host sets does not reach an agent.
   the rc and restart the daemon.
 - Windows has no login shell: runtimes get the platform baseline names of the
   live session (`windows-session`). List any other name in `pass`.
+- `byok-agent doctor` lists, per runtime, the names the running daemon builds
+  with their source (`login-shell`, `windows-session`, `allowlist`, `pass`,
+  `sdk`) and the names it removed (`deny`, `conflict`), never values. Offline
+  it shows `runtime-environment: unknown (daemon offline)`.
+  `byok-agent config check` shows the policy only.
 
 ## Configuration
 

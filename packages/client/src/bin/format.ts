@@ -2,6 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
 import { parseDaemonLifecycle, type DaemonHaltReason, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
+import type { DoctorRuntimeEnvironment } from '../diagnostics/diagnostics';
 import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types';
 import type { RuntimeObservation } from '../runtime-detection';
@@ -267,6 +268,30 @@ export function formatServiceEnvironment(status: ServiceEnvironmentStatus): stri
     case 'unavailable':
       return `unavailable code=${status.code}`;
   }
+}
+
+/**
+ * `doctor`'s runtime environment lines (#1095): per runtime, every name with
+ * its source and every removed name with its rule. Names only, never values.
+ */
+export function formatRuntimeEnvironmentLines(result: DoctorRuntimeEnvironment): string[] {
+  if (result.status === 'unknown') {
+    return [`runtime-environment: unknown (${result.reason === 'daemon-offline' ? 'daemon offline' : 'the daemon did not report it'})`];
+  }
+  if (result.runtimes.length === 0) return ['runtime-environment: (no runtimes)'];
+  const lines: string[] = [];
+  for (const runtime of result.runtimes) {
+    if (runtime.status === 'unavailable') {
+      lines.push(`runtime-environment ${runtime.runtimeId}: unavailable (${runtime.code})`);
+    } else if (runtime.status === 'failed') {
+      lines.push(`runtime-environment ${runtime.runtimeId}: failed`);
+    } else {
+      lines.push(`runtime-environment ${runtime.runtimeId}: ${runtime.names.length} names, ${runtime.removed.length} removed`);
+      for (const { name, source } of runtime.names) lines.push(`  ${name} (${source})`);
+      for (const { name, rule } of runtime.removed) lines.push(`  removed ${name} (${rule})`);
+    }
+  }
+  return lines;
 }
 
 export function formatStatusLines(view: StatusView): string[] {

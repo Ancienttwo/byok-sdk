@@ -2,7 +2,7 @@ import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../type
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import type { ServiceEnvironmentRecord } from '../login-shell-environment';
+import type { ServiceEnvironmentRecord, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 
@@ -84,6 +84,20 @@ export interface DiagnosticsSnapshot {
     files: Array<{ kind: 'daemon' | 'service-manager'; sizeBytes: number }>;
     truncated: boolean;
   };
+  /**
+   * #1095: the running daemon's runtime environments as counts. Names stay
+   * out of the snapshot and the support bundle: only `doctor` prints them.
+   */
+  runtimeEnvironment:
+    | { status: 'unknown'; reason: 'daemon-offline' | 'request-failed' }
+    | {
+        status: 'known';
+        runtimes: Array<
+          | { idHash: string; status: 'built'; names: number; removed: number }
+          | { idHash: string; status: 'unavailable'; code: ServiceEnvironmentUnavailableCode }
+          | { idHash: string; status: 'failed' }
+        >;
+      };
   checks: DiagnosticCheck[];
 }
 

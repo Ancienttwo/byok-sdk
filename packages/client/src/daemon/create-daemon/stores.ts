@@ -65,7 +65,7 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
     memoryAvailable: () => agentMemoryMcpEnabled && isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
     toolsetRegistry,
-    ...(piAdapter === undefined ? {} : { runtimeEnv: () => piAdapter.runtimeEnvironment() }),
+    ...(piAdapter === undefined ? {} : { runtimeEnv: async () => (await piAdapter.runtimeEnvironment()).env }),
     ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),
   });
 

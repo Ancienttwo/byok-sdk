@@ -532,7 +532,7 @@ export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/
 export { applyLoginShellEnvironment } from './lifecycle/service-environment';
 export { serviceEnvironmentStatus } from './login-shell-environment';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
-export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from './runtime/environment';
+export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from './runtime/environment';
 export type { RuntimeObservation } from './runtime-detection';
 export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 

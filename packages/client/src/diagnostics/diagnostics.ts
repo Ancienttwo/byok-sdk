@@ -27,7 +27,9 @@ import { connectControlClient } from '../bin/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../bin/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { defaultRuntimeAdapters, probeRuntimes } from '../bin/runtime-probe';
-import type { ControlStatusResult } from '../daemon/control-protocol';
+import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult, type ControlStatusResult } from '../daemon/control-protocol';
+import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
+import type { RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment';
 import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal';
 import { isSqliteAvailable, loadSqliteModule } from '../daemon/journal/sqlite-support';
 import {
@@ -689,11 +691,78 @@ function parseClockSkew(value: unknown): Extract<DiagnosticsSnapshot['clockSkew'
   return { status: 'measured', deviceAheadMs, uncertaintyMs, observedAt };
 }
 
+const RUNTIME_ENVIRONMENT_SOURCES = new Set<string>(['login-shell', 'windows-session', 'allowlist', 'pass', 'sdk'] satisfies RuntimeEnvironmentSource[]);
+const RUNTIME_ENVIRONMENT_REMOVAL_RULES = new Set<string>(['deny', 'conflict'] satisfies RuntimeEnvironmentRemovalRule[]);
+const UNAVAILABLE_ENVIRONMENT_CODES = new Set<string>(SERVICE_ENVIRONMENT_UNAVAILABLE_CODES);
+
+function isEnvironmentName(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && !/[=\0]/u.test(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).every((key) => keys.includes(key));
+}
+
+/** A control peer's `runtimes.environment` result is untrusted input: anything but the exact shape is `undefined`. */
+function parseRuntimesEnvironmentResult(value: unknown): ControlRuntimesEnvironmentResult | undefined {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['runtimes']) || !Array.isArray(value.runtimes)) return undefined;
+  const runtimes: ControlRuntimeEnvironment[] = [];
+  for (const entry of value.runtimes) {
+    if (!isRecord(entry) || typeof entry.runtimeId !== 'string' || entry.runtimeId.length === 0) return undefined;
+    const { runtimeId } = entry;
+    if (entry.status === 'failed' && hasOnlyKeys(entry, ['runtimeId', 'status'])) {
+      runtimes.push({ runtimeId, status: 'failed' });
+    } else if (entry.status === 'unavailable' && hasOnlyKeys(entry, ['runtimeId', 'status', 'code']) && typeof entry.code === 'string' && UNAVAILABLE_ENVIRONMENT_CODES.has(entry.code)) {
+      runtimes.push({ runtimeId, status: 'unavailable', code: entry.code as ServiceEnvironmentUnavailableCode });
+    } else if (entry.status === 'built' && hasOnlyKeys(entry, ['runtimeId', 'status', 'names', 'removed']) && Array.isArray(entry.names) && Array.isArray(entry.removed)) {
+      const names: { name: string; source: RuntimeEnvironmentSource }[] = [];
+      for (const item of entry.names) {
+        if (!isRecord(item) || !hasOnlyKeys(item, ['name', 'source']) || !isEnvironmentName(item.name) || typeof item.source !== 'string' || !RUNTIME_ENVIRONMENT_SOURCES.has(item.source)) return undefined;
+        names.push({ name: item.name, source: item.source as RuntimeEnvironmentSource });
+      }
+      const removed: { name: string; rule: RuntimeEnvironmentRemovalRule }[] = [];
+      for (const item of entry.removed) {
+        if (!isRecord(item) || !hasOnlyKeys(item, ['name', 'rule']) || !isEnvironmentName(item.name) || typeof item.rule !== 'string' || !RUNTIME_ENVIRONMENT_REMOVAL_RULES.has(item.rule)) return undefined;
+        removed.push({ name: item.name, rule: item.rule as RuntimeEnvironmentRemovalRule });
+      }
+      runtimes.push({ runtimeId, status: 'built', names, removed });
+    } else {
+      return undefined;
+    }
+  }
+  return { runtimes };
+}
+
 export async function collectDiagnostics(
   config: DaemonConfig,
   storeDir: string,
   options: CollectDiagnosticsOptions = {},
 ): Promise<DiagnosticsSnapshot> {
+  return (await collectDoctorDiagnostics(config, storeDir, options)).snapshot;
+}
+
+/** The running daemon's runtime environments with their names: `doctor`'s view of `DiagnosticsSnapshot.runtimeEnvironment`. */
+export type DoctorRuntimeEnvironment =
+  | Extract<DiagnosticsSnapshot['runtimeEnvironment'], { status: 'unknown' }>
+  | ({ status: 'known' } & ControlRuntimesEnvironmentResult);
+
+/** {@link collectDiagnostics} plus the runtime environment names it counts, read on the same control connection. */
+export interface DoctorDiagnostics {
+  snapshot: DiagnosticsSnapshot;
+  runtimeEnvironment: DoctorRuntimeEnvironment;
+}
+
+/**
+ * `byok-agent doctor`'s read: the snapshot and, from the same daemon, the
+ * names it counts.
+ *
+ * @internal
+ */
+export async function collectDoctorDiagnostics(
+  config: DaemonConfig,
+  storeDir: string,
+  options: CollectDiagnosticsOptions = {},
+): Promise<DoctorDiagnostics> {
   const resolvedStoreDir = path.resolve(storeDir);
   const connectControl = options.connectControl ?? connectControlClient;
   const [device, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment, serviceLogs] = await Promise.all([
@@ -713,6 +782,8 @@ export async function collectDiagnostics(
   let environment: DiagnosticsSnapshot['environment'] = { status: 'unknown' };
   let liveLifecycle: ReturnType<typeof parseDaemonLifecycle>;
   let clockSkew: DiagnosticsSnapshot['clockSkew'] = { status: 'unknown', reason: 'daemon-offline' };
+  let liveRuntimeEnvironment: ControlRuntimesEnvironmentResult | undefined;
+  let runtimeEnvironmentUnknown: 'daemon-offline' | 'request-failed' = 'daemon-offline';
   if (!controlConnection.ok) {
     control = { status: 'offline', reason: 'daemon control socket unavailable' };
   } else {
@@ -739,6 +810,9 @@ export async function collectDiagnostics(
         storage: live.storage,
       };
       clockSkew = parseClockSkew(live.clockSkew) ?? { status: 'unknown', reason: 'not-observed' };
+      liveRuntimeEnvironment = await controlConnection.client.request<unknown>(RUNTIMES_ENVIRONMENT_METHOD)
+        .then(parseRuntimesEnvironmentResult, () => undefined);
+      if (liveRuntimeEnvironment === undefined) runtimeEnvironmentUnknown = 'request-failed';
     } catch {
       control = { status: 'offline', reason: 'daemon status request failed' };
     } finally {
@@ -747,6 +821,8 @@ export async function collectDiagnostics(
   }
 
   if (control.status === 'offline') {
+    liveRuntimeEnvironment = undefined;
+    runtimeEnvironmentUnknown = 'daemon-offline';
     observations = await probeRuntimes(options.adapters ?? defaultRuntimeAdapters(config), { timeoutMs: options.runtimeProbeTimeoutMs });
     runtimeSource = 'local-shell';
     environment = lastEnvironment ?? { status: 'unknown' };
@@ -785,6 +861,17 @@ export async function collectDiagnostics(
     control,
     lifecycle,
     clockSkew,
+    runtimeEnvironment: liveRuntimeEnvironment === undefined
+      ? { status: 'unknown', reason: runtimeEnvironmentUnknown }
+      : {
+          status: 'known',
+          runtimes: liveRuntimeEnvironment.runtimes.map((runtime) => {
+            const idHash = stableIdentifierHash(runtime.runtimeId);
+            if (runtime.status === 'built') return { idHash, status: 'built', names: runtime.names.length, removed: runtime.removed.length };
+            if (runtime.status === 'unavailable') return { idHash, status: 'unavailable', code: runtime.code };
+            return { idHash, status: 'failed' };
+          }),
+        },
     health,
     journal,
     quarantine,
@@ -797,7 +884,12 @@ export async function collectDiagnostics(
       truncated: serviceLogs.truncated,
     },
   };
-  return { ...withoutChecks, checks: checksFor(withoutChecks) };
+  return {
+    snapshot: { ...withoutChecks, checks: checksFor(withoutChecks) },
+    runtimeEnvironment: liveRuntimeEnvironment === undefined
+      ? { status: 'unknown', reason: runtimeEnvironmentUnknown }
+      : { status: 'known', runtimes: liveRuntimeEnvironment.runtimes },
+  };
 }
 
 export function stableIdentifierHash(value: string): string {

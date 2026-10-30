@@ -1,4 +1,5 @@
 import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment';
+import type { RuntimeEnvironment } from './runtime/environment';
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { ToolAuthorizationGate } from './tool-authorization';
@@ -580,12 +581,13 @@ export interface RuntimeAdapter {
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
   /**
    * The environment every child process of this runtime's tasks receives
-   * (#1095): a fresh object, built under the adapter's own
-   * `RuntimeEnvironmentPolicy` (`buildRuntimeEnvironment`). Rejects with
-   * `RuntimeEnvironmentUnavailableError` when that policy has no environment
-   * to build from; the daemon then refuses the runtime.
+   * (#1095), built under the adapter's own `RuntimeEnvironmentPolicy`
+   * (`buildRuntimeEnvironment`): a fresh `env` and, from the same pass, the
+   * `report` of its names and sources that `byok-agent doctor` shows. Rejects
+   * with `RuntimeEnvironmentUnavailableError` when that policy has no
+   * environment to build from; the daemon then refuses the runtime.
    */
-  runtimeEnvironment(): Promise<Record<string, string>>;
+  runtimeEnvironment(): Promise<RuntimeEnvironment>;
 }
 
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */

@@ -9,7 +9,8 @@ import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../login-shell-environment';
+import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
+import type { RuntimeEnvironmentReport } from '../runtime/environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
@@ -411,6 +412,24 @@ export interface TaskQueueWatermark {
  */
 export interface ControlStorageStatus extends RetentionSnapshot {
   readonly budget?: { readonly budgetBytes: number; readonly pressureState: StoragePressureState };
+}
+
+/** The `runtimes.environment` method (#1095): every adapter's runtime environment names, built on demand. */
+export const RUNTIMES_ENVIRONMENT_METHOD = 'runtimes.environment';
+
+/**
+ * One adapter's entry in {@link ControlRuntimesEnvironmentResult}: the report
+ * of a build (names and sources, never values), the login-shell capture's
+ * failure code, or `failed` when the adapter's build threw anything else.
+ */
+export type ControlRuntimeEnvironment =
+  | ({ readonly runtimeId: string; readonly status: 'built' } & RuntimeEnvironmentReport)
+  | { readonly runtimeId: string; readonly status: 'unavailable'; readonly code: ServiceEnvironmentUnavailableCode }
+  | { readonly runtimeId: string; readonly status: 'failed' };
+
+/** Result shape for the `runtimes.environment` method, in the daemon's adapter order. */
+export interface ControlRuntimesEnvironmentResult {
+  readonly runtimes: readonly ControlRuntimeEnvironment[];
 }
 
 /** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `bin/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */

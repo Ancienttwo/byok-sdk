@@ -1,15 +1,15 @@
 import type { DaemonConfig } from '../../index';
 import {
-  collectDiagnostics,
+  collectDoctorDiagnostics,
   quarantineCorruptOperationalHealth,
   type CollectDiagnosticsOptions,
-  type DiagnosticsSnapshot,
+  type DoctorDiagnostics,
   type OperationalHealthFixResult,
 } from '../../diagnostics/diagnostics';
 import { resolveStoreDir } from '../config';
 import { serviceLogDir } from '../../daemon/host-layout';
 import type { ServiceEnvironmentRecord } from '../../login-shell-environment';
-import { formatServiceEnvironment } from '../format';
+import { formatRuntimeEnvironmentLines, formatServiceEnvironment } from '../format';
 import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from '../../diagnostics/device-doctor';
 
 export interface DoctorOptions extends CollectDiagnosticsOptions {
@@ -36,12 +36,15 @@ export class DoctorDaemonRunningError extends Error {
   }
 }
 
-function formatDoctorLines(snapshot: DiagnosticsSnapshot, logDir: string, environment: ServiceEnvironmentRecord | undefined, fixResult?: OperationalHealthFixResult): string[] {
+function formatDoctorLines(diagnostics: DoctorDiagnostics, logDir: string, environment: ServiceEnvironmentRecord | undefined, fixResult?: OperationalHealthFixResult): string[] {
+  const { snapshot } = diagnostics;
   const lines = [
     `doctor: productHash=${snapshot.product.nameHash} generatedAt=${snapshot.generatedAt}`,
     `system: node=${snapshot.system.node} platform=${snapshot.system.platform} arch=${snapshot.system.arch} sqlite=${snapshot.system.sqliteAvailable ? 'available' : 'unavailable'}`,
     // Issue #392: the environment the last `start` resolved (closed values only).
     environment ? `environment: ${formatServiceEnvironment(environment.status)} at=${environment.ts}` : 'environment: unknown',
+    // #1095: the running daemon's runtime environment names and sources, never values.
+    ...formatRuntimeEnvironmentLines(diagnostics.runtimeEnvironment),
   ];
   for (const check of snapshot.checks) lines.push(`check ${check.id}: ${check.status} (${check.summary})`);
   // #1097: where the daemon log and the service manager's redirect files are, and how large.
@@ -103,19 +106,20 @@ export async function runDoctorCommand(config: DaemonConfig, options: DoctorOpti
   }
   if (options.fix && !options.confirmed) throw new DoctorConfirmationRequiredError();
   const storeDir = resolveStoreDir(config);
-  let snapshot = await collectDiagnostics(config, storeDir, options);
+  let diagnostics = await collectDoctorDiagnostics(config, storeDir, options);
   let fixResult: OperationalHealthFixResult | undefined;
   if (options.fix) {
-    if (snapshot.control.status === 'online') throw new DoctorDaemonRunningError();
+    if (diagnostics.snapshot.control.status === 'online') throw new DoctorDaemonRunningError();
     fixResult = await quarantineCorruptOperationalHealth(storeDir, { clock: options.clock });
-    snapshot = await collectDiagnostics(config, storeDir, options);
+    diagnostics = await collectDoctorDiagnostics(config, storeDir, options);
   }
+  const { snapshot } = diagnostics;
   const log = options.log ?? ((line: string) => console.log(line));
   const logDir = serviceLogDir(storeDir);
   const environment = snapshot.environment.status === 'unknown' ? undefined : snapshot.environment;
   if (options.json) {
-    log(JSON.stringify({ diagnostics: snapshot, logDir, environment: environment ?? { status: 'unknown' }, ...(fixResult ? { fix: fixResult } : {}) }, null, 2));
+    log(JSON.stringify({ diagnostics: snapshot, logDir, environment: environment ?? { status: 'unknown' }, runtimeEnvironment: diagnostics.runtimeEnvironment, ...(fixResult ? { fix: fixResult } : {}) }, null, 2));
     return;
   }
-  for (const line of formatDoctorLines(snapshot, logDir, environment, fixResult)) log(line);
+  for (const line of formatDoctorLines(diagnostics, logDir, environment, fixResult)) log(line);
 }
