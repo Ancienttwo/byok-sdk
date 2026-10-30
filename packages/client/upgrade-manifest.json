@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "07292e219f2c5dfe69ed473d220c9fe17aa3ba8873262985f4043210a1601ff4"
+    "snapshotSha256": "5780377a331e8e11110f9eda1c040664c1dbe1c6d047a8a5bbbd61a7b915ac45"
   },
   "configFields": {
     "status": "tracked",
@@ -698,6 +698,17 @@
         "export:@byok-sdk/client#releaseServiceLifecycleOwner",
         "export:@byok-sdk/client#serviceExitDisposition"
       ]
+    },
+    {
+      "id": "config-file-static-tool-authorization",
+      "impact": "additive",
+      "summary": "A byok-agent config file can set toolAuthorization statically ({ default, byRuntime }) and the isolation options of the adapters createDaemon builds (runtimes.pi/claude/codex). The static form becomes the one per-offer resolver at construction; an unknown byRuntime key, or auto on a runtime without toolAuthorizationAuto, is a DaemonConfigInvalidError. An embedded Host may still pass a function. createDaemonWithAdapters rejects runtimes. The effective report gains toolAuthorization mode static with the resolved per-runtime modes.",
+      "migration": "docs/device-setup.md#runtime-isolation-and-tool-authorization",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#DaemonEffectiveToolAuthorization",
+        "export:@byok-sdk/client#StaticToolAuthorization"
+      ]
     }
   ],
   "changes": [
@@ -918,6 +929,12 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "config:runtimes",
+      "change": "added",
+      "after": "optional schema-sha256=caecf4e4b22e42fd",
+      "entry": "config-file-static-tool-authorization"
+    },
+    {
       "item": "config:sdkHelperHost",
       "change": "added",
       "after": "optional schema-sha256=54a73cacf0ba88bb",
@@ -962,7 +979,7 @@
     {
       "item": "config:toolAuthorization",
       "change": "added",
-      "after": "optional embedded-only schema-sha256=421bda8258876a6f",
+      "after": "optional schema-sha256=b43d13279fec8ccd",
       "entry": "daemon-config-schema"
     },
     {
@@ -1173,6 +1190,11 @@
       "item": "export:@byok-sdk/client#DaemonEffectiveRuntime",
       "change": "added",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveToolAuthorization",
+      "change": "added",
+      "entry": "config-file-static-tool-authorization"
     },
     {
       "item": "export:@byok-sdk/client#DaemonLog",
@@ -1468,6 +1490,11 @@
       "item": "export:@byok-sdk/client#ServiceUnitState",
       "change": "added",
       "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#StaticToolAuthorization",
+      "change": "added",
+      "entry": "config-file-static-tool-authorization"
     },
     {
       "item": "export:@byok-sdk/client#agentServiceDefinition",

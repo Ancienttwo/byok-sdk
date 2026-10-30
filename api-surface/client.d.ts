@@ -3343,12 +3343,14 @@ export interface DaemonConfigCheck {
  * Validates a `DaemonConfig` without constructing a daemon and, when it
  * would construct, reports its effective values (#1094). Literal problems
  * come from {@link validateDaemonConfig}; a value daemon construction would
- * refuse (a range, a cross-field rule, a scratch root past the socket budget)
- * is an `invalid_value` error. Reads the filesystem (helper assets, store
+ * refuse (a range, a cross-field rule, a scratch root past the socket budget,
+ * a static tool-authorization mode the adapters cannot run) is an
+ * `invalid_value` error. Reads the filesystem (helper assets, store
  * path canonicalization) but writes nothing and starts no process.
  */
 export declare function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOptions): DaemonConfigCheck;
 // ==== @byok-sdk/client dist/daemon/config-schema/effective.d.ts ====
+import { type ToolAuthorizationMode } from '../../tool-authorization';
 import type { RuntimeAdapter } from '../../types';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon';
 import type { DaemonConfigIssue } from './validate';
@@ -3436,13 +3438,25 @@ export interface DaemonEffectiveConfig {
     };
     readonly mcpServers: readonly DaemonEffectiveMcpServer[];
     readonly runtimes: readonly DaemonEffectiveRuntime[];
-    readonly toolAuthorization: {
-        /** `all`: no resolver, every task runs `all` (the only mode a config file can express). `host-resolver`: `DaemonConfig.toolAuthorization` decides per offer. */
-        readonly mode: 'all' | 'host-resolver';
-        /** Who may approve a `tool-authorization` approval: `host-only` (default) or `allow` (the control socket too). */
-        readonly localToolApproval: 'host-only' | 'allow';
-    };
+    readonly toolAuthorization: DaemonEffectiveToolAuthorization;
 }
+/**
+ * How this daemon decides each task's tool-authorization mode.
+ *
+ * - `all`: no `DaemonConfig.toolAuthorization`; every task runs `all`.
+ * - `static`: a static policy; `byRuntime` holds the mode of every runtime of
+ *   this daemon (its `byRuntime` entry, else `default`).
+ * - `host-resolver`: a Host function decides per offer.
+ */
+export type DaemonEffectiveToolAuthorization = ({
+    readonly mode: 'all' | 'host-resolver';
+} | {
+    readonly mode: 'static';
+    readonly byRuntime: Readonly<Record<string, ToolAuthorizationMode>>;
+}) & {
+    /** Who may approve a `tool-authorization` approval: `host-only` (default) or `allow` (the control socket too). */
+    readonly localToolApproval: 'host-only' | 'allow';
+};
 export interface EffectiveDaemonConfigInput {
     readonly config: DaemonConfig;
     readonly warnings: readonly DaemonConfigIssue[];
@@ -3487,7 +3501,7 @@ export type { DaemonConfigIssue, DaemonConfigIssueCode, DaemonConfigSource, Daem
 export { checkDaemonConfig } from './check';
 export type { DaemonConfigCheck, DaemonConfigCheckOptions } from './check';
 export { DaemonConfigInvalidError } from './errors';
-export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonMemoryHelperResolution } from './effective';
+export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonEffectiveToolAuthorization, DaemonMemoryHelperResolution } from './effective';
 // ==== @byok-sdk/client dist/daemon/config-schema/removed-fields.d.ts ====
 /**
  * `DaemonConfig` fields that no longer exist (#1094). The one table both the
@@ -3532,6 +3546,11 @@ export interface DaemonConfigJsonSchema {
     /** Always `{}` here: set only on a surface-restricted property, so any value fails a JSON Schema validator. */
     readonly not?: Readonly<Record<string, never>>;
     readonly 'x-byok-surface'?: DaemonConfigSurface;
+    /**
+     * `function`: an embedded Host may pass a function instead of this object
+     * schema (e.g. `toolAuthorization`); a config file must set the object.
+     */
+    readonly 'x-byok-embeddedAlternative'?: 'function';
     readonly 'x-byok-schemaVersion'?: number;
     readonly 'x-byok-removedFields'?: readonly {
         readonly path: string;
@@ -3548,7 +3567,9 @@ import { type RemovedDaemonConfigField } from './removed-fields';
  * Where a `DaemonConfig` comes from (#1094).
  *
  * - `cli`: a `byok-agent` JSON config file. Embedded-only fields (functions,
- *   transports) and the distribution-owned `localAgentRelease` are errors.
+ *   transports), the function form of a field that also has an object form
+ *   (`toolAuthorization`) and the distribution-owned `localAgentRelease` are
+ *   errors.
  * - `embedded`: an object a Host passes to `createDaemon` or
  *   `createDaemonWithAdapters`. Embedded-only fields are allowed and checked
  *   by daemon construction.
@@ -4649,7 +4670,9 @@ import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolse
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
-import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
+import { type CodexAdapterOptions, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
+import type { ClaudeAdapterOptions } from '../adapters/claude/claude-adapter';
+import type { PiAdapterOptions } from '../adapters/pi/pi-adapter';
 import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
 import { type LocalToolApprovalPolicy } from './approvals';
 import { type DaemonLifecycle } from './daemon-lifecycle';
@@ -4670,7 +4693,7 @@ import { type AgentMemoryExportOptions } from './agent-memory-export';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
 import { type AgentContentReadRoot } from './agent-content-read';
-import type { ToolAuthorizationResolver } from '../tool-authorization';
+import type { StaticToolAuthorization, ToolAuthorizationResolver } from '../tool-authorization';
 import { type DaemonEffectiveConfig } from './config-schema/effective';
 import type { AgentMemoryExport, AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 /**
@@ -4697,11 +4720,19 @@ export interface DaemonConfig {
      * Per-task tool authorization, decided by this Host for every runtime:
      * `all` (default) never blocks and emits a `tool-reminder` event for each
      * high-risk call; `auto` asks the user through the task's approval path
-     * before a high-risk call runs and is declined before claim on a runtime
-     * without `toolAuthorizationAuto`. Called once per offer; a throw or any
-     * other value declines the offer. Not an OS sandbox or file scope.
+     * before a high-risk call runs. Not an OS sandbox or file scope.
+     *
+     * A static policy (`{ default, byRuntime }`, the only form a config file
+     * can set) gives each runtime a fixed mode: its `byRuntime` entry, else
+     * `default`. Daemon construction refuses a `byRuntime` key that is not a
+     * runtime of this daemon, and `auto` for a runtime without
+     * `toolAuthorizationAuto`.
+     *
+     * An embedded Host may pass a function instead. It is called once per
+     * offer; a throw or any other value declines the offer, and `auto` on a
+     * runtime without `toolAuthorizationAuto` declines it before claim.
      */
-    toolAuthorization?: ToolAuthorizationResolver;
+    toolAuthorization?: ToolAuthorizationResolver | StaticToolAuthorization;
     /**
      * Who may approve a `tool-authorization` approval (an `auto` high-risk tool
      * call). Absent (default): only the Host — a wire `task.approve` or an
@@ -4823,6 +4854,31 @@ export interface DaemonConfig {
      * unchanged from M1/M2.
      */
     runtimeAllowlist?: string[];
+    /**
+     * Isolation options of the runtime adapters `createDaemon` builds (#1094),
+     * passed to each adapter's constructor; an unset option keeps the
+     * adapter's default, under which a runtime keeps the user's own context,
+     * sessions and MCP servers. Which runtimes are built stays
+     * `runtimeAllowlist`, and the Codex sandbox stays `codexSandbox`.
+     * `createDaemonWithAdapters` rejects this key, even when undefined:
+     * configure each injected adapter directly.
+     */
+    runtimes?: {
+        pi?: {
+            /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
+            agentUserContext?: PiAdapterOptions['agentUserContext'];
+        };
+        claude?: {
+            /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
+            agentUserContext?: ClaudeAdapterOptions['agentUserContext'];
+            /** `ClaudeAdapterOptions.agentSessionPersistence`: `disabled` does not save an Agent task's session transcript, so it cannot be resumed. Default `enabled`. */
+            agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
+        };
+        codex?: {
+            /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
+            agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
+        };
+    };
     /**
      * The environment every runtime `createDaemon` builds gives its children
      * (#1095): by default the user's login-shell snapshot, so a variable the
@@ -10853,7 +10909,7 @@ export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHel
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
-export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonMemoryHelperResolution, } from './daemon/config-schema';
+export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema';
 export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, HostLayoutInputError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
 export { resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout';
 /** #1101: approvals carry their kind; the control socket cannot approve a tool authorization by default. */
@@ -11013,7 +11069,7 @@ export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets';
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
-export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, } from './tool-authorization';
+export type { StaticToolAuthorization, ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, } from './tool-authorization';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
@@ -14199,6 +14255,19 @@ export interface ToolAuthorizationTask {
     readonly agentRef?: AgentRef;
 }
 export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationMode;
+/**
+ * A tool-authorization policy that a config file can express (#1094):
+ * `byRuntime` sets the mode of a runtime by its id, and `default` applies to
+ * every other runtime.
+ */
+export interface StaticToolAuthorization {
+    readonly default: ToolAuthorizationMode;
+    readonly byRuntime?: Readonly<Record<string, ToolAuthorizationMode>>;
+}
+/** The mode `policy` gives `runtimeId`: its own `byRuntime` entry, else `default`. */
+export declare function staticToolAuthorizationMode(policy: StaticToolAuthorization, runtimeId: string): ToolAuthorizationMode;
+/** The resolver of a static policy, over a copy taken now so later edits to `policy` cannot change it. */
+export declare function staticToolAuthorizationResolver(policy: StaticToolAuthorization): ToolAuthorizationResolver;
 export declare function parseToolAuthorizationMode(value: unknown): ToolAuthorizationMode;
 /** One native tool call, before execution. `input` is the runtime's own argument object. */
 export interface ToolCall {
