@@ -64,7 +64,7 @@ assert.equal(manifest.devDependencies?.['pi-subagents'], undefined);
 // The MCP client this package's own core is built on. `pi-mcp-adapter` is
 // retired: the SDK owns its MCP connection, observation and tool projection
 // (`src/mcp/`), so there is no second MCP authority in the graph to pin.
-assert.equal(manifest.dependencies?.['@modelcontextprotocol/client'], '2.0.0');
+assert.equal(manifest.dependencies?.['@modelcontextprotocol/client'], '2.3.1');
 // The ACP wire library behind the private `#byok-acp-runtime` entry (vendored OAR shared/acp).
 assert.equal(manifest.dependencies?.['@agentclientprotocol/sdk'], '1.4.0');
 assert.equal(manifest.dependencies?.['pi-mcp-adapter'], undefined);

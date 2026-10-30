@@ -1,6 +1,6 @@
 // A real stdio MCP server built on `src/mcp-server`, for the official-client
 // interop suite. It is a separate process on purpose: the thing under test is
-// what `@modelcontextprotocol/client@2.0.0` observes across a real pipe when it
+// what the pinned `@modelcontextprotocol/client` observes across a real pipe when it
 // spawns a server, negotiates a version, lists, calls, cancels, pings and
 // closes.
 //

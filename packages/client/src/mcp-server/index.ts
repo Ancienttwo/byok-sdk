@@ -48,7 +48,7 @@
  *
  * `MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS` is `['2025-11-25', '2025-06-18',
  * '2024-11-05']` and is FINAL. It is the intersection of the revisions proven
- * to interoperate with `@modelcontextprotocol/client@2.0.0` and the revisions
+ * to interoperate with the pinned `@modelcontextprotocol/client` and the revisions
  * this core actually implements. Two proven-interoperable revisions are
  * deliberately excluded:
  *
