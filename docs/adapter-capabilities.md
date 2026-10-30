@@ -453,19 +453,35 @@ session, so Hermes needs no option.
 An Agent task runs in the Agent home, but a runtime may save the session
 record elsewhere. Deleting the Agent home does not remove such a record. The
 SDK does not delete runtime records itself: their paths follow each runtime's
-own rules. Only Claude has an SDK option; Codex, Grok and ordinary Pi have
-none in this release.
+own rules. Whether the SDK can turn a runtime's record off is the
+`isolation.sessionPersistence` row of the [capability matrix](#capability-matrix);
+for Claude it is `agentSessionPersistence: 'disabled'`, below.
 
-| Runtime | Where an Agent task's session record goes | Can the SDK turn it off? |
-| --- | --- | --- |
-| Claude | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session>.jsonl`, outside the Agent home | Yes: `agentSessionPersistence: 'disabled'`, below |
-| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`. The adapter does not set `CODEX_HOME`, so normally under `~/.codex` | No. The 0.164.0 app-server schema has `ephemeral` on `thread/start` (a thread that "should not be materialized on disk"), and `codex exec --help` lists `--ephemeral`. The [launch](../packages/client/vendor/oar/51b83c9/runtimes/codex/open.ts) does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread leaves the other `CODEX_HOME` files alone |
-| Grok | `$GROK_HOME/sessions/<encoded cwd>/<session id>/`, and the `sessions/session_search.sqlite` index. The adapter does not set `GROK_HOME`, so normally under `~/.grok` | No. `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta` keys of its agent-mode guide have none. From the 1.0.62 guide and local folders; not probed with an SDK session or on 1.0.52 |
-| Pi, ordinary, Pi login | The settings `sessionDir`, else `<agent dir>/sessions/--<encoded cwd>--/<time>_<id>.jsonl`. The agent directory is `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` | No. Pi 1.4.0 has `SessionManager.inMemory` and the CLI flag `--no-session` ("Don't save session (ephemeral)"). The SDK [host](../packages/client/src/bin/pi-session-runtime.ts) opens a saved session and accepts no such flag |
-| Pi, ordinary, Keys profile | `DaemonConfig.piByokLauncher.sessionDir/<time>_<id>.jsonl`, one folder for every execution, which the Host chooses | No, as above |
-| Pi, prepared | None: the session is in memory | Already off |
-| Pi, durable | `durable-<taskId>.sqlite` replica in the daemon store, disjoint from the Agent home, removed after its retention TTL | No: the lane recovers from the replica |
-| Hermes | `state.db` and `sessions/` in the execution's profile, `<home>/profiles/byok-<id>/`, removed when the execution closes, or by the 15-minute sweep after a crash | Not needed |
+| Runtime | Where an Agent task's session record goes |
+| --- | --- |
+| Claude | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session>.jsonl`, outside the Agent home |
+| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`. The adapter does not set `CODEX_HOME`, so normally under `~/.codex` |
+| Grok | `$GROK_HOME/sessions/<encoded cwd>/<session id>/`, and the `sessions/session_search.sqlite` index. The adapter does not set `GROK_HOME`, so normally under `~/.grok` |
+| Pi, ordinary, Pi login | The settings `sessionDir`, else `<agent dir>/sessions/--<encoded cwd>--/<time>_<id>.jsonl`. The agent directory is `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` |
+| Pi, ordinary, Keys profile | `DaemonConfig.piByokLauncher.sessionDir/<time>_<id>.jsonl`, one folder for every execution, which the Host chooses |
+| Pi, prepared | None: the session is in memory |
+| Pi, durable | `durable-<taskId>.sqlite` replica in the daemon store, disjoint from the Agent home, removed after its retention TTL; the lane recovers from it |
+| Hermes | `state.db` and `sessions/` in the execution's profile, `<home>/profiles/byok-<id>/`, removed when the execution closes, or by the 15-minute sweep after a crash |
+
+What the upstream runtimes offer that the SDK does not use:
+
+- Codex: the 0.164.0 app-server schema has `ephemeral` on `thread/start` (a
+  thread that "should not be materialized on disk"), and `codex exec --help`
+  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/51b83c9/runtimes/codex/open.ts)
+  does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread
+  leaves the other `CODEX_HOME` files alone.
+- Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
+  keys of its agent-mode guide have none. From the 1.0.62 guide and local
+  folders; not probed with an SDK session or on 1.0.52.
+- Pi: Pi 1.4.0 has `SessionManager.inMemory` and the CLI flag `--no-session`
+  ("Don't save session (ephemeral)"). The SDK
+  [host](../packages/client/src/bin/pi-session-runtime.ts) opens a saved session
+  and accepts no such flag.
 
 #### `agentSessionPersistence`
 
