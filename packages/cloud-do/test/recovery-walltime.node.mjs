@@ -16,11 +16,11 @@ test('a real workerd replay exceeds 30 seconds outside the initialization gate',
   const persist = await mkdtemp(path.join(os.tmpdir(), 'byok-recovery-walltime-'));
   let providerCalls = 0;
   const makeRuntime = () => new Miniflare({ resourcePersistencePath: persist, workers: [{ config: {
-    name: 'walltime-proof', type: 'worker', compatibilityDate: '2026-08-18',
+    name: 'walltime-proof', compatibilityDate: '2026-08-18',
     compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
     manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: built.outputFiles[0].text } } },
     exports: { SessionAuditDO: { type: 'durable-object', storage: 'sqlite' } },
-    env: { AGENTS: { type: 'durable-object', workerName: 'walltime-proof', exportName: 'SessionAuditDO' },
+    env: { AGENTS: { type: 'durable-object', worker: 'walltime-proof', exportName: 'SessionAuditDO' },
       AIPHABEE_ZAI_API_KEY: { type: 'text', value: 'Primary~0123456789ABCDEFGHIJKLMNOP' },
       AIPHABEE_DEEPSEEK_API_KEY: { type: 'text', value: 'Secondary~0123456789QRSTUVWXYZabcd' } },
   }, dev: { outboundService: { type: 'node-handler', handler: (_request, response) => {

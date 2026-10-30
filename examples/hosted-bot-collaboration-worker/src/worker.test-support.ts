@@ -26,6 +26,7 @@ import { hostScopeDdl, sha256Hex, writeHostScope } from './host-scopes';
 import type { ChildMessage, ParentMessage } from './device.child';
 import type { PassReport } from './worker';
 import { openWorkerEndpoint, verifyWorkerIdentity, type WorkerEndpoint } from './worker.test-endpoint';
+import { proxyDiagnostics } from './worker.test-diagnostics';
 
 const OPT_IN_ENV = 'BYOK_TEST_WORKER_DATAPLANE';
 const REQUIRE_ENV = 'BYOK_REQUIRE_WORKER_DATAPLANE';
@@ -183,7 +184,15 @@ async function startWorkerGeneration(substrate: Substrate, options: WorkerOption
   const onData = (chunk: Buffer) => { output += chunk.toString('utf8'); for (const wake of waiters) wake(); };
   child.stdout?.on('data', onData);
   child.stderr?.on('data', onData);
-  const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
+  // close drains both pipes so teardown cannot omit the last recovery warning.
+  const closed = new Promise<void>(resolve => child.once('close', (exitCode, signal) => {
+    const diagnostics = proxyDiagnostics(output);
+    for (const line of diagnostics.recoveries) console.warn(`[worker-proxy recovery] ${line}`);
+    for (const line of diagnostics.disconnects) console.warn(`[worker-proxy disconnect] ${line}`);
+    console.log('[worker-proxy summary]', JSON.stringify({ base,
+      recoveryWarnings: diagnostics.recoveries.length, disconnectLines: diagnostics.disconnects.length, exitCode, signal }));
+    resolve();
+  }));
   let killed: Promise<void> | undefined;
   const kill = async () => {
     killed ??= (async () => {

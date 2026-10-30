@@ -37,10 +37,10 @@ class AuditLog extends Log { constructor() { super(LogLevel.ERROR); } protected 
 const sse = (delta: unknown, finish: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
 function runtime(nativeObserver = '') {
   return new Miniflare({ resourcePersistencePath: persist, log: new AuditLog(), workers: [{ config: {
-    name: 'wake-runtime', type: 'worker', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
+    name: 'wake-runtime', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
     manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: script } } },
     exports: { WakeAuditDO: { type: 'durable-object', storage: 'sqlite' } },
-    env: { AGENTS: { type: 'durable-object', workerName: 'wake-runtime', exportName: 'WakeAuditDO' },
+    env: { AGENTS: { type: 'durable-object', worker: 'wake-runtime', exportName: 'WakeAuditDO' },
       AIPHABEE_ZAI_API_KEY: { type: 'text', value: KEY }, AIPHABEE_DEEPSEEK_API_KEY: { type: 'text', value: SECONDARY },
       NATIVE_OBSERVER_PAUSE: { type: 'text', value: nativeObserver } },
   }, dev: { outboundService: { type: 'node-handler', handler: async (request: IncomingMessage, response: ServerResponse) => {

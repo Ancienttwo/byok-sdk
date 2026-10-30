@@ -37,10 +37,10 @@ async function createHooksFixture() {
   let serial = 0;
   function runtime() {
     return new Miniflare({ resourcePersistencePath: persist, workers: [{ config: {
-      name: 'cloud-hooks', type: 'worker', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
+      name: 'cloud-hooks', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
       manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: script } } },
       exports: { HooksDO: { type: 'durable-object', storage: 'sqlite' } },
-      env: { AGENTS: { type: 'durable-object', workerName: 'cloud-hooks', exportName: 'HooksDO' },
+      env: { AGENTS: { type: 'durable-object', worker: 'cloud-hooks', exportName: 'HooksDO' },
         AIPHABEE_ZAI_API_KEY: { type: 'text', value: KEY }, POLICY: { type: 'text', value: JSON.stringify(policy) } },
     }, dev: { outboundService: { type: 'node-handler', handler: provider.handle } } }] });
   }
