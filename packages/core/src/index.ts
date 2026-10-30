@@ -96,11 +96,12 @@ export type {
 } from './truth';
 
 // Presence (§12.3)
-export { PRESENCE_LEVELS } from './presence';
+export { freezePresenceRuntimeFact, PRESENCE_LEVELS } from './presence';
 export type {
   PresenceHint,
   PresenceHintInput,
   PresenceLevel,
+  PresenceRuntimeCapabilities,
   PresenceRuntimeFact,
   PresenceStore,
   TenantReadinessDevice,

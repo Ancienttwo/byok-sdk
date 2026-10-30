@@ -6,7 +6,42 @@ upstream CLI might support. The production authority remains the immutable
 This document and the conformance expectations are evidence of that contract;
 they are not a second runtime-selection registry.
 
-## Current matrix
+## Capability matrix
+
+Generated from each adapter's capability constant
+(`packages/client/src/adapters/<id>/<id>-capabilities.ts`) by
+`bun run docs:capability-matrix`; do not edit the table by hand. The same values
+are each adapter's `descriptor.capabilities`, and the daemon reports them per
+runtime in `conn.hello` (`runtimes[].capabilities`, `harnesses[].capabilities`)
+and in presence (`runtimes[].capabilities`), so a Host can read them before
+dispatch. A runtime a daemon did not report, or a field an older daemon omits,
+is unknown, not `no`.
+
+`yes` for an isolation row is a guarantee the
+[runtime contract suite](runtime-contract.md) checks: it refuses to skip a case
+the descriptor declares. `no` means the SDK makes no such guarantee; the
+[isolation section](#user-level-configuration-and-session-isolation) says what
+the runtime does instead. `auto` never applies to a prepared offer, whatever the
+`toolAuthorizationAuto` row says: the daemon declines it before claim.
+
+<!-- generated:capability-matrix:start -->
+| Capability | Wire field | Claude | Codex | Grok | Hermes | Pi | Pi (`durablePi`) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.4.0` | `1.4.0` |
+| Resume a known native session | `resume` | yes | yes | yes | no | yes | no |
+| Redirect the active turn | `steer` | no | yes | no | no | yes | no |
+| Display-only message draft | `messageDraft` | yes | yes | yes | yes | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes |
+| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no |
+| Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | yes | no |
+| Prepared lane | `preparedLane` | no | no | no | no | yes | no |
+| Durable Pi worker | `durablePi` | no | no | no | no | no | yes |
+| Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | yes | yes | yes |
+| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | no | no |
+| Turns off the transcript store | `isolation.sessionPersistence` | yes | no | no | no | no | no |
+<!-- generated:capability-matrix:end -->
+
+## Qualification notes
 
 | Capability | Claude | Codex | Grok | Pi |
 | --- | --- | --- | --- | --- |

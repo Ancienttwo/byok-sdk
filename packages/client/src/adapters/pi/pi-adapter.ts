@@ -1,4 +1,5 @@
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-capabilities';
 import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources';
 import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
 import type { RuntimeTaskInput } from '../../types';
@@ -220,16 +221,7 @@ export class PiAdapter implements RuntimeAdapter {
     // `PiSession` turns only a non-aborted `agent_settled` into `turn_end`.
     trajectoryEvidence: 'event-stream',
     platforms: ['darwin', 'linux', 'win32'],
-    capabilities: {
-      steer: true,
-      resume: true,
-      mcpToolsets: true,
-      messageDraft: true,
-      approvalInteractive: false,
-      // The ordinary RPC lane and its native Pi subagents; the daemon never
-      // offers `auto` to the prepared lane, and the durable worker opts out.
-      toolAuthorizationAuto: true,
-    },
+    capabilities: PI_RUNTIME_CAPABILITIES,
   });
 
   private readonly agentResources: PiAgentResources;
@@ -246,7 +238,7 @@ export class PiAdapter implements RuntimeAdapter {
     // T0 verified the RPC lanes only. The durable worker's own frames and
     // respawn path are unverified, so it declares no trajectory evidence.
     // Windows waits for validated parent-death Job Object recovery.
-    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false, toolAuthorizationAuto: false } });
+    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }

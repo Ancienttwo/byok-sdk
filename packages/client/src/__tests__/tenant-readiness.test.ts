@@ -39,7 +39,8 @@ describe('U3 first-hop presence identity', () => {
       {
         level: 'online',
         clientVersion: '0.4.2',
-        runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
+        // The conn.hello capability matrix rides along (#1103).
+        runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true, capabilities: { steer: true } }],
       },
     ]);
     publisher.stop();

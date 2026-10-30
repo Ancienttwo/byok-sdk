@@ -30,6 +30,7 @@ import { mayStopForeignHermesGateway, ownsHermesGatewayPid } from './gateway-own
 import {
   assertHermesModelSelection, createHermesProfile, ensureHermesRoot, removeHermesProfile, sweepStaleHermesProfiles,
 } from './hermes-home';
+import { HERMES_RUNTIME_CAPABILITIES } from './hermes-capabilities';
 import { hermesVersionLine, isQualifiedHermesVersion, QUALIFIED_HERMES_VERSION } from './hermes-version';
 import { resolveHermesBin } from './resolve-bin';
 
@@ -202,7 +203,7 @@ export class HermesAdapter implements RuntimeAdapter {
       id: 'hermes',
       supportsDispatchSelection: false,
       platforms: ['darwin', 'linux', 'win32'],
-      capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true, messageDraft: true },
+      capabilities: HERMES_RUNTIME_CAPABILITIES,
     });
   }
 

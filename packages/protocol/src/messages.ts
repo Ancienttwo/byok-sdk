@@ -92,6 +92,15 @@ export const RuntimeCapabilitiesSchema = z.object({
   /** Whether this runtime can project a locally configured MCP toolset into one task. */
   mcpToolsets: z.boolean().optional(),
   messageDraft: z.boolean().optional(),
+  /** The capability matrix (#1103): what the runtime's adapter descriptor declares. Discovery data, not a gate. */
+  toolAuthorizationAuto: z.boolean().optional(),
+  durablePi: z.boolean().optional(),
+  preparedLane: z.boolean().optional(),
+  isolation: z.object({
+    userContext: z.boolean().optional(),
+    userMcpServers: z.boolean().optional(),
+    sessionPersistence: z.boolean().optional(),
+  }).optional(),
 });
 export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
 

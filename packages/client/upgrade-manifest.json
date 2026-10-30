@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "07292e219f2c5dfe69ed473d220c9fe17aa3ba8873262985f4043210a1601ff4"
+    "snapshotSha256": "5468af01f2139bc4cfb39c371b1317bc5e397b1b7f46eb18461de84dbf04055a"
   },
   "configFields": {
     "status": "tracked",
@@ -698,6 +698,27 @@
         "export:@byok-sdk/client#releaseServiceLifecycleOwner",
         "export:@byok-sdk/client#serviceExitDisposition"
       ]
+    },
+    {
+      "id": "runtime-capability-matrix",
+      "impact": "additive",
+      "summary": "Each bundled adapter declares its capability matrix in one constant: toolAuthorizationAuto, durablePi, preparedLane and isolation (userContext, userMcpServers, sessionPersistence), next to steer, resume, messageDraft and mcpToolsets. The daemon reports it per runtime in conn.hello runtimes[]/harnesses[] and task.claim, and in presence runtimes[].capabilities, which the cloud stores and returns from presence reads; all of it is strip-safe and optional, and a field an older daemon omits is unknown. docs/adapter-capabilities.md's matrix table is generated from the same constants. No Host action; a Host may read presence runtimes[].capabilities before dispatch, for example to choose all instead of auto.",
+      "migration": "docs/adapter-capabilities.md#capability-matrix",
+      "items": [
+        "export:@byok-sdk/client#RuntimeCapabilities",
+        "export:@byok-sdk/client#RuntimeIsolationCapabilities",
+        "export:@byok-sdk/client/adapters#RuntimeCapabilities",
+        "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+        "export:@byok-sdk/core#PresenceRuntimeFact",
+        "export:@byok-sdk/core#freezePresenceRuntimeFact",
+        "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+        "export:@byok-sdk/protocol#HarnessInfoSchema",
+        "export:@byok-sdk/protocol#HarnessInventorySchema",
+        "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+        "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+        "export:@byok-sdk/protocol#RuntimeInfoSchema",
+        "export:@byok-sdk/protocol#TaskClaimPayloadSchema"
+      ]
     }
   ],
   "changes": [
@@ -1340,6 +1361,11 @@
       "entry": "runtime-environment-policy"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeCapabilities",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeDetectResult",
       "change": "changed",
       "entry": "runtime-environment-policy"
@@ -1363,6 +1389,11 @@
       "item": "export:@byok-sdk/client#RuntimeEnvironmentUnavailableError",
       "change": "added",
       "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeIsolationCapabilities",
+      "change": "added",
+      "entry": "runtime-capability-matrix"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeObservation",
@@ -1633,6 +1664,11 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapter",
       "change": "changed",
       "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeCapabilities",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectResult",
@@ -2090,6 +2126,16 @@
       "entry": "device-retirement-settles-tasks"
     },
     {
+      "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+      "change": "added",
+      "entry": "runtime-capability-matrix"
+    },
+    {
+      "item": "export:@byok-sdk/core#PresenceRuntimeFact",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
+    },
+    {
       "item": "export:@byok-sdk/core#StoreCompatibility",
       "change": "added",
       "entry": "store-compatibility-precheck"
@@ -2100,6 +2146,11 @@
       "entry": "store-compatibility-precheck"
     },
     {
+      "item": "export:@byok-sdk/core#freezePresenceRuntimeFact",
+      "change": "added",
+      "entry": "runtime-capability-matrix"
+    },
+    {
       "item": "export:@byok-sdk/keys#inspectProviderProfileStore",
       "change": "added",
       "entry": "store-compatibility-precheck"
@@ -2108,6 +2159,11 @@
       "item": "export:@byok-sdk/protocol#AgentContentReceiptPayloadSchema",
       "change": "changed",
       "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
     },
     {
       "item": "export:@byok-sdk/protocol#DEVICE_NOT_REGISTERED_CODE",
@@ -2125,6 +2181,16 @@
       "entry": "auth-revocation-typed-keychain-deadline"
     },
     {
+      "item": "export:@byok-sdk/protocol#HarnessInfoSchema",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInventorySchema",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
+    },
+    {
       "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
       "change": "changed",
       "entry": "messages-per-envelope-decode"
@@ -2135,9 +2201,29 @@
       "entry": "token-expires-in"
     },
     {
+      "item": "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeInfoSchema",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TASK_FAIL_REASON_MAX_BYTES",
       "change": "added",
       "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+      "change": "changed",
+      "entry": "runtime-capability-matrix"
     },
     {
       "item": "export:@byok-sdk/protocol#TaskDeclineCode",

@@ -11,6 +11,7 @@ export type {
   RuntimeOperationManifest,
   RuntimeOperationStartInput,
   RuntimeCapabilities,
+  RuntimeIsolationCapabilities,
   RuntimeDetectResult,
   RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,

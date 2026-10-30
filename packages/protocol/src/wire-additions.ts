@@ -40,7 +40,8 @@ import type { CapabilityFlag } from './version';
 
 type HttpWireSurface =
   | 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse'
-  | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
+  | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse'
+  | 'PresencePublishRequest';
 
 export type WireAddition =
   | {
@@ -54,6 +55,8 @@ export type WireAddition =
     }
   | { readonly kind: 'envelope'; readonly rule: 'strip-safe'; readonly surface: MessageType; readonly field: string }
   | { readonly kind: 'http'; readonly rule: 'strip-safe'; readonly surface: HttpWireSurface; readonly field: string };
+
+const MATRIX_FIELDS = ['toolAuthorizationAuto', 'durablePi', 'preparedLane', 'isolation'] as const;
 
 const offerRow = (field: string | undefined, capability: CapabilityFlag, value?: string): WireAddition => ({
   kind: 'envelope', rule: 'gated', surface: 'task.offer',
@@ -120,6 +123,14 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
   { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
   { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
+  // The capability matrix (#1103): discovery data on the same runtime capability object.
+  ...MATRIX_FIELDS.flatMap((field): WireAddition[] => [
+    { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: `runtimes[].capabilities.${field}` },
+    { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: `harnesses[].capabilities.${field}` },
+    { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: `capabilities.${field}` },
+  ]),
+  // Presence carries the conn.hello capability matrix (#1103); a published cloud drops it.
+  { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimes[].capabilities' },
   // Optional MCP event identity is observability only; older receivers may omit it.
   { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
   // Daemon to server.
