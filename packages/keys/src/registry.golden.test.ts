@@ -18,7 +18,7 @@ import { isSqliteAvailable } from './sqlite-support';
 // heuristic, so this correctly skips on any runtime where node:sqlite isn't
 // really usable (the CI Node 20 leg, or an intermediate flagged 22.x) and
 // still runs on one where it is.
-const sqliteReady = isSqliteAvailable();
+const sqliteReady = isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1';
 
 /**
  * The in-package port of the §4.3 golden test

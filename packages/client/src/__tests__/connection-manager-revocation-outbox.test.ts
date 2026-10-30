@@ -87,5 +87,13 @@ describe('a revoked device stops draining its outbox instead of retrying forever
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     expect(postBatchSpy.mock.calls.length).toBe(callsAfterRevocationDetected);
+
+    // #1119: a halted session queues nothing more, so its outbox is bounded
+    // by what it held when it ended.
+    const heldAtHalt = connection.outboxLength();
+    for (let i = 0; i < 50; i += 1) {
+      connection.send(createEnvelope('task.progress', { seq: i + 1, events: [{ type: 'progress', text: `after halt ${i}` }] }, { taskId: 'task-revoked-1' }));
+    }
+    expect(connection.outboxLength()).toBe(heldAtHalt);
   });
 });

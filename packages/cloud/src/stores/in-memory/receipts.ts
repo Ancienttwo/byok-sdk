@@ -11,12 +11,33 @@ import type { ReceiptCollectExpiredInput } from '../ports';
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type { RequestReceipt, RequestReceiptStore } from '../ports';
 
+const INTERNALS = new WeakMap<InMemoryRequestReceiptStore, { readonly receipts: Map<string, RequestReceipt>; readonly clock: Clock }>();
+
+/**
+ * The stored body, read for the Host task archive (#1120). A module function
+ * over a private registry, so the port class gains no method.
+ */
+export function receiptBodyOf(store: InMemoryRequestReceiptStore, tenant: TenantId, key: string): string | undefined {
+  return INTERNALS.get(store)!.receipts.get(tenantKey(tenant, key))?.body;
+}
+
+/** Replaces a stored body in place, or inserts the receipt when absent. The archive is the caller. */
+export function setReceiptBody(store: InMemoryRequestReceiptStore, tenant: TenantId, key: string, body: string): void {
+  const { receipts, clock } = INTERNALS.get(store)!;
+  const stored = tenantKey(tenant, key);
+  const existing = receipts.get(stored);
+  receipts.set(stored, existing === undefined
+    ? { tenantId: tenant, key, body, recordedAt: clock.now().toISOString() }
+    : { ...existing, body });
+}
+
 export class InMemoryRequestReceiptStore implements RequestReceiptStore {
   readonly #receipts = new Map<string, RequestReceipt>();
   readonly #clock: Clock;
 
   constructor(clock: Clock) {
     this.#clock = clock;
+    INTERNALS.set(this, { receipts: this.#receipts, clock });
   }
 
   async record(

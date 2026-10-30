@@ -4,7 +4,7 @@ import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 import { awaitAdmission } from '../admission-wait';
 import { observeRuntimeDetection } from '../../runtime-detection';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../../types';
-import { buildRuntimeEnv } from '../environment';
+import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment';
 import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
 import { McpAuthorityError, MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from '../mcp-tools-probe';
 import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation';
@@ -50,16 +50,26 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     decline('server does not support the selected custom harness identity', false);
     return undefined;
   }
+  // The environment EVERY child process of this task receives, under the
+  // adapter's own policy (`../../runtime/environment.ts`, #1095). Computed here, before
+  // admission, so the admission-time MCP probes below see exactly what the
+  // runtime path sees. One computation, both phases. A failed login-shell
+  // capture leaves no environment to run in: a scratch-free decline.
+  let runtimeEnv: Record<string, string>;
+  try {
+    runtimeEnv = await pick.adapter.runtimeEnvironment();
+  } catch (error) {
+    if (!(error instanceof RuntimeEnvironmentUnavailableError)) throw error;
+    decline(`runtime environment unavailable: ${error.reason}`, false);
+    return undefined;
+  }
+  if (admissionWithdrawn()) return undefined;
   // Scratch-free declines do not own an Execution resource or contend on
   // its store gate. Acquire it at the first consumer; handleOffer retains
   // ownership across this await and releases it on every pre-start exit.
   const scratch = await input.acquireScratch();
   if (admissionWithdrawn()) return undefined;
-  // The environment EVERY child process of this task receives: the
-  // daemon's own, minus the hard deny (`./environment.ts`). Computed here,
-  // before admission, so the admission-time MCP probes below see exactly
-  // what the runtime path sees. One computation, both phases.
-  const env = { ...buildRuntimeEnv({ ambient: process.env }), ...scratch.env };
+  const env = { ...runtimeEnv, ...scratch.env };
   const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
   if (resolvedMcp?.ok && this['deps'].prepareHostTaskContext) {
     await this['deps'].prepareHostTaskContext(taskId, blobAbort.signal);

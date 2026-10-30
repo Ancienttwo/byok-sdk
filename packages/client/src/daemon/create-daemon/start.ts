@@ -14,7 +14,7 @@ import { createStartConnection } from './start-connection';
 
 /** One daemon start under the owner lease (#926). */
 
-export async function runStartUnderLease(daemonScope: DaemonScope): Promise<void> {
+export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch: number): Promise<void> {
   const {
     terminalCommits, daemonState, setLifecycle, storeDir, config, startPresenceProducer,
     startDeviceMember, startupHaltReason, operationalHealth, halted, runShutdownSequence,
@@ -31,7 +31,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope): Promise<void
     }
   }
   try {
-  const run = await openStartRun(daemonScope);
+  const run = await openStartRun(daemonScope, requestEpoch);
   if (run === undefined) return;
   const {
     record, activeJournal, activePressureEngine, journalIdentity, resultReplyRecoveryTasks,

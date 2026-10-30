@@ -44,7 +44,7 @@ import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-m
 
 /**
  * The environment this assembler hands to every server it spawns — the stand-in
- * for `buildRuntimeEnv`'s output, which carries no loader-affecting name.
+ * for `buildRuntimeEnvironment`'s output, which carries no loader-affecting name.
  */
 const ASSEMBLER_ENV: Readonly<Record<string, string>> = Object.freeze({ PATH: process.env.PATH ?? '' });
 
@@ -104,7 +104,7 @@ function assembler(
 ): PreparedToolSurfaceAssembler {
   return createPreparedToolSurfaceAssembler({
     toolsetRegistry: registry,
-    runtimeEnv: () => ({ ...ASSEMBLER_ENV }),
+    runtimeEnv: async () => ({ ...ASSEMBLER_ENV }),
     ...extra,
   });
 }
@@ -368,7 +368,7 @@ describe('the two assembly stages share one measured environment', () => {
     let envCalls = 0;
     const spawnedEnvs: Readonly<Record<string, string>>[] = [];
     const result = await assembler(registryWith(), {
-      runtimeEnv: () => {
+      runtimeEnv: async () => {
         envCalls += 1;
         return envCalls === 1
           ? { ...ASSEMBLER_ENV }
@@ -390,7 +390,7 @@ describe('the two assembly stages share one measured environment', () => {
   it('carries the measured environment on the binding, so stage 1 alone answers it', async () => {
     let envCalls = 0;
     const binding = await assembler(registryWith(), {
-      runtimeEnv: () => {
+      runtimeEnv: async () => {
         envCalls += 1;
         return envCalls === 1 ? { ...ASSEMBLER_ENV } : { ...ASSEMBLER_ENV, RELOADED: '1' };
       },

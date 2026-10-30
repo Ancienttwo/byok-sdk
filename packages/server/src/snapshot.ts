@@ -67,6 +67,7 @@ export function toTaskResult(terminal: TerminalResult | undefined): TaskResult |
     ...(terminal.document === undefined ? {} : { document: terminal.document }),
     ...(terminal.reason === undefined ? {} : { reason: terminal.reason }),
     ...(terminal.code === undefined ? {} : { code: terminal.code }),
+    ...(terminal.reportedCode === undefined ? {} : { reportedCode: terminal.reportedCode }),
     ...(terminal.retryable === undefined ? {} : { retryable: terminal.retryable }),
     ...(terminal.failure === undefined ? {} : { failure: terminal.failure }),
   };

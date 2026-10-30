@@ -18,6 +18,8 @@ export type { CoreCompositionFactory, CoreCompositionHandle } from './core/index
 
 export {
   ackAndCollectMailbox,
+  conformanceMailbox,
+  mailboxExpiryFaults,
   CLOUD_CONFORMANCE_PORTS,
   runCloudConformance,
   withCloudComposition,
@@ -25,6 +27,7 @@ export {
 export type {
   CloudCompositionFactory,
   CloudCompositionHandle,
+  CloudConformanceMailbox,
   CloudConformancePortName,
   CloudConformanceStores,
 } from './cloud/index';

@@ -15,5 +15,7 @@ export interface OutboundStatus {
   rejected: number;
   rejectedByReason: Partial<Record<OutboundRefusalReason, number>>;
   rejectedTerminals: number;
+  /** `task.progress` / `agent.message.draft` envelopes dropped unsent because the outbox passed its byte cap. */
+  droppedEphemeral: number;
   lastRejection?: OutboundRejection;
 }

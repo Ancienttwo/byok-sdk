@@ -1,5 +1,6 @@
 import {
   PRESENCE_LEVELS,
+  type Clock,
   type PresenceStore,
   type TenantId,
   type TenantReadiness,
@@ -8,6 +9,7 @@ import {
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import { HarnessInventorySchema, type HarnessInfo } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
+import { retireDevice } from './task-retirement';
 
 export const DEVICE_SCHEMA = `
 CREATE TABLE device_directory (
@@ -68,9 +70,14 @@ function fromRow(row: Row): DeviceRecord {
   };
 }
 
-/** Enrollment, capability admission and pre-tenant auth read the same durable row. */
+/**
+ * Enrollment, capability admission and pre-tenant auth read the same durable
+ * row. The task and mailbox tables live in the same database, so retiring a
+ * device settles its attempts and dead-letters its pending rows in the
+ * transaction that deletes the row.
+ */
 export class SqliteDeviceDirectory implements DeviceDirectory {
-  constructor(private readonly coordinator: Coordinator) {}
+  constructor(private readonly coordinator: Coordinator, private readonly clock: Clock) {}
 
   register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
     return this.coordinator.transaction(db => {
@@ -79,8 +86,11 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
       const owner = db.prepare('SELECT tenant_id FROM device_directory WHERE device_id = ?').get(input.deviceId);
       if (owner !== undefined && owner.tenant_id !== tenant) throw new Error('Device ID already belongs to another tenant');
       if (input.machineId !== undefined) {
-        db.prepare('DELETE FROM device_directory WHERE tenant_id = ? AND product_id = ? AND machine_id = ? AND device_id <> ?')
-          .run(tenant, input.productId, input.machineId, input.deviceId);
+        const superseded = db.prepare(
+          'DELETE FROM device_directory WHERE tenant_id = ? AND product_id = ? AND machine_id = ? AND device_id <> ? RETURNING device_id',
+        ).all(tenant, input.productId, input.machineId, input.deviceId) as unknown as { device_id: string }[];
+        const now = this.clock.now().toISOString();
+        for (const row of superseded) retireDevice(db, tenant, row.device_id, 'device_superseded', now);
       }
       db.prepare(`INSERT INTO device_directory
         (tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch)
@@ -105,7 +115,8 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
 
   revoke(tenant: TenantId, deviceId: string): Promise<void> {
     return this.coordinator.transaction(db => {
-      db.prepare('DELETE FROM device_directory WHERE tenant_id = ? AND device_id = ?').run(tenant, deviceId);
+      const removed = db.prepare('DELETE FROM device_directory WHERE tenant_id = ? AND device_id = ?').run(tenant, deviceId);
+      if (Number(removed.changes) === 1) retireDevice(db, tenant, deviceId, 'device_revoked', this.clock.now().toISOString());
     });
   }
 

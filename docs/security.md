@@ -166,7 +166,7 @@ Wire v4 removed the local Git checkpoint mode and the daemon's task workspace ro
 | Durable sinks: audit log and `start` stdout | `<storeDir>/audit.jsonl` (0600), and `byok-agent start` stdout (a durable, unrotated file under launchd/systemd) | Both hold the same content-free `DaemonRecord` JSON lines and nothing else (#395) — see below. Library stderr (the service's `err.log`) follows the same rule. Full task content travels only over the authenticated control socket |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
 | BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only `@byok-sdk/keys` provider clients or the separate `byok-pi-provider-launcher` (or a host launcher executable built on `runPiProviderLauncher`) read it. Profile metadata may use a tenant-bound `TruthStore`, but truth bodies, hashes, labels, status, protocol, server, cloud provider code, and the client daemon never receive the value. The launcher keeps its explicit read-only SQLite profile composition and hands the key only to its Pi child: over private IPC into Pi's model memory for the rpc host and the durable worker, and through the environment only of the prepared host, which runs no native tool; `auth_mode: none` never constructs a keychain backend |
-| The daemon's own ambient environment (`process.env` — may hold secrets: provider API keys, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc.) | Whatever process/container/service manager launched the daemon | **Inherited by every task child, as in OAR (ADR-037 D2/D3).** `daemon/environment.ts`'s `buildRuntimeEnv` removes only `CLAUDECODE` and the SDK's own `BYOK_*` names — see the environment paragraph below |
+| The daemon's own ambient environment (`process.env` — may hold secrets the Host put there: provider API keys, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc.) | Whatever process/container/service manager launched the daemon, including an embedding Host | **Not inherited by task children (#1095).** A child gets the user's login-shell snapshot; a live variable reaches it only when the adapter's `runtimeEnvironment.pass` names it. `CLAUDECODE` and `BYOK_*` are always removed — see the environment paragraph below |
 
 Every sink that outlives the daemon process is a defended asset, not just a
 record. They all write one projection, `DaemonRecord`
@@ -241,20 +241,46 @@ or malformed `auth.json` or `settings.json` observes `authPresent: false`.
 A missing `auth.json`, or a missing, unreadable, or malformed `models.json`,
 contributes no credential. The probe does not read `models-store.json`.
 
-**Environment inheritance (ADR-037 D2/D3)**: every task child — the runtime
-CLI and the MCP servers the daemon probes for it — gets the daemon's full
-environment, as in OAR. The runtime detection probes (`--version`, `auth
-status`, `app-server --help`, `login status`) get the same environment. `daemon/environment.ts`'s `buildRuntimeEnv` removes
-only `CLAUDECODE` (so a child agent starts as its own top-level session) and
-this SDK's own control-plane variables (`BYOK_*`). Provider API keys, cloud
-credentials and loader variables such as `NODE_OPTIONS`, `LD_*` and `DYLD_*`
-reach the child as the user set them. Claude and Codex do not strip provider
-keys. The daemon does not read, persist or transmit these values; it passes
-the environment through. An operator who does not want a secret in agent
-children must not put it in the daemon's environment.
+**Runtime environment (ADR-037 D2/D3, #1095)**: every task child — the runtime
+CLI and the MCP servers the daemon probes for it — gets the user's login-shell
+environment, as a new terminal would; the runtime detection probes (`--version`,
+`auth status`, `app-server --help`, `login status`) get the same environment.
+Each adapter builds it under its own `RuntimeEnvironmentPolicy`
+(`runtime/environment.ts`'s `buildRuntimeEnvironment`). The base is a snapshot
+taken once per process by running the account's login shell (see "Login-shell
+environment" below). The shell is read from the account database by uid
+(`/usr/bin/id -P` on macOS, `/usr/bin/getent passwd` on Linux), never from
+`$SHELL`; if that lookup fails, the capture fails closed as
+`account-shell-unavailable`. The shell starts from a closed seed (`HOME`,
+`USER`, `LOGNAME`, `TMPDIR`, `LANG`, `LC_*`, `TZ`, `ZDOTDIR`, `XDG_*`,
+`SSH_AUTH_SOCK`, `DBUS_SESSION_BUS_ADDRESS`, `DISPLAY`, `WAYLAND_DISPLAY`) with
+`PATH=/usr/bin:/bin:/usr/sbin:/sbin` and `SHELL` set to the account shell,
+never from the daemon's `process.env`, so
+a variable an embedding Host sets — before or after the capture — is not in it.
+A Host lists the names it wants a runtime to receive in `pass`; they are read
+from the live `process.env` at every build. The strict `allowlist` base takes
+only the platform baseline plus `allow` from the live environment. A failed
+capture fails closed: the runtimes report `refused:runtime_environment_unavailable:<code>`
+and offers are declined; no other environment is substituted. On Windows,
+which has no login shell, the base is the platform baseline names of the live
+session (`windows-session`); reading the user environment from the registry
+is a follow-up.
 
-Two Pi lanes use the narrow form `buildAllowlistedEnv`: the durable Pi tool
-shell and the prepared Pi lane. The `@byok-sdk/keys` launcher also rebuilds
+Then `CLAUDECODE` (so a child agent starts as its own top-level session) and
+this SDK's own control-plane variables (`BYOK_*`) are removed, whatever listed
+them, and `NO_PROXY`/`no_proxy` gain `127.0.0.1` and `localhost` so a user's
+proxy never carries the traffic to the daemon's loopback gate and MCP servers.
+Claude also drops the shell's `ANTHROPIC_*`, `CLAUDE_CODE_USE_BEDROCK`,
+`CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_OAUTH_TOKEN` and
+`AWS_BEARER_TOKEN_BEDROCK` when `pass` supplies a provider. Provider API keys,
+cloud credentials and loader variables such as `NODE_OPTIONS`, `LD_*` and
+`DYLD_*` that the user's shell sets reach the child as set. The daemon does not
+read, persist or transmit these values; it passes the environment through. A
+user who does not want a secret in agent children must not export it from
+their login shell.
+
+The durable Pi tool shell, the prepared Pi lane and the Hermes custody
+launcher use the narrow form `buildAllowlistedEnv`. The `@byok-sdk/keys` launcher also rebuilds
 its Pi child environment from a closed list, and adds the resolved key only for
 the prepared host (see the credential-isolation rule above). These are the BYOK key-custody lanes.
 
@@ -262,8 +288,8 @@ the prepared host (see the credential-isolation rule above). These are the BYOK 
 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`ALL_PROXY`, plus their lowercase
 `http_proxy`-style variants (the conventional spelling most Unix tools
 actually check — some tools honor only one casing, some check both), reach
-every child: the full environment is inherited, and the narrow lanes keep
-them in their platform baseline (`daemon/environment.ts`'s
+every child: the login-shell environment carries them, and the narrow lanes keep
+them in their platform baseline (`runtime/environment.ts`'s
 `BASE_PLATFORM_ALLOWLIST`). This is a deliberate
 trade-off, not an oversight: stripping proxy configuration by default would
 silently break every agent CLI running behind a corporate proxy — no
@@ -583,22 +609,26 @@ generated service definition.
 | Same-user local process | Install/uninstall/start/stop the service — equivalent to running the CLI directly; by design | — |
 | Other local user | — | Install into this user's launchd per-user domain or `systemd --user` namespace (both inherently per-uid) |
 
-**Login-shell environment (#392).** On macOS, Linux and Windows, `byok-agent install`
+**Login-shell environment (#392, #1095).** On macOS, Linux and Windows, `byok-agent install`
 writes a launchd plist, systemd unit or WinSW XML that runs `byok-agent start
 --service` (a Host program passed to `createServiceLifecycle` is written
-unchanged). `--service` runs the user's passwd login shell once per daemon
-start on POSIX (`-i -l -c`, including fish, 10 s and 1 MiB caps) and replaces the daemon's
-`process.env` with the captured environment; the capture ends when the shell
-has exited and the end-of-dump nonce has been read, and the shell's process
-group is then SIGKILLed, including anything the rc left running. This
-executes the user's interactive rc code at every service start — the same
-code a new terminal runs. The shell never receives the daemon's `BYOK_*`
-values. Captured `BYOK_*` names are dropped and the daemon's own pre-capture `BYOK_*` values are restored, so
-rc files cannot set SDK control variables; task children still receive no
-`BYOK_*` at all. Only the source, a closed failure code and the shell's
-basename are recorded (`environment-resolved` in `audit.jsonl`, shown by
-`status`, `doctor` and the support bundle) — never variable names, values or
-paths. Windows uses the inherited service-account environment without spawning a login shell.
+unchanged). Every daemon start on POSIX runs the user's passwd login shell once
+per process (`-i -l -c`, including fish, 10 s and 1 MiB caps) from the closed
+seed described above; the capture ends when the shell has exited and the
+end-of-dump nonce has been read, and the shell's process group is then
+SIGKILLed, including anything the rc left running. This executes the user's
+interactive rc code at every daemon start — the same code a new terminal runs.
+The snapshot is the base of every default runtime environment and never
+changes `process.env`; `--service` additionally replaces the daemon's
+`process.env` with it, so the service resolves its own config and binaries as
+the user's terminal would. The shell never receives the daemon's `BYOK_*`
+values. Captured `BYOK_*` names are dropped and, under `--service`, the
+daemon's own pre-capture `BYOK_*` values are restored, so rc files cannot set
+SDK control variables; task children still receive no `BYOK_*` at all. Only
+the source, a closed failure code and the shell's basename are recorded
+(`environment-resolved` in `audit.jsonl`, shown by `status`, `doctor` and the
+support bundle) — never variable values or paths. Windows spawns no login
+shell (`windows-session`).
 The daemon emits this closed projection as `environment-resolved`; the ordinary
 audit subscriber records it. Live status and diagnostics read the daemon's
 cached environment and runtime observations without executing CLI-side probes.
@@ -1138,8 +1168,8 @@ this SDK enforces or verifies independently. A SaaS embedder with a
 genuinely hostile or untrusted instruction source should not treat the
 workspace directory alone as sufficient isolation.
 
-Environment handling is not a sandbox either. Every task child inherits the
-daemon's environment except `CLAUDECODE` and `BYOK_*` (see above). Native
+Environment handling is not a sandbox either. Every task child gets the
+user's login-shell environment except `CLAUDECODE` and `BYOK_*` (see above). Native
 execution is still native execution: an agent process can read any file its
 OS-level permissions allow, exactly as any other process running as that
 same user could.

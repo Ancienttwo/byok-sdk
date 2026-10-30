@@ -1,3 +1,4 @@
+import { testRuntimeEnv } from './fixtures/runtime-env';
 import { testAgentHomeConfig } from './fixtures/test-agent';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { testScratchRoot } from "./fixtures/execution-scratch";
@@ -211,6 +212,7 @@ describe('conn.hello.capabilities', () => {
 
   it('withholds dispatch-selection when a custom built-in-id adapter has not opted into exact target semantics', async () => {
     const opaquePi: RuntimeAdapter = {
+      runtimeEnvironment: async () => testRuntimeEnv(),
       descriptor: freezeRuntimeAdapterDescriptor({
         id: 'pi',
         supportsDispatchSelection: false,

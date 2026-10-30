@@ -105,6 +105,31 @@ cannot be encoded in CLI JSON. They remain typed Host integration points.
 Custom adapters belong in `createDaemonWithAdapters`; the effective report
 marks them `injected`, without claiming SDK-built isolation settings for them.
 
+## Runtime environment
+
+Runtimes get the user's login-shell environment, not the Host's `process.env`
+(#1095). The daemon captures it once per process from a closed seed and a
+fixed `PATH`, so the CLIs the user installed with Homebrew, nvm, bun or an
+official installer are found in both service and embedded use, and a variable
+the Host sets does not reach an agent.
+
+- A Host that wants a runtime to receive a variable it sets (before or after
+  start) lists the name in `pass`:
+  `DaemonConfig.runtimeEnvironment: { pass: ['ACME_TOKEN_FILE'] }` with
+  `createDaemon`, or the same object as each adapter's `runtimeEnvironment`
+  option with `createDaemonWithAdapters`, which rejects the `DaemonConfig`
+  field. Custom adapters implement `runtimeEnvironment()`, normally with
+  `buildRuntimeEnvironment(policy)`.
+- `{ base: 'allowlist', allow: [...] }` is the strict mode: the platform
+  baseline plus `allow`, from the live environment, with no login-shell capture.
+- If the capture fails (an rc that exits non-zero, hangs past 10 s or prints
+  more than 1 MiB), the daemon stays up, `status` shows
+  `environment: unavailable code=<code>`, every `login-shell` runtime shows
+  `refused:runtime_environment_unavailable:<code>` and offers are declined. Fix
+  the rc and restart the daemon.
+- Windows has no login shell: runtimes get the platform baseline names of the
+  live session (`windows-session`). List any other name in `pass`.
+
 ## Configuration
 
 `byok-agent config check --strict --json --config device.json` validates the
@@ -132,6 +157,18 @@ also checked by `config check`. Removed fields fail with a migration reference.
 
 Use the same config path for all operations. If you installed a named service,
 use its `--name` for service operations.
+
+A device runs at most `maxConcurrentTasks` tasks at once (default 8) across
+every Agent home and runtime. An offer over that cap is declined retryably
+before the claim, with no decline code, so the Host can offer it again later
+or to another device. `defaultMaxDurationMs`, when set, is the wall-clock
+limit for a task whose offer carries no `limits.maxDurationMs`.
+
+While the Host is unreachable, the outbound queue keeps at most 8 MiB of
+`task.progress` and `agent.message.draft` envelopes and drops the oldest of
+them beyond that. Terminals, claims, starts and approval requests are never
+dropped. The Host sees a gap in that task's progress seqs. `status` reports
+the count as `droppedEphemeral`.
 
 ## Upgrade
 
@@ -181,6 +218,26 @@ or protocol reset, follow the specific manifest migration and Host retention
 policy. Do not delete a live store, `.byok` internals or an owned-process record
 to make an error disappear. A new store does not migrate old journals or homes.
 
+### Reset cursor
+
+A daemon whose delivery cursor file is unreadable (torn, hand-edited, or not a
+nonnegative integer) halts with `cursor_unreadable`. It does not treat the file
+as missing, because a missing cursor means a fresh device. Stop the daemon,
+then reset the cursor and start again:
+
+```sh
+byok-agent doctor --repair reset-cursor --yes --config device.json
+byok-agent start --config device.json
+```
+
+Embedded hosts call `resetDeviceCursor(config, { confirmed: true })`. The reset
+refuses while the daemon runs and needs a paired device record. It writes 0, so
+the next start asks the server to replay everything it still retains for this
+device. Replay is safe: an offer this device already journaled is matched by
+its id, and the server does not deliver an offer whose task already ended. If
+the server no longer retains the start of that history, the start halts
+`replay_cursor_too_old` as for any expired cursor; follow that halt's guide.
+
 ## Troubleshooting
 
 ```sh
@@ -204,7 +261,9 @@ and names the record. Verify the processes are gone before deleting that exact
 record; never clear the directory wholesale. See the
 [storage contract](host-local-storage-layout.md#canonical-layout) for lease
 reclamation ordering. A halted lifecycle requires its stated remedy; a crash
-may be transient and is distinct from a halt.
+may be transient and is distinct from a halt. Either way the run has already
+ended its active tasks and takes no new ones, whether or not the Host has
+called `stop()` yet; their failures are reported by the next `start()`.
 
 **Keychain locked.** Every OS credential command has a deadline (15 s; 60 s for
 the Windows bridge compile). A keychain that is locked, or waiting on an unlock
@@ -332,6 +391,8 @@ linked JSON schema for full array/union shapes and descriptions.
 | `sdkHelperHost.executable` | advanced | string |
 | `sdkHelperHost.entry` | advanced | string |
 | `maxConcurrentReaderAttemptsPerAgentHome` | advanced | number |
+| `maxConcurrentTasks` | advanced | number |
+| `defaultMaxDurationMs` | advanced | number |
 | `agentEgress` | advanced | object |
 | `agentEgress.policy` | advanced | object |
 | `agentEgress.policy.policyRevision` | required when parent is set | string |
@@ -365,6 +426,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `agentEgress.contentRead.artifact.sensitiveNames` | advanced | array |
 | `agentEgress.contentRead.runtimeAllowlistedRoots` | advanced | array |
 | `runtimeAllowlist` | common | array |
+| `runtimeEnvironment` | advanced | union |
 | `durablePi` | advanced | boolean |
 | `piByokLauncher` | advanced | object |
 | `piByokLauncher.command` | required when parent is set | string |
@@ -420,6 +482,7 @@ still need correction. Codes do not replace the reported field/path or cause.
 | Code / halt reason | Retryable unchanged | Next step | Guide |
 |--------------------|---------------------|-----------|-------|
 | `config_invalid` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
+| `cursor_unreadable` | no | Run doctor --repair reset-cursor --yes, then start again. | [guide](#reset-cursor) |
 | `daemon_config_field_removed` | no | Remove the field and follow its migration; do not rename it to an unknown field. | [guide](#removed-fields) |
 | `daemon_config_invalid` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `daemon_journal_protocol_unsupported` | no | Drain the journal with the release that wrote it before upgrading. | [guide](#upgrade) |
@@ -473,6 +536,8 @@ Manifest transition: **0.31.0 → 0.31.0**. Versions and entries below come from
 | host-layout-helper | additive | resolveHostLayout({ productId, productName, platform?, homeDir?, env? }) returns the recommended storeDir (the SDK default ~/.byok/<productId>, with its #493 scratch placement and socket-path budget), hostStorageRoot (macOS ~/Library/Application Support/<productName>, Linux $XDG_DATA_HOME/<productId>, Windows %LOCALAPPDATA%\<productName>), its agents directory and the service log directory. It is pure and throws HostLayoutInputError (code host_layout_input_invalid, with the field) on an input it cannot lay out. DaemonEffectiveConfig.directories gains logDir. Nothing to change; a Host that computes these directories itself can call the helper instead. Existing stores do not move. [Migration](../docs/spec.md#recommended-host-layout) |
 | device-store-default-dir-removed | breaking | The static DeviceStore.defaultDir(productId) is removed; it duplicated the default store path. The class is reachable through BlobClient and InstallSkillPacksOptions. The default storeDir is still <home>/.byok/<productId> and no store moves. A Host that called DeviceStore.defaultDir uses resolveHostLayout({ productId, productName }).storeDir. These same exports also contain private AuthManager declaration changes for the token-renewal minimum gap (#1114): a fast device clock or short server TTL no longer loops renewals and keychain writes. That renewal fix requires no additional Host action. [Migration](../docs/spec.md#recommended-host-layout) |
 | capability-ports-two-way | breaking | createByokCloud now refuses a port passed without its capability declared (capability_port_undeclared), as it already refused a capability declared without its port (#1096). Hosts that pass a port without declaring it must either declare the capability or stop passing the port. createByokServer no longer passes an E2EE member store and derives its declaration from its ports with the new capabilityDeclarationForPorts; createInMemoryByokCloud's default declaration is derived the same way. SqliteSchemaErrorCode drops SQLITE_MIGRATION_REFUSED, which only the removed E2EE KEM-floor check raised. [Migration](../docs/architecture/process-namespace-topology.md#capability-ports-migration) |
+| device-resource-caps | breaking | A daemon runs at most DaemonConfig.maxConcurrentTasks tasks at once (default 8; a positive safe integer, no uncapped value), counted across every Agent home and runtime (#1121). Before, the device-wide count was unbounded. An offer over the cap is declined retryably before the claim, with no decline code, so a Host of any version accepts the decline. DaemonConfig.defaultMaxDurationMs (optional) is the wall-clock limit for a task whose offer carries no limits.maxDurationMs. While the Host is unreachable, the outbound queue keeps at most 8 MiB of task.progress and agent.message.draft envelopes and drops the oldest beyond that; terminals, claims, starts and approval requests are never dropped, and OutboundStatus.droppedEphemeral counts the drops. A Host that dispatches more than 8 concurrent tasks to one device sets maxConcurrentTasks to its own number. [Migration](../docs/device-setup.md#operations) |
+| runtime-environment-policy | breaking | Runtimes no longer inherit the daemon's process.env (#1095). Every adapter builds its children's environment under a RuntimeEnvironmentPolicy (constructor option runtimeEnvironment; createDaemon passes DaemonConfig.runtimeEnvironment, createDaemonWithAdapters rejects that field). The default base is the user's login-shell snapshot, captured once per process with the account's login shell (read from the account database by uid, never $SHELL; a failed lookup is the new ServiceEnvironmentUnavailableCode account-shell-unavailable) from a closed seed and a fixed PATH, so CLIs on the user's shell PATH are found in embedded use too; 'allowlist' is the strict mode over the live environment; 'pass' names live variables a Host sets. CLAUDECODE and BYOK_* are always removed, NO_PROXY/no_proxy gain 127.0.0.1 and localhost, and Claude drops the shell's ANTHROPIC_*, Bedrock/Vertex switches and OAuth token when pass supplies a provider. A failed capture fails closed: RuntimeEnvironmentUnavailableError, detection refused with the new reason runtime_environment_unavailable and its code (RuntimeObservation.code), offers declined. win32 uses the session baseline names (ServiceEnvironmentStatus source 'windows-session'). RuntimeAdapter gains the required runtimeEnvironment(); custom adapters implement it with buildRuntimeEnvironment. Prepared input bindings use the Pi adapter's environment, so a daemon without a Pi adapter refuses them (detail pi_runtime_unconfigured). The adapters entry's buildRuntimeEnv is removed; the testing fake defaults to the allowlist environment. A Host whose runtime needs a variable it set itself lists the name in pass. [Migration](../docs/device-setup.md#runtime-environment) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

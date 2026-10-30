@@ -48,7 +48,7 @@ describe('S18-2: observation-wide deadline', () => {
       await expect(probeMcpServer('fixture', f.server, { env: ENV, timeoutMs })).rejects.toThrow(/timed out|deadline/iu);
     } else {
       const assembler = createPreparedToolSurfaceAssembler({
-        runtimeEnv: () => ENV,
+        runtimeEnv: async () => ENV,
         toolsetRegistry: new McpToolsetRegistry({ test: { mcpServers: { fixture: f.server } } }),
         probeTimeoutMs: timeoutMs,
       });

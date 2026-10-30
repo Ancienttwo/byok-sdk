@@ -40,7 +40,7 @@ import type { CapabilityFlag } from './version';
 
 type HttpWireSurface =
   | 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse'
-  | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
+  | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
 
 export type WireAddition =
   | {
@@ -128,6 +128,9 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   // Relative token lifetime (#1114). A published device drops it and keeps
   // reading `expiresAt`, which the Host still sends.
   { kind: 'http', rule: 'strip-safe', surface: 'TokenResponse', field: 'expiresIn' },
+  // Relative token lifetime (#1114), as on the token response; a published
+  // device drops it.
+  { kind: 'http', rule: 'strip-safe', surface: 'PairResponse', field: 'expiresIn' },
 ];
 
 export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([

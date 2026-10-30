@@ -331,6 +331,7 @@ const tokenSecret = new TextEncoder().encode(config.tokenSecret);
 if (tokenSecret.byteLength !== 32) throw new Error('fixture tokenSecret must encode to exactly 32 bytes');
 const cloud = createByokCloud({
   core: embedded.core,
+  proofReceiptRetention: { authority: embedded.proofReceiptAuthority },
   cloud: stores,
   blobContentProxy: embedded.blobContentProxy,
   crypto,

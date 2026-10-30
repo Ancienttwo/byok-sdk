@@ -15,7 +15,7 @@ import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { buildRuntimeEnv } from '../daemon/environment';
+import { testRuntimeEnv } from './fixtures/runtime-env';
 import {
   PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX,
   PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX,
@@ -1900,7 +1900,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       toolsetRegistry: new McpToolsetRegistry({
         unrelated: { mcpServers: { otherserver: { command: process.execPath, args: ['--version'] } } },
       }),
-      runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+      runtimeEnv: async () => ({ PATH: process.env.PATH ?? '' }),
     }).assemble({
       agentMemory: 'none', requiredToolsets: [], terminalProjection: SUMMARY_SELECTION,
       runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),

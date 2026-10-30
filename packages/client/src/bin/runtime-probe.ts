@@ -1,5 +1,5 @@
 import { observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection';
-import { PiAdapter, ClaudeAdapter, CodexAdapter, type RuntimeAdapter } from '../index';
+import { PiAdapter, ClaudeAdapter, CodexAdapter, type DaemonConfig, type RuntimeAdapter } from '../index';
 
 /**
  * Mirrors `create-daemon.ts`'s own `buildDefaultAdapters`/`buildAdapter`/
@@ -35,17 +35,19 @@ async function detectWithTimeout(adapter: RuntimeAdapter, timeoutMs: number): Re
   }
 }
 
-/** The bundled adapter set explicit runtimes and offline diagnostics probe by default — same unset-vs-set allowlist contract as `createDaemon` itself. */
-export function defaultRuntimeAdapters(runtimeAllowlist: string[] | undefined): RuntimeAdapter[] {
+/** The bundled adapter set explicit runtimes and offline diagnostics probe by default — same unset-vs-set allowlist contract, and the same runtime environment policy, as `createDaemon` itself. */
+export function defaultRuntimeAdapters(config: Pick<DaemonConfig, 'runtimeAllowlist' | 'runtimeEnvironment'>): RuntimeAdapter[] {
+  const { runtimeAllowlist } = config;
+  const options = config.runtimeEnvironment === undefined ? {} : { runtimeEnvironment: config.runtimeEnvironment };
   const ids = runtimeAllowlist ? ALL_RUNTIME_IDS.filter((id) => runtimeAllowlist.includes(id)) : ALL_RUNTIME_IDS;
   return ids.map((id) => {
     switch (id) {
       case 'pi':
-        return new PiAdapter();
+        return new PiAdapter(options);
       case 'claude':
-        return new ClaudeAdapter();
+        return new ClaudeAdapter(options);
       case 'codex':
-        return new CodexAdapter();
+        return new CodexAdapter(options);
     }
   });
 }

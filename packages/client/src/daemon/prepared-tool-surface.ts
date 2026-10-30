@@ -1,3 +1,4 @@
+import { RuntimeEnvironmentUnavailableError } from '../runtime/environment';
 import { preparedResultProjection } from './prepared-agent-result';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import { observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryHelper, type PreparedAgentMemoryState } from './prepared-agent-memory';
@@ -138,12 +139,13 @@ export interface PreparedToolSurfaceDeps {
   readonly agentMemoryDescribe?: PreparedAgentMemoryHelper;
   readonly toolsetRegistry: Pick<McpToolsetRegistry, 'snapshot' | 'status'>;
   /**
-   * The exact base environment a RUNTIME child of a task receives
-   * (`./environment.ts`'s `buildRuntimeEnv`) — never `process.env`. Resolved
-   * per call so an operator's reload is not shadowed by a value captured at
-   * construction.
+   * The exact base environment a RUNTIME child of a task receives (the Pi
+   * adapter's `runtimeEnvironment()`) — never `process.env`. Resolved per
+   * call so an operator's reload is not shadowed by a value captured at
+   * construction. Absent: this daemon has no Pi adapter to run a prepared
+   * input, and every binding is refused.
    */
-  readonly runtimeEnv: () => Readonly<Record<string, string>>;
+  readonly runtimeEnv?: () => Promise<Readonly<Record<string, string>>>;
   /** Test seam only, the same one `TaskRunnerDeps.mcpToolsetToolsProbe` is. */
   readonly probe?: typeof probeMcpServer;
   readonly probeTimeoutMs?: number;
@@ -236,6 +238,16 @@ export async function resolvePreparedToolBinding(
     })),
   });
 
+  if (deps.runtimeEnv === undefined) {
+    return refuse('unsupported_input', 'pi_runtime_unconfigured', 'this device has no Pi runtime adapter to run a prepared input');
+  }
+  let runtimeEnv: Readonly<Record<string, string>>;
+  try {
+    runtimeEnv = await deps.runtimeEnv();
+  } catch (error) {
+    if (!(error instanceof RuntimeEnvironmentUnavailableError)) throw error;
+    return refuse('toolsets_unobservable', 'runtime_environment_unavailable', error.message);
+  }
   return Object.freeze({
     ok: true as const,
     binding: Object.freeze({
@@ -244,7 +256,7 @@ export async function resolvePreparedToolBinding(
       toolsetDefinitionRevisions: Object.freeze(toolsetDefinitionRevisions),
       servers: Object.freeze(resolved),
       toolBindingDigest,
-      launchEnv: projectPiMcpEnvironment(deps.runtimeEnv()),
+      launchEnv: projectPiMcpEnvironment(runtimeEnv),
     }),
   });
 }

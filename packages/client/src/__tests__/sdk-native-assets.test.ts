@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { copySdkNativeAssets, sdkDistributionManifest, sdkNativeAssetTargets } from '../sdk-native-assets';
 import { resolveSdkReservedHelperBin } from '../sdk-reserved-helper-host';
 const roots: string[] = [];
@@ -74,4 +75,32 @@ it.each([true, false])('bounds archive bytes before hashing (declared length: %s
   vi.stubGlobal('fetch', vi.fn(async () => new Response(body, declared ? { headers: { 'content-length': String(9 * 1024 * 1024) } } : undefined)));
   await expect(copySdkNativeAssets({ outDir: dir, platform: 'win32', arch: 'x64' })).rejects.toThrow('size limit');
   expect(cancel).toHaveBeenCalled(); expect(await fs.readdir(dir)).toEqual([]);
+});
+
+it('classifies every published bin of every public package, and nothing else (#1104)', async () => {
+  const packagesDir = fileURLToPath(new URL('../../../', import.meta.url));
+  const published: Record<string, { package: string; target: string }> = {};
+  for (const dir of await fs.readdir(packagesDir)) {
+    const file = path.join(packagesDir, dir, 'package.json');
+    const manifest = JSON.parse(await fs.readFile(file, 'utf8').catch(() => '{"private":true}'));
+    if (manifest.private === true) continue;
+    for (const [name, target] of Object.entries<string>(manifest.bin ?? {})) published[name] = { package: manifest.name, target };
+  }
+  const { bins, reservedHelperKinds } = sdkDistributionManifest;
+  // A new bin fails here until it has a role; a removed bin fails until its row goes.
+  expect(Object.keys(bins).sort()).toEqual(Object.keys(published).sort());
+  for (const [name, bin] of Object.entries(bins)) {
+    expect(bin.package, name).toBe(published[name]!.package);
+    if (bin.role === 'reserved-helper' || bin.role === 'pi-host') {
+      // A re-entered bin is the dist script of its reserved kind.
+      const route = resolveSdkReservedHelperBin(bin.kind!);
+      expect(path.basename(route.args[0]!), name).toBe(path.basename(published[name]!.target));
+      expect(bin.kind!.startsWith('pi-'), name).toBe(bin.role === 'pi-host');
+    } else expect(bin.kind, name).toBeUndefined();
+  }
+  // Only the describe helper has no bin; it is a reserved kind all the same.
+  const binKinds = Object.values(bins).flatMap(bin => bin.kind === undefined ? [] : [bin.kind]);
+  expect(reservedHelperKinds.filter(kind => !binKinds.includes(kind))).toEqual(['agent-memory-describe']);
+  const client = JSON.parse(await fs.readFile(path.join(packagesDir, 'client/package.json'), 'utf8'));
+  expect(sdkDistributionManifest.nodeEngine).toBe(client.engines.node);
 });

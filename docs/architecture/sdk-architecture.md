@@ -616,7 +616,7 @@ adapter-only build/import surface。
 | `connection-manager.ts` | 单一 client outbox、long-poll ack/cursor、chunking、shutdown drain |
 | `long-poll-transport.ts` | authenticated HTTP poll/post、cursor retry/backoff 与 cancellation |
 | `task-runner.ts` | offer admission、runtime selection、workspace、Session event pump、approval/cancel/steer、resource limits |
-| `environment.ts` | runtime env：继承完整 daemon 环境，只移除 `CLAUDECODE` 与 `BYOK_*`；durable Pi tool shell 与 prepared Pi lane 使用窄 allowlist |
+| `../runtime/environment.ts` | runtime env（#1095，从 `daemon/` 移入 `runtime/`，adapters 不再逆层导入）：各 adapter 按 `RuntimeEnvironmentPolicy` 构造；默认基底是登录 shell 快照（封闭种子 + 固定 PATH，不读 daemon `process.env`），`pass` 从实时环境取名，失败即拒绝；移除 `CLAUDECODE` 与 `BYOK_*`，`NO_PROXY` 补 loopback；durable Pi tool shell、prepared Pi lane 与 Hermes custody 使用窄 allowlist |
 | `progress-batcher.ts` | normalized `AgentEvent` 批次与 task-level sequence |
 | `approvals.ts` | bounded pending approval registry、first resolution wins |
 | `control-server.ts` / `control-protocol.ts` | HMAC mutual auth、local RPC、endpoint/token derivation |
@@ -949,7 +949,7 @@ flowchart TB
   Runtime(["Official runtime CLI<br/>same OS user privilege"]):::untrusted
   Control(["HMAC local control socket"]):::local
   Store[("0700/0600 or Windows DACL<br/>device key, token, ledgers")]:::local
-  Env(["full env inherited<br/>CLAUDECODE + BYOK_* removed"]):::gate
+  Env(["login-shell snapshot + pass<br/>CLAUDECODE + BYOK_* removed"]):::gate
   Workspace(["daemon-owned directory<br/>convention, not sandbox"]):::untrusted
 
   SaaS --> Wire --> Daemon
@@ -992,7 +992,7 @@ dispatch daemon 当前的 credential 边界由六条构成，前五条是已实�
 - 不读取 runtime 自己的 login store；
 - 不把 host/server token 注入 runtime 子进程；
 - 不 import `@byok-sdk/keys`（package graph 的零边，§1.2）；
-- task environment 继承完整 daemon 环境，只移除 `CLAUDECODE` 与 `BYOK_*`（ADR-037 D2/D3）。daemon 环境里已有的 provider key 会原样传给 Claude/Codex child；这不是 SDK 读取或保管 key。BYOK launcher 为 Pi child 重建窄环境；
+- task environment 是用户登录 shell 的快照，只移除 `CLAUDECODE` 与 `BYOK_*`（ADR-037 D2/D3，#1095）；Host 写进 `process.env` 的变量只在列入 `pass` 时进入。用户 shell 导出的 provider key 会原样传给 Claude/Codex child；这不是 SDK 读取或保管 key。BYOK launcher 为 Pi child 重建窄环境；
 - credential-isolation audit 是 release gate，不是可选检查。
 
 **当前 BYOK 设计**：不引入 loopback credential proxy。每次 dispatch 启动一个无 listener 的 custody launcher；projection 目录私有且 process-scoped，Pi child env 从封闭 platform/proxy baseline 加唯一 resolved key 重建，不继承 launcher 的 ambient secrets；key 只在 launcher 内存与 Pi child env 中短暂存在，缺 profile/model/keychain/key 任一条件都在 Pi 网络请求前 fail closed。默认承诺仍是“dispatch daemon 不持有任何 runtime credential”。

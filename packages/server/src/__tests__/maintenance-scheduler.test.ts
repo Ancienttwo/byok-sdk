@@ -131,9 +131,8 @@ describe('maintenance scheduler', () => {
     const event = events.next();
     try {
       const result = await server.maintenance.runNow();
-      expect(result.steps).toHaveLength(12);
-      // The memory composition keeps every used proof request id for the process life.
-      expect(result.steps[11]).toEqual({ step: 'proofReceipts', status: 'not-configured' });
+      expect(result.steps).toHaveLength(13);
+      expect(result.steps[12]).toEqual({ step: 'proofReceipts', status: 'ok', removed: 0, expired: 0, releasedBytes: 0n, more: false });
       expect(await event).toMatchObject({ value: { kind: 'maintenance.completed', report: result } });
       expect('mailbox' in server).toBe(false);
     } finally { await events.return?.(); await server.close(); }
@@ -143,7 +142,7 @@ describe('maintenance scheduler', () => {
     const server = createByokServer({ productId: 'maintenance-proof-receipts', storage: { kind: 'sqlite', path: join(path, 'server.sqlite') } });
     try {
       const result = await server.maintenance.runNow();
-      expect(result.steps[11]).toEqual({ step: 'proofReceipts', status: 'ok', removed: 0, expired: 0, releasedBytes: 0n, more: false });
+      expect(result.steps[12]).toEqual({ step: 'proofReceipts', status: 'ok', removed: 0, expired: 0, releasedBytes: 0n, more: false });
     } finally { await server.close(); rmSync(path, { recursive: true, force: true }); }
   });
   it.each([{ intervalMs: 0 }, { policy: { mailboxAckedRetentionMs: 0n } }, { limit: 0 }])('rejects invalid construction before creating storage %s', maintenance => {

@@ -13,7 +13,7 @@ import { taskFailureField, DAEMON_TASK_FAILURE } from '../task-failure';
 import { terminalIdentity } from '../terminal-identity';
 import { assertJournalEnvelopeProtocol } from '../daemon-errors';
 import { resultReplyFailureFromState } from '../result-reply-failure';
-import { serviceEnvironmentStatus } from '../../lifecycle/service-environment';
+import { loginShellSnapshot, serviceEnvironmentStatus } from '../../login-shell-environment';
 import { detectRuntimes } from './support';
 import { BlobClient } from '../blob-client';
 import type { DaemonScope } from './scope';
@@ -25,7 +25,7 @@ import type { DaemonScope } from './scope';
  * the first retention pass, starts the control server, resolves the service
  * environment and detects runtimes. It ends at its own last `await`.
  */
-export async function openStartRun(daemonScope: DaemonScope) {
+export async function openStartRun(daemonScope: DaemonScope, requestEpoch: number) {
   const {
     ownedProcessLedger, scratchRoot, storeDir, daemonState, initializeInputPreparation, config,
     retentionSweeper, replaceControlServer, setLifecycle, initializeOwnedHostedStorage,
@@ -80,7 +80,9 @@ export async function openStartRun(daemonScope: DaemonScope) {
     record = await daemonState.auth.loadExisting();
     if (!record) {
       daemonState.startedAt = Date.now();
-      daemonState.serviceEnrollmentWaiting = true;
+      // The start request's epoch, not the current one: a stop requested
+      // while this start runs must also refuse a pair made after it.
+      daemonState.serviceEnrollmentEpoch = requestEpoch;
       daemonState.serviceEnrollmentTransitioning = false;
       await retentionSweeper.runPass('startup');
       retentionSweeper.start();
@@ -89,7 +91,7 @@ export async function openStartRun(daemonScope: DaemonScope) {
       return;
     }
   }
-  daemonState.serviceEnrollmentWaiting = false;
+  daemonState.serviceEnrollmentEpoch = undefined;
   daemonState.serviceEnrollmentTransitioning = false;
   // This is the first point at which daemon-owned hosted storage may touch
   // the filesystem. The lease was acquired above, so SQLite open/schema/
@@ -201,6 +203,9 @@ export async function openStartRun(daemonScope: DaemonScope) {
   await operationalHealth.startRun();
   // The owner alone publishes this host-process observation into the event
   // stream. CLI audit persistence uses that same event, with no second writer.
+  // The login-shell snapshot every default runtime environment is built from
+  // is taken here, once per process (#1095), before runtimes are detected.
+  await loginShellSnapshot();
   daemonState.resolvedEnvironment = { ...serviceEnvironmentStatus() };
   daemonState.environmentResolvedAt = new Date().toISOString();
   // A later start() (re-pair) detects again: until it does, report nothing

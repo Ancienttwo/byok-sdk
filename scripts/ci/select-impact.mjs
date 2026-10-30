@@ -177,9 +177,9 @@ export const workspaceGraph = {
 };
 
 export const knownFamilies = Object.freeze([
-  'build-test', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
+  'build-test', 'macos-client', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
-  'windows-client', 'packageability-smoke', 'npm-release-pack',
+  'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
   'hermes-real-windows', 'runtime-contract',
 ]);
@@ -232,7 +232,9 @@ export const familyOwners = Object.freeze({
   'windows-client': [
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
     /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write|fold-name-aliases)\.ts|diagnostics\/|bin\/commands\/)/,
-    /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,
+    /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity|service-enrollment-handover)[^/]*$/,
+    // #1165: service enrollment's handover on a named-pipe control endpoint.
+    /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
     // #738: the Agent-home file write crash test, its child process and the code it qualifies.
     /^packages\/client\/src\/(?:agent-home\.ts|__tests__\/(?:fixtures\/)?agent-home-write-file[^/]*)$/,
     // #712: the Hermes suites this job runs on Windows, their fakes and the code they qualify.
@@ -255,9 +257,21 @@ export const familyOwners = Object.freeze({
     /^packages\/server\/src\/(?:__tests__\/)?loopback[^/]*$/,
     /^examples\/byok-mcp-server\/src\/loopback[^/]*$/,
   ],
+  // #1104: the embedded Host bundled as ESM, CJS and SEA on each OS, and the SDK bundle and asset code it qualifies.
+  'packaging-consistency': [
+    /^examples\/packaging\/(?:embedded-host-(?:fixture\.ts|smoke\.mjs)|bundle-import-meta\.test\.ts)$/,
+    /^packages\/client\/src\/(?:adapters\/packaging|sdk-native-assets|sdk-reserved-helper-host|sdk-distribution-bins)\b/,
+    /^packages\/client\/src\/adapters\/pi\/(?:runtime-assets|todo-locale-assets|client-manifest)\.ts$/,
+    /^packages\/keys\/src\/pi-provider-launcher-core\.ts$/,
+  ],
   'windows-service-smoke': [
     /^templates\/service\/winsw\//,
     /^packages\/client\/src\/(?:lifecycle\/|util\/secure-dir\.ts$)/,
+    // #1165: the control socket check pairs, queries and unpairs a WinSW
+    // service daemon through service enrollment's handover to normal startup.
+    /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
+    /^packages\/client\/src\/bin\/(?:control-client|commands\/unpair)\.ts$/,
+    /^packages\/client\/scripts\/control-socket-check\.mjs$/,
   ],
   'ipc-smoke': [
     /^packages\/client\/src\/daemon\/(?:control-protocol|control-server|device-credential-provider|device-credential-store)\.ts$/,
@@ -309,6 +323,8 @@ export const reviewedScripts = Object.freeze({
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and
   // runs it in every family job; #925 selects npm-release-pack alone.
   'scripts/release/execution-submit-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
+  // #1104: pack-and-smoke.mjs copies the packaging plugin smoke into its clean install.
+  'scripts/release/packaging-plugin-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and runs
   // it against the packed client's Pi launcher and todo assets.
   'scripts/release/pi-launcher-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
@@ -358,7 +374,7 @@ function todoSnapshotListed(path, context) {
 export const vitestTmpRootConsumers = Object.freeze([
   'examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/codex-interaction-host',
   'examples/host-execution-core', 'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker',
-  'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
+  'examples/packaging', 'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
 ]);
 // Reviewed M build inputs: exact paths retain workspace consumers and packed-artifact checks.
 const reviewedBuildConfigOwners = Object.freeze({
@@ -410,10 +426,10 @@ export function selectImpact(paths, context = {}) {
     }
     // #702: the Node pin is the runtime of every platform job, so a reviewed
     // exact version selects every routine family. The complete test suite
-    // stays release-validation only.
+    // stays nightly/release-validation only.
     if (path === '.node-version') {
       verifyReviewedContent(path, context);
-      for (const id of knownFamilies) if (id !== 'build-test') families.add(id);
+      for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
@@ -429,6 +445,11 @@ export function selectImpact(paths, context = {}) {
     if (path === 'examples/bot-collaboration/package.json') {
       verifyReviewedContent(path, context);
       dirs.add('examples/bot-collaboration'); continue;
+    }
+    // #1104: the private packaging example manifest, checked by its reviewed shape.
+    if (path === 'examples/packaging/package.json') {
+      verifyReviewedContent(path, context);
+      dirs.add('examples/packaging'); continue;
     }
     // #884: the private K4 manifest, checked by its reviewed shape. Its suite and the suites of its dependents run.
     if (path === 'examples/host-execution-core/package.json') {
@@ -456,6 +477,10 @@ export function selectImpact(paths, context = {}) {
     // The path-mutation gate ESM/CJS and relocated SEA probe (#1149) shares the packaging smoke owner.
     if (path === 'examples/packaging/gate-fixture.ts' || path === 'examples/packaging/gate-smoke.mjs') {
       dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
+    }
+    // #1104: the packaging consistency lane bundles and runs this fixture; its bundle test runs in the example suite.
+    if (/^examples\/packaging\/(?:embedded-host-(?:fixture\.ts|smoke\.mjs)|bundle-import-meta\.test\.ts|vitest\.config\.ts)$/.test(path)) {
+      dirs.add('examples/packaging'); continue;
     }
     // Both packaging recipes compile this launcher; the packageability smoke runs it.
     if (path === 'examples/packaging/launcher.ts') {
@@ -597,10 +622,10 @@ export function selectImpact(paths, context = {}) {
     if (path === '.gitignore' || rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     // W7: a ci.yml change can change any family job, so it selects every
     // routine family. The client suite also runs: two of its tests read this
-    // workflow. The complete test suite stays release-validation only.
+    // workflow. The complete test suite stays nightly/release-validation only.
     if (path === '.github/workflows/ci.yml') {
       scripts = true; dirs.add('packages/client');
-      for (const id of knownFamilies) if (id !== 'build-test') families.add(id);
+      for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
       continue;
     }
     // W7: agent-memory-windows.yml is removed. Its checks run in the

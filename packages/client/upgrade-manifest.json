@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "6dafd90f5cb71f37cf2b7e6d6b4172ee7977f2c4a96f8d49ef297270676dee76"
+    "snapshotSha256": "d970c198a249785bc6e2138b26c4680c3d7b50e3c195c2faf5953b877e80c309"
   },
   "configFields": {
     "status": "tracked",
@@ -439,6 +439,220 @@
       ]
     },
     {
+      "id": "doctor-clock-skew",
+      "impact": "additive",
+      "summary": "doctor reports the device clock skew measured from the server Date header of the last pair or token response, as a new clock-skew check and a clockSkew snapshot field; it warns beyond 60 s, the Host's default device-proof window. PairResponse.expiresIn is registered as a strip-safe HTTP wire addition. No Host action.",
+      "migration": "docs/agent-diagnostics-integration.md#3-故障到用户动作的映射",
+      "items": [
+        "export:@byok-sdk/client#DiagnosticCheck",
+        "export:@byok-sdk/protocol#WireAddition"
+      ]
+    },
+    {
+      "id": "messages-per-envelope-decode",
+      "impact": "breaking",
+      "summary": "POST /byok/messages decodes each entry on its own (#1121). An entry that is not a valid Envelope is answered rejected with reason payload_invalid and the rest of the batch applies; only a broken frame (not { messages: [...] }, an entry whose v is not this wire major, an entry without a UUID id, or more than 256 entries) still fails the whole request with 400. MessagesSendRequestSchema now validates that frame only: its messages entries are typed { v, id } plus unvalidated fields, so code that read decoded envelopes from it must decode each entry with parseMessage. A terminal whose task already holds a stored receipt the Host cannot read back is refused for that envelope with state_conflict (internal reason terminal_receipt_not_canonical in INBOUND_REFUSAL_REASONS) instead of a 500 for the batch. Devices need no change: a rejected outcome was already final for them.",
+      "migration": "docs/protocol.md#82-send--post-byokmessages",
+      "items": [
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#MessagesSendRequestSchema"
+      ]
+    },
+    {
+      "id": "open-device-vocabularies",
+      "impact": "breaking",
+      "summary": "Device -> Host vocabularies a newer device may extend are open (#1121): task.fail.failure.class, task.decline.code and a denied agent.content.receipt reason accept any well-formed token ([a-z][a-z0-9_-]{0,63}) this version does not know and keep it verbatim, so the report is recorded instead of rejected; a failure class it does not know may carry extra fields, which are kept too. The wire types widen accordingly (TaskFailure, the decline code and the denial reason admit unrecognized tokens). Hosts read them with readTaskFailure and readDeclineCode: a value this version does not know reads as class/code 'unknown' with the raw token in reportedClass/reportedCode. Cloud TerminalResult and embedded TaskResult now carry these readings: failure is a TaskFailureReading, code is a TaskDeclineCodeReading code, and a new reportedCode field holds an unknown code's raw token. Switch on failure.class and code as before and handle 'unknown'.",
+      "migration": "docs/protocol.md#freeze-rule",
+      "items": [
+        "export:@byok-sdk/cloud#TerminalResult",
+        "export:@byok-sdk/protocol#AgentContentReceiptPayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineCode",
+        "export:@byok-sdk/protocol#TaskDeclineCodeReading",
+        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailureReading",
+        "export:@byok-sdk/protocol#TaskFailureSchema",
+        "export:@byok-sdk/protocol#readDeclineCode",
+        "export:@byok-sdk/protocol#readTaskFailure",
+        "export:@byok-sdk/server#TaskResult"
+      ]
+    },
+    {
+      "id": "terminal-task-archive",
+      "impact": "breaking",
+      "summary": "Automatic maintenance gains a tasks step (#1120), run after mailbox: a terminal task is archived terminalTaskArchiveMs (default 90 days, at least mailboxUnackedRetentionMs + mailboxDeadLetterRetentionMs) after it ended. In one store transaction its bodies become redaction tombstones, its ephemeral rows and sealed-task object references go and archived_at is set; then its board item is removed and settle deletes any rows a custom store keeps outside that transaction (archived tasks leave the board). The task row and tombstoned receipts stay as the replay fence until tenant deletion (about 1.2 KB per task on Postgres). Content reads answer task_content_redacted; status reads stay. Device replays answer as before the archive: a claim or daemon_interrupted recovery report, which needs the now-tombstoned offer, is answered from the task's claim snapshot or, for an unclaimed task, from an exact match of its terminal receipt. An explicitly redacted task still refuses both, as before. RetentionPolicy gains terminalTaskArchiveMs, so a Host passing a complete policy adds it. CloudStores gains the required taskArchive port and BoardStore gains remove (idempotent): a custom store implements both. TaskAttempt gains archivedAt. Migration 0032 adds the policy column (NOT NULL, no default: stop policy writers from before #1120 first) backfilled to max(90 days, unacked + dead-letter windows) with every other window kept, refuses before any change a stored policy whose windows the application would reject or whose window sum exceeds Number.MAX_SAFE_INTEGER, and adds the task archive columns and backfills archive_after once from COALESCE(terminal_at, updated_at) for terminal rows; count terminal rows first, see the runbook. Embedded SQLite files add the columns and the same backfill on open.",
+      "migration": "deploy/runbooks/cloud-cleanup.md#terminal-task-archive-migration-1120",
+      "items": [
+        "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
+        "export:@byok-sdk/cloud#CloudStores",
+        "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+        "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
+        "export:@byok-sdk/cloud#MAINTENANCE_STEPS",
+        "export:@byok-sdk/cloud#MaintenanceStepReport",
+        "export:@byok-sdk/cloud#TaskArchiveCounts",
+        "export:@byok-sdk/cloud#TaskArchiveListInput",
+        "export:@byok-sdk/cloud#TaskArchiveStepCounts",
+        "export:@byok-sdk/cloud#TaskArchiveStore",
+        "export:@byok-sdk/cloud#TaskArchiveStoreInput",
+        "export:@byok-sdk/cloud#TaskArchiveStoreResult",
+        "export:@byok-sdk/cloud#TaskArchiveWork",
+        "export:@byok-sdk/cloud#TaskAttempt",
+        "export:@byok-sdk/cloud#createInMemoryCloudStores",
+        "export:@byok-sdk/cloud-dataplane#PostgresBoardStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresBoardStore",
+        "export:@byok-sdk/core#BoardStore",
+        "export:@byok-sdk/core#InMemoryBoardStore"
+      ]
+    },
+    {
+      "id": "proof-receipt-retention-required",
+      "impact": "breaking",
+      "summary": "ByokCloudOptions.proofReceiptRetention is required (#1120): every deployment prunes used device-proof request ids, so the proofReceipts maintenance step never reports not-configured. A Host that omitted it passes its ProofReceiptRetentionAuthority (Postgres: PostgresProofReceiptRetentionAuthority; in-memory compositions now carry InMemoryProofReceiptRetentionAuthority as proofReceiptAuthority).",
+      "migration": "docs/spec.md#cloud-maintenance-contract",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloudOptions",
+        "export:@byok-sdk/cloud#InMemoryByokCloud",
+        "export:@byok-sdk/cloud#InMemoryCloudComposition"
+      ]
+    },
+    {
+      "id": "mailbox-wake-probe",
+      "impact": "additive",
+      "summary": "The Postgres mailbox wake LISTEN connection enables TCP keepalive and probes itself every probeIntervalMs (default 30 s); a probe that is not observed reconnects and reports a MailboxWakeProbeMissedError through onError (#1120). No Host change is needed.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1120",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions"
+      ]
+    },
+    {
+      "id": "device-retirement-settles-tasks",
+      "impact": "breaking",
+      "summary": "Revoking a device, or superseding it when its machine re-pairs, now settles it in the same store transaction (#1119): its unfinished tasks become cancelled with terminalCause device_revoked or device_superseded, and its pending mailbox rows become expired, freeing their quota (no row is deleted and nothing returns to pending). New ByokCloud.abandonTask(tenant, taskId, cause) (and ByokServer.tasks.abandon / TaskHandle.abandon) settles one task the same way with a TASK_ABANDON_CAUSES cause; rows of a device that is still registered stay pending for it to ack, and its later reports for the task are refused (task_settled_by_cloud, a non-halting state_conflict). abandonTask sends nothing to a device, so it does not stop a live runtime; cancelTask does. readTaskResult reports a cloud-settled task from its attempt row. Custom stores must implement MailboxStore.expirePending and TaskCancellationStore.abandon and settle on revoke/register; InMemoryDeviceDirectory, InMemoryTaskCancellationStore and the Postgres directory take new constructor arguments. On the device, a halted or crashed run now ends its active tasks itself (journaling each task.fail for the next start) and its ended connection queues nothing more.",
+      "migration": "docs/hosted-host-contract.md#abandontask",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+        "export:@byok-sdk/cloud#TASK_ABANDON_CAUSES",
+        "export:@byok-sdk/cloud#TASK_ATTEMPT_UNFINISHED_STATUSES",
+        "export:@byok-sdk/cloud#TaskAbandonCause",
+        "export:@byok-sdk/cloud#TaskAbandonRequest",
+        "export:@byok-sdk/cloud#TaskCancellationStore",
+        "export:@byok-sdk/cloud#TenantStores",
+        "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskCancellationStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskCancellationStore",
+        "export:@byok-sdk/core#InMemoryMailboxStore",
+        "export:@byok-sdk/core#MailboxExpirePendingInput",
+        "export:@byok-sdk/core#MailboxStore",
+        "export:@byok-sdk/server#ByokServer",
+        "export:@byok-sdk/server#TaskHandle"
+      ]
+    },
+    {
+      "id": "device-resource-caps",
+      "impact": "breaking",
+      "summary": "A daemon runs at most DaemonConfig.maxConcurrentTasks tasks at once (default 8; a positive safe integer, no uncapped value), counted across every Agent home and runtime (#1121). Before, the device-wide count was unbounded. An offer over the cap is declined retryably before the claim, with no decline code, so a Host of any version accepts the decline. DaemonConfig.defaultMaxDurationMs (optional) is the wall-clock limit for a task whose offer carries no limits.maxDurationMs. While the Host is unreachable, the outbound queue keeps at most 8 MiB of task.progress and agent.message.draft envelopes and drops the oldest beyond that; terminals, claims, starts and approval requests are never dropped, and OutboundStatus.droppedEphemeral counts the drops. A Host that dispatches more than 8 concurrent tasks to one device sets maxConcurrentTasks to its own number.",
+      "migration": "docs/device-setup.md#operations",
+      "items": [
+        "config:defaultMaxDurationMs",
+        "config:maxConcurrentTasks",
+        "export:@byok-sdk/client#OutboundStatus"
+      ]
+    },
+    {
+      "id": "cursor-unreadable-halt",
+      "impact": "breaking",
+      "summary": "An unreadable delivery cursor file (torn, hand-edited, or not a nonnegative integer) no longer reads as a missing cursor (#1121). Startup halts with the new DaemonHaltReason 'cursor_unreadable'. The operator resets it with byok-agent doctor --repair reset-cursor --yes, or resetDeviceCursor(config, { confirmed: true }) in an embedded host: the cursor becomes 0 and the next start replays what the server retains; journaled offers are matched by id and ended tasks are not redelivered. An expired history still halts replay_cursor_too_old. Handle 'cursor_unreadable' wherever you switch on DaemonHaltReason.",
+      "migration": "docs/device-setup.md#reset-cursor",
+      "items": [
+        "export:@byok-sdk/client#DeviceCursorResetError",
+        "export:@byok-sdk/client#DeviceCursorResetErrorCode",
+        "export:@byok-sdk/client#DeviceCursorResetResult",
+        "export:@byok-sdk/client#ResetDeviceCursorInput",
+        "export:@byok-sdk/client#resetDeviceCursor"
+      ]
+    },
+    {
+      "id": "single-file-packaging",
+      "impact": "additive",
+      "summary": "A single-file Host (single-file ESM, single-file CommonJS or a Node SEA) has an SDK build helper in @byok-sdk/client/packaging (#1104): the byokSdkPackaging esbuild plugin (no esbuild dependency) sets each format's module require or import.meta.url and fails the build on any empty import.meta, SDK files included, except three reviewed third-party sites (sdkBundleImportMetaExemptions); copySdkPackagingAssets copies the Pi runtime and native assets one target ships, in sdkPackagingAssetLayout. bundledSdkHelperHost() is the sdkHelperHost of the running bundle or SEA. sdkDistributionManifest adds nodeEngine, a role for every published bin (bins) and the formats. In a CommonJS or SEA bundle, PDF reads lose unpdf's standard font and CMap defaults, as before. Nothing changes for a Host that does not use them.",
+      "migration": "packages/client/README.md#single-file-packaging",
+      "items": [
+        "entry:@byok-sdk/client/packaging",
+        "export:@byok-sdk/client#SdkDistributionBin",
+        "export:@byok-sdk/client#SdkDistributionBinRole",
+        "export:@byok-sdk/client#SdkPackagingFormat",
+        "export:@byok-sdk/client#bundledSdkHelperHost",
+        "export:@byok-sdk/client#sdkPackagingAssetLayout",
+        "export:@byok-sdk/client#sdkPackagingFormats",
+        "export:@byok-sdk/client/packaging#ByokSdkPackagingOptions",
+        "export:@byok-sdk/client/packaging#CopySdkPackagingAssetsOptions",
+        "export:@byok-sdk/client/packaging#SdkBundleImportMetaExemption",
+        "export:@byok-sdk/client/packaging#SdkPackagingAssets",
+        "export:@byok-sdk/client/packaging#SdkPackagingBuild",
+        "export:@byok-sdk/client/packaging#SdkPackagingFormat",
+        "export:@byok-sdk/client/packaging#SdkPackagingMessage",
+        "export:@byok-sdk/client/packaging#SdkPackagingPlugin",
+        "export:@byok-sdk/client/packaging#byokSdkPackaging",
+        "export:@byok-sdk/client/packaging#copySdkPackagingAssets",
+        "export:@byok-sdk/client/packaging#sdkBundleImportMetaExemptions"
+      ]
+    },
+    {
+      "id": "runtime-environment-policy",
+      "impact": "breaking",
+      "summary": "Runtimes no longer inherit the daemon's process.env (#1095). Every adapter builds its children's environment under a RuntimeEnvironmentPolicy (constructor option runtimeEnvironment; createDaemon passes DaemonConfig.runtimeEnvironment, createDaemonWithAdapters rejects that field). The default base is the user's login-shell snapshot, captured once per process with the account's login shell (read from the account database by uid, never $SHELL; a failed lookup is the new ServiceEnvironmentUnavailableCode account-shell-unavailable) from a closed seed and a fixed PATH, so CLIs on the user's shell PATH are found in embedded use too; 'allowlist' is the strict mode over the live environment; 'pass' names live variables a Host sets. CLAUDECODE and BYOK_* are always removed, NO_PROXY/no_proxy gain 127.0.0.1 and localhost, and Claude drops the shell's ANTHROPIC_*, Bedrock/Vertex switches and OAuth token when pass supplies a provider. A failed capture fails closed: RuntimeEnvironmentUnavailableError, detection refused with the new reason runtime_environment_unavailable and its code (RuntimeObservation.code), offers declined. win32 uses the session baseline names (ServiceEnvironmentStatus source 'windows-session'). RuntimeAdapter gains the required runtimeEnvironment(); custom adapters implement it with buildRuntimeEnvironment. Prepared input bindings use the Pi adapter's environment, so a daemon without a Pi adapter refuses them (detail pi_runtime_unconfigured). The adapters entry's buildRuntimeEnv is removed; the testing fake defaults to the allowlist environment. A Host whose runtime needs a variable it set itself lists the name in pass.",
+      "migration": "docs/device-setup.md#runtime-environment",
+      "items": [
+        "config:runtimeEnvironment",
+        "export:@byok-sdk/client#ClaudeAdapter",
+        "export:@byok-sdk/client#ClaudeAdapterOptions",
+        "export:@byok-sdk/client#CodexAdapter",
+        "export:@byok-sdk/client#CodexAdapterOptions",
+        "export:@byok-sdk/client#GrokAdapter",
+        "export:@byok-sdk/client#GrokAdapterOptions",
+        "export:@byok-sdk/client#HermesAdapter",
+        "export:@byok-sdk/client#HermesAdapterOptions",
+        "export:@byok-sdk/client#PiAdapter",
+        "export:@byok-sdk/client#PiAdapterOptions",
+        "export:@byok-sdk/client#RuntimeAdapter",
+        "export:@byok-sdk/client#RuntimeDetectResult",
+        "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
+        "export:@byok-sdk/client#RuntimeEnvironmentConflictRule",
+        "export:@byok-sdk/client#RuntimeEnvironmentPolicy",
+        "export:@byok-sdk/client#RuntimeEnvironmentUnavailableError",
+        "export:@byok-sdk/client#RuntimeObservation",
+        "export:@byok-sdk/client#ServiceEnvironmentStatus",
+        "export:@byok-sdk/client#ServiceEnvironmentUnavailableCode",
+        "export:@byok-sdk/client#buildRuntimeEnvironment",
+        "export:@byok-sdk/client/adapters#ClaudeAdapter",
+        "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
+        "export:@byok-sdk/client/adapters#CodexAdapter",
+        "export:@byok-sdk/client/adapters#CodexAdapterOptions",
+        "export:@byok-sdk/client/adapters#GrokAdapter",
+        "export:@byok-sdk/client/adapters#GrokAdapterOptions",
+        "export:@byok-sdk/client/adapters#HermesAdapter",
+        "export:@byok-sdk/client/adapters#HermesAdapterOptions",
+        "export:@byok-sdk/client/adapters#PiAdapter",
+        "export:@byok-sdk/client/adapters#PiAdapterOptions",
+        "export:@byok-sdk/client/adapters#RuntimeAdapter",
+        "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+        "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentConflictRule",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentPolicy",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentUnavailableError",
+        "export:@byok-sdk/client/adapters#RuntimeObservation",
+        "export:@byok-sdk/client/adapters#buildRuntimeEnv",
+        "export:@byok-sdk/client/adapters#buildRuntimeEnvironment",
+        "export:@byok-sdk/client/testing#FakeRuntimeAdapterBehavior"
+      ]
+    },
+    {
       "id": "path-mutation-gate-os-lock",
       "impact": "breaking",
       "summary": "The path-mutation gate (#1149), which SDK processes on one machine use to exclude each other from a store, an Agent home, a skill-pack store or a Pi session, is now an OS lock owned by one open handle: an O_EXLOCK open of /tmp/byok-pm-<uid>/<identity>.lock on macOS, an abstract unix socket on Linux, a named pipe on Windows as before. The OS frees it when its holder exits, and no SDK process removes another's gate. Releases up to 0.31 used unix socket files under /tmp/byok-pm-<uid>, which do not exclude the new locks on macOS and Linux. Migration: stop every SDK process on a store (the daemon, the CLI and an App that embeds the SDK) before upgrading any of them, and start them again only on the new release. Windows is unaffected. The gates coordinate only processes that use one protected directory (the daemon, the adapters, the actual Pi writer, the sweeper and relocation) as the same UID, in the same Linux network namespace, through a consistent canonical path; across network namespaces, use separate stores.",
@@ -522,6 +736,12 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "config:defaultMaxDurationMs",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "device-resource-caps"
+    },
+    {
       "item": "config:deviceAssertion",
       "change": "added",
       "after": "optional schema-sha256=67738e44d544c345",
@@ -574,6 +794,12 @@
       "change": "added",
       "after": "optional schema-sha256=cddf8275afa15408",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:maxConcurrentTasks",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "device-resource-caps"
     },
     {
       "item": "config:maxInlineEventBytes",
@@ -642,6 +868,12 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "config:runtimeEnvironment",
+      "change": "added",
+      "after": "optional schema-sha256=25be0c05980d06a5",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "config:runtimePreference",
       "change": "added",
       "after": "optional schema-sha256=3e8f01f4e19c710e",
@@ -696,6 +928,11 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "entry:@byok-sdk/client/packaging",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
       "item": "entry:@byok-sdk/protocol/agent-memory",
       "change": "added",
       "entry": "agent-memory-contract-in-protocol"
@@ -714,7 +951,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=494803d4d57d5fbd",
-      "after": "K8 0.0.1 src-sha256=90dc26d44c7903d3",
+      "after": "K8 0.0.1 src-sha256=01911b29e0d5f0b7",
       "entry": "execution-core-published"
     },
     {
@@ -788,6 +1025,26 @@
       "item": "export:@byok-sdk/client#BlobClient",
       "change": "changed",
       "entry": "device-store-default-dir-removed"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
@@ -885,9 +1142,29 @@
       "entry": "auth-revocation-typed-keychain-deadline"
     },
     {
+      "item": "export:@byok-sdk/client#DeviceCursorResetError",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceCursorResetErrorCode",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceCursorResetResult",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
+    },
+    {
       "item": "export:@byok-sdk/client#DeviceStoreBindingMismatchError",
       "change": "added",
       "entry": "device-store-pairing-binding"
+    },
+    {
+      "item": "export:@byok-sdk/client#DiagnosticCheck",
+      "change": "changed",
+      "entry": "doctor-clock-skew"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
@@ -898,6 +1175,26 @@
       "item": "export:@byok-sdk/client#ExpiringClassId",
       "change": "changed",
       "entry": "storage-retention-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/client#GrokAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#HermesAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client#HostLayout",
@@ -935,6 +1232,21 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#OutboundStatus",
+      "change": "changed",
+      "entry": "device-resource-caps"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#PreparedRuntimeOperation",
       "change": "changed",
       "entry": "pi-session-retention-lifecycle"
@@ -943,6 +1255,46 @@
       "item": "export:@byok-sdk/client#ProtectedClassId",
       "change": "changed",
       "entry": "storage-retention-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/client#ResetDeviceCursorInput",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentConflictRule",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentPolicy",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentUnavailableError",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeObservation",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
@@ -955,6 +1307,41 @@
       "entry": "pi-session-retention-lifecycle"
     },
     {
+      "item": "export:@byok-sdk/client#SdkDistributionBin",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkDistributionBinRole",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkPackagingFormat",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceEnvironmentStatus",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceEnvironmentUnavailableCode",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#buildRuntimeEnvironment",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#bundledSdkHelperHost",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
       "item": "export:@byok-sdk/client#checkDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
@@ -963,6 +1350,11 @@
       "item": "export:@byok-sdk/client#inspectDaemonStores",
       "change": "added",
       "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/client#resetDeviceCursor",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
     },
     {
       "item": "export:@byok-sdk/client#resolveHostLayout",
@@ -980,14 +1372,109 @@
       "entry": "pi-subagents-installed-dependency"
     },
     {
+      "item": "export:@byok-sdk/client#sdkPackagingAssetLayout",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkPackagingFormats",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
       "item": "export:@byok-sdk/client#validateDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#HermesAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
       "change": "changed",
       "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapter",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentConflictRule",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentPolicy",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentUnavailableError",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeObservation",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
@@ -998,6 +1485,16 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeSessionLease",
       "change": "added",
       "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#buildRuntimeEnv",
+      "change": "removed",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#buildRuntimeEnvironment",
+      "change": "added",
+      "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client/agent-memory#AgentMemoryError",
@@ -1020,6 +1517,66 @@
       "entry": "agent-memory-contract-in-protocol"
     },
     {
+      "item": "export:@byok-sdk/client/packaging#ByokSdkPackagingOptions",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#CopySdkPackagingAssetsOptions",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkBundleImportMetaExemption",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingAssets",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingBuild",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingFormat",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingMessage",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingPlugin",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#byokSdkPackaging",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#copySdkPackagingAssets",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#sdkBundleImportMetaExemptions",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterBehavior",
+      "change": "changed",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/cloud#AllowAllRateLimiter",
       "change": "changed",
       "entry": "device-route-rate-admission"
@@ -1030,9 +1587,24 @@
       "entry": "device-route-rate-admission"
     },
     {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloudOptions",
+      "change": "changed",
+      "entry": "proof-receipt-retention-required"
+    },
+    {
       "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
       "change": "changed",
       "entry": "capability-ports-two-way"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
+      "change": "changed",
+      "entry": "terminal-task-archive"
     },
     {
       "item": "export:@byok-sdk/cloud#CapabilityPorts",
@@ -1040,9 +1612,44 @@
       "entry": "capability-ports-two-way"
     },
     {
+      "item": "export:@byok-sdk/cloud#CloudStores",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "messages-per-envelope-decode"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
       "change": "changed",
       "entry": "device-route-rate-admission"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryByokCloud",
+      "change": "changed",
+      "entry": "proof-receipt-retention-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryCloudComposition",
+      "change": "changed",
+      "entry": "proof-receipt-retention-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
     },
     {
       "item": "export:@byok-sdk/cloud#InboundOutcome",
@@ -1058,6 +1665,16 @@
       "item": "export:@byok-sdk/cloud#InboundResult",
       "change": "changed",
       "entry": "device-route-rate-admission"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MAINTENANCE_STEPS",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MaintenanceStepReport",
+      "change": "changed",
+      "entry": "terminal-task-archive"
     },
     {
       "item": "export:@byok-sdk/cloud#MintedAccessToken",
@@ -1080,9 +1697,84 @@
       "entry": "dead-letter-retention"
     },
     {
+      "item": "export:@byok-sdk/cloud#TASK_ABANDON_CAUSES",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TASK_ATTEMPT_UNFINISHED_STATUSES",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAbandonCause",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAbandonRequest",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveCounts",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveListInput",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveStepCounts",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveStore",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveStoreInput",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveStoreResult",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskArchiveWork",
+      "change": "added",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttempt",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskCancellationStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TenantBoundRateLimiter",
       "change": "changed",
       "entry": "device-route-rate-admission"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantStores",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TerminalResult",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
     },
     {
       "item": "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
@@ -1090,9 +1782,24 @@
       "entry": "capability-ports-two-way"
     },
     {
+      "item": "export:@byok-sdk/cloud#createInMemoryCloudStores",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#CLOUD_CLEANUP_ERROR_CODES",
       "change": "changed",
       "entry": "dead-letter-retention"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+      "change": "added",
+      "entry": "mailbox-wake-probe"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresBoardStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
@@ -1100,9 +1807,29 @@
       "entry": "dataplane-rate-limit-required"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+      "change": "changed",
+      "entry": "mailbox-wake-probe"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresRateLimitOptions",
       "change": "added",
       "entry": "dataplane-rate-limit-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskCancellationStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#CLOUD_CLEANUP_ERROR_CODES",
@@ -1110,14 +1837,49 @@
       "entry": "dead-letter-retention"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresBoardStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
       "change": "changed",
       "entry": "dataplane-rate-limit-required"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresRateLimitOptions",
       "change": "added",
       "entry": "dataplane-rate-limit-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskCancellationStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/core#BoardStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryBoardStore",
+      "change": "changed",
+      "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryMailboxStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
     },
     {
       "item": "export:@byok-sdk/core#LocalStoreId",
@@ -1128,6 +1890,16 @@
       "item": "export:@byok-sdk/core#MailboxCollectExpiredInput",
       "change": "changed",
       "entry": "dead-letter-retention"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxExpirePendingInput",
+      "change": "added",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxStore",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
     },
     {
       "item": "export:@byok-sdk/core#StoreCompatibility",
@@ -1145,6 +1917,11 @@
       "entry": "store-compatibility-precheck"
     },
     {
+      "item": "export:@byok-sdk/protocol#AgentContentReceiptPayloadSchema",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
       "item": "export:@byok-sdk/protocol#DEVICE_NOT_REGISTERED_CODE",
       "change": "added",
       "entry": "auth-revocation-typed-keychain-deadline"
@@ -1160,6 +1937,11 @@
       "entry": "auth-revocation-typed-keychain-deadline"
     },
     {
+      "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+      "change": "changed",
+      "entry": "messages-per-envelope-decode"
+    },
+    {
       "item": "export:@byok-sdk/protocol#PairResponseSchema",
       "change": "changed",
       "entry": "token-expires-in"
@@ -1170,9 +1952,44 @@
       "entry": "task-fail-reason-bound"
     },
     {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCode",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCodeReading",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
       "change": "changed",
       "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureReading",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureSchema",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
     },
     {
       "item": "export:@byok-sdk/protocol#TokenResponseSchema",
@@ -1180,9 +1997,24 @@
       "entry": "token-expires-in"
     },
     {
+      "item": "export:@byok-sdk/protocol#WireAddition",
+      "change": "changed",
+      "entry": "doctor-clock-skew"
+    },
+    {
       "item": "export:@byok-sdk/protocol#boundFailureReason",
       "change": "added",
       "entry": "task-fail-reason-bound"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#readDeclineCode",
+      "change": "added",
+      "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#readTaskFailure",
+      "change": "added",
+      "entry": "open-device-vocabularies"
     },
     {
       "item": "export:@byok-sdk/protocol/agent-memory#AgentMemoryError",
@@ -1240,9 +2072,24 @@
       "entry": "task-fail-reason-bound"
     },
     {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
       "item": "export:@byok-sdk/server#SqliteSchemaErrorCode",
       "change": "changed",
       "entry": "capability-ports-two-way"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskHandle",
+      "change": "changed",
+      "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskResult",
+      "change": "changed",
+      "entry": "open-device-vocabularies"
     },
     {
       "item": "export:@byok-sdk/server#inspectSqliteStore",
@@ -1840,16 +2687,10 @@
       "entry": "execution-core-published"
     },
     {
-      "item": "interprocess:path-mutation-gate",
-      "change": "added",
-      "after": "protocol=2",
-      "entry": "path-mutation-gate-os-lock"
-    },
-    {
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
-      "after": "migrations=31 last=0031_mailbox_dead_letter_retention.sql sha256=0475fb80913fc49a",
+      "after": "migrations=32 last=0032_terminal_task_archive.sql sha256=4a31d8addf70ddef",
       "entry": "dead-letter-retention"
     }
   ]

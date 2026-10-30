@@ -249,7 +249,7 @@ async function prepareOnThisDevice(
 
   const assembled = await createPreparedToolSurfaceAssembler({
     toolsetRegistry: toolsets,
-    runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+    runtimeEnv: async () => ({ PATH: process.env.PATH ?? '' }),
   }).assemble({
     agentMemory: 'none',
     requiredToolsets,

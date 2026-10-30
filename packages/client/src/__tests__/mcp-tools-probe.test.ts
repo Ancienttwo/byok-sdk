@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { McpAuthorityError, probeMcpServerTools } from '../daemon/mcp-tools-probe';
 import { MCP_OBSERVATION_MAX_STDOUT_BYTES } from '../mcp';
-import { buildRuntimeEnv } from '../daemon/environment';
+import { testRuntimeEnv } from './fixtures/runtime-env';
 import type { McpStdioServerConfig } from '../types';
 
 /**
@@ -44,7 +44,7 @@ function fixtureServer(config: FixtureConfig): McpStdioServerConfig {
 
 /** The environment the real runtime child of a task would receive. */
 function runtimeEnv(): Record<string, string> {
-  return buildRuntimeEnv({ ambient: process.env });
+  return testRuntimeEnv();
 }
 
 async function probe(

@@ -868,7 +868,7 @@ lifecycle model, `status().lifecycle` and the `{kind:'lifecycle'}` event:
 `stopped`, `awaiting-enrollment`, `running` with `connection` `connecting` or
 `open`, or `halted` with a reason from one closed set (`DaemonHaltReason`:
 `unpaired`, `re_pair_required`, `store_not_bound`, `store_owned`,
-`device_revoked`, `handshake_rejected`, `replay_cursor_too_old`,
+`device_revoked`, `handshake_rejected`, `replay_cursor_too_old`, `cursor_unreadable`,
 `config_invalid`). `open` means
 the server accepted this session's `conn.hello` (protocol §8.1). Network
 failures never fail `start()` or end the run: the daemon's one reconnect loop
@@ -883,6 +883,17 @@ is a crash too: the connection stops, the same health failure is recorded,
 and `lifecycle` becomes `crashed` (it stays so, also after `stop()`, until the
 next `start()`); it is never an unhandled rejection.
 
+A halted or crashed run stops working at once; the Host does not have to call
+`stop()` for that. It takes no further `task.offer`, ends every active task
+(an interrupt bounded at 5 s, then close) and records
+each one's retryable `task.fail` in the journal, which the next `start()`
+reports. The ended connection queues nothing more, so its outbox cannot grow.
+An embedded Host and `byok-agent` behave the same; the Host still calls
+`stop()` to release the store, and `stop()` waits for that teardown (bounded by
+`shutdownGraceMs`) before it does. A revoked or superseded device's tasks are
+also ended on the server side (`cancelled`, `terminalCause` `device_revoked`
+or `device_superseded`), so the journaled fail of such a task is refused there.
+
 `byok-agent start` maps the run's end to its exit code: 0 for a normal stop,
 78 for a halt, 1 for a crash (a `crashed` lifecycle included). Under `--service` a halt exits 0, the one status
 launchd, systemd and WinSW all leave stopped; a crash still exits 1 and is
@@ -893,7 +904,43 @@ rotation); offline `status`, `service-status` and the `doctor` `lifecycle`
 check read it, and a halted or crashed daemon fails that check with its
 remedy.
 
+The control `status` result carries `clockSkew` (#1114): the device clock
+against the HTTP `Date` header of the daemon's last successful pair or token
+renewal, as `deviceAheadMs` (positive means the device is ahead),
+`uncertaintyMs` and `observedAt`. It is absent when the daemon has no reading
+(no pair or renewal since start, a response without a parseable `Date`, or a
+device clock set back during the request) and
+from an older control peer. The `doctor` `clock-skew` check reads it, passes
+within 60 seconds (the default device-proof window; a Host may widen it up to
+5 minutes) and warns beyond that. An offline `doctor` reports it as unknown:
+it keeps no state file and sends no request. The reading never sets a token
+lifetime.
+
 ## Runtime operation authority
+
+### Runtime environment (#1095)
+
+`RuntimeAdapter.runtimeEnvironment()` is the one source of the environment every
+child process of a runtime's tasks receives: the runtime CLI, its version and
+login probes, and the MCP servers the daemon probes for it. Each SDK adapter
+builds it under its `runtimeEnvironment` constructor option; `createDaemon`
+passes `DaemonConfig.runtimeEnvironment` to the adapters it builds, and
+`createDaemonWithAdapters` rejects that field.
+
+- `login-shell` (default): the user's login-shell snapshot, captured once per
+  process from a closed seed and a fixed `PATH`, never from the daemon's
+  `process.env`. A failed capture fails closed: `runtimeEnvironment()` rejects
+  with `RuntimeEnvironmentUnavailableError`, detection reports `refused` with
+  `runtime_environment_unavailable` and the capture `code`, and an offer is
+  declined before claim. win32 has no login shell; its base is the platform
+  baseline names of the live session (`windows-session`).
+- `allowlist`: the platform baseline plus `allow`, from the live environment.
+- `pass`: names read from the live `process.env` at every build.
+
+`CLAUDECODE` and `BYOK_*` are always removed, and `NO_PROXY`/`no_proxy` always
+include `127.0.0.1` and `localhost`. An adapter's conflict rule removes base
+names when `pass` supplies its trigger (Claude: a passed provider drops the
+shell's `ANTHROPIC_*`, Bedrock/Vertex switches and OAuth token).
 
 ### Local runtime probe observation
 
@@ -906,7 +953,10 @@ metadata are rejected. There is no compatibility translation.
 `refused` requires exactly `kind` and `reason`. Its reasons are
 `app_server_unavailable` (Codex has no `app-server`), `acp_unavailable`
 (an ACP runtime such as Grok has no stdio ACP mode) and `platform_unsupported`
-(the host `process.platform` is not in the descriptor's `platforms`). No other arm accepts `reason`; arbitrary error text
+(the host `process.platform` is not in the descriptor's `platforms`). The one
+exception is `runtime_environment_unavailable`, which carries exactly one more
+field, `code`: the login-shell capture failure code (see Runtime environment
+below). No other arm accepts `reason`; arbitrary error text
 is never parsed into a reason. Daemon registration, task selection and explicit local
 `runtimes`/offline doctor call `observeRuntimeDetection`, which refuses an
 unsupported platform before it calls `detect(signal?)` on the actual adapter.
@@ -2111,9 +2161,10 @@ entries first. Same-uid code can put such a file in the session cwd. The SDK
 does not guard this path. In a YOLO session the agent already has same-uid
 write access.
 
-The daemon does not deny loader environment variables. `buildRuntimeEnv`
-removes only `CLAUDECODE` and the `BYOK_*` control names. Values such as
-`NODE_OPTIONS`, `LD_*` and `DYLD_*` reach the child as the user set them.
+The daemon does not deny loader environment variables. The runtime
+environment (`buildRuntimeEnvironment`, #1095) is the user's login-shell
+snapshot minus `CLAUDECODE` and the `BYOK_*` control names. Values such as
+`NODE_OPTIONS`, `LD_*` and `DYLD_*` reach the child as the user's shell set them.
 
 The SDK does not attest tool or runtime executables. There is no install
 record, no implementation identity and no pre-spawn measurement.
@@ -2156,8 +2207,10 @@ behind an explicit helper dispatch.
 A single-file product sets `sdkHelperHost: { mode: 'self-executable' }`. Every
 Pi launch then re-enters the product executable as
 `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`, and
-the product names its Pi asset root in `PI_PACKAGE_DIR` (a Bun-compiled
-executable may keep the assets beside itself).
+the product names its Pi asset root in `PI_PACKAGE_DIR` and passes that name
+explicitly through `DaemonConfig.runtimeEnvironment.pass` or
+`PiAdapterOptions.runtimeEnvironment` (a Bun-compiled executable may keep the
+assets beside itself).
 
 This is the one supported way to ship official pi in a host download. The
 product bundles the SDK root, so official pi from the build machine install is
@@ -2940,7 +2993,7 @@ are capped at 32. The TaskRunner unattended cancellation policy is unchanged.
 `ByokCloud.runMaintenance({ tenant, now, policy, limit })` runs a closed sequence
 of ten tenant-first `collectExpired` ports: mailbox, receipts, nonces, pairing
 codes, presence, activity, approvals, device assertion replay, quota and
-objects. Every step has one batch budget, returns removed/expired counts,
+objects, with the `tasks` archive step (below) between mailbox and receipts. Every step has one batch budget, returns removed/expired counts,
 released bigint bytes and an eligible-remainder flag, and commits independently.
 Failures retain confirmed `committed` counts and `failedRows`; step faults use
 `failedRows: 0`. Unknown counts and `more` are omitted. A remainder-probe fault
@@ -2954,9 +3007,35 @@ deployment sets that value once in `ByokCloudOptions.proofReceiptRetention`
 (default 24h); it is not part of the per-tenant policy. Construction refuses a
 value below 15 minutes: a receipt recorded at R binds a proof issued no later
 than R + 5 min of clock skew, and the verifier refuses that proof after
-R + 10 min. Within the retention a `requestId` is single-use. Without an
-authority the step reports `not-configured`; the reference server wires the
-SQLite store and leaves the memory composition unpruned.
+R + 10 min. Within the retention a `requestId` is single-use. The option is
+required (#1120): every composition prunes, and there is no unpruned mode.
+
+The `tasks` step archives terminal tasks (#1120). A task is eligible once its
+`archive_after` instant (its terminal instant; for a task that ended before
+migration 0032, its last update) is older than `terminalTaskArchiveMs`
+(default 90 days, at least the unacked plus dead-letter windows, so no
+archived task has a delivery the mailbox could replay). One store transaction
+per task replaces every stored body with the redaction tombstone (offer and
+terminal receipts, Agent message admission, acked and expired mailbox
+bodies), fences an absent terminal receipt, clears the free-text cause and
+cancel reason, deletes the ephemeral rows and the task's object references,
+and sets `archived_at`. Orphan GC then reclaims the objects. The board item is
+removed after the transaction, then `settle` deletes any task rows the store
+keeps outside that transaction (the embedded server's in-memory activity and
+draft rows, which a rollback could not restore) and records settlement; a task
+archived but not yet settled is listed again until it is. Archived tasks leave
+the board. The task row and the
+tombstoned receipts are the task's identity fence and are never deleted;
+only tenant deletion removes them. A replay of a stored body compares equal to
+its tombstone and a different body is still a conflict, so every device and
+Host answer stays what it was. A claim or `daemon_interrupted` recovery report
+needs the offer, which is now a tombstone; the inbound gate answers it from
+the retained fence instead: a claimed task's immutable claim snapshot, or for
+an unclaimed task the terminal receipt, which only an exact replay of the
+recorded recovery matches. An explicitly redacted task, which holds a redaction
+receipt, still refuses both. Content reads of an archived task fail with
+`task_content_redacted`; status reads stay. The step reports `archived`,
+`settled`, `refused` and `more`.
 
 The reference server always schedules one non-overlapping pass every five
 minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
@@ -2964,7 +3043,7 @@ minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
 before releasing SQLite. Hosted schedulers invoke the same kernel with their
 stored policy. Retention durations are positive bigint milliseconds: acked
 mailbox 24h, unacked mailbox 7d, dead letters 30d after expiry, request
-receipts 24h and orphan grace 24h.
+receipts 24h, orphan grace 24h and terminal-task archive 90d.
 There is no disable value or missing-policy substitution.
 
 Acked mailbox rows may be deleted; unacked rows become dead letters, which stay
@@ -2973,8 +3052,9 @@ highest-seq dead letter, kept so `recoverableFrom` never moves back (#1115).
 Mailbox quota counts only pending rows. Mailbox collection reports zero released bytes and never touches a
 usage counter. The sole receipt classification table protects all 11 SDK
 families and unknown keys as identity; the request projection is empty.
-Redeemed pairing code rows remain reachable identity fences. Committed reservation rows remain accounting/replay identity; only expired/aborted settled rows are GC candidates. Durable tasks,
-egress, truth, board, memory, profile and terminal history do not expire.
+Redeemed pairing code rows remain reachable identity fences. Committed reservation rows remain accounting/replay identity; only expired/aborted settled rows are GC candidates. Task identity
+fences, egress, truth, memory and profile do not expire; terminal task
+content and board items expire through the `tasks` step.
 Objects need no references or live reservation and must pass orphan grace;
 physical byte deletion and accounted settlement are one protected unit. PG
 holds the manifest row through physical deletion, and SQLite commits its SQL
@@ -3721,6 +3801,23 @@ with the policy `product-resigning-allowed`; the Koffi `files` keep
 memory-helper authority; on Windows x64 the returned `agent-memory-fs`
 subdirectory is a valid value for it. Native target metadata is not platform qualification;
 Windows SEA qualification requires the actual Windows CI process-ownership fixture.
+
+#### Single-file packaging (#1104)
+
+`sdkDistributionManifest` also gives `nodeEngine` (the client `engines.node`), a
+role for every published bin (`bins`: `cli`, `reserved-helper`, `pi-host`, or
+`provider-launcher` for the keys custody launcher), the three single-file formats
+(`formats`: ESM, CommonJS, SEA) and their shared asset layout. A new bin without a
+role fails CI. `@byok-sdk/client/packaging` is the build-time helper:
+`byokSdkPackaging` (an esbuild plugin with no esbuild dependency) sets each
+format's module `require` or `import.meta.url` and fails the build on any empty
+`import.meta` except the reviewed third-party `sdkBundleImportMetaExemptions`.
+In a CommonJS or SEA bundle, unpdf's exemption means PDF reads lose its standard
+font and CMap defaults. `copySdkPackagingAssets` writes the Pi runtime and native
+assets of one target. `bundledSdkHelperHost()` is the running bundle's or SEA's
+`sdkHelperHost`. The packaging consistency CI lane runs a complete embedded Host
+in each format on macOS, Linux and Windows. A Host that does not use these is
+unchanged.
 
 ### Embedded Agent-home projection completion waiting
 

@@ -13,10 +13,19 @@ import {
   type ActivityTail,
 } from '../../activity';
 
+const TAILS = new WeakMap<InMemoryActivityStore, Map<string, ActivityTail>>();
+
+/** Deletes the task's tail for the Host task archive (#1120); returns the rows removed. */
+export function deleteActivityTail(store: InMemoryActivityStore, tenant: TenantId, taskId: string): number {
+  return TAILS.get(store)!.delete(activityTailKey(tenant, taskId)) ? 1 : 0;
+}
+
 export class InMemoryActivityStore implements ActivityStore {
   readonly #tails = new Map<string, ActivityTail>();
 
-  constructor(private readonly clock: Clock) {}
+  constructor(private readonly clock: Clock) {
+    TAILS.set(this, this.#tails);
+  }
 
   async append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail> {
     const capacity = validateActivityAppend(input);

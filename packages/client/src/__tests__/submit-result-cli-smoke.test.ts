@@ -44,13 +44,16 @@ async function run(outcome: unknown) {
   process.env.FAKE_CODEX_SUBMIT_RESULT = JSON.stringify(outcome);
   process.env.FAKE_CODEX_MCP_TOOLS_RECEIPT = toolsReceipt;
   const server = await TestServer.start(); cleanup.push(() => server.close());
+  // The built adapter's base is the real login shell, not the unit snapshot: the
+  // node-script fake and the FAKE_CODEX_* set above reach it through pass.
   const daemon: Daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-result-smoke' }, productName: 'Result smoke', productId: 'result-smoke',
     serverUrl: server.url, storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') },
     agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-  }, [new CodexAdapter({ resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }) })], { deviceCredentials: new InMemoryDeviceCredentialStore() });
+  }, [new CodexAdapter({ runtimeEnvironment: { pass: ['PATH', 'FAKE_CODEX_*'] }, resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }) })],
+  { deviceCredentials: new InMemoryDeviceCredentialStore() });
   cleanup.push(() => daemon.stop());
   await daemon.pair('pairing-code');
   await daemon.start();

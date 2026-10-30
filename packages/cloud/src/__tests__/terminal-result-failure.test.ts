@@ -24,6 +24,20 @@ describe('projectTerminalResult: the runtime failure class (#869)', () => {
     expect(projected.reason).toBeUndefined();
   });
 
+  it('reads a class this version does not know as unknown, keeping the raw token (#1121)', () => {
+    const wire = JSON.stringify({ ...createEnvelope('task.fail', { reason: 'busy' }, { taskId: 'task-3' }),
+      payload: { reason: 'busy', retryable: true, failure: { class: 'provider_capacity', retryAfterMs: 30_000 } } });
+    const projected = projectTerminalResult('task-3', { ...receipt(createEnvelope('task.fail', { reason: 'x' }, { taskId: 'task-3' })), body: wire });
+    expect(projected).toMatchObject({ state: 'failed', reason: 'busy', retryable: true, failure: { class: 'unknown', reportedClass: 'provider_capacity' } });
+  });
+
+  it('reads a decline code this version does not know as unknown, keeping the raw token (#1121)', () => {
+    const wire = JSON.stringify({ ...createEnvelope('task.decline', { reason: 'device full' }, { taskId: 'task-4' }),
+      payload: { reason: 'device full', retryable: true, code: 'device_task_limit' } });
+    const projected = projectTerminalResult('task-4', { ...receipt(createEnvelope('task.decline', { reason: 'x' }, { taskId: 'task-4' })), body: wire });
+    expect(projected).toMatchObject({ state: 'failed', code: 'unknown', reportedCode: 'device_task_limit', retryable: true });
+  });
+
   it('has no failure key when the terminal carried none', () => {
     const projected = projectTerminalResult('task-2', receipt(createEnvelope('task.fail', { reason: 'old daemon' }, { taskId: 'task-2' })));
     expect(Object.hasOwn(projected, 'failure')).toBe(false);

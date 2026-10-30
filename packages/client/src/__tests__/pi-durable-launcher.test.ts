@@ -14,7 +14,7 @@ import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 import { buildPiPreparedArgs, buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
 import { parsePiProviderLauncherOptions, buildPiProviderChildEnvironment } from '../../../keys/src/pi-provider-launcher-core';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
-import { buildRuntimeEnv } from '../daemon/environment';
+import { testRuntimeEnv } from './fixtures/runtime-env';
 const ownedGroups=new Set<number>();
 const roots: string[] = [], servers: Server[] = [], sessions: Session[] = [];
 afterEach(async () => {
@@ -70,7 +70,7 @@ const __executionScratch = await testExecutionScratch();
   const offer = { instruction: 'Host authority input\nHost context second line', dispatchSelection: selection };
   const prepared = await adapter.prepare({ offer } as never);
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
-  const env = buildRuntimeEnv({ ambient: process.env });
+  const env = testRuntimeEnv();
   const launch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: home, env,  });
   const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, dispatchSelection: selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
   const journal: string[] = [];

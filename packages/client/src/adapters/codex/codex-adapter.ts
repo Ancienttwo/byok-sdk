@@ -26,7 +26,7 @@ import {
   RuntimeStartupDisposalFailure,
   isRuntimeExecutionFailure,
 } from '../../runtime-failure';
-import { buildRuntimeEnv } from '../../daemon/environment';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import {
@@ -38,7 +38,7 @@ import { codexFailure } from '../../runtime/oar-failure-runtime';
 import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
-import { resolveRuntimeInvocation, type RuntimeInvocation } from '../runtime-invocation';
+import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
 import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-version';
 import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers';
 
@@ -60,6 +60,8 @@ export function assertCodexSandboxSetting(value: unknown, label: string): assert
 export interface CodexAdapterOptions {
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
+  /** The environment Codex and its MCP servers get (#1095). Default: the login-shell snapshot. */
+  runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /**
    * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
    * `danger-full-access`: no human answers an approval prompt, so a sandbox
@@ -125,8 +127,10 @@ export class CodexAdapter implements RuntimeAdapter {
       messageDraft: true,
     },
   }); }
+  private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   constructor(private readonly options: CodexAdapterOptions = {}) {
     if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
+    this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'CodexAdapterOptions.runtimeEnvironment');
     if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
       throw new TypeError('CodexAdapterOptions.agentUserMcpServers must be inherit or excluded');
     this.options = { ...options, ...(options.nativeInteractions === undefined ? {} : { nativeInteractions: snapshotNativeInteractionHostOptions(options.nativeInteractions) }) };
@@ -148,17 +152,21 @@ export class CodexAdapter implements RuntimeAdapter {
     )
       throw new TypeError('invalid Codex operation timeout');
   }
+  runtimeEnvironment(): Promise<Record<string, string>> {
+    return buildRuntimeEnvironment(this.environmentPolicy);
+  }
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const { command, args } = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command);
-      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, args);
+      const env = await this.runtimeEnvironment();
+      const { command, args } = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command, runtimeInvocationHost(env));
+      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env, args);
       if (version.kind !== 'available') return version;
       const text = version.stdout.trim() || version.stderr.trim();
       try {
         await execFileAsync(command, [...args, 'app-server', '--help'], {
           timeout: DETECT_TIMEOUT_MS,
           killSignal: 'SIGKILL',
-          env: buildRuntimeEnv({ ambient: process.env }),
+          env,
         });
       } catch {
         return { kind: 'refused', reason: 'app_server_unavailable' };
@@ -168,7 +176,7 @@ export class CodexAdapter implements RuntimeAdapter {
         await execFileAsync(command, [...args, 'login', 'status'], {
           timeout: DETECT_TIMEOUT_MS,
           killSignal: 'SIGKILL',
-          env: buildRuntimeEnv({ ambient: process.env }),
+          env,
         });
         // Codex reports configured credentials with exit 0; its display text is not a contract.
         authPresent = true;
@@ -208,7 +216,7 @@ export class CodexAdapter implements RuntimeAdapter {
       };
     let invocation: RuntimeInvocation;
     try {
-      invocation = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command);
+      invocation = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command, runtimeInvocationHost(await this.runtimeEnvironment()));
     } catch (error) {
       return { kind: 'reject', reason: `codex installation refused: ${classifyDetectError(error).kind}`, retryable: false };
     }

@@ -5,6 +5,7 @@ import { DeviceStore } from '../daemon/store';
 import { createDeviceCredentialStore } from '../daemon/device-credential-provider';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { connectControlClient } from '../bin/control-client';
+import { CursorStore } from '../daemon/cursor-store';
 import { collectDiagnostics } from './diagnostics';
 import type { DiagnosticsSnapshot } from './types';
 
@@ -118,5 +119,72 @@ export async function repairDeviceEnrollmentMetadata(
     if (error instanceof DeviceMetadataRepairError) throw error;
     if (error instanceof DaemonOwnerActiveError) throw new DeviceMetadataRepairError('store-busy');
     throw new DeviceMetadataRepairError(failureCode);
+  }
+}
+
+export interface ResetDeviceCursorInput {
+  confirmed: true;
+}
+
+export interface DeviceCursorResetResult {
+  action: 'reset-cursor';
+  scope: 'device';
+  /** The cursor file now holds 0; nothing was replayed yet. */
+  status: 'reset';
+}
+
+const CURSOR_RESET_MESSAGES = {
+  'confirmation-required': 'Explicit confirmation is required to reset the delivery cursor.',
+  'daemon-running': 'Stop the daemon before resetting the delivery cursor.',
+  'store-busy': 'The store is owned by another operation; cursor reset refused.',
+  'unpaired': 'No readable device record exists; pair this device instead of resetting its cursor.',
+  'reset-failed': 'The delivery cursor could not be reset; inspect the store before retrying.',
+} as const;
+
+export type DeviceCursorResetErrorCode = keyof typeof CURSOR_RESET_MESSAGES;
+
+/** Closed diagnostics only, like {@link DeviceMetadataRepairError}. */
+export class DeviceCursorResetError extends Error {
+  constructor(readonly code: DeviceCursorResetErrorCode) {
+    super(CURSOR_RESET_MESSAGES[code]);
+    this.name = 'DeviceCursorResetError';
+  }
+}
+
+/**
+ * #1121: the operator recovery for the `cursor_unreadable` halt. Rewrites the
+ * paired device's delivery cursor as 0, so the next start asks the server to
+ * replay everything it still retains for this device. Replay is safe: a
+ * redelivered offer this device journaled is matched by its id, and the
+ * server suppresses offers whose task already ended. If the server no longer
+ * retains seq 1, the next start halts `replay_cursor_too_old` as for any
+ * expired cursor. Refused while the daemon runs; takes the store's owner lease.
+ */
+export async function resetDeviceCursor(config: DaemonConfig, input: ResetDeviceCursorInput): Promise<DeviceCursorResetResult> {
+  if (input?.confirmed !== true) throw new DeviceCursorResetError('confirmation-required');
+  const productId = config.productId;
+  try {
+    const storeDir = DeviceStore.resolveDir(productId, config.storeDir);
+    const control = await connectControlClient({ storeDir, productId });
+    if (control.ok) {
+      control.client.close();
+      throw new DeviceCursorResetError('daemon-running');
+    }
+    const owner = await acquireDaemonOwner(storeDir, 'doctor');
+    try {
+      const store = new DeviceStore(storeDir, createDeviceCredentialStore({ productId, storeDir, deviceCredentials: config.deviceCredentials }));
+      const record = await store.load().catch(() => undefined);
+      if (record === undefined) throw new DeviceCursorResetError('unpaired');
+      const cursors = new CursorStore(storeDir);
+      await cursors.save(config.serverUrl, record.deviceId, 0);
+      if (await cursors.load(config.serverUrl, record.deviceId) !== 0) throw new DeviceCursorResetError('reset-failed');
+      return { action: 'reset-cursor', scope: 'device', status: 'reset' };
+    } finally {
+      await owner.release();
+    }
+  } catch (error) {
+    if (error instanceof DeviceCursorResetError) throw error;
+    if (error instanceof DaemonOwnerActiveError) throw new DeviceCursorResetError('store-busy');
+    throw new DeviceCursorResetError('reset-failed');
   }
 }

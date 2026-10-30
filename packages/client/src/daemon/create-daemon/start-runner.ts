@@ -33,6 +33,9 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
     // Already validated up front — see `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`.
     maxConcurrentReaderAttemptsPerAgentHome: agentHomeReaderLimit,
+    // Both validated up front — see `DaemonConfig.maxConcurrentTasks` / `defaultMaxDurationMs`.
+    maxConcurrentTasks: config.maxConcurrentTasks,
+    defaultMaxDurationMs: config.defaultMaxDurationMs,
     scratchRoot,
     ...(agentSessionHandoffs === undefined ? {} : { agentSessionHandoffs }),
     deviceId: record.deviceId,

@@ -130,6 +130,7 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
     onOutboundQueued: (envelope) => {
       if (terminalKindOf(envelope.type) !== undefined) overrides.executionRecoveryFault?.('terminal:queued');
     },
+    onOutboundDropped: () => { outbound.droppedEphemeral += 1; },
     beforeOutboundPost: (envelopes) => {
       if (envelopes.some((envelope) => terminalKindOf(envelope.type) !== undefined)) overrides.executionRecoveryFault?.('outbound:before-post');
     },

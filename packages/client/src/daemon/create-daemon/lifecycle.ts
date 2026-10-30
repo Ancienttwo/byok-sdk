@@ -3,7 +3,9 @@ import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError } from '..
 import { InsecureServerUrlError } from '../url';
 import { DeviceRecordRePairRequiredError } from '../store';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors';
+import { CursorUnreadableError } from '../cursor-store';
 import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager';
+import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS } from './support';
 import type { DaemonScope } from './scope';
 
 /** The daemon lifecycle: the serialized mutation slot, lifecycle phases, start and stop (#926). */
@@ -23,22 +25,30 @@ export async function runLifecycleMutation<T>(daemonScope: DaemonScope, operatio
   }
 }
 
+/**
+ * Serves the full or the enrollment-only method table. A running endpoint
+ * switches tables in place on its same listener and token: closing it would
+ * publish "gone" (`isControlDaemonGone`) while this daemon still holds its
+ * store lease, and a contender would then find the live mutex. Only a daemon
+ * without an endpoint binds one.
+ */
 export async function replaceControlServer(daemonScope: DaemonScope, required: boolean, enrollmentOnly = false): Promise<void> {
   const { daemonState, controlMethods, storeDir, config } = daemonScope;
+  const methods = enrollmentOnly
+    ? {
+        unary: {
+          status: controlMethods.unary.status!,
+          'enrollment.pair': controlMethods.unary['enrollment.pair']!,
+          shutdown: controlMethods.unary.shutdown!,
+        },
+        stream: {},
+      }
+    : controlMethods;
   if (daemonState.controlServerHandle) {
-    await daemonState.controlServerHandle.close();
-    daemonState.controlServerHandle = undefined;
+    daemonState.controlServerHandle.setMethods(methods);
+    return;
   }
   try {
-    const methods = enrollmentOnly
-      ? {
-          unary: {
-            status: controlMethods.unary.status!,
-            'enrollment.pair': controlMethods.unary['enrollment.pair']!,
-          },
-          stream: {},
-        }
-      : controlMethods;
     daemonState.controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods });
   } catch (err) {
     if (required || err instanceof AnotherControlServerRunningError) throw err;
@@ -60,6 +70,7 @@ export function setLifecycle(daemonScope: DaemonScope, next: DaemonLifecycle): v
 export function halted(daemonScope: DaemonScope, reason: DaemonHaltReason): void {
   const { setLifecycle } = daemonScope;
   setLifecycle({ phase: 'halted', reason, at: new Date().toISOString() });
+  endActiveTasks(daemonScope, `halted: ${reason}`);
 }
 
 /**
@@ -70,9 +81,33 @@ export function halted(daemonScope: DaemonScope, reason: DaemonHaltReason): void
 export function crashed(daemonScope: DaemonScope): void {
   const { setLifecycle, operationalHealth } = daemonScope;
   setLifecycle({ phase: 'crashed', at: new Date().toISOString() });
+  endActiveTasks(daemonScope, 'crashed');
   void operationalHealth.recordFailure('lifecycle').catch((err: unknown) => {
     console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
   });
+}
+
+/**
+ * #1119: a run that ended (halted or crashed) takes no more offers and ends
+ * its active tasks now, whether or not its owner ever calls `stop()`, so an
+ * embedded Host and `byok-agent` behave the same. Each `task.fail` is
+ * journaled (the connection has ended) and reported by the next `start()`.
+ * Each soft interrupt is capped at the shutdown grace, so every task reaches
+ * close and its fail is journaled within it even when a runtime never answers.
+ * The pass is a late mutation barrier: `stop()` waits for it, bounded by the
+ * shutdown grace, before its own pass and before releasing ownership.
+ */
+function endActiveTasks(daemonScope: DaemonScope, reason: string): void {
+  const { daemonState, pendingLateMutationBarriers, config } = daemonScope;
+  const runner = daemonState.runner;
+  if (runner === undefined) return;
+  runner.stopAcceptingOffers();
+  const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
+  const teardown = runner.shutdownActiveTasks(reason, graceMs).catch((err: unknown) => {
+    console.warn(`[byok/client] ending active tasks after the run ${reason} failed: ${err instanceof Error ? err.message : String(err)}`);
+  });
+  pendingLateMutationBarriers.add(teardown);
+  void teardown.finally(() => pendingLateMutationBarriers.delete(teardown));
 }
 
 export async function start(daemonScope: DaemonScope): Promise<void> {
@@ -90,16 +125,21 @@ export async function start(daemonScope: DaemonScope): Promise<void> {
  * Resume only in the operation's lifecycle slot: an earlier shutdown must
  * finish before auth is re-armed. A later stop invalidates the queued request
  * synchronously, so entering its slot cannot undo that cancellation.
+ * `cancellationEpoch` is the epoch the request was made in; an operation that
+ * continues an earlier request (service enrollment's start) passes that one.
  */
-export async function runAuthOperation<T>(daemonScope: DaemonScope, operation: () => Promise<T>): Promise<T> {
+export async function runAuthOperation<T>(
+  daemonScope: DaemonScope,
+  operation: (cancellationEpoch: number) => Promise<T>,
+  cancellationEpoch = daemonScope.daemonState.authCancellationEpoch,
+): Promise<T> {
   const { daemonState } = daemonScope;
-  const cancellationEpoch = daemonState.authCancellationEpoch;
   daemonState.pendingAuthOperations += 1;
   try {
     return await daemonScope.runLifecycleMutation(async () => {
       if (cancellationEpoch !== daemonState.authCancellationEpoch) throw new AuthRequestAbortedError('stopped');
       daemonState.auth.resume();
-      return operation();
+      return operation(cancellationEpoch);
     });
   } finally {
     daemonState.pendingAuthOperations -= 1;
@@ -117,14 +157,16 @@ export function startupHaltReason(daemonScope: DaemonScope, err: unknown): Daemo
   if (err instanceof DeviceRecordRePairRequiredError) return 're_pair_required';
   if (err instanceof DeviceStoreBindingMismatchError) return 'store_not_bound';
   if (err instanceof DeviceRevokedError) return 'device_revoked';
+  if (err instanceof CursorUnreadableError) return 'cursor_unreadable';
   return undefined;
 }
 
-export async function startUnderLease(daemonScope: DaemonScope): Promise<void> {
+/** `requestEpoch` is the `authCancellationEpoch` the start was requested in. */
+export async function startUnderLease(daemonScope: DaemonScope, requestEpoch: number): Promise<void> {
   const { daemonState, runStartUnderLease } = daemonScope;
   daemonState.startInProgress = true;
   try {
-    await runStartUnderLease();
+    await runStartUnderLease(requestEpoch);
   } finally {
     daemonState.startInProgress = false;
   }
@@ -150,13 +192,23 @@ export async function stop(daemonScope: DaemonScope, opts: { drainTimeoutMs?: nu
   // `shuttingDown === false` for the whole duration of that predecessor.
   // Setting it here, synchronously, before the first await, closes that gap.
   daemonState.shuttingDown = true;
+  cancelAuthOperations(daemonScope);
+  await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
+}
+
+/**
+ * Cancels every start and pair requested before now, the queued and the
+ * running. Call it synchronously when a stop is requested (`stop()`, the
+ * control `shutdown` RPC), before any await.
+ */
+export function cancelAuthOperations(daemonScope: DaemonScope): void {
+  const { daemonState } = daemonScope;
   daemonState.authCancellationEpoch += 1;
   // A start or pair may be blocked in an OS credential call (a locked
-  // keychain) and the teardown below queues behind it. Signal first: the
-  // auth manager's stop is the one cancellation for those calls; then await
-  // the operation settling.
+  // keychain) and the teardown queues behind it. Signal first: the auth
+  // manager's stop is the one cancellation for those calls; then await the
+  // operation settling.
   if (daemonState.pendingAuthOperations > 0) void daemonState.auth.stop().catch(() => undefined);
-  await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
 }
 
 export function requestShutdown(daemonScope: DaemonScope, reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {

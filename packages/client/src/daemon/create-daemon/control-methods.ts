@@ -3,6 +3,8 @@ import { ControlError, parseEnrollmentPairParams, ENROLLMENT_PAIRING_CODE_MAX_BY
 import { checkVerificationSecret } from '../device-member';
 import { type DeviceRecord, DeviceRecordRePairRequiredError } from '../store';
 import { PairedWithoutMemberError } from './support';
+import { AuthRequestAbortedError } from '../auth-manager';
+import { cancelAuthOperations, runAuthOperation } from './lifecycle';
 import { INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationRequestParams, INPUT_PREPARATION_LOOKUP_METHOD, parseInputPreparationLookupParams, INPUT_PREPARATION_CANCEL_METHOD, parseInputPreparationCancelParams } from '../control-protocol';
 import { McpToolsetRevisionConflictError } from '../toolset-registry';
 import { ApprovalNotFoundError, ApprovalRequiresHostError } from '../approvals';
@@ -37,6 +39,11 @@ export function createControlMethods(daemonScope: DaemonScope): ControlMethods {
         // (idempotent) so the non-RPC `stop()`/`unpair()` paths are covered
         // too.
         daemonState.shuttingDown = true;
+        // Also synchronous: a start or pair requested before this shutdown,
+        // queued or running, must not take the store lease again after the
+        // teardown has released it (service enrollment's deferred start, an
+        // `enrollment.pair` pipelined behind this request).
+        cancelAuthOperations(daemonScope);
         const { reason } = parseShutdownParams(params);
         // Fire-and-forget, deliberately AFTER this handler's own return
         // value has been serialized and written to the socket (see
@@ -71,7 +78,7 @@ export function createControlMethods(daemonScope: DaemonScope): ControlMethods {
 /** Enrollment, input preparation, toolset, approval, team workspace and Agent message, result and memory methods. */
 function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unary'] {
   const {
-    buildControlStatus, config, memberRecords, daemonState, runLifecycleMutation, startUnderLease,
+    buildControlStatus, config, memberRecords, daemonState, startUnderLease,
     pairUnderLease, runInputPreparation, toolsetRegistry, approvalRegistry, teamWorkspaces,
   } = daemonScope;
   return {
@@ -96,8 +103,12 @@ function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unar
       if (verificationSecret !== undefined && memberRecords === undefined) {
         throw new ControlError('bad_request', 'an E2EE pairing needs the OS credential custody; this daemon uses an injected credential backend');
       }
-      if (!daemonState.serviceEnrollmentWaiting || daemonState.daemonStarted) {
+      const enrollmentEpoch = daemonState.serviceEnrollmentEpoch;
+      if (enrollmentEpoch === undefined || daemonState.daemonStarted) {
         throw new ControlError('already_paired', 'this service daemon is not waiting for initial enrollment');
+      }
+      if (enrollmentEpoch !== daemonState.authCancellationEpoch) {
+        throw new ControlError('shutting_down', 'this service daemon is shutting down and will not enroll');
       }
       if (daemonState.serviceEnrollmentTransitioning) {
         throw new ControlError('pairing_in_progress', 'service enrollment is already in progress');
@@ -105,13 +116,16 @@ function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unar
       daemonState.serviceEnrollmentTransitioning = true;
       // `control-server.ts` writes this handler's result in the current
       // microtask. Starting on the next macrotask lets that persisted-id
-      // receipt leave before normal startup replaces the enrollment-only
-      // listener. A crash in this narrow window is safe: WinSW restarts,
+      // receipt leave before normal startup promotes the enrollment-only
+      // method table. A crash in this narrow window is safe: WinSW restarts,
       // loadExisting() sees the already-persisted credential, and takes the
-      // same normal startup path.
+      // same normal startup path. The pair and its start both belong to the
+      // enrollment phase's epoch and re-check it in their lifecycle slot, so
+      // a stop requested at any point before the start runs cancels it.
       const startAfterEnrollment = (): void => {
         setImmediate(() => {
-          void runLifecycleMutation(startUnderLease).catch(() => {
+          void runAuthOperation(daemonScope, startUnderLease, enrollmentEpoch).catch((err: unknown) => {
+            if (err instanceof AuthRequestAbortedError) return;
             // Do not project provider/server exception text into service logs;
             // the stopped/non-ready daemon is the fail-closed observable fact.
             console.error('[byok/client] service enrollment persisted but normal daemon startup failed');
@@ -120,7 +134,7 @@ function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unar
       };
       let record: DeviceRecord;
       try {
-        record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode, verificationSecret));
+        record = await runAuthOperation(daemonScope, () => pairUnderLease(parsed.pairingCode, verificationSecret), enrollmentEpoch);
       } catch (err) {
         // The pairing is saved, so the service starts as a device without E2EE.
         if (err instanceof PairedWithoutMemberError) startAfterEnrollment();

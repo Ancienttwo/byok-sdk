@@ -32,7 +32,7 @@ Then read the task with these calls:
 Read `readTaskAttempt` first. Its status selects the row. The other reads add evidence.
 The intent states are example names. A product can use its own names.
 It must keep the split between settled and unsettled intents.
-Rows F, G, H, I and K are settled. All other rows are unsettled.
+Rows F, G, H, I, K and L are settled. All other rows are unsettled.
 
 | Row | Case | `readTaskAttempt` | `readTaskOffer` | `readDeviceTerminal` | `readTaskResult` | Intent state | Host action |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -47,7 +47,7 @@ Rows F, G, H, I and K are settled. All other rows are unsettled.
 | I | Host cancel before claim | `cancelled`, marker set, no owner | unchanged | `undefined`, or a late terminal | `state: 'cancelled'` | `cancelled` or `expired` | Settle now. The offer cannot run. |
 | J | Host cancel after claim, no device terminal | `cancel_requested`, marker set | unchanged | `undefined` | `state: 'cancelled'` | `running` | Keep it unsettled. Wait for a device terminal. |
 | K | Host cancel after claim, device terminal stored | `cancelled`, marker set | unchanged | any terminal, also `task.complete` | `state: 'cancelled'` | `cancelled` | Settle. Do not apply a success outcome. |
-| L | Device revoked or lost before a terminal | unchanged | unchanged | `undefined` | `undefined`, or `cancelled` after a cancel | `unknown` | **Gap.** The product concludes the intent. |
+| L | Device revoked, superseded or abandoned before a terminal | `cancelled`, `terminalCause` from `TASK_ABANDON_CAUSES` | unchanged | `undefined` | `state: 'cancelled'`, that `terminalCause` | `cancelled` | Settle. A lost device that is still paired needs `revokeDevice` or `abandonTask` first. |
 
 Evidence for each row:
 
@@ -79,7 +79,8 @@ Evidence for each row:
   (`packages/client/src/daemon/task-runner.ts:2940-2951`, `packages/client/src/daemon/task-runner.ts:3150-3164`,
   `packages/client/src/daemon/task-runner.ts:4471-4520`, `packages/client/src/daemon/create-daemon.ts:2826-2834`).
   In row K, a success terminal does not authorize the outcome (`docs/host-execution-core.md:141-142`).
-- **L.** See [revokeDevice](#revokedevice) and the lost device gap below.
+- **L.** See [revokeDevice](#revokedevice) and [abandonTask](#abandontask). A cancellation marker set before the
+  retirement still answers `readTaskResult`, as in rows I to K.
 
 Corrupt evidence throws. `readTaskOffer` throws `coordination_input_invalid` for an unreadable or mismatched offer receipt
 (`packages/cloud/src/cloud.ts:2324-2335`).
@@ -119,29 +120,59 @@ A device terminal that arrives after the marker is kept as device evidence. The 
 ### revokeDevice
 
 `revokeDevice(tenant, deviceId)` calls the device directory (`packages/cloud/src/cloud.ts:2404-2406`).
-The Postgres directory does this in one transaction (`packages/cloud-dataplane/src/stores/devices.ts:258-277`):
+The Postgres directory does this in one transaction (`PostgresDeviceDirectory.revoke` in `packages/cloud-dataplane/src/stores/devices.ts`):
 
-- It deletes the device row (`packages/cloud-dataplane/src/stores/devices.ts:262-265`).
+- It deletes the device row.
 - It deletes the `device_presence`, `auth_nonce`, `inbound_dedup` and `device_assertion_replay` rows of the device
-  (`packages/cloud-dataplane/src/stores/devices.ts:94-99`, `packages/cloud-dataplane/src/stores/devices.ts:266-270`).
+  (`DEVICE_STATE_DELETES` in `packages/cloud-dataplane/src/stores/devices.ts`).
 - It deletes the E2EE member state of the device: the key packages addressed to its member, its pairing MACs and its
   member key registration (#654 E2c, `DEVICE_STATE_DELETES` in `packages/cloud-dataplane/src/stores/devices.ts`).
-  Machine supersession runs the same deletes. The SQLite directory does the same; the in-memory directory does not.
-  The member chain is tenant history and stays. Security does not rest on this cleanup: the other members rotate.
-- It keeps the `task`, `agent_egress_event`, `proof_request_receipt`, `outbox` and `device_stream` rows
-  (`packages/cloud-dataplane/src/stores/devices.ts:76-84`).
-- It writes no task terminal and does not change a task status.
+  Machine supersession runs the same deletes. The SQLite composition keeps no E2EE member state; the in-memory directory
+  does not delete it. The member chain is tenant history and stays. Security does not rest on this cleanup: the other
+  members rotate.
+- It retires the device (#1119, `retireDevices` in `packages/cloud-dataplane/src/stores/task-retirement.ts`).
+  Every unfinished task of the device (`offered`, `claimed`, `running` or `cancel_requested`, as target or owner)
+  becomes `cancelled` with `terminalCause: 'device_revoked'` and a `terminalAt`. A terminal task does not change.
+  A cancellation marker stays as it was. Every `pending` mailbox row of the device becomes `expired`, so it no longer
+  counts against `mailboxLimitBytes`. The device's `recoverableFrom` rises past those rows.
+- It keeps the `task`, `agent_egress_event`, `proof_request_receipt`, `outbox` and `device_stream` rows. It deletes no
+  mailbox row and moves no row back to `pending`.
+
+Machine supersession retires each superseded device the same way, with `terminalCause: 'device_superseded'`, in the
+transaction of the new registration. The SQLite and in-memory directories retire the device in the same way
+(`DeviceDirectory` in `packages/cloud/src/stores/ports.ts`); a custom store must too.
 
 After the revoke, the bearer token of the device fails (`packages/cloud/src/auth/bearer.ts:62-63`).
 So the device cannot send a terminal for its tasks.
+`readTaskResult` returns a retired task as `state: 'cancelled'` with that `terminalCause` and the attempt's
+`terminalAt` as `recordedAt`, unless a cancellation marker or a device terminal receipt already answers it.
 
-**Gap: lost device.** A revoked or lost device leaves its open tasks with no terminal.
-All four reads stay as they are.
-`cancelTask` on a claimed task of that device stays `cancel_requested`, because no device terminal arrives.
-The SDK has no call that ends these attempts.
-The mailbox rows of the device also stay. Under retention, its pending rows become dead letters (section 6).
-Today the product concludes the intent itself, for example as `abandoned`, and records the cause.
-Use a product rule: the waiting deadline, `device_offline` or the revoke action.
+Known gap (#1160, older than #1119): only `cancelTask` orders its append against the retirement. Every other mailbox
+writer (offers, agent controls, scope-key notices, approve/reject, steer, inbound acks, Postgres dead-letter replay)
+checks the device or task in a separate read, so one whose check ran before the retirement can still commit a
+`pending` row for the retired device after it. Such a row is never delivered. It holds quota until the maintenance
+`mailbox` step expires it: every `pending` row older than `mailboxUnackedRetentionMs` (7 days in
+`DEFAULT_RETENTION_POLICY`, `packages/cloud/src/maintenance.ts:18`) becomes `expired` whatever its device
+(`packages/cloud/src/maintenance.ts:146,153`; Postgres `packages/cloud-dataplane/src/stores/core/mailbox.ts:352-357`,
+SQLite `packages/server/src/stores/sqlite/index.ts:948-950`, in-memory `packages/core/src/in-memory/mailbox.ts:205-219`).
+`ByokServer` runs maintenance every 5 minutes by default; a hosted Host runs `runMaintenance` on its own schedule.
+
+### abandonTask
+
+`abandonTask(tenant, taskId, cause)` settles one task that no device will finish
+(`packages/cloud/src/api/task-abandonment.ts`). `cause` is one of `TASK_ABANDON_CAUSES`:
+`operator`, `device_revoked` or `device_superseded`. Another value fails with `coordination_input_invalid`,
+and an unknown task fails with `task_not_found`.
+
+In one store transaction an unfinished task becomes `cancelled` with `terminalCause: cause`. Its `pending` mailbox
+rows on a target or owner device that is no longer registered (revoked, superseded or unknown) become `expired`. A
+device that is still registered keeps them `pending`: expiring a row it has not read would raise its
+`recoverableFrom` past that row and its next poll would be `409 cursor_too_old` (section 6). It reads and acks them
+as usual, and their quota frees on the ack. The inbound gate refuses every later report it sends about the task
+(`task.claim`, `task.started`, a terminal) as a `state_conflict` refusal; the refusal settles that envelope and does
+not stop or halt the device. Nothing is sent to a device, so `abandonTask` does not stop a runtime that is still
+working on the task: `cancelTask` does that. A terminal task is returned as it is. Use it for a task that was left
+open before device retirement settled tasks, or for a task the product gives up on.
 
 A device that restarts is not lost. On start it ends each task it claimed and had not finished
 with `task.fail` (`reason: daemon_interrupted`, `retryable: false`), and it never runs that task again (#924).
@@ -283,7 +314,7 @@ Defaults and settings:
 | Presence heartbeat | 30 s | Daemon `config.presence.intervalMs`. It must stay above the minimum interval and below the TTL. | `packages/client/src/daemon/presence-publisher.ts:45-52`, `packages/client/src/daemon/create-daemon.ts:1454-1459` |
 | Presence TTL | 90 s | Host `presenceTtlMs`. The daemon `config.presence.ttlMs` only checks the cadence. | `packages/cloud/src/coordination.ts:15`, `packages/cloud/src/cloud.ts:1000`, `packages/client/src/daemon/presence-publisher.ts:87-88` |
 | Presence on or off | On when the Host `capabilities` declaration has `presence.hints` | Host declaration | `packages/cloud/src/cloud.ts:995-1006`, `packages/client/src/daemon/create-daemon.ts:3078-3079` |
-| Access token | 1 h. The daemon renews it 60 s early with 2 calls. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/cloud/src/cloud.ts:340`, `packages/client/src/daemon/auth-manager.ts:83`, `packages/client/src/daemon/auth-manager.ts:310-332`, `packages/client/src/daemon/auth-manager.ts:366-375` |
+| Access token | 1 h. The daemon renews it 60 s early with 2 calls. It computes the expiry from its own receipt time plus the response's `expiresIn`, so the device clock's offset from the Host's does not move the renewal point. | Host `accessTokenTtlSeconds` | `packages/cloud/src/auth/tokens.ts:25`, `packages/cloud/src/cloud.ts:331`, `packages/client/src/daemon/auth-manager.ts:96-97` (renewal margin), `packages/client/src/daemon/auth-manager.ts:614-622` (expiry from `expiresIn`), `packages/client/src/daemon/auth-manager.ts:510-532` (scheduling) |
 
 Calls per hour for one idle device.
 These numbers are computed from the defaults. They are not measured.
@@ -350,12 +381,11 @@ Current behavior:
 - So the mailbox copy of an acked offer goes.
   The mailbox copy of an offer that the device never acked stays as a dead letter for the dead-letter window.
   The receipt copy stays in both cases.
-- Used device-proof request ids live in `proof_request_receipt`. The `proofReceipts` step prunes them only when the Host
-  passes `proofReceiptRetention: { authority }` to `createByokCloud`; the authority is a `PostgresProofReceiptRetentionAuthority`
+- Used device-proof request ids live in `proof_request_receipt`. The Host must pass
+  `proofReceiptRetention: { authority }` to `createByokCloud` (#1120); the authority is a `PostgresProofReceiptRetentionAuthority`
   from `@byok-sdk/cloud-dataplane/runtime`, over the same table as the `proofReceipts` port
-  (`packages/cloud/src/cloud.ts:311`, `packages/cloud-dataplane/src/stores/proof-receipts.ts:104`).
-  Without it the step reports `not-configured` and the table keeps every row.
-  With it the step deletes rows recorded more than `proofReceiptRetentionMs` before `now`: 24 hours by default,
+  (`packages/cloud-dataplane/src/stores/proof-receipts.ts:104`).
+  The step deletes rows recorded more than `proofReceiptRetentionMs` before `now`: 24 hours by default,
   at least 15 minutes, checked at construction (`packages/cloud/src/maintenance.ts:48-70`).
   Within the retention a `requestId` stays single-use.
 
@@ -374,6 +404,11 @@ What the kept rows hold:
   (`packages/server/src/execution-core/core.ts:655-663`).
   So the cloud keeps that ContextPack, with its resident memory text, as long as it keeps the offer receipt.
 - An `agent_message_admission` row goes only when its `task` row goes (`deploy/sql/0017_agent_message_admission.sql:20-22`).
+- The `tasks` maintenance step archives a terminal task once its `archive_after` is older than `terminalTaskArchiveMs`
+  (default 90 days) (#1120). Every body in the table above becomes a body-free tombstone (hash, byte length, envelope type),
+  the free-text terminal cause and cancel reason are cleared, and the board item is removed. The rows themselves stay as
+  the task's identity fence and are never deleted; only tenant erasure removes them. Archived tasks leave the board.
+  See [the cleanup runbook](../deploy/runbooks/cloud-cleanup.md) for migration 0032's backfill.
 - The receipt store writes each body as it gets it (`packages/cloud-dataplane/src/stores/receipts.ts:63-73`).
   For a task whose offer has `sealing`, a body of a sealed category holds the sealed member, so the store keeps ciphertext ([protocol §2.5](protocol.md#25-sealed-payload-v1-654-gated-addition)).
   Every other body is plaintext. [security.md, Sealed tasks](security.md#sealed-tasks) lists what a sealed task still shows the Host.
@@ -433,7 +468,7 @@ This document states current behavior. It does not promise a design or a release
 
 | Gap | Current behavior | Product rule today |
 | --- | --- | --- |
-| Lost or revoked device | Its open tasks never get a terminal (section 1, row L). | Conclude the intent with a product rule. |
+| Lost device that stays paired | Its open tasks get no terminal until the Host revokes it or abandons them (section 1, row L). | Revoke the device, or call `abandonTask`, at the product's waiting deadline. |
 | Observer notice | Inline, one time and not replayed (section 2). | Keep a Durable Object alarm while intents are unsettled. |
 | Wake across invocations | The SDK has no wake across Worker invocations. Each wait ends at the fallback (section 3). | Accept the fallback reads, or build a Durable Object wake. |
 | Held message | No SDK route releases it. The task has no terminal until a cancel (section 4). | Return `held` only with a product release action. |

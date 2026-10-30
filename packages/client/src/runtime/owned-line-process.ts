@@ -165,5 +165,5 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
   };
 }
 
-/** Callers supply daemon/buildRuntimeEnv output; this function never merges ambient env. */
+/** Callers supply RuntimeAdapter.runtimeEnvironment output; this function never merges ambient env. */
 export const spawnOwnedLineProcess = createOwnedLineProcessSpawn();

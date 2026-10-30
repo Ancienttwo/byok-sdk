@@ -1,6 +1,6 @@
 import type { CapabilityDeclaration } from '@byok-sdk/core';
 import type { CapabilityFlag, RuntimeInfo } from '@byok-sdk/protocol';
-import type { ServiceEnvironmentStatus } from '../../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus } from '../../login-shell-environment';
 import type { RuntimeObservation } from '../../runtime-detection';
 import type { AgentEgressController } from '../agent-egress-controller';
 import type { AuthManager } from '../auth-manager';
@@ -114,7 +114,12 @@ export interface DaemonState {
   // running, or when binding it failed non-fatally (see `start()`'s own
   // try/catch below).
   controlServerHandle: ControlServerHandle | undefined;
-  serviceEnrollmentWaiting: boolean;
+  /**
+   * The `authCancellationEpoch` at which this daemon began waiting for
+   * service enrollment; `undefined` when it is not waiting. A stop after that
+   * point changes the epoch, so a later `enrollment.pair` is refused.
+   */
+  serviceEnrollmentEpoch: number | undefined;
   serviceEnrollmentTransitioning: boolean;
   daemonOwnerLease: DaemonOwnerLease | undefined;
   // Presence and task context share one deployment declaration. Discovery is

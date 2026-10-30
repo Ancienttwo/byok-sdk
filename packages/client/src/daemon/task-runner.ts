@@ -254,6 +254,12 @@ export const DEFAULT_MAX_TASK_OUTPUT_BYTES = 64 * 1024 * 1024;
  */
 export const DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME = 4;
 
+/**
+ * Default number of tasks one daemon runs at once, across every Agent home and
+ * runtime: active tasks plus offers already admitted past this cap.
+ */
+export const DEFAULT_MAX_CONCURRENT_TASKS = 8;
+
 export interface TaskRunnerDeps {
   adapters: RuntimeAdapter[];
   runtimeAllowlist?: string[];
@@ -314,6 +320,13 @@ export interface TaskRunnerDeps {
    * The writer limit is fixed at one.
    */
   maxConcurrentReaderAttemptsPerAgentHome?: number;
+  /**
+   * Device-wide task cap — see `DaemonConfig.maxConcurrentTasks`. Unset
+   * defaults to {@link DEFAULT_MAX_CONCURRENT_TASKS}.
+   */
+  maxConcurrentTasks?: number;
+  /** Wall-clock limit for an offer without `limits.maxDurationMs` — see `DaemonConfig.defaultMaxDurationMs`. */
+  defaultMaxDurationMs?: number;
   /** Exact host-selected policy accepted by a `task.offer` that carries `egressPolicy`. */
   agentEgressPolicy?: Readonly<AgentEgressPolicy>;
   /** Latest-value activity lane and reliable spool for Agent egress offers. */
@@ -523,7 +536,7 @@ export interface TaskRunnerDeps {
   /**
    * Production pre-runtime executability/handshake gate for the exact message
    * helper config. `env` is the same child environment the runtime
-   * gets (`buildRuntimeEnv`), so the helper is proved under the environment
+   * gets (`RuntimeAdapter.runtimeEnvironment`), so the helper is proved under the environment
    * it will actually run in.
    */
   agentMessageMcpPreflight?: (
@@ -753,6 +766,8 @@ export class TaskRunner {
   private readonly sealedOpening = new Set<string>();
   private readonly claimedHarnesses = new Map<string, string>();
   private readonly homeReservations = new Map<string, number>();
+  /** Offers admitted past the device-wide task cap that are not yet active; cleared when `handleOffer` returns. */
+  private readonly deviceTaskReservations = new Set<string>();
   private readonly startupOwnership: StartupOwnership;
   /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
   private readonly inFlightBlobAborts = new Map<string, AbortController>();
@@ -856,6 +871,11 @@ export class TaskRunner {
   private get maxConcurrentReaderAttemptsPerAgentHome(): number {
     return this.deps.maxConcurrentReaderAttemptsPerAgentHome
       ?? DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME;
+  }
+
+  /** Effective device-wide task cap — see {@link DEFAULT_MAX_CONCURRENT_TASKS}. */
+  private get maxConcurrentTasks(): number {
+    return this.deps.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS;
   }
 
   /**
@@ -1005,12 +1025,16 @@ export class TaskRunner {
    * own `stop()` call has already resolved), so it can no longer race
    * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
    * regression test for the exact scenario.
+   *
+   * `interruptTimeoutMs` caps each soft interrupt below the configured
+   * bound: a halted run passes its shutdown grace, so its tasks reach close
+   * and their `task.fail` is journaled within that grace (#1119).
    */
-  async shutdownActiveTasks(reason: string): Promise<void> {
+  async shutdownActiveTasks(reason: string, interruptTimeoutMs?: number): Promise<void> {
     const offers = offerSettlements.get(this);
     if (offers?.size) await Promise.all(offers);
     const active = [...this.tasks.values()];
-    await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
+    await Promise.all(active.map((task) => this.shutdownTask(task, reason, interruptTimeoutMs)));
     await this.startupOwnership.disposeAll();
   }
 
@@ -1052,17 +1076,19 @@ export class TaskRunner {
    * a genuine protocol bug, not a benign race — mirrors `pump()`'s own
    * identity-check guard for the same class of race.
    */
-  private interruptBounded(active: ActiveTask, drainEvents?: boolean): Promise<void> {
-    return interruptBounded.call(this, active, drainEvents);
+  private interruptBounded(active: ActiveTask, drainEvents?: boolean, interruptTimeoutMs?: number): Promise<void> {
+    return interruptBounded.call(this, active, drainEvents, interruptTimeoutMs);
   }
 
-  private teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean, drainEvents?: boolean): Promise<boolean> {
-    return teardownActiveTask.call(this, active, reason, retryable, drainEvents);
+  private teardownActiveTask(
+    active: ActiveTask, reason: string, retryable: boolean, drainEvents?: boolean, interruptTimeoutMs?: number,
+  ): Promise<boolean> {
+    return teardownActiveTask.call(this, active, reason, retryable, drainEvents, interruptTimeoutMs);
   }
 
   /** Graceful-shutdown caller of {@link teardownActiveTask} — see `shutdownActiveTasks`'s own doc comment. `retryable: true`: nothing about the task/policy itself was ever at fault, only this device's own availability right now. */
-  private shutdownTask(active: ActiveTask, reason: string): Promise<void> {
-    return shutdownTask.call(this, active, reason);
+  private shutdownTask(active: ActiveTask, reason: string, interruptTimeoutMs?: number): Promise<void> {
+    return shutdownTask.call(this, active, reason, interruptTimeoutMs);
   }
 
   /**

@@ -1,5 +1,6 @@
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import type { RuntimeId } from '@byok-sdk/protocol';
+import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
 
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
@@ -8,6 +9,8 @@ export interface RuntimeObservation {
   present: boolean;
   outcome: RuntimeDetectResult['kind'];
   reason?: RuntimeDetectionRefusalReason;
+  /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture failed. */
+  code?: ServiceEnvironmentUnavailableCode;
   version?: string;
   qualifiedVersion?: string;
   authPresent?: boolean;
@@ -23,6 +26,7 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
     present: detected.kind === 'available',
     outcome: detected.kind,
     ...(detected.kind === 'refused' ? { reason: detected.reason } : {}),
+    ...(detected.kind === 'refused' && detected.reason === 'runtime_environment_unavailable' ? { code: detected.code } : {}),
     ...(detected.kind === 'available' && detected.version !== undefined ? { version: bounded(detected.version, 256) } : {}),
     ...(detected.kind === 'available' && detected.advisory !== undefined ? { qualifiedVersion: bounded(detected.advisory.qualifiedVersion, 256) } : {}),
     ...(detected.kind === 'available' && detected.authPresent !== undefined ? { authPresent: detected.authPresent } : {}),
@@ -38,7 +42,7 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
   for (const raw of value) {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
     const r = raw as Record<string, unknown>;
-    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'version', 'qualifiedVersion', 'authPresent', 'steer', 'resume'].includes(key))
+    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'authPresent', 'steer', 'resume'].includes(key))
       || typeof r.id !== 'string' || r.id.length === 0 || r.id.length > 128 || /[\r\n\t]/.test(r.id)
       || typeof r.steer !== 'boolean' || typeof r.resume !== 'boolean'
       || r.present !== (r.outcome === 'available')
@@ -48,6 +52,7 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
       validateRuntimeDetectResult({
         kind: r.outcome,
         ...(r.reason === undefined ? {} : { reason: r.reason }),
+        ...(r.code === undefined ? {} : { code: r.code }),
         ...(r.version === undefined ? {} : { version: r.version }),
         ...(r.authPresent === undefined ? {} : { authPresent: r.authPresent }),
         ...(r.qualifiedVersion === undefined ? {} : { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: r.qualifiedVersion } }),
@@ -59,6 +64,7 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
 }
 
 const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable', 'platform_unsupported']);
+const ENVIRONMENT_CODES: readonly string[] = SERVICE_ENVIRONMENT_UNAVAILABLE_CODES;
 const MAX_VERSION_CHARS = 256;
 
 function isVersionText(value: unknown): value is string {
@@ -94,10 +100,14 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
       ...(advisory === undefined ? {} : { advisory: Object.freeze({ reason: advisory.reason, qualifiedVersion: advisory.qualifiedVersion }) }),
     });
   }
+  if (kind === 'refused' && result.reason === 'runtime_environment_unavailable') {
+    if (Object.keys(result).length !== 3 || !ENVIRONMENT_CODES.includes(result.code as string)) throw new TypeError('invalid runtime detection result');
+    return Object.freeze({ kind, reason: 'runtime_environment_unavailable', code: result.code as ServiceEnvironmentUnavailableCode });
+  }
   if (kind === 'refused') {
     if (Object.keys(result).length !== 2 || !Object.hasOwn(result, 'reason')
       || !REFUSAL_REASONS.includes(result.reason as RuntimeDetectionRefusalReason)) throw new TypeError('invalid runtime detection result');
-    return Object.freeze({ kind, reason: result.reason as RuntimeDetectionRefusalReason });
+    return Object.freeze({ kind, reason: result.reason as Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable'> });
   }
   if (RUNTIME_DETECTION_FAILURE_KINDS.some((candidate) => candidate === kind)
     && Object.keys(result).every((key) => key === 'kind')) {

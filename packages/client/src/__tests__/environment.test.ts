@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildAllowlistedEnv, buildRuntimeEnv } from '../daemon/environment';
+import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, composeRuntimeEnvironment, RuntimeEnvironmentUnavailableError, type RuntimeEnvironmentPolicy } from '../runtime/environment';
+import type { LoginShellSnapshot } from '../login-shell-environment';
 
 /** A minimal ambient env with no incidental host cruft — every test builds exactly the vars it cares about, rather than depending on whatever happens to be set on the machine running the suite. */
 function ambient(vars: Record<string, string>): NodeJS.ProcessEnv {
@@ -200,55 +201,98 @@ describe('buildAllowlistedEnv', () => {
   });
 });
 
-describe('buildRuntimeEnv', () => {
-  it('inherits the full ambient environment, user variables and provider keys included', () => {
-    const env = ambient({
-      PATH: '/usr/bin',
-      HOME: '/home/user',
-      MY_TEAM_SETTING: 'from-the-user-shell',
-      ANTHROPIC_API_KEY: 'sk-ant-user',
-      OPENAI_API_KEY: 'sk-openai-user',
-      CLAUDE_CONFIG_DIR: '/home/user/.claude-work',
-      CODEX_HOME: '/home/user/.codex',
-    });
-    expect(buildRuntimeEnv({ ambient: env, platform: 'darwin' })).toEqual(env);
+function snapshot(env: Record<string, string>): LoginShellSnapshot {
+  return { status: { source: 'login-shell', shell: 'zsh', durationMs: 1 }, env };
+}
+
+const LOOPBACK = { NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' };
+
+function compose(policy: RuntimeEnvironmentPolicy, shell: Record<string, string>, live: Record<string, string | undefined>, platform: NodeJS.Platform = 'darwin', conflicts?: (passed: ReadonlySet<string>) => readonly string[]): Record<string, string> {
+  return composeRuntimeEnvironment({ policy, snapshot: snapshot(shell), live, platform, ...(conflicts === undefined ? {} : { conflicts }) });
+}
+
+describe('composeRuntimeEnvironment (#1095)', () => {
+  it('login-shell: the snapshot is the base, user variables and provider keys included; the live environment is not', () => {
+    const shell = { PATH: '/opt/homebrew/bin:/usr/bin', HOME: '/home/user', MY_TEAM_SETTING: 'from-the-user-shell', ANTHROPIC_API_KEY: 'sk-ant-user', CODEX_HOME: '/home/user/.codex' };
+    const live = { ...shell, PATH: '/app/bundle/bin:/usr/bin', HOST_ONLY_SENTINEL: 'not-a-secret' };
+    expect(compose({}, shell, live)).toEqual({ ...shell, ...LOOPBACK });
   });
 
-  it('drops CLAUDECODE and every BYOK_* name and keeps the loader names', () => {
-    const result = buildRuntimeEnv({
-      ambient: ambient({
-        PATH: '/usr/bin',
-        CLAUDECODE: '1',
-        BYOK_STORE_DIR: '/secret/store',
-        BYOK_ANYTHING: 'x',
-        NODE_OPTIONS: '--require /tmp/x.js',
-        LD_PRELOAD: '/tmp/x.so',
-        DYLD_INSERT_LIBRARIES: '/tmp/x.dylib',
-      }),
-      platform: 'linux',
-    });
-    expect(result).toEqual({
+  it('pass copies the named live variables at every build, Host writes after start included; the hard deny still wins', () => {
+    const live: Record<string, string | undefined> = { PATH: '/usr/bin' };
+    const policy = assertRuntimeEnvironmentPolicy({ pass: ['HOST_TOKEN_FILE', 'ACME_*'] }, 'policy');
+    expect(compose(policy, { PATH: '/usr/bin' }, live)).toEqual({ PATH: '/usr/bin', ...LOOPBACK });
+    live.HOST_TOKEN_FILE = '/run/acme/token';
+    live.ACME_REGION = 'eu';
+    live.ACME_OTHER = undefined;
+    live.UNLISTED = 'x';
+    expect(compose(policy, { PATH: '/usr/bin' }, live)).toEqual({ PATH: '/usr/bin', HOST_TOKEN_FILE: '/run/acme/token', ACME_REGION: 'eu', ...LOOPBACK });
+    expect(compose({ pass: ['B*', 'CLAUDE*'] }, { PATH: '/usr/bin' }, { BYOK_SECRET: 's', CLAUDECODE: '1', BUILD: 'b' })).toEqual({ PATH: '/usr/bin', BUILD: 'b', ...LOOPBACK });
+  });
+
+  it('drops CLAUDECODE and every BYOK_* name from the snapshot and keeps the loader names', () => {
+    const result = compose({}, {
       PATH: '/usr/bin',
+      CLAUDECODE: '1',
+      BYOK_STORE_DIR: '/secret/store',
       NODE_OPTIONS: '--require /tmp/x.js',
       LD_PRELOAD: '/tmp/x.so',
       DYLD_INSERT_LIBRARIES: '/tmp/x.dylib',
-    });
+    }, {}, 'linux');
+    expect(result).toEqual({ PATH: '/usr/bin', NODE_OPTIONS: '--require /tmp/x.js', LD_PRELOAD: '/tmp/x.so', DYLD_INSERT_LIBRARIES: '/tmp/x.dylib', ...LOOPBACK });
   });
 
-  it('F1: drops mixed-case CLAUDECODE and BYOK_* names on win32 and keeps OS-cased names', () => {
-    const result = buildRuntimeEnv({
-      ambient: ambient({ Path: 'C:\\Windows', ClaudeCode: '1', byok_secret: 'must-not-leak', Byok_X: 'also-must-not-leak' }),
-      platform: 'win32',
-    });
-    expect(result).toEqual({ Path: 'C:\\Windows' });
+  it('a failed capture fails closed with the capture code; allowlist needs no snapshot', () => {
+    const failed: LoginShellSnapshot = { status: { source: 'unavailable', code: 'timeout' } };
+    let caught: unknown;
+    try { composeRuntimeEnvironment({ policy: {}, snapshot: failed, live: { PATH: '/usr/bin' }, platform: 'darwin' }); } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(RuntimeEnvironmentUnavailableError);
+    expect(caught).toMatchObject({ code: 'runtime_environment_unavailable', reason: 'timeout' });
+    expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['ACME_HOME'] }, snapshot: failed, live: { PATH: '/usr/bin', ACME_HOME: '/a', OTHER: 'x' }, platform: 'darwin' }))
+      .toEqual({ PATH: '/usr/bin', ACME_HOME: '/a', ...LOOPBACK });
   });
 
-  it('returns a fresh object, skips undefined values and never mutates ambient', () => {
-    const env: NodeJS.ProcessEnv = { PATH: '/bin', GHOST: undefined, CLAUDECODE: '1' };
-    const before = { ...env };
-    const result = buildRuntimeEnv({ ambient: env });
-    expect(result).toEqual({ PATH: '/bin' });
-    expect(result).not.toBe(env);
-    expect(env).toEqual(before);
+  it('win32: the base is the session baseline from the live environment, matched and denied case-insensitively', () => {
+    const live = { Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', HOST_ONLY_SENTINEL: 'x', ClaudeCode: '1', byok_secret: 'must-not-leak', no_proxy: 'corp.example' };
+    expect(composeRuntimeEnvironment({ policy: {}, live, platform: 'win32' })).toEqual({ Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', NO_PROXY: 'corp.example,127.0.0.1,localhost' });
+  });
+
+  it('an adapter conflict rule removes base names only when pass supplied the trigger', () => {
+    const rule = (passed: ReadonlySet<string>) => passed.has('ANTHROPIC_BASE_URL') ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK'] : [];
+    const shell = { PATH: '/usr/bin', CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_MODEL: 'shell-model' };
+    expect(compose({ pass: ['ANTHROPIC_BASE_URL'] }, shell, {}, 'darwin', rule)).toEqual({ ...shell, ...LOOPBACK });
+    expect(compose({ pass: ['ANTHROPIC_BASE_URL'] }, shell, { ANTHROPIC_BASE_URL: 'https://gw.example' }, 'darwin', rule))
+      .toEqual({ PATH: '/usr/bin', ANTHROPIC_BASE_URL: 'https://gw.example', ...LOOPBACK });
+  });
+
+  it('win32: a conflict rule sees a mixed-case passed name in upper case, so its trigger fires', () => {
+    const rule = (passed: ReadonlySet<string>) => passed.has('ANTHROPIC_API_KEY') ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK'] : [];
+    const live = { Path: 'C:\\Windows', Claude_Code_Use_Bedrock: '1', Anthropic_Api_Key: 'sk-ant-host' };
+    expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['CLAUDE_CODE_*'], pass: ['ANTHROPIC_API_KEY'] }, live, platform: 'win32', conflicts: rule }))
+      .toEqual({ Path: 'C:\\Windows', Anthropic_Api_Key: 'sk-ant-host', NO_PROXY: '127.0.0.1,localhost' });
+  });
+
+  it('NO_PROXY: merges both spellings with the loopback names, without duplicates', () => {
+    expect(compose({}, { NO_PROXY: 'corp.example, localhost', no_proxy: '.internal,corp.example', HTTPS_PROXY: 'http://proxy:3128' }, {}))
+      .toEqual({ HTTPS_PROXY: 'http://proxy:3128', NO_PROXY: 'corp.example,localhost,.internal,127.0.0.1', no_proxy: 'corp.example,localhost,.internal,127.0.0.1' });
+  });
+
+  it('returns a fresh object and never mutates the snapshot or the live environment', () => {
+    const shell = { PATH: '/bin' };
+    const live: NodeJS.ProcessEnv = { PATH: '/bin', GHOST: undefined };
+    const result = compose({}, shell, live);
+    result.PATH = 'changed';
+    expect(shell).toEqual({ PATH: '/bin' });
+    expect(live).toEqual({ PATH: '/bin', GHOST: undefined });
+  });
+
+  it('validates a policy at the boundary', () => {
+    expect(assertRuntimeEnvironmentPolicy(undefined, 'p')).toEqual({});
+    expect(assertRuntimeEnvironmentPolicy({ base: 'allowlist', allow: ['A'], pass: ['B_*'] }, 'p')).toEqual({ base: 'allowlist', allow: ['A'], pass: ['B_*'] });
+    expect(() => assertRuntimeEnvironmentPolicy({ base: 'inherit' }, 'p')).toThrow('p.base must be login-shell or allowlist');
+    expect(() => assertRuntimeEnvironmentPolicy({ allow: ['A'] }, 'p')).toThrow('p.allow is not a login-shell policy field');
+    expect(() => assertRuntimeEnvironmentPolicy({ pass: ['BYOK_KEY'] }, 'p')).toThrow('p.pass must not name CLAUDECODE or BYOK_*');
+    expect(() => assertRuntimeEnvironmentPolicy({ pass: ['A*B'] }, 'p')).toThrow('p.pass entries must be variable names or *-suffixed prefixes');
+    expect(() => assertRuntimeEnvironmentPolicy({ pass: 'A' }, 'p')).toThrow('p.pass must be an array of variable names');
   });
 });

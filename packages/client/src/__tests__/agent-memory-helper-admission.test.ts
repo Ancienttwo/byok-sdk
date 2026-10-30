@@ -20,6 +20,7 @@ vi.mock('../daemon/prepared-tool-surface', async importOriginal => {
   } };
 });
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
+import { fakeRuntimeAdapter } from '../testing';
 import { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper';
 
 const roots: string[] = [];
@@ -118,7 +119,8 @@ function config(directory: string) {
 describe.skipIf(!isAgentMemoryFilesystemHelperSupported())('helper platform native deployment admission', () => {
   it.each(['missing SDK package', 'missing binary', 'digest mismatch'])('refuses prepared memory before probing when the helper has %s', async message => {
     capture.helper.mockImplementation(() => { throw new Error(message); });
-    createDaemonWithAdapters(config(await root()), []);
+    // The prepared lane binds the Pi adapter's runtime environment (#1095).
+    createDaemonWithAdapters(config(await root()), [fakeRuntimeAdapter('pi')]);
     expect(capture.helper).toHaveBeenCalledOnce();
     expect(await capture.surface!.resolveBinding({ requiredToolsets: [], agentMemory: 'read' })).toMatchObject({
       ok: false, code: 'unsupported_input', detail: 'agent_memory_unavailable',

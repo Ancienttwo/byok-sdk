@@ -1,10 +1,14 @@
 import { tenantKey, type MailboxStore, type TenantId } from '@byok-sdk/core';
 import type {
+  DeviceDirectory,
+  TaskAbandonRequest,
+  TaskAttempt,
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskCancellationStore,
 } from '../ports';
 import { InMemoryTaskAttemptState } from './task-attempts';
+import { abandonTask } from './task-retirement';
 
 const COLLECTED = new Error('Cancellation delivery was collected.');
 
@@ -12,12 +16,14 @@ const COLLECTED = new Error('Cancellation delivery was collected.');
 export class InMemoryTaskCancellationStore implements TaskCancellationStore {
   readonly #state: InMemoryTaskAttemptState;
   readonly #mailbox: MailboxStore;
+  readonly #devices: Pick<DeviceDirectory, 'get'>;
   readonly #messageIds = new Map<string, string>();
   readonly #inFlight = new Map<string, Promise<TaskCancellationMutation | undefined>>();
 
-  constructor(state: InMemoryTaskAttemptState, mailbox: MailboxStore) {
+  constructor(state: InMemoryTaskAttemptState, mailbox: MailboxStore, devices: Pick<DeviceDirectory, 'get'>) {
     this.#state = state;
     this.#mailbox = mailbox;
+    this.#devices = devices;
   }
 
   request(
@@ -32,6 +38,11 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
     });
     this.#inFlight.set(key, operation);
     return operation;
+  }
+
+  abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined> {
+    return abandonTask(this.#state, this.#mailbox, tenant, tenantKey(tenant, input.taskId), input.cause,
+      async (deviceId) => await this.#devices.get(tenant, deviceId) !== undefined);
   }
 
   async #request(

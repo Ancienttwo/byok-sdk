@@ -23,9 +23,9 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
 /**
- * `TaskRunner` hands every runtime the daemon's full environment minus the
- * hard deny (`CLAUDECODE`, `BYOK_*` — see
- * `daemon/environment.ts`), as OAR does. These tests drive the THREE REAL bundled adapters (against
+ * `TaskRunner` hands every runtime its adapter's runtime environment — here
+ * the unit suite's login-shell snapshot, the live test environment — minus the
+ * hard deny (`CLAUDECODE`, `BYOK_*` — see `runtime/environment.ts`), as OAR does. These tests drive the THREE REAL bundled adapters (against
  * their existing fake-CLI fixtures — mirrors `pi-adapter.test.ts`/
  * `claude-adapter.test.ts`/`codex-adapter.test.ts`'s own `resolveBin`
  * override) through a directly-constructed `TaskRunner` (mirrors

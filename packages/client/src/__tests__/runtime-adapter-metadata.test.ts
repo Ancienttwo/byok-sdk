@@ -134,6 +134,7 @@ describe('daemon detection authority', () => {
       descriptor: freezeRuntimeAdapterDescriptor({ ...real.descriptor, platforms: [process.platform === 'aix' ? 'sunos' : 'aix'] }),
       detect: vi.fn(real.detect),
       prepare: real.prepare,
+      runtimeEnvironment: real.runtimeEnvironment,
     };
   }
 

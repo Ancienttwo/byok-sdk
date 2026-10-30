@@ -1,6 +1,7 @@
 import { createTenantApi } from './api/tenant';
 import { createTaskReadsApi } from './api/task-reads';
 import { createTaskCancellationApi } from './api/task-cancellation';
+import { createTaskAbandonmentApi } from './api/task-abandonment';
 import { createE2eeApi } from './api/e2ee';
 import { createAgentControlsApi } from './api/agent-controls';
 import { createOffersApi } from './api/offers';
@@ -207,6 +208,7 @@ import type {
   AgentEgressRecord,
   PairingCodeInfo,
   RequestReceipt,
+  TaskAbandonCause,
   TaskAttempt,
   TaskAttemptListQuery,
   TaskAttemptPage,
@@ -234,11 +236,10 @@ export const AGENT_HOME_CONTRACT_CAPABILITY = 'agent-home-contract';
 export interface ByokCloudOptions {
   readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
   /**
-   * Prunes used device-proof request ids in maintenance. Absent, the
-   * `proofReceipts` step reports `not-configured` and every used `requestId`
-   * stays single-use for as long as its receipt is kept.
+   * Prunes used device-proof request ids in maintenance (#1120). Required: a
+   * deployment cannot keep every used `requestId` forever.
    */
-  readonly proofReceiptRetention?: ProofReceiptRetentionOptions;
+  readonly proofReceiptRetention: ProofReceiptRetentionOptions;
   readonly mailboxWake: MailboxWake;
   readonly core: CoreStores;
   readonly cloud: CloudStores;
@@ -760,6 +761,21 @@ export interface ByokCloud {
   /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
   cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
   /**
+   * Host control plane: settle a task no device will finish. In one store
+   * transaction an unfinished attempt becomes `cancelled` with
+   * `terminalCause = cause`. Its undelivered mailbox rows on a device that is
+   * no longer registered are dead-lettered, so they stop holding mailbox
+   * quota; a registered device keeps them pending (its replay floor never
+   * passes a row it has not read), acks them as usual, and has its later
+   * reports for the task refused. Nothing is sent to a device, so this does
+   * not stop a runtime still working on the task: {@link ByokCloud.cancelTask}
+   * does. A terminal attempt is returned unchanged. `cause` must be one of
+   * `TASK_ABANDON_CAUSES` (`coordination_input_invalid` otherwise); an
+   * unknown task throws `task_not_found`. Device revocation and machine
+   * supersession apply the same transition by themselves.
+   */
+  abandonTask(tenant: TenantId, taskId: string, cause: TaskAbandonCause): Promise<TaskAttempt>;
+  /**
    * Host control plane: resolve the approval a paused task is waiting on, by
    * enqueueing `task.approve` to the device that claimed it.
    *
@@ -896,7 +912,10 @@ export interface ByokCloud {
    * receipt whose body is not a terminal envelope throws rather than
    * returning a best-effort shape. After {@link ByokCloud.redactTasks} the
    * receipt read throws `task_content_redacted`; a Host cancellation still
-   * returns `state: 'cancelled'`, with its reason cleared.
+   * returns `state: 'cancelled'`, with its reason cleared. With neither fact,
+   * an attempt cloud settled itself — {@link ByokCloud.abandonTask}, device
+   * revocation or machine supersession — returns `state: 'cancelled'` with
+   * that `terminalCause` and the attempt's `terminalAt` as `recordedAt`.
    */
   readTaskResult(tenant: TenantId, taskId: string): Promise<TerminalResult | undefined>;
   listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -918,7 +937,7 @@ export interface ByokCloud {
 
 export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   if (options.mailboxWake === undefined) throw new TypeError('mailboxWake is required');
-  const proofReceiptRetention = options.proofReceiptRetention === undefined ? undefined : resolveProofReceiptRetention(options.proofReceiptRetention);
+  const proofReceiptRetention = resolveProofReceiptRetention(options.proofReceiptRetention);
   const declaration = parseDeclaration(options.capabilities);
   assertDeclarationMatchesPorts(declaration, options);
   const root: CloudRootStores = { core: options.core, cloud: options.cloud, mailboxWake: options.mailboxWake };
@@ -983,6 +1002,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   const steeringApi = createSteeringApi({ root, controlPlane, options, ...enqueue });
 
   const taskCancellationApi = createTaskCancellationApi({ root, controlPlane, options });
+
+  const taskAbandonmentApi = createTaskAbandonmentApi({ root, controlPlane });
 
   const taskReadsApi = createTaskReadsApi({ root, controlPlane, options, sameAgentRef });
 
@@ -1330,6 +1351,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     steerSealedTask: steeringApi.steerSealedTask,
 
     cancelTask: taskCancellationApi.cancelTask,
+
+    abandonTask: taskAbandonmentApi.abandonTask,
 
     readTaskOffer: taskReadsApi.readTaskOffer,
 
