@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { verifyPrPlan } from './plan-ci.mjs';
-import { reviewedScripts, selectImpact } from './select-impact.mjs';
+import { scriptChecksForPaths, selectImpact } from './select-impact.mjs';
 import { documentationTestsForPaths } from './documentation-checks.mjs';
 
 const plan = JSON.parse(process.env.CI_PLAN ?? '');
@@ -18,7 +18,7 @@ if (plan.files.some(path => /^scripts\/release\/registry-/.test(path))) extraTes
 if (plan.files.some(path => path.startsWith('packages/client/vendor/oar/')
   || /^scripts\/api-surface\/(?:check-oar-bridge\.test\.mjs|oar-bridge-types\.ts|tsconfig\.oar-bridge\.json)$/.test(path))) extraTests.push('scripts/api-surface/check-oar-bridge.test.mjs');
 if (plan.files.some(path => path === 'scripts/vitest/tmp-root.mjs' || path === 'scripts/vitest/tmp-root.test.mjs')) extraTests.push('scripts/vitest/tmp-root.test.mjs');
-for (const path of plan.files) if (Object.hasOwn(reviewedScripts, path)) extraTests.push(...reviewedScripts[path].tests);
+extraTests.push(...scriptChecksForPaths(plan.files).tests);
 if (extraTests.length) {
   const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...new Set(extraTests)], { stdio: 'inherit', env: process.env });
   if (result.error) throw result.error;

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { knownFamilies, reviewedScripts, selectImpact } from './select-impact.mjs';
+import { knownFamilies, scriptChecksForPaths, selectImpact } from './select-impact.mjs';
 
 // Full runs are either nightly on main or exact-SHA approved release validation.
 export const isReleaseRef = ref => ref === 'refs/heads/main' || /^refs\/heads\/release\/[A-Za-z0-9._-]+$/.test(ref ?? '');
@@ -25,8 +25,8 @@ export function planCi({ event, sha, approvedSha, ref, paths, base, cwd }) {
 
 // The targeted job installs and builds for a selected workspace, a manifest or
 // lock change, or a reviewed script whose tests need installed packages.
-export const needsBuild = plan => plan.dirs.length > 0 || plan.files.some(path => path === 'bun.lock'
-  || /^packages\/[^/]+\/package\.json$/.test(path) || (Object.hasOwn(reviewedScripts, path) && reviewedScripts[path].install === true));
+export const needsBuild = plan => plan.dirs.length > 0 || scriptChecksForPaths(plan.files).install
+  || plan.files.some(path => path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path));
 
 export function changedPaths(base, cwd = process.cwd()) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Missing comparison base: explicit release validation required');
