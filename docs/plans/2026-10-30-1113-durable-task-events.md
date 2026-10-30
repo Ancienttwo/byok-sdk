@@ -4,7 +4,7 @@ Status: owner-approved plan (2026-10-30), including stacked-Draft merge policy a
 
 ## Authority and scope
 
-Decision authority: `/tmp/byok032-design-1113-synthesis.md` and the dispatch specifying 4 MiB. Both independent track documents are background; rejected alternatives do not reopen here. Code map was checked at `bc4bca64e6e9ca44719a9413cb2171aecf0ae6e1`; O4 is Draft #1172 at `cb3610c85020227301b475142180b17d96dcbb10`, stacked on #1169. Revalidate the actual predecessor head before each implementation dispatch.
+Decision authority: `/tmp/byok032-design-1113-synthesis.md` and the dispatch specifying 4 MiB. Both independent track documents are background; rejected alternatives do not reopen here. Code map was checked at `bc4bca64e6e9ca44719a9413cb2171aecf0ae6e1`; O4 is Draft #1172 at `19714335394c8749f93bc24d2bb32390c43da9b0`, stacked on #1169. Revalidate the actual predecessor head before each implementation dispatch.
 
 The durable activity log is the sole progress/artifact authority. Canonical task state and approval timeline remain their respective authorities. `tasks.events` is a read-time union projection of those sources, never a separately authored event history. SQLite must persist activity. In-memory stores provide equivalent semantics but cannot promise survival across process loss.
 
