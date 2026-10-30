@@ -18,6 +18,8 @@ export default defineConfig({
     options.minifySyntax = true;
     options.minifyWhitespace = true;
     options.legalComments = 'inline';
+    // __esm labels and map sources name a dependency by its node_modules link, not the install store directory.
+    options.preserveSymlinks = true;
   },
   noExternal: ['@juicesharp/rpiv-i18n', '@juicesharp/rpiv-config',
     'typebox', '@earendil-works/pi-ai'],

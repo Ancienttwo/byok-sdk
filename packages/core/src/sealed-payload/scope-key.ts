@@ -50,8 +50,6 @@ import {
 
 export const SCOPE_KEY_BYTES = 32;
 
-/** 16 bytes of the key-id HMAC, as unpadded base64url. */
-export const SCOPE_KEY_ID_LENGTH = 22;
 export const SCOPE_KEY_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 
 const KEY_ID_MESSAGE = 'byok-scope-key-id-v1';

@@ -1,41 +1,34 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { claimEmptyDirectory, setup, teardown } from './tmp-root.mjs';
+import { setup, teardown } from './tmp-root.mjs';
 
 const helper = fileURLToPath(new URL('./tmp-root.mjs', import.meta.url));
 const vitest = fileURLToPath(new URL('../../node_modules/vitest/vitest.mjs', import.meta.url));
 const keys = ['TMPDIR', 'TEMP', 'TMP'];
 
-test('fixed-root cleanup preserves pre-existing, nonempty and replaced directories', () => {
-  const fixture = mkdtempSync(path.join(os.tmpdir(), 'fixed-root-ownership-'));
+test('setup and teardown never create or remove the path-mutation gate root', { skip: process.platform === 'win32' }, () => {
+  const gateRoot = `/tmp/byok-pm-${process.getuid()}`;
+  const identity = () => {
+    try {
+      return lstatSync(gateRoot, { bigint: true }).ino;
+    } catch (error) {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    }
+  };
+  const before = identity();
   try {
-    const directory = path.join(fixture, 'gate');
-    const release = claimEmptyDirectory(directory);
-    assert.equal(typeof release, 'function');
-    assert.equal(claimEmptyDirectory(directory), undefined, 'another run must not claim an existing root');
-    const endpoint = path.join(directory, 'endpoint');
-    writeFileSync(endpoint, 'unreleased endpoint');
-    assert.throws(release, { code: 'ENOTEMPTY' });
-    assert.equal(readFileSync(endpoint, 'utf8'), 'unreleased endpoint');
-    rmSync(endpoint);
-    release();
-    assert.equal(existsSync(directory), false);
-
-    const releaseReplaced = claimEmptyDirectory(directory);
-    const original = path.join(fixture, 'original');
-    renameSync(directory, original);
-    mkdirSync(directory);
-    assert.throws(releaseReplaced, /identity changed/);
-    assert.equal(existsSync(directory), true);
-    assert.equal(existsSync(original), true);
+    setup();
+    assert.equal(identity(), before, 'setup created or replaced the gate root');
   } finally {
-    rmSync(fixture, { recursive: true });
+    teardown();
   }
+  assert.equal(identity(), before, 'teardown removed or replaced the gate root');
 });
 
 test('long-path IPC fixtures leave no fixed-root scratch directories', { skip: process.platform === 'win32' }, () => {

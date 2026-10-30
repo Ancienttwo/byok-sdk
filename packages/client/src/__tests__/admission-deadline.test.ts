@@ -69,7 +69,7 @@ for (const phase of ['detect', 'prepare'] as const) {
       if (action === 'shutdown') await limit(daemon.stop());
       else {
         if (action === 'cancel') server.send(createEnvelope('task.cancel', { reason: 'cancel pre-claim' }, { taskId: 'blocked', seq: server.nextSeq() }));
-        await server.waitFor(e => e.type === 'task.decline' && e.task_id === 'blocked', 1500);
+        await server.waitFor(e => e.type === 'task.decline' && e.task_id === 'blocked');
         if (action === 'deadline') {
           // The blocked offer is withdrawn by the startup timer armed at
           // `task-runner.ts:1970-1972`; `admissionWithdrawn` declines it with
@@ -136,7 +136,7 @@ for (const phase of ['detect', 'prepare'] as const) {
           unsubscribe?.();
         }
       } else {
-        await server.waitFor(e => e.type === 'task.started' && e.task_id === 'replacement', 2000);
+        await server.waitFor(e => e.type === 'task.started' && e.task_id === 'replacement');
         expect(adapter.startCalls).toHaveLength(1);
         expect(server.received.some(e => e.type === 'task.claim' && e.task_id === 'blocked')).toBe(false);
         adapter.sessions[0]!.emit({ type: 'turn_end' });

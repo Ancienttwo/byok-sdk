@@ -248,7 +248,7 @@ describe('agent-home-contract reference server', () => {
         { taskId: claimMismatch.taskId },
       ),
     );
-    expect(await claimRes.json()).toMatchObject({ accepted: 0, rejected: 1 });
+    expect(await claimRes.json()).toMatchObject({ accepted: 0, rejected: 1, outcomes: [{ reason: 'not_permitted' }] });
     expect((await started.byok.tasks.get(claimMismatch.taskId))?.state).toBe('Offered'); // never claimed
 
     const terminalMismatch = await started.byok.dispatch({
@@ -268,40 +268,9 @@ describe('agent-home-contract reference server', () => {
         { taskId: terminalMismatch.taskId },
       ),
     );
-    expect(await terminalRes.json()).toMatchObject({ accepted: 0, rejected: 1 });
+    expect(await terminalRes.json()).toMatchObject({ accepted: 0, rejected: 1, outcomes: [{ reason: 'not_permitted' }] });
     expect((await started.byok.tasks.get(terminalMismatch.taskId))?.state).toBe('Running'); // no terminal was written
     expect((await started.byok.tasks.get(terminalMismatch.taskId))?.result).toBeUndefined();
-  });
-
-  // 2d gap: the pre-fold assertions split out of the test above. The deleted
-  // hub answered an AgentRef mismatch by FORCE-FAILING the task
-  // (`{ state: 'Failed', retryable: false }`); the kernel's inbound gate
-  // refuses the envelope instead (`packages/cloud/src/inbound.ts:466`), on the
-  // same reasoning it already applies to an ownership mismatch — force-failing
-  // on an identity mismatch lets anyone who can produce a wrong echo kill the
-  // real Agent's task. The refusal is pinned by the active test above.
-  // Orchestrator decision: accept the kernel's refuse-don't-fail rule (and
-  // document the break in Step 5), or restore a force-fail for the
-  // same-device-wrong-AgentRef case only.
-  // Decision D8: https://github.com/Ancienttwo/byok-sdk/issues/1153
-  it.skip('force-fails the task with retryable: false on a claim or terminal AgentRef mismatch', async () => {
-    const started = await start();
-    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
-      productId: PRODUCT_ID,
-      capabilities: ['agent-home-contract'],
-    });
-
-    const claimMismatch = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'claim mismatch', agentRef, sessionRef: SESSION_REF });
-    await awaitEnvelope(daemon, (e) => e.task_id === claimMismatch.taskId);
-    await daemon.send(
-      createEnvelope(
-        'task.claim',
-        { deviceId: daemon.deviceId, agentRef: { ...agentRef, profileRevision: 'wrong' } },
-        { taskId: claimMismatch.taskId },
-      ),
-    );
-    await waitForTaskEvent(claimMismatch, (event) => event.kind === 'state' && event.state === 'Failed');
-    expect((await started.byok.tasks.get(claimMismatch.taskId))?.result).toMatchObject({ state: 'Failed', retryable: false });
   });
 
   it('does not let another authenticated device claim or fail a targeted Agent offer', async () => {

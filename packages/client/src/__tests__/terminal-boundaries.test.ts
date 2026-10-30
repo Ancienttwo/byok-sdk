@@ -69,7 +69,7 @@ describe('terminal durability and actual harness boundaries', () => {
     expect(adapter.startCalls).toHaveLength(0);
     expect(await new CursorStore(cfg.storeDir!).load(server.url, record.deviceId)).toBe(0);
     fail = false; server.send(offer);
-    const terminal = await server.waitFor(e => e.type === 'task.decline', 4000);
+    const terminal = await server.waitFor(e => e.type === 'task.decline');
     expect(encodeEnvelope(terminal)).toBe(first);
     await vi.waitFor(async () => {
       server.send(offer); // Retry after any still-in-flight failed delivery settles.
@@ -109,7 +109,7 @@ describe('terminal durability and actual harness boundaries', () => {
     await daemon.start();
     await vi.waitFor(() => expect(daemon.status().pendingTerminalCommits).toBe(0), { timeout: 4000 });
     const isTerminal = (e: Envelope) => e.task_id === taskId && ['task.complete', 'task.fail', 'task.decline', 'task.cancelled'].includes(e.type);
-    const terminal = await server.waitFor(isTerminal, 4000);
+    const terminal = await server.waitFor(isTerminal);
     expect(terminal.payload).toMatchObject({ summary: 'the real result' });
     expect(server.received.filter(isTerminal).map(e => e.type)).toEqual(['task.complete']);
   });

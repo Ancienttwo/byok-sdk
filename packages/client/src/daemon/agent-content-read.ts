@@ -57,7 +57,6 @@ export const AGENT_CONTENT_READ_REASONS = [
   'identity-mismatch',
 ] as const;
 export type AgentContentReadReason = (typeof AGENT_CONTENT_READ_REASONS)[number];
-export type AgentContentReadDropReason = AgentContentReadReason;
 
 export type AgentContentActorKind = 'user' | 'agent' | 'system';
 
@@ -164,7 +163,6 @@ export interface AgentContentReadDenied {
 }
 
 export type AgentContentReadResult = AgentContentReadAllowed | AgentContentReadDenied;
-export type AgentContentReadDecisionRecord = AgentContentReadResult;
 
 export class AgentContentReadPolicyError extends Error {
   constructor(message: string) {

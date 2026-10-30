@@ -60,6 +60,6 @@
     "@byok-sdk/conformance": "workspace:*",
     "@types/pg": "^8.20.4",
     "undici": "8.12.3",
-    "wrangler": "4.123.0"
+    "wrangler": "4.156.0"
   }
 }

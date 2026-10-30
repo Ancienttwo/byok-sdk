@@ -131,7 +131,7 @@ describe('a sealed envelope at the inline maximum, on a daemon with the default 
     const offer = envelopeOf('task.offer', 'sealed-large-offer', server.nextSeq());
     server.send(offer);
 
-    const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'sealed-large-offer', EVENTUAL_STATE_BUDGET_MS);
+    const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'sealed-large-offer');
     expect(decline.payload).toMatchObject({ retryable: false });
     await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(offer.seq), EVENTUAL_STATE_BUDGET_MS);
     expect(rows(storeDir, 'SELECT task_id FROM journal_task')).toEqual([{ task_id: 'sealed-large-offer' }]);

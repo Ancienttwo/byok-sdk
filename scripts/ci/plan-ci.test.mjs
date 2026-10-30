@@ -127,10 +127,10 @@ test('PR CLI pairs the tested merge with its actual main parent and rejects inco
   try {
     git('init', '-b', 'main');
     writeFileSync(path.join(cwd, 'package.json'), '{}');
-    writeFileSync(path.join(cwd, 'README.md'), 'base\n');
+    writeFileSync(path.join(cwd, 'CONTRIBUTING.md'), 'base\n');
     const eventBase = commit('event base');
     git('checkout', '-b', 'topic');
-    writeFileSync(path.join(cwd, 'README.md'), 'PR documentation\n');
+    writeFileSync(path.join(cwd, 'CONTRIBUTING.md'), 'PR documentation\n');
     mkdirSync(path.join(cwd, 'docs'), { recursive: true });
     writeFileSync(path.join(cwd, 'docs/notes.md'), 'PR notes\n');
     const prHead = commit('PR');
@@ -145,7 +145,7 @@ test('PR CLI pairs the tested merge with its actual main parent and rejects inco
       env: { ...process.env, CI_EVENT: 'pull_request', CI_BASE: eventBase, CI_PR_HEAD: prHead, GITHUB_SHA: merge, GITHUB_OUTPUT: path.join(cwd, 'output'), ...overrides },
     });
     const plan = JSON.parse(invoke('./plan-ci.mjs'));
-    assert.deepEqual(plan.files, ['README.md', 'docs/notes.md']);
+    assert.deepEqual(plan.files, ['CONTRIBUTING.md', 'docs/notes.md']);
     assert.equal(plan.base, actualBase);
     assert.deepEqual(plan.families, []);
     const evidence = { CI_PLAN: JSON.stringify(plan), CI_NEEDS: JSON.stringify(results(plan)) };
@@ -188,7 +188,11 @@ test('a routine plan never contains the complete test suite', () => {
 // installed packages; the other reviewed scripts run their tests without one.
 test('reviewed release scripts install only when their tests need packages', () => {
   const install = ['scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs', 'scripts/architecture/dependency-baseline.json', 'scripts/release/check-package-graph.mjs', 'scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs',
-    'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs'];
+    'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs',
+    'scripts/release/beta-release.test.mjs', 'scripts/release/registry-readback.mjs',
+    'scripts/release/execution-submit-smoke.mjs', 'scripts/release/packaging-plugin-smoke.mjs', 'scripts/release/cloud-do-consumer-smoke.mjs',
+    'scripts/release/pi-launcher-smoke.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/check-upgrade-manifest.mjs',
+    'scripts/release/check-upgrade-manifest.test.mjs'];
   for (const path of Object.keys(reviewedScripts)) {
     assert.equal(needsBuild(planCi({ event: 'push', sha, paths: [path] })), install.includes(path), path);
   }

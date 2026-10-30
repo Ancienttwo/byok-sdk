@@ -54,7 +54,7 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
   });
   afterAll(async () => {
     for (const device of devices) await device.stop();
-    await worker?.kill();
+    await worker?.dispose();
     await substrate?.dispose();
   });
 
@@ -130,8 +130,6 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
   });
 
   async function restart(options: Parameters<typeof startWorker>[1] = {}) {
-    const port = Number(new URL(worker!.base).port);
-    await worker!.kill();
-    return startWorker(substrate, { ...options, port });
+    return worker!.restart(options);
   }
 });

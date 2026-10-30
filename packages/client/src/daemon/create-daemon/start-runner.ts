@@ -183,5 +183,3 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     deps,
   };
 }
-
-export type StartRunnerDeps = ReturnType<typeof composeStartRunnerDeps>;

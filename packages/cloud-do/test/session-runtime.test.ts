@@ -40,10 +40,10 @@ function wireToolCalls(tools: ToolCall[]) {
 }
 function runtime() {
   return new Miniflare({ resourcePersistencePath: persist, log: new AuditLog(), workers: [{ config: {
-    name: 'cloud-session-runtime', type: 'worker', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
+    name: 'cloud-session-runtime', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
     manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: script } } },
     exports: { SessionAuditDO: { type: 'durable-object', storage: 'sqlite' } },
-    env: { AGENTS: { type: 'durable-object', workerName: 'cloud-session-runtime', exportName: 'SessionAuditDO' },
+    env: { AGENTS: { type: 'durable-object', worker: 'cloud-session-runtime', exportName: 'SessionAuditDO' },
       AIPHABEE_ZAI_API_KEY: { type: 'text', value: KEY }, AIPHABEE_DEEPSEEK_API_KEY: { type: 'text', value: SECONDARY } },
   }, dev: { outboundService: { type: 'node-handler', handler: async (request: IncomingMessage, response: ServerResponse) => {
     let text = '';

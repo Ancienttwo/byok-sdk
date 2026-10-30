@@ -1667,7 +1667,6 @@ export interface PreparedAgentMemorySelectedTool {
 export declare function parsePreparedAgentMemoryMode(value: unknown): PreparedAgentMemoryMode;
 export declare function preparedAgentMemoryModeAllowsOperation(mode: PreparedAgentMemoryMode, operation: AgentMemoryOperation): boolean;
 export declare function preparedAgentMemoryModeWithinCeiling(requested: PreparedAgentMemoryMode, ceiling: PreparedAgentMemoryMode): boolean;
-export declare function preparedAgentMemoryToolNames(mode: PreparedAgentMemoryMode): readonly string[];
 /** Strict parser for the task-free SDK descriptor. Missing/unknown operation metadata fails closed. */
 export declare function validatePreparedAgentMemoryObservation(value: unknown): PreparedAgentMemoryObservation;
 export declare function preparedAgentMemoryTools(mode: PreparedAgentMemoryMode, observation: PreparedAgentMemoryObservation): readonly PreparedAgentMemorySelectedTool[];
@@ -1875,7 +1874,6 @@ export type AgentContentReadDecision = (typeof AGENT_CONTENT_READ_DECISIONS)[num
  */
 export declare const AGENT_CONTENT_READ_REASONS: readonly ['invalid-request', 'policy-disabled', 'capability-missing', 'policy-revision-mismatch', 'absolute-target', 'non-relative-target', 'dot-segment', 'sensitive-name', 'root-not-allowlisted', 'root-invalid', 'path-escape', 'target-missing', 'symlink', 'not-regular-file', 'byte-limit', 'mime-not-allowlisted', 'text-not-allowlisted', 'text-decode-failed', 'identity-mismatch'];
 export type AgentContentReadReason = (typeof AGENT_CONTENT_READ_REASONS)[number];
-export type AgentContentReadDropReason = AgentContentReadReason;
 export type AgentContentActorKind = 'user' | 'agent' | 'system';
 export interface AgentContentReadActor {
     readonly kind: AgentContentActorKind;
@@ -1974,7 +1972,6 @@ export interface AgentContentReadDenied {
     readonly receipt: AgentContentAuditReceipt;
 }
 export type AgentContentReadResult = AgentContentReadAllowed | AgentContentReadDenied;
-export type AgentContentReadDecisionRecord = AgentContentReadResult;
 export declare class AgentContentReadPolicyError extends Error {
     constructor(message: string);
 }
@@ -10409,11 +10406,6 @@ export declare class TeamWorkspaceReceiptError extends TeamWorkspaceError {
 export declare class TeamWorkspaceCorruptError extends TeamWorkspaceError {
     constructor(message: string);
 }
-/** Public fail-closed validators for control/MCP composition sites. */
-export declare function validateTeamWorkspaceId(value: unknown): string;
-export declare function validateTeamMemberId(value: unknown): string;
-export declare function validateTeamMessageBody(value: unknown): string;
-export declare function validateTeamContentType(value: unknown): string;
 /** Encode the full lease as one opaque helper context; it is never model input. */
 export declare function encodeTeamMemberContext(lease: TeamMemberLease): string;
 /** Decode only the exact bounded lease shape emitted by {@link encodeTeamMemberContext}. */

@@ -2414,8 +2414,6 @@ export declare class SqliteProviderProfileStore implements ProviderProfileStore 
     recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
     setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
 }
-/** Exported for the store's own tests to enumerate the CHECK-constrained kinds. */
-export declare const SQLITE_PROFILE_PROVIDER_KINDS: readonly [import("./provider-profile").ModelProviderKind, ...import("./provider-profile").ModelProviderKind[]];
 // ==== @byok-sdk/keys dist/sqlite-support.d.ts ====
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 export type SqliteOpenStep = 'after-open' | 'after-wal' | 'after-synchronous';

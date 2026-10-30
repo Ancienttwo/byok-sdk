@@ -43,11 +43,11 @@ beforeAll(async () => {
     const name = `credentials-${kind}`;
     const value = kind === 'normal' ? KEY : kind === 'opaque' ? OPAQUE_PRIMARY : kind === 'empty' ? '' : 'invalid\r\nheader';
     return { config: {
-      name, type: 'worker', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
+      name, compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
       manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: script } } },
       exports: { AuditAgentDO: { type: 'durable-object', storage: 'sqlite' } },
       env: {
-        AGENTS: { type: 'durable-object', workerName: name, exportName: 'AuditAgentDO' },
+        AGENTS: { type: 'durable-object', worker: name, exportName: 'AuditAgentDO' },
         ...(kind === 'missing' ? {} : { AIPHABEE_ZAI_API_KEY: { type: 'text' as const, value } }),
         AIPHABEE_DEEPSEEK_API_KEY: { type: 'text', value: kind === 'opaque' ? OPAQUE_SECONDARY : SECONDARY },
       },

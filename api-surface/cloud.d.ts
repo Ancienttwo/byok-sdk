@@ -2866,7 +2866,6 @@ export declare class TaskOfferAppendRefusedError extends ByokCloudError {
 }
 export declare function isCloudError(value: unknown, code?: CloudErrorCode): value is ByokCloudError;
 // ==== @byok-sdk/cloud dist/handlers/board.d.ts ====
-import { type BoardPage } from '@byok-sdk/core';
 import type { Context } from 'hono';
 import { type DeviceRouteDeps } from './shared';
 export declare const DEFAULT_BOARD_PAGE_LIMIT = 50;
@@ -2888,7 +2887,6 @@ export declare function boardClaimHandler(deps: DeviceRouteDeps): (c: Context) =
 export declare function boardUnclaimHandler(deps: DeviceRouteDeps): (c: Context) => Promise<Response>;
 export declare function boardStatusHandler(deps: DeviceRouteDeps): (c: Context) => Promise<Response>;
 export declare function boardStreamHandler(deps: BoardStreamRouteDeps): (c: Context) => Promise<Response>;
-export type BoardPollResponse = BoardPage;
 // ==== @byok-sdk/cloud dist/handlers/device-proof-request.d.ts ====
 import type { Context } from 'hono';
 import { type AuthenticatedDeviceProof, type DeviceProofAuthDeps } from '../auth/device-proof';
@@ -2914,10 +2912,6 @@ import type { Context } from 'hono';
 import type { DevicePrincipal } from '@byok-sdk/core';
 import { type BearerAuthDeps } from '../auth/bearer';
 import { type CloudRootStores, type TenantStores } from '../tenant-stores';
-/** Every error response on this surface is `{ error }` — the same shape the reference server uses. */
-export interface ErrorBody {
-    readonly error: string;
-}
 export interface BoundedJsonBodyResult {
     readonly body: unknown;
     readonly tooLarge: boolean;

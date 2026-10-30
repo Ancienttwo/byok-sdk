@@ -84,6 +84,22 @@ const lifecycle = createServiceLifecycle({
 const xmlPath = path.join(logDir, `${name}.xml`);
 const exePath = path.join(logDir, `${name}.exe`);
 
+// WinSW's `<id>.out.log`/`<id>.err.log`/`<id>.wrapper.log` hold the service's
+// own output; `workDir` is removed below, so a failed run prints them first.
+async function printServiceLogs() {
+  let names;
+  try {
+    names = (await fs.readdir(logDir)).filter((entry) => entry.endsWith('.log')).sort();
+  } catch (err) {
+    console.error(`(no service logs: ${err instanceof Error ? err.message : err})`);
+    return;
+  }
+  for (const entry of names) {
+    console.error(`----- ${path.join(logDir, entry)} -----`);
+    console.error((await fs.readFile(path.join(logDir, entry), 'utf8')).trimEnd());
+  }
+}
+
 async function expectUnitState(expected) {
   const { state } = await lifecycle.inspect();
   if (state !== expected) throw new Error(`expected unit state ${expected}, got ${state}`);
@@ -282,6 +298,7 @@ try {
   // Best-effort cleanup regardless of where the assertions above failed --
   // never leave a scratch service registered on the runner/dev machine.
   await lifecycle.stop().catch(() => {});
+  if (failed) await printServiceLogs();
   await lifecycle.uninstall().catch(() => {});
   await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
 }

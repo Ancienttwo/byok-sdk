@@ -705,6 +705,3 @@ function ensureConfigurationLockFile(databasePath: string): void {
   }
   chmodSync(lockPath, 0o600);
 }
-
-/** Exported for the store's own tests to enumerate the CHECK-constrained kinds. */
-export const SQLITE_PROFILE_PROVIDER_KINDS = MODEL_PROVIDER_KINDS;

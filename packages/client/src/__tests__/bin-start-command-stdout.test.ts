@@ -1,4 +1,5 @@
 import { testAgentHomeConfig } from './fixtures/test-agent';
+import { readyGate } from './fixtures/start-ready';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -77,11 +78,11 @@ describe('bin/commands/start: stdout is the audit log (issue #395)', () => {
     const { daemon, emit } = fakeDaemon();
     const lines: string[] = [];
     const controller = new AbortController();
-    let ready = false;
+    const gate = readyGate();
     const run = runStartCommand(config(storeDir), {
-      daemon, log: (l) => lines.push(l), signal: controller.signal, onReady: () => { ready = true; },
+      daemon, log: (l) => lines.push(l), signal: controller.signal, onReady: gate.onReady,
     });
-    await vi.waitFor(() => expect(ready).toBe(true));
+    await gate.ready(run);
     const progress = (taskId: string, event: AgentEvent): DaemonEvent => ({ kind: 'progress', ts: 'T', taskId, event });
 
     let textBytes = 0;

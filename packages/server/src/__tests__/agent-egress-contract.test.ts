@@ -169,7 +169,7 @@ describe('reference-server Agent egress contract', () => {
     expect(consumed[0]).toMatchObject({ context: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' } });
   });
 
-  it.each(['accepted', 'held', 'refused'] as const)('does not re-invoke the product consumer for an exact %s transport replay', async (outcome) => {
+  it.each(['accepted', 'held', 'refused'] as const)('retains one disposition without a new delivery or consumer call for an exact %s replay', async (outcome) => {
     const consumed: unknown[] = [];
     const { byok: instance, daemon } = await start(
       ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress', 'terminal-projection-selection'],
@@ -201,6 +201,11 @@ describe('reference-server Agent egress contract', () => {
     // An EXACT transport replay: the awaited send is the barrier, since the
     // admission hook runs inline inside `POST /byok/messages`.
     await daemon.send(publish);
+    // Replay before the next poll acknowledges the delivered row.
+    const retained = (await (await daemon.replay(0)).json()) as { events: Envelope[] };
+    expect(retained.events.filter((e) => e.type === 'agent.message.disposition')).toEqual([firstDisposition]);
+    expect(await daemon.next()).toEqual([]);
+    expect(await instance.tasks.messageDisposition(handle.taskId, daemon.deviceId, publish.payload)).toEqual(firstDisposition.payload);
     expect(consumed).toHaveLength(1);
     await instance.tasks.cancel(handle.taskId, 'stop remaining');
     expect(await instance.tasks.deviceTerminal(handle.taskId)).toBeUndefined();
@@ -208,21 +213,6 @@ describe('reference-server Agent egress contract', () => {
     await daemon.send(cancelled);
     expect(await instance.tasks.deviceTerminal(handle.taskId)).toMatchObject({ envelope: cancelled });
     expect(await instance.tasks.messageDisposition(handle.taskId, daemon.deviceId, publish.payload)).toEqual(firstDisposition.payload);
-  });
-
-  // 2d gap: the second half of the `it.each` above. The deleted hub answered
-  // every replay by SENDING another `agent.message.disposition` down the live
-  // socket, so a replay observably produced a second, identical frame. The
-  // kernel's `enqueueAgentMessageDisposition` (`packages/cloud/src/cloud.ts`)
-  // is keyed `agent-message-disposition:<receiptId>` and appends exactly ONE
-  // durable mailbox row per disposition, so a replay adds nothing new to
-  // deliver — the device's next poll is empty. The frozen disposition itself is
-  // unchanged and still readable from the retained window. Orchestrator
-  // decision: accept one-durable-row delivery (the mailbox is at-least-once, so
-  // a device that lost the row re-reads it by cursor), or re-append on replay.
-  // Decision D6: https://github.com/Ancienttwo/byok-sdk/issues/1153
-  it.skip('answers an exact transport replay with a second, identical agent.message.disposition delivery', async () => {
-    expect.fail('the kernel appends one durable disposition row per message — see the 2d gap note above');
   });
 
   it('fails closed before task enqueue for a legacy Agent-home daemon', async () => {
@@ -372,24 +362,14 @@ describe('reference-server Agent egress contract', () => {
     // An exact replay returns the SAME durable receipt — the first-write-wins
     // record is unchanged, and no second one is minted.
     await daemon.send(event);
+    // Replay before the next poll acknowledges the delivered row.
+    const retained = (await (await daemon.replay(0)).json()) as { events: Envelope[] };
+    expect(retained.events.filter((e) => e.type === 'agent.egress.ack')).toEqual([first]);
+    expect(await daemon.next()).toEqual([]);
     expect(await instance.egress.get(daemon.deviceId, AGENT_REF, event.payload.eventId)).toMatchObject({
       payload: event.payload,
       receiptId: first.payload.receiptId,
     });
-  });
-
-  // 2d gap: the replay half of the test above. The deleted hub re-SENT an
-  // `agent.egress.ack` frame down the live socket for every replay. The
-  // kernel's ack is one durable mailbox row keyed by the receipt id
-  // (`packages/cloud/src/cloud.ts:1235`), so a replay re-derives the identical
-  // receipt but appends nothing new to deliver, and the device's next poll is
-  // empty. Same family as the `agent.message.disposition` replay gap above; the
-  // receipt identity itself is still pinned, through `egress.get`.
-  // Orchestrator decision: accept one-durable-row delivery, or re-append the
-  // ack on replay.
-  // Decision D7: https://github.com/Ancienttwo/byok-sdk/issues/1153
-  it.skip('re-delivers an identical agent.egress.ack envelope on an exact reliable replay', async () => {
-    expect.fail('the kernel appends one durable ack row per receipt — see the 2d gap note above');
   });
 
   it('gates each content-read surface before putting a control request in the outbox', async () => {
@@ -479,8 +459,7 @@ describe('reference-server Agent egress contract', () => {
 
     // An exact replay (a fresh envelope id carrying the identical receipt body)
     // is accepted and appends no second ack row — the durable ack is keyed by
-    // the receipt id. The "an identical ack frame is re-delivered" half of the
-    // pre-fold pin is the `it.skip` gap recorded above.
+    // the receipt id.
     const replayRes = await daemon.send(createEnvelope('agent.content.receipt', receipt.payload));
     expect(replayRes.status).toBe(200);
     expect(await daemon.next()).toEqual([]);
