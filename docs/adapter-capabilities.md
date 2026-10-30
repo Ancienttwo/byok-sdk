@@ -43,22 +43,41 @@ the runtime does instead. `auto` never applies to a prepared offer, whatever the
 
 ## Qualification notes
 
-| Capability | Claude | Codex | Grok | Pi |
-| --- | --- | --- | --- | --- |
-| Resume a known native session | Supported; exact `--resume` identity | Supported; exact `thread/resume` identity | Supported; exact ACP `session/resume` identity | Not requalified in this slice |
-| Redirect the active turn (`steer`) | Unsupported; typed rejection | Supported; exact active `expectedTurnId` | Unsupported; typed rejection | Not requalified in this slice |
-| New instruction after an idle turn (`followUp`) | Supported, same native session | Supported, same native thread | Supported, same native session | Not requalified in this slice |
-| Native session fork | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | No new support introduced |
-| Native session rollback | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | Unsupported; no SDK `Session` operation | No new support introduced |
-| Legacy boolean interactive approval | Unsupported | Unsupported | Unsupported | No new support introduced |
-| Native approval / structured question replies, default construction | Unsupported and omitted | Unsupported and omitted | Unsupported and omitted | No new support introduced |
-| Local native interaction opt-in | Structured AskUserQuestion only; other `can_use_tool` requests pass through as allow | Structured question IDs only; `approvalPolicy: never`, approval requests refused | Unsupported; every permission request is answered `cancelled` | Unsupported |
-| Recover pending native interactions after process restart | Unsupported | Unsupported | Unsupported | No new support introduced |
-| Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
-| Trajectory evidence for the execution record (`trajectoryEvidence`) | Not declared; records are `unknown` | Not declared; records are `unknown` | Not declared; records are `unknown` | Declared (`event-stream`); not declared with `durablePi: true` |
-| Display-only message draft (`messageDraft`) | Declared; text deltas from `--include-partial-messages` | Declared; `item/agentMessage/delta` | Declared; ACP `text_delta` | Declared; `text_delta` progress |
-| Tool authorization `auto` (`toolAuthorizationAuto`) | Declared; SDK `PreToolUse` callback, confirmed `hooks_applied` | Not declared; `auto` declined before claim | Not declared; hosted terminal is partial coverage, `auto` declined before claim | Declared on the ordinary RPC lane and native Pi subagents; durable declares `false`, prepared declined by the daemon |
-| MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Set for task toolset servers from Claude's own `mcp_status` answer | Set from the native `mcpToolCall` `server` and `tool`, for every server Codex runs, SDK helpers included | Not set; ACP `tool_call` defines no MCP server field, and live Grok evidence is pending (#633) | Set by exact observed name; ordinary, prepared and durable |
+The [capability matrix](#capability-matrix) is the only comparison of what each
+adapter declares. These notes are evidence of how the bundled adapters meet
+those declarations, and of behavior the matrix does not cover; they are not a
+second registry.
+
+- Resume uses each runtime's exact native identity: Claude `--resume`, Codex
+  `thread/resume`, Grok ACP `session/resume`. A new instruction after an idle
+  turn (`followUp`) stays in the same native session or thread.
+- Codex steering targets the exact active `expectedTurnId`. An adapter without
+  `steer` returns a typed rejection.
+- Message drafts come from Claude's `--include-partial-messages` text deltas,
+  Codex `item/agentMessage/delta`, Grok ACP `text_delta` and Pi `text_delta`
+  progress.
+- Tool authorization `auto`: Claude gates through the SDK `PreToolUse`
+  callback, confirmed by `hooks_applied`; Pi gates on the ordinary RPC lane and
+  its native subagents. Every other case, Grok's partial hosted-terminal
+  coverage included, is declined before claim.
+- No bundled adapter offers native session fork or rollback (the SDK `Session`
+  has no such operation), the legacy boolean interactive approval, native
+  approval or structured-question replies under default construction, or
+  recovery of pending native interactions after a process restart. Browser or
+  mobile reconnect is the Host's, not native session resume.
+- Local native interaction opt-in: Claude relays structured AskUserQuestion
+  only and passes other `can_use_tool` requests through as allow; Codex relays
+  structured question IDs only, keeps `approvalPolicy: never` and refuses
+  approval requests; Grok answers every permission request `cancelled`; Pi has
+  none.
+- MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`): Claude sets
+  it for task toolset servers from its own `mcp_status` answer; Codex from the
+  native `mcpToolCall` `server` and `tool`, for every server it runs, SDK
+  helpers included; Pi by exact observed name, on the ordinary, prepared and
+  durable lanes. Grok does not set it: ACP `tool_call` defines no MCP server
+  field, and live Grok evidence is pending (#633).
+- Trajectory evidence: only ordinary Pi declares `event-stream`, and Pi with
+  `durablePi: true` does not; Claude and Codex records are `unknown`.
 
 By default Claude and Codex run YOLO
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude with
@@ -74,11 +93,11 @@ normalized `tool_use` stream for every runtime. See the spec's
 the classifier and the honest limits (tool gate, not file scope or sandbox).
 
 Pi is intentionally outside this qualification change. Existing Pi behavior
-and its existing tests are unchanged; this matrix does not downgrade its
+and its existing tests are unchanged; these notes do not downgrade its
 already implemented capabilities or certify them without evidence. Custom
 adapters must qualify their own descriptor and behavior. Sharing an upstream
 runtime name or using a custom harness does not inherit another adapter's pass.
-The trajectory evidence row has its own Pi evidence; see
+Trajectory evidence has its own Pi evidence; see
 [Trajectory evidence](#trajectory-evidence).
 
 ## User-level configuration and session isolation
@@ -91,23 +110,17 @@ user's login-shell environment except `CLAUDECODE` and `BYOK_*` (#1095). Paths s
 MCP configuration, a fresh native session, folder trust and filesystem permission
 modes address different concerns; none alone establishes persona isolation.
 
-The table names the user-level instruction sources that each pinned runtime
+The sections below name, per runtime, the user-level instruction sources it
 loads, whether the user's own MCP servers reach a task, the runtime's own
-memory, and the per-process switch that the pinned CLI accepts. The
+memory, and the per-process switch the CLI accepts, at the version each probe
+used. The isolation rows of the [capability matrix](#capability-matrix) say
+which of these the SDK keeps out, as checked by the runtime contract suite. The
 [#634 evidence note](notes/2026-10-22-634-runtime-user-config.md) and the
 [#871/#873 evidence note](notes/2026-10-24-871-873-claude-agent-user-context.md)
 give the source lines, help output and probes. The SDK option is an adapter option: it applies
 to every session that the adapter starts. A choice per task would need a new
 wire field. The default is unchanged, and the option is not an isolation
 guarantee.
-
-| Adapter (version) | User-level instruction sources | User MCP servers in a task | Runtime memory | Per-process switch | SDK option |
-| --- | --- | --- | --- | --- | --- |
-| Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md` and `.claude/rules/` in every parent of the cwd; also managed policy and `~/.claude.json` | Yes, beside the task's `--mcp-config`: user and project servers; claude.ai connectors and plugin servers (inferred) | Auto memory, on by default | `--strict-mcp-config`; `claudeMdExcludes` and `env` through `--settings`; `--setting-sources` also drops guardrails | `agentUserContext`, Agent tasks only |
-| Codex (0.160.0) | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`, `$CODEX_HOME/config.toml` | Yes: `config.toml` `[mcp_servers]`, merged with the task servers; plugins and apps (connectors) are on by default | `memories` feature, off by default | None for instructions; per thread, `mcp_servers.<name>.enabled = false`, `features.apps` and `features.plugins` in the open request's `config` (probed for servers and plugins) | `agentUserMcpServers`, Agent tasks only: no user MCP source remains, connectors inferred |
-| Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs`; also Claude and Cursor skills and hooks through compatibility cells | Yes (from the guide): `~/.grok/config.toml`, project `.grok/config.toml` and `.mcp.json`, plugins, and `~/.claude.json` and `~/.cursor/mcp.json` through compatibility cells | Experimental, off by default (`GROK_MEMORY`) | Four variables for the Claude and Cursor instruction files and rules; `GROK_CLAUDE_MCPS_ENABLED` and `GROK_CURSOR_MCPS_ENABLED` for those MCP cells only (probed), `GROK_MANAGED_MCPS_ENABLED` for managed MCP | `compatInstructions`; `agentUserMcpServers`, Agent tasks only: refuses the start while `~/.grok/config.toml`, project or plugin servers are enabled |
-| Pi (1.4.0) | Agent-directory `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions, skills and prompts; `~/.agents/skills`; context files in every parent of the cwd | Pi's built-in MCP and `mcp.json` do not load in SDK sessions; user extensions from the agent directory load and can register tools | None found (inferred) | `--no-context-files` drops the persona too | None |
-| Hermes (0.22.2+2364.g0b10b9f) | None: each execution has a fresh `HERMES_HOME` | No: the fresh `HERMES_HOME` configuration has no `mcp_servers` | Off in the SDK profile | Not needed | None |
 
 ### Claude: user-level configuration
 
@@ -404,8 +417,9 @@ the git root. So an `AGENTS.md` or `CLAUDE.md` in `~` loads for an Agent home
 below `~`. Pi's `--no-context-files` drops every context file, the Agent-home
 `AGENTS.md` too, and the SDK host accepts no Pi resource flag. The agent
 directory also holds `auth.json`, `models.json` and the sessions. The SDK has
-no ordinary-Pi option for user instructions. Pi's `agentsFilesOverride` API
-could drop only the agent-directory file in a future host option.
+an ordinary-Pi option for user instructions: Agent tasks accept
+`PiAdapterOptions.agentUserContext: 'excluded'` (see
+[Pi explicitly authorized resources](#pi-explicitly-authorized-resources)).
 
 The [prepared Pi session](../packages/client/src/adapters/pi/prepared-session.ts)
 is different: it uses in-memory settings and disables discovered extensions,
@@ -614,20 +628,18 @@ not live certification. No live Grok run is part of CI.
 
 ## Hermes adapter (custom harness)
 
-`HermesAdapter` (id `hermes`, #519) is outside the matrix above and outside
-the shared conformance runner, which assumes native resume. It runs on the
-custom-harness path (`harnessId: 'hermes'`). Its descriptor declares:
-
-| Capability | Hermes |
-| --- | --- |
-| Resume a known native session | Unsupported; each execution has a fresh Hermes profile, `prepare()` rejects `sessionRef` |
-| Redirect the active turn (`steer`) | Unsupported; typed `SteerUnsupportedError` |
-| New instruction after an idle turn (`followUp`) | Supported, same ACP session |
-| Task MCP toolsets (`mcpToolsets`) | Supported; ACP `session/new.mcpServers` stdio entries |
-| MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Not set; the ACP title is the Hermes registry name, not an authoritative identity |
-| Legacy boolean interactive approval, native interactions | Unsupported and omitted |
-| Display-only message draft | Declared; one `progress` per `agent_message_chunk` |
-| Trajectory evidence | Not declared |
+`HermesAdapter` (id `hermes`, #519) is outside the shared conformance runner,
+which assumes native resume. It runs on the custom-harness path
+(`harnessId: 'hermes'`). Its declared capabilities are in the
+[capability matrix](#capability-matrix). How it meets them: it does not resume,
+because each execution has a fresh Hermes profile and `prepare()` rejects
+`sessionRef`; steering returns a typed `SteerUnsupportedError`; a new
+instruction after an idle turn stays in the same ACP session; task MCP toolsets
+go to ACP `session/new.mcpServers` stdio entries; and each
+`agent_message_chunk` is one draft `progress`. It sets no MCP identity on tool
+events, because the ACP title is the Hermes registry name, not an authoritative
+identity. It omits the legacy boolean approval and native interactions, and
+declares no trajectory evidence.
 
 Hermes runs edits in ACP mode `dont_ask` and commands under `--yolo`. A
 permission request that still arrives (Hermes's sensitive-path guard) is
