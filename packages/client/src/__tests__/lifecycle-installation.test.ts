@@ -192,6 +192,17 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(installation.rollback()).rejects.toMatchObject({ code: 'no_rollback' });
   });
 
+  it('a failed upgrade keeps the earlier upgrade rollbackable', async () => {
+    await installation.install(await payload('1.0.0'));
+    await installation.upgrade(await payload('2.0.0'));
+    unhealthy.add('3.0.0');
+    await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
+    expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', from: '2.0.0', to: '3.0.0', previous: '1.0.0' });
+    expect([await pointer('current'), await pointer('previous')]).toEqual(['2.0.0', '1.0.0']);
+    expect(await installation.rollback()).toMatchObject({ state: 'rolled-back', from: '1.0.0', to: '2.0.0' });
+    expect(await pointer('current')).toBe('1.0.0');
+  });
+
   it('recover completes an interrupted switch deterministically: a crash between the two junction renames', async () => {
     await installation.install(await payload('1.0.0'));
     await installation.upgrade(await payload('2.0.0'));

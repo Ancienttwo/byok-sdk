@@ -1,0 +1,23 @@
+{
+  "name": "@byok-sdk/example-service-upgrade",
+  "version": "0.0.1",
+  "private": true,
+  "description": "#1097: an App that ships the byok-agent bundle as its background service and installs, upgrades, rolls back and uninstalls it through the SDK's createServiceInstallation, the API byok-agent install --payload uses. upgrade-smoke.mjs runs both on launchd, systemd --user and WinSW.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@byok-sdk/client": "workspace:*",
+    "@byok-sdk/server": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "esbuild": "0.28.1",
+    "typescript": "^7.0.2"
+  }
+}

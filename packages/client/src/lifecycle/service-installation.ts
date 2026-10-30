@@ -85,6 +85,8 @@ export interface ServiceUpgradeReceipt {
   state: 'pending' | 'switched' | 'rolled-back' | 'failed';
   from: string;
   to: string;
+  /** Where `previous` pointed before this upgrade; a restore of `from` puts it back, so an earlier upgrade can still be rolled back. */
+  previous?: string;
   at: string;
   code?: ServiceInstallationErrorCode;
   stores?: StoreCompatibility[];
@@ -103,7 +105,7 @@ export interface ServiceInstallation {
    * restores the old version and its snapshot together.
    */
   upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
-  /** Restores `previous` and the last upgrade's store snapshot. Store writes since that upgrade are discarded. */
+  /** Restores `previous` and the store snapshot taken when `current` was switched to. Store writes since then are discarded. */
   rollback(): Promise<ServiceUpgradeReceipt>;
   /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -129,7 +131,7 @@ const ERROR_MESSAGES = {
   store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.',
   health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.',
   rollback_unhealthy: 'The previous version was restored but failed its health check too.',
-  no_rollback: 'There is no switched upgrade with a store snapshot to roll back.',
+  no_rollback: 'There is no previous version with a store snapshot to roll back to.',
 } as const;
 
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
@@ -423,20 +425,22 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   /**
    * Brings `from` back: stops whatever runs, restores the snapshot taken for
-   * `to` and both pointers, then starts `from` and checks its health.
+   * `to`, points `current` at `from` and `previous` at `previous`, then
+   * starts `from` and checks its health.
    */
-  async function restore(from: string, to: string, code?: ServiceInstallationErrorCode): Promise<ServiceUpgradeReceipt> {
+  async function restore(from: string, to: string, previous: string | undefined, code?: ServiceInstallationErrorCode): Promise<ServiceUpgradeReceipt> {
     const gate = await stopQuiescent();
     try {
       await restoreSnapshot(to);
       await setPointer('current', from);
-      await setPointer('previous', undefined);
+      await setPointer('previous', previous);
     } finally {
       await gate.release();
     }
     await fs.rm(path.join(snapshotsDir, to), { recursive: true, force: true });
-    if (!(await startHealthy())) return writeReceipt({ state: 'failed', from, to, code: 'rollback_unhealthy' });
-    return writeReceipt({ state: 'rolled-back', from, to, ...(code === undefined ? {} : { code }) });
+    const kept = previous === undefined ? {} : { previous };
+    if (!(await startHealthy())) return writeReceipt({ state: 'failed', from, to, ...kept, code: 'rollback_unhealthy' });
+    return writeReceipt({ state: 'rolled-back', from, to, ...kept, ...(code === undefined ? {} : { code }) });
   }
 
   /** Keeps `current` and `previous` and the snapshot of the last switch; removes every other version and snapshot. */
@@ -456,6 +460,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       if (from === undefined) throw new ServiceInstallationError('installation_absent');
       const to = await stage(payloadDir);
       if (to === from) throw new ServiceInstallationError('version_current');
+      const previous = await readPointer('previous');
+      const kept = previous === undefined ? {} : { previous };
 
       // Until the pending receipt is written nothing has changed: any failure restarts `from`.
       let stores: StoreCompatibility[];
@@ -468,7 +474,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
             throw new ServiceInstallationError(refused.verdict === 'new-path-repair' ? 'store_repair_required' : 'store_rejected', stores);
           }
           await snapshot(to, stores);
-          await writeReceipt({ state: 'pending', from, to, stores });
+          await writeReceipt({ state: 'pending', from, to, ...kept, stores });
         } finally {
           await gate.release();
         }
@@ -489,7 +495,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         await gate.release();
       }
       if (!(await startHealthy())) {
-        const receipt = await restore(from, to, 'health_check_failed');
+        const receipt = await restore(from, to, previous, 'health_check_failed');
         throw new ServiceInstallationError(receipt.state === 'rolled-back' ? 'health_check_failed' : 'rollback_unhealthy');
       }
       const receipt = await writeReceipt({ state: 'switched', from, to, stores });
@@ -500,11 +506,12 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   function rollback(): Promise<ServiceUpgradeReceipt> {
     return withServiceOwnerGate(async () => {
-      const last = await readReceipt();
-      if (last?.state !== 'switched' || !(await exists(path.join(snapshotsDir, last.to, 'snapshot.json')))) {
+      if ((await readReceipt())?.state === 'pending') throw new ServiceInstallationError('upgrade_pending');
+      const [current, previous] = [await currentVersion(), await readPointer('previous')];
+      if (current === undefined || previous === undefined || !(await exists(path.join(snapshotsDir, current, 'snapshot.json')))) {
         throw new ServiceInstallationError('no_rollback');
       }
-      return restore(last.from, last.to);
+      return restore(previous, current, undefined);
     });
   }
 
@@ -512,7 +519,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return withServiceOwnerGate(async () => {
       const last = await readReceipt();
       if (last?.state !== 'pending') return last;
-      return restore(last.from, last.to, 'upgrade_pending');
+      return restore(last.from, last.to, last.previous, 'upgrade_pending');
     });
   }
 
