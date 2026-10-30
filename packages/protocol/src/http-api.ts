@@ -538,8 +538,6 @@ export const BYOK_AGENT_MEMORY_PROJECTIONS_PATH = '/byok/agent-memory-projection
 
 /** `PUT /byok/presence` — presence heartbeat. */
 export const BYOK_PRESENCE_PATH = '/byok/presence';
-/** `POST /byok/activity` — activity-tail append. */
-export const BYOK_ACTIVITY_PATH = '/byok/activity';
 
 /** `GET /byok/board` — coordination board list/poll. */
 export const BYOK_BOARD_PATH = '/byok/board';
