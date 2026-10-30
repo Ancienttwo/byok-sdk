@@ -11,8 +11,9 @@ pattern).
 Each adapter file under `packages/client/src/__tests__/runtime-contract/`
 binds every case either to a check or to an explicit skip with a reason. A
 missing case is a type error. An adapter cannot skip a case for a capability
-its descriptor advertises: `mcpToolsets`, `messageDraft`, and
-`toolAuthorizationAuto`.
+its descriptor advertises: `mcpToolsets`, `messageDraft`,
+`toolAuthorizationAuto`, and each `isolation` guarantee (`userContext`,
+`userMcpServers`, `sessionPersistence`).
 
 | Case | Checks |
 | --- | --- |

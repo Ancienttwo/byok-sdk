@@ -1,4 +1,4 @@
-import { isCoreError } from '@byok-sdk/core';
+import { freezePresenceRuntimeFact, isCoreError } from '@byok-sdk/core';
 import { PresencePublishRequestSchema } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
 import { appendActivityEvents, type ActivityBounds } from '../coordination';
@@ -53,13 +53,7 @@ export function presencePublishHandler(deps: PresenceRouteDeps) {
             : { protocolVersions: parsed.data.protocolVersions }),
           ...(parsed.data.runtimes === undefined
             ? {}
-            : {
-                runtimes: parsed.data.runtimes.map(({ id, version, authPresent }) => ({
-                  id,
-                  ...(version === undefined ? {} : { version }),
-                  ...(authPresent === undefined ? {} : { authPresent }),
-                })),
-              }),
+            : { runtimes: parsed.data.runtimes.map(freezePresenceRuntimeFact) }),
           ttlMs: deps.ttlMs,
           minimumIntervalMs: deps.minimumIntervalMs,
         }),

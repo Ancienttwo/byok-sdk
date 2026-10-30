@@ -92,7 +92,10 @@ describe('GrokAdapter sessions', () => {
     const a = adapter();
     expect(a.descriptor).toEqual({
       id: 'grok', supportsDispatchSelection: false, requiresMcpToolsetToolObservation: false, platforms: ['darwin', 'linux'],
-      capabilities: { steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true },
+      capabilities: {
+        steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true, preparedLane: false,
+        isolation: { userContext: true, userMcpServers: true, sessionPersistence: false },
+      },
     });
     const prepared = await a.prepare({
       offer: { instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'm' } },

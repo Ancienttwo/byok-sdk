@@ -1396,8 +1396,8 @@ export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './boa
 export type { BoardAssignee, BoardClaimInput, BoardItem, BoardItemInput, BoardListQuery, BoardPage, BoardStatus, BoardStatusUpdateInput, BoardStore, BoardUnclaimInput, } from './board';
 export { TRUTH_RECORD_KINDS } from './truth';
 export type { SnapshotWriteInput, TerminalWriteInput, TruthBodyRef, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordKind, TruthRecordSelector, TruthStore, } from './truth';
-export { PRESENCE_LEVELS } from './presence';
-export type { PresenceHint, PresenceHintInput, PresenceLevel, PresenceRuntimeFact, PresenceStore, TenantReadinessDevice, TenantReadinessPresence, TenantReadiness, } from './presence';
+export { freezePresenceRuntimeFact, PRESENCE_LEVELS } from './presence';
+export type { PresenceHint, PresenceHintInput, PresenceLevel, PresenceRuntimeCapabilities, PresenceRuntimeFact, PresenceStore, TenantReadinessDevice, TenantReadinessPresence, TenantReadiness, } from './presence';
 export { CONTENT_HASH_PATTERN, OBJECT_KEY_PREFIX_PATTERN, OBJECT_STATES, OBJECT_STATE_TRANSITIONS, contentHash, isContentHash, isLegalObjectTransition, objectKeyPrefix, tenantObjectKey, } from './blob';
 export type { ContentHash, ObjectCommitInput, ObjectKeyPrefix, ObjectListQuery, ObjectManifestEntry, ObjectManifestInput, ObjectReference, ObjectReferenceInput, ObjectState, ObjectStore, } from './blob';
 export { STORAGE_ERROR_CODES, STORAGE_ERROR_HTTP_STATUS, STORAGE_RESERVATION_STATES, STORAGE_WRITE_KINDS, STORAGE_WRITE_POSTURES, } from './quota';
@@ -1751,12 +1751,34 @@ import type { TenantId } from './tenant';
 /** The five presence levels. */
 export declare const PRESENCE_LEVELS: readonly ['online', 'thinking', 'working', 'error', 'offline'];
 export type PresenceLevel = (typeof PRESENCE_LEVELS)[number];
+/**
+ * The capability matrix a daemon reported for one runtime: the shape of
+ * `@byok-sdk/protocol`'s `RuntimeCapabilities` (#1103). Omitted fields are unknown.
+ */
+export interface PresenceRuntimeCapabilities {
+    readonly steer?: boolean;
+    readonly resume?: boolean;
+    readonly approvalInteractive?: boolean;
+    readonly mcpToolsets?: boolean;
+    readonly messageDraft?: boolean;
+    readonly toolAuthorizationAuto?: boolean;
+    readonly durablePi?: boolean;
+    readonly preparedLane?: boolean;
+    readonly isolation?: {
+        readonly userContext?: boolean;
+        readonly userMcpServers?: boolean;
+        readonly sessionPersistence?: boolean;
+    };
+}
 /** Runtime facts observed by a daemon's real local probe. Omitted fields are unknown. */
 export interface PresenceRuntimeFact {
     readonly id: string;
     readonly version?: string;
     readonly authPresent?: boolean;
+    readonly capabilities?: PresenceRuntimeCapabilities;
 }
+/** A frozen copy of one runtime fact holding only the known fields; every presence store returns this. */
+export declare function freezePresenceRuntimeFact(runtime: PresenceRuntimeFact): PresenceRuntimeFact;
 /** Unexpired presence facts nested in the tenant aggregate. */
 export interface TenantReadinessPresence {
     readonly level: PresenceLevel;
