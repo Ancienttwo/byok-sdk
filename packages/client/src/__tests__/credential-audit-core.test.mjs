@@ -177,6 +177,29 @@ describe('credential audit trace parser', () => {
     expect(normalSmokeVerdict(evidence).pass).toBe(true);
   });
 
+  it('takes a process edge only from a clone record, not from read() data that names clone', () => {
+    // A pid equal to a read size: npm source text holding `clone(` came back as `= 31`.
+    const readData = 'read(22, "spec and repo, so that we don\'t ever clone(the same thing) twice", 4096) = 31';
+    const parent = [
+      'execve("/usr/bin/node", ["node", "/repo/adapter-task-smoke.mjs"], 0) = 0',
+      'clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 30',
+      'clone(child_stack=NULL, flags=CLONE_VM|CLONE_VFORK|SIGCHLD) = 31',
+    ].join('\n');
+    expect(parseTraceFile(parent, 'trace.10', paths).relationships).toEqual([
+      { parentPid: 10, childPid: 30, syscall: 'clone' },
+      { parentPid: 10, childPid: 31, syscall: 'clone' },
+    ]);
+    expect(parseTraceFile(readData, 'trace.30', paths).relationships).toEqual([]);
+    expect(parseTraceFile(`[pid 30] ${readData}`, 'trace', paths).relationships).toEqual([]);
+
+    const evidence = normalizeTraceEvidence(
+      [{ name: 'trace.10', text: parent }, { name: 'trace.30', text: readData }, { name: 'trace.31', text: readData }],
+      paths,
+    );
+    expect(evidence.unresolvedProcesses).toEqual([]);
+    for (const pid of [30, 31]) expect(evidence.processes.find((process) => process.pid === pid)).toMatchObject({ role: 'smoke-node' });
+  });
+
   it('fails a positive control with an unresolved traced process', () => {
     const evidence = normalizeTraceEvidence(
       [

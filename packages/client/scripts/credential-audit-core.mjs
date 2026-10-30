@@ -35,6 +35,16 @@ function pidFromLine(line) {
   return match ? Number(match[1]) : undefined;
 }
 
+// A record is `[pid N] <timestamp> name(args) = result`; the pid and timestamp
+// (-t, -tt, -ttt) prefixes are optional. The name is matched only here: a
+// syscall name inside a read()'s data is not a record of that syscall.
+const RECORD_START = /^(?:\[pid\s+\d+\]\s+)?(?:\d+(?::\d{2}:\d{2})?(?:\.\d+)?\s+)?([a-z0-9_]+)\(/;
+
+function syscallArgs(line, syscall) {
+  const match = RECORD_START.exec(line);
+  return match?.[1] === syscall ? line.slice(match[0].length) : undefined;
+}
+
 function roleHints(line) {
   const roles = [];
   if (line.includes('credential-audit-positive-control')) roles.push('positive-control');
@@ -65,19 +75,16 @@ function preferredRole(roles, pid) {
 }
 
 function quotedArgsPath(line, syscall) {
-  const marker = `${syscall}(`;
-  const start = line.indexOf(marker);
-  if (start < 0) return undefined;
-  const rest = line.slice(start + marker.length);
+  const rest = syscallArgs(line, syscall);
+  if (rest === undefined) return undefined;
   const match = /"((?:\\.|[^"\\])*)"/.exec(rest);
   return match ? decodeStraceString(match[1]) : undefined;
 }
 
 function syscallReturn(line, syscall) {
-  const marker = `${syscall}(`;
-  const start = line.indexOf(marker);
-  if (start < 0) return undefined;
-  const result = /\)\s+=\s+(-?\d+)/.exec(line.slice(start));
+  const rest = syscallArgs(line, syscall);
+  if (rest === undefined) return undefined;
+  const result = /\)\s+=\s+(-?\d+)/.exec(rest);
   return result ? Number(result[1]) : undefined;
 }
 
@@ -91,20 +98,16 @@ function syscallSucceeded(line, syscall) {
 }
 
 function syscallNumericArg(line, syscall, index = 0) {
-  const marker = `${syscall}(`;
-  const start = line.indexOf(marker);
-  if (start < 0) return undefined;
-  const rest = line.slice(start + marker.length);
+  const rest = syscallArgs(line, syscall);
+  if (rest === undefined) return undefined;
   const end = rest.indexOf(')');
   const value = (end < 0 ? rest : rest.slice(0, end)).split(',')[index]?.trim();
   return /^\d+$/.test(value ?? '') ? Number(value) : undefined;
 }
 
 function openatDirfd(line) {
-  const marker = 'openat(';
-  const start = line.indexOf(marker);
-  if (start < 0) return undefined;
-  const rest = line.slice(start + marker.length);
+  const rest = syscallArgs(line, 'openat');
+  if (rest === undefined) return undefined;
   const token = /^\s*([^,]+),/.exec(rest)?.[1]?.trim();
   if (!token) return undefined;
   if (token === 'AT_FDCWD') return 'AT_FDCWD';
@@ -112,9 +115,7 @@ function openatDirfd(line) {
 }
 
 function openFlagsContainDirectory(line, syscall) {
-  const marker = `${syscall}(`;
-  const start = line.indexOf(marker);
-  return start >= 0 && line.slice(start).includes('O_DIRECTORY');
+  return syscallArgs(line, syscall)?.includes('O_DIRECTORY') ?? false;
 }
 
 function isPotentialCanaryPath(rawPath, canonicalPaths) {
@@ -134,7 +135,6 @@ function resolvePath(rawPath, base) {
 }
 
 function execEvidence(line) {
-  if (!/\bexecve\(/.test(line)) return undefined;
   const executable = quotedArgsPath(line, 'execve');
   if (!executable) return undefined;
   return { executable, roles: roleHints(line) };
