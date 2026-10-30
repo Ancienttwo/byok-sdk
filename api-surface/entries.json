@@ -1150,7 +1150,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 526687,
+      "budgetBytes": 527007,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1981,7 +1981,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 665368,
+      "budgetBytes": 665688,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2179,7 +2179,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 550486,
+      "budgetBytes": 550746,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

@@ -133,6 +133,8 @@ function assertRedactionPreservesAuthority(original: TimelineEvent, redacted: Ti
   const stableEnvelope =
     original.taskId === redacted.taskId &&
     original.sourceEnvelopeId === redacted.sourceEnvelopeId &&
+    original.revision === redacted.revision &&
+    original.offset === redacted.offset &&
     original.batchSeq === redacted.batchSeq &&
     original.eventIndex === redacted.eventIndex &&
     original.receivedAt === redacted.receivedAt &&

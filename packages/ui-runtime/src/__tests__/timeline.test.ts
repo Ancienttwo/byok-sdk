@@ -1,3 +1,4 @@
+import { InMemoryActivityStore, tenantId } from '@byok-sdk/cloud';
 import type { ActivityTail, TimelineEvent } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
 import {
@@ -33,7 +34,7 @@ function timelineEvent(
   event: TimelineEvent['event'],
   sourceEnvelopeId = `env-${batchSeq}`,
 ): TimelineEvent {
-  return { taskId: 'task-1', sourceEnvelopeId, batchSeq, eventIndex, receivedAt, event };
+  return { taskId: 'task-1', sourceEnvelopeId, batchSeq, eventIndex, revision: batchSeq + 1, offset: eventIndex, receivedAt, event };
 }
 
 function tail(events: readonly TimelineEvent[]): ActivityTail {
@@ -42,7 +43,7 @@ function tail(events: readonly TimelineEvent[]): ActivityTail {
   const entries = [...groups.values()].map((group, index) => ({
     kind: 'progress' as const, taskId: 'task-1', sourceEnvelopeId: group[0]!.sourceEnvelopeId,
     batchSeq: group[0]!.batchSeq, sourceDropped: group[0]!.sourceDropped ?? 0,
-    revision: index + 1, receivedAt: group[0]!.receivedAt,
+    revision: group[0]!.revision, receivedAt: group[0]!.receivedAt,
     events: [...group].sort((a, b) => a.eventIndex - b.eventIndex).map(event => event.event),
   }));
   return {
@@ -258,4 +259,15 @@ describe('Live Activity Timeline fold', () => {
     expect(Object.hasOwn(item, 'inputSpill')).toBe(false);
     expect(Object.hasOwn(item, 'outputSpill')).toBe(false);
   });
+});
+
+it('reviewer: replay accepts distinct log revisions with the same producer coordinates', async () => {
+  const store = new InMemoryActivityStore({ now: () => new Date('2026-10-30T00:00:00.000Z') });
+  const tenant = tenantId('review');
+  for (const sourceEnvelopeId of ['first', 'second']) {
+    await store.append(tenant, { taskId: 'task', sourceEnvelopeId, batchSeq: 1, events: [{ type: 'progress', text: sourceEnvelopeId }], dropped: 0, ttlMs: 600_000 });
+  }
+  const tail = (await store.read(tenant, 'task'))!;
+  expect(tail.entries.map(entry => entry.revision)).toEqual([1, 2]);
+  expect(() => replayTimeline(tail)).not.toThrow();
 });

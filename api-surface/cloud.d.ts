@@ -98,6 +98,8 @@ export declare const TimelineEventSchema: z.ZodObject<{
     sourceEnvelopeId: z.ZodString;
     batchSeq: z.ZodNumber;
     eventIndex: z.ZodNumber;
+    revision: z.ZodNumber;
+    offset: z.ZodNumber;
     sourceDropped: z.ZodOptional<z.ZodNumber>;
     receivedAt: z.ZodISODateTime;
     event: z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{

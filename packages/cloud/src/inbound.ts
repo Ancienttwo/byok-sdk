@@ -919,7 +919,7 @@ async function applyLifecycle(
   }
 }
 
-/** The activity batch of a progress report; an empty plaintext batch has none. */
+/** Every admitted progress envelope has an activity row, including empty batches. */
 function activityBatchOf(taskId: string, envelope: Envelope): Parameters<typeof appendActivityEvents>[1] | undefined {
   const source = { taskId, sourceEnvelopeId: envelope.id, dropped: 0 };
   if (envelope.type === 'task.artifact' && envelope.payload.sealed === undefined) {
@@ -927,10 +927,7 @@ function activityBatchOf(taskId: string, envelope: Envelope): Parameters<typeof 
   }
   if (envelope.type !== 'task.progress') return undefined;
   if (envelope.payload.sealed !== undefined) return { ...source, batchSeq: envelope.payload.seq, sealed: envelope.payload.sealed };
-  if (envelope.payload.events.length > 0) {
-    return { ...source, batchSeq: envelope.payload.seq, events: envelope.payload.events };
-  }
-  return undefined;
+  return { ...source, batchSeq: envelope.payload.seq, events: envelope.payload.events };
 }
 
 function approvalTimelineAppendInput(
