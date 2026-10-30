@@ -49,7 +49,7 @@ function tail(events: readonly TimelineEvent[]): ActivityTail {
   return {
     tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', entries,
     cursor: { version: 1, tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', generation: 'test', revision: entries.length },
-    floor: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
+    floor: 0, after: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
     dropped: 4, capacity: 50, expiresAt: '2026-08-16T13:00:00.000Z',
   };
 }
@@ -164,7 +164,7 @@ describe('Live Activity Timeline fold', () => {
       timelineEvent(7, 3, { type: 'turn_end' }),
     ];
     const source = { ...tail(events), floor: 4 };
-    let state = createTimelineState('task-1', { ...source, log: { floor: source.floor, revisions: source.entries.map(entry => entry.revision) } });
+    let state = createTimelineState('task-1', { ...source, log: { floor: source.floor, after: source.after, revisions: source.entries.map(entry => entry.revision) } });
     for (const event of events) state = foldTimelineEvent(state, event);
     const snapshot = projectTimeline(state);
     expect(snapshot).toMatchObject({ dropped: 4, capacity: 50, expiresAt: '2026-08-16T13:00:00.000Z' });
@@ -283,4 +283,19 @@ it('reviewer: retained empty row does not create a missing-history gap', async (
   expect(tail.floor).toBe(0);
   expect(tail.dropped).toBe(0);
   expect(replayTimeline(tail).gaps).toEqual([]);
+});
+
+it('reviewer: an after-revision page does not invent missing prefix history', async () => {
+  const store = new InMemoryActivityStore({ now: () => new Date('2026-10-30T00:00:00.000Z') });
+  const tenant = tenantId('review');
+  const row = (n: number) => ({
+    taskId: 'task', sourceEnvelopeId: `source-${n}`, batchSeq: n,
+    events: [{ type: 'progress', text: String(n) }], dropped: 0, ttlMs: 600_000,
+  });
+  const first = await store.append(tenant, row(1));
+  await store.append(tenant, row(2));
+  const page = (await store.read(tenant, 'task', { after: first.cursor }))!;
+  expect(page.floor).toBe(0);
+  expect(page.entries.map(entry => entry.revision)).toEqual([2]);
+  expect(replayTimeline(page).gaps).toEqual([]);
 });

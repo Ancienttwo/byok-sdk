@@ -81,7 +81,11 @@ export function runActivityConformance(name: string, factory: ActivityCompositio
         expect(second.entries.map(entry => [entry.revision, entry.sourceEnvelopeId])).toEqual([[1, 'source-2'], [2, 'source-1']]);
         expect(second.cursor).toMatchObject({ version: 1, revision: 2, taskId: 'task', tenantId: TENANT_A });
         expect(second.cursor.generation).toBe(first.cursor.generation);
-        expect((await store.read(TENANT_A, 'task', { after: first.cursor }))?.entries).toEqual([second.entries[1]]);
+        const page = (await store.read(TENANT_A, 'task', { after: first.cursor }))!;
+        expect(page.entries).toEqual([second.entries[1]]);
+        expect(page.after).toBe(first.cursor.revision);
+        expect(page.floor).toBe(second.floor);
+        expect(second.after).toBe(0);
         expect((await store.read(TENANT_A, 'task', { after: second.cursor }))?.entries).toEqual([]);
       });
     });

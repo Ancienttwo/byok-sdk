@@ -67,11 +67,12 @@ function validateMetadata(metadata: TimelineMetadata): TimelineMetadata {
     fail('timeline_input_invalid', 'Timeline metadata cursor must contain non-negative integer coordinates.');
   }
   if (metadata.log !== undefined && (!Number.isSafeInteger(metadata.log.floor) || metadata.log.floor < 0
-    || !Array.isArray(metadata.log.revisions) || metadata.log.revisions.some(revision => !Number.isSafeInteger(revision) || revision <= metadata.log!.floor))) {
-    fail('timeline_input_invalid', 'Timeline log continuity requires a non-negative floor and retained revisions above it.');
+    || !Number.isSafeInteger(metadata.log.after) || metadata.log.after < 0
+    || !Array.isArray(metadata.log.revisions) || metadata.log.revisions.some(revision => !Number.isSafeInteger(revision) || revision <= Math.max(metadata.log!.floor, metadata.log!.after)))) {
+    fail('timeline_input_invalid', 'Timeline log continuity requires non-negative floor/after bounds and retained revisions above them.');
   }
   return Object.freeze({ ...metadata, cursor: metadata.cursor && Object.freeze({ ...metadata.cursor }),
-    ...(metadata.log === undefined ? {} : { log: Object.freeze({ floor: metadata.log.floor, revisions: Object.freeze([...metadata.log.revisions].sort((a, b) => a - b)) }) }),
+    ...(metadata.log === undefined ? {} : { log: Object.freeze({ floor: metadata.log.floor, after: metadata.log.after, revisions: Object.freeze([...metadata.log.revisions].sort((a, b) => a - b)) }) }),
   });
 }
 
@@ -181,7 +182,7 @@ function gapsFor(taskId: string, events: readonly TimelineEvent[], log: Timeline
     }
   }
   if (log !== undefined) {
-    let previous = log.floor;
+    let previous = Math.max(log.floor, log.after);
     for (const revision of log.revisions) {
       if (revision > previous + 1) gaps.push(Object.freeze({
         kind: 'batch', after: Object.freeze({ taskId, revision: previous, offset: 0 }),
@@ -385,7 +386,7 @@ export function replayTimeline(tail: ActivityTail): TaskTimelineSnapshot {
     fail('timeline_input_invalid', 'Activity tail must contain a valid taskId and entries array.');
   }
   let state = createTimelineState(tail.taskId, {
-    log: { floor: tail.floor, revisions: tail.entries.map(entry => entry.revision) },
+    log: { floor: tail.floor, after: tail.after, revisions: tail.entries.map(entry => entry.revision) },
     dropped: tail.dropped,
     capacity: tail.capacity,
     ...(tail.expiresAt === undefined ? {} : { expiresAt: tail.expiresAt }),

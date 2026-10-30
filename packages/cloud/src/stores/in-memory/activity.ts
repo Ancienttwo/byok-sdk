@@ -25,7 +25,7 @@ function newLog(tenant: TenantId, taskId: string): TaskLog {
     tail: {
       tenantId: tenant, taskId, entries: [],
       cursor: { version: 1, tenantId: tenant, taskId, generation: crypto.randomUUID(), revision: 0 },
-      floor: 0, dropped: 0, sourceDropped: 0, capacity: DEFAULT_ACTIVITY_CAPACITY,
+      floor: 0, after: 0, dropped: 0, sourceDropped: 0, capacity: DEFAULT_ACTIVITY_CAPACITY,
       byteCapacity: MAX_ACTIVITY_BYTES, retainedBytes: 0,
     },
     ttlMs: ACTIVITY_TERMINAL_TTL_MS, fences: new Map(), removed: false,
@@ -134,7 +134,7 @@ export class InMemoryActivityStore implements ActivityStore {
       if (after !== undefined) throw new ByokCloudError('activity_history_gap', 'Activity history expired.');
       return undefined;
     }
-    return structuredClone({ ...tail, entries: tail.entries.filter(entry => entry.revision > (after?.revision ?? 0)) });
+    return structuredClone({ ...tail, after: after?.revision ?? 0, entries: tail.entries.filter(entry => entry.revision > (after?.revision ?? 0)) });
   }
 
   async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {

@@ -18,7 +18,7 @@ function activity(event: TimelineEvent['event'] = result): ActivityTail {
     tenantId: tenant, taskId: 'task-1', dropped: 0, capacity: 50, expiresAt: later,
     entries: [{ kind: 'progress', revision: 1, taskId: 'task-1', sourceEnvelopeId: 'env-1', batchSeq: 1, sourceDropped: 0, receivedAt: now, events: [event] }],
     cursor: { version: 1, tenantId: tenant, taskId: 'task-1', generation: 'test', revision: 1 },
-    floor: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
+    floor: 0, after: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
   };
 }
 function approvals(event: ApprovalObservation['event'] = resolved): ApprovalTimelineTail {
