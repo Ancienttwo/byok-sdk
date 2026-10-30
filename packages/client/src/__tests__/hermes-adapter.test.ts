@@ -390,10 +390,13 @@ describe('HermesAdapter session', () => {
     const session = await open();
     const iterator = session.events[Symbol.asyncIterator]();
     expect((await iterator.next()).value).toEqual({ type: 'progress', text: 'Hello' });
+    // close() drops a line the viewer has not delivered yet, so wait for the
+    // turn's last chunk; the hanging prompt keeps the turn active.
+    expect((await iterator.next()).value).toEqual({ type: 'progress', text: ' turn 1' });
     await Promise.all([session.close(), session.close()]);
     const rest: unknown[] = [];
     for (let next = await iterator.next(); !next.done; next = await iterator.next()) rest.push(next.value);
-    expect(rest).toEqual([{ type: 'progress', text: ' turn 1' }]);
+    expect(rest).toEqual([]);
     const pids = (await entries()).filter((entry) => entry.method === undefined).map((entry) => entry.pid as number);
     expect(pids).toHaveLength(2);
     for (const pid of pids) expect(alive(pid)).toBe(false);
