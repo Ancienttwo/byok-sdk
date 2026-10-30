@@ -275,8 +275,10 @@ describe('HermesAdapter prepare', () => {
 });
 
 describe('HermesAdapter session', () => {
-  it('settles an opening session before teardown removes its profile', async () => {
-    const { open, entries, root } = await setup({ FAKE_HERMES_GATEWAY_READY_DELAY_MS: '750' }, { gatewayReadyTimeoutMs: 3_000 });
+  // The adapter's default gateway-ready budget (20 s) applies; the test timeout
+  // stays above it so a slow startup fails with the adapter's error.
+  it('settles an opening session before teardown removes its profile', { timeout: 30_000 }, async () => {
+    const { open, entries, root } = await setup({ FAKE_HERMES_GATEWAY_READY_DELAY_MS: '750' });
     const opening = open();
     // Keep startup rejection observable while teardown awaits it.
     const outcome = opening.then((session) => ({ session }), (error: unknown) => ({ error }));
@@ -287,7 +289,8 @@ describe('HermesAdapter session', () => {
     expect(alive(gateway.pid)).toBe(true);
     try {
       await cleanupFixtures();
-      expect(await outcome).toHaveProperty('session');
+      const result = await outcome;
+      expect(result, 'error' in result ? `open failed: ${String(result.error)}` : undefined).toHaveProperty('session');
       expect(alive(gateway.pid)).toBe(false);
       await expect(fs.stat(root)).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
