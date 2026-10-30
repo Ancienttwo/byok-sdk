@@ -1,9 +1,9 @@
-import { createPrivateTempDir, type ExecutionScratch } from '../../daemon/retention/scratch';
+import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { buildAllowlistedEnv } from '../../runtime/environment';
 import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { ensureSecureDir } from '../../util/secure-dir';
+import { createPrivateTempDir, ensureSecureDir } from '../../util/secure-dir';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './mcp-environment';
 

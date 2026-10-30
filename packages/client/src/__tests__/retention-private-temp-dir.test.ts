@@ -9,7 +9,8 @@ vi.mock('node:crypto', async (importOriginal) => {
   return { ...crypto, randomBytes: (size: number) => fixedBytes.value ?? crypto.randomBytes(size) };
 });
 
-const { createDaemonScratch, createPrivateTempDir } = await import('../daemon/retention/scratch');
+const { createDaemonScratch } = await import('../daemon/retention/scratch');
+const { createPrivateTempDir } = await import('../util/secure-dir');
 
 let root: string;
 

@@ -1076,7 +1076,7 @@ export interface CopyPiRuntimeAssetsOptions {
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
-import { type ExecutionScratch } from '../../daemon/retention/scratch';
+import type { ExecutionScratch } from '../../daemon/retention/scratch';
 /** The SDK-owned Pi entry a launch starts. */
 export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export interface PiRuntimeLaunchResources {
@@ -8524,14 +8524,6 @@ export declare function createExecutionScratch(options: {
     clock?: () => Date;
 }): Promise<ExecutionScratch>;
 export declare function createDaemonScratch(storeDir: string, kind: 'diag' | 'credential' | 'prepare'): Promise<string>;
-/**
- * Creates `<parent>/<prefix>` plus six random letters and digits (the name
- * mkdtemp would give, which the retention sweep matches) with one exclusive
- * mkdir, mode 0700; on Windows it inherits the parent's ACL. It replaces
- * fs.mkdtemp, which on Windows fails with ENOENT once the path passes
- * MAX_PATH while mkdir does not (#1097). An existing name throws EEXIST.
- */
-export declare function createPrivateTempDir(parent: string, prefix: string): Promise<string>;
 // ==== @byok-sdk/client dist/daemon/retention/sweeper.d.ts ====
 import type { ResolvedStorageConfig } from './config';
 import { type ClassUsage, type RetentionClassId, type RetentionTrigger, type SweepReport, RetentionRegistry } from './registry';
@@ -15414,3 +15406,11 @@ export declare class SecureFileHardeningError extends Error {
 export declare function ensureSecureDir(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
 /** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */
 export declare function ensureSecureFile(filePath: string, opts?: EnsureSecureDirOptions): Promise<void>;
+/**
+ * Creates `<parent>/<prefix>` plus six random letters and digits (the name
+ * mkdtemp would give, which the retention sweep matches) with one exclusive
+ * mkdir, mode 0700; on Windows it inherits the parent's ACL. It replaces
+ * fs.mkdtemp, which on Windows fails with ENOENT once the path passes
+ * MAX_PATH while mkdir does not (#1097). An existing name throws EEXIST.
+ */
+export declare function createPrivateTempDir(parent: string, prefix: string): Promise<string>;

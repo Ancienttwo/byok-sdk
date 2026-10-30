@@ -1,5 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { defaultRunner, type Runner } from '../lifecycle/exec-runner';
 
 /**
@@ -219,4 +221,20 @@ export async function ensureSecureFile(filePath: string, opts: EnsureSecureDirOp
   if (result.code !== 0) {
     throw new SecureFileHardeningError(filePath, `icacls exited ${result.code}: ${(result.stderr || result.stdout).trim()}`);
   }
+}
+
+const TEMP_NAME_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+/**
+ * Creates `<parent>/<prefix>` plus six random letters and digits (the name
+ * mkdtemp would give, which the retention sweep matches) with one exclusive
+ * mkdir, mode 0700; on Windows it inherits the parent's ACL. It replaces
+ * fs.mkdtemp, which on Windows fails with ENOENT once the path passes
+ * MAX_PATH while mkdir does not (#1097). An existing name throws EEXIST.
+ */
+export async function createPrivateTempDir(parent: string, prefix: string): Promise<string> {
+  const suffix = Array.from(randomBytes(6), (byte) => TEMP_NAME_ALPHABET[byte % TEMP_NAME_ALPHABET.length]).join('');
+  const directory = path.join(parent, `${prefix}${suffix}`);
+  await fs.mkdir(directory, { mode: 0o700 });
+  return directory;
 }
