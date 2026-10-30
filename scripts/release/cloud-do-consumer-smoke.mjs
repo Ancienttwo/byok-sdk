@@ -135,12 +135,11 @@ export async function cloudDoConsumerSmoke(installRoot, workerImports) {
     resourcePersistencePath: path.join(consumer, 'state'),
     workers: [{ config: {
       name: 'cloud-do-installed-consumer',
-      type: 'worker',
       compatibilityDate: '2026-08-18',
       compatibilityFlags: flags,
       manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: bundle } } },
       exports: { ConsumerDO: { type: 'durable-object', storage: 'sqlite' } },
-      env: { AGENTS: { type: 'durable-object', workerName: 'cloud-do-installed-consumer', exportName: 'ConsumerDO' } },
+      env: { AGENTS: { type: 'durable-object', worker: 'cloud-do-installed-consumer', exportName: 'ConsumerDO' } },
     } }],
   });
   try {
