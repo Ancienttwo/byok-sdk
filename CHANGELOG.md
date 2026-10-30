@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Security (build and test toolchain)** — `bun.lock` moves to lockfile
+  format v2 and clears the four dev advisories that format-v1 records pinned in
+  place: `esbuild` 0.27.7 → 0.28.1 (GHSA-g7r4-m6w7-qqqr), `postcss` 8.5.19 →
+  8.5.32 (GHSA-fxqj-rqcc-2cmp), `nanoid` 3.3.16 → 3.3.20
+  (GHSA-2v37-7h3g-55p8) and `source-map-js` 1.2.1 → 1.2.2
+  (GHSA-68fv-2mgg-jv7q). `tsup` moves to 9 and `wrangler`/`miniflare` are
+  refreshed. No manifest changes; every re-resolved version stays inside the
+  range its manifest declares, and `@modelcontextprotocol/client` keeps its
+  exact `2.3.1` pin. Two client closure budgets are re-pinned to the bytes the
+  refreshed build tooling produces.
+
 - **Security (client)** — `@modelcontextprotocol/client` moves from `2.0.0` to
   `2.3.1` (exact pin), past GHSA-6qxp-vccf-f47h (OAuth credentials sent to an
   authorization server the MCP server chose) and GHSA-6prh-2h8m-c8cw (HTTP
