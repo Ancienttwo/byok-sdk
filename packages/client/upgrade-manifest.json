@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "160c37e739607b4df6dbd60cff5516e0abd1ce138f5a54cba4a04a9f2ffa07b1"
+    "snapshotSha256": "ec141bc30b5a2c3f40006c0fc5349f03710dcb1647a1b1c6e8d98e381438753e"
   },
   "configFields": {
     "status": "tracked",
@@ -700,7 +700,15 @@
         "export:@byok-sdk/client/adapters#RuntimeObservation",
         "export:@byok-sdk/client/adapters#buildRuntimeEnv",
         "export:@byok-sdk/client/adapters#buildRuntimeEnvironment",
-        "export:@byok-sdk/client/testing#FakeRuntimeAdapterBehavior"
+        "export:@byok-sdk/client/testing#FakeRuntimeAdapterBehavior",
+        "export:@byok-sdk/client#RuntimeEnvironment",
+        "export:@byok-sdk/client#RuntimeEnvironmentRemovalRule",
+        "export:@byok-sdk/client#RuntimeEnvironmentReport",
+        "export:@byok-sdk/client#RuntimeEnvironmentSource",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironment",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentRemovalRule",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentSource"
       ]
     },
     {
@@ -1078,7 +1086,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=494803d4d57d5fbd",
-      "after": "K8 0.0.1 src-sha256=01911b29e0d5f0b7",
+      "after": "K8 0.0.1 src-sha256=c6917b2762392bcd",
       "entry": "execution-core-published"
     },
     {
@@ -1449,12 +1457,32 @@
       "entry": "runtime-environment-policy"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeEnvironment",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeEnvironmentConflictRule",
       "change": "added",
       "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeEnvironmentPolicy",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentRemovalRule",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentReport",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentSource",
       "change": "added",
       "entry": "runtime-environment-policy"
     },
@@ -1759,12 +1787,32 @@
       "entry": "runtime-environment-policy"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironment",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentConflictRule",
       "change": "added",
       "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentPolicy",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentRemovalRule",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentSource",
       "change": "added",
       "entry": "runtime-environment-policy"
     },

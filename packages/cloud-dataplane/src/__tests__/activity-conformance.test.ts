@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createMutableClock } from '@byok-sdk/core';
 import { runActivityConformance, type ActivityCompositionFactory } from '@byok-sdk/conformance';
 import { tenantId } from '@byok-sdk/core';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrate } from '../migrate';
 import { PostgresActivityStore } from '../stores/activity';
 import {
@@ -16,25 +16,31 @@ import {
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 
-const factory: ActivityCompositionFactory = {
-  async create() {
-    const scope = await createDataplaneScope();
-    await migrate(scope.pool, DEPLOY_SQL);
-    const clock = createMutableClock();
-    return {
-      store: new PostgresActivityStore(scope.pool, clock),
-      advanceTime: (ms) => clock.advance(ms),
-      dispose: () => scope.dispose(),
-    };
-  },
-};
-
 if (SKIP_DATAPLANE) {
   describe.skip(`activity store conformance [postgres] — ${SKIP_REASON}`, () => {
     it('needs a dataplane substrate', () => undefined);
   });
 } else {
-  runActivityConformance('postgres', factory);
+  describe('Postgres activity composition', () => {
+    let scope: Awaited<ReturnType<typeof createDataplaneScope>>;
+    beforeAll(async () => {
+      scope = await createDataplaneScope();
+      await migrate(scope.pool, DEPLOY_SQL);
+    });
+    afterAll(async () => { await scope?.dispose(); });
+    const factory: ActivityCompositionFactory = {
+      async create() {
+        // Conformance cases are serial; reset both payloads and dedup fences.
+        await scope.pool.query('TRUNCATE activity_log_entry, activity_log_head');
+        const clock = createMutableClock();
+        return {
+          store: new PostgresActivityStore(scope.pool, clock),
+          advanceTime: (ms) => clock.advance(ms),
+        };
+      },
+    };
+    runActivityConformance('postgres', factory);
+  });
 }
 
 describe.skipIf(SKIP_DATAPLANE)('one-shot activity log migration', () => {
