@@ -88,7 +88,10 @@ not enforce any of them at the mechanism level today.
       same Linux network namespace, through a consistent canonical path; the
       pathless Pi rebinding barrier is shared per UID and network namespace.
       Processes in different network namespaces do not exclude each other, so
-      give each namespace its own store (`docs/host-local-storage-layout.md`).
+      each namespace must use disjoint stores and disjoint protected targets:
+      no Agent home root, skill-pack store or Pi session directory shared
+      across namespaces, even between separate stores
+      (`docs/host-local-storage-layout.md`).
 - [ ] **Are the secrets in the daemon's environment safe to forward?**
       Every variable except `CLAUDECODE` and `BYOK_*` is forwarded, proxy
       credentials and provider keys included.

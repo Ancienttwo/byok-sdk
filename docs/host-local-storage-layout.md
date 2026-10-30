@@ -151,7 +151,9 @@ through a consistent canonical path. That holds for every gated target (the
 store, the Agent home root, the skill-pack store and the Pi session directory)
 and for the pathless Pi rebinding barrier, which exists once per UID and network
 namespace rather than per directory. Processes in different network namespaces
-do not exclude each other: give each namespace its own store.
+do not exclude each other: each namespace must use disjoint stores and disjoint
+protected targets, so no Agent home root, skill-pack store or Pi session
+directory is shared across namespaces, even between separate stores.
 A short discovery gate covers native session opening and replacement; different
 sessions run concurrently. Cleanup must acquire discovery, admission and writer
 gates, then recheck last-write time. Native `newSession.setup` receives a mutable
@@ -230,17 +232,20 @@ this; the long-held Pi session writer gate is the main exposure. A reboot clears
 #### Upgrading from 0.31 or earlier
 
 On macOS and Linux the gates of 0.31 and earlier (a unix socket file under
-`/tmp/byok-pm-<uid>`) and the new OS locks do not exclude each other. Stop every
-SDK process on a store (the daemon, the CLI, and an App that embeds the SDK)
-before you upgrade any of them, and start them again only on the new release.
-Windows is unaffected.
+`/tmp/byok-pm-<uid>`) and the new OS locks do not exclude each other. Before you
+upgrade any participant, stop every SDK process that shares a protected target
+with it or takes part in the same pathless Pi rebinding barrier: the daemon, the
+CLI, an App that embeds the SDK, the adapters, the actual Pi writer, the sweeper
+and relocation, for every store involved, including other stores that share a
+Pi session directory, an Agent home root or a skill-pack store. Start them again
+only once all of them run the new release. Upgrading one store while another
+participant still runs 0.31 or earlier is not supported. Windows is unaffected.
 
-The new gates exclude each other only between processes (the daemon, the
-adapters, the actual Pi writer, the sweeper and relocation) that run as the same
+The new gates exclude each other only between processes that run as the same
 UID, in the same Linux network namespace, and reach each protected target
 through a consistent canonical path; the pathless Pi rebinding barrier is shared
 per UID and network namespace. A Host that runs processes in different network
-namespaces gives each namespace its own store.
+namespaces gives each namespace disjoint stores and disjoint protected targets.
 
 Relocation acquisition canonicalizes intended paths without creating them and
 must leave an absent destination absent. Active, unknown or corrupt owner/lease
