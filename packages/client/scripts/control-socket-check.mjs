@@ -96,6 +96,23 @@ async function runCli(args, timeoutMs = 15000) {
   return execFileAsync(process.execPath, [byokAgentBin, ...args], { timeout: timeoutMs });
 }
 
+// The service manager's stdout/stderr redirect and wrapper logs (WinSW
+// `<id>.out.log`/`<id>.err.log`/`<id>.wrapper.log`) hold the daemon's own
+// error output; `workDir` is removed below, so a failed run prints them first.
+async function printServiceLogs() {
+  let names;
+  try {
+    names = (await fs.readdir(logDir)).filter((entry) => entry.endsWith('.log')).sort();
+  } catch (err) {
+    console.error(`(no service logs: ${err instanceof Error ? err.message : err})`);
+    return;
+  }
+  for (const entry of names) {
+    console.error(`----- ${path.join(logDir, entry)} -----`);
+    console.error((await fs.readFile(path.join(logDir, entry), 'utf8')).trimEnd());
+  }
+}
+
 try {
   const port = await new Promise((resolve) => {
     httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => resolve(info.port));
@@ -181,6 +198,23 @@ try {
   }
   console.log('PASS: control socket answered a live status request from a SERVICE-launched daemon');
 
+  // `enrollment.pair` starts normal daemon startup after it answers. Unpair
+  // only once that startup has settled: a startup failure tears the control
+  // endpoint down, and it must fail here with its own status and logs rather
+  // than surface later as an unpair refusal.
+  console.log('==> waiting for the daemon to leave awaiting-enrollment');
+  let phase = 'awaiting-enrollment';
+  for (let attempt = 0; attempt < 15 && phase === 'awaiting-enrollment'; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1000));
+    ({ stdout: statusStdout } = await runCli(['status', '--config', configPath]));
+    phase = /^live: pid=\d+.* phase=(\S+)/m.exec(statusStdout)?.[1] ?? 'no live control endpoint';
+  }
+  if (phase !== 'running') {
+    throw new Error(`expected the service daemon to reach phase=running after enrollment, got ${phase}:\n${statusStdout.trim()}`);
+  }
+  console.log(statusStdout.trim());
+  console.log('PASS: service daemon reached phase=running after enrollment');
+
   console.log('==> byok-agent unpair --yes (clears the per-run OS credential authority)');
   await runCli(['unpair', '--yes', '--config', configPath]);
   console.log('PASS: service stopped and per-run device credential cleared');
@@ -190,6 +224,7 @@ try {
 } finally {
   if (lifecycle) {
     await lifecycle.stop().catch(() => {});
+    if (failed) await printServiceLogs();
     await lifecycle.uninstall().catch(() => {});
   }
   if (httpServer) {
