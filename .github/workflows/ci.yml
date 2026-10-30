@@ -203,6 +203,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # scripts/ci/script-test-inputs.test.mjs compares the current selector
+          # against a historical blob (git show <sha>:scripts/ci/select-impact.mjs),
+          # so this job cannot run on a shallow clone.
+          fetch-depth: 0
 
       - name: Setup fixed Node
         if: matrix.node == 'baseline'
