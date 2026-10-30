@@ -8,7 +8,7 @@ import { requireCiSuccess } from './require-ci-success.mjs';
 const families = ['build-test', 'macos-client', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
-  'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit', 'hermes-real-windows', 'runtime-contract'];
+  'release-pack-migrate', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit', 'hermes-real-windows', 'runtime-contract'];
 const successful = () => Object.fromEntries(families.map(id => [id, { result: 'success' }]));
 
 test('aggregate accepts exactly the complete successful matrix', () => {
@@ -72,7 +72,8 @@ test('workflow separates targeted, nightly and approved release validation', () 
   assert.match(aggregate, /^        run: node scripts\/ci\/require-ci-plan.mjs$/m);
   assert.match(workflow, /if: matrix.os == 'ubuntu-latest' && needs.select.outputs.release == 'true'\n        uses: actions\/upload-artifact/);
   const release = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
-  assert.match(release, /--event workflow_dispatch/);
-  assert.doesNotMatch(release, /--event push/);
-  assert.match(release, /--branch main --commit "\$GITHUB_SHA"/);
+  assert.match(release, /--ci-run-id "\$CI_RUN_ID" --ci-artifact-id "\$CI_ARTIFACT_ID" --ci-artifact-digest "\$CI_ARTIFACT_DIGEST"/);
+  const verifier = readFileSync(new URL('./release-artifact.mjs', import.meta.url), 'utf8');
+  assert.match(verifier, /run.event !== 'workflow_dispatch'/);
+  assert.match(verifier, /run.head_sha !== request.sourceSha/);
 });

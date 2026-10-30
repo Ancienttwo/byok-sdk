@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -48,7 +48,10 @@ export function vendorInventory(root) {
       }
     }
   };
-  walk(join(root, 'packages'));
+  for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })) {
+    const vendorRoot = join(root, 'packages', entry.name, 'vendor');
+    if (entry.isDirectory() && existsSync(vendorRoot)) walk(vendorRoot);
+  }
   if (!inventory.length) throw new Error('No canonical vendor manifests found');
   const packages = inventory.flatMap(item => item.commit !== null
     ? [{ package: { name: item.repository, commit: item.commit } }]
@@ -86,6 +89,8 @@ export function audit({ root, output, scannerPath, execute = spawnSync }) {
   const report = { scanner, status: 'SCAN ERROR', inventory: [], coverageGaps: [], scans: [], findings: [], errors: [] };
   try {
     const vendors = vendorInventory(root);
+    report.inputs = { lockfileSha256: createHash('sha256').update(readFileSync(join(root, 'bun.lock'))).digest('hex'),
+      vendorInventorySha256: createHash('sha256').update(JSON.stringify(vendors.inventory)).digest('hex') };
     report.inventory = vendors.inventory;
     report.coverageGaps = vendors.gaps;
     json(join(output, 'vendor-osv-scanner.json'), vendors.input);

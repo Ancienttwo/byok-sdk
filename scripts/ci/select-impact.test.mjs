@@ -145,6 +145,7 @@ test('a platform family is selected only by a path it owns', () => {
     'packageability-smoke': 'packages/client/src/sdk-native-assets.ts',
     'packaging-consistency': 'packages/client/src/adapters/packaging.ts',
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
+    'linux-systemd-smoke': 'templates/service/systemd/smoke-test.mjs',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
     'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
@@ -163,7 +164,7 @@ test('a platform family is selected only by a path it owns', () => {
 });
 
 test('shared Windows filesystem helpers select their real Windows consumers', () => {
-  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'windows-client', 'windows-service-smoke']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'linux-systemd-smoke', 'windows-client', 'windows-service-smoke']);
   assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-client']);
 });
 
@@ -383,7 +384,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 18);
+  assert.equal(knownFamilies.length, 19);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {

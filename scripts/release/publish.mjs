@@ -598,10 +598,7 @@ async function main() {
   } = parseArguments(process.argv.slice(2));
   if (otp && !execute) throw new Error('--otp is only meaningful with --execute');
   const log = (message) => console.log(`[release-publish] ${message}`);
-  const headSha = capture('git', ['rev-parse', 'HEAD']);
-  const ciRequest = ciRunId === undefined ? undefined : {
-    sourceSha: headSha, runId: Number(ciRunId), artifactId: Number(ciArtifactId), artifactDigest: ciArtifactDigest,
-  };
+
 
   // --- Step 1: version consistency + registry candidacy -------------------
   const manifests = readPublicManifests(packagesDir);
@@ -623,6 +620,10 @@ async function main() {
       );
     }
   }
+  const headSha = capture('git', ['rev-parse', 'HEAD']);
+  const ciRequest = ciRunId === undefined ? undefined : {
+    sourceSha: headSha, runId: Number(ciRunId), artifactId: Number(ciArtifactId), artifactDigest: ciArtifactDigest,
+  };
   log(`step 1/8: release train version ${trainVersion} across ${trainEntries.length} public package(s)`);
 
   // The tag is the release's completion marker: it exists only once the registry

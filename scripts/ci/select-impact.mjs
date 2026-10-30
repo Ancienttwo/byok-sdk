@@ -180,7 +180,7 @@ export const knownFamilies = Object.freeze([
   'build-test', 'macos-client', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
-  'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
+  'release-pack-migrate', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
   'hermes-real-windows', 'runtime-contract',
 ]);
 // A routine PR selects a platform family only when it changes a path that the
@@ -263,6 +263,10 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/(?:adapters\/packaging|sdk-native-assets|sdk-reserved-helper-host|sdk-distribution-bins)\b/,
     /^packages\/client\/src\/adapters\/pi\/(?:runtime-assets|todo-locale-assets|client-manifest)\.ts$/,
     /^packages\/keys\/src\/pi-provider-launcher-core\.ts$/,
+  ],
+  'linux-systemd-smoke': [
+    /^templates\/service\/systemd\//,
+    /^packages\/client\/src\/(?:lifecycle\/|util\/(?:secure-dir|path-mutation-gate)\.ts$)/,
   ],
   'windows-service-smoke': [
     /^templates\/service\/winsw\//,
@@ -391,7 +395,7 @@ const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md',
 // #605 W5: w5-runner-probe.yml is workflow_dispatch only and reads no repo
 // file, so like release.yml it selects only the CI script checks.
 // #1103: runtime-contract-nightly.yml runs on a schedule against the latest CLIs; it never gates a PR.
-const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml', '.github/workflows/w5-runner-probe.yml',
+const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml', '.github/workflows/w5-runner-probe.yml', '.github/workflows/security-advisories.yml',
   '.github/workflows/runtime-contract-nightly.yml']);
 const sorted = values => [...values].sort();
 // An unmapped path is a selector gap. Fix it with a reviewed mapping; a
@@ -406,6 +410,7 @@ export function selectImpact(paths, context = {}) {
   const files = new Set();
   const dirs = new Set();
   const leafDirs = new Set();
+  const dependencyDirs = new Set();
   const families = new Set();
   let scripts = false;
   for (const path of paths) {
@@ -435,35 +440,35 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path)) {
       // A reviewed dependency move also runs the suites of the workspaces that declare it.
-      for (const dir of verifyReviewedContent(path, context)) dirs.add(dir);
-      if (path === 'package.json') { scripts = true; continue; }
+      for (const dir of verifyReviewedContent(path, context)) { dirs.add(dir); dependencyDirs.add(dir); }
+      if (path === 'package.json') { scripts = true; if (dependencyDirs.size) families.add('npm-release-pack'); continue; }
       if (path === 'bun.lock') { families.add('npm-release-pack'); continue; }
       const dir = path.slice(0, -'/package.json'.length);
       if (!workspaceGraph[dir]) requireMapping(path);
       families.add('npm-release-pack'); continue;
     }
     if (path === 'examples/bot-collaboration/package.json') {
-      verifyReviewedContent(path, context);
+      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
       dirs.add('examples/bot-collaboration'); continue;
     }
     // #1104: the private packaging example manifest, checked by its reviewed shape.
     if (path === 'examples/packaging/package.json') {
-      verifyReviewedContent(path, context);
+      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
       dirs.add('examples/packaging'); continue;
     }
     // #884: the private K4 manifest, checked by its reviewed shape. Its suite and the suites of its dependents run.
     if (path === 'examples/host-execution-core/package.json') {
-      verifyReviewedContent(path, context);
+      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
       dirs.add('examples/host-execution-core'); continue;
     }
     // #793 D2: the private hosted example manifest, checked by its reviewed shape.
     if (path === 'examples/hosted-bot-collaboration/package.json') {
-      verifyReviewedContent(path, context);
+      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
       dirs.add('examples/hosted-bot-collaboration'); continue;
     }
     // #794 D3: the private Worker composition of H, checked by the same reviewed shape.
     if (path === 'examples/hosted-bot-collaboration-worker/package.json') {
-      verifyReviewedContent(path, context);
+      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
       dirs.add('examples/hosted-bot-collaboration-worker'); continue;
     }
     // These root-level fixtures are executed by the relocated native SEA smoke.
@@ -643,6 +648,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (path === 'scripts/vitest/tmp-root.test.mjs') { scripts = true; continue; }
+    if (path === 'scripts/ci/security-advisories-fixtures/vulnerable-bun.lock') { scripts = true; continue; }
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
     if (golden) {
@@ -657,6 +663,7 @@ export function selectImpact(paths, context = {}) {
       dirs.add('packages/client');
       families.add('packageability-smoke'); families.add('npm-release-pack');
       if (template[3] === 'winsw') families.add('windows-service-smoke');
+      if (template[3] === 'systemd') families.add('linux-systemd-smoke');
       continue;
     }
     const match = /^(packages|examples)\/([^/]+)\/(.+)$/.exec(path);
@@ -697,6 +704,11 @@ export function selectImpact(paths, context = {}) {
         dirs.add(dir); changed = true;
       }
     }
+  }
+  // A dependency change reaching the client can change native/adapter behavior
+  // without touching any owned source path. Qualify its routine platform legs.
+  if (dependencyDirs.size && dirs.has('packages/client')) {
+    for (const family of knownFamilies) if (family !== 'build-test' && family !== 'macos-client') families.add(family);
   }
   for (const dir of leafDirs) dirs.add(dir);
   // #793 O5: the hosted example also runs in the dataplane job, the only job with a real Postgres.

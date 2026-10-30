@@ -41,6 +41,13 @@ test('exact inventory projects source and third-party authorities without guesse
   assert.equal(inventory.gaps.length, 0);
 });
 
+test('build outputs are not a second vendor inventory authority', t => {
+  const options = fixture(t);
+  mkdirSync(join(options.root, 'packages/client/dist/assets'), { recursive: true });
+  writeFileSync(join(options.root, 'packages/client/dist/assets/source-manifest.json'), '{');
+  assert.equal(vendorInventory(options.root).inventory.length, 1);
+});
+
 test('commit-only OAR provenance remains a coverage gap after a zero-advisory query', t => {
   const options = fixture(t, { format: 'byok.vendor-source', version: 1, package: '@botiverse/oar', packageVersion: '0.75.0', commit: 'a'.repeat(40), repository: 'https://github.com/botiverse/oar' });
   const report = audit({ ...options, execute: () => result() });
