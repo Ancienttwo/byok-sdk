@@ -148,6 +148,7 @@ export const INBOUND_REFUSAL_REASONS = [
   'claim_harness_unavailable',
   'claim_offer_mismatch',
   'claim_not_won',
+  'task_settled_by_cloud',
   // task.fail recovery
   'recovery_report_invalid',
   'recovery_offer_mismatch',
@@ -675,6 +676,15 @@ async function applyInboundGate(
   // immutable attempt binding.
   if (attempt === undefined || attempt.deviceId !== deviceId) return refuse('task_not_found_for_device');
   if (attempt?.ownerDeviceId !== undefined && attempt.ownerDeviceId !== deviceId) return refuse('task_owned_by_other_device');
+  // #1119: the cloud settled this attempt without its device (`abandonTask`
+  // while the device stays registered): terminal, yet with neither a device
+  // terminal receipt nor a Host cancellation. That device still reads the
+  // task's rows, so any later report about it is refused, never recorded: the
+  // attempt row is the result. A refusal settles the envelope and ends nothing.
+  if (
+    TERMINAL_TASK_STATUSES.includes(attempt.status) && attempt.cancellation === undefined
+    && await stores.receipts.get(terminalReceiptKey(taskId)) === undefined
+  ) return refuse('task_settled_by_cloud');
   if (envelope.type === 'task.claim' && envelope.payload.deviceId !== deviceId) return refuse('claim_device_mismatch');
   if (envelope.type === 'task.claim') {
     const harnessId = envelope.payload.harnessId;

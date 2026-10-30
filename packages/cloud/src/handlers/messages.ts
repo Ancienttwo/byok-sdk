@@ -86,6 +86,7 @@ const WIRE_REFUSAL_REASONS = {
   content_receipt_conflict: 'state_conflict',
   claim_not_won: 'state_conflict',
   terminal_receipt_not_canonical: 'state_conflict',
+  task_settled_by_cloud: 'state_conflict',
   protocol_version_unsupported: 'unsupported',
   type_not_allowed: 'unsupported',
   sealed_payload_unsupported: 'unsupported',

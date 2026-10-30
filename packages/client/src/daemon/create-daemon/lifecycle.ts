@@ -4,6 +4,7 @@ import { InsecureServerUrlError } from '../url';
 import { DeviceRecordRePairRequiredError } from '../store';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors';
 import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager';
+import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS } from './support';
 import type { DaemonScope } from './scope';
 
 /** The daemon lifecycle: the serialized mutation slot, lifecycle phases, start and stop (#926). */
@@ -68,6 +69,7 @@ export function setLifecycle(daemonScope: DaemonScope, next: DaemonLifecycle): v
 export function halted(daemonScope: DaemonScope, reason: DaemonHaltReason): void {
   const { setLifecycle } = daemonScope;
   setLifecycle({ phase: 'halted', reason, at: new Date().toISOString() });
+  endActiveTasks(daemonScope, `halted: ${reason}`);
 }
 
 /**
@@ -78,9 +80,33 @@ export function halted(daemonScope: DaemonScope, reason: DaemonHaltReason): void
 export function crashed(daemonScope: DaemonScope): void {
   const { setLifecycle, operationalHealth } = daemonScope;
   setLifecycle({ phase: 'crashed', at: new Date().toISOString() });
+  endActiveTasks(daemonScope, 'crashed');
   void operationalHealth.recordFailure('lifecycle').catch((err: unknown) => {
     console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
   });
+}
+
+/**
+ * #1119: a run that ended (halted or crashed) takes no more offers and ends
+ * its active tasks now, whether or not its owner ever calls `stop()`, so an
+ * embedded Host and `byok-agent` behave the same. Each `task.fail` is
+ * journaled (the connection has ended) and reported by the next `start()`.
+ * Each soft interrupt is capped at the shutdown grace, so every task reaches
+ * close and its fail is journaled within it even when a runtime never answers.
+ * The pass is a late mutation barrier: `stop()` waits for it, bounded by the
+ * shutdown grace, before its own pass and before releasing ownership.
+ */
+function endActiveTasks(daemonScope: DaemonScope, reason: string): void {
+  const { daemonState, pendingLateMutationBarriers, config } = daemonScope;
+  const runner = daemonState.runner;
+  if (runner === undefined) return;
+  runner.stopAcceptingOffers();
+  const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
+  const teardown = runner.shutdownActiveTasks(reason, graceMs).catch((err: unknown) => {
+    console.warn(`[byok/client] ending active tasks after the run ${reason} failed: ${err instanceof Error ? err.message : String(err)}`);
+  });
+  pendingLateMutationBarriers.add(teardown);
+  void teardown.finally(() => pendingLateMutationBarriers.delete(teardown));
 }
 
 export async function start(daemonScope: DaemonScope): Promise<void> {

@@ -40,7 +40,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
     'claim',
     'recordStatus',
   ],
-  cancellations: ['request'],
+  cancellations: ['request', 'abandon'],
   receipts: ['record', 'get', 'collectExpired'],
   egress: ['record', 'get'],
   proofReceipts: ['record', 'get'],

@@ -204,7 +204,9 @@ and names the record. Verify the processes are gone before deleting that exact
 record; never clear the directory wholesale. See the
 [storage contract](host-local-storage-layout.md#canonical-layout) for lease
 reclamation ordering. A halted lifecycle requires its stated remedy; a crash
-may be transient and is distinct from a halt.
+may be transient and is distinct from a halt. Either way the run has already
+ended its active tasks and takes no new ones, whether or not the Host has
+called `stop()` yet; their failures are reported by the next `start()`.
 
 **Keychain locked.** Every OS credential command has a deadline (15 s; 60 s for
 the Windows bridge compile). A keychain that is locked, or waiting on an unlock

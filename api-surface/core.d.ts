@@ -1246,7 +1246,7 @@ export { InMemoryStorageLedger } from './storage-ledger';
 export type { InMemoryObjectBytes } from './blob';
 // ==== @byok-sdk/core dist/in-memory/mailbox.d.ts ====
 import { type CollectExpiredResult } from '../retention';
-import type { MailboxAdvanceCursorInput, MailboxAppendInput, MailboxCursorState, MailboxMessage, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCollectExpiredInput, MailboxStore, MailboxUsage } from '../mailbox';
+import type { MailboxAdvanceCursorInput, MailboxAppendInput, MailboxCursorState, MailboxMessage, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCollectExpiredInput, MailboxExpirePendingInput, MailboxStore, MailboxUsage } from '../mailbox';
 import type { QuotaStore } from '../quota';
 import type { Clock } from '../stores';
 import { type TenantId } from '../tenant';
@@ -1261,6 +1261,9 @@ export declare class InMemoryMailboxStore implements MailboxStore {
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
     collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult>;
+    expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{
+        readonly expired: number;
+    }>;
 }
 // ==== @byok-sdk/core dist/in-memory/presence.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '../retention';
@@ -1388,7 +1391,7 @@ export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCore
 export type { CoreErrorCode } from './errors';
 export { CANONICAL_TIMESTAMP_PATTERN, assertCanonicalTimestamp, isCanonicalTimestamp, } from './time';
 export { MAILBOX_MESSAGE_STATES } from './mailbox';
-export type { MailboxAdmission, MailboxAdvanceCursorInput, MailboxAppendInput, MailboxBody, MailboxCursorState, MailboxMessage, MailboxMessageState, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCollectExpiredInput, MailboxStore, MailboxUsage, } from './mailbox';
+export type { MailboxAdmission, MailboxAdvanceCursorInput, MailboxAppendInput, MailboxBody, MailboxCursorState, MailboxMessage, MailboxMessageState, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCollectExpiredInput, MailboxExpirePendingInput, MailboxStore, MailboxUsage, } from './mailbox';
 export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board';
 export type { BoardAssignee, BoardClaimInput, BoardItem, BoardItemInput, BoardListQuery, BoardPage, BoardStatus, BoardStatusUpdateInput, BoardStore, BoardUnclaimInput, } from './board';
 export { TRUTH_RECORD_KINDS } from './truth';
@@ -1598,6 +1601,15 @@ export interface MailboxCollectExpiredInput extends CollectExpiredInput {
     readonly reapDeadLettersBefore: string;
 }
 /**
+ * Which of one device's `pending` rows {@link MailboxStore.expirePending}
+ * dead-letters: every one, or exactly the listed sequences. A listed seq that
+ * is not `pending` (acked, already expired, or never written) is skipped.
+ */
+export interface MailboxExpirePendingInput {
+    readonly deviceId: string;
+    readonly seqs: 'all' | readonly number[];
+}
+/**
  * Mailbox port. Tenant-first, async.
  *
  * Raises: `mailbox_cursor_regression` (an ack that moves the cursor backwards,
@@ -1621,6 +1633,19 @@ export interface MailboxStore {
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
     /** Retention hook: delete acked rows, reap old dead letters below the floor, dead-letter unacked ones. */
     collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult>;
+    /**
+     * Dead-letters undelivered rows nobody will ever ack — the rows of a retired
+     * device, or of a task the Host abandoned — without waiting for retention.
+     * Only `pending` rows move, and only to `expired`: nothing is deleted, no row
+     * returns to `pending`, the cursor is untouched, and the device's `seq`
+     * allocator keeps counting. The moved rows stop holding mailbox quota and
+     * raise `recoverableFrom` exactly as a retention sweep would. Serialized with
+     * the device's appends and acks, so a row appended before this call is
+     * either moved or already acked.
+     */
+    expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{
+        readonly expired: number;
+    }>;
 }
 // ==== @byok-sdk/core dist/pairing.d.ts ====
 /**

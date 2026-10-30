@@ -21,6 +21,7 @@ import {
   type MailboxRecordDeliveryInput,
   type MailboxAdvanceCursorInput,
   type MailboxCollectExpiredInput,
+  type MailboxExpirePendingInput,
   type CollectExpiredResult,
   type MailboxStore,
   type MailboxUsage,
@@ -58,6 +59,7 @@ import {
   type TaskAttemptPage,
   type TaskAttemptStatus,
   type TaskAttemptStore,
+  type TaskAbandonRequest,
   type TaskCancellationMutation,
   type TaskCancellationRequest,
   type TaskCancellationStore,
@@ -88,6 +90,7 @@ import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
 import { SqliteTaskArchiveStore } from './task-archive';
 import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
+import { abandonTask, expirePendingMailbox } from './task-retirement';
 import {
   PROOF_REQUEST_RECEIPT_PROJECTION,
   PROOF_REQUEST_RECEIPT_SCHEMA,
@@ -989,6 +992,11 @@ export class SqliteMailboxStore implements MailboxStore {
     });
   }
 
+  expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{ readonly expired: number }> {
+    return this.coordinator.transaction((db) => ({
+      expired: expirePendingMailbox(db, tenant, input.deviceId, input.seqs),
+    }));
+  }
 }
 
 export class SqliteTaskCancellationStore implements TaskCancellationStore {
@@ -1034,6 +1042,15 @@ export class SqliteTaskCancellationStore implements TaskCancellationStore {
          WHERE tenant_id = ? AND task_id = ?`,
       ).run(requestedAt, requestedAt, requestedAt, input.reason ?? null, input.proposedMessageId, requestedAt, tenant, input.taskId);
       return { attempt: readTask(db, tenant, input.taskId)!, message };
+    });
+  }
+
+  abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined> {
+    return this.coordinator.transaction((db) => {
+      const existing = readTask(db, tenant, input.taskId);
+      if (existing === undefined || ['complete', 'failed', 'cancelled'].includes(existing.status)) return existing;
+      abandonTask(db, tenant, existing, input.cause, this.clock.now().toISOString());
+      return readTask(db, tenant, input.taskId)!;
     });
   }
 }
@@ -1465,7 +1482,7 @@ export function createSqliteEmbeddedStores(
     createInMemoryBlobBytes(dependencies.clock, dependencies.crypto),
     (rows) => new SqliteTaskArchiveStore(coordinator, dependencies.clock, rows),
   );
-  const devices = new SqliteDeviceDirectory(coordinator);
+  const devices = new SqliteDeviceDirectory(coordinator, dependencies.clock);
   const pairing = new InMemoryPairingCodeStore(dependencies.clock, devices);
   const cloud: CloudStores = {
     ...inMemoryCloud.stores,

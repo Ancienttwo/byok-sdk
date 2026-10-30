@@ -23,6 +23,7 @@ import type {
   MailboxReadQuery,
   MailboxRecordDeliveryInput,
   MailboxCollectExpiredInput,
+  MailboxExpirePendingInput,
   MailboxStore,
   MailboxUsage,
 } from '../mailbox';
@@ -259,6 +260,25 @@ export class InMemoryMailboxStore implements MailboxStore {
     }
     // Mailbox usage is the pending rows, never a mutable accounting counter, so no phase moves it.
     return { removed, expired, releasedBytes: 0n, more };
+  }
+
+  async expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{ readonly expired: number }> {
+    const device = this.#devices.get(tenantKey(tenant, input.deviceId));
+    if (device === undefined) return { expired: 0 };
+    const selected = input.seqs === 'all' ? undefined : new Set(input.seqs);
+    const retired = device.mutationTail.then(() => {
+      let expired = 0;
+      for (const [index, message] of device.messages.entries()) {
+        if (message.state !== 'pending' || (selected !== undefined && !selected.has(message.seq))) continue;
+        const dead: MailboxMessage = { ...message, state: 'expired' };
+        device.messages[index] = dead;
+        device.byMessageId.set(dead.messageId, dead);
+        expired++;
+      }
+      return { expired };
+    });
+    device.mutationTail = retired.then(() => undefined, () => undefined);
+    return retired;
   }
 
   async #mailboxLimit(tenant: TenantId): Promise<bigint> {

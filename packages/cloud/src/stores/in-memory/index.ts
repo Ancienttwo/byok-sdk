@@ -94,7 +94,7 @@ export function createInMemoryCloudStores(
   const blobs = createInMemoryBlobs(objects, objectBytes);
   const taskState = new InMemoryTaskAttemptState(clock);
   const tasks = new InMemoryTaskAttemptStore(clock, taskState);
-  const devices = new InMemoryDeviceDirectory();
+  const devices = new InMemoryDeviceDirectory(taskState, mailbox);
   const pairing = new InMemoryPairingCodeStore(clock, devices);
   const activity = new InMemoryActivityStore(clock);
   const approvals = new InMemoryApprovalTimelineStore(clock);
@@ -114,7 +114,7 @@ export function createInMemoryCloudStores(
       nonces: new InMemoryNonceStore(clock, crypto),
       dedup: new InMemoryInboundDedupStore(),
       tasks,
-      cancellations: new InMemoryTaskCancellationStore(taskState, mailbox),
+      cancellations: new InMemoryTaskCancellationStore(taskState, mailbox, devices),
       receipts,
       egress: new InMemoryAgentEgressStore(clock),
       proofReceipts,

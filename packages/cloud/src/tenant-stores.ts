@@ -68,6 +68,7 @@ import type {
   RateLimitDecision,
   RateLimitUnit,
   RequestReceipt,
+  TaskAbandonRequest,
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskAttempt,
@@ -174,6 +175,7 @@ export interface TenantBoundTaskAttempts {
 
 export interface TenantBoundTaskCancellations {
   request(input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
+  abandon(input: TaskAbandonRequest): Promise<TaskAttempt | undefined>;
 }
 
 export interface TenantBoundDedup {
@@ -335,6 +337,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
         if (mutation?.message !== undefined) mailboxWake.appended(tenant, mutation.message.deviceId);
         return mutation;
       },
+      abandon: (input) => cloud.cancellations.abandon(tenant, input),
     },
     dedup: {
       checkAndRecord: (deviceId, envelopeId) => cloud.dedup.checkAndRecord(tenant, deviceId, envelopeId),

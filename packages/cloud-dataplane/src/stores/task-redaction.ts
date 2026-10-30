@@ -401,7 +401,7 @@ async function readAdmissions(
  * the text filter narrows the scan and the parse confirms each match. A
  * tombstone has no `task_id`, so a redacted row is not read again.
  */
-async function readOutbox(
+export async function readOutbox(
   db: Querier,
   tenant: TenantId,
   taskId: string,

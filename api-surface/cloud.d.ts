@@ -1440,7 +1440,7 @@ import { type ByokCloudObserver } from './inbound';
 import { type AgentHomeProjectionReceiptInput } from './agent-home-projections';
 import { type InputPreparationReceiptInput } from './input-preparations';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection';
-import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports';
+import type { BlobContentProxy, CloudStores, DeviceRecord, AgentEgressRecord, PairingCodeInfo, RequestReceipt, TaskAbandonCause, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage } from './stores/ports';
 import { type DeviceTerminal, type TerminalResult } from './terminal-result';
 import type { MailboxWake } from './mailbox-wake';
 import { type TaskRedactionResult, type TaskRedactionStore } from './task-redaction';
@@ -1941,6 +1941,21 @@ export interface ByokCloud {
     /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
     cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
     /**
+     * Host control plane: settle a task no device will finish. In one store
+     * transaction an unfinished attempt becomes `cancelled` with
+     * `terminalCause = cause`. Its undelivered mailbox rows on a device that is
+     * no longer registered are dead-lettered, so they stop holding mailbox
+     * quota; a registered device keeps them pending (its replay floor never
+     * passes a row it has not read), acks them as usual, and has its later
+     * reports for the task refused. Nothing is sent to a device, so this does
+     * not stop a runtime still working on the task: {@link ByokCloud.cancelTask}
+     * does. A terminal attempt is returned unchanged. `cause` must be one of
+     * `TASK_ABANDON_CAUSES` (`coordination_input_invalid` otherwise); an
+     * unknown task throws `task_not_found`. Device revocation and machine
+     * supersession apply the same transition by themselves.
+     */
+    abandonTask(tenant: TenantId, taskId: string, cause: TaskAbandonCause): Promise<TaskAttempt>;
+    /**
      * Host control plane: resolve the approval a paused task is waiting on, by
      * enqueueing `task.approve` to the device that claimed it.
      *
@@ -2055,7 +2070,10 @@ export interface ByokCloud {
      * receipt whose body is not a terminal envelope throws rather than
      * returning a best-effort shape. After {@link ByokCloud.redactTasks} the
      * receipt read throws `task_content_redacted`; a Host cancellation still
-     * returns `state: 'cancelled'`, with its reason cleared.
+     * returns `state: 'cancelled'`, with its reason cleared. With neither fact,
+     * an attempt cloud settled itself — {@link ByokCloud.abandonTask}, device
+     * revocation or machine supersession — returns `state: 'cancelled'` with
+     * that `terminalCause` and the attempt's `terminalAt` as `recordedAt`.
      */
     readTaskResult(tenant: TenantId, taskId: string): Promise<TerminalResult | undefined>;
     listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -3058,7 +3076,7 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected';
  * exhaustively to coarse wire codes; the internal names never reach the wire
  * and may be refined without a protocol revision.
  */
-export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'sealed_ciphertext_invalid', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid', 'terminal_receipt_not_canonical'];
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'sealed_ciphertext_invalid', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'task_settled_by_cloud', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid', 'terminal_receipt_not_canonical'];
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {
@@ -3216,9 +3234,9 @@ export { DEFAULT_MAX_TRUTH_REQUEST_BYTES, DEVICE_PROOF_HEADER, MAX_DEVICE_PROOF_
 export type { PreparedTruthWrite, TruthBodyInput, TruthCommitInput, TruthCommitResponse, TruthCommitResult, TruthCommitter, TruthObjectDownloads, TruthRecordMetadata, TruthWriteRequest, } from './truth/contract';
 export { TruthCommitError, isTruthCommitError } from './truth/errors';
 export type { TruthCommitErrorCode } from './truth/errors';
-export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, } from './stores/ports';
+export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ABANDON_CAUSES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, TASK_ATTEMPT_UNFINISHED_STATUSES, } from './stores/ports';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
-export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
+export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryE2eeMemberStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
@@ -3768,11 +3786,23 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * path already reads, but no record this store writes ever carries `true`:
  * revocation and machine supersession remove the record outright, so "revoked"
  * and "never registered" are one indistinguishable answer rather than two.
+ *
+ * A removed device is retired through the task state and the mailbox the
+ * composition hands in: its unfinished attempts are settled and its pending
+ * rows dead-lettered (see `DeviceDirectory` in `../ports`). Registration and
+ * revocation run one at a time, so a retirement never overlaps a later
+ * registration of the same device id. A retirement runs in the task state's
+ * exclusive section, so no cancellation or abandonment lands between its
+ * mailbox and attempt halves, and a failed mailbox expiry puts the
+ * registrations back before anything else moved: the in-memory stand-in for
+ * the SQL stores' one transaction (#1119).
  */
-import { type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
+import { type MailboxStore, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports';
+import type { InMemoryTaskAttemptState } from './task-attempts';
 export declare class InMemoryDeviceDirectory implements DeviceDirectory {
     #private;
+    constructor(tasks: InMemoryTaskAttemptState, mailbox: MailboxStore);
     register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     /**
@@ -4115,19 +4145,32 @@ export declare class InMemoryTaskAttemptState {
     readonly archiveSettled: Map<string, string>;
     constructor(clock: Clock);
     now(): string;
-    /** Serialize every state-changing operation for one tenant/task key. */
+    /**
+     * Serialize every state-changing operation for one tenant/task key. It also
+     * waits for an exclusive section queued before it (see {@link exclusive}).
+     */
     mutate<T>(key: string, operation: () => T | Promise<T>): Promise<T>;
+    /**
+     * Runs `operation` with no task mutation in flight: it starts once every
+     * mutation queued before it has settled, and every mutation queued after it
+     * waits for it to end. Device retirement runs here, so its attempt and
+     * mailbox halves are one step no cancellation or abandonment can split, the
+     * in-memory stand-in for the SQL stores' transaction (#1119). `operation`
+     * writes `attempts` directly; calling {@link mutate} from it deadlocks.
+     */
+    exclusive<T>(operation: () => Promise<T>): Promise<T>;
 }
 export {};
 // ==== @byok-sdk/cloud dist/stores/in-memory/task-cancellations.d.ts ====
 import { type MailboxStore, type TenantId } from '@byok-sdk/core';
-import type { TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore } from '../ports';
+import type { DeviceDirectory, TaskAbandonRequest, TaskAttempt, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore } from '../ports';
 import { InMemoryTaskAttemptState } from './task-attempts';
 /** Failure-free reference composition of the atomic cancellation port. */
 export declare class InMemoryTaskCancellationStore implements TaskCancellationStore {
     #private;
-    constructor(state: InMemoryTaskAttemptState, mailbox: MailboxStore);
+    constructor(state: InMemoryTaskAttemptState, mailbox: MailboxStore, devices: Pick<DeviceDirectory, 'get'>);
     request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
+    abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined>;
 }
 // ==== @byok-sdk/cloud dist/stores/ports-contract.d.ts ====
 /**
@@ -4239,34 +4282,55 @@ export interface DeviceRegistration {
      * Optional client-hashed physical machine identity from `PairRequest`. When
      * present, `register` DELETES this tenant/product's prior rows carrying the
      * same value — and the device-scoped state those rows were the only reason
-     * to keep — before inserting, so one physical machine holds one device row
-     * per product. It names no tenant and no product of
+     * to keep — and retires each one as {@link DeviceDirectory.revoke} does,
+     * under `device_superseded`, before inserting, so one physical machine holds
+     * one device row per product. It names no tenant and no product of
      * its own — both still come from the redeemed pairing code's claims — so it
      * can only ever supersede rows the caller already addressed.
      */
     readonly machineId?: string;
 }
+/**
+ * Device retirement — revocation, and the supersession of a machine's prior
+ * rows on re-pairing — is ONE transaction with the registration change, and
+ * every composition, a custom one included, must finalize the retired device
+ * in it:
+ *
+ * 1. Every unfinished attempt of that device ({@link
+ *    TASK_ATTEMPT_UNFINISHED_STATUSES}, matched on `deviceId` OR
+ *    `ownerDeviceId`) becomes `cancelled` with `terminalCause`
+ *    `device_revoked` or `device_superseded` and, when it has none,
+ *    `terminalAt`. A terminal attempt is never touched; a cancellation
+ *    tombstone stays as it was.
+ * 2. Every `pending` mailbox row addressed to that device becomes `expired`
+ *    (see `MailboxStore.expirePending`): the rows stop holding mailbox quota
+ *    and raise the device's `recoverableFrom`, and nothing is deleted.
+ *
+ * Neither the task history nor the mailbox rows go away: what the device did
+ * and what it was sent stay readable after its grant is gone.
+ */
 export interface DeviceDirectory {
-    /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row. */
+    /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. */
     register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
     /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     /**
      * Deletes the registration and the device-scoped state it owned (presence,
-     * challenge nonces, assertion-replay entries, inbound dedup) — never the
-     * history keyed by the device_id string. A no-op for a device this tenant
-     * cannot address. Afterwards every read answers exactly as it does for a
-     * device that was never registered.
+     * challenge nonces, assertion-replay entries, inbound dedup), and retires
+     * the device under `device_revoked` in the same transaction (see above). A
+     * no-op for a device this tenant cannot address. Afterwards every read
+     * answers exactly as it does for a device that was never registered.
      *
-     * How far the deletion physically reaches is driver-scoped. The durable
-     * (Postgres) driver deletes the registration and every dependent
-     * device-scoped row in the same transaction, so the state is gone the moment
-     * `revoke` resolves. The in-memory reference directory deletes only the
-     * registration: its sibling stores are separate maps it does not own, so a
-     * presence hint expires on its own `expiresAt` TTL and, until then, is
-     * excluded from every projection by the readiness active-device filter
-     * (`activeDeviceIds`, built from the surviving rows). The observable contract
-     * above holds either way — no read path can see a revoked device.
+     * How far the device-state deletion physically reaches is driver-scoped.
+     * The durable (Postgres) driver deletes the registration and every
+     * dependent device-scoped row in the same transaction, so the state is gone
+     * the moment `revoke` resolves. The in-memory reference directory deletes
+     * only the registration: presence, nonces and dedup are separate maps it
+     * does not own, so a presence hint expires on its own `expiresAt` TTL and,
+     * until then, is excluded from every projection by the readiness
+     * active-device filter (`activeDeviceIds`, built from the surviving rows).
+     * The observable contract above holds either way — no read path can see a
+     * revoked device. Retirement of tasks and mailbox rows is not driver-scoped.
      */
     revoke(tenant: TenantId, deviceId: string): Promise<void>;
     list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
@@ -4361,6 +4425,19 @@ export declare const TASK_ATTEMPT_STATUSES: readonly ['offered', 'claimed', 'run
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
 /** Attempts that can still be in flight, provided no host cancellation is recorded. */
 export declare const TASK_ATTEMPT_ACTIVE_STATUSES: readonly ["offered", "claimed", "running"];
+/** Every non-terminal status, `cancel_requested` included: the attempts device retirement and abandonment settle. */
+export declare const TASK_ATTEMPT_UNFINISHED_STATUSES: readonly ["offered", "claimed", "running", "cancel_requested"];
+/**
+ * The `terminalCause` cloud itself writes when it settles an attempt no device
+ * will ever finish: `device_revoked` and `device_superseded` from device
+ * retirement ({@link DeviceDirectory.revoke}, machine supersession in
+ * {@link DeviceDirectory.register}), and any of the three from
+ * `ByokCloud.abandonTask`. An attempt settled this way is `cancelled` and
+ * carries no device terminal receipt.
+ */
+export declare const TASK_ABANDON_CAUSES: readonly ['operator', 'device_revoked', 'device_superseded'];
+export type TaskAbandonCause = (typeof TASK_ABANDON_CAUSES)[number];
+export declare function isTaskAbandonCause(value: unknown): value is TaskAbandonCause;
 /** One store aggregate; host cancellation is counted separately because it outranks status. */
 export interface TaskAttemptCounts {
     /** Every status is present. Rows carrying a cancellation marker are excluded. */
@@ -4611,12 +4688,30 @@ export interface TaskCancellationMutation {
     /** Absent when the task was terminal before cancellation, or once the delivery row is gone. */
     readonly message?: MailboxMessage;
 }
+export interface TaskAbandonRequest {
+    readonly taskId: string;
+    readonly cause: TaskAbandonCause;
+}
 /**
- * One atomic authority for the cancellation tombstone plus its durable device
- * delivery. Implementations must commit both or neither.
+ * One atomic authority for Host-side task termination plus its mailbox
+ * effect. Implementations must commit both halves or neither.
  */
 export interface TaskCancellationStore {
+    /** The cancellation tombstone plus its durable device delivery. */
     request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
+    /**
+     * Settles an attempt no device will finish, in one transaction: an
+     * unfinished attempt becomes `cancelled` with `terminalCause = cause` (and
+     * `terminalAt` when it has none), and every `pending` mailbox row of the
+     * task — a row whose envelope's top-level `task_id` names it — on a target
+     * or owner device that is no longer registered becomes `expired`. A
+     * registered device keeps its rows pending, so its `recoverableFrom` never
+     * passes a row it has not read. The same transition device retirement
+     * applies ({@link DeviceDirectory}). A terminal attempt is
+     * returned unchanged and nothing is written; a cancellation tombstone stays
+     * as it was. `undefined` for a task this tenant never offered.
+     */
+    abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined>;
 }
 export interface RequestReceipt {
     readonly tenantId: TenantId;
@@ -5135,7 +5230,7 @@ import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protoco
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline';
-import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
+import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
 export interface TenantBoundMailbox {
     /** Subscribe before reading; hints never replace durable mailbox reads. */
     watch(deviceId: string, signal: AbortSignal): MailboxWakeSubscription;
@@ -5239,6 +5334,7 @@ export interface TenantBoundTaskAttempts {
 }
 export interface TenantBoundTaskCancellations {
     request(input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
+    abandon(input: TaskAbandonRequest): Promise<TaskAttempt | undefined>;
 }
 export interface TenantBoundDedup {
     /** Device-physical envelope ledger. */

@@ -57,7 +57,7 @@ import {
 import { TaskEventRelay } from './relay';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
-import { approvePendingApproval, createTaskHandle, readTaskEvents, rejectPendingApproval } from './task-handle';
+import { approvePendingApproval, createTaskHandle, noteAbandoned, readTaskEvents, rejectPendingApproval } from './task-handle';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -234,6 +234,8 @@ export interface ByokServer {
     messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
     /** Request cancellation through the kernel without a process-owned TaskHandle. */
     cancel(taskId: string, reason?: string): Promise<void>;
+    /** Settle a task no device will finish through the kernel (`ByokCloud.abandonTask`), without a process-owned TaskHandle. */
+    abandon(taskId: string, cause: import('@byok-sdk/cloud').TaskAbandonCause): Promise<void>;
     /**
      * Approve the task's pending approval without a process-owned TaskHandle,
      * such as a task `executions.submit` created. The same decision and
@@ -832,6 +834,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         if (attempt.cancellation !== undefined) {
           relay.noteHostTransition(taskId, 'Cancelled', attempt.cancellation.requestedAt);
         }
+      },
+      async abandon(taskId, cause) {
+        noteAbandoned(relay, await cloud.abandonTask(tenant, taskId, cause), cause);
       },
       approve(taskId, opts) { return approvePendingApproval({ tenant, cloud, relay }, taskId, opts); },
       reject(taskId, reason, opts) { return rejectPendingApproval({ tenant, cloud, relay }, taskId, reason, opts); },

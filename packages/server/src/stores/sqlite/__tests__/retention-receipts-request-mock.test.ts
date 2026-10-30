@@ -2,7 +2,7 @@ import { vi } from 'vitest';
 const { requestPrefix } = vi.hoisted(() => ({ requestPrefix: 'test-request:' }));
 vi.mock('@byok-sdk/cloud', async original => ({ ...await original<typeof import('@byok-sdk/cloud')>(), REQUEST_RECEIPT_PREFIXES: Object.freeze([requestPrefix]) }));
 import { createMutableClock } from '@byok-sdk/core';
-import { ackAndCollectMailbox, runCloudRetentionConformance, type CloudCompositionFactory } from '@byok-sdk/conformance';
+import { ackAndCollectMailbox, conformanceMailbox, runCloudRetentionConformance, type CloudCompositionFactory } from '@byok-sdk/conformance';
 
 import { describe } from 'vitest';
 import { createWebCrypto } from '@byok-sdk/cloud';
@@ -17,6 +17,8 @@ const factory: CloudCompositionFactory = {
       landBlobBytes: async ({ grant, bytes }) => { const result = await composition.blobContentProxy.writeContent(grant.blobId, bytes); if (!result.ok) throw new Error(result.reason); },
       commitBlob: async (tenant, reservation, observation) => { await composition.core.objects.commit(tenant, { hash: reservation.contentHash, ...observation }); },
       retireCancellationDelivery: (tenant, deviceId) => ackAndCollectMailbox(composition.core.mailbox, tenant, deviceId),
+      mailbox: conformanceMailbox(composition.core),
+      holdMailboxExpiry: async () => { throw new Error('Receipt/TTL retention does not retire devices.'); },
       dispose: () => composition.close(),
     };
   },

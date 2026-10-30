@@ -61,6 +61,7 @@ export type {
   MailboxReadQuery,
   MailboxRecordDeliveryInput,
   MailboxCollectExpiredInput,
+  MailboxExpirePendingInput,
   MailboxStore,
   MailboxUsage,
 } from './mailbox';
