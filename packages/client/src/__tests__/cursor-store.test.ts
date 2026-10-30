@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CursorStore } from '../daemon/cursor-store';
+import { CursorStore, CursorUnreadableError } from '../daemon/cursor-store';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -67,5 +67,46 @@ describe('CursorStore (atomic write path)', () => {
 
     await store.clear('https://example.test', 'device-1');
     expect(await store.load('https://example.test', 'device-1')).toBeUndefined();
+  });
+});
+
+/** #1121: a damaged cursor file is never read as "no cursor". */
+describe('CursorStore refuses an unreadable cursor file', () => {
+  let storeDir: string;
+
+  afterEach(async () => {
+    if (storeDir) await fs.rm(storeDir, { recursive: true, force: true });
+  });
+
+  async function corrupt(contents: string): Promise<CursorStore> {
+    storeDir = await tmpDir('byok-cursor-corrupt-');
+    const store = new CursorStore(storeDir);
+    await store.save('https://example.test', 'device-1', 9);
+    const [file] = await fs.readdir(storeDir);
+    await fs.writeFile(path.join(storeDir, file!), contents);
+    return store;
+  }
+
+  it.each([
+    ['torn JSON', '{"cursor":'],
+    ['empty file', ''],
+    ['negative cursor', '{"cursor":-1}'],
+    ['fractional cursor', '{"cursor":1.5}'],
+    ['string cursor', '{"cursor":"9"}'],
+    ['missing cursor', '{}'],
+    ['non-object', '9'],
+  ])('throws CursorUnreadableError for %s', async (_label, contents) => {
+    const store = await corrupt(contents);
+    await expect(store.load('https://example.test', 'device-1')).rejects.toBeInstanceOf(CursorUnreadableError);
+  });
+
+  it('throws CursorUnreadableError when the cursor path cannot be read as a file', async () => {
+    storeDir = await tmpDir('byok-cursor-corrupt-');
+    const store = new CursorStore(storeDir);
+    await store.save('https://example.test', 'device-1', 9);
+    const [file] = await fs.readdir(storeDir);
+    await fs.rm(path.join(storeDir, file!));
+    await fs.mkdir(path.join(storeDir, file!));
+    await expect(store.load('https://example.test', 'device-1')).rejects.toBeInstanceOf(CursorUnreadableError);
   });
 });

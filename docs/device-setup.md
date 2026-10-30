@@ -133,6 +133,18 @@ also checked by `config check`. Removed fields fail with a migration reference.
 Use the same config path for all operations. If you installed a named service,
 use its `--name` for service operations.
 
+A device runs at most `maxConcurrentTasks` tasks at once (default 8) across
+every Agent home and runtime. An offer over that cap is declined retryably
+before the claim, with no decline code, so the Host can offer it again later
+or to another device. `defaultMaxDurationMs`, when set, is the wall-clock
+limit for a task whose offer carries no `limits.maxDurationMs`.
+
+While the Host is unreachable, the outbound queue keeps at most 8 MiB of
+`task.progress` and `agent.message.draft` envelopes and drops the oldest of
+them beyond that. Terminals, claims, starts and approval requests are never
+dropped. The Host sees a gap in that task's progress seqs. `status` reports
+the count as `droppedEphemeral`.
+
 ## Upgrade
 
 Before replacing a distribution, read its shipped
@@ -180,6 +192,26 @@ pair again with a new Host code, then start using the same config. For storage
 or protocol reset, follow the specific manifest migration and Host retention
 policy. Do not delete a live store, `.byok` internals or an owned-process record
 to make an error disappear. A new store does not migrate old journals or homes.
+
+### Reset cursor
+
+A daemon whose delivery cursor file is unreadable (torn, hand-edited, or not a
+nonnegative integer) halts with `cursor_unreadable`. It does not treat the file
+as missing, because a missing cursor means a fresh device. Stop the daemon,
+then reset the cursor and start again:
+
+```sh
+byok-agent doctor --repair reset-cursor --yes --config device.json
+byok-agent start --config device.json
+```
+
+Embedded hosts call `resetDeviceCursor(config, { confirmed: true })`. The reset
+refuses while the daemon runs and needs a paired device record. It writes 0, so
+the next start asks the server to replay everything it still retains for this
+device. Replay is safe: an offer this device already journaled is matched by
+its id, and the server does not deliver an offer whose task already ended. If
+the server no longer retains the start of that history, the start halts
+`replay_cursor_too_old` as for any expired cursor; follow that halt's guide.
 
 ## Troubleshooting
 
@@ -334,6 +366,8 @@ linked JSON schema for full array/union shapes and descriptions.
 | `sdkHelperHost.executable` | advanced | string |
 | `sdkHelperHost.entry` | advanced | string |
 | `maxConcurrentReaderAttemptsPerAgentHome` | advanced | number |
+| `maxConcurrentTasks` | advanced | number |
+| `defaultMaxDurationMs` | advanced | number |
 | `agentEgress` | advanced | object |
 | `agentEgress.policy` | advanced | object |
 | `agentEgress.policy.policyRevision` | required when parent is set | string |
@@ -422,6 +456,7 @@ still need correction. Codes do not replace the reported field/path or cause.
 | Code / halt reason | Retryable unchanged | Next step | Guide |
 |--------------------|---------------------|-----------|-------|
 | `config_invalid` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
+| `cursor_unreadable` | no | Run doctor --repair reset-cursor --yes, then start again. | [guide](#reset-cursor) |
 | `daemon_config_field_removed` | no | Remove the field and follow its migration; do not rename it to an unknown field. | [guide](#removed-fields) |
 | `daemon_config_invalid` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `daemon_journal_protocol_unsupported` | no | Drain the journal with the release that wrote it before upgrading. | [guide](#upgrade) |
@@ -475,6 +510,7 @@ Manifest transition: **0.31.0 → 0.31.0**. Versions and entries below come from
 | host-layout-helper | additive | resolveHostLayout({ productId, productName, platform?, homeDir?, env? }) returns the recommended storeDir (the SDK default ~/.byok/<productId>, with its #493 scratch placement and socket-path budget), hostStorageRoot (macOS ~/Library/Application Support/<productName>, Linux $XDG_DATA_HOME/<productId>, Windows %LOCALAPPDATA%\<productName>), its agents directory and the service log directory. It is pure and throws HostLayoutInputError (code host_layout_input_invalid, with the field) on an input it cannot lay out. DaemonEffectiveConfig.directories gains logDir. Nothing to change; a Host that computes these directories itself can call the helper instead. Existing stores do not move. [Migration](../docs/spec.md#recommended-host-layout) |
 | device-store-default-dir-removed | breaking | The static DeviceStore.defaultDir(productId) is removed; it duplicated the default store path. The class is reachable through BlobClient and InstallSkillPacksOptions. The default storeDir is still <home>/.byok/<productId> and no store moves. A Host that called DeviceStore.defaultDir uses resolveHostLayout({ productId, productName }).storeDir. These same exports also contain private AuthManager declaration changes for the token-renewal minimum gap (#1114): a fast device clock or short server TTL no longer loops renewals and keychain writes. That renewal fix requires no additional Host action. [Migration](../docs/spec.md#recommended-host-layout) |
 | capability-ports-two-way | breaking | createByokCloud now refuses a port passed without its capability declared (capability_port_undeclared), as it already refused a capability declared without its port (#1096). Hosts that pass a port without declaring it must either declare the capability or stop passing the port. createByokServer no longer passes an E2EE member store and derives its declaration from its ports with the new capabilityDeclarationForPorts; createInMemoryByokCloud's default declaration is derived the same way. SqliteSchemaErrorCode drops SQLITE_MIGRATION_REFUSED, which only the removed E2EE KEM-floor check raised. [Migration](../docs/architecture/process-namespace-topology.md#capability-ports-migration) |
+| device-resource-caps | breaking | A daemon runs at most DaemonConfig.maxConcurrentTasks tasks at once (default 8; a positive safe integer, no uncapped value), counted across every Agent home and runtime (#1121). Before, the device-wide count was unbounded. An offer over the cap is declined retryably before the claim, with no decline code, so a Host of any version accepts the decline. DaemonConfig.defaultMaxDurationMs (optional) is the wall-clock limit for a task whose offer carries no limits.maxDurationMs. While the Host is unreachable, the outbound queue keeps at most 8 MiB of task.progress and agent.message.draft envelopes and drops the oldest beyond that; terminals, claims, starts and approval requests are never dropped, and OutboundStatus.droppedEphemeral counts the drops. A Host that dispatches more than 8 concurrent tasks to one device sets maxConcurrentTasks to its own number. [Migration](../docs/device-setup.md#operations) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

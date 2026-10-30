@@ -254,6 +254,12 @@ export const DEFAULT_MAX_TASK_OUTPUT_BYTES = 64 * 1024 * 1024;
  */
 export const DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME = 4;
 
+/**
+ * Default number of tasks one daemon runs at once, across every Agent home and
+ * runtime: active tasks plus offers already admitted past this cap.
+ */
+export const DEFAULT_MAX_CONCURRENT_TASKS = 8;
+
 export interface TaskRunnerDeps {
   adapters: RuntimeAdapter[];
   runtimeAllowlist?: string[];
@@ -314,6 +320,13 @@ export interface TaskRunnerDeps {
    * The writer limit is fixed at one.
    */
   maxConcurrentReaderAttemptsPerAgentHome?: number;
+  /**
+   * Device-wide task cap — see `DaemonConfig.maxConcurrentTasks`. Unset
+   * defaults to {@link DEFAULT_MAX_CONCURRENT_TASKS}.
+   */
+  maxConcurrentTasks?: number;
+  /** Wall-clock limit for an offer without `limits.maxDurationMs` — see `DaemonConfig.defaultMaxDurationMs`. */
+  defaultMaxDurationMs?: number;
   /** Exact host-selected policy accepted by a `task.offer` that carries `egressPolicy`. */
   agentEgressPolicy?: Readonly<AgentEgressPolicy>;
   /** Latest-value activity lane and reliable spool for Agent egress offers. */
@@ -753,6 +766,8 @@ export class TaskRunner {
   private readonly sealedOpening = new Set<string>();
   private readonly claimedHarnesses = new Map<string, string>();
   private readonly homeReservations = new Map<string, number>();
+  /** Offers admitted past the device-wide task cap that are not yet active; cleared when `handleOffer` returns. */
+  private readonly deviceTaskReservations = new Set<string>();
   private readonly startupOwnership: StartupOwnership;
   /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
   private readonly inFlightBlobAborts = new Map<string, AbortController>();
@@ -856,6 +871,11 @@ export class TaskRunner {
   private get maxConcurrentReaderAttemptsPerAgentHome(): number {
     return this.deps.maxConcurrentReaderAttemptsPerAgentHome
       ?? DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME;
+  }
+
+  /** Effective device-wide task cap — see {@link DEFAULT_MAX_CONCURRENT_TASKS}. */
+  private get maxConcurrentTasks(): number {
+    return this.deps.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS;
   }
 
   /**

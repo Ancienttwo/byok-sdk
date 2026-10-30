@@ -23,6 +23,8 @@ export const DAEMON_HALT_REASONS = [
   'handshake_rejected',
   /** The server no longer retains the history after this device's acknowledged cursor. */
   'replay_cursor_too_old',
+  /** The durable delivery cursor file is unreadable: run `doctor --repair reset-cursor`. */
+  'cursor_unreadable',
   /** The configuration cannot work; a restart with the same configuration fails the same way. Thrown by `start()`; never reported through `lifecycle`. */
   'config_invalid',
 ] as const;

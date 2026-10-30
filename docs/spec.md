@@ -868,7 +868,7 @@ lifecycle model, `status().lifecycle` and the `{kind:'lifecycle'}` event:
 `stopped`, `awaiting-enrollment`, `running` with `connection` `connecting` or
 `open`, or `halted` with a reason from one closed set (`DaemonHaltReason`:
 `unpaired`, `re_pair_required`, `store_not_bound`, `store_owned`,
-`device_revoked`, `handshake_rejected`, `replay_cursor_too_old`,
+`device_revoked`, `handshake_rejected`, `replay_cursor_too_old`, `cursor_unreadable`,
 `config_invalid`). `open` means
 the server accepted this session's `conn.hello` (protocol §8.1). Network
 failures never fail `start()` or end the run: the daemon's one reconnect loop

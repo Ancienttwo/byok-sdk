@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "2f50976582949fcfee83abde91ee3da251814842c659d085cd2b4b7f209fd2aa"
+    "snapshotSha256": "8df6acaeb098d607d354a674f718f6c7c585cace9f8bef5d1f0080677b347e13"
   },
   "configFields": {
     "status": "tracked",
@@ -552,6 +552,30 @@
         "export:@byok-sdk/server#ByokServer",
         "export:@byok-sdk/server#TaskHandle"
       ]
+    },
+    {
+      "id": "device-resource-caps",
+      "impact": "breaking",
+      "summary": "A daemon runs at most DaemonConfig.maxConcurrentTasks tasks at once (default 8; a positive safe integer, no uncapped value), counted across every Agent home and runtime (#1121). Before, the device-wide count was unbounded. An offer over the cap is declined retryably before the claim, with no decline code, so a Host of any version accepts the decline. DaemonConfig.defaultMaxDurationMs (optional) is the wall-clock limit for a task whose offer carries no limits.maxDurationMs. While the Host is unreachable, the outbound queue keeps at most 8 MiB of task.progress and agent.message.draft envelopes and drops the oldest beyond that; terminals, claims, starts and approval requests are never dropped, and OutboundStatus.droppedEphemeral counts the drops. A Host that dispatches more than 8 concurrent tasks to one device sets maxConcurrentTasks to its own number.",
+      "migration": "docs/device-setup.md#operations",
+      "items": [
+        "config:defaultMaxDurationMs",
+        "config:maxConcurrentTasks",
+        "export:@byok-sdk/client#OutboundStatus"
+      ]
+    },
+    {
+      "id": "cursor-unreadable-halt",
+      "impact": "breaking",
+      "summary": "An unreadable delivery cursor file (torn, hand-edited, or not a nonnegative integer) no longer reads as a missing cursor (#1121). Startup halts with the new DaemonHaltReason 'cursor_unreadable'. The operator resets it with byok-agent doctor --repair reset-cursor --yes, or resetDeviceCursor(config, { confirmed: true }) in an embedded host: the cursor becomes 0 and the next start replays what the server retains; journaled offers are matched by id and ended tasks are not redelivered. An expired history still halts replay_cursor_too_old. Handle 'cursor_unreadable' wherever you switch on DaemonHaltReason.",
+      "migration": "docs/device-setup.md#reset-cursor",
+      "items": [
+        "export:@byok-sdk/client#DeviceCursorResetError",
+        "export:@byok-sdk/client#DeviceCursorResetErrorCode",
+        "export:@byok-sdk/client#DeviceCursorResetResult",
+        "export:@byok-sdk/client#ResetDeviceCursorInput",
+        "export:@byok-sdk/client#resetDeviceCursor"
+      ]
     }
   ],
   "changes": [
@@ -628,6 +652,12 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "config:defaultMaxDurationMs",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "device-resource-caps"
+    },
+    {
       "item": "config:deviceAssertion",
       "change": "added",
       "after": "optional schema-sha256=67738e44d544c345",
@@ -680,6 +710,12 @@
       "change": "added",
       "after": "optional schema-sha256=cddf8275afa15408",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "config:maxConcurrentTasks",
+      "change": "added",
+      "after": "optional schema-sha256=cddf8275afa15408",
+      "entry": "device-resource-caps"
     },
     {
       "item": "config:maxInlineEventBytes",
@@ -991,6 +1027,21 @@
       "entry": "auth-revocation-typed-keychain-deadline"
     },
     {
+      "item": "export:@byok-sdk/client#DeviceCursorResetError",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceCursorResetErrorCode",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceCursorResetResult",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
+    },
+    {
       "item": "export:@byok-sdk/client#DeviceStoreBindingMismatchError",
       "change": "added",
       "entry": "device-store-pairing-binding"
@@ -1046,6 +1097,11 @@
       "entry": "local-tool-approval-host-only"
     },
     {
+      "item": "export:@byok-sdk/client#OutboundStatus",
+      "change": "changed",
+      "entry": "device-resource-caps"
+    },
+    {
       "item": "export:@byok-sdk/client#PreparedRuntimeOperation",
       "change": "changed",
       "entry": "pi-session-retention-lifecycle"
@@ -1054,6 +1110,11 @@
       "item": "export:@byok-sdk/client#ProtectedClassId",
       "change": "changed",
       "entry": "storage-retention-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/client#ResetDeviceCursorInput",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
@@ -1074,6 +1135,11 @@
       "item": "export:@byok-sdk/client#inspectDaemonStores",
       "change": "added",
       "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/client#resetDeviceCursor",
+      "change": "added",
+      "entry": "cursor-unreadable-halt"
     },
     {
       "item": "export:@byok-sdk/client#resolveHostLayout",

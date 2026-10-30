@@ -197,9 +197,11 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   }
   // M5 batch-3 (workstream 2): see `armMaxDurationTimer`'s own doc
   // comment — still inside the synchronous construct -> register -> arm
-  // -> pump handoff described just below (no `await` yet).
-  if (payload.limits?.maxDurationMs !== undefined) {
-    this['armMaxDurationTimer'](active, payload.limits.maxDurationMs);
+  // -> pump handoff described just below (no `await` yet). The offer's own
+  // limit wins; the daemon default applies only when the offer sets none.
+  const maxDurationMs = payload.limits?.maxDurationMs ?? this['deps'].defaultMaxDurationMs;
+  if (maxDurationMs !== undefined) {
+    this['armMaxDurationTimer'](active, maxDurationMs);
   }
   active.eventPump = this['pump'](active);
   } catch (error) {

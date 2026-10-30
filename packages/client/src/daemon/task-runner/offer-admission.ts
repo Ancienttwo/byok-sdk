@@ -140,6 +140,17 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
     return undefined;
   }
 
+  // #1121: one device runs at most `maxConcurrentTasks` tasks, whatever their
+  // Agent homes. An offer admitted here counts until it is active, then as an
+  // active task, so a burst of offers cannot overshoot the cap while earlier
+  // ones are still starting. Check and reserve are synchronous.
+  const deviceTasks = new Set([...this['tasks'].keys(), ...this['deviceTaskReservations']]).size;
+  if (deviceTasks >= this['maxConcurrentTasks']) {
+    decline(`device busy: ${deviceTasks} of ${this['maxConcurrentTasks']} concurrent task(s) in use`, true);
+    return undefined;
+  }
+  this['deviceTaskReservations'].add(taskId);
+
   // M5 batch-3 (workstream 1): `limits.maxTokens` has no hard-enforcement
   // path on ANY bundled runtime adapter today — nothing actually counts
   // or caps tokens against it. Silently accepting the offer would let a

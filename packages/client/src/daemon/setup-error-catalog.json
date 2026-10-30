@@ -84,6 +84,11 @@
     "nextStep": "Pair again or use the Host operator recovery procedure for expired history.",
     "anchor": "#reset"
   },
+  "cursor_unreadable": {
+    "retryable": false,
+    "nextStep": "Run doctor --repair reset-cursor --yes, then start again.",
+    "anchor": "#reset-cursor"
+  },
   "daemon_journal_protocol_unsupported": {
     "retryable": false,
     "nextStep": "Drain the journal with the release that wrote it before upgrading.",

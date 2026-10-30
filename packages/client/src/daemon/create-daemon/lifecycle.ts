@@ -3,6 +3,7 @@ import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError } from '..
 import { InsecureServerUrlError } from '../url';
 import { DeviceRecordRePairRequiredError } from '../store';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors';
+import { CursorUnreadableError } from '../cursor-store';
 import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager';
 import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS } from './support';
 import type { DaemonScope } from './scope';
@@ -156,6 +157,7 @@ export function startupHaltReason(daemonScope: DaemonScope, err: unknown): Daemo
   if (err instanceof DeviceRecordRePairRequiredError) return 're_pair_required';
   if (err instanceof DeviceStoreBindingMismatchError) return 'store_not_bound';
   if (err instanceof DeviceRevokedError) return 'device_revoked';
+  if (err instanceof CursorUnreadableError) return 'cursor_unreadable';
   return undefined;
 }
 
