@@ -238,22 +238,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       after.exports = before.exports; after.description = before.description;
     }
   } else if (path === 'package.json') {
-    // repo-harness owns its generated command scripts. Admit additions, removals
-    // and edits whose old and new values both invoke repo-harness; every other
-    // script and field stays in the deep comparison below.
-    const harnessScript = value => typeof value === 'string' && value.startsWith('repo-harness ');
-    for (const name of new Set([...Object.keys(before.scripts ?? {}), ...Object.keys(after.scripts ?? {})])) {
-      const oldValue = before.scripts?.[name], newValue = after.scripts?.[name];
-      if ((oldValue === undefined || harnessScript(oldValue)) && (newValue === undefined || harnessScript(newValue))) {
-        delete before.scripts?.[name]; delete after.scripts?.[name];
-      }
-    }
-    // #1102: the upgrade-manifest gate command, exactly.
-    if (before.scripts?.['check:upgrade-manifest'] === undefined
-      && after.scripts?.['check:upgrade-manifest'] === UPGRADE_MANIFEST_GATE) delete after.scripts['check:upgrade-manifest'];
-    const documentationTests = admitDocumentationScripts(before, after, cwd);
-    // The CI contracts have one package-script authority. Only this exact
-    // composition may wrap the existing ordered script-test list.
+    // Reserve the CI helper before generic script normalization can erase it.
+    // Only this exact composition may wrap the existing ordered test list.
     const ciHelper = 'test:scripts:ci';
     const ciCommand = 'node --test scripts/ci/*.test.mjs';
     const ciPrefix = 'bun run test:scripts:ci && ';
@@ -272,6 +258,20 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       after.scripts['test:scripts'] = after.scripts['test:scripts'].slice(ciPrefix.length);
       delete after.scripts[ciHelper];
     }
+    // repo-harness owns its generated command scripts. Admit additions, removals
+    // and edits whose old and new values both invoke repo-harness; every other
+    // script and field stays in the deep comparison below.
+    const harnessScript = value => typeof value === 'string' && value.startsWith('repo-harness ');
+    for (const name of new Set([...Object.keys(before.scripts ?? {}), ...Object.keys(after.scripts ?? {})])) {
+      const oldValue = before.scripts?.[name], newValue = after.scripts?.[name];
+      if ((oldValue === undefined || harnessScript(oldValue)) && (newValue === undefined || harnessScript(newValue))) {
+        delete before.scripts?.[name]; delete after.scripts?.[name];
+      }
+    }
+    // #1102: the upgrade-manifest gate command, exactly.
+    if (before.scripts?.['check:upgrade-manifest'] === undefined
+      && after.scripts?.['check:upgrade-manifest'] === UPGRADE_MANIFEST_GATE) delete after.scripts['check:upgrade-manifest'];
+    const documentationTests = admitDocumentationScripts(before, after, cwd);
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
     if (!oldCommand?.startsWith(prefix) || !newCommand?.startsWith(prefix)) throw new Error('Unreviewed test command');

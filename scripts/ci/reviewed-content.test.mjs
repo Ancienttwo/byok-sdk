@@ -894,6 +894,21 @@ test('generic example manifest upgrades include the basic workspace', t => {
 });
 
 
+test('CI helper is reserved before repo-harness script normalization', t => {
+  const f = fixture(t);
+  const previous = f.rootManifest.scripts['test:scripts'];
+  for (const helper of ['repo-harness --help', 'repo-harness run no-such-check || true']) {
+    for (const command of [previous, 'bun run test:scripts:ci && ' + previous]) {
+      f.write('package.json', { scripts: { 'test:scripts:ci': helper, 'test:scripts': command } });
+      assert.throws(() => selectImpact(['package.json'], f), /Unreviewed CI test composition/);
+    }
+  }
+  f.write('package.json', { scripts: {
+    'test:scripts:ci': 'node --test scripts/ci/*.test.mjs', 'test:scripts': previous,
+  } });
+  assert.throws(() => selectImpact(['package.json'], f), /Unreviewed CI test composition/);
+});
+
 test('root CI composition admits only the exact helper and prefix, retaining the ordered list guard', t => {
   const f = fixture(t);
   const previous = f.rootManifest.scripts['test:scripts'];
