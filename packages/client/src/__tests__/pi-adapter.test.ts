@@ -918,6 +918,8 @@ const __executionScratch = await testExecutionScratch();
       // pi never requests approval, so it is never handed the approval channel.
       approvalInteractive: false,
       toolAuthorizationAuto: true,
+      preparedLane: true,
+      isolation: { userContext: true, userMcpServers: false, sessionPersistence: false },
     });
   });
 });

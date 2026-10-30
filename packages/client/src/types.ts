@@ -66,6 +66,19 @@ export interface RuntimeDetectionAdvisory {
  */
 export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported' | 'runtime_environment_unavailable';
 
+/**
+ * Each `true` is a guarantee the runtime contract suite checks; `false` means
+ * the SDK makes no such guarantee for this runtime (#1103).
+ */
+export interface RuntimeIsolationCapabilities {
+  /** User-level instructions (a user `CLAUDE.md`, `AGENTS.md` or rules) can be kept out. */
+  readonly userContext: boolean;
+  /** MCP servers the user configured for the runtime can be kept out. */
+  readonly userMcpServers: boolean;
+  /** The runtime's own transcript store can be turned off. */
+  readonly sessionPersistence: boolean;
+}
+
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
   /**
@@ -78,8 +91,15 @@ export interface RuntimeCapabilities {
   readonly messageDraft?: boolean;
   /** Local native interaction support only; omission is unsupported. Not the approval channel. */
   readonly nativeInteractions?: NativeInteractionCapabilities;
-  /** Local adapter advertisement; no new protocol field or capability vocabulary. */
+  /** The durable Pi worker. Omission means an ordinary adapter. */
   readonly durablePi?: boolean;
+  /**
+   * Accepts a prepared offer (the prepared lane). Omission means unsupported.
+   * `auto` never applies to a prepared offer, whatever `toolAuthorizationAuto` says.
+   */
+  readonly preparedLane?: boolean;
+  /** Which user-level sources the adapter keeps out of a Bot session. Omission means none. */
+  readonly isolation?: RuntimeIsolationCapabilities;
   readonly steer: boolean;
   readonly resume: boolean;
   /**
@@ -581,6 +601,14 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     capabilities: Object.freeze({
       ...(descriptor.capabilities.toolAuthorizationAuto === undefined ? {} : { toolAuthorizationAuto: descriptor.capabilities.toolAuthorizationAuto === true }),
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
+      ...(descriptor.capabilities.preparedLane === undefined ? {} : { preparedLane: descriptor.capabilities.preparedLane === true }),
+      ...(descriptor.capabilities.isolation === undefined ? {} : {
+        isolation: Object.freeze({
+          userContext: descriptor.capabilities.isolation.userContext === true,
+          userMcpServers: descriptor.capabilities.isolation.userMcpServers === true,
+          sessionPersistence: descriptor.capabilities.isolation.sessionPersistence === true,
+        }),
+      }),
       ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {
         nativeInteractions: Object.freeze({
           approvalDecisions: Object.freeze([...descriptor.capabilities.nativeInteractions.approvalDecisions]),

@@ -20,11 +20,57 @@ import type { TenantId } from './tenant';
 export const PRESENCE_LEVELS = ['online', 'thinking', 'working', 'error', 'offline'] as const;
 export type PresenceLevel = (typeof PRESENCE_LEVELS)[number];
 
+/**
+ * The capability matrix a daemon reported for one runtime: the shape of
+ * `@byok-sdk/protocol`'s `RuntimeCapabilities` (#1103). Omitted fields are unknown.
+ */
+export interface PresenceRuntimeCapabilities {
+  readonly steer?: boolean;
+  readonly resume?: boolean;
+  readonly approvalInteractive?: boolean;
+  readonly mcpToolsets?: boolean;
+  readonly messageDraft?: boolean;
+  readonly toolAuthorizationAuto?: boolean;
+  readonly durablePi?: boolean;
+  readonly preparedLane?: boolean;
+  readonly isolation?: {
+    readonly userContext?: boolean;
+    readonly userMcpServers?: boolean;
+    readonly sessionPersistence?: boolean;
+  };
+}
+
 /** Runtime facts observed by a daemon's real local probe. Omitted fields are unknown. */
 export interface PresenceRuntimeFact {
   readonly id: string;
   readonly version?: string;
   readonly authPresent?: boolean;
+  readonly capabilities?: PresenceRuntimeCapabilities;
+}
+
+/** Copies the defined boolean flags named by `keys`; a stored row holds no other keys. */
+function definedFlags<T extends object, K extends keyof T>(source: T, keys: readonly K[]): Pick<T, K> {
+  const flags: Partial<Pick<T, K>> = {};
+  for (const key of keys) if (source[key] !== undefined) flags[key] = source[key];
+  return flags as Pick<T, K>;
+}
+
+/** A frozen copy of one runtime fact holding only the known fields; every presence store returns this. */
+export function freezePresenceRuntimeFact(runtime: PresenceRuntimeFact): PresenceRuntimeFact {
+  const capabilities = runtime.capabilities;
+  return Object.freeze({
+    id: runtime.id,
+    ...(runtime.version === undefined ? {} : { version: runtime.version }),
+    ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
+    ...(capabilities === undefined ? {} : {
+      capabilities: Object.freeze({
+        ...definedFlags(capabilities, ['steer', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durablePi', 'preparedLane']),
+        ...(capabilities.isolation === undefined ? {} : {
+          isolation: Object.freeze(definedFlags(capabilities.isolation, ['userContext', 'userMcpServers', 'sessionPersistence'])),
+        }),
+      }),
+    }),
+  });
 }
 
 /** Unexpired presence facts nested in the tenant aggregate. */

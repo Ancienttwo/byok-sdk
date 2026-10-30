@@ -26,12 +26,14 @@
     "check:release-pack": "node scripts/release/pack-and-smoke.mjs",
     "check:upgrade-manifest": "node scripts/release/check-upgrade-manifest.mjs",
     "check:task-sync": "repo-harness run check-task-sync",
-    "test:scripts": "node --test --test-concurrency=1 scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/entry-closure.test.mjs scripts/api-surface/check-version-authority.test.mjs scripts/release/publish.test.mjs scripts/release/publish-recovery.test.mjs scripts/release/install-matrix.test.mjs scripts/release/beta-release.test.mjs scripts/release/registry-contract.test.mjs scripts/release/registry-npm.test.mjs scripts/release/pack-and-smoke.test.mjs scripts/api-surface/check-provisioning-code-alignment.test.mjs scripts/api-surface/check-oar-bridge.test.mjs scripts/ci/check-tmpdir-leaks.test.mjs scripts/ci/require-ci-success.test.mjs scripts/vitest/tmp-root.test.mjs scripts/release/agent-memory-helper-source.test.mjs scripts/release/check-upgrade-manifest.test.mjs scripts/architecture/dependency-graph.test.mjs scripts/docs/device-setup.test.mjs",
+    "test:scripts": "node --test --test-concurrency=1 scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/entry-closure.test.mjs scripts/api-surface/check-version-authority.test.mjs scripts/release/publish.test.mjs scripts/release/publish-recovery.test.mjs scripts/release/install-matrix.test.mjs scripts/release/beta-release.test.mjs scripts/release/registry-contract.test.mjs scripts/release/registry-npm.test.mjs scripts/release/pack-and-smoke.test.mjs scripts/api-surface/check-provisioning-code-alignment.test.mjs scripts/api-surface/check-oar-bridge.test.mjs scripts/ci/check-tmpdir-leaks.test.mjs scripts/ci/require-ci-success.test.mjs scripts/vitest/tmp-root.test.mjs scripts/release/agent-memory-helper-source.test.mjs scripts/release/check-upgrade-manifest.test.mjs scripts/architecture/dependency-graph.test.mjs scripts/docs/device-setup.test.mjs scripts/docs/capability-matrix.test.mjs",
     "build:release": "bun run build && bun run --filter @byok-sdk/client build:agent-memory-helper",
     "check:brain": "repo-harness brain check",
     "sync:brain": "repo-harness brain sync",
     "docs:device-setup": "node scripts/docs/device-setup.mjs --write",
-    "check:device-setup": "node scripts/docs/device-setup.mjs"
+    "check:device-setup": "node scripts/docs/device-setup.mjs",
+    "docs:capability-matrix": "node scripts/docs/capability-matrix.mjs --write",
+    "check:capability-matrix": "node scripts/docs/capability-matrix.mjs"
   },
   "devDependencies": {
     "@types/node": "^24",

@@ -9,6 +9,7 @@ import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpire
  */
 import { ByokCoreError } from '../errors';
 import {
+  freezePresenceRuntimeFact,
   type PresenceHint,
   type PresenceHintInput,
   type PresenceStore,
@@ -74,15 +75,7 @@ export class InMemoryPresenceStore implements PresenceStore {
       ...(input.runtimes === undefined
         ? {}
         : {
-            runtimes: Object.freeze(
-              input.runtimes.map((runtime) =>
-                Object.freeze({
-                  id: runtime.id,
-                  ...(runtime.version === undefined ? {} : { version: runtime.version }),
-                  ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
-                }),
-              ),
-            ),
+            runtimes: Object.freeze(input.runtimes.map(freezePresenceRuntimeFact)),
           }),
       observedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + input.ttlMs).toISOString(),

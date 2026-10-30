@@ -20,7 +20,7 @@ describe('durable parent recovery authority', () => {
     expect(new PiAdapter({ durablePi: false }).descriptor.capabilities.durablePi).toBeUndefined();
     expect(() => new PiAdapter({ durablePi: { replicaRoot: '/removed' } as never })).toThrow(/must be boolean/);
     const adapter = new PiAdapter({ durablePi: true });
-    expect(adapter.descriptor.capabilities).toMatchObject({ durablePi: true, steer: false, resume: false });
+    expect(adapter.descriptor.capabilities).toMatchObject({ durablePi: true, steer: false, resume: false, toolAuthorizationAuto: false, preparedLane: false });
     expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
     expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
   });

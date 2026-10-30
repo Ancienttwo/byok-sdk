@@ -325,6 +325,7 @@ describe('public API surface', () => {
       'deviceProofCanonicalClaims',
       'deviceProofCanonicalJson',
       'deviceProofSigningInput',
+      'freezePresenceRuntimeFact',
       'hasCapability',
       'isCanonicalTimestamp',
       'isContentHash',
