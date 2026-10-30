@@ -19,10 +19,10 @@ beforeAll(async () => {
     bundle: true, format: 'esm', platform: 'browser', external: ['cloudflare:workers'], write: false });
   persist = await mkdtemp(path.join(os.tmpdir(), 'byok-submit-delivery-'));
   mf = new Miniflare({ resourcePersistencePath: persist, log: new Log(LogLevel.ERROR), workers: [{ config: {
-    name: 'submit-delivery', type: 'worker', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
+    name: 'submit-delivery', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
     manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: bundled.outputFiles[0]!.text } } },
     exports: { DeliveryAuditDO: { type: 'durable-object', storage: 'sqlite' } },
-    env: { AGENTS: { type: 'durable-object', workerName: 'submit-delivery', exportName: 'DeliveryAuditDO' },
+    env: { AGENTS: { type: 'durable-object', worker: 'submit-delivery', exportName: 'DeliveryAuditDO' },
       AIPHABEE_ZAI_API_KEY: { type: 'text', value: 'Fixture~0123456789ABCDEFGHIJKLMNOP' } },
   }, dev: { outboundService: { type: 'node-handler', handler: async (request, response) => {
     let body = ''; for await (const chunk of request) body += chunk.toString();

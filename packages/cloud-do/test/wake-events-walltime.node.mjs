@@ -15,10 +15,10 @@ test('a real workerd durable event stream closes at its 110 second connection ca
   const persist = await mkdtemp(path.join(os.tmpdir(), 'byok-events-walltime-'));
   let externalCalls = 0;
   const mf = new Miniflare({ resourcePersistencePath: persist, log: new Log(LogLevel.NONE), workers: [{ config: {
-    name: 'events-walltime', type: 'worker', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
+    name: 'events-walltime', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
     manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: built.outputFiles[0].text } } },
     exports: { WakeAuditDO: { type: 'durable-object', storage: 'sqlite' } },
-    env: { AGENTS: { type: 'durable-object', workerName: 'events-walltime', exportName: 'WakeAuditDO' },
+    env: { AGENTS: { type: 'durable-object', worker: 'events-walltime', exportName: 'WakeAuditDO' },
       AIPHABEE_ZAI_API_KEY: { type: 'text', value: 'Primary~0123456789ABCDEFGHIJKLMNOP' },
       AIPHABEE_DEEPSEEK_API_KEY: { type: 'text', value: 'Secondary~0123456789QRSTUVWXYZabcd' } },
   }, dev: { outboundService: { type: 'node-handler', handler: (_request, response) => {
