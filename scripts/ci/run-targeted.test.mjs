@@ -57,6 +57,7 @@ test('another selected workspace without a test check still fails closed', posix
   const plan = planCi({ event: 'push', sha, base, paths: ['packages/keys/src/index.ts'] });
   const cwd = mkdtempSync(path.join(tmpdir(), 'ci-run-targeted-cwd-'));
   try {
+    writeFileSync(path.join(cwd, 'package.json'), '{}');
     for (const dir of plan.dirs) {
       mkdirSync(path.join(cwd, dir), { recursive: true });
       const scripts = dir === 'packages/keys' ? { typecheck: 'tsc' } : { typecheck: 'tsc', test: 'vitest' };
@@ -79,4 +80,31 @@ test('a reviewed release script path runs its mapped node tests', posixOnly, () 
   assert.match(stdout, /a README keys version that differs from the release train fails/);
   assert.match(stdout, /(?:ℹ|#) fail 0/);
   assert.deepEqual(calls, []);
+});
+
+test('manifest-declared documentation checks run for generator, markdown and SDK inputs', posixOnly, () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), 'ci-doc-projection-'));
+  try {
+    mkdirSync(path.join(cwd, 'scripts/docs'), { recursive: true });
+    writeFileSync(path.join(cwd, 'scripts/docs/capability-matrix.mjs'), '');
+    writeFileSync(path.join(cwd, 'scripts/docs/capability-matrix.test.mjs'),
+      "import { test } from 'node:test'; test('registered projection executed', () => {});");
+    writeFileSync(path.join(cwd, 'package.json'), JSON.stringify({ scripts: {
+      'docs:capability-matrix': 'node scripts/docs/capability-matrix.mjs --write',
+      'check:capability-matrix': 'node scripts/docs/capability-matrix.mjs',
+      'test:scripts': 'node --test scripts/docs/capability-matrix.test.mjs',
+    } }));
+    for (const input of ['docs/adapter-capabilities.md', 'scripts/docs/capability-matrix.mjs',
+      'scripts/docs/capability-matrix.test.mjs', 'packages/client/src/adapters/pi/pi-capabilities.ts',
+      'packages/client/src/adapters/claude/claude-version.ts']) {
+      const plan = planCi({ event: 'push', sha, base, paths: [input], cwd });
+      for (const dir of plan.dirs) {
+        mkdirSync(path.join(cwd, dir), { recursive: true });
+        writeFileSync(path.join(cwd, dir, 'package.json'), JSON.stringify({ scripts: { typecheck: 'tsc', test: 'vitest' } }));
+      }
+      const { status, stdout, stderr } = runTargeted(plan, cwd);
+      assert.equal(status, 0, stderr);
+      assert.match(stdout, /registered projection executed/);
+    }
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
 });

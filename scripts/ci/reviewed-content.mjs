@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parseBunLock } from '../release/pi-runtime-identity.mjs';
 import { dependencyLockImpact, normalizeDependencyVersions } from './dependency-impact.mjs';
+import { admitDocumentationScripts } from './documentation-checks.mjs';
 
 // The nine published manifests. A contract test keeps this list equal to the
 // non-private packages/*/package.json files.
@@ -63,10 +64,8 @@ const SERVER_EXECUTION_CORE_EXPORTS = Object.freeze({
   './execution-core': { types: './dist/execution-core/index.d.ts', import: './dist/execution-core/index.js' },
   './execution-core/canonical': { types: './dist/execution-core/canonical.d.ts', import: './dist/execution-core/canonical.js' },
 });
-const SERVER_TSX = '^4.19.2';
-// #1104: the single-file packaging entry, and the vitest runner of the packaging example's bundle test.
+// #1104: the single-file packaging entry.
 const CLIENT_PACKAGING_EXPORT = Object.freeze({ types: './dist/adapters/packaging.d.ts', import: './dist/adapters/packaging.js' });
-const PACKAGING_VITEST = '^4.1.10';
 // #793 D2g: the K8 retention rule and its shared vectors, added to the hosted
 // entries for H's retention slice (owner question §53d).
 const K8_RETENTION_EXPORTS = Object.freeze({
@@ -187,6 +186,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
   const parse = path === 'bun.lock' ? parseBunLock : JSON.parse;
   const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
+  if (path.startsWith('examples/') && (before.private !== true || after.private !== true)) throw new Error('Example workspaces must stay private');
   if (path !== 'bun.lock') qualify.push(...normalizeDependencyVersions(before, after, path, cwd));
   if (path === 'bun.lock') {
     // Newly introduced hosted workspaces retain their shape/ownership gate.
@@ -228,9 +228,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     }
   } else if (path === 'examples/packaging/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The packaging example must stay private');
-    // #1104: the bundle test, exactly its script and runner.
+    // #1104: the bundle test command.
     if (before.scripts?.test === undefined && after.scripts?.test === 'vitest run') delete after.scripts.test;
-    if (before.devDependencies?.vitest === undefined && after.devDependencies?.vitest === PACKAGING_VITEST) delete after.devDependencies.vitest;
   } else if (path === 'examples/host-execution-core/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The host execution core example must stay private');
     // #1106: the core entries leave together with the description, from exactly the old entries.
@@ -252,13 +251,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     // #1102: the upgrade-manifest gate command, exactly.
     if (before.scripts?.['check:upgrade-manifest'] === undefined
       && after.scripts?.['check:upgrade-manifest'] === UPGRADE_MANIFEST_GATE) delete after.scripts['check:upgrade-manifest'];
-    // #1094: admit only the exact additive setup-doc generator/check commands.
-    for (const [name, command] of Object.entries({
-      'docs:device-setup': 'node scripts/docs/device-setup.mjs --write',
-      'check:device-setup': 'node scripts/docs/device-setup.mjs',
-    })) {
-      if (before.scripts?.[name] === undefined && after.scripts?.[name] === command) delete after.scripts[name];
-    }
+    const documentationTests = admitDocumentationScripts(before, after, cwd);
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
     if (!oldCommand?.startsWith(prefix) || !newCommand?.startsWith(prefix)) throw new Error('Unreviewed test command');
@@ -266,18 +259,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     let index = 0;
     for (const test of newTests) {
       if (test === oldTests[index]) { index++; continue; }
-      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || test === UPGRADE_MANIFEST_TEST || test === 'scripts/architecture/dependency-graph.test.mjs' || test === 'scripts/docs/device-setup.test.mjs')
+      if (!(/^scripts\/ci\/[a-z0-9-]+\.test\.mjs$/.test(test) || test === UPGRADE_MANIFEST_TEST || test === 'scripts/architecture/dependency-graph.test.mjs' || documentationTests.has(test))
         || oldTests.includes(test) || !existsSync(resolve(cwd, test))) throw new Error('Only existing CI contract tests may be added');
     }
     if (index !== oldTests.length || new Set(newTests).size !== newTests.length) throw new Error('Existing tests must remain in order without duplicates');
     delete before.scripts['test:scripts']; delete after.scripts['test:scripts'];
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
-    if (path === 'packages/client/package.json'
-      && before.devDependencies?.esbuild === undefined
-      && after.devDependencies?.esbuild === '0.28.1') {
-      delete after.devDependencies.esbuild;
-    }
     if (path === 'packages/client/package.json') {
       if (before.exports?.['./packaging'] === undefined && isDeepStrictEqual(after.exports?.['./packaging'], CLIENT_PACKAGING_EXPORT)) delete after.exports['./packaging'];
       const key = '#byok-hermes-session';
@@ -326,12 +314,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       if (before.exports?.['./agent-memory'] === undefined && isDeepStrictEqual(after.exports?.['./agent-memory'], entry)) delete after.exports['./agent-memory'];
     }
     if (path === 'packages/server/package.json') {
-      // #1106: the two K4 subpaths, added together, and tsx for the forked K4 crash fixtures.
+      // #1106: the two K4 subpaths, added together.
       if (Object.keys(SERVER_EXECUTION_CORE_EXPORTS).every(key => before.exports?.[key] === undefined
         && isDeepStrictEqual(after.exports?.[key], SERVER_EXECUTION_CORE_EXPORTS[key]))) {
         for (const key of Object.keys(SERVER_EXECUTION_CORE_EXPORTS)) delete after.exports[key];
       }
-      if (before.devDependencies?.tsx === undefined && after.devDependencies?.tsx === SERVER_TSX) delete after.devDependencies.tsx;
     }
     if (path === 'packages/cloud-do/package.json'
       && before.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === undefined
@@ -347,7 +334,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       && after.engines?.node === '>=24.22.1') {
       after.engines.node = before.engines.node;
     }
-    const dir = path.slice(0, -'/package.json'.length);
     delete before.version; delete after.version;
   }
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);

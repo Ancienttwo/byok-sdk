@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { verifyPrPlan } from './plan-ci.mjs';
 import { reviewedScripts, selectImpact } from './select-impact.mjs';
+import { documentationTestsForPaths } from './documentation-checks.mjs';
 
 const plan = JSON.parse(process.env.CI_PLAN ?? '');
 if (plan.mode !== 'targeted') throw new Error('Targeted runner refuses a release or missing plan');
@@ -11,7 +12,7 @@ const verified = selectImpact(plan.files, { base });
 if (JSON.stringify(verified.dirs) !== JSON.stringify(plan.dirs) || JSON.stringify(verified.families) !== JSON.stringify(plan.families)) {
   throw new Error('Impact plan does not match changed paths');
 }
-const extraTests = [];
+const extraTests = documentationTestsForPaths(plan.files);
 if (plan.files.includes('scripts/release/agent-memory-helper-source.test.mjs')) extraTests.push('scripts/release/agent-memory-helper-source.test.mjs');
 if (plan.files.some(path => /^scripts\/release\/registry-/.test(path))) extraTests.push('scripts/release/registry-contract.test.mjs', 'scripts/release/registry-npm.test.mjs');
 if (plan.files.some(path => path.startsWith('packages/client/vendor/oar/')

@@ -6,12 +6,12 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { selectImpact } from './select-impact.mjs';
 
-test('helper bundler addition retains its shape check while existing dependencies may upgrade', t => {
+test('existing bundler versions may upgrade while new dependency edges fail closed', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-helper-edge-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, 'packages/client'), { recursive: true });
   const write = (path, value) => writeFileSync(join(cwd, path), JSON.stringify(value));
-  const manifest = { name: '@byok-sdk/client', version: '0.28.1', devDependencies: { x: '1.0.0' } };
+  const manifest = { name: '@byok-sdk/client', version: '0.28.1', devDependencies: { x: '1.0.0', esbuild: '0.28.1' } };
   const lock = { lockfileVersion: 1, workspaces: { '': { name: 'workspace' }, 'packages/client': structuredClone(manifest) }, packages: { esbuild: ['esbuild@0.28.1'] } };
   write('package.json', { name: 'workspace' });
   write('packages/client/package.json', manifest); write('bun.lock', lock);
@@ -23,10 +23,13 @@ test('helper bundler addition retains its shape check while existing dependencie
   write('packages/client/package.json', manifest); write('bun.lock', lock);
   assert.ok(selectImpact(['packages/client/package.json', 'bun.lock'], context).families.includes('npm-release-pack'));
   manifest.devDependencies.esbuild = '0.28.2'; write('packages/client/package.json', manifest);
-  assert.throws(() => selectImpact(['packages/client/package.json'], context), /more than/);
+  assert.ok(selectImpact(['packages/client/package.json'], context).dirs.includes('packages/client'));
   assert.throws(() => selectImpact(['bun.lock'], context), /differs from manifest/);
   manifest.devDependencies.esbuild = '0.28.1'; manifest.devDependencies.x = '2.0.0'; write('packages/client/package.json', manifest);
   assert.ok(selectImpact(['packages/client/package.json'], context).dirs.includes('packages/client'));
+  manifest.devDependencies.newBundler = '1.0.0'; write('packages/client/package.json', manifest);
+  assert.throws(() => selectImpact(['packages/client/package.json'], context), /more than/);
+  delete manifest.devDependencies.newBundler; write('packages/client/package.json', manifest);
   lock.packages.esbuild = ['esbuild@0.28.2']; write('bun.lock', lock);
   assert.throws(() => selectImpact(['bun.lock'], context), /differs from manifest/);
 });

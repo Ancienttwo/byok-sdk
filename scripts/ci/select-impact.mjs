@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyReviewedContent, changedApiOwners } from './reviewed-content.mjs';
+import { documentationChecks } from './documentation-checks.mjs';
 
 // Reviewed workspace graph; the contract test detects manifest drift.
 export const workspaceGraph = {
@@ -440,38 +441,15 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
-    if (path === 'package.json' || path === 'bun.lock' || /^packages\/[^/]+\/package\.json$/.test(path)) {
+    if (path === 'package.json' || path === 'bun.lock' || /^(?:packages|examples)\/[^/]+\/package\.json$/.test(path)) {
       // A reviewed dependency move also runs the suites of the workspaces that declare it.
       for (const dir of verifyReviewedContent(path, context)) { dirs.add(dir); dependencyDirs.add(dir); }
       if (path === 'package.json') { scripts = true; if (dependencyDirs.size) families.add('npm-release-pack'); continue; }
       if (path === 'bun.lock') { families.add('npm-release-pack'); continue; }
       const dir = path.slice(0, -'/package.json'.length);
       if (!workspaceGraph[dir]) requireMapping(path);
+      if (dir.startsWith('examples/')) dirs.add(dir);
       families.add('npm-release-pack'); continue;
-    }
-    if (path === 'examples/bot-collaboration/package.json') {
-      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
-      dirs.add('examples/bot-collaboration'); continue;
-    }
-    // #1104: the private packaging example manifest, checked by its reviewed shape.
-    if (path === 'examples/packaging/package.json') {
-      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
-      dirs.add('examples/packaging'); continue;
-    }
-    // #884: the private K4 manifest, checked by its reviewed shape. Its suite and the suites of its dependents run.
-    if (path === 'examples/host-execution-core/package.json') {
-      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
-      dirs.add('examples/host-execution-core'); continue;
-    }
-    // #793 D2: the private hosted example manifest, checked by its reviewed shape.
-    if (path === 'examples/hosted-bot-collaboration/package.json') {
-      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
-      dirs.add('examples/hosted-bot-collaboration'); continue;
-    }
-    // #794 D3: the private Worker composition of H, checked by the same reviewed shape.
-    if (path === 'examples/hosted-bot-collaboration-worker/package.json') {
-      for (const dir of verifyReviewedContent(path, context)) { dependencyDirs.add(dir); families.add('npm-release-pack'); }
-      dirs.add('examples/hosted-bot-collaboration-worker'); continue;
     }
     // These root-level fixtures are executed by the relocated native SEA smoke.
     if (path === 'examples/packaging/native-assets-fixture.ts' || path === 'examples/packaging/native-assets-smoke.mjs') {
@@ -575,6 +553,11 @@ export function selectImpact(paths, context = {}) {
       scripts = true;
       for (const id of reviewedScripts[path].families ?? []) families.add(id);
       continue;
+    }
+    if (/^scripts\/docs\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) {
+      const checks = documentationChecks(context.cwd ?? process.cwd());
+      if (!checks.some(check => path === check.source || path === check.test)) requireMapping(path);
+      scripts = true; continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
     if (/^packages\/client\/vendor\/oar\/51b83c9\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {

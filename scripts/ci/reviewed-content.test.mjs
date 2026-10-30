@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { documentationTestsForPaths } from './documentation-checks.mjs';
 import { selectImpact, knownFamilies, reviewedScripts } from './select-impact.mjs';
 import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
@@ -693,14 +694,14 @@ test('#1106: the protocol manifest admits the agent-memory subpath exactly', t =
   }
 });
 
-test('#1106: the server manifest admits both execution-core subpaths together and the tsx edge, in manifest and lock', t => {
+test('#1106: the server manifest admits both execution-core subpaths together with existing dependencies, in manifest and lock', t => {
   const f = fixture(t);
   const path = 'packages/server/package.json';
   const root = { types: './dist/index.d.ts', import: './dist/index.js' };
   const manifest = { name: '@byok-sdk/server', version: '0.31.0', exports: { '.': root, './package.json': './package.json' },
-    devDependencies: { '@byok-sdk/conformance': 'workspace:*' } };
+    devDependencies: { '@byok-sdk/conformance': 'workspace:*', tsx: '^4.19.2' } };
   f.write(path, manifest);
-  f.lock.workspaces['packages/server'] = { name: manifest.name, version: manifest.version, devDependencies: { '@byok-sdk/conformance': 'workspace:*' } };
+  f.lock.workspaces['packages/server'] = { name: manifest.name, version: manifest.version, devDependencies: { '@byok-sdk/conformance': 'workspace:*', tsx: '^4.19.2' } };
   f.write('bun.lock', f.lock); rebase(f, 'server without execution-core');
   const core = { types: './dist/execution-core/index.d.ts', import: './dist/execution-core/index.js' };
   const canonical = { types: './dist/execution-core/canonical.d.ts', import: './dist/execution-core/canonical.js' };
@@ -713,7 +714,6 @@ test('#1106: the server manifest admits both execution-core subpaths together an
     [{ ...manifest, exports: { ...exports, './execution-core/canonical': undefined } }, 'one subpath without the other'],
     [{ ...manifest, exports: { ...exports, './execution-core': { ...core, import: './dist/other.js' } } }, 'a retargeted subpath'],
     [{ ...manifest, exports: { ...exports, './execution-core/ledger': core } }, 'a third subpath'],
-    [{ ...manifest, exports, devDependencies: { ...devDependencies, tsx: '^4.20.0' } }, 'another tsx range'],
     [{ ...manifest, exports, devDependencies, dependencies: { tsx: '^4.19.2' } }, 'a runtime tsx edge'],
   ]) {
     f.write(path, JSON.parse(JSON.stringify(candidate)));
@@ -803,6 +803,7 @@ test('keys model-route subpath admits the exact addition only', t => {
 test('setup documentation admits only exact additive generator commands and its test', t => {
   const f = fixture(t);
   f.write('scripts/docs/device-setup.test.mjs', '');
+  f.write('scripts/docs/device-setup.mjs', '');
   const scripts = {
     ...f.rootManifest.scripts,
     'docs:device-setup': 'node scripts/docs/device-setup.mjs --write',
@@ -821,9 +822,9 @@ test('setup documentation admits only exact additive generator commands and its 
 test('#1104: the packaging example admits only its bundle test, and the client only the ./packaging entry', t => {
   const f = fixture(t);
   const dir = 'examples/packaging';
-  const manifest = { name: '@byok-sdk/example-packaging', private: true, version: '0.0.1', scripts: { typecheck: 'tsc --noEmit' }, devDependencies: { esbuild: '^0.27.7' } };
+  const manifest = { name: '@byok-sdk/example-packaging', private: true, version: '0.0.1', scripts: { typecheck: 'tsc --noEmit' }, devDependencies: { esbuild: '^0.27.7', vitest: '^4.1.10' } };
   f.write(`${dir}/package.json`, manifest);
-  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, devDependencies: { esbuild: '^0.27.7' } };
+  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, devDependencies: { esbuild: '^0.27.7', vitest: '^4.1.10' } };
   f.write('bun.lock', f.lock);
   rebase(f, 'packaging example without a test');
   const tested = { ...manifest, scripts: { ...manifest.scripts, test: 'vitest run' }, devDependencies: { ...manifest.devDependencies, vitest: '^4.1.10' } };
@@ -833,7 +834,6 @@ test('#1104: the packaging example admits only its bundle test, and the client o
   assert.ok(plan.dirs.includes(dir));
   for (const [candidate, reason] of [
     [{ ...tested, scripts: { ...tested.scripts, test: 'vitest run --passWithNoTests' } }, 'another test command'],
-    [{ ...tested, devDependencies: { ...tested.devDependencies, vitest: '^5.0.0' } }, 'another runner range'],
     [{ ...tested, dependencies: { x: '1.0.0' } }, 'a dependency change'],
   ]) {
     f.write(`${dir}/package.json`, candidate);
@@ -853,4 +853,42 @@ test('#1104: the packaging example admits only its bundle test, and the client o
   assert.deepEqual(selectImpact([client], f).families, ['npm-release-pack']);
   f.write(client, { ...f.manifest, exports: { ...root, './packaging': { ...entry, import: './dist/other.js' } } });
   assert.throws(() => selectImpact([client], f), /more than/);
+});
+
+for (const name of ['capability-matrix', 'another-projection']) test(`manifest-owned documentation check: ${name}`, t => {
+  const f = fixture(t);
+  const source = `scripts/docs/${name}.mjs`, drift = `scripts/docs/${name}.test.mjs`;
+  f.write(source, ''); f.write(drift, '');
+  const scripts = { ...f.rootManifest.scripts,
+    [`docs:${name}`]: `node ${source} --write`, [`check:${name}`]: `node ${source}`,
+    'test:scripts': `${f.rootManifest.scripts['test:scripts']} ${drift}` };
+  f.write('package.json', { ...f.rootManifest, scripts });
+  assert.equal(selectImpact(['package.json', source, drift], f).reason, 'root-ci-scripts');
+  for (const input of ['packages/client/package.json', 'packages/client/src/adapters/pi/pi-capabilities.ts',
+    'packages/client/src/adapters/claude/claude-version.ts', 'docs/adapter-capabilities.md', source, drift]) {
+    assert.deepEqual(documentationTestsForPaths([input], f.cwd), [drift]);
+  }
+  for (const bad of [
+    { ...scripts, [`docs:${name}`]: `node ${source} --write ; echo bypass` },
+    { ...scripts, [`check:${name}`]: undefined },
+    { ...scripts, 'test:scripts': f.rootManifest.scripts['test:scripts'] },
+  ]) {
+    f.write('package.json', { scripts: bad });
+    assert.throws(() => selectImpact(['package.json', source], f), /Documentation check/);
+  }
+  f.write('package.json', { scripts });
+  assert.throws(() => selectImpact(['scripts/docs/unregistered.mjs'], f), /unmapped/);
+});
+
+test('generic example manifest upgrades include the basic workspace', t => {
+  const f = fixture(t), path = 'examples/basic/package.json';
+  const manifest = { name: '@byok-sdk/example-basic', private: true, version: '0.0.1', devDependencies: { tooling: '1.0.0' } };
+  f.write(path, manifest); rebase(f, 'existing basic dependency');
+  f.write(path, { ...manifest, devDependencies: { tooling: '2.0.0' } });
+  const plan = selectImpact([path], f);
+  assert.ok(plan.dirs.includes('examples/basic'));
+  assert.ok(plan.families.includes('npm-release-pack'));
+  for (const bad of [{ ...manifest, private: false }, { ...manifest, scripts: { test: 'echo bypass' } }, { ...manifest, dependencies: { newEdge: '1.0.0' } }]) {
+    f.write(path, bad); assert.throws(() => selectImpact([path], f));
+  }
 });
