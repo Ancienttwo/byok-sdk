@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "b95779da23d15319b7efa6d5c50428bf59f5d371b3dd9d1a3ee39d1f175cb2f8"
+    "snapshotSha256": "07292e219f2c5dfe69ed473d220c9fe17aa3ba8873262985f4043210a1601ff4"
   },
   "configFields": {
     "status": "tracked",
@@ -1050,6 +1050,11 @@
       "entry": "agent-memory-contract-in-protocol"
     },
     {
+      "item": "export:@byok-sdk/client#AgentServiceDefinitionInput",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#ApprovalKind",
       "change": "added",
       "entry": "local-tool-approval-host-only"
@@ -1085,6 +1090,11 @@
       "entry": "runtime-environment-policy"
     },
     {
+      "item": "export:@byok-sdk/client#CreateServiceLifecycleOptions",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#DAEMON_CONFIG_SCHEMA_VERSION",
       "change": "added",
       "entry": "daemon-config-schema"
@@ -1093,6 +1103,11 @@
       "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
       "change": "changed",
       "entry": "device-store-pairing-binding"
+    },
+    {
+      "item": "export:@byok-sdk/client#DAEMON_LOG_LIMITS",
+      "change": "added",
+      "entry": "service-units-library-api"
     },
     {
       "item": "export:@byok-sdk/client#Daemon",
@@ -1160,6 +1175,16 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonLog",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonLogOptions",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonMemoryHelperResolution",
       "change": "added",
       "entry": "daemon-config-schema"
@@ -1208,6 +1233,16 @@
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
       "change": "changed",
       "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#EXIT_CODE_CONTRACT",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ExitCode",
+      "change": "added",
+      "entry": "service-units-library-api"
     },
     {
       "item": "export:@byok-sdk/client#ExpiringClassId",
@@ -1345,6 +1380,11 @@
       "entry": "pi-session-retention-lifecycle"
     },
     {
+      "item": "export:@byok-sdk/client#SERVICE_REDIRECT_LIMITS",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#SdkDistributionBin",
       "change": "added",
       "entry": "single-file-packaging"
@@ -1360,6 +1400,11 @@
       "entry": "single-file-packaging"
     },
     {
+      "item": "export:@byok-sdk/client#ServiceDefinition",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#ServiceEnvironmentStatus",
       "change": "changed",
       "entry": "runtime-environment-policy"
@@ -1368,6 +1413,66 @@
       "item": "export:@byok-sdk/client#ServiceEnvironmentUnavailableCode",
       "change": "changed",
       "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceExitDisposition",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallOptions",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceLifecycle",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceLifecycleOwnerInput",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceLogReport",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceRepairResult",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceStatusResult",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitError",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitErrorCode",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitInspection",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUnitState",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#agentServiceDefinition",
+      "change": "added",
+      "entry": "service-units-library-api"
     },
     {
       "item": "export:@byok-sdk/client#buildRuntimeEnvironment",
@@ -1385,9 +1490,49 @@
       "entry": "daemon-config-schema"
     },
     {
+      "item": "export:@byok-sdk/client#claimServiceLifecycleOwner",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#generateLaunchdPlist",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#generateServiceLauncher",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#generateSystemdUnit",
+      "change": "changed",
+      "entry": "service-units-library-api"
+    },
+    {
       "item": "export:@byok-sdk/client#inspectDaemonStores",
       "change": "added",
       "entry": "store-compatibility-precheck"
+    },
+    {
+      "item": "export:@byok-sdk/client#inspectServiceLogs",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#openDaemonLog",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#readServiceLifecycleOwner",
+      "change": "added",
+      "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#releaseServiceLifecycleOwner",
+      "change": "added",
+      "entry": "service-units-library-api"
     },
     {
       "item": "export:@byok-sdk/client#resetDeviceCursor",
@@ -1418,6 +1563,11 @@
       "item": "export:@byok-sdk/client#sdkPackagingFormats",
       "change": "added",
       "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#serviceExitDisposition",
+      "change": "added",
+      "entry": "service-units-library-api"
     },
     {
       "item": "export:@byok-sdk/client#validateDaemonConfig",

@@ -10970,6 +10970,14 @@ export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions,
 export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
+export { agentServiceDefinition } from './lifecycle/agent-service';
+export type { AgentServiceDefinitionInput } from './lifecycle/agent-service';
+export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit';
+export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit';
+export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
+export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes';
+export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log';
+export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log';
 export { applyLoginShellEnvironment } from './lifecycle/service-environment';
 export { serviceEnvironmentStatus } from './login-shell-environment';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
