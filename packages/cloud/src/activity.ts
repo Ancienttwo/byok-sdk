@@ -13,7 +13,7 @@ const SourceEnvelopeIdSchema = z.string().max(200).regex(/\S/);
 const source = { taskId: ActivityTaskIdSchema, sourceEnvelopeId: SourceEnvelopeIdSchema };
 export const ActivityAppendRequestSchema = z.object({
   ...source, batchSeq: z.number().int().nonnegative(),
-  events: z.array(AgentEventOrUnknownSchema).min(1), dropped: z.number().int().nonnegative(),
+  events: z.array(AgentEventOrUnknownSchema), dropped: z.number().int().nonnegative(),
 });
 const SealedProgressSchema = z.object({
   ...source, batchSeq: z.number().int().nonnegative(),
@@ -28,6 +28,8 @@ export const TimelineEventSchema = z.object({
   sourceEnvelopeId: SourceEnvelopeIdSchema,
   batchSeq: z.number().int().nonnegative(),
   eventIndex: z.number().int().nonnegative(),
+  revision: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
   /**
    * The producer-declared loss attached to this source batch. It travels with
    * every retained event so a replay includes it in the canonical batch
@@ -140,7 +142,7 @@ export async function activitySourceHash(input: ActivityAppendInput): Promise<st
 export function projectTimelineEvents(entry: Extract<ActivityTailEntry, { kind: 'progress' }>): readonly TimelineEvent[] {
   return entry.events.map((event, eventIndex) => ({
     taskId: entry.taskId, sourceEnvelopeId: entry.sourceEnvelopeId, batchSeq: entry.batchSeq,
-    eventIndex, sourceDropped: entry.sourceDropped, receivedAt: entry.receivedAt, event,
+    revision: entry.revision, offset: eventIndex, eventIndex, sourceDropped: entry.sourceDropped, receivedAt: entry.receivedAt, event,
   }));
 }
 export function activityTailKey(tenant: TenantId, taskId: string): string { return tenantKey(tenant, taskId); }

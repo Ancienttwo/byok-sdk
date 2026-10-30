@@ -27,6 +27,8 @@ function timelineEvent(
     sourceEnvelopeId: 'envelope-1',
     batchSeq: 1,
     eventIndex: 0,
+    revision: 1,
+    offset: 0,
     receivedAt: NOW,
     event,
     ...overrides,
@@ -382,8 +384,8 @@ describe('live activity host security boundary', () => {
       entries: activityTail([
         timelineEvent({ type: 'progress', text: 'start' }, { batchSeq: 0 }),
         timelineEvent({ type: 'future_event', privateValue: '[redacted]' }, { batchSeq: 2, sourceEnvelopeId: 'envelope-2' }),
-      ]).entries,
-      cursor: { ...activityTail([]).cursor, revision: 2 },
+      ]).entries.map((entry, index) => ({ ...entry, revision: index * 2 + 1 })),
+      cursor: { ...activityTail([]).cursor, revision: 3 },
       dropped: 3,
     };
     const response = await createLiveActivityHost(

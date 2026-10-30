@@ -41,7 +41,7 @@ const failure = { name: 'LiveActivityHostError', code: 'redaction_invalid' };
 
 type Mutation<T> = { name: string; event: T extends TimelineEvent ? TimelineEvent['event'] : ApprovalObservation['event']; mutate: (entry: T) => void };
 const activityCases: Mutation<TimelineEvent>[] = [
-  ...Object.entries({ taskId: 'task-2', sourceEnvelopeId: 'env-2', batchSeq: 2, eventIndex: 1, receivedAt: later })
+  ...Object.entries({ taskId: 'task-2', sourceEnvelopeId: 'env-2', batchSeq: 2, eventIndex: 1, revision: 2, offset: 1, receivedAt: later })
     .map(([field, value]) => ({ name: field, event: result, mutate: (entry: TimelineEvent) => { Object.assign(entry, { [field]: value }); } })),
   { name: 'event type', event: result, mutate: (entry) => { Object.assign(entry, { event: { type: 'progress', text: 'changed' } }); } },
   ...([use, result] as const).flatMap((event) => [

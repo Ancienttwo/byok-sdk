@@ -107,11 +107,18 @@ export class InMemoryActivityStore implements ActivityStore {
 
   async read(tenant: TenantId, taskId: string, options: ActivityReadOptions = {}): Promise<ActivityTail | undefined> {
     const after = options.after;
-    if (after !== undefined && (after === null || typeof after !== 'object' || after.version !== 1)) {
-      throw new ByokCloudError('activity_history_gap', 'Activity cursor predates this log generation.');
-    }
-    if (after !== undefined && (after.tenantId !== tenant || after.taskId !== taskId || !Number.isSafeInteger(after.revision) || after.revision < 0 || typeof after.generation !== 'string')) {
-      throw new ByokCloudError('activity_cursor_invalid', 'Invalid activity cursor.');
+    if (after !== undefined) {
+      const cursor = after as unknown;
+      if (cursor !== null && typeof cursor === 'object' && !('version' in cursor)
+        && 'batchSeq' in cursor && Number.isSafeInteger(cursor.batchSeq) && Number(cursor.batchSeq) >= 0
+        && 'eventIndex' in cursor && Number.isSafeInteger(cursor.eventIndex) && Number(cursor.eventIndex) >= 0) {
+        throw new ByokCloudError('activity_history_gap', 'Activity cursor predates this log generation.');
+      }
+      if (cursor === null || typeof cursor !== 'object' || after.version !== 1
+        || after.tenantId !== tenant || after.taskId !== taskId || !Number.isSafeInteger(after.revision)
+        || after.revision < 0 || typeof after.generation !== 'string' || after.generation.length === 0) {
+        throw new ByokCloudError('activity_cursor_invalid', 'Invalid activity cursor.');
+      }
     }
     const log = this.#logs.get(activityTailKey(tenant, taskId));
     if (log === undefined || log.removed) {

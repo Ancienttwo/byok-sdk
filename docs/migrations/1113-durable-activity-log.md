@@ -30,10 +30,10 @@ identity/order/correlation checks remain in force.
 `readActivity(tenant, taskId, { after })` resumes by the store-assigned revision.
 Pass the complete returned cursor, including version, tenant/task binding and
 generation. The old `{ batchSeq, eventIndex }` cursor is not a log cursor.
-Source batch sequence and projected event index remain display provenance.
+TimelineEvent and TimelineOrderKey use store `revision` plus within-entry `offset` for ordering. Source `batchSeq` and `eventIndex` remain provenance; callers constructing projected events must supply the new ordering fields. Empty admitted progress batches retain an envelope row and replay identity even though their event projection is empty.
 Readers get `activity_history_gap` for legacy/generation-mismatched cursors,
 positions below the retained floor, or expired/removed history; invalid
-bindings/future revisions get `activity_cursor_invalid`. A fresh read without
+shapes/types, bindings and future revisions get `activity_cursor_invalid`. A fresh read without
 `after` is an explicit choice to start from the retained history, not an
 implicit recovery of missing entries.
 

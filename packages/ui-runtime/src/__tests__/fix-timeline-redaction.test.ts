@@ -4,7 +4,7 @@ import { createTimelineState, foldTimelineEvent, projectTimeline, replayTimeline
 
 function observation(batchSeq: number, eventIndex: number, event: TimelineEvent['event']): TimelineEvent {
   return {
-    taskId: 'task-1', sourceEnvelopeId: `env-${batchSeq}`, batchSeq, eventIndex,
+    taskId: 'task-1', sourceEnvelopeId: `env-${batchSeq}`, batchSeq, eventIndex, revision: batchSeq + 1, offset: eventIndex,
     receivedAt: '2026-08-16T12:00:00.000Z', event,
   };
 }
@@ -15,7 +15,7 @@ function tail(events: readonly TimelineEvent[]): ActivityTail {
   const entries = [...groups.values()].map((group, index) => ({
     kind: 'progress' as const, taskId: 'task-1', sourceEnvelopeId: group[0]!.sourceEnvelopeId,
     batchSeq: group[0]!.batchSeq, sourceDropped: group[0]!.sourceDropped ?? 0,
-    revision: index + 1, receivedAt: group[0]!.receivedAt,
+    revision: group[0]!.revision, receivedAt: group[0]!.receivedAt,
     events: [...group].sort((a, b) => a.eventIndex - b.eventIndex).map(event => event.event),
   }));
   return {
@@ -27,7 +27,7 @@ function tail(events: readonly TimelineEvent[]): ActivityTail {
 }
 
 const key = (event: TimelineEvent) => ({ sourceEnvelopeId: event.sourceEnvelopeId, eventIndex: event.eventIndex });
-const order = (event: TimelineEvent) => ({ taskId: event.taskId, batchSeq: event.batchSeq, eventIndex: event.eventIndex });
+const order = (event: TimelineEvent) => ({ taskId: event.taskId, revision: event.revision, offset: event.offset });
 
 const toolUse = { type: 'tool_use', tool: 'shell', toolCallId: 'call-1', input: 'pwd' } as const;
 const toolResult = { type: 'tool_result', tool: 'shell', toolCallId: 'call-1', output: 'ok', isError: false } as const;

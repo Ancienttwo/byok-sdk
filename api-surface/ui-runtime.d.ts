@@ -77,8 +77,8 @@ export interface TimelineEventKey {
 }
 export interface TimelineOrderKey {
     readonly taskId: string;
-    readonly batchSeq: number;
-    readonly eventIndex: number;
+    readonly revision: number;
+    readonly offset: number;
 }
 export interface TimelineMetadata {
     readonly dropped: number;

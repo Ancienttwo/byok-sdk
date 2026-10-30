@@ -87,10 +87,10 @@ export function validateActivityEvents(
       'Activity dropped must be a non-negative integer.',
     );
   }
-  if (events.length === 0 || events.length > bounds.maxEvents) {
+  if (events.length > bounds.maxEvents) {
     throw new ByokCloudError(
       'activity_batch_too_large',
-      `Activity batch must contain 1..${bounds.maxEvents} events.`,
+      `Activity batch must contain 0..${bounds.maxEvents} events.`,
     );
   }
   const encoded = JSON.stringify(events);

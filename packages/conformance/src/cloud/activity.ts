@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { ActivityStore, ActivityAppendInput } from '@byok-sdk/cloud';
+import { createByokCloud, createHmacTokenSigner, capabilityDeclarationForPorts, type ActivityStore, type ActivityAppendInput } from '@byok-sdk/cloud';
+import { createEnvelope } from '@byok-sdk/protocol';
+import { createHarness, grantAgentHome, offerPayload, TEST_AGENT_REF } from '../../../cloud/src/__tests__/support/harness';
 import { TENANT_A, sealedOutputMember } from './fixtures';
 
 export interface ActivityCompositionHandle {
@@ -18,6 +20,43 @@ function batch(id: number, extra: Partial<ActivityAppendInput> = {}): ActivityAp
 
 export function runActivityConformance(name: string, factory: ActivityCompositionFactory): void {
   describe(`activity log conformance [${name}]`, () => {
+    it.each([null, 7, {}])('malformed cursor %j is invalid rather than a history gap', async after => {
+      await withActivityComposition(factory, async ({ store }) => {
+        await store.append(TENANT_A, batch(1));
+        await expect(store.read(TENANT_A, 'task', { after: after as never })).rejects.toMatchObject({ code: 'activity_cursor_invalid' });
+      });
+    });
+    it('an admitted empty progress envelope retains its log row and identity', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        // Exercise the same authenticated HTTP admission with each activity adapter.
+        const tokenSigner = createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(32)), { now: () => new Date() });
+        const base = createHarness({ tokenSigner });
+        const cloud = createByokCloud({
+          core: base.core, cloud: { ...base.stores, activity: store }, clock: base.clock,
+          crypto: base.crypto, tokenSigner, mailboxWake: base.mailboxWake,
+          proofReceiptRetention: base.proofReceiptRetention,
+          capabilities: capabilityDeclarationForPorts({ blobContentProxy: base.blobContentProxy }),
+          blobContentProxy: base.blobContentProxy,
+        });
+        const harness = { ...base, cloud, async json(path: string, init: RequestInit) {
+          const response = await cloud.fetch(new Request(`http://cloud.test${path}`, init));
+          return { status: response.status, body: await response.json() };
+        } };
+        const device = await harness.pairDevice(TENANT_A);
+        await grantAgentHome(harness, TENANT_A, device.deviceId);
+        const taskId = 'empty-progress';
+        await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: offerPayload('work') });
+        const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+        const progress = createEnvelope('task.progress', { seq: 1, events: [] }, { taskId });
+        const result = await harness.json('/byok/messages', { method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [claim, progress] }) });
+        expect(result).toMatchObject({ status: 200, body: { accepted: 2 } });
+        const tail = await harness.cloud.readActivity(TENANT_A, taskId);
+        expect(tail).toMatchObject({ entries: [{ sourceEnvelopeId: progress.id, kind: 'progress', events: [] }] });
+        await harness.json('/byok/messages', { method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [progress] }) });
+        expect(await harness.cloud.readActivity(TENANT_A, taskId)).toEqual(tail);
+      });
+    });
+
     it('orders envelopes by revision, preserves batch order metadata and resumes after the cursor', async () => {
       await withActivityComposition(factory, async ({ store }) => {
         const first = await store.append(TENANT_A, batch(2));

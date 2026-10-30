@@ -35,7 +35,7 @@ interface ToolAccumulator {
 const DEFAULT_METADATA: TimelineMetadata = Object.freeze({ dropped: 0 });
 
 function compareEvents(left: TimelineEvent, right: TimelineEvent): number {
-  return left.batchSeq - right.batchSeq || left.eventIndex - right.eventIndex;
+  return left.revision - right.revision || left.offset - right.offset;
 }
 
 function fail(code: ConstructorParameters<typeof TimelineFoldError>[0], message: string, cause?: unknown): never {
@@ -133,7 +133,7 @@ function eventKey(event: TimelineEvent): TimelineEventKey {
 }
 
 function orderKey(event: TimelineEvent): TimelineOrderKey {
-  return Object.freeze({ taskId: event.taskId, batchSeq: event.batchSeq, eventIndex: event.eventIndex });
+  return Object.freeze({ taskId: event.taskId, revision: event.revision, offset: event.offset });
 }
 
 function sameIdentity(left: TimelineEvent, right: TimelineEvent): boolean {
@@ -141,12 +141,12 @@ function sameIdentity(left: TimelineEvent, right: TimelineEvent): boolean {
 }
 
 function sameOrder(left: TimelineEvent, right: TimelineEvent): boolean {
-  return left.batchSeq === right.batchSeq && left.eventIndex === right.eventIndex;
+  return left.revision === right.revision && left.offset === right.offset;
 }
 
 function contiguous(left: TimelineEvent, right: TimelineEvent): boolean {
-  return (left.batchSeq === right.batchSeq && right.eventIndex === left.eventIndex + 1)
-    || (right.batchSeq === left.batchSeq + 1 && right.eventIndex === 0);
+  return (left.revision === right.revision && right.offset === left.offset + 1)
+    || (right.revision === left.revision + 1 && right.offset === 0);
 }
 
 function gapsFor(events: readonly TimelineEvent[]): readonly TimelineGap[] {
@@ -154,30 +154,30 @@ function gapsFor(events: readonly TimelineEvent[]): readonly TimelineGap[] {
   for (let index = 1; index < events.length; index += 1) {
     const previous = events[index - 1]!;
     const current = events[index]!;
-    if (current.batchSeq === previous.batchSeq && current.eventIndex > previous.eventIndex + 1) {
+    if (current.revision === previous.revision && current.offset > previous.offset + 1) {
       gaps.push(Object.freeze({
         kind: 'event',
         after: orderKey(previous),
         before: orderKey(current),
-        missing: current.eventIndex - previous.eventIndex - 1,
+        missing: current.offset - previous.offset - 1,
       }));
       continue;
     }
-    if (current.batchSeq > previous.batchSeq) {
-      if (current.batchSeq > previous.batchSeq + 1) {
+    if (current.revision > previous.revision) {
+      if (current.revision > previous.revision + 1) {
         gaps.push(Object.freeze({
           kind: 'batch',
           after: orderKey(previous),
           before: orderKey(current),
-          missing: current.batchSeq - previous.batchSeq - 1,
+          missing: current.revision - previous.revision - 1,
         }));
       }
-      if (current.eventIndex > 0) {
+      if (current.offset > 0) {
         gaps.push(Object.freeze({
           kind: 'event',
           after: orderKey(previous),
           before: orderKey(current),
-          missing: current.eventIndex,
+          missing: current.offset,
         }));
       }
     }
