@@ -148,7 +148,7 @@ function admitHostedLock(before, after, cwd, example) {
   delete after.packages[example.name];
 }
 
-/** Returns the workspaces whose suites must qualify a reviewed dependency move. */
+/** Returns qualifying workspaces and any verified lock-format full-matrix reason. */
 export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Content-sensitive impact requires exact CI_BASE');
   const hosted = PRIVATE_HOSTED.find(example => path === `${example.dir}/package.json`);
@@ -156,7 +156,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
   if (hosted && !existed) {
     // A new file has no base content, so the reviewed shape is the whole check.
     verifyHostedManifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), cwd, hosted);
-    return [];
+    return { dirs: [] };
   }
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const afterText = readFileSync(resolve(cwd, path), 'utf8');
@@ -173,7 +173,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       && addition.trimEnd().split('\n').every(line => !before.split('\n').includes(line)))) {
       throw new Error('Reviewed CI mapping required: only the reviewed helper LF attributes may be added');
     }
-    return [];
+    return { dirs: [] };
   }
   if (path === '.node-version') {
     // #702: every CI and release setup-node step reads this pin. Admit only one
@@ -181,7 +181,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\n?$/.test(afterText)) {
       throw new Error('Reviewed CI mapping required: .node-version must hold one exact X.Y.Z version');
     }
-    return [];
+    return { dirs: [] };
   }
   const parse = path === 'bun.lock' ? parseBunLock : JSON.parse;
   const qualify = [];
@@ -337,7 +337,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     delete before.version; delete after.version;
   }
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);
-  return qualify;
+  return { dirs: qualify };
 }
 
 /** A `bin:<name>` entry belongs to the one workspace package whose manifest declares that bin. */

@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { selectImpact, knownFamilies } from './select-impact.mjs';
-import { planCi, needsBuild } from './plan-ci.mjs';
+import { planCi, needsBuild, assertTargetedScope } from './plan-ci.mjs';
+import { LOCKFILE_VERSION_REASON } from './dependency-impact.mjs';
+import { requireCiPlan } from './require-ci-plan.mjs';
 
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'dependency-impact-'));
@@ -75,4 +77,73 @@ test('an orphan lock row is rejected even beside a valid transitive upgrade', t 
   f.lock.packages.nested[0] = 'nested@1.0.1';
   f.lock.packages.orphan = ['orphan@1.0.0', '', {}]; f.write('bun.lock', f.lock);
   assert.throws(() => selectImpact(['bun.lock'], f), /no declaring workspace/);
+});
+
+
+test('lockfileVersion transition selects every family but stays targeted and cannot publish release artifacts', t => {
+  const f = fixture(t);
+  f.lock.lockfileVersion = 2; f.write('bun.lock', f.lock);
+  const sha = 'a'.repeat(40);
+  const plan = planCi({ ...f, event: 'pull_request', sha, paths: ['bun.lock'] });
+  assert.equal(plan.mode, 'targeted');
+  assert.equal(plan.reason, LOCKFILE_VERSION_REASON);
+  assert.deepEqual(plan.families, [...knownFamilies].sort());
+  assert.ok(plan.dirs.includes('packages/client') && plan.dirs.includes('packages/ui-runtime'));
+  assert.ok(needsBuild(plan));
+  assert.doesNotThrow(() => assertTargetedScope(plan));
+  const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, { result: 'success' }]));
+  assert.doesNotThrow(() => requireCiPlan(needs, plan, 'pull_request', sha, f.base, f.cwd));
+  for (const id of knownFamilies) for (const result of ['failure', 'skipped', 'cancelled']) {
+    assert.throws(() => requireCiPlan({ ...needs, [id]: { result } }, plan, 'pull_request', sha, f.base, f.cwd));
+  }
+  execFileSync('git', ['add', 'bun.lock'], { cwd: f.cwd });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'format transition'], { cwd: f.cwd, stdio: 'pipe' });
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  const output = join(f.cwd, 'github-output');
+  const cli = execFileSync(process.execPath, [new URL('./plan-ci.mjs', import.meta.url).pathname], {
+    cwd: f.cwd, encoding: 'utf8', env: { ...process.env, CI_EVENT: 'push', CI_BASE: f.base,
+      GITHUB_SHA: head, GITHUB_OUTPUT: output, CI_RELEASE_SHA: head },
+  });
+  assert.equal(JSON.parse(cli).mode, 'targeted');
+  assert.match(readFileSync(output, 'utf8'), /^release=false$/m);
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const upload = workflow.split('- name: Retain the accepted release tarballs for the publish driver')[1].split('retention-days: 30')[0];
+  assert.match(upload, /if: matrix.os == 'ubuntu-latest' && needs.select.outputs.release == 'true'/);
+  assert.match(upload, /uses: actions\/upload-artifact@/);
+  // The aggregate recomputes from the lockfiles; a forged reason/family list
+  // cannot turn an unchanged lock into full-matrix authorization.
+  f.lock.lockfileVersion = 1; f.write('bun.lock', f.lock);
+  assert.throws(() => requireCiPlan(needs, plan, 'pull_request', sha, f.base, f.cwd), /selection mismatch/);
+});
+
+test('other metadata and malformed format versions remain refused, including beside a valid transition', t => {
+  const f = fixture(t);
+  for (const lockfileVersion of [1, 2]) {
+    f.write('bun.lock', { ...f.lock, lockfileVersion, unrelatedMetadata: true });
+    assert.throws(() => selectImpact(['bun.lock'], f), /more than dependency fields/);
+    f.write('bun.lock', { ...f.lock, lockfileVersion, fullMatrixReason: LOCKFILE_VERSION_REASON });
+    assert.throws(() => selectImpact(['bun.lock'], f), /more than dependency fields/);
+  }
+  for (const lockfileVersion of [undefined, null, '2', 0, -1, 1.5]) {
+    f.write('bun.lock', { ...f.lock, lockfileVersion });
+    assert.throws(() => selectImpact(['bun.lock'], f), /positive integer/);
+  }
+});
+
+test('the targeted full-matrix guard admits exactly the verified format reason', () => {
+  for (const reason of [undefined, 'impacted', 'nightly', 'release', 'lockfile-version-change-extra']) {
+    assert.throws(() => assertTargetedScope({ families: [...knownFamilies], reason }), /Only a verified lockfileVersion/);
+  }
+  assert.doesNotThrow(() => assertTargetedScope({ families: ['npm-release-pack'], reason: 'impacted' }));
+});
+
+test('unchanged format and dependency-only changes retain their existing scope regardless of caller flags', t => {
+  const f = fixture(t);
+  f.lock.packages.unrelated[0] = 'unrelated@1.0.1'; f.write('bun.lock', f.lock);
+  const plan = planCi({ ...f, event: 'push', sha: 'a'.repeat(40), paths: ['bun.lock'],
+    reason: LOCKFILE_VERSION_REASON, families: [...knownFamilies], release: true });
+  assert.equal(plan.reason, 'impacted');
+  assert.equal(plan.mode, 'targeted');
+  assert.deepEqual(plan.dirs, ['examples/live-activity-host', 'packages/ui-runtime']);
+  assert.deepEqual(plan.families, ['npm-release-pack']);
 });

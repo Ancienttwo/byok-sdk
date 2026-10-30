@@ -2,6 +2,8 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
+export const LOCKFILE_VERSION_REASON = 'lockfile-version-change';
+
 const fields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const fail = message => { throw new Error(`Reviewed CI mapping required: ${message}`); };
@@ -54,7 +56,11 @@ function packageName(row) {
 export function dependencyLockImpact(before, after, { cwd }) {
   if (![before, after].every(lock => plain(lock.workspaces) && plain(lock.packages))) fail('invalid Bun lock shape');
   if (!isDeepStrictEqual(Object.keys(before.workspaces).sort(), Object.keys(after.workspaces).sort())) fail('workspace topology changed');
-  const roots = new Set();
+  const versionChanged = !isDeepStrictEqual(before.lockfileVersion, after.lockfileVersion);
+  if (versionChanged && ![before.lockfileVersion, after.lockfileVersion].every(value => Number.isSafeInteger(value) && value > 0)) {
+    fail('lockfileVersion transition requires positive integer versions');
+  }
+  const roots = new Set(versionChanged ? [''] : []);
   for (const [dir, record] of Object.entries(after.workspaces)) {
     if (dir && !/^(packages|examples)\/[^/]+$/.test(dir)) fail('invalid workspace path');
     const manifest = read(cwd, dir);
@@ -114,6 +120,8 @@ export function dependencyLockImpact(before, after, { cwd }) {
   if (!isDeepStrictEqual(before.overrides, after.overrides)) roots.add('');
   if (!isDeepStrictEqual(after.overrides ?? {}, read(cwd, '').overrides ?? {})) fail('lock overrides differ from root manifest');
   delete before.overrides; delete after.overrides;
+  if (versionChanged) { delete before.lockfileVersion; delete after.lockfileVersion; }
   if (!isDeepStrictEqual(before, after)) fail('lock changes more than dependency fields');
-  return [...(roots.has('') ? workspaces(cwd) : roots)].sort();
+  return { dirs: [...(roots.has('') ? workspaces(cwd) : roots)].sort(),
+    fullMatrixReason: versionChanged ? LOCKFILE_VERSION_REASON : undefined };
 }

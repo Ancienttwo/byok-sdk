@@ -2,8 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { knownFamilies, scriptChecksForPaths, selectImpact } from './select-impact.mjs';
+import { LOCKFILE_VERSION_REASON } from './dependency-impact.mjs';
 
-// Full runs are either nightly on main or exact-SHA approved release validation.
+// Release validation remains exact-SHA dispatch only; full test coverage also
+// runs nightly or for a verified lockfile format transition.
 export const isReleaseRef = ref => ref === 'refs/heads/main' || /^refs\/heads\/release\/[A-Za-z0-9._-]+$/.test(ref ?? '');
 
 export function planCi({ event, sha, approvedSha, ref, paths, base, cwd }) {
@@ -19,8 +21,16 @@ export function planCi({ event, sha, approvedSha, ref, paths, base, cwd }) {
   }
   if (!['pull_request', 'push'].includes(event)) throw new Error('Unsupported CI event');
   const plan = { ...selectImpact(paths, { base, cwd }), base, mode: 'targeted', sha };
-  if (plan.families.some(id => id === 'build-test' || id === 'macos-client')) throw new Error('A targeted plan never selects the complete test suite');
+  assertTargetedScope(plan);
   return plan;
+}
+
+// Called on selector output, never on a PR-provided scope/reason flag.
+export function assertTargetedScope(plan) {
+  if (plan.families.some(id => id === 'build-test' || id === 'macos-client')
+    && plan.reason !== LOCKFILE_VERSION_REASON) {
+    throw new Error('Only a verified lockfileVersion transition may select a targeted full matrix');
+  }
 }
 
 // The targeted job installs and builds for a selected workspace, a manifest or
