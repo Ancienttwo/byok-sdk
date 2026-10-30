@@ -34,6 +34,7 @@
 --   deploy/sql/0030_task_attempt_phase_times.sql (nullable write-once attempt phase instants; no new table or key)
 --   deploy/sql/0031_mailbox_dead_letter_retention.sql (dead-letter retention column with a default; pending-only tenant-leading partial index replaces 0023's; no new table or key)
 --   deploy/sql/0032_terminal_task_archive.sql (terminal-task archive window column, backfilled to cover each stored policy's mailbox windows; nullable task archive instants; two tenant-leading partial task indexes; no new table or key)
+--   deploy/sql/0034_activity_log.sql (tenant-first durable activity head, envelope rows and source identity fences; replaces activity_tail)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -66,6 +67,37 @@
 --
 -- Scope: every ordinary table in `current_schema()` except the migration
 -- runner's own ledger, which is infrastructure rather than port state.
+
+-- 0034: each durable activity identity is scoped by tenant and task.
+DO $$
+DECLARE
+  required record;
+  actual_columns text[];
+BEGIN
+  FOR required IN
+    SELECT * FROM (VALUES
+      ('activity_log_head', 'p', ARRAY['tenant_id', 'task_id']::text[]),
+      ('activity_log_entry', 'p', ARRAY['tenant_id', 'task_id', 'revision']::text[]),
+      ('activity_log_entry', 'u', ARRAY['tenant_id', 'task_id', 'source_envelope_id']::text[]),
+      ('activity_log_entry', 'f', ARRAY['tenant_id', 'task_id']::text[])
+    ) AS keys(table_name, constraint_type, expected_columns)
+  LOOP
+    SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+      INTO actual_columns
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+     WHERE n.nspname = current_schema()
+       AND t.relname = required.table_name
+       AND c.contype::text = required.constraint_type;
+    IF actual_columns IS DISTINCT FROM required.expected_columns THEN
+      RAISE EXCEPTION '0034 activity log %.% key must be %, found %',
+        required.table_name, required.constraint_type, required.expected_columns, actual_columns;
+    END IF;
+  END LOOP;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- 0. The schema is actually migrated
