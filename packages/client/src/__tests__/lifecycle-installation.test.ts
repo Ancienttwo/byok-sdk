@@ -192,15 +192,21 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await expect(installation.rollback()).rejects.toMatchObject({ code: 'no_rollback' });
   });
 
-  it('a failed upgrade keeps the earlier upgrade rollbackable', async () => {
+  it('a failed upgrade keeps the earlier upgrade rollbackable: rollback then restores the version before it', async () => {
     await installation.install(await payload('1.0.0'));
     await installation.upgrade(await payload('2.0.0'));
+    await fs.writeFile(db, 'v2 data');
     unhealthy.add('3.0.0');
+    onHealth = async (version) => { if (version === '3.0.0') await fs.writeFile(db, 'v3 data'); };
     await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
     expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', from: '2.0.0', to: '3.0.0', previous: '1.0.0' });
     expect([await pointer('current'), await pointer('previous')]).toEqual(['2.0.0', '1.0.0']);
+    expect(await fs.readFile(db, 'utf8')).toBe('v2 data');
+    // The rollback goes to 1.0.0 with the snapshot taken when 2.0.0 was switched to.
     expect(await installation.rollback()).toMatchObject({ state: 'rolled-back', from: '1.0.0', to: '2.0.0' });
-    expect(await pointer('current')).toBe('1.0.0');
+    expect([await pointer('current'), await pointer('previous')]).toEqual(['1.0.0', undefined]);
+    expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+    expect(await fs.readFile(`${db}-wal`, 'utf8')).toBe('v1 wal');
   });
 
   it('recover completes an interrupted switch deterministically: a crash between the two junction renames', async () => {
