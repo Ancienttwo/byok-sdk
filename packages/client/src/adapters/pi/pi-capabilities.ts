@@ -28,4 +28,6 @@ export const PI_DURABLE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freez
   resume: false,
   toolAuthorizationAuto: false,
   preparedLane: false,
+  // Agent resources (including excluded user context) only run on the RPC lane.
+  isolation: Object.freeze({ userContext: false, userMcpServers: false, sessionPersistence: false }),
 });

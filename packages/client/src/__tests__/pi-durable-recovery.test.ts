@@ -6,6 +6,8 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { DurableRecovery } from '../adapters/pi-durable/recovery';
 import { pathToFileURL } from 'node:url';
 import { durableToolDenial } from '../adapters/pi-durable/guard';
+import { toRuntimeInfoCapabilities } from '../daemon/runtime-capabilities';
+import { startPreparedOperation } from './fixtures/prepared-operation';
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 describe('durable parent recovery authority', () => {
@@ -21,8 +23,31 @@ describe('durable parent recovery authority', () => {
     expect(() => new PiAdapter({ durablePi: { replicaRoot: '/removed' } as never })).toThrow(/must be boolean/);
     const adapter = new PiAdapter({ durablePi: true });
     expect(adapter.descriptor.capabilities).toMatchObject({ durablePi: true, steer: false, resume: false, toolAuthorizationAuto: false, preparedLane: false });
+    expect(adapter.descriptor.capabilities.isolation).toEqual({ userContext: false, userMcpServers: false, sessionPersistence: false });
+    expect(toRuntimeInfoCapabilities(adapter.descriptor.capabilities).isolation?.userContext).toBe(false);
+    expect(new PiAdapter().descriptor.capabilities.isolation?.userContext).toBe(true);
+    expect(Object.isFrozen(adapter.descriptor.capabilities.isolation)).toBe(true);
     expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
     expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses excluded user context on the durable lane before spawning', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'byok-durable-context-')); roots.push(root);
+    const home = path.join(root, 'home'); await mkdir(home);
+    const spawnFn = vi.fn(() => { throw new Error('must not spawn'); });
+    const adapter = new PiAdapter({
+      durablePi: true, agentUserContext: 'excluded',
+      resolveBin: () => ({ command: process.execPath, source: 'env' }),
+      spawnFn: spawnFn as never,
+      byokLauncher: { command: path.join(root, 'unused-launcher'), profileDbPath: path.join(root, 'unused-profiles'), sessionDir: path.join(root, 'sessions') },
+    });
+    // Real prepare, sealed Agent manifest and runtime-launch resources. The
+    // lane restriction must reject before the custody launcher can be invoked.
+    await expect(startPreparedOperation(adapter, {
+      instruction: 'unused', dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'unused' },
+    }, { workspaceDir: home, agentHome: home, env: {} }))
+      .rejects.toThrow('Pi Agent resources are supported only by the ordinary RPC lane');
+    expect(spawnFn).not.toHaveBeenCalled();
   });
 
   it('commits respawn intent before returning permission and caps attempts at two', async () => {

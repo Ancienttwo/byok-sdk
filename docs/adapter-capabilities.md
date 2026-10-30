@@ -36,7 +36,7 @@ the runtime does instead. `auto` never applies to a prepared offer, whatever the
 | Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | yes | no |
 | Prepared lane | `preparedLane` | no | no | no | no | yes | no |
 | Durable Pi worker | `durablePi` | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | yes | yes | yes |
+| Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | yes | yes | no |
 | Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | no | no |
 | Turns off the transcript store | `isolation.sessionPersistence` | yes | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
