@@ -191,7 +191,7 @@ test('reviewed release scripts install only when their tests need packages', () 
     'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs',
     'scripts/release/beta-release.test.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/execution-submit-smoke.mjs', 'scripts/release/packaging-plugin-smoke.mjs',
-    'scripts/release/pi-launcher-smoke.mjs', 'scripts/release/check-upgrade-manifest.mjs',
+    'scripts/release/pi-launcher-smoke.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/check-upgrade-manifest.mjs',
     'scripts/release/check-upgrade-manifest.test.mjs'];
   for (const path of Object.keys(reviewedScripts)) {
     assert.equal(needsBuild(planCi({ event: 'push', sha, paths: [path] })), install.includes(path), path);
