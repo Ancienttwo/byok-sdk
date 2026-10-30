@@ -29,7 +29,7 @@ export { McpAuthorityError };
  * place for the framing, the bounds and the name rules to diverge.
  *
  * Protocol, framing and request correlation come from
- * `@modelcontextprotocol/client@2.0.0`. Only the process layer is ours, and
+ * the pinned `@modelcontextprotocol/client`. Only the process layer is ours, and
  * only because the bounds below cannot be expressed through the package's own
  * `StdioClientTransport`: it exposes a per-frame `maxBufferSize` and the
  * child's stderr, but no hook on stdout, so the total-stdout cap that

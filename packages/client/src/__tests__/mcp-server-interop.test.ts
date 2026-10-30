@@ -1,5 +1,5 @@
 /**
- * T2/T4(d): `src/mcp-server` against the REAL `@modelcontextprotocol/client@2.0.0`.
+ * T2/T4(d): `src/mcp-server` against the REAL, pinned `@modelcontextprotocol/client`.
  *
  * Every other suite in this package drives the core over in-memory streams,
  * which proves what bytes it emits but not that a real peer accepts them. This

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Security (client)** — `@modelcontextprotocol/client` moves from `2.0.0` to
+  `2.3.1` (exact pin), past GHSA-6qxp-vccf-f47h (OAuth credentials sent to an
+  authorization server the MCP server chose) and GHSA-6prh-2h8m-c8cw (HTTP
+  transports and OAuth helpers followed cross-origin redirects with headers
+  and bodies). The SDK's MCP core connects over stdio through its own process
+  layer and uses neither OAuth nor the HTTP transports; the pin reaches every
+  install. Upstream relicensed the package from MIT to Apache-2.0 in 2.3.0; it
+  stays an external dependency, not bundled into any published file.
+
 - **Security (protocol, core, client, cloud, keys, server)** — dependency
   floors raised past published advisories: `zod` `^4.6.6` (GHSA-mrhx-c7xc-m3w5),
   `hono` `^4.13.11` (nine advisories, GHSA-54fx-42gc-7vw4 through
