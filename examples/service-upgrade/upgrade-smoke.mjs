@@ -20,7 +20,7 @@
 // (`loginctl enable-linger`); a missing one fails the run.
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs, mkdtempSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -148,6 +148,7 @@ async function smoke(owner, server, payloads) {
   }, null, 2));
   const cmd = commands(variant);
   log(`${owner}: store ${storeDir} (${storeDir.length} chars)`);
+  if (isWindows && storeDir.length > 260) await probeLongPathMkdtemp(storeDir);
   try {
     await lifecycle(variant, cmd, server, payloads);
   } catch (error) {
@@ -192,6 +193,23 @@ async function captureStartError(variant, cmd) {
   } finally {
     await daemon?.stop().catch(() => undefined);
   }
+}
+
+/**
+ * One probe on a store past MAX_PATH: fs.mkdtemp against an exclusive
+ * fs.mkdir in the same parent. The SDK creates its scratch directories with
+ * mkdir because mkdtemp failed there with ENOENT (#1097); this prints both
+ * outcomes so a run shows the Node behavior next to the leg it fixes.
+ */
+async function probeLongPathMkdtemp(storeDir) {
+  const parent = path.join(storeDir, 'mkdtemp-probe');
+  await fs.mkdir(parent, { recursive: true });
+  const outcome = (promise) => promise.then((created) => `ok ${path.basename(created ?? '')}`, (error) => `${error.code}: ${error.message.split(',')[0]}`);
+  const mkdtemp = await outcome(fs.mkdtemp(path.join(parent, 'probe-')));
+  const exclusive = path.join(parent, `probe-${randomUUID()}`);
+  const mkdir = await outcome(fs.mkdir(exclusive).then(() => exclusive));
+  log(`probe (${parent.length + 13} chars): fs.mkdtemp -> ${mkdtemp}; fs.mkdir -> ${mkdir}`);
+  await fs.rm(parent, { recursive: true, force: true });
 }
 
 async function lifecycle(variant, cmd, server, payloads) {
