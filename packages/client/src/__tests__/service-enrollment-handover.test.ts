@@ -114,13 +114,44 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
    */
   function watchGoneWhileHeld(nonce: string, until: Promise<unknown>): Promise<number> {
     let done = false;
-    void until.then(() => { done = true; }, () => { done = true; });
+    let failed = false;
+    let failure: unknown;
+    void until.then(() => { done = true; }, (error: unknown) => {
+      done = true;
+      failed = true;
+      failure = error;
+    });
+    const deadline = Date.now() + 5_000;
+    let lastErrorCode: string | undefined;
+    const pending = Symbol('owner read pending');
+    const observeNonce = async () => {
+      try { return await ownerNonce(); }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (process.platform !== 'win32' || code !== 'EPERM') throw error;
+        lastErrorCode = code;
+        // Windows can deny this ungated test read while the owner is being deleted.
+        return pending;
+      }
+    };
     return (async () => {
       let violations = 0;
-      while (!done) {
-        const before = await ownerNonce();
-        if (await gone() && before === nonce && await ownerNonce() === nonce) violations += 1;
+      let observationPending = false;
+      while (!done || observationPending) {
+        if (failed || Date.now() >= deadline) {
+          throw new Error(`handover observation did not complete; last owner read error code: ${lastErrorCode ?? 'none'}`, { cause: failure });
+        }
+        const before = await observeNonce();
+        observationPending = before === pending;
+        if (!observationPending && await gone() && before === nonce) {
+          const after = await observeNonce();
+          observationPending = after === pending;
+          if (after === nonce) violations += 1;
+        }
         await new Promise((resolve) => setImmediate(resolve));
+      }
+      if (failed) {
+        throw new Error(`handover observation failed; last owner read error code: ${lastErrorCode ?? 'none'}`, { cause: failure });
       }
       return violations;
     })();
@@ -138,8 +169,6 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     }, { timeout: 5_000, interval: 5 });
     const violations = watchGoneWhileHeld((await ownerNonce())!, running);
     await client.request('enrollment.pair', { pairingCode: 'pairing-code' });
-    await running;
-
     expect(await violations).toBe(0);
     expect(await client.request('approvals.list', {})).toEqual({ approvals: [] });
     expect(await fs.readFile(controlTokenPath(storeDir), 'utf8')).toBe(token);
@@ -171,7 +200,6 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
       controlExitTimeoutMs: 5_000, controlExitPollIntervalMs: 1,
     });
     const violations = watchGoneWhileHeld(nonce, unpairing);
-    await unpairing;
     expect(await violations).toBe(0);
     await expectStoppedForGood(current);
   }, 15_000);
@@ -271,7 +299,6 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     const violations = watchGoneWhileHeld((await ownerNonce())!, settled);
     await client.request('enrollment.pair', { pairingCode: 'pairing-code' });
     client.close();
-    await settled;
     expect(await violations).toBe(0);
     expect(leaseHeld()).toBe(false);
     await expect(build().unpair()).resolves.toBeUndefined();
