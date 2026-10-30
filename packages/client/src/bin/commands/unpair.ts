@@ -347,6 +347,7 @@ export async function runUnpairCommand(daemon: Pick<Daemon, 'unpair'>, deps: Unp
   const log = deps.log ?? ((line: string) => console.log(line));
   const isTTY = deps.isTTY ?? Boolean(process.stdin.isTTY);
 
+  let controlFailure: string | undefined;
   if (deps.storeDir !== undefined && deps.productId !== undefined) {
     const connectControl = deps.connectControl ?? connectControlClient;
     const conn = await connectControl({ storeDir: deps.storeDir, productId: deps.productId });
@@ -397,9 +398,15 @@ export async function runUnpairCommand(daemon: Pick<Daemon, 'unpair'>, deps: Unp
       }
       return;
     }
+    controlFailure = conn.reason;
   }
 
-  const serviceState = await checkServiceState(deps.lifecycle);
+  const checked = await checkServiceState(deps.lifecycle);
+  // An unknown state also names why the live path was not taken, so an
+  // operator can tell a daemon that is not running from an unreachable socket.
+  const serviceState: ServiceCheckResult = checked.outcome === 'unknown' && controlFailure !== undefined
+    ? { outcome: 'unknown', reason: `${controlFailure}; ${checked.reason}` }
+    : checked;
   if (serviceState.outcome === 'confirmed-running') {
     throw new UnpairBlockedByRunningServiceError(serviceState.detail);
   }
