@@ -212,17 +212,7 @@ describe('task.approval_resolved handling', () => {
     expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B');
   });
 
-  // 2d gap: the "sanity" half split out of the S2 test above. The old hub only
-  // re-emitted when `payload.approvalId !== record.pendingApprovalId`, so a
-  // redelivery carrying the SAME id pushed nothing. `TaskEventRelay`
-  // (`relay.ts`) folds every COMMITTED `task.await_approval` into the feed, and
-  // only an envelope-id duplicate is suppressed — by the kernel's dedup step,
-  // which a fresh envelope carrying the same `approvalId` does not trip. Same
-  // family as `inbound-gate.test.ts`'s own re-emission gap. Orchestrator
-  // decision: accept the re-emission as the honest report of a new observation,
-  // or restore approvalId-keyed suppression in the relay.
-  // Decision D3: https://github.com/Ancienttwo/byok-sdk/issues/1153
-  it.skip('a redelivery carrying the SAME approvalId does not re-emit another await_approval event', async () => {
+  it('a fresh envelope with the same approvalId emits its new summary and remains resolvable', async () => {
     const { byok: instance, daemon } = await start();
 
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
@@ -232,11 +222,16 @@ describe('task.approval_resolved handling', () => {
     await daemon.send(
       createEnvelope('task.await_approval', { summary: 'second (B) resent', approvalId: 'appr-B' }, { taskId: handle.taskId }),
     );
-    const sawAnotherEvent = await Promise.race([
-      waitForTaskEvent(handle, (e) => e.kind === 'await_approval' && e.summary === 'second (B) resent').then(() => true),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 200)),
-    ]);
-    expect(sawAnotherEvent).toBe(false);
+    const iter = handle.events()[Symbol.asyncIterator]();
+    for (let i = 0; i < 5; i++) await iter.next();
+    expect((await iter.next()).value).toMatchObject({ kind: 'await_approval', approvalId: 'appr-B', summary: 'second (B) resent' });
+    expect((await iter.next()).value).toMatchObject({ kind: 'state', state: 'AwaitApproval' });
+    expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B');
+    await handle.approve({ approvalId: 'appr-B' });
+    expect((await iter.next()).value).toMatchObject({ kind: 'state', state: 'Running' });
+    expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBeUndefined();
+    const decisions = (await daemon.next()).filter((e) => e.type === 'task.approve');
+    expect(decisions).toMatchObject([{ type: 'task.approve', task_id: handle.taskId, payload: { approvalId: 'appr-B' } }]);
   });
 
   it('an unknown taskId is a silent no-op (no crash, no event)', async () => {
