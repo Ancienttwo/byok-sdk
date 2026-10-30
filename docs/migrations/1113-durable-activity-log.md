@@ -37,7 +37,7 @@ shapes/types, bindings and future revisions get `activity_cursor_invalid`. A fre
 `after` is an explicit choice to start from the retained history, not an
 implicit recovery of missing entries.
 
-Timeline batch-gap detection consumes `TimelineMetadata.log` (the retained row revisions and floor), populated by `replayTimeline`. A retained empty or artifact row still proves continuity. Incremental events alone no longer infer revision loss: a jump can skip a row that projects zero events. Supply log continuity metadata or rely on the typed cursor gap for missing-history authority; within-row offset gaps remain visible.
+ActivityTail.after records the exclusive revision lower bound actually served (zero for an unfiltered read); it does not advance the retention floor or change the cursor. Timeline batch-gap detection consumes `TimelineMetadata.log` (the retained row revisions, floor and served after bound), populated by `replayTimeline`. Gap scanning starts at max(floor, after), so an intentional page prefix is not missing history. A retained empty or artifact row still proves continuity. Incremental events alone no longer infer revision loss: a jump can skip a row that projects zero events. Supply log continuity metadata or rely on the typed cursor gap for missing-history authority; within-row offset gaps remain visible.
 
 `dropped` counts evicted envelope rows; `sourceDropped` separately records
 producer-reported loss. A batch is never partially evicted. The returned

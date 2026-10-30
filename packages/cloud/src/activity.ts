@@ -71,6 +71,8 @@ export interface ActivityTail {
   readonly cursor: ActivityCursor;
   /** Last evicted revision: a cursor strictly below this floor has a gap. */
   readonly floor: number;
+  /** Exclusive lower revision served by this page; zero for an unfiltered read. */
+  readonly after: number;
   readonly dropped: number;
   readonly sourceDropped: number;
   readonly capacity: number;

@@ -21,7 +21,7 @@ function tail(events: readonly TimelineEvent[]): ActivityTail {
   return {
     tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', entries,
     cursor: { version: 1, tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', generation: 'test', revision: entries.length },
-    floor: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
+    floor: 0, after: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
     dropped: 0, capacity: 50, expiresAt: '2026-08-16T13:00:00.000Z',
   };
 }
