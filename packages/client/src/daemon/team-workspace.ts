@@ -339,27 +339,6 @@ function normalizeLimits(value: unknown): TeamWorkspaceLimits {
   return cloneLimits({ maxMembers: value.maxMembers, maxMessages: value.maxMessages, maxBytes: value.maxBytes });
 }
 
-/** Public fail-closed validators for control/MCP composition sites. */
-export function validateTeamWorkspaceId(value: unknown): string {
-  assertSafeId(value, 'workspaceId');
-  return value;
-}
-
-export function validateTeamMemberId(value: unknown): string {
-  assertSafeId(value, 'memberId');
-  return value;
-}
-
-export function validateTeamMessageBody(value: unknown): string {
-  assertBody(value);
-  return value;
-}
-
-export function validateTeamContentType(value: unknown): string {
-  assertContentType(value);
-  return value;
-}
-
 /** Encode the full lease as one opaque helper context; it is never model input. */
 export function encodeTeamMemberContext(lease: TeamMemberLease): string {
   assertLeaseShape(lease);

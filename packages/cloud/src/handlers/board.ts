@@ -4,7 +4,6 @@ import {
   isCoreError,
   type BoardItem,
   type BoardListQuery,
-  type BoardPage,
 } from '@byok-sdk/core';
 import type { Context } from 'hono';
 import { z } from 'zod';
@@ -297,5 +296,3 @@ function boardFailure(c: Context, caught: unknown): Response {
   if (isCoreError(caught, 'board_not_held')) return c.json({ error: caught.code }, 409);
   throw caught;
 }
-
-export type BoardPollResponse = BoardPage;

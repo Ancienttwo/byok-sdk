@@ -45,10 +45,6 @@ export function preparedAgentMemoryModeWithinCeiling(requested: PreparedAgentMem
   return rank[requested] <= rank[ceiling];
 }
 
-export function preparedAgentMemoryToolNames(mode: PreparedAgentMemoryMode): readonly string[] {
-  return Object.freeze(AGENT_MEMORY_TOOLS.filter((tool) => preparedAgentMemoryModeAllowsOperation(mode, tool.operation)).map((tool) => tool.name));
-}
-
 function record(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`);
   return value as Readonly<Record<string, unknown>>;
