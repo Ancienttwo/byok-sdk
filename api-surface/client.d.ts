@@ -12405,7 +12405,12 @@ export interface LaunchdDeps {
     homedir?: () => string;
     /** Defaults to `process.getuid` — macOS/Linux only; this module is never constructed on `win32` (see `create-service-lifecycle.ts`). */
     getuid?: () => number;
+    /** Clock and wait for the unload deadline; tests drive them. */
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
 }
+/** How long a booted-out job may stay in the domain before `stop()` gives up with `service_unload_timeout`. */
+export declare const LAUNCHD_UNLOAD_TIMEOUT_MS = 10000;
 /**
  * Generates a launchd LaunchAgent plist for `label` that runs only the
  * stable `launcherPath` (#1097), logging to `logDir`. Pure/no I/O.
@@ -13019,6 +13024,7 @@ declare const ERROR_MESSAGES: {
     readonly lifecycle_owner_unreadable: 'The lifecycle owner record in the store cannot be read; preserve it for inspection.';
     readonly lifecycle_owner_busy: 'Another service lifecycle operation or local-state relocation is in progress. Run it again when that one has finished.';
     readonly invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.';
+    readonly service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.';
 };
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes only; the message never carries a path or OS text. */
