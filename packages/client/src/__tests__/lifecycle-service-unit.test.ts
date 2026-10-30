@@ -45,8 +45,11 @@ function lifecycleFor(platform: NodeJS.Platform, fs: MemoryServiceFs, run: Runne
   return createServiceLifecycle(def(overrides), { platform, deps: { run, fs, homedir: () => '/h', getuid: () => 501 } });
 }
 
+/** Every command succeeds; `launchctl print` reports the job absent, as it is once a bootout has finished. */
 function okRunner() {
-  return vi.fn<Runner>().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+  return vi.fn<Runner>().mockImplementation(async (command, args) => (command === 'launchctl' && args[0] === 'print'
+    ? { code: 113, stdout: '', stderr: 'Could not find service' }
+    : { code: 0, stdout: '', stderr: '' }));
 }
 
 async function memoryRead(fs: MemoryServiceFs, file: string): Promise<string> {

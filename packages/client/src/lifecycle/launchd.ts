@@ -1,11 +1,11 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
+import { defaultRunner, isIdempotentAbsence, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log';
 import { sanitizeServiceName, type ServiceDefinition } from './service-types';
-import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit';
+import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, ServiceUnitError } from './service-unit';
 
 /**
  * Genuine-failure text that must NEVER be reclassified as "job already
@@ -55,7 +55,14 @@ export interface LaunchdDeps {
   homedir?: () => string;
   /** Defaults to `process.getuid` — macOS/Linux only; this module is never constructed on `win32` (see `create-service-lifecycle.ts`). */
   getuid?: () => number;
+  /** Clock and wait for the unload deadline; tests drive them. */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
+
+/** How long a booted-out job may stay in the domain before `stop()` gives up with `service_unload_timeout`. */
+export const LAUNCHD_UNLOAD_TIMEOUT_MS = 10_000;
+const LAUNCHD_UNLOAD_POLL_MS = 50;
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
@@ -143,11 +150,35 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
       return process.getuid();
     });
 
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
   const label = sanitizeServiceName(def.name);
   const plistPath = path.join(homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
   const launcherPath = serviceLauncherPath(def.storeDir, label, 'darwin');
   const domainTarget = () => `gui/${getuid()}`;
   const serviceTarget = () => `${domainTarget()}/${label}`;
+
+  /** Whether launchd still has the job in the domain: `print` succeeds, or reports it absent; anything else is a real failure. */
+  async function loaded(): Promise<boolean> {
+    const result = await run('launchctl', ['print', serviceTarget()]);
+    if (result.code === 0) return true;
+    if (isIdempotentAbsence(result, LAUNCHD_NOT_LOADED)) return false;
+    throw new Error(`launchctl print failed (exit ${result.code}): ${(result.stderr || result.stdout).trim()}`);
+  }
+
+  /**
+   * `bootout` returns while launchd is still tearing the job down, and a
+   * `bootstrap` in that window fails with `5: Input/output error`. Waits on
+   * launchd's own state until the job has left the domain.
+   */
+  async function untilUnloaded(): Promise<void> {
+    const deadline = now() + LAUNCHD_UNLOAD_TIMEOUT_MS;
+    while (await loaded()) {
+      if (now() >= deadline) throw new ServiceUnitError('service_unload_timeout');
+      await sleep(LAUNCHD_UNLOAD_POLL_MS);
+    }
+  }
 
   return createManagedLifecycle(def, {
     serviceName: label,
@@ -162,6 +193,7 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
       // — "not currently loaded" is an expected, ignorable outcome, not a
       // real failure (see `exec-runner.ts`'s `RunResult` doc comment).
       await run('launchctl', ['bootout', serviceTarget()]);
+      await untilUnloaded();
       await runOrThrow(run, 'launchctl', ['bootstrap', domainTarget(), plistPath], 'launchctl bootstrap');
       await runOrThrow(run, 'launchctl', ['enable', serviceTarget()], 'launchctl enable');
       // RunAtLoad already starts it on bootstrap; kickstart -k guarantees a
@@ -175,20 +207,23 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
       // deleted once the job is gone from the domain, so a still-running
       // job never loses its control file (cross-model-review P1 #7).
       await runIdempotent(run, 'launchctl', ['bootout', serviceTarget()], 'launchctl bootout', LAUNCHD_NOT_LOADED);
+      await untilUnloaded();
     },
     async removeFiles() {
       await fs.rm(plistPath, { force: true });
       await fs.rm(launcherPath, { force: true });
     },
     async start() {
-      await run('launchctl', ['bootstrap', domainTarget(), plistPath]); // best-effort — "already bootstrapped" is fine
-      await runOrThrow(run, 'launchctl', ['kickstart', '-k', serviceTarget()], 'launchctl kickstart');
+      // A loaded job is restarted; an unloaded one is bootstrapped, and RunAtLoad starts it.
+      if (await loaded()) await runOrThrow(run, 'launchctl', ['kickstart', '-k', serviceTarget()], 'launchctl kickstart');
+      else await runOrThrow(run, 'launchctl', ['bootstrap', domainTarget(), plistPath], 'launchctl bootstrap');
     },
     async stop() {
       // Tolerant of "already stopped/not loaded", but a REAL failure
       // (permission denied, an unreachable GUI domain) must be surfaced
       // rather than silently reported as "stopped" (P1 #7, round 2).
       await runIdempotent(run, 'launchctl', ['bootout', serviceTarget()], 'launchctl bootout', LAUNCHD_NOT_LOADED);
+      await untilUnloaded();
     },
     async query() {
       const result = await run('launchctl', ['print', serviceTarget()]);
