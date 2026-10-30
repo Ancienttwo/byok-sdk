@@ -170,9 +170,10 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   async function loaded(): Promise<boolean> {
     const result = await run('launchctl', ['print', serviceTarget()]);
     if (result.code === 0) return true;
-    const detail = (result.stderr || result.stdout).trim();
-    if (result.code === LAUNCHCTL_PRINT_ABSENT && !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail))) return false;
-    throw new Error(`launchctl print failed (exit ${result.code}): ${detail}`);
+    // Both streams: a permission failure on either one is never an absent job.
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (result.code === LAUNCHCTL_PRINT_ABSENT && !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(output))) return false;
+    throw new Error(`launchctl print failed (exit ${result.code}): ${(result.stderr || result.stdout).trim()}`);
   }
 
   /**

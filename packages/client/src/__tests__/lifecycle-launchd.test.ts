@@ -215,6 +215,8 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
       fail(112, 'Could not find domain for user gui: 501'),
       fail(5, 'job not loaded: Input/output error'),
       fail(113, 'Could not find service: Permission denied'),
+      { code: 113, stdout: 'Permission denied', stderr: 'Could not find service' },
+      { code: 113, stdout: 'Could not find service', stderr: 'Permission denied' },
     ]) {
       const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'print' ? printed : ok()));
       const lifecycle = createLaunchdLifecycle(def(), { run, fs: installedFs(), homedir: () => '/h', getuid: () => 501 });
