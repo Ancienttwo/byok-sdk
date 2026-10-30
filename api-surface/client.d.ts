@@ -654,6 +654,94 @@ export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInter
 export { buildRuntimeEnv } from '../daemon/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
+// ==== @byok-sdk/client dist/adapters/packaging.d.ts ====
+import { type SdkPackagingFormat } from '../sdk-native-assets';
+export type { SdkPackagingFormat } from '../sdk-native-assets';
+/** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
+export interface SdkPackagingBuild {
+    readonly initialOptions: {
+        bundle?: boolean;
+        platform?: string;
+        format?: string;
+        define?: Record<string, string>;
+        banner?: Record<string, string>;
+        logOverride?: Record<string, string>;
+    };
+    onEnd(callback: (result: {
+        readonly warnings: readonly SdkPackagingMessage[];
+    }) => {
+        errors: SdkPackagingMessage[];
+    } | undefined): void;
+}
+/** The part of an esbuild message that this plugin reads and reports. */
+export interface SdkPackagingMessage {
+    readonly id?: string;
+    readonly text: string;
+    readonly location?: {
+        readonly file: string;
+        readonly line?: number;
+        readonly column?: number;
+        readonly lineText?: string;
+    } | null;
+}
+export interface SdkBundleImportMetaExemption {
+    /** npm package name, as installed under `node_modules`. */
+    readonly package: string;
+    /** File within the package, `/`-separated. */
+    readonly file: string;
+    /** Why the empty `import.meta` is not reached, or what a bundle loses. */
+    readonly reason: string;
+}
+/**
+ * The reviewed third-party files whose `import.meta` esbuild empties in a CommonJS bundle of the SDK. Every other
+ * empty `import.meta`, in any file, fails the build. The SDK's own files are never exempt. A test bundles the embedded
+ * Host and requires exactly these files to warn, so an entry a dependency update made stale fails too.
+ */
+export declare const sdkBundleImportMetaExemptions: readonly SdkBundleImportMetaExemption[];
+/** Structurally an esbuild `Plugin`: pass it in `plugins`. */
+export interface SdkPackagingPlugin {
+    readonly name: string;
+    setup(build: SdkPackagingBuild): void;
+}
+export interface ByokSdkPackagingOptions {
+    readonly format: SdkPackagingFormat;
+}
+/**
+ * The esbuild plugin for a single-file Host bundle (`sdkPackagingFormats`). `sea` is the CommonJS bundle a Node SEA
+ * embeds. The build must be a `platform: 'node'` bundle in the format's esbuild output format.
+ *
+ * - ESM: a module-scoped `require`, which the CommonJS dependencies of the bundled Pi host need for Node built-ins.
+ * - CommonJS: `import.meta.url` is the bundle's own file URL (`__filename`; the executable inside a SEA). It is the only
+ *   `import.meta` property SDK code reads, so a Host must not define it too.
+ * - Every format: an empty `import.meta` is a build error in any file, SDK included, except the reviewed third-party
+ *   sites in `sdkBundleImportMetaExemptions`, which stay visible as warnings. esbuild already rejects top-level `await`
+ *   in CommonJS output. Neither is ever left for the bundle to hit at run time.
+ */
+export declare function byokSdkPackaging(options: ByokSdkPackagingOptions): SdkPackagingPlugin;
+export interface CopySdkPackagingAssetsOptions {
+    /** A new or empty directory that ships beside the product bundle or executable. */
+    readonly outDir: string;
+    readonly platform: 'darwin' | 'linux' | 'win32';
+    readonly arch: 'x64' | 'arm64';
+}
+/** Directories relative to `outDir`, for the product's daemon configuration and environment. */
+export interface SdkPackagingAssets {
+    /** Every written file, relative to `outDir`, sorted. */
+    readonly files: readonly string[];
+    /** `PI_PACKAGE_DIR` for the Pi host. */
+    readonly piPackageDir: string;
+    /** `DaemonConfig.nativeAssetRoot`; Windows x64 only. */
+    readonly nativeAssetRoot?: string;
+    /** `DaemonConfig.agentMemoryHelperAssetRoot`; macOS and Windows x64. Linux memory needs no helper. */
+    readonly agentMemoryHelperAssetRoot?: string;
+}
+/**
+ * Build-time copy of every SDK file a single-file Host ships for one target, in `sdkPackagingAssetLayout`: the Pi
+ * runtime assets, and the native assets of the platforms that have them (`sdkNativeAssetTargets`). It composes
+ * `copyPiRuntimeAssets` and `copySdkNativeAssets`, with their integrity checks; the Windows target downloads the
+ * integrity-pinned koffi archive.
+ */
+export declare function copySdkPackagingAssets(options: CopySdkPackagingAssetsOptions): Promise<SdkPackagingAssets>;
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
@@ -10779,7 +10867,7 @@ export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './lo
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
-export { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, runSdkReservedHelperCommand, } from './sdk-reserved-helper-host';
+export { BYOK_SDK_HELPER_SUBCOMMAND, bundledSdkHelperHost, resolveSdkReservedHelperBin, runSdkReservedHelperCommand, } from './sdk-reserved-helper-host';
 export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host';
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
@@ -10930,7 +11018,7 @@ export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } 
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
 export { isReservedMcpServerName } from './sdk-reserved-mcp';
-export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
+export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets';
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, } from './tool-authorization';
@@ -13382,6 +13470,7 @@ export declare function isRuntimeStartupDisposalFailure(value: unknown): value i
 /** Runtime loader: explicit absolute root only, no download or package-search fallback. */
 export declare function loadSdkKoffiAsset(root: string): unknown;
 // ==== @byok-sdk/client dist/sdk-native-assets.d.ts ====
+import { type SdkReservedHelperKind } from './sdk-reserved-helper-host';
 export declare const sdkNativeAssetTargets: Readonly<{
     'win32-x64': Readonly<{
         package: "@koromix/koffi-win32-x64";
@@ -13409,11 +13498,52 @@ export interface CopySdkNativeAssetsOptions {
 /** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;
 export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
+/**
+ * What a single-file product does with each published bin. `cli`: the daemon CLI, not shipped by an embedded Host.
+ * `reserved-helper` and `pi-host`: re-entered through `sdkHelperHost` as `kind`. `provider-launcher`: the keys
+ * custody launcher, which the product re-enters as its own command with `runPiProviderLauncher`.
+ */
+export type SdkDistributionBinRole = 'cli' | 'reserved-helper' | 'pi-host' | 'provider-launcher';
+export interface SdkDistributionBin {
+    readonly package: '@byok-sdk/client' | '@byok-sdk/keys';
+    readonly role: SdkDistributionBinRole;
+    readonly kind?: SdkReservedHelperKind;
+}
+/**
+ * The supported single-file formats. Every format ships the same asset layout (`copySdkPackagingAssets` in
+ * `@byok-sdk/client/packaging`): `pi` is `PI_PACKAGE_DIR`, `native` is `nativeAssetRoot` and
+ * `native/agent-memory-fs` is `agentMemoryHelperAssetRoot`, where the platform has native targets.
+ */
+export declare const sdkPackagingFormats: Readonly<{
+    readonly esm: Readonly<{
+        esbuildFormat: "esm";
+        helperHost: "node-entry";
+        piRuntimeForm: "interpreter+bundle";
+    }>;
+    readonly cjs: Readonly<{
+        esbuildFormat: "cjs";
+        helperHost: "node-entry";
+        piRuntimeForm: "interpreter+bundle";
+    }>;
+    readonly sea: Readonly<{
+        esbuildFormat: "cjs";
+        helperHost: "executable";
+        piRuntimeForm: "interpreter+bundle";
+    }>;
+}>;
+export type SdkPackagingFormat = keyof typeof sdkPackagingFormats;
+export declare const sdkPackagingAssetLayout: Readonly<{
+    readonly pi: 'pi';
+    readonly native: 'native';
+    readonly agentMemoryHelper: 'native/agent-memory-fs';
+}>;
 /** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
 export declare const sdkDistributionManifest: Readonly<{
     version: 1;
     piRuntimePin: string;
-    reservedHelperKinds: readonly import("./sdk-reserved-helper-host").SdkReservedHelperKind[];
+    nodeEngine: string;
+    bins: Readonly<Readonly<Record<string, SdkDistributionBin>>>;
+    reservedHelperKinds: readonly SdkReservedHelperKind[];
     nativeTargets: Readonly<{
         'win32-x64': Readonly<{
             package: "@koromix/koffi-win32-x64";
@@ -13432,6 +13562,28 @@ export declare const sdkDistributionManifest: Readonly<{
             files: readonly string[];
             signingPolicy: "product-resigning-allowed";
         }>;
+    }>;
+    formats: Readonly<{
+        readonly esm: Readonly<{
+            esbuildFormat: "esm";
+            helperHost: "node-entry";
+            piRuntimeForm: "interpreter+bundle";
+        }>;
+        readonly cjs: Readonly<{
+            esbuildFormat: "cjs";
+            helperHost: "node-entry";
+            piRuntimeForm: "interpreter+bundle";
+        }>;
+        readonly sea: Readonly<{
+            esbuildFormat: "cjs";
+            helperHost: "executable";
+            piRuntimeForm: "interpreter+bundle";
+        }>;
+    }>;
+    assetLayout: Readonly<{
+        readonly pi: 'pi';
+        readonly native: 'native';
+        readonly agentMemoryHelper: 'native/agent-memory-fs';
     }>;
 }>;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
@@ -13458,6 +13610,15 @@ export interface ResolvedSdkReservedHelperBin {
 export declare const sdkReservedHelperKinds: readonly SdkReservedHelperKind[];
 /** SDK-owned launcher shape used by every reserved stdio helper. */
 export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind, host?: SdkHelperHostConfig): ResolvedSdkReservedHelperBin;
+/**
+ * The helper host of a single-file product, called from inside that product. A
+ * Node SEA re-enters its own executable; a bundle run by Node re-enters Node
+ * with the running bundle as its entry. `node:sea` decides which, so nothing is
+ * inferred from paths or names.
+ */
+export declare function bundledSdkHelperHost(): SdkHelperHostConfig & {
+    readonly executable: string;
+};
 /**
  * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
  * side effects for normal product commands; a reserved command is handled to

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "8df6acaeb098d607d354a674f718f6c7c585cace9f8bef5d1f0080677b347e13"
+    "snapshotSha256": "c1b874846d1df869443bbcfe24917045b9729e243ff364578cf59c3b0118e67d"
   },
   "configFields": {
     "status": "tracked",
@@ -576,6 +576,32 @@
         "export:@byok-sdk/client#ResetDeviceCursorInput",
         "export:@byok-sdk/client#resetDeviceCursor"
       ]
+    },
+    {
+      "id": "single-file-packaging",
+      "impact": "additive",
+      "summary": "A single-file Host (single-file ESM, single-file CommonJS or a Node SEA) has an SDK build helper in @byok-sdk/client/packaging (#1104): the byokSdkPackaging esbuild plugin (no esbuild dependency) sets each format's module require or import.meta.url and fails the build on any empty import.meta, SDK files included, except three reviewed third-party sites (sdkBundleImportMetaExemptions); copySdkPackagingAssets copies the Pi runtime and native assets one target ships, in sdkPackagingAssetLayout. bundledSdkHelperHost() is the sdkHelperHost of the running bundle or SEA. sdkDistributionManifest adds nodeEngine, a role for every published bin (bins) and the formats. In a CommonJS or SEA bundle, PDF reads lose unpdf's standard font and CMap defaults, as before. Nothing changes for a Host that does not use them.",
+      "migration": "packages/client/README.md#single-file-packaging",
+      "items": [
+        "entry:@byok-sdk/client/packaging",
+        "export:@byok-sdk/client#SdkDistributionBin",
+        "export:@byok-sdk/client#SdkDistributionBinRole",
+        "export:@byok-sdk/client#SdkPackagingFormat",
+        "export:@byok-sdk/client#bundledSdkHelperHost",
+        "export:@byok-sdk/client#sdkPackagingAssetLayout",
+        "export:@byok-sdk/client#sdkPackagingFormats",
+        "export:@byok-sdk/client/packaging#ByokSdkPackagingOptions",
+        "export:@byok-sdk/client/packaging#CopySdkPackagingAssetsOptions",
+        "export:@byok-sdk/client/packaging#SdkBundleImportMetaExemption",
+        "export:@byok-sdk/client/packaging#SdkPackagingAssets",
+        "export:@byok-sdk/client/packaging#SdkPackagingBuild",
+        "export:@byok-sdk/client/packaging#SdkPackagingFormat",
+        "export:@byok-sdk/client/packaging#SdkPackagingMessage",
+        "export:@byok-sdk/client/packaging#SdkPackagingPlugin",
+        "export:@byok-sdk/client/packaging#byokSdkPackaging",
+        "export:@byok-sdk/client/packaging#copySdkPackagingAssets",
+        "export:@byok-sdk/client/packaging#sdkBundleImportMetaExemptions"
+      ]
     }
   ],
   "changes": [
@@ -836,6 +862,11 @@
       "change": "added",
       "after": "optional embedded-only schema-sha256=421bda8258876a6f",
       "entry": "daemon-config-schema"
+    },
+    {
+      "item": "entry:@byok-sdk/client/packaging",
+      "change": "added",
+      "entry": "single-file-packaging"
     },
     {
       "item": "entry:@byok-sdk/protocol/agent-memory",
@@ -1127,6 +1158,26 @@
       "entry": "pi-session-retention-lifecycle"
     },
     {
+      "item": "export:@byok-sdk/client#SdkDistributionBin",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkDistributionBinRole",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkPackagingFormat",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#bundledSdkHelperHost",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
       "item": "export:@byok-sdk/client#checkDaemonConfig",
       "change": "added",
       "entry": "daemon-config-schema"
@@ -1155,6 +1206,16 @@
       "item": "export:@byok-sdk/client#sdkDistributionManifest",
       "change": "changed",
       "entry": "pi-subagents-installed-dependency"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkPackagingAssetLayout",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client#sdkPackagingFormats",
+      "change": "added",
+      "entry": "single-file-packaging"
     },
     {
       "item": "export:@byok-sdk/client#validateDaemonConfig",
@@ -1195,6 +1256,61 @@
       "item": "export:@byok-sdk/client/agent-memory#validateAgentMemoryPath",
       "change": "removed",
       "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#ByokSdkPackagingOptions",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#CopySdkPackagingAssetsOptions",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkBundleImportMetaExemption",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingAssets",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingBuild",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingFormat",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingMessage",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#SdkPackagingPlugin",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#byokSdkPackaging",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#copySdkPackagingAssets",
+      "change": "added",
+      "entry": "single-file-packaging"
+    },
+    {
+      "item": "export:@byok-sdk/client/packaging#sdkBundleImportMetaExemptions",
+      "change": "added",
+      "entry": "single-file-packaging"
     },
     {
       "item": "export:@byok-sdk/cloud#AllowAllRateLimiter",

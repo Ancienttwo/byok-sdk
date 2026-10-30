@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1870192,
+      "budgetBytes": 1872105,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -341,7 +341,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4873,
+      "budgetBytes": 4997,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -360,6 +360,52 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
+  "@byok-sdk/client/packaging": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
+      "budgetBytes": 25682,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/adapters/packaging.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/client/dist/adapters/packaging.d.ts"
+      ],
+      "bareImports": [
+        "crypto",
+        "fs",
+        "module",
+        "path",
+        "url",
+        "zlib"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "crypto",
+          "fs",
+          "module",
+          "path",
+          "url",
+          "zlib"
+        ],
         "thirdParty": []
       },
       "codegen": []

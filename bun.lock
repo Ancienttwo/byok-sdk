@@ -170,6 +170,7 @@
         "postject": "1.0.0-alpha.6",
         "tsx": "^4.19.2",
         "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
       },
     },
     "examples/salesko-connector-broker": {

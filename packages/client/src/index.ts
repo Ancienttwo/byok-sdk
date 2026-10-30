@@ -86,6 +86,7 @@ export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
 export {
   BYOK_SDK_HELPER_SUBCOMMAND,
+  bundledSdkHelperHost,
   resolveSdkReservedHelperBin,
   runSdkReservedHelperCommand,
 } from './sdk-reserved-helper-host';
@@ -571,7 +572,7 @@ export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
 export { isReservedMcpServerName } from './sdk-reserved-mcp';
 
-export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
+export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets';
 
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 

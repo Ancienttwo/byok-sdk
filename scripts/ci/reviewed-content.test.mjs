@@ -1001,3 +1001,41 @@ test('setup documentation admits only exact additive generator commands and its 
     assert.throws(() => selectImpact(['package.json'], f));
   }
 });
+
+// #1104: the packaging example's bundle test (script, runner and lock row) and the client packaging entry.
+test('#1104: the packaging example admits only its bundle test, and the client only the ./packaging entry', t => {
+  const f = fixture(t);
+  const dir = 'examples/packaging';
+  const manifest = { name: '@byok-sdk/example-packaging', private: true, version: '0.0.1', scripts: { typecheck: 'tsc --noEmit' }, devDependencies: { esbuild: '^0.27.7' } };
+  f.write(`${dir}/package.json`, manifest);
+  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, devDependencies: { esbuild: '^0.27.7' } };
+  f.write('bun.lock', f.lock);
+  rebase(f, 'packaging example without a test');
+  const tested = { ...manifest, scripts: { ...manifest.scripts, test: 'vitest run' }, devDependencies: { ...manifest.devDependencies, vitest: '^4.1.10' } };
+  f.write(`${dir}/package.json`, tested);
+  f.lock.workspaces[dir].devDependencies.vitest = '^4.1.10'; f.write('bun.lock', f.lock);
+  const plan = selectImpact(['bun.lock', `${dir}/package.json`], f);
+  assert.ok(plan.dirs.includes(dir));
+  for (const [candidate, reason] of [
+    [{ ...tested, scripts: { ...tested.scripts, test: 'vitest run --passWithNoTests' } }, 'another test command'],
+    [{ ...tested, devDependencies: { ...tested.devDependencies, vitest: '^5.0.0' } }, 'another runner range'],
+    [{ ...tested, dependencies: { x: '1.0.0' } }, 'a dependency change'],
+  ]) {
+    f.write(`${dir}/package.json`, candidate);
+    assert.throws(() => selectImpact([`${dir}/package.json`], f), /more than/, reason);
+  }
+  f.write(`${dir}/package.json`, { ...tested, private: false });
+  assert.throws(() => selectImpact([`${dir}/package.json`], f), /must stay private/);
+  f.write(`${dir}/package.json`, tested);
+  f.lock.workspaces[dir].devDependencies.vitest = '^5.0.0'; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f));
+
+  const client = 'packages/client/package.json';
+  const entry = { types: './dist/adapters/packaging.d.ts', import: './dist/adapters/packaging.js' };
+  const root = { '.': { types: './dist/index.d.ts', import: './dist/index.js' } };
+  f.write(client, { ...f.manifest, exports: root }); rebase(f, 'client without the packaging entry');
+  f.write(client, { ...f.manifest, exports: { ...root, './packaging': entry } });
+  assert.deepEqual(selectImpact([client], f).families, ['npm-release-pack']);
+  f.write(client, { ...f.manifest, exports: { ...root, './packaging': { ...entry, import: './dist/other.js' } } });
+  assert.throws(() => selectImpact([client], f), /more than/);
+});

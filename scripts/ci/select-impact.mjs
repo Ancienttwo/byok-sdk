@@ -179,7 +179,7 @@ export const workspaceGraph = {
 export const knownFamilies = Object.freeze([
   'build-test', 'macos-client', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
-  'windows-client', 'packageability-smoke', 'npm-release-pack',
+  'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
   'hermes-real-windows', 'runtime-contract',
 ]);
@@ -257,6 +257,13 @@ export const familyOwners = Object.freeze({
     /^packages\/server\/src\/(?:__tests__\/)?loopback[^/]*$/,
     /^examples\/byok-mcp-server\/src\/loopback[^/]*$/,
   ],
+  // #1104: the embedded Host bundled as ESM, CJS and SEA on each OS, and the SDK bundle and asset code it qualifies.
+  'packaging-consistency': [
+    /^examples\/packaging\/(?:embedded-host-(?:fixture\.ts|smoke\.mjs)|bundle-import-meta\.test\.ts)$/,
+    /^packages\/client\/src\/(?:adapters\/packaging|sdk-native-assets|sdk-reserved-helper-host|sdk-distribution-bins)\b/,
+    /^packages\/client\/src\/adapters\/pi\/(?:runtime-assets|todo-locale-assets|client-manifest)\.ts$/,
+    /^packages\/keys\/src\/pi-provider-launcher-core\.ts$/,
+  ],
   'windows-service-smoke': [
     /^templates\/service\/winsw\//,
     /^packages\/client\/src\/(?:lifecycle\/|util\/secure-dir\.ts$)/,
@@ -316,6 +323,8 @@ export const reviewedScripts = Object.freeze({
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and
   // runs it in every family job; #925 selects npm-release-pack alone.
   'scripts/release/execution-submit-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
+  // #1104: pack-and-smoke.mjs copies the packaging plugin smoke into its clean install.
+  'scripts/release/packaging-plugin-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and runs
   // it against the packed client's Pi launcher and todo assets.
   'scripts/release/pi-launcher-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
@@ -365,7 +374,7 @@ function todoSnapshotListed(path, context) {
 export const vitestTmpRootConsumers = Object.freeze([
   'examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/codex-interaction-host',
   'examples/host-execution-core', 'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker',
-  'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
+  'examples/packaging', 'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
 ]);
 // Reviewed M build inputs: exact paths retain workspace consumers and packed-artifact checks.
 const reviewedBuildConfigOwners = Object.freeze({
@@ -437,6 +446,11 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       dirs.add('examples/bot-collaboration'); continue;
     }
+    // #1104: the private packaging example manifest, checked by its reviewed shape.
+    if (path === 'examples/packaging/package.json') {
+      verifyReviewedContent(path, context);
+      dirs.add('examples/packaging'); continue;
+    }
     // #884: the private K4 manifest, checked by its reviewed shape. Its suite and the suites of its dependents run.
     if (path === 'examples/host-execution-core/package.json') {
       verifyReviewedContent(path, context);
@@ -459,6 +473,10 @@ export function selectImpact(paths, context = {}) {
     // SQLite ESM/CJS and relocated SEA probes share the packaging smoke owner.
     if (path === 'examples/packaging/sqlite-fixture.ts' || path === 'examples/packaging/sqlite-smoke.mjs') {
       dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
+    }
+    // #1104: the packaging consistency lane bundles and runs this fixture; its bundle test runs in the example suite.
+    if (/^examples\/packaging\/(?:embedded-host-(?:fixture\.ts|smoke\.mjs)|bundle-import-meta\.test\.ts|vitest\.config\.ts)$/.test(path)) {
+      dirs.add('examples/packaging'); continue;
     }
     // Both packaging recipes compile this launcher; the packageability smoke runs it.
     if (path === 'examples/packaging/launcher.ts') {
