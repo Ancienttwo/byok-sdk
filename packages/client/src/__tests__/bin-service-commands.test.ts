@@ -17,7 +17,7 @@ import {
 import { generateWinswXml } from '../lifecycle/winsw';
 import { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from '../lifecycle/agent-service';
 import type { ServiceInstallation, ServiceUpgradeReceipt } from '../lifecycle/service-installation';
-import { runUpgradeInstallationCommand } from '../bin/commands/upgrade';
+import { runUpgradeInstallationCommand, runUpgradeStatusCommand } from '../bin/commands/upgrade';
 import { appendAuditRecord } from '../bin/audit-log';
 import { formatHaltRemedy } from '../bin/format';
 
@@ -300,7 +300,26 @@ describe('#1097 slice 2: payload installations through the CLI', () => {
     }
   });
 
-  it('upgrade apply|rollback|status report the current version and receipt', async () => {
+  it('upgrade status reads the install root alone: no service definition, so no WinSW inputs', async () => {
+    const installRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cli-upgrade-status-'));
+    try {
+      const lines: string[] = [];
+      await runUpgradeStatusCommand(installRoot, { json: true, log: (line) => lines.push(line) });
+      expect(JSON.parse(lines[0]!)).toEqual({ current: null, receipt: null });
+      await fs.mkdir(path.join(installRoot, 'versions', '2.0.0'), { recursive: true });
+      await fs.symlink(path.join('versions', '2.0.0'), path.join(installRoot, 'current'));
+      const receipt: ServiceUpgradeReceipt = { format: 'byok-service-upgrade-receipt', version: 1, state: 'switched', from: '1.0.0', to: '2.0.0', at: 'now' };
+      await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), JSON.stringify(receipt));
+      await runUpgradeStatusCommand(installRoot, { json: true, log: (line) => lines.push(line) });
+      await runUpgradeStatusCommand(installRoot, { json: false, log: (line) => lines.push(line) });
+      expect(JSON.parse(lines[1]!)).toEqual({ current: '2.0.0', receipt });
+      expect(lines.slice(2)).toEqual(['current: 2.0.0', 'receipt: switched from=1.0.0 to=2.0.0 at=now']);
+    } finally {
+      await fs.rm(installRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('upgrade apply|rollback report the current version and receipt', async () => {
     const installation = fakeInstallation();
     const lines: string[] = [];
     await runUpgradeInstallationCommand(installation, { action: 'apply', payload: 'p2', json: true, log: (line) => lines.push(line) });

@@ -192,6 +192,45 @@ type Pointer = (typeof POINTERS)[number];
 const STORE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
 const VERDICTS: ReadonlySet<StoreCompatibilityVerdict> = new Set(['accepted', 'new-path-repair', 'rejected', 'absent']);
 
+/** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
+async function readInstallPointer(installRoot: string, name: Pointer): Promise<string | undefined> {
+  const link = path.join(installRoot, name);
+  let target: string;
+  try {
+    target = await fs.readlink(link);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  const id = path.basename(target.replace(/[\\/]+$/u, ''));
+  if (!VERSION_ID.test(id)) throw new Error(`${link} does not point into ${path.join(installRoot, 'versions')}`);
+  return id;
+}
+
+async function readUpgradeReceipt(installRoot: string): Promise<ServiceUpgradeReceipt | undefined> {
+  const receiptPath = path.join(installRoot, 'upgrade-receipt.json');
+  let text: string;
+  try {
+    text = await fs.readFile(receiptPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  const receipt = JSON.parse(text) as Partial<ServiceUpgradeReceipt>;
+  if (receipt.format !== 'byok-service-upgrade-receipt' || receipt.version !== 1) throw new Error(`${receiptPath} is not a version 1 upgrade receipt`);
+  return receipt as ServiceUpgradeReceipt;
+}
+
+/**
+ * @internal The running version and the last receipt of an install root,
+ * read from disk only: no service definition, unit or service manager is
+ * involved, so a status read needs none of their inputs (WinSW paths).
+ */
+export async function readServiceInstallationState(installRoot: string): Promise<{ current: string | undefined; receipt: ServiceUpgradeReceipt | undefined }> {
+  const root = path.resolve(installRoot);
+  return { current: await readInstallPointer(root, 'current'), receipt: await readUpgradeReceipt(root) };
+}
+
 export function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation {
   const program = opts.program(path.join(path.resolve(opts.installRoot), 'current'));
   return serviceInstallationOver(opts, createManagedServiceLifecycle({ ...opts.service, program }, opts.lifecycle));
@@ -214,17 +253,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return readPointer('current');
   }
 
-  async function readPointer(name: Pointer): Promise<string | undefined> {
-    let target: string;
-    try {
-      target = await fs.readlink(path.join(root, name));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw error;
-    }
-    const id = path.basename(target.replace(/[\\/]+$/u, ''));
-    if (!VERSION_ID.test(id)) throw new Error(`${path.join(root, name)} does not point into ${versionsDir}`);
-    return id;
+  function readPointer(name: Pointer): Promise<string | undefined> {
+    return readInstallPointer(root, name);
   }
 
   /**
@@ -255,17 +285,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
   }
 
-  async function readReceipt(): Promise<ServiceUpgradeReceipt | undefined> {
-    let text: string;
-    try {
-      text = await fs.readFile(receiptPath, 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw error;
-    }
-    const receipt = JSON.parse(text) as Partial<ServiceUpgradeReceipt>;
-    if (receipt.format !== 'byok-service-upgrade-receipt' || receipt.version !== 1) throw new Error(`${receiptPath} is not a version 1 upgrade receipt`);
-    return receipt as ServiceUpgradeReceipt;
+  function readReceipt(): Promise<ServiceUpgradeReceipt | undefined> {
+    return readUpgradeReceipt(root);
   }
 
   /** Only `recover()` may act while a receipt is `pending`. */

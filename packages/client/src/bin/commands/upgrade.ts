@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { StoreCompatibility } from '@byok-sdk/core';
-import type { ServiceInstallation, ServiceUpgradeReceipt } from '../../lifecycle/service-installation';
+import { readServiceInstallationState, type ServiceInstallation, type ServiceUpgradeReceipt } from '../../lifecycle/service-installation';
 import { inspectDaemonStores } from '../../diagnostics/store-compatibility';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release';
 
@@ -45,7 +45,7 @@ export const UPGRADE_INSTALLATION_ACTIONS = ['apply', 'rollback', 'recover', 'st
 export type UpgradeInstallationAction = (typeof UPGRADE_INSTALLATION_ACTIONS)[number];
 
 export interface UpgradeInstallationOptions {
-  readonly action: UpgradeInstallationAction;
+  readonly action: Exclude<UpgradeInstallationAction, 'status'>;
   /** The payload directory, for `apply`. */
   readonly payload?: string;
   readonly json: boolean;
@@ -53,13 +53,12 @@ export interface UpgradeInstallationOptions {
 }
 
 /**
- * `byok-agent upgrade apply <payload>|rollback|recover|status` (#1097): the
- * payload installation recorded for this store, through the same API an
- * embedded Host calls. A refusal or a failed health check throws
+ * `byok-agent upgrade apply <payload>|rollback|recover` (#1097): the payload
+ * installation recorded for this store, through the same API an embedded
+ * Host calls. A refusal or a failed health check throws
  * `ServiceInstallationError`; its receipt is written first.
  */
 export async function runUpgradeInstallationCommand(installation: ServiceInstallation, options: UpgradeInstallationOptions): Promise<void> {
-  const log = options.log ?? ((line: string) => console.log(line));
   let receipt: ServiceUpgradeReceipt | undefined;
   switch (options.action) {
     case 'apply':
@@ -71,11 +70,20 @@ export async function runUpgradeInstallationCommand(installation: ServiceInstall
     case 'recover':
       receipt = await installation.recover();
       break;
-    case 'status':
-      receipt = await installation.receipt();
-      break;
   }
-  const current = await installation.currentVersion();
+  reportInstallationState(await installation.currentVersion(), receipt, options);
+}
+
+/** `byok-agent upgrade status`: reads the install root only, so it takes no service or WinSW inputs. */
+export async function runUpgradeStatusCommand(installRoot: string, options: { readonly json: boolean; readonly log?: (line: string) => void }): Promise<void> {
+  const { current, receipt } = await readServiceInstallationState(installRoot);
+  reportInstallationState(current, receipt, options);
+}
+
+function reportInstallationState(
+  current: string | undefined, receipt: ServiceUpgradeReceipt | undefined, options: { readonly json: boolean; readonly log?: (line: string) => void },
+): void {
+  const log = options.log ?? ((line: string) => console.log(line));
   if (options.json) {
     log(JSON.stringify({ current: current ?? null, receipt: receipt ?? null }, null, 2));
     return;

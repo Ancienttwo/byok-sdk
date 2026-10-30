@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { PI_TEAM_OPERATOR_TOKEN } from './team-pi-operator-entry';
 import { runTeamPiRelayCommand } from './commands/team-pi-relay';
 import { runTeamRelayCommand } from './commands/team-relay';
-import { createDaemon, createServiceLifecycle, type ServiceLifecycle } from '../index';
+import { createDaemon, createServiceLifecycle, readServiceInstallationRecord, type ServiceLifecycle } from '../index';
 import { argValue, ConfigError, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
 import { formatHaltRemedy } from './format';
 import { applyLoginShellEnvironment, SERVICE_FLAG } from '../lifecycle/service-environment';
@@ -32,7 +32,7 @@ import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runToolsetsReloadCommand } from './commands/toolsets';
 import { runTeamCreateCommand, runTeamJoinCommand, runTeamListCommand, runTeamOpenCommand, runTeamWatchCommand } from './commands/team';
 import { runUnpairCommand } from './commands/unpair';
-import { runUpgradeInstallationCommand, runUpgradeStoreCheckCommand, UPGRADE_INSTALLATION_ACTIONS, type UpgradeInstallationAction } from './commands/upgrade';
+import { runUpgradeInstallationCommand, runUpgradeStatusCommand, runUpgradeStoreCheckCommand, UPGRADE_INSTALLATION_ACTIONS, type UpgradeInstallationAction } from './commands/upgrade';
 import { runVersionCommand } from './version';
 
 /**
@@ -359,13 +359,19 @@ async function main(): Promise<void> {
       console.error(`upgrade ${action} requires --config <path> or a BYOK_CONFIG env var`);
       process.exit(1);
     }
-    const installation = await cliServiceInstallation(loadConfig(configPath), configPath, rest, {});
-    if (installation === undefined) {
+    const config = loadConfig(configPath);
+    const noInstallation = (): never => {
       console.error('upgrade: no payload installation is recorded for this store (install it with byok-agent install --payload)');
       process.exit(1);
+    };
+    if (action === 'status') {
+      // A status read takes only the recorded install root, never the service definition.
+      const record = (await readServiceInstallationRecord(resolveStoreDir(config))) ?? noInstallation();
+      return runUpgradeStatusCommand(record.installRoot, { json: hasFlag(rest, '--json') });
     }
+    const installation = (await cliServiceInstallation(config, configPath, rest, {})) ?? noInstallation();
     return runUpgradeInstallationCommand(installation, {
-      action: action as UpgradeInstallationAction, ...(action === 'apply' ? { payload: args[0] } : {}), json: hasFlag(rest, '--json'),
+      action: action as Exclude<UpgradeInstallationAction, 'status'>, ...(action === 'apply' ? { payload: args[0] } : {}), json: hasFlag(rest, '--json'),
     });
   }
 
