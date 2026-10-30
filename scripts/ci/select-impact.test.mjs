@@ -146,6 +146,7 @@ test('a platform family is selected only by a path it owns', () => {
     'packaging-consistency': 'packages/client/src/adapters/packaging.ts',
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
     'linux-systemd-smoke': 'templates/service/systemd/smoke-test.mjs',
+    'service-upgrade-smoke': 'examples/service-upgrade/upgrade-smoke.mjs',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
     'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
@@ -384,7 +385,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 19);
+  assert.equal(knownFamilies.length, 20);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {

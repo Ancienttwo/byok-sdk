@@ -892,3 +892,35 @@ test('generic example manifest upgrades include the basic workspace', t => {
     f.write(path, bad); assert.throws(() => selectImpact([path], f));
   }
 });
+
+test('new graph-registered private workspaces and matching lock rows are admitted; unregistered additions fail', t => {
+  const f = fixture(t);
+  for (const id of ['protocol', 'server']) {
+    const manifest = { name: `@byok-sdk/${id}`, version: '0.28.0' };
+    f.write(`packages/${id}/package.json`, manifest); f.lock.workspaces[`packages/${id}`] = manifest;
+  }
+  f.write('bun.lock', f.lock); rebase(f, 'base dependency declarations');
+  const dir = 'examples/basic';
+  const manifest = { name: '@byok-sdk/example-basic', version: '0.0.1', private: true, type: 'module',
+    scripts: { typecheck: 'tsc --noEmit', test: 'vitest run' },
+    dependencies: { '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' } };
+  f.write(`${dir}/package.json`, manifest);
+  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, dependencies: manifest.dependencies };
+  f.lock.packages[manifest.name] = [`${manifest.name}@workspace:${dir}`];
+  f.write('bun.lock', f.lock);
+  assert.ok(selectImpact([`${dir}/package.json`, 'bun.lock'], f).dirs.includes(dir));
+  for (const change of [{ private: false }, { name: 'unregistered-name' }, { scripts: { typecheck: 'tsc --noEmit' } }, { dependencies: { '@byok-sdk/client': 'workspace:*' } }, { devDependencies: { unapproved: '1.0.0' } }]) {
+    f.write(`${dir}/package.json`, { ...manifest, ...change });
+    assert.throws(() => selectImpact([`${dir}/package.json`], f));
+  }
+  f.write(`${dir}/package.json`, manifest);
+  f.lock.workspaces[dir].version = '0.0.2'; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /lock rows differ/);
+  const unknown = 'examples/unregistered';
+  f.write(`${unknown}/package.json`, manifest);
+  assert.throws(() => selectImpact([`${unknown}/package.json`], f), /graph-registered/);
+  delete f.lock.workspaces[dir]; delete f.lock.packages[manifest.name];
+  f.lock.workspaces[unknown] = { name: manifest.name, version: manifest.version, dependencies: manifest.dependencies };
+  f.lock.packages[manifest.name] = [`${manifest.name}@workspace:${unknown}`]; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /graph-registered/);
+});
