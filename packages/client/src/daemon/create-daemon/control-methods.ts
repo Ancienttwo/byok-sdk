@@ -88,7 +88,13 @@ async function describeRuntimeEnvironments(adapters: readonly RuntimeAdapter[]):
     const runtimeId = adapter.descriptor.id;
     try {
       const { report } = await adapter.runtimeEnvironment();
-      return { runtimeId, status: 'built', names: report.names, removed: report.removed };
+      // A custom adapter's report may carry more fields than the type names: only these cross the socket.
+      return {
+        runtimeId,
+        status: 'built',
+        names: report.names.map(({ name, source }) => ({ name, source })),
+        removed: report.removed.map(({ name, rule }) => ({ name, rule })),
+      };
     } catch (error) {
       if (error instanceof RuntimeEnvironmentUnavailableError) return { runtimeId, status: 'unavailable', code: error.reason };
       return { runtimeId, status: 'failed' };

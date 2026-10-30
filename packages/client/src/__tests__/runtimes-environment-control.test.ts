@@ -8,7 +8,7 @@ import { connectControlClient } from '../bin/control-client';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { RUNTIMES_ENVIRONMENT_METHOD } from '../daemon/control-protocol';
-import { composeRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../runtime/environment';
+import { composeRuntimeEnvironment, RuntimeEnvironmentUnavailableError, type RuntimeEnvironment } from '../runtime/environment';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -81,6 +81,35 @@ it('answers each adapter build as names and sources, a capture failure as its co
     for (const value of ['passed-value-sentinel', 'host-value-sentinel', 'shell-value-sentinel', '/opt/homebrew/bin', 'failed-message-sentinel', 'HOST_ONLY_SENTINEL']) {
       expect(serialized).not.toContain(value);
     }
+  } finally {
+    connection.client.close();
+  }
+});
+
+it('sends only name and source, name and rule, whatever else a custom adapter puts into its report', async () => {
+  // Structural typing lets a custom adapter return report entries with more fields than the type names.
+  const names = [{ name: 'ACME_API_KEY', source: 'pass' as const, value: 'NAME_VALUE_SENTINEL' }];
+  const removed = [{ name: 'BYOK_SECRET', rule: 'deny' as const, value: 'REMOVED_VALUE_SENTINEL' }];
+  const rich: RuntimeEnvironment = { env: { ACME_API_KEY: 'NAME_VALUE_SENTINEL' }, report: { names, removed } };
+  const adapter = new StubRuntimeAdapter('claude');
+  adapter.runtimeEnvironment = async () => rich;
+  daemon = createDaemonWithAdapters({
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() },
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir,
+  }, [adapter]);
+  await daemon.pair('code');
+  await daemon.start();
+
+  const connection = await connectControlClient({ storeDir, productId: 'test-product' });
+  if (!connection.ok) throw new Error('expected the control socket');
+  try {
+    const result = await connection.client.request<unknown>(RUNTIMES_ENVIRONMENT_METHOD);
+    expect(result).toEqual({
+      runtimes: [{ runtimeId: 'claude', status: 'built', names: [{ name: 'ACME_API_KEY', source: 'pass' }], removed: [{ name: 'BYOK_SECRET', rule: 'deny' }] }],
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('NAME_VALUE_SENTINEL');
+    expect(serialized).not.toContain('REMOVED_VALUE_SENTINEL');
   } finally {
     connection.client.close();
   }
