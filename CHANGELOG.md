@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Security (protocol, core, client, cloud, keys, server)** — dependency
+  floors raised past published advisories: `zod` `^4.6.6` (GHSA-mrhx-c7xc-m3w5),
+  `hono` `^4.13.11` (nine advisories, GHSA-54fx-42gc-7vw4 through
+  GHSA-hxh3-vqpv-xpqv) and `@hono/node-server` `^2.1.3` (GHSA-rmxm-3fg6-px4f).
+  A Host that pins an older `zod` or `hono` must move to these versions. The
+  transitive `ip-address` (GHSA-rxp7-6hxx-x8q5) is refreshed in the lockfile.
+
 - **Add (client; #1094)** — a `byok-agent` config file sets runtime isolation
   and tool authorization without the embedded path. `DaemonConfig.runtimes`
   carries the isolation options of the adapters `createDaemon` builds
