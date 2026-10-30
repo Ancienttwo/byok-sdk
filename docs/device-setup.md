@@ -249,6 +249,8 @@ the App first. While another `install`, `repair`, `uninstall` or owner claim or
 release is in progress for this user (on Windows, on this machine), in any
 process and for any store, or a store is being relocated, the command fails at
 once with `lifecycle_owner_busy`; run it again when that one has finished.
+On macOS a stop returns only once launchd has unloaded the job; if it is still
+loaded after 10 seconds, the command fails with `service_unload_timeout`.
 
 Exit codes: a service exits 0 to stay stopped (a normal stop, or a halt such as
 revocation) and 1 to be restarted (a crash). The units encode this as launchd
