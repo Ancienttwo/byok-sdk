@@ -13,6 +13,8 @@ export interface TimelineOrderKey {
 }
 
 export interface TimelineMetadata {
+  /** Retained log-row continuity; projected events alone cannot prove missing rows. */
+  readonly log?: { readonly floor: number; readonly revisions: readonly number[] };
   readonly dropped: number;
   readonly capacity?: number;
   readonly expiresAt?: string;

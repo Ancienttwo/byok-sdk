@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "f8924d85d21e29c597d4052490e362d131461eae3edbec70e9da3d5457576c2d"
+    "snapshotSha256": "14093f81c2ba1e270e6ffca073355dad54979fb9a92897f924a42f16273f7378"
   },
   "configFields": {
     "status": "tracked",
@@ -18,7 +18,7 @@
     {
       "id": "activity-log-read-contract",
       "impact": "breaking",
-      "summary": "Activity is an envelope log with bounded bytes, durable revision cursors, plaintext artifact entries, opaque sealed progress and retained source fences (#1113 A1). A1 is not deployable or independently mergeable: Postgres fails closed until A2, and canonical lifecycle/wake/union integration follows in A3-A5. Hosts must update log-entry readers and handle explicit cursor gaps. TimelineEvent and TimelineOrderKey order by store revision and within-entry offset; producer batchSeq/eventIndex remain provenance.",
+      "summary": "Activity is an envelope log with bounded bytes, durable revision cursors, plaintext artifact entries, opaque sealed progress and retained source fences (#1113 A1). A1 is not deployable or independently mergeable: Postgres fails closed until A2, and canonical lifecycle/wake/union integration follows in A3-A5. Hosts must update log-entry readers and handle explicit cursor gaps. TimelineEvent and TimelineOrderKey order by store revision and within-entry offset; producer batchSeq/eventIndex remain provenance. TimelineMetadata.log supplies retained-row continuity; incremental events alone no longer infer missing log revisions.",
       "migration": "docs/migrations/1113-durable-activity-log.md#durable-activity-log-contract",
       "items": [
         "export:@byok-sdk/cloud#ACTIVITY_TERMINAL_TTL_MS",
@@ -42,7 +42,8 @@
         "export:@byok-sdk/cloud-dataplane#PostgresActivityStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresActivityStore",
         "export:@byok-sdk/cloud#TimelineEventSchema",
-        "export:@byok-sdk/ui-runtime#TimelineOrderKey"
+        "export:@byok-sdk/ui-runtime#TimelineOrderKey",
+        "export:@byok-sdk/ui-runtime#TimelineMetadata"
       ]
     },
     {
@@ -3135,6 +3136,11 @@
       "item": "export:@byok-sdk/server/execution-core/canonical#hash",
       "change": "added",
       "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/ui-runtime#TimelineMetadata",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
     },
     {
       "item": "export:@byok-sdk/ui-runtime#TimelineOrderKey",

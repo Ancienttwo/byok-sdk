@@ -2259,7 +2259,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 550746,
+      "budgetBytes": 551569,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

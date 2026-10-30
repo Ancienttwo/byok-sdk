@@ -163,8 +163,8 @@ describe('Live Activity Timeline fold', () => {
       timelineEvent(4, 2, { type: 'progress', text: 'event gap' }),
       timelineEvent(7, 3, { type: 'turn_end' }),
     ];
-    const source = tail(events);
-    let state = createTimelineState('task-1', source);
+    const source = { ...tail(events), floor: 4 };
+    let state = createTimelineState('task-1', { ...source, log: { floor: source.floor, revisions: source.entries.map(entry => entry.revision) } });
     for (const event of events) state = foldTimelineEvent(state, event);
     const snapshot = projectTimeline(state);
     expect(snapshot).toMatchObject({ dropped: 4, capacity: 50, expiresAt: '2026-08-16T13:00:00.000Z' });
@@ -270,4 +270,17 @@ it('reviewer: replay accepts distinct log revisions with the same producer coord
   const tail = (await store.read(tenant, 'task'))!;
   expect(tail.entries.map(entry => entry.revision)).toEqual([1, 2]);
   expect(() => replayTimeline(tail)).not.toThrow();
+});
+
+it('reviewer: retained empty row does not create a missing-history gap', async () => {
+  const store = new InMemoryActivityStore({ now: () => new Date('2026-10-30T00:00:00.000Z') });
+  const tenant = tenantId('review');
+  for (const [index, events] of [[1, [{type:'progress',text:'before'}]], [2, []], [3, [{type:'progress',text:'after'}]]] as const) {
+    await store.append(tenant, {taskId:'task',sourceEnvelopeId:`source-${index}`,batchSeq:index,events:[...events],dropped:0,ttlMs:600_000});
+  }
+  const tail = (await store.read(tenant, 'task'))!;
+  expect(tail.entries.map(entry => entry.revision)).toEqual([1, 2, 3]);
+  expect(tail.floor).toBe(0);
+  expect(tail.dropped).toBe(0);
+  expect(replayTimeline(tail).gaps).toEqual([]);
 });
