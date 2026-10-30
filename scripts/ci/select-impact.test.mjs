@@ -320,7 +320,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/packaging-plugin-smoke.mjs',
     'scripts/release/pi-launcher-smoke.mjs',
-    'scripts/release/publish.mjs', 'scripts/release/registry-readback.mjs',
+    'scripts/release/publish-recovery.test.mjs', 'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
     'scripts/release/upgrade-manifest/snapshot.mjs',
   ]);
@@ -373,7 +373,7 @@ test('store precheck fixtures select the server, keys and client suites', () => 
 });
 
 test('release script siblings outside the reviewed list still fail closed', () => {
-  for (const path of ['scripts/release/publish.test.mjs', 'scripts/release/pg-migrate-smoke.mjs', 'scripts/release/registry-contract.mjs',
+  for (const path of ['scripts/release/publish-unreviewed.test.mjs', 'scripts/release/pg-migrate-smoke.mjs', 'scripts/release/registry-contract.mjs',
     'scripts/release/nested/publish.mjs', 'scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/check-version-authority.js']) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
   }
