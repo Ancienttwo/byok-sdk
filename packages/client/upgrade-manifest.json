@@ -823,6 +823,28 @@
         "export:@byok-sdk/protocol#RuntimeInfoSchema",
         "export:@byok-sdk/protocol#TaskClaimPayloadSchema"
       ]
+    },
+    {
+      "id": "service-installation-upgrade",
+      "impact": "additive",
+      "summary": "Versioned service installs and upgrades (#1097). createServiceInstallation installs a Host-verified payload (a directory plus byok-payload.json listing each file's SHA-256) under a Host-owned install root as versions/<id> with current and previous pointers, so the unit and launcher never change. upgrade() stops the service, runs the candidate's store precheck and stops before the switch on new-path-repair or rejected (ServiceInstallationError store_repair_required / store_rejected, with the verdicts), snapshots every listed store, switches, and restores the old version and its snapshot together when the new one fails its health check (health_check_failed). rollback(), recover() for an interrupted switch, uninstall() and upgrade-receipt.json complete it; agentServiceInstallation is the byok-agent payload's installation. The CLI adds install --payload <dir> --install-root <dir> and upgrade apply <dir> | rollback | recover | status. A service installed without a payload is unchanged.",
+      "migration": "docs/device-setup.md#versioned-installs",
+      "items": [
+        "export:@byok-sdk/client#AGENT_PAYLOAD_ENTRY",
+        "export:@byok-sdk/client#AgentServiceInstallationInput",
+        "export:@byok-sdk/client#SERVICE_PAYLOAD_MANIFEST",
+        "export:@byok-sdk/client#ServiceInstallation",
+        "export:@byok-sdk/client#ServiceInstallationError",
+        "export:@byok-sdk/client#ServiceInstallationErrorCode",
+        "export:@byok-sdk/client#ServiceInstallationOptions",
+        "export:@byok-sdk/client#ServiceInstallationRecord",
+        "export:@byok-sdk/client#ServicePayloadManifest",
+        "export:@byok-sdk/client#ServiceUpgradeReceipt",
+        "export:@byok-sdk/client#agentServiceInstallation",
+        "export:@byok-sdk/client#createServiceInstallation",
+        "export:@byok-sdk/client#readPayloadManifest",
+        "export:@byok-sdk/client#readServiceInstallationRecord"
+      ]
     }
   ],
   "changes": [
