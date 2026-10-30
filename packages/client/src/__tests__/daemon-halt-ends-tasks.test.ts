@@ -104,5 +104,7 @@ describe('#1119 a halted daemon ends its active tasks', () => {
     await expect.poll(() => session.closeCalled, { timeout: 1000, interval: 10 }).toBe(true);
     await expect.poll(() => terminalRows(storeDir, 'hung-interrupt'), { timeout: 1000, interval: 10 }).toEqual([{ truth_state: 'pending' }]);
     expect(Date.now() - interruptAt!).toBeLessThan(1000);
+    // The halt barrier's fsync tail runs past the journal row; activeTaskCount drops after its lease release (finish.ts:199).
+    await expect.poll(() => daemon!.status().activeTaskCount).toBe(0);
   });
 });
