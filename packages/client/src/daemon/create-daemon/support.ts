@@ -284,13 +284,30 @@ export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 
 export function buildAdapter(id: RuntimeId, config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter {
   const environment = config.runtimeEnvironment === undefined ? {} : { runtimeEnvironment: config.runtimeEnvironment };
+  // `DaemonConfig.runtimes`, already validated; an unset option keeps the adapter default.
+  const pi = config.runtimes?.pi;
+  const claude = config.runtimes?.claude;
+  const codex = config.runtimes?.codex;
   switch (id) {
     case 'pi':
-      return new PiAdapter({ nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...environment, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: true } : {}) });
+      return new PiAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...environment,
+        ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }),
+        ...(config.durablePi === true ? { durablePi: true } : {}),
+        ...(pi?.agentUserContext === undefined ? {} : { agentUserContext: pi.agentUserContext }),
+      });
     case 'claude':
-      return new ClaudeAdapter({ nativeAssetRoot: config.nativeAssetRoot, ...environment });
+      return new ClaudeAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        ...(claude?.agentUserContext === undefined ? {} : { agentUserContext: claude.agentUserContext }),
+        ...(claude?.agentSessionPersistence === undefined ? {} : { agentSessionPersistence: claude.agentSessionPersistence }),
+      });
     case 'codex':
-      return new CodexAdapter({ nativeAssetRoot: config.nativeAssetRoot, ...environment, ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }) });
+      return new CodexAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }),
+        ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
+      });
   }
 }
 

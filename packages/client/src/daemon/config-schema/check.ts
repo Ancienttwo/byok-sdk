@@ -9,6 +9,7 @@ import { resolveStorageConfig } from '../retention/config';
 import { ScratchRootPathError } from '../retention/scratch';
 import { DeviceStore } from '../store';
 import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './effective';
+import { staticToolAuthorizationIssues } from './static-tool-authorization';
 import { validateDaemonConfig, type DaemonConfigIssue, type DaemonConfigSource } from './validate';
 
 export interface DaemonConfigCheckOptions {
@@ -34,8 +35,9 @@ export interface DaemonConfigCheck {
  * Validates a `DaemonConfig` without constructing a daemon and, when it
  * would construct, reports its effective values (#1094). Literal problems
  * come from {@link validateDaemonConfig}; a value daemon construction would
- * refuse (a range, a cross-field rule, a scratch root past the socket budget)
- * is an `invalid_value` error. Reads the filesystem (helper assets, store
+ * refuse (a range, a cross-field rule, a scratch root past the socket budget,
+ * a static tool-authorization mode the adapters cannot run) is an
+ * `invalid_value` error. Reads the filesystem (helper assets, store
  * path canonicalization) but writes nothing and starts no process.
  */
 export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOptions): DaemonConfigCheck {
@@ -49,10 +51,13 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
     const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
     const storage = resolveStorageConfig(storeDir, config.storage);
     const adapters = options.adapters ?? buildDefaultAdapters(config, scope.piByokLauncher);
+    const runtimeSource = options.adapters === undefined ? 'sdk-built' : 'injected';
+    const toolAuthorizationIssues = staticToolAuthorizationIssues(config, adapters, runtimeSource);
+    if (toolAuthorizationIssues.length > 0) return { ok: false, issues: [...issues, ...toolAuthorizationIssues] };
     const effective = describeEffectiveDaemonConfig({
       config, warnings: scope.configWarnings, memoryHelper: scope.memoryHelper,
       agentMemoryMcpAdmission: scope.agentMemoryMcpAdmission, storeDir, scratchRoot: storage.scratchRoot,
-      adapters, runtimeSource: options.adapters === undefined ? 'sdk-built' : 'injected',
+      adapters, runtimeSource,
     });
     return { ok: true, issues, effective };
   } catch (error) {

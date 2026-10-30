@@ -21,6 +21,31 @@ export interface ToolAuthorizationTask {
 }
 export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationMode;
 
+/**
+ * A tool-authorization policy that a config file can express (#1094):
+ * `byRuntime` sets the mode of a runtime by its id, and `default` applies to
+ * every other runtime.
+ */
+export interface StaticToolAuthorization {
+  readonly default: ToolAuthorizationMode;
+  readonly byRuntime?: Readonly<Record<string, ToolAuthorizationMode>>;
+}
+
+/** The mode `policy` gives `runtimeId`: its own `byRuntime` entry, else `default`. */
+export function staticToolAuthorizationMode(policy: StaticToolAuthorization, runtimeId: string): ToolAuthorizationMode {
+  const { byRuntime } = policy;
+  return byRuntime !== undefined && Object.hasOwn(byRuntime, runtimeId) ? byRuntime[runtimeId]! : policy.default;
+}
+
+/** The resolver of a static policy, over a copy taken now so later edits to `policy` cannot change it. */
+export function staticToolAuthorizationResolver(policy: StaticToolAuthorization): ToolAuthorizationResolver {
+  const snapshot: StaticToolAuthorization = Object.freeze({
+    default: policy.default,
+    ...(policy.byRuntime === undefined ? {} : { byRuntime: Object.freeze({ ...policy.byRuntime }) }),
+  });
+  return (task) => staticToolAuthorizationMode(snapshot, task.runtimeId);
+}
+
 export function parseToolAuthorizationMode(value: unknown): ToolAuthorizationMode {
   if (value !== 'auto' && value !== 'all') throw new TypeError('tool authorization mode must be auto or all');
   return value;

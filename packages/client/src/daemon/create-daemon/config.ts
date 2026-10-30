@@ -15,6 +15,7 @@ import { validateProgressBatcherOptions } from '../progress-batcher';
 import type { DaemonStatus } from '../create-daemon';
 import type { DaemonInputs } from './scope';
 import { foldNameAliases } from '../../util/fold-name-aliases';
+import { staticToolAuthorizationResolver, type ToolAuthorizationResolver } from '../../tool-authorization';
 
 /**
  * The first stage of `buildDaemonWithAdapters` (#926): validates
@@ -30,9 +31,10 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   const configWarnings = assertDaemonConfigValid(config);
   if (Object.hasOwn(overrides, 'hostedJournal')) throw removedFieldError('hostedJournal');
   if (Object.hasOwn(overrides, 'gitWorkspace')) throw removedFieldError('gitWorkspace');
-  if (config.toolAuthorization !== undefined && typeof config.toolAuthorization !== 'function') {
-    throw new Error('toolAuthorization must be a function returning auto or all');
-  }
+  // Validated above as a function (embedded) or a static policy; the task runner receives only this resolver.
+  const toolAuthorizationResolver: ToolAuthorizationResolver | undefined = config.toolAuthorization === undefined ? undefined
+    : typeof config.toolAuthorization === 'function' ? config.toolAuthorization
+      : staticToolAuthorizationResolver(config.toolAuthorization);
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
   }
@@ -178,7 +180,7 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   return {
     agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,
     agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, piByokLauncher,
-    memoryHelper, configWarnings,
+    memoryHelper, configWarnings, toolAuthorizationResolver,
   };
 }
 
