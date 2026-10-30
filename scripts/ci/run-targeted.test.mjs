@@ -63,6 +63,9 @@ test('dependent-only changes run every selected workspace check without the pack
     const { status, stderr, calls, readers } = runTargeted(plan, root, 0);
     assert.equal(status, 0, `${changed}\n${stderr}`);
     assert.deepEqual(readers.sort(), [
+      // Both are registered generator/check pairs, so the documentation test
+      // selector qualifies them for any packages/*/src input.
+      'scripts/docs/capability-matrix.test.mjs',
       'scripts/docs/device-setup.test.mjs',
       'scripts/architecture/dependency-graph.test.mjs',
       ...(changed.startsWith('packages/client/')
