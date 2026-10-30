@@ -63,7 +63,7 @@ async function run(outcome: unknown) {
     terminalProjection: { mode: 'result-document', contract: 'smoke.review.v1', schema: SCHEMA as never },
   }, { taskId: 'smoke-task', seq: server.nextSeq() }));
   const terminal = await server.waitFor((envelope) => envelope.task_id === 'smoke-task'
-    && (envelope.type === 'task.complete' || envelope.type === 'task.fail' || envelope.type === 'task.decline'), 20_000);
+    && (envelope.type === 'task.complete' || envelope.type === 'task.fail' || envelope.type === 'task.decline'));
   return { terminal, tools: JSON.parse(readFileSync(toolsReceipt, 'utf8')) as { tools: Array<Record<string, unknown>> } };
 }
 

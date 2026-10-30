@@ -30,13 +30,13 @@ function runtime() {
   return new Miniflare({
     resourcePersistencePath: persist,
     workers: [{ config: {
-      name: 'byok-cloud-4a-test', type: 'worker', compatibilityDate: '2026-08-18',
+      name: 'byok-cloud-4a-test', compatibilityDate: '2026-08-18',
       compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
       manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: script } } },
       exports: { AgentDO: { type: 'durable-object', storage: 'sqlite' }, ContractDO: { type: 'durable-object', storage: 'sqlite' } },
       env: {
-        AGENTS: { type: 'durable-object', workerName: 'byok-cloud-4a-test', exportName: 'AgentDO' },
-        CONTRACTS: { type: 'durable-object', workerName: 'byok-cloud-4a-test', exportName: 'ContractDO' },
+        AGENTS: { type: 'durable-object', worker: 'byok-cloud-4a-test', exportName: 'AgentDO' },
+        CONTRACTS: { type: 'durable-object', worker: 'byok-cloud-4a-test', exportName: 'ContractDO' },
       },
     } }],
   });

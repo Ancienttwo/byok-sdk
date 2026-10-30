@@ -7,7 +7,7 @@ import { nextRoutineOccurrence } from '../../core/src/routine-schedule';
 it('matches Node calendar instants and zone checks in real workerd without Node support', async () => {
   const bundle = await build({ entryPoints: ['test/routine-schedule-worker.ts'], bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022' });
   const mf = new Miniflare({ log: new Log(LogLevel.ERROR), workers: [{ config: {
-    name: 'routine-calendar', type: 'worker', compatibilityDate: '2026-08-18',
+    name: 'routine-calendar', compatibilityDate: '2026-08-18',
     compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
     manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: bundle.outputFiles![0]!.text } } },
   } }] });

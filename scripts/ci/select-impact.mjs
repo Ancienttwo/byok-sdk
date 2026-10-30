@@ -326,6 +326,10 @@ export const reviewedScripts = Object.freeze({
     tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs'],
     install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
+  // Each of these ci.yml families runs pack-and-smoke.mjs, which calls this installed-consumer fixture.
+  'scripts/release/cloud-do-consumer-smoke.mjs': {
+    tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
+  },
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and
   // runs it in every family job; #925 selects npm-release-pack alone.
   'scripts/release/execution-submit-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
@@ -335,6 +339,11 @@ export const reviewedScripts = Object.freeze({
   // it against the packed client's Pi launcher and todo assets.
   'scripts/release/pi-launcher-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
   'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
+  // pack-and-smoke.mjs imports this tarball guard and runs it in each of its family jobs.
+  'scripts/release/published-store-paths.mjs': {
+    tests: ['scripts/release/pack-and-smoke.test.mjs'],
+    install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
+  },
   'scripts/release/publish.test.mjs': { tests: ['scripts/release/publish.test.mjs'], install: true },
   'scripts/release/publish-recovery.test.mjs': { tests: ['scripts/release/publish-recovery.test.mjs'], install: true },
   'scripts/release/publish.mjs': {
@@ -419,6 +428,7 @@ export function selectImpact(paths, context = {}) {
   const dependencyDirs = new Set();
   const families = new Set();
   let scripts = false;
+  let fullMatrixReason;
   for (const path of paths) {
     if (typeof path !== 'string' || !path || /[\\\x00-\x1f\x7f]/.test(path)
       || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) requireMapping(path);
@@ -446,7 +456,9 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^(?:packages|examples)\/[^/]+\/package\.json$/.test(path)) {
       // A reviewed dependency move also runs the suites of the workspaces that declare it.
-      for (const dir of verifyReviewedContent(path, context)) { dirs.add(dir); dependencyDirs.add(dir); }
+      const impact = verifyReviewedContent(path, context);
+      for (const dir of impact.dirs) { dirs.add(dir); dependencyDirs.add(dir); }
+      if (impact.fullMatrixReason) fullMatrixReason = impact.fullMatrixReason;
       if (path === 'package.json') { scripts = true; if (dependencyDirs.size) families.add('npm-release-pack'); continue; }
       if (path === 'bun.lock') { families.add('npm-release-pack'); continue; }
       const dir = path.slice(0, -'/package.json'.length);
@@ -514,10 +526,11 @@ export function selectImpact(paths, context = {}) {
     if (Object.hasOwn(reviewedBuildConfigOwners, path)) {
       dirs.add(reviewedBuildConfigOwners[path]); families.add('npm-release-pack'); continue;
     }
-    // Client build inputs: the entry checks, the main build config, the sealed
+    // Client build inputs: the entry checks, the main build config, the todo
+    // build config (check-adapters-entry.mjs --build-todo runs it), the sealed
     // host build check and the retired vendored-subagents build plugin.
     if (path === 'packages/client/scripts/check-hermes-session-entry.mjs' || path === 'packages/client/scripts/check-adapters-entry.mjs'
-      || path === 'packages/client/tsup.config.ts' || path === 'packages/client/scripts/build-sealed-host.mjs'
+      || path === 'packages/client/tsup.config.ts' || path === 'packages/client/tsup.todo.config.ts' || path === 'packages/client/scripts/build-sealed-host.mjs'
       || path === 'packages/client/scripts/subagents-build.ts') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
@@ -703,11 +716,12 @@ export function selectImpact(paths, context = {}) {
   // #794 D3: so does its Worker composition, which needs that Postgres and wrangler.
   if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance') || dirs.has('examples/hosted-bot-collaboration')
     || dirs.has('examples/hosted-bot-collaboration-worker')) families.add('dataplane');
+  if (fullMatrixReason) for (const family of knownFamilies) families.add(family);
   const checks = scriptChecksForPaths([...files]);
   scripts ||= checks.tests.length > 0;
   for (const family of checks.families) families.add(family);
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
-    reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
+    reason: fullMatrixReason ?? (dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only') };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

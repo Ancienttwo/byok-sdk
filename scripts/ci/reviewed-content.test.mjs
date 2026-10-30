@@ -10,6 +10,14 @@ import { selectImpact, knownFamilies, reviewedScripts } from './select-impact.mj
 import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
 import { publicManifests, RUNTIME_CONTRACT_SCRIPT } from './reviewed-content.mjs';
+
+test('cloud-do installed-consumer smoke selects exactly its release-pack execution families', t => {
+  const f = fixture(t);
+  const plan = selectImpact(['scripts/release/cloud-do-consumer-smoke.mjs'], f);
+  assert.deepEqual(plan.families, ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate']);
+  assert.deepEqual(plan.dirs, []);
+});
+
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-reviewed-content-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));

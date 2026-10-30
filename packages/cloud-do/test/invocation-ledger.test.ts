@@ -12,11 +12,11 @@ let script: string;
 let persist: string;
 function runtime() {
   return new Miniflare({ resourcePersistencePath: persist, workers: [{ config: {
-    name: 'cloud-ledger-test', type: 'worker', compatibilityDate: '2026-08-18',
+    name: 'cloud-ledger-test', compatibilityDate: '2026-08-18',
     compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
     manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: script } } },
     exports: { LedgerDO: { type: 'durable-object', storage: 'sqlite' } },
-    env: { LEDGERS: { type: 'durable-object', workerName: 'cloud-ledger-test', exportName: 'LedgerDO' } },
+    env: { LEDGERS: { type: 'durable-object', worker: 'cloud-ledger-test', exportName: 'LedgerDO' } },
   } }] });
 }
 beforeAll(async () => {

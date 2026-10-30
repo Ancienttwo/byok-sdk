@@ -54,12 +54,12 @@ beforeAll(async () => {
   const workers: MiniflareOptions['workers'] = [...faults, 'normal'].map(fault => {
     const name = `auth-boundary-${fault}`;
     return { config: {
-      name, type: 'worker', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
+      name, compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
       manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: result.outputFiles![0]!.text } } },
       exports: { PreflightAgentDO: { type: 'durable-object', storage: 'sqlite' }, AuthHarnessDO: { type: 'durable-object', storage: 'sqlite' } },
       env: {
-        PREFLIGHT: { type: 'durable-object', workerName: name, exportName: 'PreflightAgentDO' },
-        HARNESSES: { type: 'durable-object', workerName: name, exportName: 'AuthHarnessDO' },
+        PREFLIGHT: { type: 'durable-object', worker: name, exportName: 'PreflightAgentDO' },
+        HARNESSES: { type: 'durable-object', worker: name, exportName: 'AuthHarnessDO' },
         AIPHABEE_ZAI_API_KEY: { type: 'text', value: KEY }, FAULT: { type: 'text', value: fault },
       },
     }, dev: { outboundService: { type: 'node-handler', handler: async (request: IncomingMessage, response: ServerResponse) => {
