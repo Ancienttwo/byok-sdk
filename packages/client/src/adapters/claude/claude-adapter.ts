@@ -1,6 +1,7 @@
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import type { RuntimeTaskInput } from '../../types';
 import { claudeMcpEventIdentities } from './mcp-identity';
+import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities';
 import { claudeAgentUserContextSettings } from './agent-user-context';
 import type { McpEventIdentity } from '../../mcp/event-identity';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
@@ -175,12 +176,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       progressEventsAreMessages: true,
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: {
-        steer: false,
-        resume: true,
-        approvalInteractive: false,
-        toolAuthorizationAuto: true,
-        mcpToolsets: true,
-        messageDraft: true,
+        ...CLAUDE_RUNTIME_CAPABILITIES,
         ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
       },
     });

@@ -323,7 +323,10 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
       expect(hints[0]?.level).toBe('online');
       expect(hints[0]?.configuredToolsets).toEqual([]);
       expect(hints[0]?.clientVersion).toBe('0.0.0-test');
-      expect(hints[0]?.runtimes).toEqual([{ id: 'pi', version: '0.0.0' }]);
+      // The conn.hello capability matrix reaches the Host through presence (#1103).
+      expect(hints[0]?.runtimes).toEqual([{
+        id: 'pi', version: '0.0.0', capabilities: { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true },
+      }]);
     });
 
     // Stopping IS the offline signal: no `offline` publish is issued, the hint

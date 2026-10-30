@@ -131,6 +131,10 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       mcpToolsets: true,
       messageDraft: true,
       approvalInteractive: false,
+      // The capability matrix (#1103) rides on the same object.
+      toolAuthorizationAuto: true,
+      preparedLane: true,
+      isolation: { userContext: true, userMcpServers: false, sessionPersistence: false },
     });
 
     // Claude still supports plan; its private confirm/approval MCP path has been removed.
@@ -140,6 +144,9 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       approvalInteractive: false,
       mcpToolsets: true,
       messageDraft: true,
+      toolAuthorizationAuto: true,
+      preparedLane: false,
+      isolation: { userContext: true, userMcpServers: true, sessionPersistence: true },
     });
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
@@ -149,6 +156,8 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       approvalInteractive: false,
       mcpToolsets: true,
       messageDraft: true,
+      preparedLane: false,
+      isolation: { userContext: false, userMcpServers: true, sessionPersistence: false },
     });
 
     // The wire value remains adapter-generated. The shipped adapters all

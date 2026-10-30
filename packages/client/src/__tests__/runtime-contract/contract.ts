@@ -77,6 +77,9 @@ export function defineRuntimeContract(title: string, descriptor: RuntimeAdapterD
     'mcp.submitResult': capabilities.mcpToolsets === true,
     drafts: capabilities.messageDraft === true,
     'gate.auto': capabilities.toolAuthorizationAuto === true,
+    'isolation.userContext': capabilities.isolation?.userContext === true,
+    'isolation.userMcp': capabilities.isolation?.userMcpServers === true,
+    'isolation.sessionPersistence': capabilities.isolation?.sessionPersistence === true,
   };
   for (const [id, entry] of Object.entries(plan) as Array<[ContractCaseId, ContractCheck | ContractSkip]>) {
     if ('skip' in entry && advertised[id] === true) throw new Error(`${descriptor.id}: ${id} is advertised by the descriptor and cannot be skipped`);

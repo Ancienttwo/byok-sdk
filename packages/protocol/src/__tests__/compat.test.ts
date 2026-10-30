@@ -104,7 +104,8 @@ function corpusOf(lines: readonly string[]): CorpusLine[] {
 }
 
 type HttpSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse'
-  | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
+  | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse'
+  | 'PresencePublishRequest';
 
 interface HttpCorpusLine {
   readonly index: number;
@@ -367,16 +368,20 @@ describe('compat v4: the current decoder reads every v4 corpus line exactly (sel
   });
 });
 
-function carries(line: CorpusLine, entry: WireAddition): boolean {
-  if (entry.kind !== 'envelope' || line.type !== entry.surface) return false;
-  if (entry.field === undefined) return true;
-  const values = entry.field.split('.').reduce<unknown[]>((parents, segment) => parents.flatMap(parent => {
+/** The values at a `a[].b.c` field path; `[]` steps into every array element. */
+function fieldValues(root: unknown, field: string): unknown[] {
+  return field.split('.').reduce<unknown[]>((parents, segment) => parents.flatMap(parent => {
     if (parent === null || typeof parent !== 'object') return [];
     const array = segment.endsWith('[]');
     const value = (parent as Record<string, unknown>)[array ? segment.slice(0, -2) : segment];
     return array ? (Array.isArray(value) ? value : []) : [value];
-  }), [line.payload]);
-  const value = values.find(value => value !== undefined);
+  }), [root]);
+}
+
+function carries(line: CorpusLine, entry: WireAddition): boolean {
+  if (entry.kind !== 'envelope' || line.type !== entry.surface) return false;
+  if (entry.field === undefined) return true;
+  const value = fieldValues(line.payload, entry.field).find(value => value !== undefined);
   if (value === undefined) return false;
   return entry.rule !== 'gated' || entry.value === undefined || value === entry.value;
 }
@@ -423,7 +428,7 @@ describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
   it('every entry names a current message type and capability, in the right direction', () => {
     for (const entry of WIRE_ADDITIONS) {
       if (entry.kind === 'http') {
-        expect(Object.keys((httpSchema(currentModule, entry.surface) as unknown as { shape: object }).shape)).toContain(entry.field);
+        expect(Object.keys((httpSchema(currentModule, entry.surface) as unknown as { shape: object }).shape)).toContain(entry.field.split(/[.[]/u)[0]);
         continue;
       }
       expect(MESSAGE_TYPES).toContain(entry.surface);
@@ -438,7 +443,7 @@ describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
   it('every entry is exercised by a v4 corpus line', () => {
     const unused = WIRE_ADDITIONS.filter((entry) => entry.kind === 'envelope'
       ? !v4Corpus.some((line) => carries(line, entry))
-      : !v4HttpCorpus.some((line) => line.surface === entry.surface && Object.hasOwn(line.value, entry.field))).map(
+      : !v4HttpCorpus.some((line) => line.surface === entry.surface && fieldValues(line.value, entry.field).some((value) => value !== undefined))).map(
       (entry) => `${entry.surface}${entry.field === undefined ? '' : `.${entry.field}`}${entry.rule === 'gated' && entry.value !== undefined ? `=${entry.value}` : ''}`,
     );
     expect(unused, 'append a v4 corpus line that carries each of these (golden/v4.envelopes.ndjson is append-only)').toEqual([]);
@@ -499,6 +504,19 @@ describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
       { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.messageDraft' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.toolAuthorizationAuto' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.toolAuthorizationAuto' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.toolAuthorizationAuto' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.durablePi' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.durablePi' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.durablePi' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.preparedLane' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.preparedLane' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.preparedLane' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.isolation' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.isolation' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.isolation' },
+      { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimes[].capabilities' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
       { kind: 'http', rule: 'strip-safe', surface: 'TokenResponse', field: 'expiresIn' },
       { kind: 'http', rule: 'strip-safe', surface: 'PairResponse', field: 'expiresIn' },
@@ -529,9 +547,10 @@ function assertCurrentHttp(line: HttpCorpusLine): void {
 }
 
 describe('compat v4: HTTP corpus (self-consistency; no published v4 decoder yet)', () => {
-  it('covers all ten scoped HTTP route schemas with owned bodies and independent expected values', () => {
+  it('covers all eleven scoped HTTP route schemas with owned bodies and independent expected values', () => {
     const surfaces: readonly HttpSurface[] = ['ChallengeRequest', 'ChallengeResponse', 'TokenRequest', 'TokenResponse',
-      'PairRequest', 'PairResponse', 'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse'];
+      'PairRequest', 'PairResponse', 'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse',
+      'PresencePublishRequest'];
     expect([...new Set(v4HttpCorpus.map((line) => line.surface))].sort()).toEqual([...surfaces].sort());
     expect(v4HttpText.endsWith('\n'), 'literal corpus lines must be newline terminated').toBe(true);
     for (const line of v4HttpCorpus) {

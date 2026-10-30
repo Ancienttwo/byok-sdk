@@ -20,6 +20,7 @@ import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpire
  */
 import {
   ByokCoreError,
+  freezePresenceRuntimeFact,
   type Clock,
   type PresenceHint,
   type PresenceHintInput,
@@ -63,15 +64,7 @@ function toHint(row: PresenceRow): PresenceHint {
     ...(row.runtimes === null
       ? {}
       : {
-          runtimes: Object.freeze(
-            row.runtimes.map((runtime) =>
-              Object.freeze({
-                id: runtime.id,
-                ...(runtime.version === undefined ? {} : { version: runtime.version }),
-                ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
-              }),
-            ),
-          ),
+          runtimes: Object.freeze(row.runtimes.map(freezePresenceRuntimeFact)),
         }),
     observedAt: row.observed_at,
     expiresAt: row.expires_at,
@@ -150,7 +143,7 @@ export class PostgresPresenceStore implements PresenceStore {
         input.configuredToolsets === undefined ? null : JSON.stringify(input.configuredToolsets),
         input.clientVersion ?? null,
         input.protocolVersions === undefined ? null : JSON.stringify(input.protocolVersions),
-        input.runtimes === undefined ? null : JSON.stringify(input.runtimes),
+        input.runtimes === undefined ? null : JSON.stringify(input.runtimes.map(freezePresenceRuntimeFact)),
         observedAt,
         new Date(now.getTime() + input.ttlMs).toISOString(),
         allowedBefore,

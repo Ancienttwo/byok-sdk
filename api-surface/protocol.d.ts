@@ -2304,6 +2304,21 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
         }>;
         version: z.ZodOptional<z.ZodString>;
         authPresent: z.ZodOptional<z.ZodBoolean>;
+        capabilities: z.ZodOptional<z.ZodObject<{
+            steer: z.ZodOptional<z.ZodBoolean>;
+            resume: z.ZodOptional<z.ZodBoolean>;
+            approvalInteractive: z.ZodOptional<z.ZodBoolean>;
+            mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+            messageDraft: z.ZodOptional<z.ZodBoolean>;
+            toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
+            durablePi: z.ZodOptional<z.ZodBoolean>;
+            preparedLane: z.ZodOptional<z.ZodBoolean>;
+            isolation: z.ZodOptional<z.ZodObject<{
+                userContext: z.ZodOptional<z.ZodBoolean>;
+                userMcpServers: z.ZodOptional<z.ZodBoolean>;
+                sessionPersistence: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
 export type PresencePublishRequest = z.infer<typeof PresencePublishRequestSchema>;
@@ -3886,6 +3901,14 @@ export declare const RuntimeCapabilitiesSchema: z.ZodObject<{
     approvalInteractive: z.ZodOptional<z.ZodBoolean>;
     mcpToolsets: z.ZodOptional<z.ZodBoolean>;
     messageDraft: z.ZodOptional<z.ZodBoolean>;
+    toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
+    durablePi: z.ZodOptional<z.ZodBoolean>;
+    preparedLane: z.ZodOptional<z.ZodBoolean>;
+    isolation: z.ZodOptional<z.ZodObject<{
+        userContext: z.ZodOptional<z.ZodBoolean>;
+        userMcpServers: z.ZodOptional<z.ZodBoolean>;
+        sessionPersistence: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
 /**
@@ -3907,6 +3930,14 @@ export declare const RuntimeInfoSchema: z.ZodObject<{
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
+        toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
+        durablePi: z.ZodOptional<z.ZodBoolean>;
+        preparedLane: z.ZodOptional<z.ZodBoolean>;
+        isolation: z.ZodOptional<z.ZodObject<{
+            userContext: z.ZodOptional<z.ZodBoolean>;
+            userMcpServers: z.ZodOptional<z.ZodBoolean>;
+            sessionPersistence: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
@@ -3922,6 +3953,14 @@ export declare const HarnessInfoSchema: z.ZodObject<{
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
+        toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
+        durablePi: z.ZodOptional<z.ZodBoolean>;
+        preparedLane: z.ZodOptional<z.ZodBoolean>;
+        isolation: z.ZodOptional<z.ZodObject<{
+            userContext: z.ZodOptional<z.ZodBoolean>;
+            userMcpServers: z.ZodOptional<z.ZodBoolean>;
+            sessionPersistence: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
 }, z.core.$strip>;
 export type HarnessInfo = z.infer<typeof HarnessInfoSchema>;
@@ -3934,6 +3973,14 @@ export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
+        toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
+        durablePi: z.ZodOptional<z.ZodBoolean>;
+        preparedLane: z.ZodOptional<z.ZodBoolean>;
+        isolation: z.ZodOptional<z.ZodObject<{
+            userContext: z.ZodOptional<z.ZodBoolean>;
+            userMcpServers: z.ZodOptional<z.ZodBoolean>;
+            sessionPersistence: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>;
     }, z.core.$strip>;
 }, z.core.$strip>>;
 /** Maximum logical toolsets one daemon may advertise as locally configured. */
@@ -3989,6 +4036,14 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             approvalInteractive: z.ZodOptional<z.ZodBoolean>;
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
             messageDraft: z.ZodOptional<z.ZodBoolean>;
+            toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
+            durablePi: z.ZodOptional<z.ZodBoolean>;
+            preparedLane: z.ZodOptional<z.ZodBoolean>;
+            isolation: z.ZodOptional<z.ZodObject<{
+                userContext: z.ZodOptional<z.ZodBoolean>;
+                userMcpServers: z.ZodOptional<z.ZodBoolean>;
+                sessionPersistence: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strip>>;
         }, z.core.$strip>>;
     }, z.core.$strip>>>;
     harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -4000,6 +4055,14 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             approvalInteractive: z.ZodOptional<z.ZodBoolean>;
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
             messageDraft: z.ZodOptional<z.ZodBoolean>;
+            toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
+            durablePi: z.ZodOptional<z.ZodBoolean>;
+            preparedLane: z.ZodOptional<z.ZodBoolean>;
+            isolation: z.ZodOptional<z.ZodObject<{
+                userContext: z.ZodOptional<z.ZodBoolean>;
+                userMcpServers: z.ZodOptional<z.ZodBoolean>;
+                sessionPersistence: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strip>>;
         }, z.core.$strip>;
     }, z.core.$strip>>>;
     configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -5150,6 +5213,14 @@ export declare const TaskClaimPayloadSchema: z.ZodObject<{
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
+        toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
+        durablePi: z.ZodOptional<z.ZodBoolean>;
+        preparedLane: z.ZodOptional<z.ZodBoolean>;
+        isolation: z.ZodOptional<z.ZodObject<{
+            userContext: z.ZodOptional<z.ZodBoolean>;
+            userMcpServers: z.ZodOptional<z.ZodBoolean>;
+            sessionPersistence: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>;
     }, z.core.$strip>>;
     admission: z.ZodOptional<z.ZodObject<{
         totalMs: z.ZodNumber;
@@ -7735,7 +7806,7 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  */
 import type { MessageType } from './messages';
 import type { CapabilityFlag } from './version';
-type HttpWireSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse' | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
+type HttpWireSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse' | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse' | 'PresencePublishRequest';
 export type WireAddition = {
     readonly kind: 'envelope';
     readonly rule: 'gated';

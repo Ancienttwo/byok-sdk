@@ -30,6 +30,7 @@ import { grokAgentPersona } from './agent-persona';
 import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-user-mcp-servers';
 import { GrokProjection, type GrokTurnOutcome } from './projection';
 import { resolveGrokBin } from './resolve-bin';
+import { GROK_RUNTIME_CAPABILITIES } from './grok-capabilities';
 import { isQualifiedGrokVersion, QUALIFIED_GROK_VERSION } from './grok-version';
 
 const execFileAsync = promisify(execFile);
@@ -99,13 +100,7 @@ export class GrokAdapter implements RuntimeAdapter {
     supportsDispatchSelection: false,
     // Windows has no Grok evidence (`docs/adapter-capabilities.md`).
     platforms: ['darwin', 'linux'],
-    capabilities: {
-      steer: false,
-      resume: true,
-      approvalInteractive: false,
-      mcpToolsets: true,
-      messageDraft: true,
-    },
+    capabilities: GROK_RUNTIME_CAPABILITIES,
   }); }
 
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;

@@ -3439,8 +3439,16 @@ same flag. §1.3.1 states its rules.
 `capabilities` object (`RuntimeCapabilitiesSchema`):
 
 ```
-{ steer?, resume?, approvalInteractive?, mcpToolsets? }
+{ steer?, resume?, approvalInteractive?, mcpToolsets?, messageDraft?,
+  toolAuthorizationAuto?, durablePi?, preparedLane?,
+  isolation?: { userContext?, userMcpServers?, sessionPersistence? } }
 ```
+
+The fields from `toolAuthorizationAuto` on are the capability matrix (#1103),
+each a strip-safe addition. They are the adapter's capability constant, the
+same values [the generated matrix](adapter-capabilities.md#capability-matrix)
+shows. A presence publication carries the same object per runtime in
+`runtimes[].capabilities`, so a Host can read it from presence before dispatch.
 
 Every field is independently optional — an older daemon omits `capabilities`
 entirely; a daemon that only partially detected a runtime's abilities may

@@ -39,6 +39,7 @@ import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
+import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities';
 import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-version';
 import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers';
 
@@ -118,13 +119,9 @@ export class CodexAdapter implements RuntimeAdapter {
     platforms: ['darwin', 'linux', 'win32'],
     mcpToolApprovals: true,
     capabilities: {
-      steer: true,
-      resume: true,
-      approvalInteractive: false,
+      ...CODEX_RUNTIME_CAPABILITIES,
       // Questions only: tool permission is the SDK `auto | all` decision.
       ...(this.options.nativeInteractions === undefined ? {} : { nativeInteractions: { approvalDecisions: [], structuredQuestions: true } }),
-      mcpToolsets: true,
-      messageDraft: true,
     },
   }); }
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;

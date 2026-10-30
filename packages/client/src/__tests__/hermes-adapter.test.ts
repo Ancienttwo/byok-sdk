@@ -173,7 +173,10 @@ describe('HermesAdapter construction and descriptor', () => {
       supportsDispatchSelection: false,
       requiresMcpToolsetToolObservation: false,
       platforms: ['darwin', 'linux', 'win32'],
-      capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true, messageDraft: true },
+      capabilities: {
+        steer: false, resume: false, approvalInteractive: false, mcpToolsets: true, messageDraft: true, preparedLane: false,
+        isolation: { userContext: true, userMcpServers: true, sessionPersistence: false },
+      },
     });
     expect(Object.isFrozen(descriptor)).toBe(true);
     expect(Object.isFrozen(descriptor.capabilities)).toBe(true);

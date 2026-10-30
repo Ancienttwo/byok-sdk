@@ -5,6 +5,7 @@ import {
   AgentRefSchema,
   ConfiguredToolsetsSchema,
   ProtocolVersionNumberSchema,
+  RuntimeCapabilitiesSchema,
   RuntimeIdSchema,
   AgentHomeProjectionAgentRefSchema,
 } from './messages';
@@ -164,14 +165,16 @@ export const PRESENCE_DETAIL_MAX_LENGTH = 512;
 export const PRESENCE_RUNTIME_VERSION_MAX_LENGTH = 128;
 
 /**
- * Presence is a readiness observation, not a second runtime-capability
- * protocol. It retains only the facts the cloud persists and bounds every
- * string/array/numeric input at this public request boundary.
+ * Presence is a readiness observation. It retains only the facts the cloud
+ * persists and bounds every string/array/numeric input at this public request
+ * boundary. `capabilities` is the same capability matrix `conn.hello` reports
+ * for the runtime (#1103), so a Host can read it before dispatch.
  */
 const PresenceRuntimeFactSchema = z.object({
   id: RuntimeIdSchema,
   version: z.string().min(1).max(PRESENCE_RUNTIME_VERSION_MAX_LENGTH).optional(),
   authPresent: z.boolean().optional(),
+  capabilities: RuntimeCapabilitiesSchema.optional(),
 });
 
 export const PresencePublishRequestSchema = z.object({

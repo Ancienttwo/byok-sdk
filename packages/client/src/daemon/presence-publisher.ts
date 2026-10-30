@@ -166,17 +166,17 @@ export class PresencePublisher {
             ...(this.opts.protocolVersions === undefined
               ? {}
               : { protocolVersions: [...this.opts.protocolVersions] }),
-            // Presence is a lightweight readiness fact, not a second
-            // capability-negotiation channel. Keep its projection identical
-            // to the persisted presence contract: the conn.hello snapshot's
-            // runtime identity/version/auth facts, with no capabilities blob.
+            // The conn.hello snapshot's runtime facts, its capability matrix
+            // included (#1103): discovery data a Host reads before dispatch,
+            // never a negotiation channel.
             ...(this.opts.runtimes === undefined
               ? {}
               : {
-                  runtimes: this.opts.runtimes.map(({ id, version, authPresent }) => ({
+                  runtimes: this.opts.runtimes.map(({ id, version, authPresent, capabilities }) => ({
                     id,
                     ...(version === undefined ? {} : { version }),
                     ...(authPresent === undefined ? {} : { authPresent }),
+                    ...(capabilities === undefined ? {} : { capabilities }),
                   })),
                 }),
           }),
