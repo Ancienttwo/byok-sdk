@@ -63,7 +63,7 @@ for (const entry of JSON.parse(listed.stdout))
       overrides[`mcp_servers.${entry.name}.url`] = '"http://127.0.0.1:9/mcp"';
     overrides[`mcp_servers.${entry.name}.enabled`] = 'false';
   }
-const env = await adapter.runtimeEnvironment();
+const { env } = await adapter.runtimeEnvironment();
 let raw;
 let projection;
 let complete;
