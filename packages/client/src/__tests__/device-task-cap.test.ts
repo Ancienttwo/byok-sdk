@@ -7,6 +7,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { MAX_DURATION_EXCEEDED_REASON_PREFIX } from '../daemon/task-runner';
 import { TestServer } from './fixtures/test-server';
+import { until } from './fixtures/until';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
@@ -79,6 +80,9 @@ describe('device-wide task resources (#1121)', () => {
 
     pi.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor(entry => entry.type === 'task.complete' && entry.task_id === 'cap-1');
+    // task.complete is sent before finish() releases the task's slot; offer
+    // again only once the device has a free slot.
+    await until(() => daemon!.status().activeTaskCount === 1, () => `activeTaskCount=${daemon!.status().activeTaskCount}`);
     offer('cap-4', 'agent-c');
     await started('cap-4');
     expect(pi.sessions).toHaveLength(3);

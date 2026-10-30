@@ -1,4 +1,6 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
+import { onTestFailed } from 'vitest';
+import { getCurrentTest } from 'vitest/suite';
 import type { AddressInfo } from 'node:net';
 import { createPublicKey, randomUUID, verify as edVerify } from 'node:crypto';
 import {
@@ -341,15 +343,32 @@ export class TestServer {
     this.pushLongPollEvent(envelope);
   }
 
-  async waitFor(predicate: (envelope: Envelope) => boolean, timeoutMs = 2000): Promise<Envelope> {
+  /**
+   * Resolves with the first received envelope matching `predicate`. It has no
+   * deadline of its own: the test timeout is the only bound, so host load
+   * cannot fail a wait whose envelope is still on its way. If the test fails
+   * while this is still waiting, the predicate and what did arrive are printed.
+   */
+  async waitFor(predicate: (envelope: Envelope) => boolean): Promise<Envelope> {
     const existing = this.received.find(predicate);
     if (existing) return existing;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('timed out waiting for envelope')), timeoutMs);
+    let settled = false;
+    // What had arrived when the test timed out, before teardown sends more.
+    let arrived: string[] | undefined;
+    const signal = getCurrentTest()!.context.signal;
+    const describeReceived = (): string[] => this.received.map((envelope) =>
+      envelope.task_id === undefined ? envelope.type : `${envelope.type}(${envelope.task_id})`);
+    signal.addEventListener('abort', () => { arrived ??= describeReceived(); }, { once: true });
+    onTestFailed(() => {
+      if (settled) return;
+      const seen = arrived ?? describeReceived();
+      console.error(`TestServer.waitFor: no envelope matched ${predicate.toString()}; received: ${seen.join(', ') || '(none)'}`);
+    });
+    return new Promise((resolve) => {
       this.waiters.push({
         predicate,
         resolve: (envelope) => {
-          clearTimeout(timer);
+          settled = true;
           resolve(envelope);
         },
       });
@@ -357,6 +376,8 @@ export class TestServer {
   }
 
   async close(): Promise<void> {
+    // A wait abandoned by a failed test never resolves; drop it with the server.
+    this.waiters = [];
     // A held response keeps its connection open, and http.Server#close waits for it.
     for (const release of this.messagesHoldReleases) release();
     await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));

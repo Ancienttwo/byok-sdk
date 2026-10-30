@@ -144,7 +144,7 @@ async function start(options: {
   const member: ScopeMember = { web, scopeKey: await web.putScope(SCOPE, [device], { categories: options.policy ?? BOTH.categories }) };
   await options.beforeStart?.(storeDir, deviceId, member, device);
   await daemon.start();
-  await server.waitFor(options.e2ee === undefined ? advertised : (envelope) => envelope.type === 'conn.hello', BUDGET_MS);
+  await server.waitFor(options.e2ee === undefined ? advertised : (envelope) => envelope.type === 'conn.hello');
   return { server, adapter, deviceId, storeDir, member, device, cursor: () => new CursorStore(storeDir).load(server!.url, deviceId) };
 }
 
@@ -232,7 +232,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     }, [new StubRuntimeAdapter('pi')]);
     await daemon.pair('pair-code');
     await daemon.start();
-    await server.waitFor((envelope) => envelope.type === 'conn.hello', BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'conn.hello');
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(server.received.filter(advertised)).toEqual([]);
     await daemon.stop(); daemon = undefined;
@@ -251,7 +251,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     await vi.waitFor(() => expect(info).toHaveBeenCalledWith(expect.stringMatching(/^\[byok\/client\] E2EE member \S+ verified/u)), BUDGET_MS);
     // the receiver checks the offer's `sealing` gate against the flags this daemon advertises, and it never advertises sealed-payload-v1 here.
     server.send(await sealedOffer(member, 'undeclared', server.nextSeq(), deviceId, 'run'));
-    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'undeclared', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'undeclared');
     expect(decline.payload).toEqual({ agentRef: agentOf('undeclared'), reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.sessions).toHaveLength(0);
     expect(server.received.filter(advertised)).toEqual([]);
@@ -324,10 +324,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(adapter.startCalls[0]!.task.instruction).toBe(prependAgentMemoryGuidance(instruction));
     adapter.sessions[0]!.emit({ type: 'progress', text: 'secret progress' });
     // The Agent egress lane of a fresh offer forwards the last event of a batch, so the turn ends only after the progress envelope under test was sent.
-    await server.waitFor((envelope) => wireForm(envelope) === 'task.progress_sealed' && envelope.task_id === 'sealed-task', BUDGET_MS);
+    await server.waitFor((envelope) => wireForm(envelope) === 'task.progress_sealed' && envelope.task_id === 'sealed-task');
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
-    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed', BUDGET_MS);
+    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed');
     expect(await openOutput(member, complete, deviceId)).toMatchObject({ summary: 'secret progress' });
     const progress = taskEnvelopes('sealed-task').filter((envelope) => wireForm(envelope) === 'task.progress_sealed');
     expect(progress.length).toBeGreaterThan(0);
@@ -354,7 +354,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     adapter.sessions[0]!.emit({ type: 'progress', text: 'rotated answer' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
-    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'output-only', BUDGET_MS);
+    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'output-only');
     expect((complete.payload as { sealed: { scope: { epoch: number } } }).sealed.scope.epoch).toBe(EPOCH + 1);
     const rotated = await member.web.openPackage(SCOPE, EPOCH + 1, device);
     expect(await openOutput(member, complete, deviceId, OUTPUT_ONLY, rotated)).toMatchObject({ summary: 'rotated answer' });
@@ -372,7 +372,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     adapter.sessions[1]!.emit({ type: 'progress', text: 'sealed answer' });
     adapter.sessions[1]!.emit({ type: 'turn_end' });
 
-    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'output-only', BUDGET_MS);
+    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'output-only');
     expect(await openOutput(member, complete, deviceId, OUTPUT_ONLY)).toMatchObject({ summary: 'sealed answer' });
     expect(JSON.stringify(taskEnvelopes('output-only'))).not.toContain('sealed answer');
   });
@@ -381,7 +381,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const { server, adapter, deviceId, member } = await start();
     const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
     server.send(await sealedOffer(member, 'below-policy', server.nextSeq(), deviceId, 'never runs', inputOnly));
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'below-policy', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'below-policy');
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
@@ -395,7 +395,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       .mockImplementation(function (this: DeviceMemberKeyring, scopeId: string) { return scopeCategories.call(this, scopeId); });
     const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
     server.send(await sealedOffer(member, 'policy-moved', server.nextSeq(), deviceId, 'never runs', inputOnly));
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'policy-moved', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'policy-moved');
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
@@ -410,7 +410,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     });
     server.send(createEnvelope('task.offer', { agentRef: agentOf('foreign-head'), ...FRESH_OFFER, sealing: BOTH, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
       { taskId: 'foreign-head', seq: server.nextSeq() }));
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'foreign-head', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'foreign-head');
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
@@ -435,7 +435,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const offer = await alter(server, await sealedOffer(member, 'declined', server.nextSeq(), deviceId, 'never runs'));
     server.send(offer);
 
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'declined', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'declined');
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: code, code, retryable: false, admission: { totalMs: expect.any(Number) } });
     await vi.waitFor(async () => expect(await cursor()).toBe(offer.seq), BUDGET_MS);
     server.send({ ...offer, id: randomUUID(), seq: server.nextSeq() });
@@ -449,7 +449,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const blobRef = { blobId: 'b1', contentHash: `sha256:${'1'.repeat(64)}`, size: 1, contentType: 'text/plain' };
     server.send(await sealedOffer(member, 'blob-instruction', server.nextSeq(), deviceId, blobRef));
 
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'blob-instruction', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'blob-instruction');
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, admission: { totalMs: expect.any(Number) } });
   });
 
@@ -457,7 +457,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const { server, adapter, deviceId, member } = await start({ serverFlag: false });
     server.send(await sealedOffer(member, 'no-flag', server.nextSeq(), deviceId, 'never runs'));
 
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'no-flag', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'no-flag');
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_payload_unsupported: the server does not accept sealed task output', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
@@ -471,7 +471,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(hello.payload.capabilities).not.toContain('agent-egress-policy');
     server.send(await sealedOffer(member, 'missing-egress', server.nextSeq(), deviceId, 'never runs'));
 
-    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'missing-egress', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'missing-egress');
     expect(decline.payload).toEqual({ agentRef: agentOf('missing-egress'), reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false, admission: { totalMs: expect.any(Number) } });
     // The Host's inbound check reads this helper, so the decline settles the task.
     expect(isSealedTaskPlainOutput('task.decline', decline.payload)).toBe(true);
@@ -485,7 +485,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
     server.send(await sealedOffer(member, 'downgraded', server.nextSeq(), deviceId, 'never runs', inputOnly, { boundSealing: BOTH }));
 
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'downgraded', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'downgraded');
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
@@ -494,7 +494,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'gated', server.nextSeq(), deviceId, 'never runs', BOTH, { plain: { harnessId: 'acme-harness' } }));
 
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline_sealed' && envelope.task_id === 'gated', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline_sealed' && envelope.task_id === 'gated');
     expect(await openOutput(member, decline, deviceId)).toEqual({ reason: expect.any(String) });
     expect(taskEnvelopes('gated').map(wireForm)).toEqual(['task.decline_sealed']);
     expect(adapter.startCalls).toHaveLength(0);
@@ -505,9 +505,9 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     // The sealed input comes first: it makes the epoch fresh for the output-only task.
     server.send(await sealedOffer(member, 'sealed-input', server.nextSeq(), deviceId, 'run sealed-input'));
     // Session creation precedes durable activation; controls require task.started.
-    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'sealed-input', BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'sealed-input');
     server.send(await sealedOffer(member, 'output-only-steer', server.nextSeq(), deviceId, 'run output-only-steer', OUTPUT_ONLY));
-    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'output-only-steer', BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'output-only-steer');
     const sessionOf = (taskId: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === prependAgentMemoryGuidance(`run ${taskId}`))]!;
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -526,7 +526,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'fresh', server.nextSeq(), deviceId, 'run fresh'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.send(await sealedOffer(member, 'output-only-sealed-steer', server.nextSeq(), deviceId, 'run', OUTPUT_ONLY));
-    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'output-only-sealed-steer', BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'output-only-sealed-steer');
     const steerId = randomUUID();
     const { header, ciphertext } = await sealedMember(member, { text: 'go left' },
       binding('task.steer', 'server-to-daemon', { taskId: 'output-only-sealed-steer', steerId }, deviceId, BOTH));
@@ -544,7 +544,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   it('applies a sealed steer once per steerId', async () => {
     const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'steered', server.nextSeq(), deviceId, 'run'));
-    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'steered', BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'steered');
 
     const steerId = randomUUID();
     const { header, ciphertext } = await sealedMember(member, { text: 'go left' }, binding('task.steer', 'server-to-daemon', { taskId: 'steered', steerId }, deviceId, BOTH));
@@ -564,7 +564,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   it('applies the redelivery of a sealed steer whose first apply failed', async () => {
     const { server, adapter, deviceId, member } = await start();
     server.send(await sealedOffer(member, 'steer-retry', server.nextSeq(), deviceId, 'run'));
-    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'steer-retry', BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'steer-retry');
     const session = adapter.sessions[0]!;
 
     const steerId = randomUUID();
@@ -582,7 +582,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   it('applies a sealed steer past a harmless chain advance, and drops one after a scope policy adds another device', async () => {
     const { server, adapter, deviceId, member, device } = await start();
     server.send(await sealedOffer(member, 'steer-shared', server.nextSeq(), deviceId, 'run'));
-    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'steer-shared', BUDGET_MS);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'steer-shared');
     const session = adapter.sessions[0]!;
     const steer = async (text: string) => {
       const steerId = randomUUID();
@@ -620,16 +620,16 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const session = (taskIndex: number) => adapter.sessions[taskIndex]!;
 
     void session(0).requestApproval('secret approval summary');
-    const approval = await server.waitFor((envelope) => wireForm(envelope) === 'task.await_approval_sealed', BUDGET_MS);
+    const approval = await server.waitFor((envelope) => wireForm(envelope) === 'task.await_approval_sealed');
     expect(approval.payload).toMatchObject({ approvalId: expect.any(String) });
     expect(await openOutput(member, approval, deviceId)).toEqual({ summary: 'secret approval summary' });
     server.send(createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId: approval.task_id!, seq: server.nextSeq() }));
-    const cancelled = await server.waitFor((envelope) => wireForm(envelope) === 'task.cancelled_sealed', BUDGET_MS);
+    const cancelled = await server.waitFor((envelope) => wireForm(envelope) === 'task.cancelled_sealed');
     expect(cancelled.task_id).toBe(approval.task_id);
     expect(await openOutput(member, cancelled, deviceId)).toEqual({ reason: expect.any(String) });
 
     session(1).fail(new Error('secret runtime failure'));
-    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed', BUDGET_MS);
+    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed');
     expect(await openOutput(member, failed, deviceId)).toEqual({ reason: expect.any(String) });
 
     const wire = JSON.stringify(server.received);
@@ -645,7 +645,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     try {
       adapter.sessions[0]!.emit({ type: 'progress', text: 'p'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024) });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
-      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge', 15_000);
+      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge');
       expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
       // The local observer sees the failure that was sent, not the completion it replaced.
       await vi.waitFor(() => expect(daemon!.tasks().find((task) => task.taskId === 'huge')).toMatchObject({ state: 'Failed', summary: 'terminal_result_unsealable' }), BUDGET_MS);
@@ -662,7 +662,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'auth' },
       reason: 'r'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024),
     }));
-    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge-classed', 15_000);
+    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge-classed');
     const { reason } = await openOutput(member, failed, deviceId) as { reason: string };
     expect(reason).toMatch(/^r+\u2026\[truncated \d+ bytes\]$/u);
     expect(new TextEncoder().encode(reason).length).toBeLessThanOrEqual(TASK_FAIL_REASON_MAX_BYTES);
@@ -681,7 +681,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     try {
       adapter.sessions[0]!.emit({ type: 'progress', text: 'p'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024) });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
-      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge-complete', 15_000);
+      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'huge-complete');
       expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
       if (expected === undefined) expect(failed.payload).not.toHaveProperty('failure');
       else expect(failed.payload).toMatchObject(expected);
@@ -699,7 +699,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     try {
       adapter.sessions[0]!.emit({ type: 'progress', text: 'lost output' });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
-      const fail = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'key-lost', BUDGET_MS);
+      const fail = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'key-lost');
       expect(fail.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
     } finally {
       diagnostic.mockRestore();
@@ -722,7 +722,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       diagnostic.mockRestore();
     }
     adapter.sessions[0]!.emit({ type: 'turn_end' });
-    await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'unsent-approval', BUDGET_MS);
+    await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'unsent-approval');
     const types = taskEnvelopes('unsent-approval').map(wireForm);
     expect(types).not.toContain('task.await_approval_sealed');
     expect(types).not.toContain('task.await_approval');
@@ -752,7 +752,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       // Under the 2 MiB plaintext limit, over the 256 KiB inline frame.
       adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
-      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'over-inline', BUDGET_MS);
+      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'over-inline');
       expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
     } finally {
       diagnostic.mockRestore();
@@ -798,7 +798,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
         await journal.close();
       },
     });
-    const fail = await server!.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'interrupted', BUDGET_MS);
+    const fail = await server!.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'interrupted');
     expect(fail.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, recovery: { kind: 'daemon_interrupted', offerId: offer!.id } });
   });
 
@@ -823,7 +823,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
         await journal.close();
       },
     });
-    const fail = await server!.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === taskId, BUDGET_MS);
+    const fail = await server!.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === taskId);
     expect(fail.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
     expect(isSealedTaskPlainOutput(fail.type, fail.payload)).toBe(true);
     expect(JSON.stringify(taskEnvelopes(taskId))).not.toContain('result_not_submitted');
@@ -837,12 +837,12 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'out.bin'), content);
     adapter.sessions[0]!.emit({ type: 'artifact', name: 'out.bin', contentType: 'application/octet-stream' });
 
-    const artifact = await server.waitFor((envelope) => wireForm(envelope) === 'task.artifact_sealed', BUDGET_MS);
+    const artifact = await server.waitFor((envelope) => wireForm(envelope) === 'task.artifact_sealed');
     expect(artifact.payload).toMatchObject({ name: 'out.bin', contentType: 'application/octet-stream', artifactId: expect.any(String) });
     expect(await openOutput(member, artifact, deviceId)).toEqual({ inline: content.toString('base64') });
     expect(taskEnvelopes('artifact').map(wireForm)).not.toContain('task.artifact');
     adapter.sessions[0]!.emit({ type: 'turn_end' });
-    await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed', BUDGET_MS);
+    await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed');
   });
 
   it('reports an artifact above the sealed inline limit as a sealed error and sends no artifact', async () => {
@@ -854,7 +854,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     try {
       adapter.sessions[0]!.emit({ type: 'artifact', name: 'huge.bin', contentType: 'application/octet-stream' });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
-      await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'too-big', BUDGET_MS);
+      await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'too-big');
     } finally {
       diagnostic.mockRestore();
     }
@@ -875,7 +875,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     try {
       adapter.sessions[0]!.emit({ type: 'artifact', name: 'large.bin', contentType: 'application/octet-stream' });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
-      await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'large', BUDGET_MS);
+      await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'large');
     } finally {
       diagnostic.mockRestore();
     }
@@ -906,7 +906,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     };
 
     server.send(await offerOf('bad-hash', true));
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'bad-hash', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'bad-hash');
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, admission: { totalMs: expect.any(Number) } });
 
     server.send(await offerOf('blob-offer', false));
@@ -926,7 +926,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     });
     server.send(big);
 
-    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'big-sealed', BUDGET_MS);
+    const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'big-sealed');
     expect(decline.payload).toEqual({ agentRef: line.payload.agentRef, reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), BUDGET_MS);
   });
@@ -966,7 +966,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
     server.setFailBlobUploads(false);
 
-    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'upload-retry', BUDGET_MS);
+    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'upload-retry');
     expect((complete.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
     expect(await openOutput(member, complete, deviceId)).toMatchObject({ summary });
     expect(taskEnvelopes('upload-retry').map(wireForm)).not.toContain('task.fail_sealed');
@@ -981,7 +981,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     try {
       adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
-      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'upload-refused', BUDGET_MS);
+      const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'upload-refused');
       expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
     } finally {
       diagnostic.mockRestore();
@@ -1011,7 +1011,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     expect(taskEnvelopes('upload-refused-retry').map(wireForm)).not.toContain('task.fail_sealed');
     refuse(undefined);
 
-    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'upload-refused-retry', BUDGET_MS);
+    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'upload-refused-retry');
     expect((complete.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
     expect(await openOutput(member, complete, deviceId)).toMatchObject({ summary });
     expect(taskEnvelopes('upload-refused-retry').map(wireForm)).not.toContain('task.fail_sealed');
@@ -1032,7 +1032,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     server.setFailMessagesSends(false);
     server.setFailEventsPolls(false);
 
-    const terminal = await server.waitFor((envelope) => (wireForm(envelope) === 'task.complete_sealed' || wireForm(envelope) === 'task.fail_sealed') && envelope.task_id === 'between-sessions', BUDGET_MS);
+    const terminal = await server.waitFor((envelope) => (wireForm(envelope) === 'task.complete_sealed' || wireForm(envelope) === 'task.fail_sealed') && envelope.task_id === 'between-sessions');
     expect(wireForm(terminal)).toBe('task.complete_sealed');
     expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
     expect(await openOutput(member, terminal, deviceId)).toMatchObject({ summary });
@@ -1089,7 +1089,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     server.setFailBlobUploads(false);
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
     const terminal = await server.waitFor((envelope) => envelope.task_id === 'upload-restart'
-      && ['task.complete_sealed', 'task.fail_sealed', 'task.fail'].includes(wireForm(envelope)), BUDGET_MS);
+      && ['task.complete_sealed', 'task.fail_sealed', 'task.fail'].includes(wireForm(envelope)));
     expect(wireForm(terminal)).toBe('task.complete_sealed');
     expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
     expect(await openOutput(member, terminal, deviceId)).toMatchObject({ summary });
@@ -1125,7 +1125,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     await started;
 
     const terminal = await server.waitFor((envelope) => (wireForm(envelope) === 'task.complete_sealed' || wireForm(envelope) === 'task.fail_sealed')
-      && envelope.task_id === 'upload-slow-restart', BUDGET_MS);
+      && envelope.task_id === 'upload-slow-restart');
     expect(wireForm(terminal)).toBe('task.complete_sealed');
     expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
     expect(await openOutput(member, terminal, deviceId)).toMatchObject({ summary });
@@ -1152,7 +1152,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     await daemon!.start();
 
     const terminal = await server.waitFor((envelope) => ['task.complete_sealed', 'task.fail_sealed', 'task.fail', 'task.complete'].includes(wireForm(envelope))
-      && envelope.task_id === 'restart-member', BUDGET_MS);
+      && envelope.task_id === 'restart-member');
     expect(wireForm(terminal)).toBe('task.complete_sealed');
     const sealed = (terminal.payload as { sealed: { chainHead: { seq: number; hash: string }; ciphertextRef?: unknown } }).sealed;
     expect(sealed.chainHead).toEqual(member.web.head);
@@ -1185,7 +1185,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     await daemon!.start();
 
     const terminal = await server.waitFor((envelope) => envelope.task_id === 'restart-other-member'
-      && ['task.complete_sealed', 'task.fail_sealed', 'task.fail', 'task.complete'].includes(wireForm(envelope)), BUDGET_MS);
+      && ['task.complete_sealed', 'task.fail_sealed', 'task.fail', 'task.complete'].includes(wireForm(envelope)));
     expect(wireForm(terminal)).toBe('task.fail');
     expect(terminal.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
     expect(isSealedTaskPlainOutput(terminal.type, terminal.payload)).toBe(true);
@@ -1221,7 +1221,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     await daemon!.start();
 
     const terminal = await server.waitFor((envelope) => envelope.task_id === 'after-retire'
-      && ['task.fail_sealed', 'task.fail'].includes(wireForm(envelope)), BUDGET_MS);
+      && ['task.fail_sealed', 'task.fail'].includes(wireForm(envelope)));
     expect(wireForm(terminal)).toBe('task.fail_sealed');
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
     expect(taskEnvelopes('after-retire').map(wireForm)).not.toContain('task.fail');
@@ -1235,7 +1235,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'large.bin'), content);
     adapter.sessions[0]!.emit({ type: 'artifact', name: 'large.bin', contentType: 'application/octet-stream' });
 
-    const artifact = await server.waitFor((envelope) => wireForm(envelope) === 'task.artifact_sealed', BUDGET_MS);
+    const artifact = await server.waitFor((envelope) => wireForm(envelope) === 'task.artifact_sealed');
     const ref = (artifact.payload as { sealed: { paddedLength: number; ciphertextRef?: { blobId: string; contentType: string } } }).sealed;
     expect(ref.paddedLength).toBeGreaterThan(SEALED_INLINE_MAX_PADDED_LENGTH);
     expect(ref.ciphertextRef?.contentType).toBe('application/octet-stream');
@@ -1258,12 +1258,12 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
 
       small.emit({ type: 'progress', text: 'small summary' });
       small.emit({ type: 'turn_end' });
-      await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'small-terminal', BUDGET_MS);
+      await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'small-terminal');
       expect(taskEnvelopes('held-upload').map(wireForm)).not.toContain('task.complete_sealed');
     } finally {
       release();
     }
-    await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'held-upload', BUDGET_MS);
+    await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'held-upload');
   });
 
   it('keeps an approval request inline only, and denies it locally over the inline frame without an upload', async () => {
@@ -1354,7 +1354,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await runLargeResult(adapter, member, deviceId, 'refused-ref');
 
-    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'refused-ref', BUDGET_MS);
+    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'refused-ref');
     expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
     expect(failed.payload).not.toHaveProperty('sealed.ciphertextRef');
     await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-ref')).toEqual({ bytes: encodeEnvelope(failed), truth_state: 'confirmed' }), BUDGET_MS);
@@ -1372,7 +1372,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await runLargeResult(adapter, member, deviceId, 'refused-twice');
 
-    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'refused-twice', BUDGET_MS);
+    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'refused-twice');
     await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-twice')).toEqual({ bytes: encodeEnvelope(failed), truth_state: 'failed' }), BUDGET_MS);
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     expect(terminalTypes('refused-twice')).toEqual(['task.complete_sealed', 'task.fail_sealed']);
@@ -1387,7 +1387,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
     adapter.sessions[0]!.emit({ type: 'progress', text: 'small answer' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
-    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'refused-inline', BUDGET_MS);
+    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'refused-inline');
     expect(byReference(complete)).toBe(false);
     await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-inline')).toEqual({ bytes: encodeEnvelope(complete), truth_state: 'failed' }), BUDGET_MS);
     await new Promise((resolve) => setTimeout(resolve, 1_500));
@@ -1404,7 +1404,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     server.setFailMessagesSends(false);
 
-    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'route-retry', BUDGET_MS);
+    const complete = await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'route-retry');
     expect(byReference(complete)).toBe(true);
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
     expect(terminalTypes('route-retry')).toEqual(['task.complete_sealed']);
@@ -1416,7 +1416,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
       ciphertextRef: true,
       beforeStart: async (storeDir, deviceId, member, device) => { refused = await seedRefusedResult(storeDir, deviceId, member, 'refused-before-restart', device.memberId); },
     });
-    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'refused-before-restart', BUDGET_MS);
+    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'refused-before-restart');
     expect(await openAtEpoch(member, failed, deviceId, device)).toEqual({ reason: 'terminal_result_unsealable' });
     await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-before-restart')).toEqual({ bytes: encodeEnvelope(failed), truth_state: 'confirmed' }), BUDGET_MS);
     expect(terminalTypes('refused-before-restart')).toEqual(['task.fail_sealed']);
@@ -1428,7 +1428,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
       ciphertextRef: true,
       beforeStart: async (storeDir, deviceId, member) => { await seedRefusedResult(storeDir, deviceId, member, 'refused-other-member', member.web.member.memberId); },
     });
-    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'refused-other-member', BUDGET_MS);
+    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'refused-other-member');
     expect(failed.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
     expect(isSealedTaskPlainOutput(failed.type, failed.payload)).toBe(true);
     await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-other-member')?.truth_state).toBe('confirmed'), BUDGET_MS);
@@ -1451,7 +1451,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
         } finally { await journal.close(); }
       },
     });
-    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'replaced-before-restart', BUDGET_MS);
+    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'replaced-before-restart');
     expect(encodeEnvelope(failed)).toBe(encodeEnvelope(replacement!));
     await vi.waitFor(() => expect(journalTerminal(storeDir, 'replaced-before-restart')?.truth_state).toBe('confirmed'), BUDGET_MS);
     expect(terminalTypes('replaced-before-restart')).toEqual(['task.fail']);

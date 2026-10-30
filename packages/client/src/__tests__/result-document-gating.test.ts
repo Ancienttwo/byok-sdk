@@ -215,7 +215,7 @@ describe('result-document recovery from the journal', () => {
     await journal.close();
     journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     await startWith(config, journal);
-    const terminal = await server.waitFor(e => e.task_id === taskId && e.type === 'task.cancelled', 5000);
+    const terminal = await server.waitFor(e => e.task_id === taskId && e.type === 'task.cancelled');
     expect(encodeEnvelope(terminal)).toBe(cancelled);
     expect(server.received.filter(e => e.task_id === taskId && e.type === 'task.fail')).toHaveLength(0);
   });
@@ -235,7 +235,7 @@ describe('result-document recovery from the journal', () => {
 
     journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     await startWith(config, journal);
-    const terminal = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.fail', 5000);
+    const terminal = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.fail');
     expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef });
     expect(JSON.stringify(terminal)).not.toContain('"document"');
     expect(server.received.some((envelope) => envelope.type === 'task.complete')).toBe(false);
@@ -259,7 +259,7 @@ describe('result-document recovery from the journal', () => {
 
     journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     await startWith(config, journal);
-    const delivered = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.complete', 5000);
+    const delivered = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.complete');
     expect(encodeEnvelope(delivered)).toBe(complete);
     expect(decodeEnvelope(complete).payload).toMatchObject({ document: { verdict: 'pass' } });
     await new Promise((resolve) => setTimeout(resolve, 200));

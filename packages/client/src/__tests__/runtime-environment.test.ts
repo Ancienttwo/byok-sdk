@@ -3,7 +3,7 @@ import { testScratchRoot } from './fixtures/execution-scratch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -156,13 +156,14 @@ describe('daemon wiring', () => {
     await daemon.pair('code');
     await daemon.start();
     server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'go' }, { taskId: 'env-task', seq: server.nextSeq() }));
-    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'env-task');
+    expect(adapter.startCalls).toHaveLength(1);
     expect(adapter.startCalls[0]!.ctx.env).toMatchObject({ PATH: '/usr/bin', ADAPTER_ENV_SENTINEL: '1' });
     expect(adapter.startCalls[0]!.ctx.env).not.toHaveProperty('HOST_ONLY_SENTINEL');
 
     adapter.runtimeEnvironment = async () => { throw new RuntimeEnvironmentUnavailableError('timeout'); };
     server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'go' }, { taskId: 'env-declined', seq: server.nextSeq() }));
-    const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'env-declined', 10_000);
+    const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'env-declined');
     expect(decline.payload).toMatchObject({ reason: 'runtime environment unavailable: timeout' });
     expect(adapter.startCalls).toHaveLength(1);
   });

@@ -2144,7 +2144,7 @@ describe('WP2I-S2 daemon routing', () => {
     server.setPairingTenantId('pairing-code', TENANT);
     const record = await daemon.pair('pairing-code');
     await daemon.start();
-    const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 5_000);
+    const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
     const cursor = () => new CursorStore(storeDir).load(server.url, record.deviceId);
     return { server, hello, cursor, record };

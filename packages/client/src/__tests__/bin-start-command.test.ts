@@ -16,6 +16,7 @@ import { createSupportBundle } from '../diagnostics/support-bundle';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { readyGate } from './fixtures/start-ready';
 import { connectControlClient } from '../bin/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -68,7 +69,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
     const lines: string[] = [];
     const controller = new AbortController();
-    let ready = false;
+    const gate = readyGate();
 
     const startPromise = runStartCommand(
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-product', serverUrl: server.url, storeDir, branding: { displayName: 'Acme Coder' } },
@@ -77,13 +78,11 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
         log: (l) => lines.push(l),
         error: (l) => lines.push(`ERR: ${l}`),
         signal: controller.signal,
-        onReady: () => {
-          ready = true;
-        },
+        onReady: gate.onReady,
       },
     );
 
-    await vi.waitFor(() => expect(ready).toBe(true));
+    await gate.ready(startPromise);
     expect(lines.map((l) => JSON.parse(l) as DaemonRecord)).toContainEqual(
       expect.objectContaining({ kind: 'daemon-started', productId: 'acme-start-product' }),
     );
@@ -139,7 +138,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
     const lines: string[] = [];
     const controller = new AbortController();
-    let ready = false;
+    const gate = readyGate();
 
     const startPromise = runStartCommand(
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, storeDir },
@@ -148,13 +147,11 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
         log: (l) => lines.push(l),
         error: (l) => lines.push(`ERR: ${l}`),
         signal: controller.signal,
-        onReady: () => {
-          ready = true;
-        },
+        onReady: gate.onReady,
       },
     );
 
-    await vi.waitFor(() => expect(ready).toBe(true));
+    await gate.ready(startPromise);
     await vi.waitFor(() => expect(lines.some((l) => l.startsWith('ERR: audit log append failed'))).toBe(true));
 
     controller.abort();
@@ -186,12 +183,12 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       vi.spyOn(console, 'warn').mockImplementation(capture(stderr)),
     ];
     const controller = new AbortController();
-    let ready = false;
+    const gate = readyGate();
     try {
       const startPromise = runStartCommand(config, {
-        daemon, log: (l) => stdout.push(l), error: (l) => stderr.push(l), signal: controller.signal, onReady: () => { ready = true; },
+        daemon, log: (l) => stdout.push(l), error: (l) => stderr.push(l), signal: controller.signal, onReady: gate.onReady,
       });
-      await vi.waitFor(() => expect(ready).toBe(true));
+      await gate.ready(startPromise);
       const connection = await connectControlClient({ storeDir, productId: config.productId });
       if (!connection.ok) throw new Error('expected the authenticated live control socket');
       try {
@@ -206,7 +203,8 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       // inline bytes) and one that does not (its name reaches the error
       // path), then a completed summary built from the run's text.
       offer('task-1');
-      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-1');
+      expect(adapter.sessions).toHaveLength(1);
       await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, `${SENTINEL}.txt`), SENTINEL);
       const first = adapter.sessions[0]!;
       first.emit({ type: 'progress', text: SENTINEL });
@@ -220,13 +218,15 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
       // An untyped adapter failure whose error object carries content.
       offer('task-2');
-      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2));
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-2');
+      expect(adapter.sessions).toHaveLength(2);
       adapter.sessions[1]!.fail(new Error(SENTINEL));
       await server.waitFor((e) => e.type === 'task.fail' && e.task_id === 'task-2');
 
       // An approval summary, then a typed failure whose reason is content.
       offer('task-3');
-      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(3));
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-3');
+      expect(adapter.sessions).toHaveLength(3);
       void adapter.sessions[2]!.requestApproval(SENTINEL);
       await vi.waitFor(async () => expect((await readAuditRecords(storeDir)).some((r) => r.kind === 'awaiting-approval')).toBe(true));
       adapter.sessions[2]!.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'semantic', retry: 'non-retryable', reason: SENTINEL }));
