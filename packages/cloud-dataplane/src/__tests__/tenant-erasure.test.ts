@@ -217,9 +217,12 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
     [tenant, device, now],
   );
   await pool.query(
-    `INSERT INTO activity_tail (tenant_id, task_id, entries, dropped, capacity, expires_at)
-     VALUES ($1, 'task', '[]'::jsonb, 0, 1, $2)`,
-    [tenant, now],
+    `INSERT INTO activity_log_head (tenant_id, task_id) VALUES ($1, 'task')`,
+    [tenant],
+  );
+  await pool.query(
+    `INSERT INTO activity_log_entry (tenant_id, task_id, revision, source_envelope_id, source_hash, body, byte_size)
+     VALUES ($1, 'task', 1, 'source', repeat('a', 64), NULL, 0)`, [tenant],
   );
   await pool.query(
     `INSERT INTO object_manifest (tenant_id, hash, byte_size, content_type, state, created_at, updated_at)

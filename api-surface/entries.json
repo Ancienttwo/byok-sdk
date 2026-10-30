@@ -1233,7 +1233,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 763681,
+      "budgetBytes": 768768,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1363,7 +1363,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 726638,
+      "budgetBytes": 731700,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

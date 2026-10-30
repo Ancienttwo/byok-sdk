@@ -3225,7 +3225,7 @@ export { SteerRejectedError } from './steer-control';
 export type { SteerRejectionCode } from './steer-control';
 export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination';
 export type { ActivityBounds } from './coordination';
-export { TimelineEventSchema, ActivityAppendRequestSchema, projectTimelineEvents, validateActivityAppend, MAX_ACTIVITY_BYTES, ACTIVITY_TERMINAL_TTL_MS, activityEntryBytes, } from './activity';
+export { TimelineEventSchema, ActivityAppendRequestSchema, projectTimelineEvents, validateActivityAppend, MAX_ACTIVITY_BYTES, ACTIVITY_TERMINAL_TTL_MS, activityEntryBytes, createActivityEntry, activitySourceHash, } from './activity';
 export type { ActivityAppendInput, ActivityCursor, ActivityReadOptions, ActivityStore, ActivityTail, ActivityTailEntry, TimelineEvent, } from './activity';
 export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
 export type { BoardFeedClientOptions, BoardFeedItem, BoardFeedMode, BoardFeedPage, BoardFeedRead, } from './coordination-client';

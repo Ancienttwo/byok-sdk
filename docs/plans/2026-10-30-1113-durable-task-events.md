@@ -24,7 +24,9 @@ O4 is already implemented separately: remove direct activity HTTP admission; all
 
 ## PR order and release boundary
 
-`#1169 → #1172/O4 → A1 → A2 → A3 → A4 → A5`.
+`#1169 → #1172/O4 → A1 → A2a (Postgres) → A2b (SQLite, after #1164) → A3 → A4 → A5`.
+
+Owner-approved split: A2a uses frozen A1 `21400a7ce481aacebe90b04104dcd9e13c93c722` and reserved Postgres migration `0034_activity_log.sql`. It does not wait for or modify reserved 0033. A2b alone depends on #1164 landing and performs in-place SQLite 7→8. Neither intermediate adapter slice is an independent merge/deployment candidate.
 
 Each implementation PR gets an exact frozen predecessor, one writer and an explicit allowlist. Shared files and generated artifacts transfer sequentially; no concurrent edits to `inbound.ts`, compositions, public types, manifest or goldens. A1–A5 remain a **stacked Draft chain**, each frozen, reviewed and stacked on its predecessor. No non-deployable intermediate head may land independently on main. Only after A5 final acceptance may the complete stack enter one orchestrator-controlled serial merge train. A1's fail-closed placeholder adapter is not a merge candidate on its own. No intermediate deployment or feature-flag dual path is permitted.
 
@@ -40,7 +42,7 @@ Manifest: `activity-log-read-contract` (breaking) covers changed `ActivityStore`
 
 10x first failure: hot-task serialization and retained source-fence growth, followed by many active task heads. Measure append latency/fence bytes separately from the 4 MiB payload bound; bound task lifetime through canonical retirement, not fence deletion that admits duplicate progress.
 
-### A2 — Durable Postgres and SQLite log adapters
+### A2a / A2b — Durable Postgres and SQLite log adapters
 
 Own `packages/cloud-dataplane/src/stores/activity.ts`, its composition in `stores/index.ts`/`index.ts`, new ordered `deploy/sql/NNNN_*.sql`, `packages/server/src/stores/sqlite/activity.ts` (new), SQLite schema/composition in `stores/sqlite/index.ts`, and adapter activity-conformance/restart tests. Shared port corrections return to A1's boundary sequentially. Use row-per-envelope storage, a per-task revision/floor/head, source identity/hash fence and payload-byte accounting. SQLite replaces the currently inherited in-memory activity port; no process-local history behind a durable task row.
 

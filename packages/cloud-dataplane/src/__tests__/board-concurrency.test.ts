@@ -76,7 +76,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres board concurrency and I6', () => {
     }
   });
 
-  it('serializes a 100-batch activity burst without loss and returns stable order', async () => {
+  it('serializes a 100-batch activity burst without loss and allocates contiguous arrival revisions', async () => {
     const scope = await createDataplaneScope(32);
     try {
       await migrate(scope.pool, DEPLOY_SQL);
@@ -94,9 +94,8 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres board concurrency and I6', () => {
       );
       const tail = await activity.read(TENANT_A, 'activity-race');
       expect(tail?.entries).toHaveLength(100);
-      expect(tail?.entries.map((entry) => entry.kind === 'artifact' ? undefined : entry.batchSeq)).toEqual(
-        Array.from({ length: 100 }, (_, index) => index + 1),
-      );
+      expect(tail?.entries.map(entry => entry.revision)).toEqual(Array.from({ length: 100 }, (_, index) => index + 1));
+      expect(tail?.entries.map(entry => entry.sourceEnvelopeId).sort()).toEqual(Array.from({ length: 100 }, (_, index) => `envelope-${index + 1}`).sort());
       expect(tail?.cursor).toMatchObject({ version: 1, revision: 100 });
       expect(tail?.dropped).toBe(0);
     } finally {

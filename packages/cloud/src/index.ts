@@ -276,6 +276,8 @@ export {
   MAX_ACTIVITY_BYTES,
   ACTIVITY_TERMINAL_TTL_MS,
   activityEntryBytes,
+  createActivityEntry,
+  activitySourceHash,
 } from './activity';
 export type {
   ActivityAppendInput,

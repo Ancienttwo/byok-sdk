@@ -1,8 +1,9 @@
 # Durable activity log contract
 
 This MINOR breaking change is A1 of the #1113 stack. **A1 is not deployable and
-is not a merge candidate on its own.** The Postgres activity adapter fails
-closed at construction until A2 supplies the new schema and implementation.
+is not a merge candidate on its own.** A2a now supplies the Postgres activity adapter and migration 0034; the
+complete stack remains non-deployable until final acceptance. SQLite durability
+remains A2b, after #1164 lands.
 No old activity-tail reader or writer is used as a fallback.
 
 The complete A1–A5 stack remains a reviewed, frozen Draft chain until A5 final
@@ -78,3 +79,17 @@ Postgres and in-place SQLite migrations at the final frozen stack head.
 The direct activity HTTP route removal is covered by the preceding
 [O4 migration](1113-activity-envelope-only.md). External callers must be
 checked against operator inventory before release.
+
+
+## Postgres A2a
+
+Apply the [one-shot cutover](../../deploy/runbooks/activity-tail-cutover.md#one-shot-cutover)
+only at final-stack acceptance. 0034 starts an empty activity log and drops
+`activity_tail`; it does not convert old history. The adapter uses shared
+`createActivityEntry` and `activitySourceHash` exports so all adapters agree
+on entry metadata, byte accounting and resealed replay identity. Head-row
+transactions serialize append, settle, cursor reads and bounded cleanup.
+Restarted processes read the same generation/revisions; no in-process cache
+is a replay authority. Redaction/archive retain a removed-history fence;
+tenant erasure removes entry/fence rows before heads. Canonical lifecycle
+atomicity and artifact object-reference ownership remain A3 work.

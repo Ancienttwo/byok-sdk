@@ -17,6 +17,7 @@ import { DEFAULT_RETENTION_POLICY, isCloudError } from '@byok-sdk/cloud';
 import { tenantId } from '@byok-sdk/core';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { migrate } from '../migrate';
+import { PostgresActivityStore } from '../stores/activity';
 import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE, SKIP_REASON, type DataplaneScope } from './support/dataplane';
 import { readTenantRows } from './support/plaintext-scan';
 import {
@@ -137,6 +138,11 @@ describe.skipIf(SKIP_DATAPLANE)(`terminal-task archive on Postgres — ${SKIP_RE
 
       expect(await rowsMarkedBy(scope.pool, [canaryA.core])).toEqual([]);
       expect(await archiveColumns(scope.pool, taskA)).toEqual({ archived: true, settled: true });
+      expect((await scope.pool.query('SELECT removed, retained_bytes FROM activity_log_head WHERE tenant_id = $1 AND task_id = $2', [TENANT, taskA])).rows).toEqual([{ removed: true, retained_bytes: 0 }]);
+      expect((await scope.pool.query('SELECT count(*) FROM activity_log_entry WHERE tenant_id = $1 AND task_id = $2 AND body IS NOT NULL', [TENANT, taskA])).rows[0].count).toBe(0n);
+      const log = new PostgresActivityStore(scope.pool, { now: () => new Date() });
+      await expect(log.append(TENANT, { taskId: taskA, sourceEnvelopeId: 'post-removal', batchSeq: 99, events: [{ type: 'turn_end' }], dropped: 0, ttlMs: 600_000 })).rejects.toMatchObject({ code: 'activity_history_gap' });
+
       expect(await host.core.board.get(TENANT, taskA)).toBeUndefined();
       await expect(host.cloud.readTaskAttempt(TENANT, taskA)).resolves.toMatchObject({ status: 'complete', archivedAt: expect.any(String) });
       expect(await errorCode(host.cloud.readTaskResult(TENANT, taskA))).toBe('task_content_redacted');

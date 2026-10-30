@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "4c75c36adcb785d7c0d6e790e6c3dd5f11c94b80c247c84300a7498aad73296a"
+    "snapshotSha256": "160c37e739607b4df6dbd60cff5516e0abd1ce138f5a54cba4a04a9f2ffa07b1"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,16 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "activity-log-shared-encoding",
+      "impact": "additive",
+      "summary": "createActivityEntry and activitySourceHash expose the single activity-entry serialization and source-fence hashing rules for durable adapters (#1113 A2a), including the existing resealed comparison projection.",
+      "migration": "docs/migrations/1113-durable-activity-log.md#postgres-a2a",
+      "items": [
+        "export:@byok-sdk/cloud#createActivityEntry",
+        "export:@byok-sdk/cloud#activitySourceHash"
+      ]
+    },
     {
       "id": "activity-log-read-contract",
       "impact": "breaking",
@@ -307,15 +317,16 @@
     {
       "id": "dead-letter-retention",
       "impact": "breaking",
-      "summary": "Automatic maintenance now reaps mailbox dead letters once mailboxDeadLetterRetentionMs (default 30 days) has passed after they expired, but keeps each device's highest-seq dead letter as the recoverableFrom floor. RetentionPolicy gains mailboxDeadLetterRetentionMs, so a Host that passes a complete policy must add it. A custom MailboxStore receives the new required reapDeadLettersBefore input in collectExpired and must reap the same way. discardDeadLetter refuses the floor row with cleanup_dead_letter_is_recovery_floor. Migration 0031 adds the tenant_retention_policy column with the 30-day default and replaces outbox_tenant_bytes_idx with a pending-only partial index.",
-      "migration": "deploy/runbooks/mailbox-retention.md#expired-rows-and-the-operator-dead-letter-flow",
+      "summary": "Automatic maintenance now reaps mailbox dead letters once mailboxDeadLetterRetentionMs (default 30 days) has passed after they expired, but keeps each device's highest-seq dead letter as the recoverableFrom floor. RetentionPolicy gains mailboxDeadLetterRetentionMs, so a Host that passes a complete policy must add it. A custom MailboxStore receives the new required reapDeadLettersBefore input in collectExpired and must reap the same way. discardDeadLetter refuses the floor row with cleanup_dead_letter_is_recovery_floor. Migration 0031 adds the tenant_retention_policy column with the 30-day default and replaces outbox_tenant_bytes_idx with a pending-only partial index. Migration 0034 replaces activity_tail with an empty durable activity log in place: stop old writers/readers, explicitly accept loss of bounded pre-cutover activity history, reject old cursors with a gap, and drop the old table; no row conversion or dual read. TENANT_ERASURE_TABLES replaces activity_tail with activity_log_entry/activity_log_head, affecting Hosts that iterate the table list.",
+      "migration": "deploy/runbooks/activity-tail-cutover.md#one-shot-cutover",
       "acceptance": "accept",
       "items": [
         "export:@byok-sdk/cloud#RetentionPolicy",
         "export:@byok-sdk/cloud-dataplane#CLOUD_CLEANUP_ERROR_CODES",
         "export:@byok-sdk/cloud-dataplane/runtime#CLOUD_CLEANUP_ERROR_CODES",
         "export:@byok-sdk/core#MailboxCollectExpiredInput",
-        "store:cloud-dataplane-postgres"
+        "store:cloud-dataplane-postgres",
+        "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES"
       ]
     },
     {
@@ -2153,9 +2164,19 @@
       "entry": "activity-log-read-contract"
     },
     {
+      "item": "export:@byok-sdk/cloud#activitySourceHash",
+      "change": "added",
+      "entry": "activity-log-shared-encoding"
+    },
+    {
       "item": "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
       "change": "added",
       "entry": "capability-ports-two-way"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#createActivityEntry",
+      "change": "added",
+      "entry": "activity-log-shared-encoding"
     },
     {
       "item": "export:@byok-sdk/cloud#createInMemoryCloudStores",
@@ -2221,6 +2242,11 @@
       "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskCancellationStore",
       "change": "changed",
       "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
+      "change": "changed",
+      "entry": "dead-letter-retention"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#CLOUD_CLEANUP_ERROR_CODES",
@@ -3157,7 +3183,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
-      "after": "migrations=32 last=0032_terminal_task_archive.sql sha256=4a31d8addf70ddef",
+      "after": "migrations=33 last=0034_activity_log.sql sha256=6cb9e1490d4524dc",
       "entry": "dead-letter-retention"
     }
   ]
