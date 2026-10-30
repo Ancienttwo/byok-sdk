@@ -210,10 +210,25 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     expect(daemon.status().config.toolAuthorization).toEqual({ mode: 'host-resolver', localToolApproval: 'host-only' });
   });
 
-  it('createDaemonWithAdapters rejects runtimes, even when undefined', async () => {
+  it.each([
+    ['codexSandbox', 'configure the injected Codex adapter directly'],
+    ['runtimeEnvironment', 'pass runtimeEnvironment to each injected adapter'],
+    ['runtimes', 'pass the isolation options to each injected adapter'],
+  ])('checkDaemonConfig refuses %s for injected adapters exactly where createDaemonWithAdapters throws', async (key, remedy) => {
+    const config = { ...await bundled({}), [key]: undefined };
+    const adapters = [new StubRuntimeAdapter('pi')];
+    const message = `DaemonConfig.${key} is only supported by createDaemon; ${remedy}`;
+    expect(() => createDaemonWithAdapters(config, adapters)).toThrow(new TypeError(message));
+    expect(checkDaemonConfig(config, { source: 'embedded', adapters })).toEqual({
+      ok: false, issues: [{ severity: 'error', code: 'invalid_value', path: key, message }],
+    });
+  });
+
+  it('checkDaemonConfig accepts injected adapters without the createDaemon-only keys', async () => {
     const config = await bundled({});
-    expect(() => createDaemonWithAdapters({ ...config, runtimes: undefined }, []))
-      .toThrow(new TypeError('DaemonConfig.runtimes is only supported by createDaemon; pass the isolation options to each injected adapter'));
+    const adapters = [new StubRuntimeAdapter('pi')];
+    expect(() => createDaemonWithAdapters(config, adapters)).not.toThrow();
+    expect(checkDaemonConfig(config, { source: 'embedded', adapters })).toEqual(expect.objectContaining({ ok: true, issues: [] }));
   });
 
   it('resolves a static policy per runtime id from a snapshot', () => {

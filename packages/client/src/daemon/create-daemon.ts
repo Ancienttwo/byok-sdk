@@ -75,7 +75,7 @@ import {
   type AgentContentReadRoot,
 } from './agent-content-read';
 import type { DaemonState } from './create-daemon/state';
-import { buildDefaultAdapters } from './create-daemon/support';
+import { buildDefaultAdapters, injectedAdapterConfigConflicts } from './create-daemon/support';
 import { resolveDaemonConfig } from './create-daemon/config';
 import { composeDaemonStores } from './create-daemon/stores';
 import { composeDaemonWorkspaces } from './create-daemon/workspaces';
@@ -823,15 +823,8 @@ export function createDaemonWithAdapters(
   adapters: RuntimeAdapter[],
   overrides: DaemonOverrides = {},
 ): Daemon {
-  if (Object.hasOwn(config, 'codexSandbox')) {
-    throw new TypeError('DaemonConfig.codexSandbox is only supported by createDaemon; configure the injected Codex adapter directly');
-  }
-  if (Object.hasOwn(config, 'runtimeEnvironment')) {
-    throw new TypeError('DaemonConfig.runtimeEnvironment is only supported by createDaemon; pass runtimeEnvironment to each injected adapter');
-  }
-  if (Object.hasOwn(config, 'runtimes')) {
-    throw new TypeError('DaemonConfig.runtimes is only supported by createDaemon; pass the isolation options to each injected adapter');
-  }
+  const [conflict] = injectedAdapterConfigConflicts(config);
+  if (conflict !== undefined) throw new TypeError(conflict.message);
   return buildDaemonWithAdapters(config, adapters, overrides);
 }
 

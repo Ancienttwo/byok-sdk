@@ -3,7 +3,7 @@ import type { RuntimeAdapter } from '../../types';
 import { AgentEgressPolicyError, resolveAgentEgressPolicy } from '../agent-egress-policy';
 import { resolveDaemonConfig } from '../create-daemon/config';
 import { resolveDaemonOperationalConfig } from '../create-daemon/operational-config';
-import { buildDefaultAdapters } from '../create-daemon/support';
+import { buildDefaultAdapters, injectedAdapterConfigConflicts } from '../create-daemon/support';
 import type { DaemonConfig } from '../create-daemon';
 import { resolveStorageConfig } from '../retention/config';
 import { ScratchRootPathError } from '../retention/scratch';
@@ -43,6 +43,12 @@ export interface DaemonConfigCheck {
 export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOptions): DaemonConfigCheck {
   const { issues } = validateDaemonConfig(input, { source: options.source });
   if (issues.some((issue) => issue.severity === 'error')) return { ok: false, issues };
+  if (options.adapters !== undefined) {
+    const conflicts = injectedAdapterConfigConflicts(input as object);
+    if (conflicts.length > 0) {
+      return { ok: false, issues: [...issues, ...conflicts.map(({ key, message }): DaemonConfigIssue => ({ severity: 'error', code: 'invalid_value', path: key, message }))] };
+    }
+  }
   const config = (options.localAgentRelease === undefined ? input : { ...(input as object), localAgentRelease: options.localAgentRelease }) as DaemonConfig;
   try {
     const scope = resolveDaemonConfig({ config, overrides: {} });
