@@ -1734,6 +1734,65 @@ jobs:
   # separate .NET runtime install needed on the runner) -- pinned to an
   # immutable release version and SHA256-verified before it is executed, so
   # an upstream release cannot silently change what CI installs and runs.
+  service-upgrade-smoke:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'service-upgrade-smoke') }}
+    name: Service upgrade (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Verify pinned Bun archive
+        shell: node {0}
+        run: *verify-bun
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun ci
+      - run: bun run build
+      - name: Provision systemd and Secret Service on the user bus
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes dbus-user-session gnome-keyring libsecret-tools
+          uid="$(id -u)"
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@${uid}.service"
+          export XDG_RUNTIME_DIR="/run/user/${uid}"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+          systemctl --user start dbus.socket
+          state="$(timeout 30s systemctl --user is-system-running --wait)" || test "$state" = degraded
+          case "$state" in running|degraded) ;; *) echo "User manager unavailable: $state" >&2; exit 1 ;; esac
+          systemctl --user import-environment XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
+          printf '%s' 'byok-ci-ephemeral' | gnome-keyring-daemon --unlock >/dev/null
+          gnome-keyring-daemon --start --components=secrets >/dev/null
+          printf '%s' 'probe' | secret-tool store --label=byok-ci-probe byok-ci service-upgrade
+          test "$(secret-tool lookup byok-ci service-upgrade)" = probe
+          secret-tool clear byok-ci service-upgrade
+          echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}" >> "$GITHUB_ENV"
+      - name: Provision pinned WinSW and long paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = "v2.12.0"
+          $sha = "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
+          $out = "$env:RUNNER_TEMP\WinSW.exe"
+          Invoke-WebRequest -Uri "https://github.com/winsw/winsw/releases/download/$ver/WinSW-x64.exe" -OutFile $out
+          $actual = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLower()
+          if ($actual -ne $sha) { Write-Error "WinSW checksum mismatch: expected $sha, got $actual"; exit 1 }
+          "WINSW_BIN=$out" >> $env:GITHUB_ENV
+          New-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
+          if ((Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem).LongPathsEnabled -ne 1) { throw "Long paths are not enabled" }
+      - name: CLI and App service install, upgrade recovery, rollback and uninstall
+        run: node examples/service-upgrade/upgrade-smoke.mjs
+
   linux-systemd-smoke:
     needs: select
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'linux-systemd-smoke') }}
@@ -2056,7 +2115,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "runtime-contract"]
+    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "service-upgrade-smoke", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "runtime-contract"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
