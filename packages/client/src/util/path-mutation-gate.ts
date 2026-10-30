@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import { createConnection, createServer, type Server, type Socket } from 'node:net';
+import { closeSync, constants, openSync, promises as fs } from 'node:fs';
+import { createServer, type Server } from 'node:net';
 import path from 'node:path';
 import { ensureSecureDir } from './secure-dir';
 
@@ -37,11 +37,33 @@ export class PathMutationGateBusyError extends Error {
   }
 }
 
-const GATE_PROTOCOL_PREFIX = 'byok-path-mutation-v1:';
-const GATE_PROBE_TIMEOUT_MS = 1_000;
-// Fixed and environment-independent; short enough for macOS's 104-byte
-// sockaddr_un limit even when the full SHA-256 identity is used.
+/**
+ * The gate is a kernel lock that belongs to one open handle (#1149): the OS
+ * releases it when the handle closes or its process dies, and no path is ever
+ * unlinked, so no process can remove another holder's lock.
+ *
+ * - darwin: `<POSIX_GATE_ROOT>/<identity>.lock` opened with `O_EXLOCK |
+ *   O_NONBLOCK` (`flock` taken by `open(2)`); `EAGAIN` is busy. The raw fd is
+ *   kept, never a `FileHandle`, whose collection would close it and drop the
+ *   lock. The lock file is never removed.
+ * - linux: an abstract unix socket `\0byok-pm-<uid>-<identity>`; bind
+ *   `EADDRINUSE` is busy. It has no filesystem entry.
+ * - win32: a named pipe; creating a second first instance fails with
+ *   `EADDRINUSE`.
+ *
+ * Every other platform is refused.
+ */
+/**
+ * The gate's interprocess protocol: SDK processes of one release exclude each
+ * other only when they lock the same way. Bump it with any change to how a
+ * gate is taken, so the upgrade manifest records the break (#1149).
+ */
+export const PATH_MUTATION_GATE_PROTOCOL = 2;
+
+// Fixed and environment-independent; holds the darwin lock files.
 const POSIX_GATE_ROOT = `/tmp/byok-pm-${process.getuid?.() ?? 'unknown'}`;
+// darwin <sys/fcntl.h>; Node and Bun pass open(2) flags through unchanged.
+const DARWIN_O_EXLOCK = 0x20;
 
 function assertAbsolutePath(value: string): void {
   if (!path.isAbsolute(value)) throw new Error('path mutation gate target must be absolute');
@@ -71,48 +93,7 @@ function gateIdentity(scope: PathMutationGateScope, canonicalTarget: string): st
   return createHash('sha256').update(`${scope}\0${canonicalTarget}`).digest('hex');
 }
 
-function gateEndpoint(identity: string): string {
-  if (process.platform === 'win32') return `\\\\.\\pipe\\byok-path-mutation-${identity}`;
-  return path.join(POSIX_GATE_ROOT, `${identity}.sock`);
-}
-
-function endProbe(socket: Socket, identity: string): void {
-  socket.on('error', () => {});
-  socket.end(`${GATE_PROTOCOL_PREFIX}${identity}\n`);
-}
-
-type GateProbe = 'unbound' | 'holder' | 'occupied';
-
-async function probeEndpoint(endpoint: string, identity: string): Promise<GateProbe> {
-  return new Promise<GateProbe>((resolve) => {
-    const socket = createConnection(endpoint);
-    let settled = false;
-    let raw = '';
-    const finish = (result: GateProbe): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.removeAllListeners();
-      socket.destroy();
-      resolve(result);
-    };
-    const timer = setTimeout(() => finish('occupied'), GATE_PROBE_TIMEOUT_MS);
-    socket.setEncoding('utf8');
-    socket.on('data', (chunk: string) => {
-      raw += chunk;
-      if (raw.length > GATE_PROTOCOL_PREFIX.length + 65) finish('occupied');
-    });
-    socket.once('end', () => {
-      finish(raw.trimEnd() === `${GATE_PROTOCOL_PREFIX}${identity}` ? 'holder' : 'occupied');
-    });
-    socket.once('error', (error: NodeJS.ErrnoException) => {
-      finish(error.code === 'ECONNREFUSED' || error.code === 'ENOENT' ? 'unbound' : 'occupied');
-    });
-  });
-}
-
 async function assertPrivateGateRoot(): Promise<void> {
-  if (process.platform === 'win32') return;
   await ensureSecureDir(POSIX_GATE_ROOT);
   const stat = await fs.lstat(POSIX_GATE_ROOT);
   const uid = process.getuid?.();
@@ -121,40 +102,33 @@ async function assertPrivateGateRoot(): Promise<void> {
   }
 }
 
-async function clearProvenStaleEndpoint(
-  endpoint: string,
-  identity: string,
-  scope: PathMutationGateScope,
-  targetPath: string,
-): Promise<void> {
-  if (process.platform === 'win32') return;
-  let stat: import('node:fs').Stats;
-  try {
-    stat = await fs.lstat(endpoint);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-    throw error;
-  }
-  if (!stat.isSocket()) throw new Error(`path mutation gate endpoint is not a socket: ${endpoint}`);
-  if ((await probeEndpoint(endpoint, identity)) !== 'unbound') {
-    throw new PathMutationGateBusyError(scope, targetPath);
-  }
-  await fs.rm(endpoint, { force: true });
-}
-
 function resolveGateTarget(input: PathMutationGateInput): Promise<string> {
   // One fixed cross-process identity, including on Windows with multiple drives.
   return input.scope === 'pi-session-rebinding' ? Promise.resolve('*') : resolvePathWithoutCreate(input.targetPath);
 }
 
-async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGate> {
-  const canonicalTarget = await resolveGateTarget(input);
-  const identity = gateIdentity(input.scope, canonicalTarget);
-  const endpoint = gateEndpoint(identity);
-  await assertPrivateGateRoot();
-  await clearProvenStaleEndpoint(endpoint, identity, input.scope, canonicalTarget);
-
-  const server: Server = createServer((socket) => endProbe(socket, identity));
+/** Takes the OS lock for `identity`; resolves to the function that drops it, or `undefined` when another handle holds it. */
+async function lockIdentity(identity: string): Promise<(() => Promise<void>) | undefined> {
+  if (process.platform === 'darwin') {
+    await assertPrivateGateRoot();
+    let fd: number;
+    try {
+      fd = openSync(
+        path.join(POSIX_GATE_ROOT, `${identity}.lock`),
+        constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW | DARWIN_O_EXLOCK | constants.O_NONBLOCK,
+        0o600,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EAGAIN') return undefined;
+      throw error;
+    }
+    return async () => closeSync(fd);
+  }
+  let endpoint: string;
+  if (process.platform === 'linux') endpoint = `\0byok-pm-${process.getuid?.() ?? 'unknown'}-${identity}`;
+  else if (process.platform === 'win32') endpoint = `\\\\.\\pipe\\byok-path-mutation-${identity}`;
+  else throw new Error(`path mutation gate is not supported on ${process.platform}`);
+  const server: Server = createServer((socket) => socket.destroy());
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -165,13 +139,18 @@ async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGat
     });
   } catch (error) {
     server.close();
-    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-      throw new PathMutationGateBusyError(input.scope, canonicalTarget);
-    }
+    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') return undefined;
     throw error;
   }
-  if (process.platform !== 'win32') await fs.chmod(endpoint, 0o600).catch(() => undefined);
   server.unref();
+  return () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+}
+
+async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGate> {
+  const canonicalTarget = await resolveGateTarget(input);
+  const identity = gateIdentity(input.scope, canonicalTarget);
+  const unlock = await lockIdentity(identity);
+  if (unlock === undefined) throw new PathMutationGateBusyError(input.scope, canonicalTarget);
 
   try {
     const rechecked = await resolveGateTarget(input);
@@ -179,12 +158,10 @@ async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGat
       throw new Error(`path mutation gate target changed during acquisition: ${input.targetPath}`);
     }
   } catch (error) {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => undefined);
+    await unlock();
     throw error;
   }
 
-  let serverClosed = false;
   let released = false;
   let releaseAttempt: Promise<void> | undefined;
   return Object.freeze({
@@ -194,14 +171,9 @@ async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGat
     release: () => {
       if (released) return Promise.resolve();
       if (releaseAttempt !== undefined) return releaseAttempt;
-      releaseAttempt = (async () => {
-        if (!serverClosed) {
-          await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
-          serverClosed = true;
-        }
-        if (process.platform !== 'win32') await fs.rm(endpoint, { force: true });
+      releaseAttempt = unlock().then(() => {
         released = true;
-      })().catch((error: unknown) => {
+      }, (error: unknown) => {
         releaseAttempt = undefined;
         throw error;
       });

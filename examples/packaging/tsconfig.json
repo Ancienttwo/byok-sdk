@@ -1,4 +1,4 @@
 {
   "extends": "../../tsconfig.json",
-  "include": ["launcher.ts", "sqlite-fixture.ts", "native-assets-fixture.ts", "embedded-host-fixture.ts", "bundle-import-meta.test.ts", "vitest.config.ts"]
+  "include": ["launcher.ts", "sqlite-fixture.ts", "native-assets-fixture.ts", "gate-fixture.ts", "embedded-host-fixture.ts", "bundle-import-meta.test.ts", "vitest.config.ts"]
 }

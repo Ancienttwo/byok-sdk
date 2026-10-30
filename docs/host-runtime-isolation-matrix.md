@@ -81,7 +81,17 @@ not enforce any of them at the mechanism level today.
       configuration or from the Host.
 - [ ] **Who provides egress control if the runtime cannot?** Host-side
       options include a network namespace, an egress proxy/firewall, or
-      denying the device the task. None of these ship here.
+      denying the device the task. None of these ship here. A network
+      namespace also bounds the path-mutation gates: every process that uses
+      one store's protected targets (the daemon, the adapters, the actual Pi
+      writer, the sweeper and relocation) must run as the same UID, in the
+      same Linux network namespace, through a consistent canonical path; the
+      pathless Pi rebinding barrier is shared per UID and network namespace.
+      Processes in different network namespaces do not exclude each other, so
+      each namespace must use disjoint stores and disjoint protected targets:
+      no Agent home root, skill-pack store or Pi session directory shared
+      across namespaces, even between separate stores
+      (`docs/host-local-storage-layout.md`).
 - [ ] **Are the secrets in the daemon's environment safe to forward?**
       Every variable except `CLAUDECODE` and `BYOK_*` is forwarded, proxy
       credentials and provider keys included.

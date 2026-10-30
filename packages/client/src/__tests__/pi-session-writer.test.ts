@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { closeSync, existsSync, mkdtempSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { closeSync, existsSync, mkdtempSync, mkdirSync, openSync, readFileSync, rmSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter } from '../util/pi-session-retention';
@@ -350,16 +349,10 @@ it('preserves native stale-context rejection during setup and releases rebinding
   await expectWriterBusy(state.data.sessionFile);
 });
 
-it.skipIf(process.platform === 'win32')('cleans the exact writer endpoint when an ordinary fixture is torn down', async () => {
+it.skipIf(process.platform === 'win32')('releases the writer gate when an ordinary fixture is torn down', async () => {
   const runtime = start(fixture()), state = await runtime.send('get_state');
   const file = state.data.sessionFile as string;
-  // Diagnose this one owned socket; never infer ownership from a shared-directory
-  // diff or remove another runner's endpoints. These hashes mirror the gate's
-  // named writer identity only for the filesystem leak assertion.
-  const writer = createHash('sha256').update(basename(file)).digest('hex');
-  const identity = createHash('sha256').update(`pi-session-writer:${writer}\0${realpathSync(dirname(file))}`).digest('hex');
-  const endpoint = `/tmp/byok-pm-${process.getuid!()}/${identity}.sock`;
-  expect(existsSync(endpoint)).toBe(true);
+  await expectWriterBusy(file);
   await cleanupFixtures();
-  expect(existsSync(endpoint), `owned writer endpoint remains after fixture close: ${endpoint}; session=${file}`).toBe(false);
+  const writer = await acquirePiSessionWriter(file); await writer.release();
 });

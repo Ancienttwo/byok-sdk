@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { run } from './check-upgrade-manifest.mjs';
 import { packageSurface, splitStatements } from './upgrade-manifest/dts-surface.mjs';
 import { BASELINE_PATH, MANIFEST_PATH, breakingAllowed, bumpKind, markdownAnchors, renderManifest, serialize } from './upgrade-manifest/manifest.mjs';
-import { CONFIG_SCHEMA_PATH, PUBLIC_PACKAGES, STORES, VENDORED_EXAMPLES, buildSnapshot } from './upgrade-manifest/snapshot.mjs';
+import { CONFIG_SCHEMA_PATH, INTERPROCESS_PROTOCOLS, PUBLIC_PACKAGES, STORES, VENDORED_EXAMPLES, buildSnapshot } from './upgrade-manifest/snapshot.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DOC = 'docs/migration.md';
@@ -29,6 +29,7 @@ function fixture(t) {
   copy('api-surface');
   for (const pkg of PUBLIC_PACKAGES) copy(`packages/${pkg}/package.json`);
   for (const store of STORES) copy(store.source);
+  for (const protocol of INTERPROCESS_PROTOCOLS) copy(protocol.source);
   copy('packages/keys/src');
   copy(CONFIG_SCHEMA_PATH);
   for (const example of VENDORED_EXAMPLES) {
@@ -177,6 +178,21 @@ test('bumping a store format version demands an entry with an acceptance policy'
   const manifest = JSON.parse(readFileSync(path.join(f.root, MANIFEST_PATH), 'utf8'));
   assert.match(manifest.changes[0].before, /^schema_version=\d+$/);
   assert.notEqual(manifest.changes[0].before, manifest.changes[0].after);
+});
+
+test('bumping an interprocess protocol demands an entry; a missing constant fails the snapshot (#1149)', (t) => {
+  const f = fixture(t);
+  const source = INTERPROCESS_PROTOCOLS[0].source;
+  f.edit(source, (text) => text.replace(/^export const PATH_MUTATION_GATE_PROTOCOL = (\d+);$/m, (_, v) => `export const PATH_MUTATION_GATE_PROTOCOL = ${Number(v) + 1};`));
+  assert.match(f.gate().output, /interprocess:path-mutation-gate changed since \S+ without a manifest entry/);
+  f.entries([{ id: 'gate-next', impact: 'breaking', summary: 'Stop every SDK process on a store before upgrading.', migration: `${DOC}#store-bump`, items: ['interprocess:path-mutation-gate'] }]);
+  assert.equal(f.gate('--write').status, 0);
+  const manifest = JSON.parse(readFileSync(path.join(f.root, MANIFEST_PATH), 'utf8'));
+  assert.deepEqual(manifest.changes.map(({ item, before, after }) => ({ item, before, after })), [
+    { item: 'interprocess:path-mutation-gate', before: 'protocol=2', after: 'protocol=3' },
+  ]);
+  f.edit(source, (text) => text.replace(/^export const PATH_MUTATION_GATE_PROTOCOL = \d+;$/m, ''));
+  assert.throws(() => buildSnapshot(f.root), /PATH_MUTATION_GATE_PROTOCOL|path-mutation-gate\.ts/);
 });
 
 test('a SQL DDL change or a migration file changes the store identity', (t) => {

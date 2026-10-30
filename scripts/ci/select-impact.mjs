@@ -474,6 +474,10 @@ export function selectImpact(paths, context = {}) {
     if (path === 'examples/packaging/sqlite-fixture.ts' || path === 'examples/packaging/sqlite-smoke.mjs') {
       dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
     }
+    // The path-mutation gate ESM/CJS and relocated SEA probe (#1149) shares the packaging smoke owner.
+    if (path === 'examples/packaging/gate-fixture.ts' || path === 'examples/packaging/gate-smoke.mjs') {
+      dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
+    }
     // #1104: the packaging consistency lane bundles and runs this fixture; its bundle test runs in the example suite.
     if (/^examples\/packaging\/(?:embedded-host-(?:fixture\.ts|smoke\.mjs)|bundle-import-meta\.test\.ts|vitest\.config\.ts)$/.test(path)) {
       dirs.add('examples/packaging'); continue;
