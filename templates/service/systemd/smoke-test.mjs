@@ -34,7 +34,15 @@ const errors = [];
 let ownsUnit = false;
 
 async function nativeState() {
-  const text = await systemctl('show', unit, '--property=LoadState,ActiveState,SubState,MainPID,FragmentPath,UnitFileState');
+  let text;
+  try {
+    text = await systemctl('show', unit, '--property=LoadState,ActiveState,SubState,MainPID,FragmentPath,UnitFileState');
+  } catch (error) {
+    // systemctl can exit 1 for an unknown unit while still returning its
+    // structured properties. Accept only that explicit manager answer.
+    if (error.code !== 1 || !/^LoadState=not-found$/m.test(error.stdout ?? '') || error.stderr?.trim()) throw error;
+    text = error.stdout.trim();
+  }
   return Object.fromEntries(text.split('\n').map((line) => {
     const separator = line.indexOf('=');
     return [line.slice(0, separator), line.slice(separator + 1)];
