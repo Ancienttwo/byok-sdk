@@ -252,6 +252,26 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     if (before.scripts?.['check:upgrade-manifest'] === undefined
       && after.scripts?.['check:upgrade-manifest'] === UPGRADE_MANIFEST_GATE) delete after.scripts['check:upgrade-manifest'];
     const documentationTests = admitDocumentationScripts(before, after, cwd);
+    // The CI contracts have one package-script authority. Only this exact
+    // composition may wrap the existing ordered script-test list.
+    const ciHelper = 'test:scripts:ci';
+    const ciCommand = 'node --test scripts/ci/*.test.mjs';
+    const ciPrefix = 'bun run test:scripts:ci && ';
+    if (before.scripts?.[ciHelper] !== undefined || after.scripts?.[ciHelper] !== undefined
+      || after.scripts?.['test:scripts']?.startsWith(ciPrefix)) {
+      if (after.scripts?.[ciHelper] !== ciCommand || !after.scripts?.['test:scripts']?.startsWith(ciPrefix)) {
+        throw new Error('Unreviewed CI test composition');
+      }
+      if (before.scripts?.[ciHelper] !== undefined) {
+        if (before.scripts[ciHelper] !== ciCommand || !before.scripts['test:scripts']?.startsWith(ciPrefix)) {
+          throw new Error('Unreviewed CI test composition');
+        }
+        before.scripts['test:scripts'] = before.scripts['test:scripts'].slice(ciPrefix.length);
+        delete before.scripts[ciHelper];
+      }
+      after.scripts['test:scripts'] = after.scripts['test:scripts'].slice(ciPrefix.length);
+      delete after.scripts[ciHelper];
+    }
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
     if (!oldCommand?.startsWith(prefix) || !newCommand?.startsWith(prefix)) throw new Error('Unreviewed test command');

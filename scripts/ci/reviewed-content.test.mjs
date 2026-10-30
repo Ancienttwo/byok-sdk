@@ -892,3 +892,33 @@ test('generic example manifest upgrades include the basic workspace', t => {
     f.write(path, bad); assert.throws(() => selectImpact([path], f));
   }
 });
+
+
+test('root CI composition admits only the exact helper and prefix, retaining the ordered list guard', t => {
+  const f = fixture(t);
+  const previous = f.rootManifest.scripts['test:scripts'];
+  const helper = 'node --test scripts/ci/*.test.mjs';
+  const prefix = 'bun run test:scripts:ci && ';
+  const valid = { 'test:scripts:ci': helper, 'test:scripts': prefix + previous };
+  f.write('package.json', { scripts: valid });
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const scripts of [
+    { 'test:scripts': prefix + previous },
+    ...['node --test scripts/**/*.test.mjs', helper + ' --test-only', helper + ' scripts/extra.test.mjs'].map(command => ({ ...valid, 'test:scripts:ci': command })),
+    { ...valid, 'test:scripts': prefix + previous + ' && true' },
+    { ...valid, 'test:scripts': prefix + 'echo bypass && ' + previous },
+    { ...valid, 'test:scripts': previous + ' && bun run test:scripts:ci' },
+    { ...valid, 'test:scripts': previous },
+    { ...valid, 'test:scripts': prefix + previous.replace('scripts/old.test.mjs', 'scripts/ci/new.test.mjs') },
+  ]) {
+    f.write('package.json', { scripts });
+    assert.throws(() => selectImpact(['package.json'], f), undefined, JSON.stringify(scripts));
+  }
+  f.write('package.json', { scripts: valid }); rebase(f, 'shared CI helper is required');
+  f.write('package.json', { scripts: { ...valid, 'test:scripts': prefix + previous + ' scripts/ci/new.test.mjs' } });
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const scripts of [{ 'test:scripts': previous }, { ...valid, 'test:scripts': previous }, { 'test:scripts': prefix + previous }]) {
+    f.write('package.json', { scripts });
+    assert.throws(() => selectImpact(['package.json'], f), /Unreviewed CI test composition/);
+  }
+});
