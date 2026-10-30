@@ -32,7 +32,9 @@
     "check:brain": "repo-harness brain check",
     "sync:brain": "repo-harness brain sync",
     "docs:device-setup": "node scripts/docs/device-setup.mjs --write",
-    "check:device-setup": "node scripts/docs/device-setup.mjs"
+    "check:device-setup": "node scripts/docs/device-setup.mjs",
+    "docs:capability-matrix": "node scripts/docs/capability-matrix.mjs --write",
+    "check:capability-matrix": "node scripts/docs/capability-matrix.mjs"
   },
   "devDependencies": {
     "@types/node": "^24",
