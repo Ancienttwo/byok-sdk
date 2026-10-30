@@ -169,12 +169,40 @@ async function diagnose(variant) {
   }
 }
 
+/**
+ * A service that never goes live hides why: byok-agent start, in the
+ * foreground too, prints only the length of an unknown startup error
+ * (bin/commands/start.ts formatStartErrorReason). With the service removed,
+ * one in-process start of the config byok-agent start would run shows the
+ * error itself, as this user rather than the service account. A diagnostic, run once; the run
+ * still fails.
+ */
+async function captureStartError(variant, cmd) {
+  await run(cmd.uninstall());
+  const { createDaemon } = await import('@byok-sdk/client');
+  // byok-agent start adds its own release identity to the file's config.
+  const { version } = (await import('@byok-sdk/client/package.json', { with: { type: 'json' } })).default;
+  let daemon;
+  try {
+    daemon = createDaemon({ ...JSON.parse(await fs.readFile(variant.config, 'utf8')), localAgentRelease: { version } });
+    await daemon.start();
+    console.log(`--- ${variant.owner} in-process start: reached ${daemon.status().lifecycle.phase}; the failure is specific to the service context`);
+  } catch (error) {
+    console.log(`--- ${variant.owner} in-process start error\n${error?.stack ?? error}`);
+  } finally {
+    await daemon?.stop().catch(() => undefined);
+  }
+}
+
 async function lifecycle(variant, cmd, server, payloads) {
   const { owner, storeDir } = variant;
 
   await ok(cmd.install(payloads.v1));
   // Pair through the service: a pair that finds no live service enrolls in this process instead.
-  await livePid(variant);
+  await livePid(variant).catch(async (error) => {
+    await captureStartError(variant, cmd);
+    throw error;
+  });
   const { code } = await server.byok.pairing.createPairingCode({ productId: server.productId });
   await ok([agentCli, 'pair', code, '--server', server.url, '--config', variant.config]);
   let pid = await runningPid(variant);
