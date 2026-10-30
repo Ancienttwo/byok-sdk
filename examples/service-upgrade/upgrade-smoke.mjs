@@ -92,7 +92,10 @@ function runningPid(variant) {
 }
 
 function shortPath(dir) {
-  const short = execFileSync('cmd.exe', ['/d', '/c', `for %I in ("${dir}") do @echo %~sI`], { encoding: 'utf8' }).trim();
+  // cmd.exe cannot take a quoted path from execFileSync: Node escapes the quotes as \" and cmd keeps them.
+  const literal = dir.replaceAll("'", "''");
+  const short = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `(New-Object -ComObject Scripting.FileSystemObject).GetFolder('${literal}').ShortPath`], { encoding: 'utf8' }).trim();
   assert.notEqual(short.toLowerCase(), dir.toLowerCase(), `${dir} has no 8.3 short name on this volume`);
   return short;
 }
