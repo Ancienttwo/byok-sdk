@@ -274,10 +274,11 @@ describe('HermesAdapter prepare', () => {
   });
 });
 
-describe('HermesAdapter session', () => {
-  // The adapter's default gateway-ready budget (20 s) applies; the test timeout
-  // stays above it so a slow startup fails with the adapter's error.
-  it('settles an opening session before teardown removes its profile', { timeout: 30_000 }, async () => {
+// Every test here opens a gateway. Its ready wait, which on Windows includes a
+// PowerShell process-table walk, has the adapter's 20 s budget; the test timeout
+// stays above it so a slow start fails with the adapter's error.
+describe('HermesAdapter session', { timeout: 30_000 }, () => {
+  it('settles an opening session before teardown removes its profile', async () => {
     const { open, entries, root } = await setup({ FAKE_HERMES_GATEWAY_READY_DELAY_MS: '750' });
     const opening = open();
     // Keep startup rejection observable while teardown awaits it.
