@@ -68,7 +68,6 @@ import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
 import type { StaleApprovalError } from './approval-control';
 import {
-  BYOK_ACTIVITY_PATH,
   BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
   BYOK_INPUT_PREPARATION_COMPLETION_ROUTE,
@@ -167,7 +166,7 @@ import {
   DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS,
   DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS,
 } from './handlers/board';
-import { activityAppendHandler, presencePublishHandler } from './handlers/presence';
+import { presencePublishHandler } from './handlers/presence';
 import {
   DEFAULT_SKILL_PACK_PAGE_LIMIT,
   skillPackFileHandler,
@@ -1173,13 +1172,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
           options.presenceMinimumIntervalMs ?? DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
         detailMaxBytes: options.presenceDetailMaxBytes ?? DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
       }),
-    );
-  }
-
-  if (declares(declaration, CLOUD_CAPABILITIES.activityTail)) {
-    registry.register(
-      { method: 'POST', path: BYOK_ACTIVITY_PATH, class: 'device' },
-      activityAppendHandler({ ...deviceRouteDeps, bounds: activityBounds }),
     );
   }
 

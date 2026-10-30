@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "0752e842816676f87865fb0ed5b63c15be5b593408770b8a78897d81cc3f7f17"
+    "snapshotSha256": "8c171fc80d1ff341378744c4e6ce72462e4745485eb903c212401c437abc8d54"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "activity-post-removed",
+      "impact": "breaking",
+      "summary": "POST /byok/activity and BYOK_ACTIVITY_PATH are removed (#1113). Device progress must use authenticated task.progress envelopes through POST /byok/messages; check operator inventory for external callers before release.",
+      "migration": "docs/migrations/1113-activity-envelope-only.md#activity-progress-uses-task-envelopes-only",
+      "items": [
+        "export:@byok-sdk/protocol#BYOK_ACTIVITY_PATH"
+      ]
+    },
     {
       "id": "pi-subagents-installed-dependency",
       "impact": "breaking",
@@ -2186,6 +2195,11 @@
       "item": "export:@byok-sdk/protocol#AgentContentReceiptPayloadSchema",
       "change": "changed",
       "entry": "open-device-vocabularies"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BYOK_ACTIVITY_PATH",
+      "change": "removed",
+      "entry": "activity-post-removed"
     },
     {
       "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",

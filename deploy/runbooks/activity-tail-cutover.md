@@ -8,15 +8,16 @@ only the JSON value stored in `entries` changes authority.
 ## Required sequence
 
 1. Stop every old writer that can append string `detail` entries, including old
-   cloud instances and direct `/byok/activity` clients.
+   cloud instances. Remove direct activity clients using the
+   [envelope-only migration](../../docs/migrations/1113-activity-envelope-only.md).
 2. Wait at least the deployment's full configured activity TTL after the last
    old write. The SDK default is 10 minutes. Use the longest configured value
    across the fleet, not the default, if they differ.
 3. Confirm no old writer remains able to receive traffic. Do not inspect or
    translate existing JSONB rows; expiry is the migration boundary.
-4. Deploy the typed reader and typed writers together. Direct activity writers
-   must now provide `sourceEnvelopeId` and `batchSeq`; the route rejects missing
-   identity or order authority.
+4. Deploy the typed reader and envelope writers together. Device progress uses
+   `task.progress` through `POST /byok/messages`; no direct activity append route
+   is available.
 5. Read one new task through the host-only `readActivity()` control-plane port
    and verify typed entries, cursor, dropped count, capacity, and expiry.
 

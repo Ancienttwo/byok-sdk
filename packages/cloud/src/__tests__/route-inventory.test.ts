@@ -39,7 +39,6 @@ const EXPECTED_INVENTORY: Record<string, RouteClass> = {
   'POST /byok/board/:id/status': 'device',
   'GET /byok/board/stream': 'device',
   'PUT /byok/presence': 'device',
-  'POST /byok/activity': 'device',
   'POST /byok/blobs': 'device',
   'POST /byok/blobs/:id/finalize': 'device',
   'GET /byok/blobs/:id/url': 'device',
