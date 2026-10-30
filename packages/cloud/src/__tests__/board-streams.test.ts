@@ -134,7 +134,7 @@ describe('board coordination surface', () => {
     expect((await harness.cloud.acceptBoardItem(TENANT_A, 'review')).status).toBe('done');
   });
 
-  it('projects the first wire terminal to at most in_review and stores progress via the batch seam', async () => {
+  it('stores envelope progress and refuses direct activity writes without changing history', async () => {
     const harness = createHarness({ activityCapacity: 2 });
     const device = await harness.pairDevice(TENANT_A);
     await createBoardFixture(harness, 'projected');
@@ -181,18 +181,32 @@ describe('board coordination surface', () => {
       [progress.id, 1, 2],
     ]);
     expect(activity?.cursor).toEqual({ batchSeq: 1, eventIndex: 2 });
+
+    const append = vi.spyOn(harness.stores.activity, 'append');
+    for (const taskId of ['projected', 'unknown-task']) {
+      const response = await harness.request('/byok/activity',
+        jsonInit(device, {
+          taskId,
+          sourceEnvelopeId: 'removed-route-envelope',
+          batchSeq: 2,
+          events: [{ type: 'progress', text: 'must not be stored' }],
+          dropped: 0,
+        }),
+      );
+      expect(response.status).toBe(404);
+    }
+    expect(append).not.toHaveBeenCalled();
+    expect(await harness.cloud.readActivity(TENANT_A, 'projected')).toEqual(activity);
+    expect(await harness.cloud.readActivity(TENANT_A, 'unknown-task')).toBeUndefined();
   });
 
-  it('bounds producer labels, presence cadence/detail, and activity events/bytes', async () => {
+  it('bounds producer labels and presence cadence/detail', async () => {
     const clock = createMutableClock();
     const harness = createHarness({
       clock,
       boardTitleMaxBytes: 4,
       presenceMinimumIntervalMs: 5_000,
       presenceDetailMaxBytes: 4,
-      activityMaxEvents: 2,
-      activityMaxBytes: 64,
-      activityCapacity: 2,
     });
     const device = await harness.pairDevice(TENANT_A);
     expect(() =>
@@ -250,33 +264,6 @@ describe('board coordination surface', () => {
         )
       ).status,
     ).toBe(413);
-
-    expect(
-      await harness.json(
-        '/byok/activity',
-        jsonInit(device, {
-          taskId: 'activity-without-order-authority',
-          events: [{ type: 'turn_end' }],
-          dropped: 0,
-        }),
-      ),
-    ).toEqual({ status: 400, body: { error: 'invalid activity body' } });
-
-    const tooMany = await harness.json(
-      '/byok/activity',
-      jsonInit(device, {
-        taskId: 'activity',
-        sourceEnvelopeId: 'activity-envelope',
-        batchSeq: 1,
-        events: [
-          { type: 'turn_end' },
-          { type: 'turn_end' },
-          { type: 'turn_end' },
-        ],
-        dropped: 0,
-      }),
-    );
-    expect(tooMany).toEqual({ status: 413, body: { error: 'activity_batch_too_large' } });
   });
 });
 

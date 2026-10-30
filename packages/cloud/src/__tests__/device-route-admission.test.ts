@@ -261,7 +261,6 @@ describe('Host request bodies are bounded (#1118)', () => {
     const device = await harness.pairDevice(TENANT_A);
     const routes = [
       ['PUT', '/byok/presence'],
-      ['POST', '/byok/activity'],
       ['POST', '/byok/board/item-1/claim'],
       ['POST', '/byok/board/item-1/status'],
       ['POST', '/byok/blobs'],
