@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "d970c198a249785bc6e2138b26c4680c3d7b50e3c195c2faf5953b877e80c309"
+    "snapshotSha256": "b95779da23d15319b7efa6d5c50428bf59f5d371b3dd9d1a3ee39d1f175cb2f8"
   },
   "configFields": {
     "status": "tracked",
@@ -2685,6 +2685,12 @@
       "item": "export:@byok-sdk/server/execution-core/canonical#hash",
       "change": "added",
       "entry": "execution-core-published"
+    },
+    {
+      "item": "interprocess:path-mutation-gate",
+      "change": "added",
+      "after": "protocol=2",
+      "entry": "path-mutation-gate-os-lock"
     },
     {
       "item": "store:cloud-dataplane-postgres",
