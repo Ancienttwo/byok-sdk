@@ -274,9 +274,12 @@ describe('HermesAdapter prepare', () => {
   });
 });
 
-describe('HermesAdapter session', () => {
+// Every test here opens a gateway. Its ready wait, which on Windows includes a
+// PowerShell process-table walk, has the adapter's 20 s budget; the test timeout
+// stays above it so a slow start fails with the adapter's error.
+describe('HermesAdapter session', { timeout: 30_000 }, () => {
   it('settles an opening session before teardown removes its profile', async () => {
-    const { open, entries, root } = await setup({ FAKE_HERMES_GATEWAY_READY_DELAY_MS: '750' }, { gatewayReadyTimeoutMs: 3_000 });
+    const { open, entries, root } = await setup({ FAKE_HERMES_GATEWAY_READY_DELAY_MS: '750' });
     const opening = open();
     // Keep startup rejection observable while teardown awaits it.
     const outcome = opening.then((session) => ({ session }), (error: unknown) => ({ error }));
@@ -287,7 +290,8 @@ describe('HermesAdapter session', () => {
     expect(alive(gateway.pid)).toBe(true);
     try {
       await cleanupFixtures();
-      expect(await outcome).toHaveProperty('session');
+      const result = await outcome;
+      expect(result, 'error' in result ? `open failed: ${String(result.error)}` : undefined).toHaveProperty('session');
       expect(alive(gateway.pid)).toBe(false);
       await expect(fs.stat(root)).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
@@ -390,10 +394,13 @@ describe('HermesAdapter session', () => {
     const session = await open();
     const iterator = session.events[Symbol.asyncIterator]();
     expect((await iterator.next()).value).toEqual({ type: 'progress', text: 'Hello' });
+    // close() drops a line the viewer has not delivered yet, so wait for the
+    // turn's last chunk; the hanging prompt keeps the turn active.
+    expect((await iterator.next()).value).toEqual({ type: 'progress', text: ' turn 1' });
     await Promise.all([session.close(), session.close()]);
     const rest: unknown[] = [];
     for (let next = await iterator.next(); !next.done; next = await iterator.next()) rest.push(next.value);
-    expect(rest).toEqual([{ type: 'progress', text: ' turn 1' }]);
+    expect(rest).toEqual([]);
     const pids = (await entries()).filter((entry) => entry.method === undefined).map((entry) => entry.pid as number);
     expect(pids).toHaveLength(2);
     for (const pid of pids) expect(alive(pid)).toBe(false);
