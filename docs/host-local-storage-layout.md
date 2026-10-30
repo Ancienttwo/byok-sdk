@@ -144,10 +144,14 @@ resume ledger, TaskRunner obtains the prepared operation's `RuntimeSessionLease`
 and retains it through startup and disposal. Standalone PiAdapter uses the same
 admission gate. The actual Pi RPC host holds a separate writer gate for its
 session file, so a surviving child stays protected even if its parent is killed.
-The gates use canonical paths. They coordinate only processes that use the
-protected directory (the daemon, the adapters, the actual Pi writer, the sweeper
-and relocation) as the same UID, in the same Linux network namespace, through a
-consistent canonical path. Across network namespaces, use separate stores.
+The gates use canonical paths. They coordinate only processes (the daemon, the
+adapters, the actual Pi writer, the sweeper and relocation) that run as the same
+UID, in the same Linux network namespace, and reach each protected target
+through a consistent canonical path. That holds for every gated target (the
+store, the Agent home root, the skill-pack store and the Pi session directory)
+and for the pathless Pi rebinding barrier, which exists once per UID and network
+namespace rather than per directory. Processes in different network namespaces
+do not exclude each other: give each namespace its own store.
 A short discovery gate covers native session opening and replacement; different
 sessions run concurrently. Cleanup must acquire discovery, admission and writer
 gates, then recheck last-write time. Native `newSession.setup` receives a mutable
@@ -231,10 +235,11 @@ SDK process on a store (the daemon, the CLI, and an App that embeds the SDK)
 before you upgrade any of them, and start them again only on the new release.
 Windows is unaffected.
 
-The gates exclude each other only between processes that use one protected
-directory (the daemon, the adapters, the actual Pi writer, the sweeper and
-relocation) as the same UID, in the same Linux network namespace, through a
-consistent canonical path. A Host that runs processes in different network
+The new gates exclude each other only between processes (the daemon, the
+adapters, the actual Pi writer, the sweeper and relocation) that run as the same
+UID, in the same Linux network namespace, and reach each protected target
+through a consistent canonical path; the pathless Pi rebinding barrier is shared
+per UID and network namespace. A Host that runs processes in different network
 namespaces gives each namespace its own store.
 
 Relocation acquisition canonicalizes intended paths without creating them and
