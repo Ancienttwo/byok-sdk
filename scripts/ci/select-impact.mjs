@@ -326,6 +326,10 @@ export const reviewedScripts = Object.freeze({
     tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs'],
     install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
+  // Each of these ci.yml families runs pack-and-smoke.mjs, which calls this installed-consumer fixture.
+  'scripts/release/cloud-do-consumer-smoke.mjs': {
+    tests: [], families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
+  },
   // pack-and-smoke.mjs copies this smoke next to the installed tarballs and
   // runs it in every family job; #925 selects npm-release-pack alone.
   'scripts/release/execution-submit-smoke.mjs': { tests: [], families: ['npm-release-pack'] },

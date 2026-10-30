@@ -190,7 +190,7 @@ test('reviewed release scripts install only when their tests need packages', () 
   const install = ['scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs', 'scripts/architecture/dependency-baseline.json', 'scripts/release/check-package-graph.mjs', 'scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs',
     'scripts/release/beta-release.test.mjs', 'scripts/release/registry-readback.mjs',
-    'scripts/release/execution-submit-smoke.mjs', 'scripts/release/packaging-plugin-smoke.mjs',
+    'scripts/release/execution-submit-smoke.mjs', 'scripts/release/packaging-plugin-smoke.mjs', 'scripts/release/cloud-do-consumer-smoke.mjs',
     'scripts/release/pi-launcher-smoke.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/check-upgrade-manifest.mjs',
     'scripts/release/check-upgrade-manifest.test.mjs'];
   for (const path of Object.keys(reviewedScripts)) {
