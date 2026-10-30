@@ -224,9 +224,8 @@ async function lifecycle(variant, cmd, server, payloads) {
 try {
   log(`platform=${process.platform} node=${process.version}`);
   const bundle = path.join(work, 'bundle', 'byok-agent.mjs');
-  // tsup drops the `node:` prefix from the CLI's builtins, and esbuild does not list bare `readline/promises` as one.
   await build({ entryPoints: [agentCli], bundle: true, platform: 'node', format: 'esm', target: 'node24', outfile: bundle,
-    external: ['readline/promises'], logLevel: 'silent', plugins: [byokSdkPackaging({ format: 'esm' })] });
+    logLevel: 'silent', plugins: [byokSdkPackaging({ format: 'esm' })] });
   const agent = await fs.readFile(bundle);
   // v3 passes the precheck with the real build, then breaks every start.
   const broken = (journal) => [
