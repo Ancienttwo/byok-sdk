@@ -135,10 +135,61 @@ a generated unit with systemd's own validator:
 systemd-analyze verify /path/to/generated-unit.service
 ```
 
-This SDK's own CI does not run a dedicated Linux systemd install job today
-(unlike the Windows WinSW job — see `templates/service/winsw/`) — the
-generated-content unit tests plus this manual `systemd-analyze verify` step
-are the verification path for this recipe.
+For native lifecycle verification, build the client and run:
+
+```bash
+bun run build
+node templates/service/systemd/smoke-test.mjs
+```
+
+The smoke requires Linux with a working systemd **user manager**, a reachable
+user D-Bus, `systemctl`, and the built `packages/client/dist/index.js`.
+Set `XDG_RUNTIME_DIR=/run/user/$(id -u)` and
+`DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus` for that user.
+Missing preconditions fail the command; they never skip it. A container
+without systemd cannot provide this proof.
+
+On a disposable GitHub-hosted Ubuntu runner, provision the user manager
+explicitly in a workflow step before running the smoke (the step uses the
+runner's existing user, not root):
+
+```yaml
+- name: Provision systemd user manager
+  shell: bash
+  run: |
+    set -euo pipefail
+    sudo apt-get update
+    sudo apt-get install -y dbus-user-session
+    uid="$(id -u)"
+    sudo loginctl enable-linger "$(id -un)"
+    sudo systemctl start "user@${uid}.service"
+    export XDG_RUNTIME_DIR="/run/user/${uid}"
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+    systemctl --user start dbus.socket
+    systemctl --user show-environment >/dev/null
+    echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> "$GITHUB_ENV"
+    echo "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}" >> "$GITHUB_ENV"
+- name: Native systemd lifecycle smoke
+  run: node templates/service/systemd/smoke-test.mjs
+```
+
+Checkout, Bun/dependency setup, and `bun run build` must precede the smoke.
+Provisioning is unconditional and fails on errors; it does not substitute a
+private D-Bus session, mock manager, system service, or another supervisor.
+Lingering remains enabled only for this disposable runner's lifetime.
+
+The fixture is a harmless Node process independent of pairing and daemon
+network access. The smoke uses the public `createServiceLifecycle` API with
+`program`, `storeDir`, and `owner`; proves `inspect`, install, stop, start,
+unit/launcher repair, and uninstall; and checks real `systemctl` state,
+enabled registration, MainPID, `/proc` command line, fixture readiness, and
+process exit. Its store path contains spaces to exercise the stable launcher.
+Only observation polling waits for Node readiness; lifecycle mutations are
+never retried. A UUID unit name isolates every run. Cleanup stops/disables
+only that unit, removes its unit and temporary files, and reports any failure
+as a failed smoke. If stopping cannot be confirmed, control files remain for
+diagnosis and the command fails. Local macOS execution cannot establish Linux
+acceptance; retain the successful hosted Ubuntu run as the native evidence.
 
 ## What's explicitly out of scope
 
