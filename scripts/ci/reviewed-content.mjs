@@ -238,6 +238,26 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       after.exports = before.exports; after.description = before.description;
     }
   } else if (path === 'package.json') {
+    // Reserve the CI helper before generic script normalization can erase it.
+    // Only this exact composition may wrap the existing ordered test list.
+    const ciHelper = 'test:scripts:ci';
+    const ciCommand = 'node --test scripts/ci/*.test.mjs';
+    const ciPrefix = 'bun run test:scripts:ci && ';
+    if (before.scripts?.[ciHelper] !== undefined || after.scripts?.[ciHelper] !== undefined
+      || after.scripts?.['test:scripts']?.startsWith(ciPrefix)) {
+      if (after.scripts?.[ciHelper] !== ciCommand || !after.scripts?.['test:scripts']?.startsWith(ciPrefix)) {
+        throw new Error('Unreviewed CI test composition');
+      }
+      if (before.scripts?.[ciHelper] !== undefined) {
+        if (before.scripts[ciHelper] !== ciCommand || !before.scripts['test:scripts']?.startsWith(ciPrefix)) {
+          throw new Error('Unreviewed CI test composition');
+        }
+        before.scripts['test:scripts'] = before.scripts['test:scripts'].slice(ciPrefix.length);
+        delete before.scripts[ciHelper];
+      }
+      after.scripts['test:scripts'] = after.scripts['test:scripts'].slice(ciPrefix.length);
+      delete after.scripts[ciHelper];
+    }
     // repo-harness owns its generated command scripts. Admit additions, removals
     // and edits whose old and new values both invoke repo-harness; every other
     // script and field stays in the deep comparison below.
