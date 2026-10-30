@@ -46,6 +46,21 @@
   configured isolation values; a Host that switches exhaustively on that
   `mode` must handle `'static'`. Nothing changes for a Host that does not set
   these fields.
+- **Add (client; #1097)** — versioned service installs and upgrades.
+  `createServiceInstallation` installs a Host-verified payload (a directory plus
+  `byok-payload.json` with each file's SHA-256) under a Host-owned install root
+  as `versions/<id>` with `current` and `previous` pointers, so the unit and
+  launcher never change. `upgrade()` stops the service, runs the candidate's
+  store precheck and stops before the switch when a store needs a new path and
+  pairing or is refused, snapshots every listed store, switches, and restores
+  the old version and its snapshot together when the new one fails its health
+  check. `rollback()`, `recover()` for an interrupted switch, `uninstall()` and
+  `upgrade-receipt.json` for a Host UI complete it. `agentServiceInstallation`
+  is the `byok-agent` payload's installation; the CLI adds
+  `install --payload <dir> --install-root <dir>` and
+  `upgrade apply <dir> | rollback | recover | status`. Nothing changes for a
+  service installed without a payload.
+
 
 - **Add (client; #1104)** — single-file Host packaging. `@byok-sdk/client/packaging`
   exports `byokSdkPackaging`, an esbuild plugin (esbuild stays the Host's
