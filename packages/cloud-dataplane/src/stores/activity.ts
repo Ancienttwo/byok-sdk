@@ -51,7 +51,7 @@ export class PostgresActivityStore implements ActivityStore {
     return {
       tenantId: head.tenant_id as TenantId, taskId: head.task_id, entries: rows.rows.map(row => row.body),
       cursor: { version: 1, tenantId: head.tenant_id as TenantId, taskId: head.task_id, generation: head.generation, revision: Number(head.revision) },
-      floor: Number(head.floor), dropped: Number(head.dropped), sourceDropped: Number(head.source_dropped),
+      floor: Number(head.floor), after, dropped: Number(head.dropped), sourceDropped: Number(head.source_dropped),
       capacity: head.capacity, byteCapacity: head.byte_capacity, retainedBytes: head.retained_bytes,
       ...(head.terminal_at === null ? {} : { terminalAt: head.terminal_at }),
       ...(head.expires_at === null ? {} : { expiresAt: head.expires_at }),
