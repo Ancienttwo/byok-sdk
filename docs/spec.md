@@ -3908,6 +3908,11 @@ resolver sees the local task identity (`taskId`, `runtimeId`, `agentRef`) and
 is called once, before claim. A throw or any other value (including legacy
 wording such as `full access` or `inherit`) declines the offer with
 `tool_authorization_unresolved`. Without a resolver every task runs in `all`.
+A config file sets the static form `{ default: 'auto' | 'all', byRuntime? }`
+instead (#1094); daemon construction turns it into the same single resolver
+(`byRuntime[runtimeId] ?? default`). A `byRuntime` key that names no runtime
+of the daemon, or static `auto` on an adapter without `toolAuthorizationAuto`,
+raises `DaemonConfigInvalidError` at construction.
 
 - `all`: no tool is blocked. The daemon classifies each `tool_use` the runtime
   reports and emits a local `tool-reminder` `DaemonEvent` for a high-risk call.

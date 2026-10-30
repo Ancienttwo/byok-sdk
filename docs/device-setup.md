@@ -100,8 +100,10 @@ For E2EE enrollment the Host also passes the base32 verification-secret string t
 `daemon.pair(code, { verificationSecret })`; use the Host's pairing flow rather
 than treating the combined UI string as an ordinary code.
 
-Embedded callbacks such as `toolAuthorization` and `agentHome.projection`
-cannot be encoded in CLI JSON. They remain typed Host integration points.
+Embedded callbacks such as a `toolAuthorization` function and
+`agentHome.projection` cannot be encoded in CLI JSON. They remain typed Host
+integration points; a config file sets the static `toolAuthorization` policy
+instead (see [Configuration](#configuration)).
 Custom adapters belong in `createDaemonWithAdapters`; the effective report
 marks them `injected`, without claiming SDK-built isolation settings for them.
 
@@ -143,8 +145,10 @@ Read `directories` for the resolved store, optional Host root, Agent-home parent
 service log directory (`logDir`) and scratch root (including its source and
 socket byte budget); `memory` for
 helper resolution/admission; `mcpServers` for mount availability; `runtimes` for
-adapter source, auto-authorization support and inherited isolation settings;
-and `toolAuthorization` for the resolver mode and local approval policy.
+adapter source, auto-authorization support and isolation settings (the
+configured `runtimes` value, else the adapter default); and `toolAuthorization`
+for the mode (`all`, `static` with each runtime's resolved mode in `byRuntime`,
+or `host-resolver`) and local approval policy.
 
 Missing required fields, invalid types/values, removed fields and CLI-forbidden
 values are errors. Unknown fields are warnings under the Q4' rollback contract;
@@ -152,6 +156,40 @@ they do not stop startup, but `--strict` fails on them. Correct warnings before
 shipping an installer config. The generated schema marks embedded-only and
 distribution-owned fields with `not: {}`; range and cross-field constraints are
 also checked by `config check`. Removed fields fail with a migration reference.
+
+### Runtime isolation and tool authorization
+
+A CLI config sets the isolation options of the bundled runtimes in `runtimes`
+and a static tool-authorization policy in `toolAuthorization`:
+
+```json
+{
+  "productName": "BYOK Example",
+  "productId": "byok-example-basic",
+  "serverUrl": "http://localhost:8787",
+  "storeDir": "/tmp/byok-example-store",
+  "runtimes": {
+    "claude": { "agentUserContext": "excluded", "agentSessionPersistence": "disabled" },
+    "codex": { "agentUserMcpServers": "excluded" }
+  },
+  "toolAuthorization": { "default": "auto", "byRuntime": { "codex": "all" } }
+}
+```
+
+- `runtimes.pi.agentUserContext`, `runtimes.claude.agentUserContext`,
+  `runtimes.claude.agentSessionPersistence` and
+  `runtimes.codex.agentUserMcpServers` go to the adapter constructors. An unset
+  option keeps the adapter default (`inherit`, `enabled`). Which runtimes run
+  stays `runtimeAllowlist`; the Codex sandbox stays `codexSandbox`.
+  `createDaemonWithAdapters` rejects `runtimes`: configure injected adapters
+  directly.
+- `toolAuthorization.byRuntime` gives a runtime its own mode; `default` covers
+  the rest. A `byRuntime` key that is not a runtime of the daemon is an error.
+- Static `auto` requires the runtime's `toolAuthorizationAuto` capability.
+  Codex has none: set it to `all` (as above), or remove it from
+  `runtimeAllowlist`.
+- An embedded Host may pass a function instead of the static policy; a config
+  file cannot.
 
 ## Operations
 
@@ -401,7 +439,9 @@ linked JSON schema for full array/union shapes and descriptions.
 | Field | Tier | Shape |
 |-------|------|-------|
 | `nativeAssetRoot` | advanced | string |
-| `toolAuthorization` | embedded-only | embedded-only |
+| `toolAuthorization` | advanced | object |
+| `toolAuthorization.default` | required when parent is set | "all" / "auto" |
+| `toolAuthorization.byRuntime` | advanced | object |
 | `localToolApproval` | common | "allow" |
 | `deviceCredentials` | advanced | object |
 | `deviceCredentials.macosKeychainPath` | advanced | string |
@@ -498,6 +538,14 @@ linked JSON schema for full array/union shapes and descriptions.
 | `agentEgress.contentRead.artifact.sensitiveNames` | advanced | array |
 | `agentEgress.contentRead.runtimeAllowlistedRoots` | advanced | array |
 | `runtimeAllowlist` | common | array |
+| `runtimes` | advanced | object |
+| `runtimes.pi` | advanced | object |
+| `runtimes.pi.agentUserContext` | advanced | "excluded" / "inherit" |
+| `runtimes.claude` | advanced | object |
+| `runtimes.claude.agentUserContext` | advanced | "excluded" / "inherit" |
+| `runtimes.claude.agentSessionPersistence` | advanced | "disabled" / "enabled" |
+| `runtimes.codex` | advanced | object |
+| `runtimes.codex.agentUserMcpServers` | advanced | "excluded" / "inherit" |
 | `runtimeEnvironment` | advanced | union |
 | `durablePi` | advanced | boolean |
 | `piByokLauncher` | advanced | object |
