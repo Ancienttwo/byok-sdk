@@ -17,6 +17,7 @@ import { createMutableClock, tenantId, type ContentHash } from '@byok-sdk/core';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
 import { byokBlobUrlPath, createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { migrate } from '../migrate';
+import { PostgresActivityStore } from '../stores/activity';
 import { createPostgresTaskRedactionStore } from '../stores';
 import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 import { readObjects, readTenantRows, record, scanObjects, scanPostgres, type Hits } from './support/plaintext-scan';
@@ -234,6 +235,11 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       ]);
 
       // Zero hits for the redacted tasks.
+      expect((await scope.pool.query('SELECT removed, retained_bytes FROM activity_log_head WHERE tenant_id = $1 AND task_id = $2', [TENANT_1, taskA])).rows).toEqual([{ removed: true, retained_bytes: 0 }]);
+      expect((await scope.pool.query('SELECT count(*) FROM activity_log_entry WHERE tenant_id = $1 AND task_id = $2 AND body IS NOT NULL', [TENANT_1, taskA])).rows[0].count).toBe(0n);
+      const log = new PostgresActivityStore(scope.pool, { now: () => new Date() });
+      await expect(log.append(TENANT_1, { taskId: taskA, sourceEnvelopeId: 'post-removal', batchSeq: 99, events: [{ type: 'turn_end' }], dropped: 0, ttlMs: 600_000 })).rejects.toMatchObject({ code: 'activity_history_gap' });
+
       expect(await hitsFor(scope.pool, storage, canaryA, consoleCalls())).toEqual({});
       expect(await hitsFor(scope.pool, storage, canaryD, consoleCalls())).toEqual({});
       // No change for task B or for tenant 2.

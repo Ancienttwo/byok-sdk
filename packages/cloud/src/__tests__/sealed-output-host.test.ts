@@ -275,6 +275,12 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
     },
   );
 
+  it('keeps sealed artifacts outside the activity log until #1045 item 6', async () => {
+    const task = await offeredTask(OUTPUT_SEALING);
+    expect(await task.send('task.artifact', SEALED_OUTPUTS['task.artifact'])).toEqual({ outcome: 'accepted' });
+    expect(await task.harness.cloud.readActivity(TENANT_A, task.taskId)).toBeUndefined();
+  });
+
   it('stores each sealed progress batch as one activity entry (12e)', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
     expect(await task.send('task.progress', SEALED_OUTPUTS['task.progress'])).toEqual({ outcome: 'accepted' });
@@ -284,12 +290,13 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
       taskId: task.taskId,
       sourceEnvelopeId: expect.any(String),
       batchSeq,
-      eventIndex: 0,
+      kind: 'sealed-progress',
+      revision: batchSeq,
       sourceDropped: 0,
       receivedAt: expect.any(String),
       sealed: OUTPUT_MEMBER,
     })));
-    expect(tail?.cursor).toEqual({ batchSeq: 2, eventIndex: 0 });
+    expect(tail?.cursor).toMatchObject({ version: 1, revision: 2 });
   });
 
   it('stores a sealed approval request, which the Host approves while it is pending (12e)', async () => {

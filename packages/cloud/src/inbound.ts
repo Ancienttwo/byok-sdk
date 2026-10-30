@@ -796,7 +796,15 @@ async function applyInboundGate(
     }
   }
 
-  const lifecycleRefusal = await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt?.agentRef);
+  let lifecycleRefusal: Refused | undefined;
+  try {
+    lifecycleRefusal = await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt?.agentRef);
+  } catch (caught) {
+    if (isCloudError(caught, 'activity_batch_too_large')) return refuse('activity_batch_too_large');
+    if (isCloudError(caught, 'activity_task_settled')) return refuse('task_settled_by_cloud');
+    if (isCloudError(caught, 'activity_history_gap')) return refuse('task_settled_by_cloud');
+    throw caught;
+  }
   if (lifecycleRefusal !== undefined) return lifecycleRefusal;
   return completeInboundEnvelope(stores, deviceId, envelope.id, attempt?.agentRef);
 }
@@ -820,9 +828,8 @@ async function completeInboundEnvelope(
 /**
  * The lifecycle half. Deliberately thin: S3a records ownership, the coarse
  * attempt status, the terminal receipt, and bounded activity/approval
- * observations. Artifacts are accepted and carried, but the durable record of
- * what a task *produced* belongs to the truth and board planes (S5/S6) and to
- * S3b's journal — not to a map in this package.
+ * observations. Plaintext artifacts share the activity log; task results and
+ * truth/board facts retain their existing authorities.
  */
 async function applyLifecycle(
   stores: TenantStores,
@@ -888,7 +895,9 @@ async function applyLifecycle(
     case 'task.cancelled':
       return recordTerminal(stores, taskId, envelope);
     case 'task.artifact': {
-      // A plaintext artifact is complete as received; a sealed one may hold its ciphertext blob.
+      const activity = activityBatchOf(taskId, envelope);
+      if (activity !== undefined) await appendActivityEvents(stores.activity, activity, activityBounds);
+      // Sealed artifacts remain outside the log until #1045 item 6; their existing blob hold is unchanged.
       const ref = envelope.payload.sealed === undefined ? undefined : sealedCiphertextRef(envelope.payload);
       if (ref === undefined) return;
       // One reference per (blob, task): a replay cannot tell its reference
@@ -910,15 +919,15 @@ async function applyLifecycle(
   }
 }
 
-/** The activity batch of a progress report; an empty plaintext batch has none. */
+/** Every admitted progress envelope has an activity row, including empty batches. */
 function activityBatchOf(taskId: string, envelope: Envelope): Parameters<typeof appendActivityEvents>[1] | undefined {
   const source = { taskId, sourceEnvelopeId: envelope.id, dropped: 0 };
+  if (envelope.type === 'task.artifact' && envelope.payload.sealed === undefined) {
+    return { taskId, sourceEnvelopeId: envelope.id, artifact: envelope.payload };
+  }
   if (envelope.type !== 'task.progress') return undefined;
   if (envelope.payload.sealed !== undefined) return { ...source, batchSeq: envelope.payload.seq, sealed: envelope.payload.sealed };
-  if (envelope.payload.events.length > 0) {
-    return { ...source, batchSeq: envelope.payload.seq, events: envelope.payload.events };
-  }
-  return undefined;
+  return { ...source, batchSeq: envelope.payload.seq, events: envelope.payload.events };
 }
 
 function approvalTimelineAppendInput(

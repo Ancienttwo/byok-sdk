@@ -202,7 +202,7 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
       .toEqual({ taskId, state: 'complete', sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, recordedAt: expect.any(String) });
 
     expect((await harness.cloud.readActivity(TENANT_A, taskId))?.entries).toEqual([{
-      taskId, sourceEnvelopeId: expect.any(String), batchSeq: 1, eventIndex: 0, sourceDropped: 0,
+      taskId, sourceEnvelopeId: expect.any(String), batchSeq: 1, kind: 'sealed-progress', revision: 1, sourceDropped: 0,
       receivedAt: expect.any(String), sealed: OUTPUT_MEMBER,
     }]);
 

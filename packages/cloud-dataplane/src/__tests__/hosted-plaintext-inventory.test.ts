@@ -78,7 +78,7 @@ const INVENTORY_END = '<!-- hosted-plaintext-inventory:end -->';
  * for an object. The inventory table in `docs/security.md` lists the same set.
  */
 const EXPECTED_PLAINTEXT = [
-  'activity_tail.entries',
+  'activity_log_entry.body',
   'agent_memory_projection_head.redacted_snapshot',
   'agent_message_admission.payload_body',
   'agent_message_admission.terminal_body',

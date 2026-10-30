@@ -1,9 +1,10 @@
 // ==== @byok-sdk/cloud dist/activity.d.ts ====
-import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
-import { type TenantId } from '@byok-sdk/core';
-import { type AgentEventOrUnknown, type SealedPayload } from '@byok-sdk/protocol';
+import type { CollectExpiredInput, CollectExpiredResult, TenantId } from '@byok-sdk/core';
+import { type AgentEventOrUnknown, type SealedPayload, type TaskArtifactPayload } from '@byok-sdk/protocol';
 import { z } from 'zod';
-export declare const DEFAULT_ACTIVITY_CAPACITY = 50;
+export declare const DEFAULT_ACTIVITY_CAPACITY = 1000;
+export declare const MAX_ACTIVITY_BYTES: number;
+export declare const ACTIVITY_TERMINAL_TTL_MS: number;
 export declare const ActivityAppendRequestSchema: z.ZodObject<{
     taskId: z.ZodString;
     sourceEnvelopeId: z.ZodString;
@@ -97,6 +98,8 @@ export declare const TimelineEventSchema: z.ZodObject<{
     sourceEnvelopeId: z.ZodString;
     batchSeq: z.ZodNumber;
     eventIndex: z.ZodNumber;
+    revision: z.ZodNumber;
+    offset: z.ZodNumber;
     sourceDropped: z.ZodOptional<z.ZodNumber>;
     receivedAt: z.ZodISODateTime;
     event: z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -183,98 +186,97 @@ export declare const TimelineEventSchema: z.ZodObject<{
     }, z.core.$loose>]>;
 }, z.core.$strip>;
 export type TimelineEvent = Readonly<z.infer<typeof TimelineEventSchema>>;
-/**
- * One sealed batch in the tail (#654 12e). A sealed member covers the whole
- * batch, so the tail keeps one entry for it, and the tail capacity counts
- * batches. `eventIndex` is always 0, so the order key of a batch is the same
- * as for its first plaintext event. A member opens `sealed`.
- */
-export declare const SealedActivityBatchSchema: z.ZodObject<{
-    taskId: z.ZodString;
-    sourceEnvelopeId: z.ZodString;
-    batchSeq: z.ZodNumber;
-    eventIndex: z.ZodLiteral<0>;
-    sourceDropped: z.ZodOptional<z.ZodNumber>;
-    receivedAt: z.ZodISODateTime;
-    sealed: z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-output">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>;
-}, z.core.$strip>;
-export type SealedActivityBatch = Readonly<z.infer<typeof SealedActivityBatchSchema>>;
-/** One tail entry: a plaintext event, or a sealed batch. */
-export type ActivityTailEntry = TimelineEvent | SealedActivityBatch;
-export interface ActivityCursor {
+interface ActivityEntryFields {
+    readonly taskId: string;
+    readonly sourceEnvelopeId: string;
+    readonly revision: number;
+    readonly receivedAt: string;
+}
+export type ActivityTailEntry = ActivityEntryFields & ({
+    readonly kind: 'progress';
     readonly batchSeq: number;
-    readonly eventIndex: number;
+    readonly sourceDropped: number;
+    readonly events: readonly AgentEventOrUnknown[];
+} | {
+    readonly kind: 'sealed-progress';
+    readonly batchSeq: number;
+    readonly sourceDropped: number;
+    readonly sealed: SealedPayload;
+} | {
+    readonly kind: 'artifact';
+    readonly artifact: Extract<TaskArtifactPayload, {
+        sealed?: undefined;
+    }>;
+});
+/** One durable log position. Source batch sequence is provenance, not a resume cursor. */
+export interface ActivityCursor {
+    readonly version: 1;
+    readonly tenantId: TenantId;
+    readonly taskId: string;
+    readonly generation: string;
+    readonly revision: number;
+}
+export interface ActivityReadOptions {
+    readonly after?: ActivityCursor;
 }
 export interface ActivityTail {
     readonly tenantId: TenantId;
     readonly taskId: string;
     readonly entries: readonly ActivityTailEntry[];
-    readonly cursor?: ActivityCursor;
+    readonly cursor: ActivityCursor;
+    /** Last evicted revision: a cursor strictly below this floor has a gap. */
+    readonly floor: number;
+    /** Exclusive lower revision served by this page; zero for an unfiltered read. */
+    readonly after: number;
     readonly dropped: number;
+    readonly sourceDropped: number;
     readonly capacity: number;
-    readonly expiresAt: string;
+    readonly byteCapacity: number;
+    readonly retainedBytes: number;
+    readonly terminalAt?: string;
+    readonly expiresAt?: string;
 }
 interface ActivityAppendFields {
     readonly taskId: string;
     readonly sourceEnvelopeId: string;
-    readonly batchSeq: number;
-    readonly dropped: number;
+    /** Terminal-relative duration, never an idle timer; capped at ten minutes. */
     readonly ttlMs: number;
     readonly capacity?: number;
+    readonly byteCapacity?: number;
 }
-/** One batch to append: plaintext events, or one sealed member that covers the batch. */
-export type ActivityAppendInput = (ActivityAppendFields & {
+export type ActivityAppendInput = ActivityAppendFields & ({
+    readonly batchSeq: number;
+    readonly dropped: number;
     readonly events: readonly AgentEventOrUnknown[];
-}) | (ActivityAppendFields & {
+} | {
+    readonly batchSeq: number;
+    readonly dropped: number;
     readonly sealed: SealedPayload;
+} | {
+    readonly artifact: Extract<TaskArtifactPayload, {
+        sealed?: undefined;
+    }>;
 });
 export interface ActivityStore {
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
-    /**
-     * `sourceEnvelopeId` is the per-envelope idempotency authority. Repeating
-     * its exact canonical batch returns the existing tail; changing any batch
-     * fact under that identity is rejected rather than appended as a second
-     * observation.
-     */
     append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
-    read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
+    read(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
+    /**
+     * Freeze first terminal and final revision under the same task serialization as append.
+     * Durable adapters must enlist this boundary in the canonical lifecycle transaction (A3).
+     */
+    settle(tenant: TenantId, taskId: string, terminalAt: string): Promise<ActivityTail>;
 }
 export declare function validateActivityAppend(input: ActivityAppendInput): number;
-export declare function projectTimelineEvents(input: ActivityAppendInput, receivedAt: string): readonly ActivityTailEntry[];
-/**
- * Whether one live tail already contains this source envelope's canonical
- * batch. `conflict` includes a partially retained source: its missing events
- * are not evidence that a different batch may reuse the same source identity.
- */
-export declare function activitySourceBatchState(entries: readonly ActivityTailEntry[], input: ActivityAppendInput): 'absent' | 'same' | 'conflict';
-export declare function parseTimelineEvents(value: unknown): readonly ActivityTailEntry[];
-export declare function compareTimelineEvents(left: ActivityTailEntry, right: ActivityTailEntry): number;
-export declare function activityCursor(entries: readonly ActivityTailEntry[]): ActivityCursor | undefined;
+/** Sorted object keys give adapters one byte representation and one source fence hash. */
+export declare function canonicalActivityJson(value: unknown): string;
+export declare function activityEntryBytes(entry: ActivityTailEntry): number;
+export declare function createActivityEntry(input: ActivityAppendInput, revision: number, receivedAt: string): ActivityTailEntry;
+export declare function activitySourceHash(input: ActivityAppendInput): Promise<string>;
+/** Deterministic progress view; artifacts have their own renderer and sealed content must be opened by a member. */
+export declare function projectTimelineEvents(entry: Extract<ActivityTailEntry, {
+    kind: 'progress';
+}>): readonly TimelineEvent[];
 export declare function activityTailKey(tenant: TenantId, taskId: string): string;
 export {};
 // ==== @byok-sdk/cloud dist/agent-execution.d.ts ====
@@ -1430,7 +1432,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
  * `src/__tests__/constraints.test.ts`.
  */
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import type { ActivityTail } from './activity';
+import type { ActivityTail, ActivityReadOptions } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
 import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type TaskOfferPlainPayload, type TaskOfferSealedPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
@@ -2086,7 +2088,7 @@ export interface ByokCloud {
     listPresence(tenant: TenantId): Promise<readonly PresenceHint[]>;
     /** SDK-owned observation only; never a scheduler or execution authority. */
     readTenantReadiness(tenant: TenantId): Promise<TenantReadiness>;
-    readActivity(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
+    readActivity(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
     readApprovalTimeline(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 export declare function createByokCloud(options: ByokCloudOptions): ByokCloud;
@@ -2718,6 +2720,10 @@ export declare function readDeviceClientPairingMac(ctx: E2eeMemberContext, devic
  * declaration the host mis-configured), and core errors travel up unchanged.
  */
 export declare const CLOUD_ERROR_CODES: {
+    readonly activity_history_gap: 'activity_history_gap';
+    readonly activity_cursor_invalid: 'activity_cursor_invalid';
+    readonly activity_task_settled: 'activity_task_settled';
+    readonly activity_store_unavailable: 'activity_store_unavailable';
     readonly maintenance_invalid_input: 'maintenance_invalid_input';
     readonly maintenance_result_invalid: 'maintenance_result_invalid';
     /** A pairing code that is unknown, expired, or already redeemed (§6.1). */
@@ -3219,8 +3225,8 @@ export { SteerRejectedError } from './steer-control';
 export type { SteerRejectionCode } from './steer-control';
 export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination';
 export type { ActivityBounds } from './coordination';
-export { TimelineEventSchema, SealedActivityBatchSchema, ActivityAppendRequestSchema, activityCursor, activitySourceBatchState, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
-export type { ActivityAppendInput, ActivityCursor, ActivityStore, ActivityTail, ActivityTailEntry, SealedActivityBatch, TimelineEvent, } from './activity';
+export { TimelineEventSchema, ActivityAppendRequestSchema, projectTimelineEvents, validateActivityAppend, MAX_ACTIVITY_BYTES, ACTIVITY_TERMINAL_TTL_MS, activityEntryBytes, createActivityEntry, activitySourceHash, } from './activity';
+export type { ActivityAppendInput, ActivityCursor, ActivityReadOptions, ActivityStore, ActivityTail, ActivityTailEntry, TimelineEvent, } from './activity';
 export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
 export type { BoardFeedClientOptions, BoardFeedItem, BoardFeedMode, BoardFeedPage, BoardFeedRead, } from './coordination-client';
 export { TRUTH_BATCH_MAX_RECORDS, TRUTH_INLINE_CONTENT_TYPE, TRUTH_LABEL_MAX_LENGTH, TRUTH_MANIFEST_MAX_LIMIT, TRUTH_RECORD_CAPABILITY, TRUTH_RECORD_KEY_MAX_LENGTH, TRUTH_REQUEST_ID_MAX_LENGTH, TruthBodyInputSchema, TruthCommitResponseSchema, TruthRecordKeySchema, TruthRecordMetadataSchema, TruthWriteRequestSchema, truthManifestMetadata, truthRecordMetadata, } from './truth/contract';
@@ -3552,17 +3558,17 @@ export declare class SteerRejectedError extends Error {
     runtime: RuntimeId | undefined);
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/activity.d.ts ====
-import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
-import type { Clock, TenantId } from '@byok-sdk/core';
-import { type ActivityAppendInput, type ActivityStore, type ActivityTail } from '../../activity';
-/** Deletes the task's tail for the Host task archive (#1120); returns the rows removed. */
+import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
+import { type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail } from '../../activity';
+/** Remove content, retaining a fence against resurrection and a cursor gap. */
 export declare function deleteActivityTail(store: InMemoryActivityStore, tenant: TenantId, taskId: string): number;
 export declare class InMemoryActivityStore implements ActivityStore {
     #private;
     private readonly clock;
     constructor(clock: Clock);
     append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
-    read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
+    settle(tenant: TenantId, taskId: string, terminalAt: string): Promise<ActivityTail>;
+    read(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/agent-egress.d.ts ====
@@ -5222,7 +5228,7 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type ContentHash, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type ObjectManifestEntry, type ObjectReferenceInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
 import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
-import type { ActivityAppendInput, ActivityTail } from './activity';
+import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity';
 import type { ApprovalTimelineAppendInput, ApprovalTimelineTail } from './approval-timeline';
 import type { BlobObservation, CloudStores, DeviceRecord, AgentEgressRecord, RateLimitDecision, RateLimitUnit, RequestReceipt, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskAttempt, TaskAttemptStatus } from './stores/ports';
 export interface TenantBoundMailbox {
@@ -5250,7 +5256,8 @@ export interface TenantBoundPresence {
 }
 export interface TenantBoundActivity {
     append(input: ActivityAppendInput): Promise<ActivityTail>;
-    read(taskId: string): Promise<ActivityTail | undefined>;
+    read(taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
+    settle(taskId: string, terminalAt: string): Promise<ActivityTail>;
 }
 export interface TenantBoundApprovalTimeline {
     append(input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;

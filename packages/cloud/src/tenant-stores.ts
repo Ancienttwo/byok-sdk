@@ -55,7 +55,7 @@ import {
 } from '@byok-sdk/core';
 import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
-import type { ActivityAppendInput, ActivityTail } from './activity';
+import type { ActivityAppendInput, ActivityTail, ActivityReadOptions } from './activity';
 import type {
   ApprovalTimelineAppendInput,
   ApprovalTimelineTail,
@@ -103,7 +103,8 @@ export interface TenantBoundPresence {
 
 export interface TenantBoundActivity {
   append(input: ActivityAppendInput): Promise<ActivityTail>;
-  read(taskId: string): Promise<ActivityTail | undefined>;
+  read(taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
+  settle(taskId: string, terminalAt: string): Promise<ActivityTail>;
 }
 
 export interface TenantBoundApprovalTimeline {
@@ -291,7 +292,8 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     },
     activity: {
       append: (input) => cloud.activity.append(tenant, input),
-      read: (taskId) => cloud.activity.read(tenant, taskId),
+      read: (taskId, options) => cloud.activity.read(tenant, taskId, options),
+      settle: (taskId, terminalAt) => cloud.activity.settle(tenant, taskId, terminalAt),
     },
     approvals: {
       append: (input) => cloud.approvals.append(tenant, input),

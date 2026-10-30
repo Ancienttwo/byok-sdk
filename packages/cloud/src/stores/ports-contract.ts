@@ -17,7 +17,7 @@
 import type { CloudStoreName } from './ports';
 
 export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string[]>> = {
-  activity: ['append', 'read', 'collectExpired'],
+  activity: ['append', 'read', 'settle', 'collectExpired'],
   agentMessageDraft: ['apply', 'read', 'delete', 'sweepExpired'],
   approvals: ['append', 'read', 'resolvePending', 'collectExpired'],
   devices: ['register', 'get', 'revoke', 'list', 'readiness', 'recordCapabilities', 'resolveByDeviceId'],

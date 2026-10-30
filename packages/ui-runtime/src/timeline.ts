@@ -1,5 +1,6 @@
 import {
   TimelineEventSchema,
+  projectTimelineEvents,
   type ActivityTail,
   type TimelineEvent,
 } from '@byok-sdk/cloud';
@@ -34,7 +35,7 @@ interface ToolAccumulator {
 const DEFAULT_METADATA: TimelineMetadata = Object.freeze({ dropped: 0 });
 
 function compareEvents(left: TimelineEvent, right: TimelineEvent): number {
-  return left.batchSeq - right.batchSeq || left.eventIndex - right.eventIndex;
+  return left.revision - right.revision || left.offset - right.offset;
 }
 
 function fail(code: ConstructorParameters<typeof TimelineFoldError>[0], message: string, cause?: unknown): never {
@@ -60,12 +61,19 @@ function validateMetadata(metadata: TimelineMetadata): TimelineMetadata {
     fail('timeline_input_invalid', 'Timeline metadata expiresAt must be a canonical ISO timestamp when present.');
   }
   if (metadata.cursor !== undefined && (
-    !Number.isSafeInteger(metadata.cursor.batchSeq) || metadata.cursor.batchSeq < 0
-    || !Number.isSafeInteger(metadata.cursor.eventIndex) || metadata.cursor.eventIndex < 0
+    metadata.cursor.version !== 1 || !Number.isSafeInteger(metadata.cursor.revision) || metadata.cursor.revision < 0
+    || typeof metadata.cursor.generation !== 'string' || typeof metadata.cursor.tenantId !== 'string' || !validTaskId(metadata.cursor.taskId)
   )) {
     fail('timeline_input_invalid', 'Timeline metadata cursor must contain non-negative integer coordinates.');
   }
-  return Object.freeze({ ...metadata, cursor: metadata.cursor && Object.freeze({ ...metadata.cursor }) });
+  if (metadata.log !== undefined && (!Number.isSafeInteger(metadata.log.floor) || metadata.log.floor < 0
+    || !Number.isSafeInteger(metadata.log.after) || metadata.log.after < 0
+    || !Array.isArray(metadata.log.revisions) || metadata.log.revisions.some(revision => !Number.isSafeInteger(revision) || revision <= Math.max(metadata.log!.floor, metadata.log!.after)))) {
+    fail('timeline_input_invalid', 'Timeline log continuity requires non-negative floor/after bounds and retained revisions above them.');
+  }
+  return Object.freeze({ ...metadata, cursor: metadata.cursor && Object.freeze({ ...metadata.cursor }),
+    ...(metadata.log === undefined ? {} : { log: Object.freeze({ floor: metadata.log.floor, after: metadata.log.after, revisions: Object.freeze([...metadata.log.revisions].sort((a, b) => a - b)) }) }),
+  });
 }
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
@@ -132,7 +140,7 @@ function eventKey(event: TimelineEvent): TimelineEventKey {
 }
 
 function orderKey(event: TimelineEvent): TimelineOrderKey {
-  return Object.freeze({ taskId: event.taskId, batchSeq: event.batchSeq, eventIndex: event.eventIndex });
+  return Object.freeze({ taskId: event.taskId, revision: event.revision, offset: event.offset });
 }
 
 function sameIdentity(left: TimelineEvent, right: TimelineEvent): boolean {
@@ -140,47 +148,50 @@ function sameIdentity(left: TimelineEvent, right: TimelineEvent): boolean {
 }
 
 function sameOrder(left: TimelineEvent, right: TimelineEvent): boolean {
-  return left.batchSeq === right.batchSeq && left.eventIndex === right.eventIndex;
+  return left.revision === right.revision && left.offset === right.offset;
 }
 
 function contiguous(left: TimelineEvent, right: TimelineEvent): boolean {
-  return (left.batchSeq === right.batchSeq && right.eventIndex === left.eventIndex + 1)
-    || (right.batchSeq === left.batchSeq + 1 && right.eventIndex === 0);
+  return (left.revision === right.revision && right.offset === left.offset + 1)
+    || (right.revision === left.revision + 1 && right.offset === 0);
 }
 
-function gapsFor(events: readonly TimelineEvent[]): readonly TimelineGap[] {
+function gapsFor(taskId: string, events: readonly TimelineEvent[], log: TimelineMetadata['log']): readonly TimelineGap[] {
   const gaps: TimelineGap[] = [];
   for (let index = 1; index < events.length; index += 1) {
     const previous = events[index - 1]!;
     const current = events[index]!;
-    if (current.batchSeq === previous.batchSeq && current.eventIndex > previous.eventIndex + 1) {
+    if (current.revision === previous.revision && current.offset > previous.offset + 1) {
       gaps.push(Object.freeze({
         kind: 'event',
         after: orderKey(previous),
         before: orderKey(current),
-        missing: current.eventIndex - previous.eventIndex - 1,
+        missing: current.offset - previous.offset - 1,
       }));
       continue;
     }
-    if (current.batchSeq > previous.batchSeq) {
-      if (current.batchSeq > previous.batchSeq + 1) {
-        gaps.push(Object.freeze({
-          kind: 'batch',
-          after: orderKey(previous),
-          before: orderKey(current),
-          missing: current.batchSeq - previous.batchSeq - 1,
-        }));
-      }
-      if (current.eventIndex > 0) {
+    if (current.revision > previous.revision) {
+      if (current.offset > 0) {
         gaps.push(Object.freeze({
           kind: 'event',
           after: orderKey(previous),
           before: orderKey(current),
-          missing: current.eventIndex,
+          missing: current.offset,
         }));
       }
     }
   }
+  if (log !== undefined) {
+    let previous = Math.max(log.floor, log.after);
+    for (const revision of log.revisions) {
+      if (revision > previous + 1) gaps.push(Object.freeze({
+        kind: 'batch', after: Object.freeze({ taskId, revision: previous, offset: 0 }),
+        before: Object.freeze({ taskId, revision, offset: 0 }), missing: revision - previous - 1,
+      }));
+      previous = revision;
+    }
+  }
+  gaps.sort((a, b) => a.before.revision - b.before.revision || a.before.offset - b.before.offset);
   return Object.freeze(gaps);
 }
 
@@ -362,7 +373,7 @@ export function projectTimeline(state: TimelineState): TaskTimelineSnapshot {
   return Object.freeze({
     taskId: state.taskId,
     items: projectItems(state.events),
-    gaps: gapsFor(state.events),
+    gaps: gapsFor(state.taskId, state.events, state.metadata.log),
     dropped: state.metadata.dropped,
     ...(state.metadata.capacity !== undefined ? { capacity: state.metadata.capacity } : {}),
     ...(state.metadata.expiresAt !== undefined ? { expiresAt: state.metadata.expiresAt } : {}),
@@ -375,11 +386,16 @@ export function replayTimeline(tail: ActivityTail): TaskTimelineSnapshot {
     fail('timeline_input_invalid', 'Activity tail must contain a valid taskId and entries array.');
   }
   let state = createTimelineState(tail.taskId, {
+    log: { floor: tail.floor, after: tail.after, revisions: tail.entries.map(entry => entry.revision) },
     dropped: tail.dropped,
     capacity: tail.capacity,
-    expiresAt: tail.expiresAt,
+    ...(tail.expiresAt === undefined ? {} : { expiresAt: tail.expiresAt }),
     ...(tail.cursor !== undefined ? { cursor: tail.cursor } : {}),
   });
-  for (const event of tail.entries) state = foldTimelineEvent(state, event);
+  for (const entry of tail.entries) {
+    if (entry.kind === 'sealed-progress') fail('timeline_input_invalid', 'A member must open sealed progress before timeline replay.');
+    if (entry.kind === 'artifact') continue;
+    for (const event of projectTimelineEvents(entry)) state = foldTimelineEvent(state, event);
+  }
   return projectTimeline(state);
 }

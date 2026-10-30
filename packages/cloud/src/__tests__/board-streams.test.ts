@@ -170,17 +170,13 @@ describe('board coordination surface', () => {
       'in_review',
     );
     const activity = await harness.cloud.readActivity(TENANT_A, 'projected');
-    expect(activity?.entries).toHaveLength(2);
-    expect(activity?.dropped).toBe(1);
-    expect(activity?.entries.map((entry) => ('event' in entry ? entry.event.type : 'sealed'))).toEqual([
-      'progress',
-      'turn_end',
-    ]);
-    expect(activity?.entries.map((entry) => [entry.sourceEnvelopeId, entry.batchSeq, entry.eventIndex])).toEqual([
-      [progress.id, 1, 1],
-      [progress.id, 1, 2],
-    ]);
-    expect(activity?.cursor).toEqual({ batchSeq: 1, eventIndex: 2 });
+    expect(activity?.entries).toHaveLength(1);
+    expect(activity?.dropped).toBe(0);
+    expect(activity?.entries[0]).toMatchObject({
+      kind: 'progress', sourceEnvelopeId: progress.id, batchSeq: 1, revision: 1,
+      events: [{ type: 'progress', text: 'one' }, { type: 'progress', text: 'two' }, { type: 'turn_end' }],
+    });
+    expect(activity?.cursor).toMatchObject({ version: 1, revision: 1 });
 
     const append = vi.spyOn(harness.stores.activity, 'append');
     for (const taskId of ['projected', 'unknown-task']) {

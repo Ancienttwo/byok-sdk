@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ActivityStore } from '@byok-sdk/cloud';
+import { createByokCloud, createInMemoryByokCloud, AGENT_HOME_CONTRACT_CAPABILITY, createHmacTokenSigner, capabilityDeclarationForPorts, type ActivityStore, type ActivityAppendInput } from '@byok-sdk/cloud';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { TENANT_A, sealedOutputMember } from './fixtures';
 
 export interface ActivityCompositionHandle {
@@ -7,255 +8,161 @@ export interface ActivityCompositionHandle {
   advanceTime(ms: number): void | Promise<void>;
   dispose?(): void | Promise<void>;
 }
-
-export interface ActivityCompositionFactory {
-  create(): ActivityCompositionHandle | Promise<ActivityCompositionHandle>;
-}
-
-async function withActivityComposition(
-  factory: ActivityCompositionFactory,
-  body: (handle: ActivityCompositionHandle) => Promise<void>,
-): Promise<void> {
+export interface ActivityCompositionFactory { create(): ActivityCompositionHandle | Promise<ActivityCompositionHandle> }
+async function withActivityComposition(factory: ActivityCompositionFactory, body: (handle: ActivityCompositionHandle) => Promise<void>): Promise<void> {
   const handle = await factory.create();
-  try {
-    await body(handle);
-  } finally {
-    await handle.dispose?.();
-  }
+  try { await body(handle); } finally { await handle.dispose?.(); }
+}
+function batch(id: number, extra: Partial<ActivityAppendInput> = {}): ActivityAppendInput {
+  return { taskId: 'task', sourceEnvelopeId: `source-${id}`, batchSeq: id, events: [{ type: 'progress', text: `${id}` }], dropped: 0, ttlMs: 600_000, ...extra } as ActivityAppendInput;
 }
 
-function progress(text: string) {
-  return { type: 'progress' as const, text };
-}
-
-export function runActivityConformance(
-  name: string,
-  factory: ActivityCompositionFactory,
-): void {
-  describe(`activity store conformance [${name}]`, () => {
-    it('stores typed events in stable batch order with source identity and cursor', async () => {
+export function runActivityConformance(name: string, factory: ActivityCompositionFactory): void {
+  describe(`activity log conformance [${name}]`, () => {
+    it.each([null, 7, {}])('malformed cursor %j is invalid rather than a history gap', async after => {
       await withActivityComposition(factory, async ({ store }) => {
-        await store.append(TENANT_A, {
-          taskId: 'task-1',
-          sourceEnvelopeId: 'envelope-2',
-          batchSeq: 2,
-          events: [progress('two-a'), progress('two-b')],
-          dropped: 0,
-          ttlMs: 300_000,
-          capacity: 4,
-        });
-        const tail = await store.append(TENANT_A, {
-          taskId: 'task-1',
-          sourceEnvelopeId: 'envelope-1',
-          batchSeq: 1,
-          events: [progress('one')],
-          dropped: 0,
-          ttlMs: 300_000,
-          capacity: 4,
-        });
-
-        expect(tail.entries.map((entry) => [entry.batchSeq, entry.eventIndex, 'event' in entry ? entry.event : entry.sealed])).toEqual([
-          [1, 0, progress('one')],
-          [2, 0, progress('two-a')],
-          [2, 1, progress('two-b')],
-        ]);
-        expect(tail.entries.map((entry) => entry.sourceEnvelopeId)).toEqual([
-          'envelope-1',
-          'envelope-2',
-          'envelope-2',
-        ]);
-        expect(tail.cursor).toEqual({ batchSeq: 2, eventIndex: 1 });
-        expect(tail.entries.every((entry) => entry.taskId === 'task-1')).toBe(true);
-        expect(tail.entries.every((entry) => entry.receivedAt.length > 0)).toBe(true);
+        await store.append(TENANT_A, batch(1));
+        await expect(store.read(TENANT_A, 'task', { after: after as never })).rejects.toMatchObject({ code: 'activity_cursor_invalid' });
       });
     });
-
-    it('bounds the tail and adds producer loss to capacity eviction', async () => {
+    it('an admitted empty progress envelope retains its log row and identity', async () => {
       await withActivityComposition(factory, async ({ store }) => {
-        const tail = await store.append(TENANT_A, {
-          taskId: 'task-dropped',
-          sourceEnvelopeId: 'envelope-drop',
-          batchSeq: 7,
-          events: [progress('one'), progress('two'), progress('three')],
-          dropped: 4,
-          ttlMs: 300_000,
-          capacity: 2,
+        // Exercise the same authenticated HTTP admission with each activity adapter.
+        const tokenSigner = createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(32)), { now: () => new Date() });
+        const base = createInMemoryByokCloud({ tokenSigner });
+        const cloud = createByokCloud({
+          core: base.core, cloud: { ...base.stores, activity: store }, clock: base.clock,
+          crypto: base.crypto, tokenSigner, mailboxWake: base.mailboxWake,
+          proofReceiptRetention: base.proofReceiptRetention,
+          capabilities: capabilityDeclarationForPorts({ blobContentProxy: base.blobContentProxy }),
+          blobContentProxy: base.blobContentProxy,
         });
-        expect(tail.entries.map((entry) => ('event' in entry ? entry.event : entry.sealed))).toEqual([progress('two'), progress('three')]);
-        expect(tail.dropped).toBe(5);
-        expect(tail.capacity).toBe(2);
-        expect(tail.cursor).toEqual({ batchSeq: 7, eventIndex: 2 });
-      });
-    });
-
-    it('retains an unknown event at its original event index', async () => {
-      await withActivityComposition(factory, async ({ store }) => {
-        const tail = await store.append(TENANT_A, {
-          taskId: 'task-unknown',
-          sourceEnvelopeId: 'envelope-unknown',
-          batchSeq: 3,
-          events: [progress('before'), { type: 'future_observation', value: 7 }, { type: 'turn_end' }],
-          dropped: 0,
-          ttlMs: 300_000,
-        });
-        expect(tail.entries[1]).toMatchObject({
-          eventIndex: 1,
-          event: { type: 'future_observation', value: 7 },
-        });
-      });
-    });
-
-    it('fails closed when two source envelopes claim the same order key', async () => {
-      await withActivityComposition(factory, async ({ store }) => {
-        await store.append(TENANT_A, {
-          taskId: 'task-order-collision',
-          sourceEnvelopeId: 'envelope-a',
-          batchSeq: 4,
-          events: [progress('first')],
-          dropped: 0,
-          ttlMs: 300_000,
-        });
-        await expect(
-          store.append(TENANT_A, {
-            taskId: 'task-order-collision',
-            sourceEnvelopeId: 'envelope-b',
-            batchSeq: 4,
-            events: [progress('second')],
-            dropped: 0,
-            ttlMs: 300_000,
-          }),
-        ).rejects.toThrow();
-      });
-    });
-
-    it('returns the existing tail for an exact source batch replay and rejects a conflicting replay', async () => {
-      await withActivityComposition(factory, async ({ store }) => {
-        const input = {
-          taskId: 'task-source-replay',
-          sourceEnvelopeId: 'envelope-replay',
-          batchSeq: 9,
-          events: [progress('first'), { type: 'turn_end' }],
-          dropped: 2,
-          ttlMs: 300_000,
-          capacity: 4,
-        } as const;
-        const first = await store.append(TENANT_A, input);
-        await expect(store.append(TENANT_A, input)).resolves.toEqual(first);
-        await expect(
-          store.append(TENANT_A, { ...input, events: [progress('changed'), { type: 'turn_end' }] }),
-        ).rejects.toThrow();
-        await expect(
-          store.append(TENANT_A, { ...input, dropped: 3 }),
-        ).rejects.toThrow();
-      });
-    });
-
-    it('keeps a sealed batch as one entry, which capacity counts once (#654 12e)', async () => {
-      await withActivityComposition(factory, async ({ store }) => {
-        const sealedBatch = (batchSeq: number) => ({
-          taskId: 'task-sealed',
-          sourceEnvelopeId: `envelope-sealed-${batchSeq}`,
-          batchSeq,
-          sealed: sealedOutputMember(batchSeq),
-          dropped: 0,
-          ttlMs: 300_000,
-          capacity: 2,
-        });
-        await store.append(TENANT_A, sealedBatch(1));
-        await store.append(TENANT_A, sealedBatch(2));
-        const tail = await store.append(TENANT_A, {
-          taskId: 'task-sealed',
-          sourceEnvelopeId: 'envelope-plain-3',
-          batchSeq: 3,
-          events: [progress('three')],
-          dropped: 0,
-          ttlMs: 300_000,
-          capacity: 2,
-        });
-        expect(tail.entries).toEqual([
-          {
-            taskId: 'task-sealed',
-            sourceEnvelopeId: 'envelope-sealed-2',
-            batchSeq: 2,
-            eventIndex: 0,
-            sourceDropped: 0,
-            receivedAt: expect.any(String),
-            sealed: sealedOutputMember(2),
-          },
-          {
-            taskId: 'task-sealed',
-            sourceEnvelopeId: 'envelope-plain-3',
-            batchSeq: 3,
-            eventIndex: 0,
-            sourceDropped: 0,
-            receivedAt: expect.any(String),
-            event: progress('three'),
-          },
-        ]);
-        expect(tail.dropped).toBe(1);
-        expect(tail.cursor).toEqual({ batchSeq: 3, eventIndex: 0 });
-        expect(await store.read(TENANT_A, 'task-sealed')).toEqual(tail);
-      });
-    });
-
-    it('returns the existing tail for a resealed replay and rejects other content under the same source', async () => {
-      await withActivityComposition(factory, async ({ store }) => {
-        const input = {
-          taskId: 'task-sealed-replay',
-          sourceEnvelopeId: 'envelope-sealed-replay',
-          batchSeq: 5,
-          sealed: sealedOutputMember(1),
-          dropped: 0,
-          ttlMs: 300_000,
+        const json = async (path: string, init: RequestInit) => {
+          const response = await cloud.fetch(new Request(`http://cloud.test${path}`, init));
+          return { status: response.status, body: await response.json() };
         };
-        const first = await store.append(TENANT_A, input);
-        await expect(store.append(TENANT_A, { ...input, sealed: sealedOutputMember(2) })).resolves.toEqual(first);
-        await expect(store.append(TENANT_A, { ...input, sealed: sealedOutputMember(1, 'c') })).rejects.toThrow();
-        await expect(store.append(TENANT_A, { ...input, dropped: 1 })).rejects.toThrow();
-        const { sealed: _sealed, ...source } = input;
-        await expect(store.append(TENANT_A, { ...source, events: [progress('plain')] })).rejects.toThrow();
-        expect((await store.read(TENANT_A, 'task-sealed-replay'))?.entries).toEqual(first.entries);
+        const harness = { cloud, json, async pairDevice(tenant: typeof TENANT_A) {
+          await base.core.quota.writeEntitlement(tenant, {
+            version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
+            maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test',
+          });
+          const keys = await globalThis.crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+          if (!('publicKey' in keys)) throw new Error('Expected an Ed25519 key pair');
+          const publicKey = await globalThis.crypto.subtle.exportKey('jwk', keys.publicKey);
+          const pairing = await cloud.createPairingCode(tenant, { productId: 'test-product' });
+          const response = await json('/byok/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+            pairingCode: pairing.code, deviceName: 'test-device', devicePublicKey: publicKey.x,
+          }) });
+          expect(response.status).toBe(200);
+          const body = response.body as { deviceId: string; accessToken: string };
+          return { deviceId: body.deviceId, authorization: { authorization: `Bearer ${body.accessToken}` } };
+        } };
+        const TEST_AGENT_REF = { agentId: 'test-agent', profileRevision: 'rev-1' };
+        const offerPayload = (instruction: string) => ({ instruction, agentRef: TEST_AGENT_REF, session: { mode: 'resume' as const, sessionRef: 'test-session' } });
+        const device = await harness.pairDevice(TENANT_A);
+        await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
+        const taskId = 'empty-progress';
+        await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: offerPayload('work') });
+        const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+        const progress = createEnvelope('task.progress', { seq: 1, events: [] }, { taskId });
+        const result = await harness.json('/byok/messages', { method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [claim, progress] }) });
+        expect(result).toMatchObject({ status: 200, body: { accepted: 2 } });
+        const tail = await harness.cloud.readActivity(TENANT_A, taskId);
+        expect(tail).toMatchObject({ entries: [{ sourceEnvelopeId: progress.id, kind: 'progress', events: [] }] });
+        await harness.json('/byok/messages', { method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [progress] }) });
+        expect(await harness.cloud.readActivity(TENANT_A, taskId)).toEqual(tail);
       });
     });
 
-    it('treats an expired tail as absent', async () => {
-      await withActivityComposition(factory, async (handle) => {
-        await handle.store.append(TENANT_A, {
-          taskId: 'task-expiry',
-          sourceEnvelopeId: 'envelope-expiry',
-          batchSeq: 1,
-          events: [{ type: 'turn_end' }],
-          dropped: 0,
-          ttlMs: 300_000,
-        });
-        expect(await handle.store.read(TENANT_A, 'task-expiry')).toBeDefined();
-        await handle.advanceTime(300_000);
-        expect(await handle.store.read(TENANT_A, 'task-expiry')).toBeUndefined();
-      });
-    });
-
-    it('fails closed on malformed known events and missing stable identity', async () => {
+    it('orders envelopes by revision, preserves batch order metadata and resumes after the cursor', async () => {
       await withActivityComposition(factory, async ({ store }) => {
-        await expect(
-          store.append(TENANT_A, {
-            taskId: 'task-invalid',
-            sourceEnvelopeId: ' ',
-            batchSeq: 1,
-            events: [{ type: 'turn_end' }],
-            dropped: 0,
-            ttlMs: 300_000,
-          }),
-        ).rejects.toThrow();
-        await expect(
-          store.append(TENANT_A, {
-            taskId: 'task-invalid',
-            sourceEnvelopeId: 'envelope-invalid',
-            batchSeq: 1,
-            events: [{ type: 'progress' } as never],
-            dropped: 0,
-            ttlMs: 300_000,
-          }),
-        ).rejects.toThrow();
+        const first = await store.append(TENANT_A, batch(2));
+        const second = await store.append(TENANT_A, batch(1));
+        expect(second.entries.map(entry => [entry.revision, entry.sourceEnvelopeId])).toEqual([[1, 'source-2'], [2, 'source-1']]);
+        expect(second.cursor).toMatchObject({ version: 1, revision: 2, taskId: 'task', tenantId: TENANT_A });
+        expect(second.cursor.generation).toBe(first.cursor.generation);
+        const page = (await store.read(TENANT_A, 'task', { after: first.cursor }))!;
+        expect(page.entries).toEqual([second.entries[1]]);
+        expect(page.after).toBe(first.cursor.revision);
+        expect(page.floor).toBe(second.floor);
+        expect(second.after).toBe(0);
+        expect((await store.read(TENANT_A, 'task', { after: second.cursor }))?.entries).toEqual([]);
+      });
+    });
+    it('retains complete batches and keeps producer loss separate from entry eviction', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        const first = await store.append(TENANT_A, batch(1, { capacity: 1, dropped: 4, events: [{ type: 'progress', text: 'a' }, { type: 'future_observation', value: 7 }, { type: 'turn_end' }] }));
+        expect(first.entries).toHaveLength(1);
+        expect(first.entries[0]).toMatchObject({ kind: 'progress', events: [{ type: 'progress', text: 'a' }, { type: 'future_observation', value: 7 }, { type: 'turn_end' }] });
+        const second = await store.append(TENANT_A, batch(2, { capacity: 1 }));
+        expect(second).toMatchObject({ floor: 1, dropped: 1, sourceDropped: 4 });
+        expect(second.entries).toHaveLength(1);
+      });
+    });
+    it('does not lose concurrently admitted batches', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        await Promise.all(Array.from({ length: 100 }, (_, i) => store.append(TENANT_A, batch(i))));
+        const tail = (await store.read(TENANT_A, 'task'))!;
+        expect(tail.entries.map(entry => entry.revision)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+        expect(new Set(tail.entries.map(entry => entry.sourceEnvelopeId)).size).toBe(100);
+      });
+    });
+    it('preserves idempotency and rejects changed content after payload eviction', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        const first = batch(1, { capacity: 1 });
+        await store.append(TENANT_A, first);
+        const tail = await store.append(TENANT_A, batch(2, { capacity: 1 }));
+        expect(await store.append(TENANT_A, first)).toEqual(tail);
+        await expect(store.append(TENANT_A, batch(1, { capacity: 1, dropped: 1 }))).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        expect(await store.read(TENANT_A, 'task')).toEqual(tail);
+      });
+    });
+    it('accepts a resealed retry after eviction but refuses a changed comparison projection', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        const first = { taskId: 'task', sourceEnvelopeId: 'sealed', batchSeq: 1, sealed: sealedOutputMember(1), dropped: 0, capacity: 1, ttlMs: 600_000 };
+        const original = await store.append(TENANT_A, first);
+        expect(original.entries[0]).toMatchObject({ kind: 'sealed-progress', sealed: first.sealed });
+        const tail = await store.append(TENANT_A, batch(2, { capacity: 1 }));
+        expect(await store.append(TENANT_A, { ...first, sealed: sealedOutputMember(2) })).toEqual(tail);
+        await expect(store.append(TENANT_A, { ...first, sealed: sealedOutputMember(1, 'c') })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        expect(await store.read(TENANT_A, 'task')).toEqual(tail);
+      });
+    });
+    it('never inactivity-expires and freezes the first terminal deadline', async () => {
+      await withActivityComposition(factory, async handle => {
+        const first = await handle.store.append(TENANT_A, batch(1));
+        await handle.advanceTime(700_000);
+        expect(await handle.store.read(TENANT_A, 'task')).toEqual(first);
+        // Anchor the terminal at receipt time for deterministic clocks in every adapter.
+        const terminalAt = new Date(Date.parse(first.entries[0]!.receivedAt) + 700_000).toISOString();
+        const terminal = await handle.store.settle(TENANT_A, 'task', terminalAt);
+        expect(terminal.expiresAt).toBe(new Date(Date.parse(terminalAt) + 600_000).toISOString());
+        expect(await handle.store.settle(TENANT_A, 'task', new Date(Date.parse(terminalAt) + 1).toISOString())).toEqual(terminal);
+        expect(await handle.store.append(TENANT_A, batch(1))).toEqual(terminal);
+        await expect(handle.store.append(TENANT_A, batch(2))).rejects.toMatchObject({ code: 'activity_task_settled' });
+        await handle.advanceTime(600_000);
+        expect(await handle.store.read(TENANT_A, 'task')).toBeUndefined();
+        await expect(handle.store.read(TENANT_A, 'task', { after: first.cursor })).rejects.toMatchObject({ code: 'activity_history_gap' });
+        await expect(handle.store.append(TENANT_A, batch(2))).rejects.toMatchObject({ code: 'activity_task_settled' });
+      });
+    });
+    it('reports an explicit gap below the floor and rejects foreign/legacy cursors', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        const first = await store.append(TENANT_A, batch(1, { capacity: 1 }));
+        await store.append(TENANT_A, batch(2, { capacity: 1 }));
+        await store.append(TENANT_A, batch(3, { capacity: 1 }));
+        await expect(store.read(TENANT_A, 'task', { after: first.cursor })).rejects.toMatchObject({ code: 'activity_history_gap' });
+        await expect(store.read(TENANT_A, 'foreign', { after: first.cursor })).rejects.toMatchObject({ code: 'activity_cursor_invalid' });
+        await expect(store.read(TENANT_A, 'task', { after: { batchSeq: 1, eventIndex: 0 } as never })).rejects.toMatchObject({ code: 'activity_history_gap' });
+      });
+    });
+    it('validates malformed payloads and fixed bounds before changing history', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        const first = await store.append(TENANT_A, batch(1));
+        await expect(store.append(TENANT_A, batch(2, { events: [{ type: 'progress' } as never] }))).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        await expect(store.append(TENANT_A, batch(2, { sourceEnvelopeId: ' ' }))).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        await expect(store.append(TENANT_A, batch(2, { capacity: 1001 }))).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        expect(await store.read(TENANT_A, 'task')).toEqual(first);
       });
     });
   });

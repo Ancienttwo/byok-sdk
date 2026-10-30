@@ -1,3 +1,4 @@
+import { InMemoryActivityStore, tenantId } from '@byok-sdk/cloud';
 import type { ActivityTail, TimelineEvent } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
 import {
@@ -33,18 +34,23 @@ function timelineEvent(
   event: TimelineEvent['event'],
   sourceEnvelopeId = `env-${batchSeq}`,
 ): TimelineEvent {
-  return { taskId: 'task-1', sourceEnvelopeId, batchSeq, eventIndex, receivedAt, event };
+  return { taskId: 'task-1', sourceEnvelopeId, batchSeq, eventIndex, revision: batchSeq + 1, offset: eventIndex, receivedAt, event };
 }
 
-function tail(entries: readonly TimelineEvent[]): ActivityTail {
+function tail(events: readonly TimelineEvent[]): ActivityTail {
+  const groups = new Map<string, TimelineEvent[]>();
+  for (const event of events) groups.set(event.sourceEnvelopeId, [...(groups.get(event.sourceEnvelopeId) ?? []), event]);
+  const entries = [...groups.values()].map((group, index) => ({
+    kind: 'progress' as const, taskId: 'task-1', sourceEnvelopeId: group[0]!.sourceEnvelopeId,
+    batchSeq: group[0]!.batchSeq, sourceDropped: group[0]!.sourceDropped ?? 0,
+    revision: group[0]!.revision, receivedAt: group[0]!.receivedAt,
+    events: [...group].sort((a, b) => a.eventIndex - b.eventIndex).map(event => event.event),
+  }));
   return {
-    tenantId: 'tenant-1' as ActivityTail['tenantId'],
-    taskId: 'task-1',
-    entries,
-    cursor: { batchSeq: 9, eventIndex: 1 },
-    dropped: 4,
-    capacity: 50,
-    expiresAt: '2026-08-16T13:00:00.000Z',
+    tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', entries,
+    cursor: { version: 1, tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', generation: 'test', revision: entries.length },
+    floor: 0, after: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
+    dropped: 4, capacity: 50, expiresAt: '2026-08-16T13:00:00.000Z',
   };
 }
 
@@ -61,7 +67,7 @@ function expectCode(run: () => unknown, code: TimelineFoldError['code']): void {
 
 describe('Live Activity Timeline fold', () => {
   it('refuses a sealed activity batch, which a reader must open before replay (#654 12e)', () => {
-    const sealedBatch = { taskId: 'task-1', sourceEnvelopeId: 'env-sealed', batchSeq: 1, eventIndex: 0 as const, receivedAt, sealed: SEALED_MEMBER };
+    const sealedBatch = { kind: 'sealed-progress' as const, revision: 1, sourceDropped: 0, taskId: 'task-1', sourceEnvelopeId: 'env-sealed', batchSeq: 1, eventIndex: 0 as const, receivedAt, sealed: SEALED_MEMBER };
     expectCode(() => replayTimeline({ ...tail([]), entries: [sealedBatch] }), 'timeline_input_invalid');
   });
 
@@ -85,7 +91,7 @@ describe('Live Activity Timeline fold', () => {
       dropped: 4,
       capacity: 50,
       expiresAt: '2026-08-16T13:00:00.000Z',
-      cursor: { batchSeq: 9, eventIndex: 1 },
+      cursor: tail(events).cursor,
     });
     expect(projectTimeline(state)).toEqual(replayed);
     expect(replayed.items[0]).toMatchObject({
@@ -152,11 +158,15 @@ describe('Live Activity Timeline fold', () => {
   });
 
   it('projects gaps and store-owned loss, capacity, cursor and expiry separately', () => {
-    const snapshot = replayTimeline(tail([
+    const events = [
       timelineEvent(4, 0, { type: 'progress', text: 'first observed' }),
       timelineEvent(4, 2, { type: 'progress', text: 'event gap' }),
       timelineEvent(7, 3, { type: 'turn_end' }),
-    ]));
+    ];
+    const source = { ...tail(events), floor: 4 };
+    let state = createTimelineState('task-1', { ...source, log: { floor: source.floor, after: source.after, revisions: source.entries.map(entry => entry.revision) } });
+    for (const event of events) state = foldTimelineEvent(state, event);
+    const snapshot = projectTimeline(state);
     expect(snapshot).toMatchObject({ dropped: 4, capacity: 50, expiresAt: '2026-08-16T13:00:00.000Z' });
     expect(snapshot.gaps.map(({ kind, missing }) => ({ kind, missing }))).toEqual([
       { kind: 'event', missing: 1 },
@@ -249,4 +259,43 @@ describe('Live Activity Timeline fold', () => {
     expect(Object.hasOwn(item, 'inputSpill')).toBe(false);
     expect(Object.hasOwn(item, 'outputSpill')).toBe(false);
   });
+});
+
+it('reviewer: replay accepts distinct log revisions with the same producer coordinates', async () => {
+  const store = new InMemoryActivityStore({ now: () => new Date('2026-10-30T00:00:00.000Z') });
+  const tenant = tenantId('review');
+  for (const sourceEnvelopeId of ['first', 'second']) {
+    await store.append(tenant, { taskId: 'task', sourceEnvelopeId, batchSeq: 1, events: [{ type: 'progress', text: sourceEnvelopeId }], dropped: 0, ttlMs: 600_000 });
+  }
+  const tail = (await store.read(tenant, 'task'))!;
+  expect(tail.entries.map(entry => entry.revision)).toEqual([1, 2]);
+  expect(() => replayTimeline(tail)).not.toThrow();
+});
+
+it('reviewer: retained empty row does not create a missing-history gap', async () => {
+  const store = new InMemoryActivityStore({ now: () => new Date('2026-10-30T00:00:00.000Z') });
+  const tenant = tenantId('review');
+  for (const [index, events] of [[1, [{type:'progress',text:'before'}]], [2, []], [3, [{type:'progress',text:'after'}]]] as const) {
+    await store.append(tenant, {taskId:'task',sourceEnvelopeId:`source-${index}`,batchSeq:index,events:[...events],dropped:0,ttlMs:600_000});
+  }
+  const tail = (await store.read(tenant, 'task'))!;
+  expect(tail.entries.map(entry => entry.revision)).toEqual([1, 2, 3]);
+  expect(tail.floor).toBe(0);
+  expect(tail.dropped).toBe(0);
+  expect(replayTimeline(tail).gaps).toEqual([]);
+});
+
+it('reviewer: an after-revision page does not invent missing prefix history', async () => {
+  const store = new InMemoryActivityStore({ now: () => new Date('2026-10-30T00:00:00.000Z') });
+  const tenant = tenantId('review');
+  const row = (n: number) => ({
+    taskId: 'task', sourceEnvelopeId: `source-${n}`, batchSeq: n,
+    events: [{ type: 'progress', text: String(n) }], dropped: 0, ttlMs: 600_000,
+  });
+  const first = await store.append(tenant, row(1));
+  await store.append(tenant, row(2));
+  const page = (await store.read(tenant, 'task', { after: first.cursor }))!;
+  expect(page.floor).toBe(0);
+  expect(page.entries.map(entry => entry.revision)).toEqual([2]);
+  expect(replayTimeline(page).gaps).toEqual([]);
 });

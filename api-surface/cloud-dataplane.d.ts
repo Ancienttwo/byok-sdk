@@ -358,17 +358,19 @@ export type { TenantRetentionPolicy, TenantRetentionPolicyInput } from './stores
 export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError } from './maintenance-errors';
 export type { CloudCleanupErrorCode } from './maintenance-errors';
 // ==== @byok-sdk/cloud-dataplane dist/stores/activity.d.ts ====
-import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
-import { type ActivityAppendInput, type ActivityStore, type ActivityTail } from '@byok-sdk/cloud';
-import type { Clock, TenantId } from '@byok-sdk/core';
+import { type Clock, type CollectExpiredInput, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
+import { type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail } from '@byok-sdk/cloud';
 import type { ByokPool } from '../pool';
+/** All operations serialize on the durable task head; no process-local replay state. */
 export declare class PostgresActivityStore implements ActivityStore {
+    #private;
     private readonly pool;
     private readonly clock;
     constructor(pool: ByokPool, clock: Clock);
-    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
-    read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
+    settle(tenant: TenantId, taskId: string, terminalAt: string): Promise<ActivityTail>;
+    read(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/agent-egress.d.ts ====
 import { type AgentEgressReliablePayload } from '@byok-sdk/protocol';
@@ -1707,7 +1709,7 @@ import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from './pool';
 import { type R2BlobStoreOptions, type R2ObjectMaintenance } from './stores/r2-blobs';
 /** Every tenant-owned table as of 0017, in child-before-parent deletion order. */
-export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_tail', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
+export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_log_entry', 'activity_log_head', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
 export declare const TENANT_ERASURE_ERROR_CODES: {
     readonly tenant_erasure_invalid_input: 'tenant_erasure_invalid_input';
     readonly tenant_erasure_schema_drift: 'tenant_erasure_schema_drift';

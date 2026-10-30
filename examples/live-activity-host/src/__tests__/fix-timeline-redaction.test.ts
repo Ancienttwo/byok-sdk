@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   ApprovalObservationSchema, TimelineEventSchema, tenantId,
-  type ActivityTail, type ApprovalObservation, type ApprovalTimelineTail, type TimelineEvent,
+  projectTimelineEvents, type ActivityTail, type ApprovalObservation, type ApprovalTimelineTail, type TimelineEvent,
 } from '@byok-sdk/cloud';
 import { createLiveActivityHost, redactActivityTail, redactApprovalTail, type LiveActivityHostOptions } from '../index';
 
@@ -16,7 +16,9 @@ const resolved = { type: 'approval_resolved', approvalId: 'approval-1', decision
 function activity(event: TimelineEvent['event'] = result): ActivityTail {
   return {
     tenantId: tenant, taskId: 'task-1', dropped: 0, capacity: 50, expiresAt: later,
-    entries: [{ taskId: 'task-1', sourceEnvelopeId: 'env-1', batchSeq: 1, eventIndex: 0, receivedAt: now, event }],
+    entries: [{ kind: 'progress', revision: 1, taskId: 'task-1', sourceEnvelopeId: 'env-1', batchSeq: 1, sourceDropped: 0, receivedAt: now, events: [event] }],
+    cursor: { version: 1, tenantId: tenant, taskId: 'task-1', generation: 'test', revision: 1 },
+    floor: 0, after: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
   };
 }
 function approvals(event: ApprovalObservation['event'] = resolved): ApprovalTimelineTail {
@@ -39,7 +41,7 @@ const failure = { name: 'LiveActivityHostError', code: 'redaction_invalid' };
 
 type Mutation<T> = { name: string; event: T extends TimelineEvent ? TimelineEvent['event'] : ApprovalObservation['event']; mutate: (entry: T) => void };
 const activityCases: Mutation<TimelineEvent>[] = [
-  ...Object.entries({ taskId: 'task-2', sourceEnvelopeId: 'env-2', batchSeq: 2, eventIndex: 1, receivedAt: later })
+  ...Object.entries({ taskId: 'task-2', sourceEnvelopeId: 'env-2', batchSeq: 2, eventIndex: 1, revision: 2, offset: 1, receivedAt: later })
     .map(([field, value]) => ({ name: field, event: result, mutate: (entry: TimelineEvent) => { Object.assign(entry, { [field]: value }); } })),
   { name: 'event type', event: result, mutate: (entry) => { Object.assign(entry, { event: { type: 'progress', text: 'changed' } }); } },
   ...([use, result] as const).flatMap((event) => [
@@ -69,7 +71,7 @@ describe('S20-F2: in-place redaction preserves original authority', () => {
     const before = structuredClone(raw);
     const redact = async (entry: TimelineEvent) => { mutate(entry); return entry; };
     // The mutation is schema-valid, so rejection must come from authority comparison.
-    const changed = structuredClone(raw.entries[0]!) as TimelineEvent;
+    const changed = structuredClone(projectTimelineEvents(raw.entries[0] as Extract<ActivityTail['entries'][number], { kind: 'progress' }>)[0]!);
     mutate(changed);
     expect(() => TimelineEventSchema.parse(changed)).not.toThrow();
     await expect(redactActivityTail(raw, 'user-1', redact)).rejects.toMatchObject(failure);
@@ -106,8 +108,8 @@ describe('S20-F2: in-place redaction preserves original authority', () => {
       return entry;
     };
     const redactApproval = (entry: ApprovalObservation) => { Object.assign(entry.event, { summary: '[redacted-summary]' }); return entry; };
-    expect(((await redactActivityTail(raw, 'user-1', redact)).entries[0] as TimelineEvent | undefined)?.event).toEqual({ ...use, input: '[redacted-input]' });
-    expect(((await redactActivityTail(activity(), 'user-1', redact)).entries[0] as TimelineEvent | undefined)?.event).toEqual({ ...result, output: '[redacted-output]' });
+    expect(projectTimelineEvents((await redactActivityTail(raw, 'user-1', redact)).entries[0] as Extract<ActivityTail['entries'][number], { kind: 'progress' }>)[0]?.event).toEqual({ ...use, input: '[redacted-input]' });
+    expect(projectTimelineEvents((await redactActivityTail(activity(), 'user-1', redact)).entries[0] as Extract<ActivityTail['entries'][number], { kind: 'progress' }>)[0]?.event).toEqual({ ...result, output: '[redacted-output]' });
     expect((await redactApprovalTail(rawApprovals, 'user-1', redactApproval)).entries[0]?.event).toEqual({ ...requested, summary: '[redacted-summary]' });
     const response = await createLiveActivityHost(options({ readActivity: () => raw, readApprovals: () => rawApprovals, redact, redactApproval })).fetch(request());
     expect(response.status).toBe(200);

@@ -1,33 +1,26 @@
-import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
-import { tenantKey, type TenantId } from '@byok-sdk/core';
-import { AgentEventOrUnknownSchema, SealedTaskOutputSchema, type AgentEventOrUnknown, type SealedPayload } from '@byok-sdk/protocol';
+import type { CollectExpiredInput, CollectExpiredResult, TenantId } from '@byok-sdk/core';
+import { tenantKey } from '@byok-sdk/core';
+import { AgentEventOrUnknownSchema, SealedTaskOutputSchema, TaskArtifactPayloadSchema, type AgentEventOrUnknown, type SealedPayload, type TaskArtifactPayload } from '@byok-sdk/protocol';
 import { z } from 'zod';
 import { ByokCloudError } from './errors';
-import { sameSealedProjection } from './sealed-comparison';
+import { sealedComparisonProjection } from './sealed-comparison';
 
-export const DEFAULT_ACTIVITY_CAPACITY = 50;
-
+export const DEFAULT_ACTIVITY_CAPACITY = 1000;
+export const MAX_ACTIVITY_BYTES = 4 * 1024 * 1024;
+export const ACTIVITY_TERMINAL_TTL_MS = 10 * 60_000;
 const ActivityTaskIdSchema = z.string().min(1).max(200);
-const SourceEnvelopeIdSchema = z
-  .string()
-  .max(200)
-  .regex(/\S/, 'sourceEnvelopeId must not be blank');
-
+const SourceEnvelopeIdSchema = z.string().max(200).regex(/\S/);
+const source = { taskId: ActivityTaskIdSchema, sourceEnvelopeId: SourceEnvelopeIdSchema };
 export const ActivityAppendRequestSchema = z.object({
-  taskId: ActivityTaskIdSchema,
-  sourceEnvelopeId: SourceEnvelopeIdSchema,
-  batchSeq: z.number().int().nonnegative(),
-  events: z.array(AgentEventOrUnknownSchema).min(1),
-  dropped: z.number().int().nonnegative(),
+  ...source, batchSeq: z.number().int().nonnegative(),
+  events: z.array(AgentEventOrUnknownSchema), dropped: z.number().int().nonnegative(),
 });
-
-/** One sealed `task.progress` batch: its events stay in `sealed` (#654 12e). */
-const SealedActivityAppendRequestSchema = z.object({
-  taskId: ActivityTaskIdSchema,
-  sourceEnvelopeId: SourceEnvelopeIdSchema,
-  batchSeq: z.number().int().nonnegative(),
-  sealed: SealedTaskOutputSchema,
-  dropped: z.number().int().nonnegative(),
+const SealedProgressSchema = z.object({
+  ...source, batchSeq: z.number().int().nonnegative(),
+  sealed: SealedTaskOutputSchema, dropped: z.number().int().nonnegative(),
+});
+const ArtifactAppendSchema = z.object({
+  ...source, artifact: TaskArtifactPayloadSchema.refine(value => value.sealed === undefined, 'Sealed artifacts require #1045 item 6'),
 });
 
 export const TimelineEventSchema = z.object({
@@ -35,6 +28,8 @@ export const TimelineEventSchema = z.object({
   sourceEnvelopeId: SourceEnvelopeIdSchema,
   batchSeq: z.number().int().nonnegative(),
   eventIndex: z.number().int().nonnegative(),
+  revision: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
   /**
    * The producer-declared loss attached to this source batch. It travels with
    * every retained event so a replay includes it in the canonical batch
@@ -47,177 +42,109 @@ export const TimelineEventSchema = z.object({
 
 export type TimelineEvent = Readonly<z.infer<typeof TimelineEventSchema>>;
 
-/**
- * One sealed batch in the tail (#654 12e). A sealed member covers the whole
- * batch, so the tail keeps one entry for it, and the tail capacity counts
- * batches. `eventIndex` is always 0, so the order key of a batch is the same
- * as for its first plaintext event. A member opens `sealed`.
- */
-export const SealedActivityBatchSchema = z.object({
-  taskId: ActivityTaskIdSchema,
-  sourceEnvelopeId: SourceEnvelopeIdSchema,
-  batchSeq: z.number().int().nonnegative(),
-  eventIndex: z.literal(0),
-  sourceDropped: z.number().int().nonnegative().optional(),
-  receivedAt: z.iso.datetime(),
-  sealed: SealedTaskOutputSchema,
-});
 
-export type SealedActivityBatch = Readonly<z.infer<typeof SealedActivityBatchSchema>>;
-
-/** One tail entry: a plaintext event, or a sealed batch. */
-export type ActivityTailEntry = TimelineEvent | SealedActivityBatch;
-
-const ActivityTailEntrySchema = z.union([TimelineEventSchema, SealedActivityBatchSchema]);
-
-export interface ActivityCursor {
-  readonly batchSeq: number;
-  readonly eventIndex: number;
+interface ActivityEntryFields {
+  readonly taskId: string;
+  readonly sourceEnvelopeId: string;
+  readonly revision: number;
+  readonly receivedAt: string;
 }
+export type ActivityTailEntry = ActivityEntryFields & (
+  | { readonly kind: 'progress'; readonly batchSeq: number; readonly sourceDropped: number; readonly events: readonly AgentEventOrUnknown[] }
+  | { readonly kind: 'sealed-progress'; readonly batchSeq: number; readonly sourceDropped: number; readonly sealed: SealedPayload }
+  | { readonly kind: 'artifact'; readonly artifact: Extract<TaskArtifactPayload, { sealed?: undefined }> }
+);
 
+/** One durable log position. Source batch sequence is provenance, not a resume cursor. */
+export interface ActivityCursor {
+  readonly version: 1;
+  readonly tenantId: TenantId;
+  readonly taskId: string;
+  readonly generation: string;
+  readonly revision: number;
+}
+export interface ActivityReadOptions { readonly after?: ActivityCursor }
 export interface ActivityTail {
   readonly tenantId: TenantId;
   readonly taskId: string;
   readonly entries: readonly ActivityTailEntry[];
-  readonly cursor?: ActivityCursor;
+  readonly cursor: ActivityCursor;
+  /** Last evicted revision: a cursor strictly below this floor has a gap. */
+  readonly floor: number;
+  /** Exclusive lower revision served by this page; zero for an unfiltered read. */
+  readonly after: number;
   readonly dropped: number;
+  readonly sourceDropped: number;
   readonly capacity: number;
-  readonly expiresAt: string;
+  readonly byteCapacity: number;
+  readonly retainedBytes: number;
+  readonly terminalAt?: string;
+  readonly expiresAt?: string;
 }
-
 interface ActivityAppendFields {
   readonly taskId: string;
   readonly sourceEnvelopeId: string;
-  readonly batchSeq: number;
-  readonly dropped: number;
+  /** Terminal-relative duration, never an idle timer; capped at ten minutes. */
   readonly ttlMs: number;
   readonly capacity?: number;
+  readonly byteCapacity?: number;
 }
-
-/** One batch to append: plaintext events, or one sealed member that covers the batch. */
-export type ActivityAppendInput =
-  | (ActivityAppendFields & { readonly events: readonly AgentEventOrUnknown[] })
-  | (ActivityAppendFields & { readonly sealed: SealedPayload });
-
+export type ActivityAppendInput = ActivityAppendFields & (
+  | { readonly batchSeq: number; readonly dropped: number; readonly events: readonly AgentEventOrUnknown[] }
+  | { readonly batchSeq: number; readonly dropped: number; readonly sealed: SealedPayload }
+  | { readonly artifact: Extract<TaskArtifactPayload, { sealed?: undefined }> }
+);
 export interface ActivityStore {
   collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
-  /**
-   * `sourceEnvelopeId` is the per-envelope idempotency authority. Repeating
-   * its exact canonical batch returns the existing tail; changing any batch
-   * fact under that identity is rejected rather than appended as a second
-   * observation.
-   */
   append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
-  read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
+  read(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
+  /**
+   * Freeze first terminal and final revision under the same task serialization as append.
+   * Durable adapters must enlist this boundary in the canonical lifecycle transaction (A3).
+   */
+  settle(tenant: TenantId, taskId: string, terminalAt: string): Promise<ActivityTail>;
 }
 
 export function validateActivityAppend(input: ActivityAppendInput): number {
-  if (!Number.isFinite(input.ttlMs) || input.ttlMs <= 0) {
-    throw new ByokCloudError(
-      'coordination_input_invalid',
-      `Activity ttl must be a positive number of milliseconds, received ${String(input.ttlMs)}.`,
-    );
-  }
   const capacity = input.capacity ?? DEFAULT_ACTIVITY_CAPACITY;
-  if (!Number.isSafeInteger(capacity) || capacity <= 0) {
-    throw new ByokCloudError(
-      'coordination_input_invalid',
-      `Activity capacity must be a positive integer, received ${String(capacity)}.`,
-    );
+  const byteCapacity = input.byteCapacity ?? MAX_ACTIVITY_BYTES;
+  if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > DEFAULT_ACTIVITY_CAPACITY
+    || !Number.isSafeInteger(byteCapacity) || byteCapacity < 1 || byteCapacity > MAX_ACTIVITY_BYTES
+    || !Number.isSafeInteger(input.ttlMs) || input.ttlMs < 1 || input.ttlMs > ACTIVITY_TERMINAL_TTL_MS) {
+    throw new ByokCloudError('coordination_input_invalid', 'Activity retention bounds exceed the declared limits.');
   }
-  const parsed = ('sealed' in input ? SealedActivityAppendRequestSchema : ActivityAppendRequestSchema).safeParse(input);
-  if (!parsed.success) {
-    throw new ByokCloudError(
-      'coordination_input_invalid',
-      'Activity batches require stable source identity, order, at least one valid event, and a non-negative dropped count.',
-    );
-  }
+  const parsed = ('artifact' in input ? ArtifactAppendSchema : 'sealed' in input ? SealedProgressSchema : ActivityAppendRequestSchema).safeParse(input);
+  if (!parsed.success) throw new ByokCloudError('coordination_input_invalid', 'Activity requires a valid source envelope and output payload.');
   return capacity;
 }
 
-export function projectTimelineEvents(
-  input: ActivityAppendInput,
-  receivedAt: string,
-): readonly ActivityTailEntry[] {
-  if ('sealed' in input) {
-    return [SealedActivityBatchSchema.parse({
-      taskId: input.taskId,
-      sourceEnvelopeId: input.sourceEnvelopeId,
-      batchSeq: input.batchSeq,
-      eventIndex: 0,
-      sourceDropped: input.dropped,
-      receivedAt,
-      sealed: input.sealed,
-    })];
-  }
-  return input.events.map((event, eventIndex) =>
-    TimelineEventSchema.parse({
-      taskId: input.taskId,
-      sourceEnvelopeId: input.sourceEnvelopeId,
-      batchSeq: input.batchSeq,
-      eventIndex,
-      sourceDropped: input.dropped,
-      receivedAt,
-      event,
-    }),
-  );
+/** Sorted object keys give adapters one byte representation and one source fence hash. */
+export function canonicalActivityJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => item !== null && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
+}
+export function activityEntryBytes(entry: ActivityTailEntry): number {
+  return new TextEncoder().encode(canonicalActivityJson(entry)).byteLength;
+}
+export function createActivityEntry(input: ActivityAppendInput, revision: number, receivedAt: string): ActivityTailEntry {
+  const base = { taskId: input.taskId, sourceEnvelopeId: input.sourceEnvelopeId, revision, receivedAt };
+  if ('artifact' in input) return { ...base, kind: 'artifact', artifact: structuredClone(input.artifact) };
+  const progress = { ...base, batchSeq: input.batchSeq, sourceDropped: input.dropped };
+  return 'sealed' in input ? { ...progress, kind: 'sealed-progress', sealed: structuredClone(input.sealed) }
+    : { ...progress, kind: 'progress', events: structuredClone(input.events) };
+}
+export async function activitySourceHash(input: ActivityAppendInput): Promise<string> {
+  const { capacity: _capacity, byteCapacity: _bytes, ttlMs: _ttl, ...source } = input;
+  const bytes = new TextEncoder().encode(canonicalActivityJson(sealedComparisonProjection(source)));
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/**
- * Whether one live tail already contains this source envelope's canonical
- * batch. `conflict` includes a partially retained source: its missing events
- * are not evidence that a different batch may reuse the same source identity.
- */
-export function activitySourceBatchState(
-  entries: readonly ActivityTailEntry[],
-  input: ActivityAppendInput,
-): 'absent' | 'same' | 'conflict' {
-  const existing = entries
-    .filter((entry) => entry.sourceEnvelopeId === input.sourceEnvelopeId)
-    .sort((left, right) => left.eventIndex - right.eventIndex);
-  if (existing.length === 0) return 'absent';
-  if ('sealed' in input) {
-    // A retry that sealed the same batch again is the same batch (§9.2).
-    const stored = existing[0];
-    return existing.length === 1 && stored !== undefined && 'sealed' in stored
-      && stored.taskId === input.taskId && stored.batchSeq === input.batchSeq && stored.sourceDropped === input.dropped
-      && sameSealedProjection({ sealed: stored.sealed }, { sealed: input.sealed })
-      ? 'same'
-      : 'conflict';
-  }
-  if (existing.length !== input.events.length) return 'conflict';
-  for (const [eventIndex, event] of input.events.entries()) {
-    const stored = existing[eventIndex];
-    if (
-      stored === undefined ||
-      !('event' in stored) ||
-      stored.taskId !== input.taskId ||
-      stored.batchSeq !== input.batchSeq ||
-      stored.eventIndex !== eventIndex ||
-      stored.sourceDropped !== input.dropped ||
-      JSON.stringify(stored.event) !== JSON.stringify(event)
-    ) {
-      return 'conflict';
-    }
-  }
-  return 'same';
+/** Deterministic progress view; artifacts have their own renderer and sealed content must be opened by a member. */
+export function projectTimelineEvents(entry: Extract<ActivityTailEntry, { kind: 'progress' }>): readonly TimelineEvent[] {
+  return entry.events.map((event, eventIndex) => ({
+    taskId: entry.taskId, sourceEnvelopeId: entry.sourceEnvelopeId, batchSeq: entry.batchSeq,
+    revision: entry.revision, offset: eventIndex, eventIndex, sourceDropped: entry.sourceDropped, receivedAt: entry.receivedAt, event,
+  }));
 }
-
-export function parseTimelineEvents(value: unknown): readonly ActivityTailEntry[] {
-  return z.array(ActivityTailEntrySchema).parse(value) as readonly ActivityTailEntry[];
-}
-
-export function compareTimelineEvents(left: ActivityTailEntry, right: ActivityTailEntry): number {
-  return left.batchSeq - right.batchSeq || left.eventIndex - right.eventIndex;
-}
-
-export function activityCursor(
-  entries: readonly ActivityTailEntry[],
-): ActivityCursor | undefined {
-  const last = entries.at(-1);
-  return last === undefined ? undefined : { batchSeq: last.batchSeq, eventIndex: last.eventIndex };
-}
-
-export function activityTailKey(tenant: TenantId, taskId: string): string {
-  return tenantKey(tenant, taskId);
-}
+export function activityTailKey(tenant: TenantId, taskId: string): string { return tenantKey(tenant, taskId); }
