@@ -66,6 +66,22 @@ async function pointer(name: string): Promise<string | undefined> {
   return fs.readlink(path.join(installRoot, name)).then((target) => path.basename(target), () => undefined);
 }
 
+/** Throws EIO from the `step`-th fs.rename (1-based) and lets every other rename through. */
+function failRename(step: number | ((destination: string) => boolean)): { fired: () => boolean; restore: () => void } {
+  const original = fs.rename.bind(fs);
+  let calls = 0;
+  let fired = false;
+  const spy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+    calls += 1;
+    if (!fired && (typeof step === 'number' ? calls === step : step(String(to)))) {
+      fired = true;
+      throw Object.assign(new Error(`injected rename I/O failure: ${String(to)}`), { code: 'EIO' });
+    }
+    return original(from, to);
+  });
+  return { fired: () => fired, restore: () => spy.mockRestore() };
+}
+
 /**
  * A real managed lifecycle for owner `cli` over this store, with `app`
  * recorded as the store's lifecycle owner and an exact marked unit.
@@ -106,6 +122,12 @@ async function tree(dir: string): Promise<Record<string, string>> {
   return out;
 }
 
+/** A state recover() leaves: nothing pending, and the store holds the data of the version `current` runs. */
+async function expectConsistent(dataOf: Record<string, string>): Promise<void> {
+  expect((await installation.receipt())?.state).not.toBe('pending');
+  const current = (await pointer('current'))!;
+  expect(await fs.readFile(db, 'utf8')).toBe(dataOf[current]);
+}
 
 beforeEach(async () => {
   root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-install-')));
@@ -294,6 +316,91 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
     expect(events.at(-1)).toBe('uninstall');
   });
+  describe('crash consistency: every rename may fail, and recover() resolves what it leaves', () => {
+    it('recovery survives an interrupted restore receipt commit', async () => {
+      await installation.install(await payload('1.0.0'));
+      unhealthy.add('2.0.0');
+      let fault = false;
+      const injected = failRename((to) => fault && to === path.join(installRoot, 'upgrade-receipt.json'));
+      onHealth = async (version) => { if (version === '1.0.0') fault = true; };
+      try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'EIO' }); }
+      finally { injected.restore(); }
+      onHealth = async () => undefined;
+      expect(await installation.receipt()).toMatchObject({ state: 'pending', from: '1.0.0', to: '2.0.0' });
+      await expect(installation.recover()).resolves.toMatchObject({ state: 'rolled-back' });
+    });
+
+    it('rollback journals an interrupted pointer switch', async () => {
+      await installation.install(await payload('1.0.0'));
+      await installation.upgrade(await payload('2.0.0'));
+      await fs.writeFile(db, 'v2 data');
+      const injected = failRename((to) => to === path.join(installRoot, 'current'));
+      try { await expect(installation.rollback()).rejects.toMatchObject({ code: 'EIO' }); }
+      finally { injected.restore(); }
+      expect(await installation.receipt()).toMatchObject({ state: 'pending', from: '1.0.0', to: '2.0.0' });
+      await expect(installation.recover()).resolves.toMatchObject({ state: 'rolled-back', from: '1.0.0', to: '2.0.0' });
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+    });
+
+    it('install and uninstall refuse a pending receipt and change nothing', async () => {
+      await installation.install(await payload('1.0.0'));
+      await installation.upgrade(await payload('2.0.0'));
+      await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), JSON.stringify({
+        format: 'byok-service-upgrade-receipt', version: 1, state: 'pending', from: '1.0.0', to: '2.0.0', at: new Date().toISOString(),
+      }));
+      const reinstall = await payload('2.0.0');
+      const before = await tree(root);
+      events = [];
+      await expect(installation.install(reinstall)).rejects.toMatchObject({ code: 'upgrade_pending' });
+      await expect(installation.uninstall()).rejects.toMatchObject({ code: 'upgrade_pending' });
+      expect(events).toEqual([]);
+      expect(await tree(root)).toEqual(before);
+    });
+
+    it('rollback: an EIO at each rename, then recover', async () => {
+      for (let step = 1; ; step += 1) {
+        await fs.rm(installRoot, { recursive: true, force: true });
+        await fs.writeFile(db, 'v1 data');
+        await installation.install(await payload('1.0.0'));
+        await installation.upgrade(await payload('2.0.0'));
+        await fs.writeFile(db, 'v2 data');
+        const injected = failRename(step);
+        try { await installation.rollback().catch((error: unknown) => { expect(error).toMatchObject({ code: 'EIO' }); }); }
+        finally { injected.restore(); }
+        if (!injected.fired()) {
+          expect(step).toBeGreaterThan(3);
+          break;
+        }
+        await installation.recover();
+        await expectConsistent({ '1.0.0': 'v1 data', '2.0.0': 'v2 data' });
+        // Only an EIO before the pending receipt is written leaves 2.0.0; every later one is completed.
+        expect(await pointer('current')).toBe(step === 1 ? '2.0.0' : '1.0.0');
+      }
+    });
+
+    it('a failed health check: an EIO at each rename, then recover', async () => {
+      unhealthy.add('2.0.0');
+      onHealth = async (version) => { if (version === '2.0.0') await fs.writeFile(db, 'v2 data'); };
+      for (let step = 1; ; step += 1) {
+        await fs.rm(installRoot, { recursive: true, force: true });
+        await fs.writeFile(db, 'v1 data');
+        await installation.install(await payload('1.0.0'));
+        const candidate = await payload('2.0.0');
+        const injected = failRename(step);
+        try { await expect(installation.upgrade(candidate)).rejects.toThrow(); }
+        finally { injected.restore(); }
+        if (!injected.fired()) {
+          expect(step).toBeGreaterThan(5);
+          break;
+        }
+        await installation.recover();
+        await expectConsistent({ '1.0.0': 'v1 data', '2.0.0': 'v2 data' });
+        expect(await pointer('current')).toBe('1.0.0');
+      }
+    });
+  });
+
   describe('lifecycle owner: another recorded owner is refused before anything is written', () => {
     it('a refused foreign-owner install preserves the recorded installation', async () => {
       await installation.install(await payload('1.0.0'));

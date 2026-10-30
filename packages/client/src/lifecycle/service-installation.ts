@@ -73,8 +73,10 @@ export interface ServiceInstallationOptions {
 /**
  * The upgrade receipt a Host UI reads (`upgrade-receipt.json`):
  *
- * - `pending`: the switch began and has not been confirmed. Only
- *   `recover()` resolves it, by restoring `from`.
+ * - `pending`: an upgrade or a rollback began and has not been confirmed.
+ *   Only `recover()` resolves it, by restoring `from` with the snapshot
+ *   taken for `to`. A rollback journals its target as `from`, so recover
+ *   completes it.
  * - `switched`: `to` runs and passed the health check.
  * - `rolled-back`: `from` runs again with its store snapshot; `code` says why.
  * - `failed`: nothing was switched (`code` and, for a store refusal,
@@ -112,7 +114,11 @@ export interface ServiceInstallation {
    * restores the old version and its snapshot together.
    */
   upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
-  /** Restores `previous` and the store snapshot taken when `current` was switched to. Store writes since then are discarded. */
+  /**
+   * Restores `previous` and the store snapshot taken when `current` was
+   * switched to, under a `pending` receipt written first. Store writes since
+   * that switch are discarded.
+   */
   rollback(): Promise<ServiceUpgradeReceipt>;
   /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
@@ -130,7 +136,7 @@ const ERROR_MESSAGES = {
   payload_invalid: 'The payload manifest is missing, malformed, or does not match the payload files.',
   version_current: 'The payload is the version already running.',
   version_conflict: 'A different payload with the same version id is already staged.',
-  upgrade_pending: 'An earlier upgrade was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.',
+  upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.',
   store_busy: 'The store still has a running owner after the stop. Stop every process that uses this store and retry.',
   owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.',
   precheck_failed: 'The candidate\'s store precheck did not produce a verdict.',
@@ -262,6 +268,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     return receipt as ServiceUpgradeReceipt;
   }
 
+  /** Only `recover()` may act while a receipt is `pending`. */
+  async function refusePending(): Promise<void> {
+    if ((await readReceipt())?.state === 'pending') throw new ServiceInstallationError('upgrade_pending');
+  }
+
   async function writeReceipt(fields: Omit<ServiceUpgradeReceipt, 'format' | 'version' | 'at'>): Promise<ServiceUpgradeReceipt> {
     const receipt: ServiceUpgradeReceipt = { format: 'byok-service-upgrade-receipt', version: 1, ...fields, at: new Date().toISOString() };
     await writeFileAtomic(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
@@ -305,6 +316,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   /** Running it again with the installed payload rewrites the unit and launcher, as `lifecycle.install` does. */
   function install(payloadDir: string, installOpts: ServiceInstallOptions = {}): Promise<void> {
     return lifecycle.owned(async (held) => {
+      await refusePending();
       const installed = await currentVersion();
       const id = await stage(payloadDir);
       if (installed !== undefined && installed !== id) throw new ServiceInstallationError('installation_exists');
@@ -437,9 +449,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /**
-   * Brings `from` back: stops whatever runs, restores the snapshot taken for
-   * `to`, points `current` at `from` and `previous` at `previous`, then
-   * starts `from` and checks its health.
+   * Brings `from` back under a `pending` receipt: stops whatever runs,
+   * restores the snapshot taken for `to`, points `current` at `from` and
+   * `previous` at `previous`, then starts `from` and checks its health. The
+   * snapshot is removed only after the final receipt is written, so until
+   * then `recover()` can run every step again from what is on disk.
    */
   async function restore(from: string, to: string, previous: string | undefined, code?: ServiceInstallationErrorCode): Promise<ServiceUpgradeReceipt> {
     const gate = await stopQuiescent();
@@ -450,10 +464,12 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     } finally {
       await gate.release();
     }
-    await fs.rm(path.join(snapshotsDir, to), { recursive: true, force: true });
     const kept = previous === undefined ? {} : { previous };
-    if (!(await startHealthy())) return writeReceipt({ state: 'failed', from, to, ...kept, code: 'rollback_unhealthy' });
-    return writeReceipt({ state: 'rolled-back', from, to, ...kept, ...(code === undefined ? {} : { code }) });
+    const receipt = (await startHealthy())
+      ? await writeReceipt({ state: 'rolled-back', from, to, ...kept, ...(code === undefined ? {} : { code }) })
+      : await writeReceipt({ state: 'failed', from, to, ...kept, code: 'rollback_unhealthy' });
+    await fs.rm(path.join(snapshotsDir, to), { recursive: true, force: true });
+    return receipt;
   }
 
   /** Keeps `current` and `previous` and the snapshot of the last switch; removes every other version and snapshot. */
@@ -468,7 +484,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   function upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt> {
     return lifecycle.owned(async () => {
-      if ((await readReceipt())?.state === 'pending') throw new ServiceInstallationError('upgrade_pending');
+      await refusePending();
       const from = await currentVersion();
       if (from === undefined) throw new ServiceInstallationError('installation_absent');
       const to = await stage(payloadDir);
@@ -519,11 +535,13 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   function rollback(): Promise<ServiceUpgradeReceipt> {
     return lifecycle.owned(async () => {
-      if ((await readReceipt())?.state === 'pending') throw new ServiceInstallationError('upgrade_pending');
+      await refusePending();
       const [current, previous] = [await currentVersion(), await readPointer('previous')];
       if (current === undefined || previous === undefined || !(await exists(path.join(snapshotsDir, current, 'snapshot.json')))) {
         throw new ServiceInstallationError('no_rollback');
       }
+      // The pending receipt is what recover() completes: the same restore of `previous` with this snapshot.
+      await writeReceipt({ state: 'pending', from: previous, to: current });
       return restore(previous, current, undefined);
     });
   }
@@ -538,6 +556,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   function uninstall(): Promise<void> {
     return lifecycle.owned(async (held) => {
+      await refusePending();
       await held.uninstall();
       for (const name of POINTERS) await setPointer(name, undefined);
       await fs.rm(versionsDir, { recursive: true, force: true });

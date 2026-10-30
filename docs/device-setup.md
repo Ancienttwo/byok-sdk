@@ -331,16 +331,20 @@ records the root in `<storeDir>/service/installation.json`. The unit runs
 6. if that health check fails, restores the old version and its store
    snapshot together and fails with `health_check_failed`.
 
-`upgrade rollback` restores `previous` and the snapshot taken when `current`
-was switched to; store writes since then are discarded. A failed upgrade keeps
+`upgrade rollback` writes a `pending` receipt, then restores `previous` and the
+snapshot taken when `current` was switched to; store writes since then are
+discarded. A failed upgrade keeps
 the earlier one rollbackable. Only the latest switch keeps a snapshot, so one
 rollback is possible after it.
 
 `upgrade-receipt.json` is what a Host UI reads: `switched`, `rolled-back`,
 `failed` (with `code`, and `stores` for a store refusal) or `pending`. A
-`pending` receipt means an upgrade stopped mid-switch; every other operation
-refuses with `upgrade_pending` until `byok-agent upgrade recover` restores its
-old version and snapshot.
+`pending` receipt means an upgrade or a rollback stopped part way; every other
+operation, `install` and `uninstall` included, refuses with `upgrade_pending`
+until `byok-agent upgrade recover` finishes it: it restores the receipt's
+`from` version and snapshot (for a rollback, the version it was going back
+to). A snapshot is removed only after the receipt that ends the operation is
+written.
 
 Upgrade, rollback, recover, install and uninstall run only for the store's
 recorded lifecycle owner: another owner gets `lifecycle_owner_conflict`, and
