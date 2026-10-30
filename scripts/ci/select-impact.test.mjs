@@ -25,7 +25,7 @@ test('reviewed graph covers every workspace and all local dependency edges', () 
 
 test('docs and known CI contracts select light checks, not release families', () => {
   assert.deepEqual(selectImpact(['README.md', 'docs/releases/v0.28.1.md']), {
-    dirs: [], files: ['README.md', 'docs/releases/v0.28.1.md'], families: [], reason: 'docs-only',
+    dirs: [], files: ['README.md', 'docs/releases/v0.28.1.md'], families: [], reason: 'root-ci-scripts',
   });
   for (const path of ['.github/workflows/release.yml', 'scripts/ci/select-impact.mjs']) {
     assert.equal(selectImpact([path]).reason, 'root-ci-scripts');
@@ -391,7 +391,7 @@ test('CLI accepts JSON stdin and fails closed without an output selection on bad
   const script = fileURLToPath(new URL('./select-impact.mjs', import.meta.url));
   const good = spawnSync(process.execPath, [script], { input: '["README.md"]', encoding: 'utf8' });
   assert.equal(good.status, 0, good.stderr);
-  assert.equal(JSON.parse(good.stdout).reason, 'docs-only');
+  assert.equal(JSON.parse(good.stdout).reason, 'root-ci-scripts');
   for (const input of ['{', '[]', '["unknown"]']) {
     const bad = spawnSync(process.execPath, [script], { input, encoding: 'utf8' });
     assert.notEqual(bad.status, 0);

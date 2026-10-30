@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyReviewedContent, changedApiOwners } from './reviewed-content.mjs';
 import { documentationChecks } from './documentation-checks.mjs';
+import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
 
 // Reviewed workspace graph; the contract test detects manifest drift.
 export const workspaceGraph = {
@@ -351,6 +352,8 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/upgrade-manifest/manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/snapshot.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
 });
+export const scriptChecksForPaths = paths => resolveScriptChecks(paths, reviewedScripts);
+
 // An OAR or rpiv-todo re-vendor adds one snapshot directory and deletes the
 // previous one. A snapshot path is reviewed only when that snapshot's
 // source-manifest.json lists it (or is that manifest or its PROVENANCE.md):
@@ -549,9 +552,9 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/client/daemon-config.schema.json') {
       dirs.add('packages/client'); scripts = true; families.add('npm-release-pack'); continue;
     }
-    if (Object.hasOwn(reviewedScripts, path)) {
+    if (Object.hasOwn(reviewedScripts, path) || Object.hasOwn(scriptTestInputs, path)) {
       scripts = true;
-      for (const id of reviewedScripts[path].families ?? []) families.add(id);
+      for (const id of reviewedScripts[path]?.families ?? []) families.add(id);
       continue;
     }
     if (/^scripts\/docs\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) {
@@ -700,6 +703,9 @@ export function selectImpact(paths, context = {}) {
   // #794 D3: so does its Worker composition, which needs that Postgres and wrangler.
   if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance') || dirs.has('examples/hosted-bot-collaboration')
     || dirs.has('examples/hosted-bot-collaboration-worker')) families.add('dataplane');
+  const checks = scriptChecksForPaths([...files]);
+  scripts ||= checks.tests.length > 0;
+  for (const family of checks.families) families.add(family);
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
     reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
 }

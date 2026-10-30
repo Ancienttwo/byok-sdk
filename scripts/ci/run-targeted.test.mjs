@@ -54,18 +54,18 @@ test('dependent-only changes run every selected workspace check without the pack
 });
 
 test('another selected workspace without a test check still fails closed', posixOnly, () => {
-  const plan = planCi({ event: 'push', sha, base, paths: ['packages/keys/src/index.ts'] });
+  const plan = planCi({ event: 'push', sha, base, paths: ['examples/packaging/src/index.ts'] });
   const cwd = mkdtempSync(path.join(tmpdir(), 'ci-run-targeted-cwd-'));
   try {
     writeFileSync(path.join(cwd, 'package.json'), '{}');
     for (const dir of plan.dirs) {
       mkdirSync(path.join(cwd, dir), { recursive: true });
-      const scripts = dir === 'packages/keys' ? { typecheck: 'tsc' } : { typecheck: 'tsc', test: 'vitest' };
+      const scripts = dir === 'examples/packaging' ? { typecheck: 'tsc' } : { typecheck: 'tsc', test: 'vitest' };
       writeFileSync(path.join(cwd, dir, 'package.json'), JSON.stringify({ scripts }));
     }
     const { status, stderr, calls } = runTargeted(plan, cwd);
     assert.notEqual(status, 0);
-    assert.match(stderr, /Selected workspace packages\/keys has no test check/);
+    assert.match(stderr, /Selected workspace examples\/packaging has no test check/);
     assert.ok(calls.includes('run --cwd examples/packaging typecheck'));
   } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
