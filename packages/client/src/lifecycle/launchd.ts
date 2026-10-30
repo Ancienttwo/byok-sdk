@@ -1,7 +1,7 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, isIdempotentAbsence, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
+import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log';
 import { sanitizeServiceName, type ServiceDefinition } from './service-types';
@@ -59,6 +59,9 @@ export interface LaunchdDeps {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 }
+
+/** `launchctl print`'s exit for a service the domain does not have (`Could not find service ...`). */
+const LAUNCHCTL_PRINT_ABSENT = 113;
 
 /** How long a booted-out job may stay in the domain before `stop()` gives up with `service_unload_timeout`. */
 export const LAUNCHD_UNLOAD_TIMEOUT_MS = 10_000;
@@ -159,12 +162,17 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   const domainTarget = () => `gui/${getuid()}`;
   const serviceTarget = () => `${domainTarget()}/${label}`;
 
-  /** Whether launchd still has the job in the domain: `print` succeeds, or reports it absent; anything else is a real failure. */
+  /**
+   * Whether launchd still has the job in the domain: exit 0 is loaded, exit
+   * 113 is absent unless its text is a connectivity or permission failure,
+   * and any other exit is a real failure whatever its text.
+   */
   async function loaded(): Promise<boolean> {
     const result = await run('launchctl', ['print', serviceTarget()]);
     if (result.code === 0) return true;
-    if (isIdempotentAbsence(result, LAUNCHD_NOT_LOADED)) return false;
-    throw new Error(`launchctl print failed (exit ${result.code}): ${(result.stderr || result.stdout).trim()}`);
+    const detail = (result.stderr || result.stdout).trim();
+    if (result.code === LAUNCHCTL_PRINT_ABSENT && !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail))) return false;
+    throw new Error(`launchctl print failed (exit ${result.code}): ${detail}`);
   }
 
   /**

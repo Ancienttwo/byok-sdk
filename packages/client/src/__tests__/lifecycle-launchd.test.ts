@@ -133,7 +133,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
   });
 
   it('uninstall() bootouts (idempotent "not loaded") and removes the plist file', async () => {
-    const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'not loaded'));
+    const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'print' ? ABSENT : fail(3, 'not loaded')));
     const fs = fakeFs();
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
 
@@ -210,10 +210,17 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(run).not.toHaveBeenCalledWith('launchctl', ['kickstart', '-k', 'gui/501/Acme-Agent-']);
   });
 
-  it('start() throws when launchctl print fails for a real reason', async () => {
-    const run = vi.fn<Runner>().mockResolvedValue(fail(112, 'Could not find domain for user gui: 501'));
-    const lifecycle = createLaunchdLifecycle(def(), { run, fs: installedFs(), homedir: () => '/h', getuid: () => 501 });
-    await expect(lifecycle.start()).rejects.toThrow(/launchctl print failed \(exit 112\)/);
+  it('start() rejects any launchctl print failure other than an absent service (exit 113)', async () => {
+    for (const printed of [
+      fail(112, 'Could not find domain for user gui: 501'),
+      fail(5, 'job not loaded: Input/output error'),
+      fail(113, 'Could not find service: Permission denied'),
+    ]) {
+      const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'print' ? printed : ok()));
+      const lifecycle = createLaunchdLifecycle(def(), { run, fs: installedFs(), homedir: () => '/h', getuid: () => 501 });
+      await expect(lifecycle.start()).rejects.toThrow(`launchctl print failed (exit ${printed.code})`);
+      expect(run).toHaveBeenCalledTimes(1);
+    }
   });
 
   it('start() throws if kickstart fails even though the plist exists', async () => {
@@ -224,7 +231,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
   });
 
   it('stop() bootouts and tolerates a nonzero exit (already stopped)', async () => {
-    const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'not loaded'));
+    const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'print' ? ABSENT : fail(3, 'not loaded')));
     const lifecycle = createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h', getuid: () => 501 });
     await expect(lifecycle.stop()).resolves.toBeUndefined();
     expect(run).toHaveBeenCalledWith('launchctl', ['bootout', 'gui/501/Acme-Agent-']);
