@@ -1,6 +1,6 @@
 import type { CapabilityDeclaration } from '@byok-sdk/core';
 import type { CapabilityFlag, RuntimeInfo } from '@byok-sdk/protocol';
-import type { ServiceEnvironmentStatus } from '../../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus } from '../../login-shell-environment';
 import type { RuntimeObservation } from '../../runtime-detection';
 import type { AgentEgressController } from '../agent-egress-controller';
 import type { AuthManager } from '../auth-manager';

@@ -9,7 +9,7 @@ import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';

@@ -22,7 +22,6 @@ const { spawnOwnedLineProcess } = await import(
 );
 const { CodexProjection } = await import('../src/adapters/codex/projection.ts');
 const { CodexAdapter } = await import('../src/adapters/codex/codex-adapter.ts');
-const { buildRuntimeEnv } = await import('../src/daemon/environment.ts');
 const execute = promisify(execFile);
 const report = {
   status: 'not-verified',
@@ -31,7 +30,8 @@ const report = {
   cases: [],
   mcpCalls: [],
 };
-const detected = await new CodexAdapter().detect();
+const adapter = new CodexAdapter();
+const detected = await adapter.detect();
 report.detection = detected;
 if (detected.kind !== 'available' || !detected.authPresent) {
   console.log(JSON.stringify(report, null, 2));
@@ -63,7 +63,7 @@ for (const entry of JSON.parse(listed.stdout))
       overrides[`mcp_servers.${entry.name}.url`] = '"http://127.0.0.1:9/mcp"';
     overrides[`mcp_servers.${entry.name}.enabled`] = 'false';
   }
-const env = buildRuntimeEnv({ ambient: process.env });
+const env = await adapter.runtimeEnvironment();
 let raw;
 let projection;
 let complete;

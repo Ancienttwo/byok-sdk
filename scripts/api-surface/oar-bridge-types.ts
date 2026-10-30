@@ -5,7 +5,7 @@ import type { codexSession as vendorSession, CodexAdapterSession } from '../../p
 import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/51b83c9/contracts/session.js';
 import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/51b83c9/runtimes/codex/app-server-client.js';
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
-import type { buildRuntimeEnv } from '../../packages/client/src/daemon/environment.js';
+import type { buildRuntimeEnvironment } from '../../packages/client/src/runtime/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
 import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/51b83c9/contracts/session-not-found-error.js';
 import type * as TreeBridge from '../../packages/client/src/runtime/oar-process-tree.js';
@@ -108,8 +108,8 @@ export type CheckExitError = Assert<Equal<
   ReturnType<ReturnType<typeof spawnOwnedLineProcess>['exitError']>,
   ReturnType<NonNullable<LineProcess['exitError']>>
 >>;
-export type CheckEnv = Assert<Equal<Readonly<ReturnType<typeof buildRuntimeEnv>>, BridgeArgs[2]['env']>>;
-export type CheckVendorEnv = Assert<Assignable<ReturnType<typeof buildRuntimeEnv>, VendorArgs[2]['env']>>;
+export type CheckEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildRuntimeEnvironment>>>, BridgeArgs[2]['env']>>;
+export type CheckVendorEnv = Assert<Assignable<Awaited<ReturnType<typeof buildRuntimeEnvironment>>, VendorArgs[2]['env']>>;
 export type CheckProjectionRecord = Assert<Equal<Parameters<CodexProjection['consume']>[1], CodexRecord>>;
 export type CheckProjectionInput = Assert<Assignable<RawEvent, Parameters<CodexProjection['consume']>[1]>>;
 export type CheckHookRecord = Assert<Assignable<RawEvent, Parameters<NonNullable<NonNullable<BridgeArgs[4]>['onRecord']>>[0]>>;
@@ -182,7 +182,7 @@ export type CheckAcpHookRecord = Assert<Assignable<RawEvent, AcpBridge.AcpRecord
 // The real SDK transports fit the vendor seams.
 export type CheckAcpSpawn = Assert<Assignable<typeof spawnOwnedLineProcess, SpawnAcpLineProcess>>;
 export type CheckAcpTerminalSpawn = Assert<Assignable<typeof spawnOwnedTerminalProcess, SpawnAcpTerminal>>;
-export type CheckAcpEnv = Assert<Equal<Readonly<ReturnType<typeof buildRuntimeEnv>>, AcpBridgeArgs[3]['env']>>;
+export type CheckAcpEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildRuntimeEnvironment>>>, AcpBridgeArgs[3]['env']>>;
 
 // The failure bridge (#869): the vendored OAR failure tables, typed with the
 // protocol's class. The protocol enum and OAR's `FailureClass` are one set.

@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 /**
- * Stands in for the allowlisted child environment `buildRuntimeEnv` produces
+ * Stands in for the allowlisted child environment `buildRuntimeEnvironment` produces
  * for the selected runtime — the preflight never sees `process.env` itself.
  */
 const PROBE_BASE_ENV: Readonly<Record<string, string>> = { PATH: process.env.PATH ?? '' };

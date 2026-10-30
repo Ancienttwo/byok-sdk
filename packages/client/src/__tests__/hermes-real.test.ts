@@ -13,7 +13,7 @@ import { exchangeHermesPipe, windowsLower } from '../adapters/hermes/gateway-pip
 import { ownsHermesGatewayPid } from '../adapters/hermes/gateway-ownership';
 import { isQualifiedHermesVersion } from '../adapters/hermes/hermes-version';
 import { loadKoffi } from '../adapters/win32-job-object';
-import { buildRuntimeEnv } from '../daemon/environment';
+import { testRuntimeEnv } from './fixtures/runtime-env';
 import type { MessageDraftDelta, Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { startFakeModelEndpoint } from './fixtures/hermes-fake-model';
@@ -107,7 +107,7 @@ try { await runHermesProviderLauncher(request,{createSecretStore:()=>store}); } 
     const version = detected.kind === 'available' ? detected.version ?? '' : '';
 
     // The environment the daemon gives a task; custody narrows it to the allowlist.
-    const env = buildRuntimeEnv({ ambient: process.env });
+    const env = testRuntimeEnv();
     expect(Object.values(env)).not.toContain(fakeKey);
     const session: Session = await timed('startMs', () => startPreparedOperation(adapter, { instruction: 'Reply with one word.' }, { workspaceDir, env }));
     const closeSession = () => session.close();

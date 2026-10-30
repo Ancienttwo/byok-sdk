@@ -388,8 +388,12 @@ try {
         `import path from 'node:path';\n` +
         `const require = createRequire(import.meta.url);\n` +
         `for (const name of ${JSON.stringify(smokeImports.node)}) await import(name);\n` +
-        `const { buildRuntimeEnv } = await import('@byok-sdk/client/adapters');\n` +
-        `assert.deepEqual(buildRuntimeEnv({ ambient: { CLAUDECODE: '1', BYOK_TEST: 'secret', NODE_OPTIONS: '--trace-warnings' } }), { NODE_OPTIONS: '--trace-warnings' });\n` +
+        `const { buildRuntimeEnvironment } = await import('@byok-sdk/client/adapters');\n` +
+        `Object.assign(process.env, { CLAUDECODE: '1', BYOK_TEST: 'secret', NODE_OPTIONS: '--trace-warnings' });\n` +
+        `const smokeEnv = await buildRuntimeEnvironment({ base: 'allowlist', allow: ['NODE_OPTIONS'] });\n` +
+        `assert.equal(smokeEnv.NODE_OPTIONS, '--trace-warnings');\n` +
+        `assert.equal('CLAUDECODE' in smokeEnv || 'BYOK_TEST' in smokeEnv, false);\n` +
+        `for (const name of ['CLAUDECODE', 'BYOK_TEST', 'NODE_OPTIONS']) delete process.env[name];\n` +
         `const { AgentHomeBusyError, AgentHomeManager } = await import('@byok-sdk/client');\n` +
         `const parallelRoot = mkdtempSync(path.join(tmpdir(), 'byok-packed-agent-session-'));\n` +
         `try {\n` +

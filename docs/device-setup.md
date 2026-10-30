@@ -105,6 +105,31 @@ cannot be encoded in CLI JSON. They remain typed Host integration points.
 Custom adapters belong in `createDaemonWithAdapters`; the effective report
 marks them `injected`, without claiming SDK-built isolation settings for them.
 
+## Runtime environment
+
+Runtimes get the user's login-shell environment, not the Host's `process.env`
+(#1095). The daemon captures it once per process from a closed seed and a
+fixed `PATH`, so the CLIs the user installed with Homebrew, nvm, bun or an
+official installer are found in both service and embedded use, and a variable
+the Host sets does not reach an agent.
+
+- A Host that wants a runtime to receive a variable it sets (before or after
+  start) lists the name in `pass`:
+  `DaemonConfig.runtimeEnvironment: { pass: ['ACME_TOKEN_FILE'] }` with
+  `createDaemon`, or the same object as each adapter's `runtimeEnvironment`
+  option with `createDaemonWithAdapters`, which rejects the `DaemonConfig`
+  field. Custom adapters implement `runtimeEnvironment()`, normally with
+  `buildRuntimeEnvironment(policy)`.
+- `{ base: 'allowlist', allow: [...] }` is the strict mode: the platform
+  baseline plus `allow`, from the live environment, with no login-shell capture.
+- If the capture fails (an rc that exits non-zero, hangs past 10 s or prints
+  more than 1 MiB), the daemon stays up, `status` shows
+  `environment: unavailable code=<code>`, every `login-shell` runtime shows
+  `refused:runtime_environment_unavailable:<code>` and offers are declined. Fix
+  the rc and restart the daemon.
+- Windows has no login shell: runtimes get the platform baseline names of the
+  live session (`windows-session`). List any other name in `pass`.
+
 ## Configuration
 
 `byok-agent config check --strict --json --config device.json` validates the
@@ -401,6 +426,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `agentEgress.contentRead.artifact.sensitiveNames` | advanced | array |
 | `agentEgress.contentRead.runtimeAllowlistedRoots` | advanced | array |
 | `runtimeAllowlist` | common | array |
+| `runtimeEnvironment` | advanced | union |
 | `durablePi` | advanced | boolean |
 | `piByokLauncher` | advanced | object |
 | `piByokLauncher.command` | required when parent is set | string |
@@ -511,6 +537,7 @@ Manifest transition: **0.31.0 → 0.31.0**. Versions and entries below come from
 | device-store-default-dir-removed | breaking | The static DeviceStore.defaultDir(productId) is removed; it duplicated the default store path. The class is reachable through BlobClient and InstallSkillPacksOptions. The default storeDir is still <home>/.byok/<productId> and no store moves. A Host that called DeviceStore.defaultDir uses resolveHostLayout({ productId, productName }).storeDir. These same exports also contain private AuthManager declaration changes for the token-renewal minimum gap (#1114): a fast device clock or short server TTL no longer loops renewals and keychain writes. That renewal fix requires no additional Host action. [Migration](../docs/spec.md#recommended-host-layout) |
 | capability-ports-two-way | breaking | createByokCloud now refuses a port passed without its capability declared (capability_port_undeclared), as it already refused a capability declared without its port (#1096). Hosts that pass a port without declaring it must either declare the capability or stop passing the port. createByokServer no longer passes an E2EE member store and derives its declaration from its ports with the new capabilityDeclarationForPorts; createInMemoryByokCloud's default declaration is derived the same way. SqliteSchemaErrorCode drops SQLITE_MIGRATION_REFUSED, which only the removed E2EE KEM-floor check raised. [Migration](../docs/architecture/process-namespace-topology.md#capability-ports-migration) |
 | device-resource-caps | breaking | A daemon runs at most DaemonConfig.maxConcurrentTasks tasks at once (default 8; a positive safe integer, no uncapped value), counted across every Agent home and runtime (#1121). Before, the device-wide count was unbounded. An offer over the cap is declined retryably before the claim, with no decline code, so a Host of any version accepts the decline. DaemonConfig.defaultMaxDurationMs (optional) is the wall-clock limit for a task whose offer carries no limits.maxDurationMs. While the Host is unreachable, the outbound queue keeps at most 8 MiB of task.progress and agent.message.draft envelopes and drops the oldest beyond that; terminals, claims, starts and approval requests are never dropped, and OutboundStatus.droppedEphemeral counts the drops. A Host that dispatches more than 8 concurrent tasks to one device sets maxConcurrentTasks to its own number. [Migration](../docs/device-setup.md#operations) |
+| runtime-environment-policy | breaking | Runtimes no longer inherit the daemon's process.env (#1095). Every adapter builds its children's environment under a RuntimeEnvironmentPolicy (constructor option runtimeEnvironment; createDaemon passes DaemonConfig.runtimeEnvironment, createDaemonWithAdapters rejects that field). The default base is the user's login-shell snapshot, captured once per process with the account's login shell (read from the account database by uid, never $SHELL; a failed lookup is the new ServiceEnvironmentUnavailableCode account-shell-unavailable) from a closed seed and a fixed PATH, so CLIs on the user's shell PATH are found in embedded use too; 'allowlist' is the strict mode over the live environment; 'pass' names live variables a Host sets. CLAUDECODE and BYOK_* are always removed, NO_PROXY/no_proxy gain 127.0.0.1 and localhost, and Claude drops the shell's ANTHROPIC_*, Bedrock/Vertex switches and OAuth token when pass supplies a provider. A failed capture fails closed: RuntimeEnvironmentUnavailableError, detection refused with the new reason runtime_environment_unavailable and its code (RuntimeObservation.code), offers declined. win32 uses the session baseline names (ServiceEnvironmentStatus source 'windows-session'). RuntimeAdapter gains the required runtimeEnvironment(); custom adapters implement it with buildRuntimeEnvironment. Prepared input bindings use the Pi adapter's environment, so a daemon without a Pi adapter refuses them (detail pi_runtime_unconfigured). The adapters entry's buildRuntimeEnv is removed; the testing fake defaults to the allowlist environment. A Host whose runtime needs a variable it set itself lists the name in pass. [Migration](../docs/device-setup.md#runtime-environment) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

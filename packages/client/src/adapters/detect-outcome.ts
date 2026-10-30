@@ -1,12 +1,16 @@
 import { execFile } from 'node:child_process';
-import { buildRuntimeEnv } from '../daemon/environment';
+import { RuntimeEnvironmentUnavailableError } from '../runtime/environment';
 import type { RuntimeDetectResult } from '../types';
 
 type ProbeFailure = Exclude<RuntimeDetectResult, { kind: 'available' }>;
 type VersionProbeResult = ProbeFailure | { kind: 'available'; stdout: string; stderr: string };
 
-/** OS/process codes only. Arbitrary messages, streams and resolver paths never escape. */
+/**
+ * OS/process codes only. Arbitrary messages, streams and resolver paths never
+ * escape. A runtime environment that cannot be built is a refusal (#1095).
+ */
 export function classifyDetectError(error: unknown): ProbeFailure {
+  if (error instanceof RuntimeEnvironmentUnavailableError) return { kind: 'refused', reason: 'runtime_environment_unavailable', code: error.reason };
   const code = error !== null && typeof error === 'object'
     ? (error as { code?: unknown }).code
     : undefined;
@@ -19,15 +23,16 @@ export function classifyDetectError(error: unknown): ProbeFailure {
  * This probe owns both the deadline and the version child. A killed child is
  * not by itself timeout evidence (execFile also kills on output overflow).
  * Resolve only at execFile completion; SIGKILL bounds a TERM-ignoring probe.
- * The probe gets the environment a task child gets (`buildRuntimeEnv`).
+ * The probe gets `env`: the environment a task child gets
+ * (`RuntimeAdapter.runtimeEnvironment`).
  */
-export async function probeRuntimeVersion(command: string, timeoutMs: number, prefixArgs: readonly string[] = []): Promise<VersionProbeResult> {
+export async function probeRuntimeVersion(command: string, timeoutMs: number, env: Readonly<Record<string, string>>, prefixArgs: readonly string[] = []): Promise<VersionProbeResult> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError('invalid runtime probe timeout');
   return new Promise((resolve) => {
     let timer: NodeJS.Timeout | undefined;
     let timedOut = false;
     try {
-      const child = execFile(command, [...prefixArgs, '--version'], { encoding: 'utf8', env: buildRuntimeEnv({ ambient: process.env }) }, (error, stdout, stderr) => {
+      const child = execFile(command, [...prefixArgs, '--version'], { encoding: 'utf8', env }, (error, stdout, stderr) => {
         if (timer) clearTimeout(timer);
         // Output overflow is already a known failure even if a TERM-ignoring
         // child requires the deadline's SIGKILL to finish cleanup.

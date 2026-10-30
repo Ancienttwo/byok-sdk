@@ -7,7 +7,7 @@ import {
   type OperationalHealthFixResult,
 } from '../../diagnostics/diagnostics';
 import { resolveStoreDir } from '../config';
-import type { ServiceEnvironmentRecord } from '../../lifecycle/service-environment';
+import type { ServiceEnvironmentRecord } from '../../login-shell-environment';
 import { formatServiceEnvironment } from '../format';
 import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from '../../diagnostics/device-doctor';
 

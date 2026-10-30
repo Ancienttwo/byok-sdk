@@ -1,3 +1,4 @@
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources';
 import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
 import type { RuntimeTaskInput } from '../../types';
@@ -92,6 +93,8 @@ export interface PiAdapterOptions {
   agentExtensionPaths?: readonly string[];
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
+  /** The environment Pi and its MCP servers get (#1095). Default: the login-shell snapshot. */
+  runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** Opt-in ordinary, lease-bound durable worker. */
   durablePi?: boolean;
   /** Override bin resolution — tests substitute the fake-pi fixture script. */
@@ -230,8 +233,10 @@ export class PiAdapter implements RuntimeAdapter {
   });
 
   private readonly agentResources: PiAgentResources;
+  private readonly environmentPolicy: RuntimeEnvironmentPolicy;
 
   constructor(private readonly options: PiAdapterOptions = {}) {
+    this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'PiAdapterOptions.runtimeEnvironment');
     this.agentResources = parsePiAgentResources({
       userContext: options.agentUserContext === undefined ? 'inherit' : options.agentUserContext,
       skillPaths: options.agentSkillPaths === undefined ? [] : options.agentSkillPaths,
@@ -246,8 +251,13 @@ export class PiAdapter implements RuntimeAdapter {
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
 
+  runtimeEnvironment(): Promise<Record<string, string>> {
+    return buildRuntimeEnvironment(this.environmentPolicy);
+  }
+
   async detect(): Promise<RuntimeDetectResult> {
     try {
+      const env = await this.runtimeEnvironment();
       const host = this.options.sdkHelperHost;
       if (host !== undefined) {
         // The product bundles Pi at the SDK pin; there is no package to probe.
@@ -256,20 +266,20 @@ export class PiAdapter implements RuntimeAdapter {
         const version = readClientPiRuntimePin();
         if (version === undefined) return { kind: 'not-found' };
         try {
-          locateBundledPiAssets({ piPackageDir: process.env.PI_PACKAGE_DIR, executable: host.executable ?? process.execPath, ...(host.entry === undefined ? {} : { entry: host.entry }) });
+          locateBundledPiAssets({ piPackageDir: env.PI_PACKAGE_DIR, executable: host.executable ?? process.execPath, ...(host.entry === undefined ? {} : { entry: host.entry }) });
         } catch {
           return { kind: 'not-found' };
         }
-        const authPresent = await probePiAuthPresent(process.env);
+        const authPresent = await probePiAuthPresent(env);
         return { kind: 'available', version, authPresent };
       }
       const bin = this.resolveBin();
       const invocation = piInvocation(bin);
-      const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS,
+      const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env,
         invocation.entry === undefined ? [] : [invocation.entry]);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim() || probe.stderr.trim();
-      const authPresent = await probePiAuthPresent(process.env);
+      const authPresent = await probePiAuthPresent(env);
       return { kind: 'available', version, authPresent };
     } catch (error) {
       return classifyDetectError(error);

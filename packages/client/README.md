@@ -136,7 +136,10 @@ await copyPiRuntimeAssets({ outDir: 'release/pi-assets', form: 'interpreter+bund
 The helper requires the exact pinned pi package on the build machine and an
 empty `outDir`. It verifies the pi export resources and the SDK todo locale
 assets, and fails closed on a mismatch. Ship `outDir` with the product. Set
-`PI_PACKAGE_DIR` to it when the product starts. A Bun-compiled executable may
+`PI_PACKAGE_DIR` to it when the product starts, and pass the name explicitly
+through `DaemonConfig.runtimeEnvironment.pass` or
+`PiAdapterOptions.runtimeEnvironment`: detection and every launch read the
+asset root from the runtime environment. A Bun-compiled executable may
 use its own directory as the asset root instead: run the helper on that empty
 directory before you write the executable into it. Without the asset root, `detect()` reports pi `not-found` and a pi
 launch is refused with `pi_bundled_assets_unavailable`. Pi reads its photon
@@ -240,9 +243,15 @@ absolute keychain file. The client projects it as the launcher's reserved
 or widen the Pi child environment.
 
 Claude Code and Codex remain user-installed runtimes and use their own login
-state. Each runtime child inherits the daemon environment, provider API keys
-included. The daemon removes only `CLAUDECODE` and its own `BYOK_*` names.
-Loader names such as `NODE_OPTIONS` reach the child as the user set them.
+state. Each runtime child gets the user's login-shell environment, provider
+API keys included, as a new terminal would (#1095). The daemon captures it
+once per process and never from its own `process.env`, so a variable the Host
+sets reaches a runtime only when `runtimeEnvironment.pass` names it. The
+daemon removes `CLAUDECODE` and its own `BYOK_*` names, and adds `127.0.0.1`
+and `localhost` to `NO_PROXY`. Loader names such as `NODE_OPTIONS` reach the
+child as the user's shell set them. A failed capture refuses the runtimes with
+`runtime_environment_unavailable:<code>` instead of starting them in another
+environment.
 Claude loads the user's own MCP configuration,
 settings, deny rules and hooks. The SDK adds its task servers with
 `--mcp-config`. Ordinary Pi loads the user's own extensions and skills from
@@ -1103,12 +1112,33 @@ compatibility or a bundled product's complete distribution.
 
 ### Direct adapter environments
 
-Hosts that use `@byok-sdk/client/adapters` can import `buildRuntimeEnv` from that
-entry. Pass `buildRuntimeEnv({ ambient: process.env })` as the operation's `env`.
-It copies the environment and removes `CLAUDECODE` and `BYOK_*`. It retains
-loader variables such as `NODE_OPTIONS`, `LD_*`, and `DYLD_*`, as required by
-ADR-037. Direct adapters use the environment supplied by the Host. The builder
-uses case-insensitive names on Windows.
+Every adapter takes a `runtimeEnvironment` policy, the same type as
+`DaemonConfig.runtimeEnvironment`, and builds the environment of its children
+itself (`RuntimeAdapter.runtimeEnvironment()`), so a Host that constructs an
+adapter gets the same environment as `createDaemon`:
+
+```ts
+new ClaudeAdapter({ runtimeEnvironment: { pass: ['ACME_TOKEN_FILE'] } });
+new CodexAdapter({ runtimeEnvironment: { base: 'allowlist', allow: ['CODEX_HOME'] } });
+```
+
+- `login-shell` (default): the user's login-shell snapshot. On Windows, which
+  has no login shell, the platform baseline names of the live session.
+- `allowlist`: the platform baseline plus `allow`, from the live environment;
+  it takes no snapshot.
+- `pass`: names read from the live `process.env` each time an environment is
+  built, for variables the Host sets after it starts.
+
+`CLAUDECODE` and `BYOK_*` are always removed; a policy that names them is
+rejected. Claude also drops the shell's `ANTHROPIC_*`, Bedrock/Vertex switches
+and OAuth token when `pass` supplies `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`
+or `ANTHROPIC_AUTH_TOKEN`. Loader variables such as `NODE_OPTIONS`, `LD_*`, and
+`DYLD_*` are kept, as required by ADR-037. A custom adapter implements
+`runtimeEnvironment()` with the exported `buildRuntimeEnvironment(policy)`.
+Names are case-insensitive on Windows.
+
+`createDaemonWithAdapters` rejects `DaemonConfig.runtimeEnvironment`: set the
+policy on each injected adapter.
 
 `codexSandbox` belongs to `createDaemon`, which builds the default adapters.
 `createDaemonWithAdapters` rejects that key. Set `sandbox` on the injected

@@ -574,6 +574,47 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "type": "string"
       }
     },
+    "runtimeEnvironment": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "base": {
+              "const": "login-shell"
+            },
+            "pass": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "base": {
+              "const": "allowlist"
+            },
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pass": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "base"
+          ]
+        }
+      ]
+    },
     "durablePi": {
       "type": "boolean"
     },

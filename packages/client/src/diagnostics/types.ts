@@ -2,7 +2,7 @@ import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../type
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import type { ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentRecord } from '../login-shell-environment';
 
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 

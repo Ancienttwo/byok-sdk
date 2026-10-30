@@ -15,7 +15,7 @@ describe('memory-only preparation through the real descriptor process and compil
     const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     const assembler = createPreparedToolSurfaceAssembler({
       toolsetRegistry: new McpToolsetRegistry({}),
-      runtimeEnv: () => ({ PATH: '/usr/bin:/bin' }),
+      runtimeEnv: async () => ({ PATH: '/usr/bin:/bin' }),
       agentMemoryDescribe: { command: process.execPath, args: [installPath, '__byok_sdk_helper', 'agent-memory-describe'] },
       memoryAvailable: () => true,
     });

@@ -2,7 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
 import { parseDaemonLifecycle, type DaemonHaltReason, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
-import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types';
 import type { RuntimeObservation } from '../runtime-detection';
 import type { TaskCounts, DerivedTaskInfo } from './tasks-view';
@@ -221,7 +221,7 @@ export function formatTaskListLines(tasks: readonly (DaemonTaskInfo | DerivedTas
 export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): string[] {
   if (runtimes.length === 0) return ['(no runtimes configured — check runtimeAllowlist)'];
   return runtimes.map((r) => {
-    if (!r.present) return `${r.id}: ${r.outcome}${r.outcome === 'refused' ? `:${r.reason}` : ''}`;
+    if (!r.present) return `${r.id}: ${r.outcome}${r.outcome === 'refused' ? `:${refusalText(r)}` : ''}`;
     const caps: string[] = [];
     if (r.steer) caps.push('steer');
     if (r.resume) caps.push('resume');
@@ -255,13 +255,15 @@ export interface StatusView {
   runtimesDetectedAt?: string;
 }
 
-/** Issue #392: `login-shell shell=zsh durationMs=530`, `inherited`, or `unavailable code=timeout` — closed values and a shell basename only. */
+/** Issue #392: `login-shell shell=zsh durationMs=530`, `inherited`, `windows-session` or `unavailable code=timeout` — closed values and a shell basename only. */
 export function formatServiceEnvironment(status: ServiceEnvironmentStatus): string {
   switch (status.source) {
     case 'login-shell':
       return `login-shell shell=${status.shell} durationMs=${status.durationMs}`;
     case 'inherited':
       return 'inherited';
+    case 'windows-session':
+      return 'windows-session';
     case 'unavailable':
       return `unavailable code=${status.code}`;
   }
@@ -300,8 +302,13 @@ export function formatStatusLines(view: StatusView): string[] {
   return lines;
 }
 
+/** `runtime_environment_unavailable:timeout` carries the capture failure code (#1095). */
+function refusalText(runtime: RuntimeObservation): string {
+  return runtime.code === undefined ? `${runtime.reason}` : `${runtime.reason}:${runtime.code}`;
+}
+
 function formatRuntimeObservations(runtimes: readonly RuntimeObservation[]): string {
-  return runtimes.map(runtime => `${runtime.id}=${runtime.outcome === 'refused' ? `refused:${runtime.reason}` : runtime.outcome}`).join(' ') || '(none)';
+  return runtimes.map(runtime => `${runtime.id}=${runtime.outcome === 'refused' ? `refused:${refusalText(runtime)}` : runtime.outcome}`).join(' ') || '(none)';
 }
 
 /**

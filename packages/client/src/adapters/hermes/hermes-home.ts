@@ -47,7 +47,7 @@ export function assertHermesModelSelection(value: HermesModelSelection, label: s
     if (url.username !== '' || url.password !== '') throw new TypeError(`${label}.baseUrl must not carry credentials`);
   }
   if (value.keyEnv !== undefined && (typeof value.keyEnv !== 'string' || !ENV_NAME.test(value.keyEnv))) throw new TypeError(`${label}.keyEnv must be an environment variable name`);
-  // The runtime environment drops BYOK_* (`buildRuntimeEnv`) and the adapter drops HERMES_*: such a key never reaches Hermes.
+  // The runtime environment drops BYOK_* (`buildRuntimeEnvironment`) and the adapter drops HERMES_*: such a key never reaches Hermes.
   if (value.keyEnv !== undefined && /^(BYOK|HERMES)_/i.test(value.keyEnv)) throw new TypeError(`${label}.keyEnv must not start with BYOK_ or HERMES_`);
 }
 

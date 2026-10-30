@@ -6,7 +6,7 @@ import { DeviceStore, type DeviceRecord } from '../store';
 import { resolveStorageConfig } from '../retention/config';
 import { ScratchRoot } from '../retention/scratch';
 import { StoragePressure } from '../retention/pressure';
-import { buildRuntimeEnv } from '../environment';
+import type { RuntimeAdapter } from '../../types';
 import { createPreparedToolSurfaceAssembler } from '../prepared-tool-surface';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
 import { LocalTeamWorkspace } from '../team-workspace';
@@ -24,7 +24,7 @@ import type { DaemonConfigScope } from './config';
  * prepared tool surface, the team workspace, the device store and the member
  * records.
  */
-export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope, 'config' | 'overrides' | 'agentMemoryMcpEnabled' | 'resolveAgentMemoryFilesystemHelperBin' | 'toolsetRegistry' | 'agentMemoryDescribeBin'>) {
+export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope, 'config' | 'overrides' | 'agentMemoryMcpEnabled' | 'resolveAgentMemoryFilesystemHelperBin' | 'toolsetRegistry' | 'agentMemoryDescribeBin'> & { adapters: readonly RuntimeAdapter[] }) {
   const { config, overrides, agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, toolsetRegistry, agentMemoryDescribeBin } = input;
   // Resolved exactly once so the admission gate and the status readback below
   // can never report different numbers.
@@ -57,14 +57,15 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
    * `InputPreparationService.prepare`, so a preparation's fingerprints and an
    * offer's admission bind the same facts.
    *
-   * The runtime environment is resolved PER CALL, exactly as the offer path
-   * builds it — a value captured at construction would miss a later change.
+   * The runtime environment is the Pi adapter's, resolved PER CALL exactly
+   * as the offer path builds it — a value captured at construction would
+   * miss a later change.
    */
-  const preparationRuntimeEnv = () => buildRuntimeEnv({ ambient: process.env });
+  const piAdapter = input.adapters.find((adapter) => adapter.descriptor.id === 'pi');
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
     memoryAvailable: () => agentMemoryMcpEnabled && isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
     toolsetRegistry,
-    runtimeEnv: preparationRuntimeEnv,
+    ...(piAdapter === undefined ? {} : { runtimeEnv: () => piAdapter.runtimeEnvironment() }),
     ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),
   });
 

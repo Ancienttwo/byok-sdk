@@ -166,7 +166,7 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   const registry = new McpToolsetRegistry({ 's2.echo.v1': { mcpServers: { fixture: server } } });
   const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
   const runtimeIdentity = `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}+${compiler.runtime.closureDigest}.compiler-${compiler.runtime.compilerVersion}`;
-  const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: registry, runtimeEnv: () => env })
+  const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: registry, runtimeEnv: async () => env })
     .assemble({ agentMemory: 'none', requiredToolsets: ['s2.echo.v1'], runtimeIdentity });
   if (!assembled.ok) throw new Error(`fixture assembly failed: ${assembled.detail}`);
   const surface = assembled.surface;

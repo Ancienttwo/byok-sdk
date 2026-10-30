@@ -25,9 +25,9 @@ import {
   type Session,
 } from '../../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure';
-import { buildRuntimeEnv } from '../../daemon/environment';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
-import { resolveRuntimeInvocation, type RuntimeInvocation } from '../runtime-invocation';
+import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
 import { createClaudeControlChannel } from './control-channel';
 import { ClaudeToolAuthorizationBridge } from './tool-authorization';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
@@ -92,6 +92,8 @@ async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | 
 export interface ClaudeAdapterOptions {
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
+  /** The environment Claude and its MCP servers get (#1095). Default: the login-shell snapshot. */
+  runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** Override bin resolution — tests substitute the fake-claude fixture script. */
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
@@ -137,9 +139,21 @@ export interface ClaudeAdapterOptions {
  * `auto | all` mode (the PreToolUse gate), never by a second native prompt.
  * Remote boolean approvals remain unsupported, as does mid-turn steering.
  */
+/**
+ * A provider the Host passes (`pass`) replaces whatever provider the user's
+ * shell selects: the inherited Bedrock/Vertex switches, OAuth token and other
+ * `ANTHROPIC_*` settings would otherwise override or mix with it.
+ */
+const CLAUDE_PROVIDER_NAMES = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+const claudeEnvironmentConflicts: RuntimeEnvironmentConflictRule = (passed) =>
+  CLAUDE_PROVIDER_NAMES.some((name) => passed.has(name))
+    ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_OAUTH_TOKEN', 'AWS_BEARER_TOKEN_BEDROCK']
+    : [];
+
 export class ClaudeAdapter implements RuntimeAdapter {
   readonly descriptor;
   private readonly nativeOptions?: NativeInteractionHostOptions;
+  private readonly environmentPolicy: RuntimeEnvironmentPolicy;
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
     const timeout = options.interruptTimeoutMs ?? 1000;
@@ -149,6 +163,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     if (options.agentSessionPersistence !== undefined && options.agentSessionPersistence !== 'enabled' && options.agentSessionPersistence !== 'disabled')
       throw new TypeError('ClaudeAdapterOptions.agentSessionPersistence must be enabled or disabled');
     this.nativeOptions = options.nativeInteractions === undefined ? undefined : snapshotNativeInteractionHostOptions(options.nativeInteractions);
+    this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'ClaudeAdapterOptions.runtimeEnvironment');
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
       supportsDispatchSelection: true,
@@ -171,13 +186,18 @@ export class ClaudeAdapter implements RuntimeAdapter {
     });
   }
 
+  runtimeEnvironment(): Promise<Record<string, string>> {
+    return buildRuntimeEnvironment(this.environmentPolicy, claudeEnvironmentConflicts);
+  }
+
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const invocation = resolveRuntimeInvocation(this.resolveBin().command);
-      const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, invocation.args);
+      const env = await this.runtimeEnvironment();
+      const invocation = resolveRuntimeInvocation(this.resolveBin().command, runtimeInvocationHost(env));
+      const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim();
-      const authPresent = await this.probeAuthPresent(invocation);
+      const authPresent = await this.probeAuthPresent(invocation, env);
       return { kind: 'available', version, authPresent };
     } catch (error) {
       return classifyDetectError(error);
@@ -199,7 +219,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     }
     let invocation: RuntimeInvocation;
     try {
-      invocation = resolveRuntimeInvocation(bin.command);
+      invocation = resolveRuntimeInvocation(bin.command, runtimeInvocationHost(await this.runtimeEnvironment()));
     } catch (error) {
       // As Codex: the reason names the detect kind only, never a local path.
       return { kind: 'reject', reason: `claude installation refused: ${classifyDetectError(error).kind}`, retryable: false };
@@ -513,11 +533,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
    * `false` — this never affects `present`, which is solely about whether
    * `--version` itself succeeded.
    */
-  private async probeAuthPresent(invocation: RuntimeInvocation): Promise<boolean> {
+  private async probeAuthPresent(invocation: RuntimeInvocation, env: Record<string, string>): Promise<boolean> {
     try {
       const { stdout } = await execFileAsync(invocation.command, [...invocation.args, 'auth', 'status', '--json'], {
         timeout: DETECT_TIMEOUT_MS,
-        env: buildRuntimeEnv({ ambient: process.env }),
+        env,
       });
       const parsed = JSON.parse(stdout) as { loggedIn?: unknown };
       return parsed.loggedIn === true;

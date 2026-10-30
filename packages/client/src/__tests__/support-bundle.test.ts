@@ -1,3 +1,4 @@
+import { testRuntimeEnv } from './fixtures/runtime-env';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { execFileSync } from 'node:child_process';
@@ -118,6 +119,7 @@ describe('support bundle privacy and bounds', () => {
   it('projects runtime identifiers and version output through a closed bounded shape', async () => {
     const dir = await tempDir();
     const runtime: RuntimeAdapter = {
+      runtimeEnvironment: async () => testRuntimeEnv(),
       descriptor: freezeRuntimeAdapterDescriptor({
         id: 'SENTINEL_RUNTIME_ID',
         supportsDispatchSelection: false,

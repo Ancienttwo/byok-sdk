@@ -50,8 +50,8 @@ The trajectory evidence row has its own Pi evidence; see
 
 An Agent home sets the execution's working directory and projected persona; it
 is not a promise that the runtime reads only that directory. The standard
-[environment builder](../packages/client/src/daemon/environment.ts) inherits the
-Host process environment except `CLAUDECODE` and `BYOK_*`. Paths such as `HOME`,
+[environment builder](../packages/client/src/runtime/environment.ts) gives it the
+user's login-shell environment except `CLAUDECODE` and `BYOK_*` (#1095). Paths such as `HOME`,
 `XDG_*`, `GROK_HOME` and `CODEX_HOME` are not reset by that builder. Task-scoped
 MCP configuration, a fresh native session, folder trust and filesystem permission
 modes address different concerns; none alone establishes persona isolation.

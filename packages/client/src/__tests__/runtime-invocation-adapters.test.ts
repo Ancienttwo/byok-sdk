@@ -24,6 +24,7 @@ vi.mock('../adapters/runtime-invocation', () => ({
     if (runtime === undefined) throw new Error(`unexpected command ${command}`);
     return { command: process.execPath, args: [fixtures[runtime]] };
   }),
+  runtimeInvocationHost: vi.fn(() => ({})),
 }));
 
 const sessions: Session[] = [];

@@ -26,7 +26,7 @@ const MODEL = {
 };
 
 async function surfaceFor(terminalProjection: TerminalProjectionSelection | undefined) {
-  const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: new McpToolsetRegistry({}), runtimeEnv: () => ({}) })
+  const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: new McpToolsetRegistry({}), runtimeEnv: async () => ({}) })
     .assemble({ agentMemory: 'none', requiredToolsets: [], runtimeIdentity, ...(terminalProjection === undefined ? {} : { terminalProjection }) });
   if (!assembled.ok) throw new Error(`${assembled.code}: ${assembled.detail}`);
   const compiled = await compiler.compile({

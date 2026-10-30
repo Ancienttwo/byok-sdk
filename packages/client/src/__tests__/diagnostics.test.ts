@@ -1,3 +1,4 @@
+import { testRuntimeEnv } from './fixtures/runtime-env';
 import { testAgentHomeConfig } from './fixtures/test-agent';
 import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
 import { createHash } from 'node:crypto';
@@ -112,7 +113,7 @@ async function unusedLoopbackPort(): Promise<number> {
 describe('diagnostics collector', () => {
   it('#392: old or malformed online observations remain unknown and never trigger local probes', async () => {
     const dir = await tempDir();
-    const adapter = { descriptor: freezeRuntimeAdapterDescriptor({ id: 'private', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false } }), detect: vi.fn(), prepare: vi.fn() };
+    const adapter = { descriptor: freezeRuntimeAdapterDescriptor({ id: 'private', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false } }), detect: vi.fn(), prepare: vi.fn(), runtimeEnvironment: vi.fn() };
     for (const overrides of [
       { runtimes: undefined, environment: undefined },
       { runtimes: [{ id: 'pi' }], environment: { source: 'login-shell', shell: '/private/secret', durationMs: 1 } },
@@ -400,6 +401,7 @@ describe('diagnostics collector', () => {
     const dir = await tempDir();
     await fs.writeFile(path.join(dir, 'device.json'), 'x'.repeat(70 * 1024));
     const hanging: RuntimeAdapter = {
+      runtimeEnvironment: async () => testRuntimeEnv(),
       descriptor: freezeRuntimeAdapterDescriptor({
         id: 'hanging',
         supportsDispatchSelection: false,

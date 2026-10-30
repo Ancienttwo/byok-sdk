@@ -918,6 +918,30 @@ lifetime.
 
 ## Runtime operation authority
 
+### Runtime environment (#1095)
+
+`RuntimeAdapter.runtimeEnvironment()` is the one source of the environment every
+child process of a runtime's tasks receives: the runtime CLI, its version and
+login probes, and the MCP servers the daemon probes for it. Each SDK adapter
+builds it under its `runtimeEnvironment` constructor option; `createDaemon`
+passes `DaemonConfig.runtimeEnvironment` to the adapters it builds, and
+`createDaemonWithAdapters` rejects that field.
+
+- `login-shell` (default): the user's login-shell snapshot, captured once per
+  process from a closed seed and a fixed `PATH`, never from the daemon's
+  `process.env`. A failed capture fails closed: `runtimeEnvironment()` rejects
+  with `RuntimeEnvironmentUnavailableError`, detection reports `refused` with
+  `runtime_environment_unavailable` and the capture `code`, and an offer is
+  declined before claim. win32 has no login shell; its base is the platform
+  baseline names of the live session (`windows-session`).
+- `allowlist`: the platform baseline plus `allow`, from the live environment.
+- `pass`: names read from the live `process.env` at every build.
+
+`CLAUDECODE` and `BYOK_*` are always removed, and `NO_PROXY`/`no_proxy` always
+include `127.0.0.1` and `localhost`. An adapter's conflict rule removes base
+names when `pass` supplies its trigger (Claude: a passed provider drops the
+shell's `ANTHROPIC_*`, Bedrock/Vertex switches and OAuth token).
+
 ### Local runtime probe observation
 
 `RuntimeDetectResult` has one required `kind`: `available`, `not-found`,
@@ -929,7 +953,10 @@ metadata are rejected. There is no compatibility translation.
 `refused` requires exactly `kind` and `reason`. Its reasons are
 `app_server_unavailable` (Codex has no `app-server`), `acp_unavailable`
 (an ACP runtime such as Grok has no stdio ACP mode) and `platform_unsupported`
-(the host `process.platform` is not in the descriptor's `platforms`). No other arm accepts `reason`; arbitrary error text
+(the host `process.platform` is not in the descriptor's `platforms`). The one
+exception is `runtime_environment_unavailable`, which carries exactly one more
+field, `code`: the login-shell capture failure code (see Runtime environment
+below). No other arm accepts `reason`; arbitrary error text
 is never parsed into a reason. Daemon registration, task selection and explicit local
 `runtimes`/offline doctor call `observeRuntimeDetection`, which refuses an
 unsupported platform before it calls `detect(signal?)` on the actual adapter.
@@ -2134,9 +2161,10 @@ entries first. Same-uid code can put such a file in the session cwd. The SDK
 does not guard this path. In a YOLO session the agent already has same-uid
 write access.
 
-The daemon does not deny loader environment variables. `buildRuntimeEnv`
-removes only `CLAUDECODE` and the `BYOK_*` control names. Values such as
-`NODE_OPTIONS`, `LD_*` and `DYLD_*` reach the child as the user set them.
+The daemon does not deny loader environment variables. The runtime
+environment (`buildRuntimeEnvironment`, #1095) is the user's login-shell
+snapshot minus `CLAUDECODE` and the `BYOK_*` control names. Values such as
+`NODE_OPTIONS`, `LD_*` and `DYLD_*` reach the child as the user's shell set them.
 
 The SDK does not attest tool or runtime executables. There is no install
 record, no implementation identity and no pre-spawn measurement.
@@ -2179,8 +2207,10 @@ behind an explicit helper dispatch.
 A single-file product sets `sdkHelperHost: { mode: 'self-executable' }`. Every
 Pi launch then re-enters the product executable as
 `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`, and
-the product names its Pi asset root in `PI_PACKAGE_DIR` (a Bun-compiled
-executable may keep the assets beside itself).
+the product names its Pi asset root in `PI_PACKAGE_DIR` and passes that name
+explicitly through `DaemonConfig.runtimeEnvironment.pass` or
+`PiAdapterOptions.runtimeEnvironment` (a Bun-compiled executable may keep the
+assets beside itself).
 
 This is the one supported way to ship official pi in a host download. The
 product bundles the SDK root, so official pi from the build machine install is

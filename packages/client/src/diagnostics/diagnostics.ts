@@ -744,7 +744,7 @@ export async function collectDiagnostics(
   }
 
   if (control.status === 'offline') {
-    observations = await probeRuntimes(options.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist), { timeoutMs: options.runtimeProbeTimeoutMs });
+    observations = await probeRuntimes(options.adapters ?? defaultRuntimeAdapters(config), { timeoutMs: options.runtimeProbeTimeoutMs });
     runtimeSource = 'local-shell';
     environment = lastEnvironment ?? { status: 'unknown' };
   }
