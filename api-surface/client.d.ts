@@ -12667,6 +12667,15 @@ export interface ServiceInstallationRecord {
 export declare function serviceInstallationRecordPath(storeDir: string): string;
 /** The installation record of a store, or `undefined` when the service is not installed from payloads. */
 export declare function readServiceInstallationRecord(storeDir: string): Promise<ServiceInstallationRecord | undefined>;
+/**
+ * @internal The running version and the last receipt of an install root,
+ * read from disk only: no service definition, unit or service manager is
+ * involved, so a status read needs none of their inputs (WinSW paths).
+ */
+export declare function readServiceInstallationState(installRoot: string): Promise<{
+    current: string | undefined;
+    receipt: ServiceUpgradeReceipt | undefined;
+}>;
 export declare function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation;
 /**
  * @internal The installation over a given lifecycle; tests drive it with a
