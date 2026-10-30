@@ -419,6 +419,7 @@ export function selectImpact(paths, context = {}) {
   const dependencyDirs = new Set();
   const families = new Set();
   let scripts = false;
+  let fullMatrixReason;
   for (const path of paths) {
     if (typeof path !== 'string' || !path || /[\\\x00-\x1f\x7f]/.test(path)
       || path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..')) requireMapping(path);
@@ -446,7 +447,9 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/protocol/src/__tests__/golden/v3.releases.json') { leafDirs.add('packages/protocol'); continue; }
     if (path === 'package.json' || path === 'bun.lock' || /^(?:packages|examples)\/[^/]+\/package\.json$/.test(path)) {
       // A reviewed dependency move also runs the suites of the workspaces that declare it.
-      for (const dir of verifyReviewedContent(path, context)) { dirs.add(dir); dependencyDirs.add(dir); }
+      const impact = verifyReviewedContent(path, context);
+      for (const dir of impact.dirs) { dirs.add(dir); dependencyDirs.add(dir); }
+      if (impact.fullMatrixReason) fullMatrixReason = impact.fullMatrixReason;
       if (path === 'package.json') { scripts = true; if (dependencyDirs.size) families.add('npm-release-pack'); continue; }
       if (path === 'bun.lock') { families.add('npm-release-pack'); continue; }
       const dir = path.slice(0, -'/package.json'.length);
@@ -703,11 +706,12 @@ export function selectImpact(paths, context = {}) {
   // #794 D3: so does its Worker composition, which needs that Postgres and wrangler.
   if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance') || dirs.has('examples/hosted-bot-collaboration')
     || dirs.has('examples/hosted-bot-collaboration-worker')) families.add('dataplane');
+  if (fullMatrixReason) for (const family of knownFamilies) families.add(family);
   const checks = scriptChecksForPaths([...files]);
   scripts ||= checks.tests.length > 0;
   for (const family of checks.families) families.add(family);
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
-    reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
+    reason: fullMatrixReason ?? (dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only') };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
