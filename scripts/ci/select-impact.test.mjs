@@ -320,7 +320,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/packaging-plugin-smoke.mjs',
     'scripts/release/pi-launcher-smoke.mjs',
-    'scripts/release/publish-recovery.test.mjs', 'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/registry-readback.mjs',
+    'scripts/release/publish-recovery.test.mjs', 'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
     'scripts/release/upgrade-manifest/snapshot.mjs',
   ]);
@@ -346,6 +346,8 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   });
   assert.deepEqual(selectImpact(['scripts/release/pack-and-smoke.mjs']).families, sorted(runners));
   assert.ok(runners.includes('npm-release-pack'));
+  // Its store-path guard runs inside those same jobs.
+  assert.deepEqual(selectImpact(['scripts/release/published-store-paths.mjs']).families, sorted(runners));
 });
 
 // #1102: the upgrade-manifest data files run the root script checks; the shipped manifest also packs.
@@ -560,6 +562,15 @@ test('the sealed client build config retains the ordinary client build scope', (
   assert.deepEqual(sealed.dirs, ordinary.dirs);
   assert.deepEqual(sealed.families, ordinary.families);
   assert.equal(sealed.reason, ordinary.reason);
+});
+
+test('the todo build config selects the client build that runs it', () => {
+  // check-adapters-entry.mjs --build-todo runs tsup.todo.config.ts in the client build.
+  const runner = selectImpact(['packages/client/scripts/check-adapters-entry.mjs']);
+  const todo = selectImpact(['packages/client/tsup.todo.config.ts']);
+  assert.deepEqual(todo, { ...runner, files: todo.files });
+  assert.ok(todo.dirs.includes('packages/client'));
+  assert.ok(todo.families.includes('npm-release-pack'));
 });
 
 test('reviewed M package build configs keep owner consumers and packed artifacts, not adjacent unknown configs', () => {
