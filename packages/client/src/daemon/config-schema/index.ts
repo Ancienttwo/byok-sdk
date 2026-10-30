@@ -5,4 +5,4 @@ export type { DaemonConfigIssue, DaemonConfigIssueCode, DaemonConfigSource, Daem
 export { checkDaemonConfig } from './check';
 export type { DaemonConfigCheck, DaemonConfigCheckOptions } from './check';
 export { DaemonConfigInvalidError } from './errors';
-export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonMemoryHelperResolution } from './effective';
+export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonEffectiveToolAuthorization, DaemonMemoryHelperResolution } from './effective';

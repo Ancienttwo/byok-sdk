@@ -22,6 +22,11 @@
 //   that requires such a member, is not JSON-expressible: the property is
 //   `x-byok-surface: "embedded-only"` with `not: {}`, so a config file that
 //   sets it fails any JSON Schema validator.
+// - A union of a function and one JSON-expressible object type (e.g.
+//   `toolAuthorization`) is the object's schema plus
+//   `x-byok-embeddedAlternative: "function"`: a config file sets the object
+//   form, and an embedded Host may pass the function instead. Any other union
+//   of embedded-only and JSON-expressible members is an error.
 // - `localAgentRelease` is `x-byok-surface: "distribution-owned"`: the
 //   distribution (the `byok-agent` bin) supplies it, a config file must not.
 // - Objects are open in the schema (no `additionalProperties: false`): an
@@ -115,14 +120,21 @@ class SchemaBuilder {
     values.sort((a, b) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0));
     if (values.length === 1) options.push({ const: values[0] });
     else if (values.length > 1) options.push({ enum: values });
-    let embedded = 0;
+    const embedded = [];
     for (const member of rest) {
       const result = this.typeSchema(member);
-      if (result.embeddedOnly) embedded += 1;
+      if (result.embeddedOnly) embedded.push(member);
       else options.push(result.schema);
     }
-    if (options.length === 0) return embedded > 0 ? embeddedOnly() : { schema: {}, embeddedOnly: false };
-    return data(options.length === 1 ? options[0] : { anyOf: options });
+    if (options.length === 0) return embedded.length > 0 ? embeddedOnly() : { schema: {}, embeddedOnly: false };
+    const schema = options.length === 1 ? options[0] : { anyOf: options };
+    if (embedded.length === 0) return data(schema);
+    const functions = embedded.filter((member) => this.checker.getSignaturesOfType(member, 0).length > 0);
+    if (functions.length !== embedded.length || schema.type !== 'object') {
+      const union = present.map((member) => this.checker.typeToString(member)).join(' | ');
+      throw new Error(`unsupported union of embedded-only and JSON members: ${union}; only a function with one object type is supported`);
+    }
+    return data({ ...schema, 'x-byok-embeddedAlternative': 'function' });
   }
 
   objectResult(type) {

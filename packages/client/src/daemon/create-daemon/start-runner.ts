@@ -20,6 +20,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     observer, approvalRegistry, storeDir,
     localAgentRelease, overrides, terminalCommits, agentMemoryMcpBin, agentMemoryDescribeBin,
     resolveAgentMemoryFilesystemHelperBin, taskContextCapabilityAvailable, waitForHostTaskContext,
+    toolAuthorizationResolver,
   } = daemonScope;
   const {
     record, sendEnvelope, withReplyTransition, activeJournal, journalIdentity, recordReplyState,
@@ -146,7 +147,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     onApprovalDispatched: (taskId, approvalId) => {
       observer.noteApprovalDispatched(taskId, approvalId);
     },
-    ...(config.toolAuthorization === undefined ? {} : { toolAuthorization: config.toolAuthorization }),
+    ...(toolAuthorizationResolver === undefined ? {} : { toolAuthorization: toolAuthorizationResolver }),
     onToolReminder: (reminder) => observer.noteToolReminder(reminder),
     // M4 (additive-minor, `task.approval_resolved`): read fresh at call
     // time via `connection` (assigned just below — safe by the time this

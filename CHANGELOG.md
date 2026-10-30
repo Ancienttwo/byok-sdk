@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Add (client; #1094)** — a `byok-agent` config file sets runtime isolation
+  and tool authorization without the embedded path. `DaemonConfig.runtimes`
+  carries the isolation options of the adapters `createDaemon` builds
+  (`pi.agentUserContext`, `claude.agentUserContext`,
+  `claude.agentSessionPersistence`, `codex.agentUserMcpServers`);
+  `createDaemonWithAdapters` rejects it. `DaemonConfig.toolAuthorization` also
+  takes a static policy `{ default, byRuntime }` (`StaticToolAuthorization`),
+  the only form a config file can set; a function stays embedded-only. Daemon
+  construction and `checkDaemonConfig` refuse a `byRuntime` key that names no
+  runtime of the daemon and static `auto` for a runtime without
+  `toolAuthorizationAuto` (Codex: set it to `all`). The effective report adds
+  `toolAuthorization.mode: 'static'` with each runtime's mode and shows the
+  configured isolation values; a Host that switches exhaustively on that
+  `mode` must handle `'static'`. The schema marks a field with a function form
+  `x-byok-embeddedAlternative: "function"`. Nothing changes for a Host that
+  does not set these fields.
+
 - **Add (client; #1104)** — single-file Host packaging. `@byok-sdk/client/packaging`
   exports `byokSdkPackaging`, an esbuild plugin (esbuild stays the Host's
   dependency) for single-file ESM, single-file CommonJS and Node SEA bundles. It
