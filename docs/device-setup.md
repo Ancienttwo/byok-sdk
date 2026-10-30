@@ -342,6 +342,10 @@ rollback is possible after it.
 refuses with `upgrade_pending` until `byok-agent upgrade recover` restores its
 old version and snapshot.
 
+Upgrade, rollback, recover, install and uninstall run only for the store's
+recorded lifecycle owner: another owner gets `lifecycle_owner_conflict`, and
+nothing changes.
+
 An embedded Host uses the same implementation, with its own lifecycle owner:
 
 ```ts

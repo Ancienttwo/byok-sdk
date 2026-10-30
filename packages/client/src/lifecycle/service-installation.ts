@@ -8,8 +8,9 @@ import type { ControlStatusResult } from '../daemon/control-protocol';
 import { assertDaemonStoreQuiescent, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { acquirePathMutationGate, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
-import { createServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle';
-import { serviceStateDir, withServiceOwnerGate } from './service-unit';
+import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle';
+import type { ManagedServiceLifecycle } from './managed-lifecycle';
+import { serviceStateDir } from './service-unit';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types';
 
 /** The manifest every payload directory carries at its root. */
@@ -92,6 +93,12 @@ export interface ServiceUpgradeReceipt {
   stores?: StoreCompatibility[];
 }
 
+/**
+ * Every mutation (install, upgrade, rollback, recover, uninstall) first
+ * passes the lifecycle's owner check: when another owner is recorded for the
+ * store it throws `ServiceUnitError` `lifecycle_owner_conflict` and changes
+ * nothing.
+ */
 export interface ServiceInstallation {
   /** The service lifecycle whose program runs `<installRoot>/current`. */
   readonly lifecycle: ServiceLifecycle;
@@ -181,11 +188,15 @@ const VERDICTS: ReadonlySet<StoreCompatibilityVerdict> = new Set(['accepted', 'n
 
 export function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation {
   const program = opts.program(path.join(path.resolve(opts.installRoot), 'current'));
-  return serviceInstallationOver(opts, createServiceLifecycle({ ...opts.service, program }, opts.lifecycle));
+  return serviceInstallationOver(opts, createManagedServiceLifecycle({ ...opts.service, program }, opts.lifecycle));
 }
 
-/** @internal The installation over a given lifecycle; tests drive it with a fake service manager. */
-export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecycle: ServiceLifecycle): ServiceInstallation {
+/**
+ * @internal The installation over a given lifecycle; tests drive it with a
+ * fake service manager. Every mutation runs inside `lifecycle.owned()`, so
+ * another recorded lifecycle owner is refused before anything is written.
+ */
+export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecycle: ManagedServiceLifecycle): ServiceInstallation {
   const root = path.resolve(opts.installRoot);
   const storeDir = opts.service.storeDir;
   const versionsDir = path.join(root, 'versions');
@@ -292,13 +303,15 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /** Running it again with the installed payload rewrites the unit and launcher, as `lifecycle.install` does. */
-  async function install(payloadDir: string, installOpts: ServiceInstallOptions = {}): Promise<void> {
-    const installed = await currentVersion();
-    const id = await stage(payloadDir);
-    if (installed !== undefined && installed !== id) throw new ServiceInstallationError('installation_exists');
-    await setPointer('current', id);
-    await writeRecord();
-    await lifecycle.install(installOpts);
+  function install(payloadDir: string, installOpts: ServiceInstallOptions = {}): Promise<void> {
+    return lifecycle.owned(async (held) => {
+      const installed = await currentVersion();
+      const id = await stage(payloadDir);
+      if (installed !== undefined && installed !== id) throw new ServiceInstallationError('installation_exists');
+      await setPointer('current', id);
+      await writeRecord();
+      await held.install(installOpts);
+    });
   }
 
   /**
@@ -454,7 +467,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   function upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt> {
-    return withServiceOwnerGate(async () => {
+    return lifecycle.owned(async () => {
       if ((await readReceipt())?.state === 'pending') throw new ServiceInstallationError('upgrade_pending');
       const from = await currentVersion();
       if (from === undefined) throw new ServiceInstallationError('installation_absent');
@@ -505,7 +518,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   function rollback(): Promise<ServiceUpgradeReceipt> {
-    return withServiceOwnerGate(async () => {
+    return lifecycle.owned(async () => {
       if ((await readReceipt())?.state === 'pending') throw new ServiceInstallationError('upgrade_pending');
       const [current, previous] = [await currentVersion(), await readPointer('previous')];
       if (current === undefined || previous === undefined || !(await exists(path.join(snapshotsDir, current, 'snapshot.json')))) {
@@ -516,20 +529,22 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   function recover(): Promise<ServiceUpgradeReceipt | undefined> {
-    return withServiceOwnerGate(async () => {
+    return lifecycle.owned(async () => {
       const last = await readReceipt();
       if (last?.state !== 'pending') return last;
       return restore(last.from, last.to, last.previous, 'upgrade_pending');
     });
   }
 
-  async function uninstall(): Promise<void> {
-    await lifecycle.uninstall();
-    for (const name of POINTERS) await setPointer(name, undefined);
-    await fs.rm(versionsDir, { recursive: true, force: true });
-    await fs.rm(snapshotsDir, { recursive: true, force: true });
-    await fs.rm(receiptPath, { force: true });
-    await fs.rm(serviceInstallationRecordPath(storeDir), { force: true });
+  function uninstall(): Promise<void> {
+    return lifecycle.owned(async (held) => {
+      await held.uninstall();
+      for (const name of POINTERS) await setPointer(name, undefined);
+      await fs.rm(versionsDir, { recursive: true, force: true });
+      await fs.rm(snapshotsDir, { recursive: true, force: true });
+      await fs.rm(receiptPath, { force: true });
+      await fs.rm(serviceInstallationRecordPath(storeDir), { force: true });
+    });
   }
 
   return { lifecycle, install, upgrade, rollback, recover, uninstall, receipt: readReceipt, currentVersion };

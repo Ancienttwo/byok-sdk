@@ -1,6 +1,7 @@
 import { createLaunchdLifecycle, type LaunchdDeps } from './launchd';
 import { createSystemdLifecycle, type SystemdDeps } from './systemd';
 import { createWinswLifecycle, type WinswDeps } from './winsw';
+import type { ManagedServiceLifecycle } from './managed-lifecycle';
 import type { ServiceDefinition, ServiceLifecycle } from './service-types';
 
 export class UnsupportedServicePlatformError extends Error {
@@ -63,6 +64,11 @@ export interface CreateServiceLifecycleOptions {
  * how it was invoked, bundled or not.
  */
 export function createServiceLifecycle(def: ServiceDefinition, opts: CreateServiceLifecycleOptions = {}): ServiceLifecycle {
+  return createManagedServiceLifecycle(def, opts);
+}
+
+/** @internal `createServiceLifecycle` with the owner gate a service installation runs its steps behind. */
+export function createManagedServiceLifecycle(def: ServiceDefinition, opts: CreateServiceLifecycleOptions = {}): ManagedServiceLifecycle {
   const platform = opts.platform ?? process.platform;
   switch (platform) {
     case 'darwin':

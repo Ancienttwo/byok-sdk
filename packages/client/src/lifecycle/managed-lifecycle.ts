@@ -38,6 +38,22 @@ export interface PlatformUnit {
   preparedArtifactsExact?(): Promise<boolean>;
 }
 
+/** install and uninstall for an operation already inside `owned()`, which holds the owner gate they would take. */
+export interface HeldServiceLifecycle {
+  install(opts?: ServiceInstallOptions): Promise<void>;
+  uninstall(): Promise<void>;
+}
+
+/** A lifecycle whose owner check other installation steps run behind (#1097). */
+export interface ManagedServiceLifecycle extends ServiceLifecycle {
+  /**
+   * Runs `operation` inside the store's owner gate, after the same owner
+   * check install, repair and uninstall make: another recorded owner throws
+   * `lifecycle_owner_conflict` before `operation` writes anything.
+   */
+  owned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T>;
+}
+
 /**
  * The install, repair, uninstall and status rules all three platforms share
  * (#1097): a `foreign` unit is never changed (`install` replaces it only
@@ -46,7 +62,7 @@ export interface PlatformUnit {
  * repair and uninstall run whole inside the store's owner gate, so the owner
  * they checked is still the owner when they write, deactivate or release.
  */
-export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs: ManagedLifecycleFs = fsp): ServiceLifecycle {
+export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs: ManagedLifecycleFs = fsp): ManagedServiceLifecycle {
   assertServiceOwner(def.owner);
   const owner = def.owner;
 
@@ -71,14 +87,28 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
     }
   }
 
-  function install(opts: ServiceInstallOptions = {}): Promise<void> {
+  async function heldInstall(opts: ServiceInstallOptions = {}): Promise<void> {
+    const { state } = await inspect();
+    if (state === 'foreign' && opts.replaceUnmarked !== true) throw new ServiceUnitError('service_unit_unmarked');
+    await requireOwner();
+    await claimHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner, service: unit.serviceName }, fs);
+    await writeFiles();
+    await unit.activate();
+  }
+
+  async function heldUninstall(): Promise<void> {
+    const { state } = await inspect();
+    if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
+    await requireOwner();
+    await unit.deactivate();
+    await unit.removeFiles();
+    await releaseHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner }, fs);
+  }
+
+  function owned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T> {
     return withServiceOwnerGate(async () => {
-      const { state } = await inspect();
-      if (state === 'foreign' && opts.replaceUnmarked !== true) throw new ServiceUnitError('service_unit_unmarked');
       await requireOwner();
-      await claimHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner, service: unit.serviceName }, fs);
-      await writeFiles();
-      await unit.activate();
+      return operation({ install: heldInstall, uninstall: heldUninstall });
     });
   }
 
@@ -91,17 +121,6 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
       await writeFiles();
       await unit.activate();
       return { status: 'repaired' } as const;
-    });
-  }
-
-  function uninstall(): Promise<void> {
-    return withServiceOwnerGate(async () => {
-      const { state } = await inspect();
-      if (state === 'foreign') throw new ServiceUnitError('service_unit_unmarked');
-      await requireOwner();
-      await unit.deactivate();
-      await unit.removeFiles();
-      await releaseHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner }, fs);
     });
   }
 
@@ -125,5 +144,14 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
     return { installed: inspection.state !== 'absent', ...query, unit: inspection, logs };
   }
 
-  return { install, repair, uninstall, start, stop, status, inspect };
+  return {
+    install: (opts) => withServiceOwnerGate(() => heldInstall(opts)),
+    repair,
+    uninstall: () => withServiceOwnerGate(heldUninstall),
+    start,
+    stop,
+    status,
+    inspect,
+    owned,
+  };
 }

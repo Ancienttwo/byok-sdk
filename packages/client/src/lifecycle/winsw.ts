@@ -1,9 +1,9 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
-import { createManagedLifecycle, type ManagedLifecycleFs } from './managed-lifecycle';
+import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
 import { SERVICE_REDIRECT_LIMITS } from './service-log';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceLifecycle, type ServiceProgram } from './service-types';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types';
 import { SERVICE_UNIT_MARKER } from './service-unit';
 
 /**
@@ -199,7 +199,7 @@ ${argXml}${cwdXml}
  * `status()` queries `sc.exe` (the real Windows SCM query tool, always
  * present) rather than parsing WinSW's own `status` subcommand text.
  */
-export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {}): ServiceLifecycle {
+export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {}): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
 

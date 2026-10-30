@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   readServiceInstallationRecord,
   serviceInstallationOver,
@@ -10,7 +10,8 @@ import {
   SERVICE_PAYLOAD_MANIFEST,
   type ServiceInstallation,
 } from '../lifecycle/service-installation';
-import type { ServiceLifecycle } from '../lifecycle/service-types';
+import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
+import { SERVICE_UNIT_MARKER, withServiceOwnerGate } from '../lifecycle/service-unit';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 useInProcessServiceLifecycleGate();
@@ -32,10 +33,11 @@ let unhealthy: Set<string>;
 let onHealth: (version: string) => Promise<void>;
 let installation: ServiceInstallation;
 
-function fakeLifecycle(): ServiceLifecycle {
+function fakeLifecycle(): ManagedServiceLifecycle {
   const record = (event: string) => async () => { events.push(event); };
   return {
     install: record('install'), uninstall: record('uninstall'), start: record('start'), stop: record('stop'),
+    owned: (operation) => withServiceOwnerGate(() => operation({ install: record('install'), uninstall: record('uninstall') })),
     repair: async () => ({ status: 'not-needed', state: 'exact' }),
     inspect: async () => ({ state: 'exact', unitPath: 'unit', launcherPath: 'launcher' }),
     status: async () => { throw new Error('not used'); },
@@ -63,6 +65,47 @@ async function verdicts(verdict: string): Promise<void> {
 async function pointer(name: string): Promise<string | undefined> {
   return fs.readlink(path.join(installRoot, name)).then((target) => path.basename(target), () => undefined);
 }
+
+/**
+ * A real managed lifecycle for owner `cli` over this store, with `app`
+ * recorded as the store's lifecycle owner and an exact marked unit.
+ */
+async function cliOverAppOwner(installRootFor = installRoot): Promise<ServiceInstallation> {
+  await fs.mkdir(path.join(storeDir, 'service'), { recursive: true });
+  await fs.writeFile(path.join(storeDir, 'service', 'lifecycle-owner.json'), JSON.stringify({ version: 1, owner: 'app', service: 'svc' }));
+  const unitPath = path.join(root, 'unit');
+  await fs.writeFile(unitPath, SERVICE_UNIT_MARKER);
+  const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'logs'), owner: 'cli', program: { command: process.execPath, args: [] } };
+  const unit: PlatformUnit = {
+    serviceName: 'svc', unitPath, launcherPath: unitPath,
+    files: () => [{ path: unitPath, content: SERVICE_UNIT_MARKER }],
+    activate: async () => undefined, deactivate: async () => undefined, removeFiles: async () => undefined,
+    start: async () => undefined, stop: async () => undefined,
+    query: async () => ({ running: true, determinate: true, detail: 'fake' }),
+  };
+  return serviceInstallationOver({
+    service: def,
+    productId: 'svc',
+    installRoot: installRootFor,
+    program: () => def.program,
+    precheck: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'precheck.cjs'), path.join(root, 'verdicts.json')] }),
+    healthCheck: async () => undefined,
+  }, createManagedLifecycle(def, unit));
+}
+
+/** Every file's bytes and every link's target under `dir`. */
+async function tree(dir: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const entry of await fs.readdir(dir, { withFileTypes: true, recursive: true })) {
+    const file = path.join(entry.parentPath, entry.name);
+    const key = path.relative(dir, file);
+    if (entry.isSymbolicLink()) out[key] = `-> ${await fs.readlink(file)}`;
+    else if (entry.isFile()) out[key] = (await fs.readFile(file)).toString('base64');
+    else out[key] = 'dir';
+  }
+  return out;
+}
+
 
 beforeEach(async () => {
   root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-install-')));
@@ -250,5 +293,38 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await readServiceInstallationRecord(storeDir)).toBeUndefined();
     expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
     expect(events.at(-1)).toBe('uninstall');
+  });
+  describe('lifecycle owner: another recorded owner is refused before anything is written', () => {
+    it('a refused foreign-owner install preserves the recorded installation', async () => {
+      await installation.install(await payload('1.0.0'));
+      const before = await readServiceInstallationRecord(storeDir);
+      const other = await cliOverAppOwner(path.join(root, 'cli-app'));
+      await expect(other.install(await payload('2.0.0'))).rejects.toMatchObject({ code: 'lifecycle_owner_conflict' });
+      expect(await readServiceInstallationRecord(storeDir)).toEqual(before);
+    });
+
+    it('a different owner cannot upgrade the recorded installation', async () => {
+      await installation.install(await payload('1.0.0'));
+      const other = await cliOverAppOwner();
+      const outcome = await other.upgrade(await payload('2.0.0')).then((value) => ({ accepted: value }), (error: unknown) => ({ error }));
+      expect(outcome).toMatchObject({ error: { code: 'lifecycle_owner_conflict' } });
+    });
+
+    it.each(['install', 'upgrade', 'rollback', 'recover', 'uninstall'] as const)('%s by a different owner leaves every file byte-identical', async (action) => {
+      await installation.install(await payload('1.0.0'));
+      await installation.upgrade(await payload('2.0.0'));
+      const other = await cliOverAppOwner();
+      const [first, third] = [await payload('1.0.0'), await payload('3.0.0')];
+      const before = await tree(root);
+      const run = {
+        install: () => other.install(first),
+        upgrade: () => other.upgrade(third),
+        rollback: () => other.rollback(),
+        recover: () => other.recover(),
+        uninstall: () => other.uninstall(),
+      }[action];
+      await expect(run()).rejects.toMatchObject({ code: 'lifecycle_owner_conflict' });
+      expect(await tree(root)).toEqual(before);
+    });
   });
 });

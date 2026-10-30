@@ -2,9 +2,9 @@ import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
-import { createManagedLifecycle, type ManagedLifecycleFs } from './managed-lifecycle';
+import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceLifecycle } from './service-types';
+import { sanitizeServiceName, type ServiceDefinition } from './service-types';
 import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit';
 
 /**
@@ -130,7 +130,7 @@ export function generateLaunchdPlist(def: { label: string; launcherPath: string;
  * from the still-on-disk plist) — not `kickstart`, which only force-restarts
  * an ALREADY-loaded job.
  */
-export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps = {}): ServiceLifecycle {
+export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps = {}): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
   const homedir = deps.homedir ?? (() => os.homedir());
