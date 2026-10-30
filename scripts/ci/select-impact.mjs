@@ -333,6 +333,8 @@ export const reviewedScripts = Object.freeze({
   // it against the packed client's Pi launcher and todo assets.
   'scripts/release/pi-launcher-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
   'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
+  'scripts/release/publish.test.mjs': { tests: ['scripts/release/publish.test.mjs'], install: true },
+  'scripts/release/publish-recovery.test.mjs': { tests: ['scripts/release/publish-recovery.test.mjs'], install: true },
   'scripts/release/publish.mjs': {
     tests: [
       'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs', 'scripts/release/beta-release.test.mjs',
