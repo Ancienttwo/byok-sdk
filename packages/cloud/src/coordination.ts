@@ -1,6 +1,7 @@
 import type { AgentEventOrUnknown } from '@byok-sdk/protocol';
 import {
   DEFAULT_ACTIVITY_CAPACITY,
+  ACTIVITY_TERMINAL_TTL_MS,
   validateActivityAppend,
   type ActivityAppendInput,
   type ActivityTail,
@@ -11,7 +12,7 @@ import type { TenantBoundActivity } from './tenant-stores';
 export const DEFAULT_BOARD_CHANNEL_MAX_BYTES = 128;
 export const DEFAULT_BOARD_TITLE_MAX_BYTES = 512;
 export { DEFAULT_ACTIVITY_CAPACITY } from './activity';
-export const DEFAULT_ACTIVITY_TTL_MS = 10 * 60_000;
+export const DEFAULT_ACTIVITY_TTL_MS = ACTIVITY_TERMINAL_TTL_MS;
 export const DEFAULT_PRESENCE_TTL_MS = 90_000;
 export const DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS = 5_000;
 export const DEFAULT_PRESENCE_DETAIL_MAX_BYTES = 512;

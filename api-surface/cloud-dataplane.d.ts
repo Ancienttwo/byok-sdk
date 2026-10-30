@@ -358,17 +358,17 @@ export type { TenantRetentionPolicy, TenantRetentionPolicyInput } from './stores
 export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError } from './maintenance-errors';
 export type { CloudCleanupErrorCode } from './maintenance-errors';
 // ==== @byok-sdk/cloud-dataplane dist/stores/activity.d.ts ====
-import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
-import { type ActivityAppendInput, type ActivityStore, type ActivityTail } from '@byok-sdk/cloud';
-import type { Clock, TenantId } from '@byok-sdk/core';
+import type { Clock, CollectExpiredInput, CollectExpiredResult, TenantId } from '@byok-sdk/core';
+import { type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail } from '@byok-sdk/cloud';
 import type { ByokPool } from '../pool';
+/** A1 changes the port; A2 supplies the new durable schema and implementation. */
 export declare class PostgresActivityStore implements ActivityStore {
-    private readonly pool;
-    private readonly clock;
-    constructor(pool: ByokPool, clock: Clock);
-    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
-    append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
-    read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
+    #private;
+    constructor(_pool: ByokPool, _clock: Clock);
+    append(_tenant: TenantId, _input: ActivityAppendInput): Promise<ActivityTail>;
+    read(_tenant: TenantId, _taskId: string, _options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
+    settle(_tenant: TenantId, _taskId: string, _terminalAt: string): Promise<ActivityTail>;
+    collectExpired(_tenant: TenantId, _input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/agent-egress.d.ts ====
 import { type AgentEgressReliablePayload } from '@byok-sdk/protocol';

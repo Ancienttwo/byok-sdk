@@ -36,15 +36,20 @@ function timelineEvent(
   return { taskId: 'task-1', sourceEnvelopeId, batchSeq, eventIndex, receivedAt, event };
 }
 
-function tail(entries: readonly TimelineEvent[]): ActivityTail {
+function tail(events: readonly TimelineEvent[]): ActivityTail {
+  const groups = new Map<string, TimelineEvent[]>();
+  for (const event of events) groups.set(event.sourceEnvelopeId, [...(groups.get(event.sourceEnvelopeId) ?? []), event]);
+  const entries = [...groups.values()].map((group, index) => ({
+    kind: 'progress' as const, taskId: 'task-1', sourceEnvelopeId: group[0]!.sourceEnvelopeId,
+    batchSeq: group[0]!.batchSeq, sourceDropped: group[0]!.sourceDropped ?? 0,
+    revision: index + 1, receivedAt: group[0]!.receivedAt,
+    events: [...group].sort((a, b) => a.eventIndex - b.eventIndex).map(event => event.event),
+  }));
   return {
-    tenantId: 'tenant-1' as ActivityTail['tenantId'],
-    taskId: 'task-1',
-    entries,
-    cursor: { batchSeq: 9, eventIndex: 1 },
-    dropped: 4,
-    capacity: 50,
-    expiresAt: '2026-08-16T13:00:00.000Z',
+    tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', entries,
+    cursor: { version: 1, tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', generation: 'test', revision: entries.length },
+    floor: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
+    dropped: 4, capacity: 50, expiresAt: '2026-08-16T13:00:00.000Z',
   };
 }
 
@@ -61,7 +66,7 @@ function expectCode(run: () => unknown, code: TimelineFoldError['code']): void {
 
 describe('Live Activity Timeline fold', () => {
   it('refuses a sealed activity batch, which a reader must open before replay (#654 12e)', () => {
-    const sealedBatch = { taskId: 'task-1', sourceEnvelopeId: 'env-sealed', batchSeq: 1, eventIndex: 0 as const, receivedAt, sealed: SEALED_MEMBER };
+    const sealedBatch = { kind: 'sealed-progress' as const, revision: 1, sourceDropped: 0, taskId: 'task-1', sourceEnvelopeId: 'env-sealed', batchSeq: 1, eventIndex: 0 as const, receivedAt, sealed: SEALED_MEMBER };
     expectCode(() => replayTimeline({ ...tail([]), entries: [sealedBatch] }), 'timeline_input_invalid');
   });
 
@@ -85,7 +90,7 @@ describe('Live Activity Timeline fold', () => {
       dropped: 4,
       capacity: 50,
       expiresAt: '2026-08-16T13:00:00.000Z',
-      cursor: { batchSeq: 9, eventIndex: 1 },
+      cursor: tail(events).cursor,
     });
     expect(projectTimeline(state)).toEqual(replayed);
     expect(replayed.items[0]).toMatchObject({
@@ -152,11 +157,15 @@ describe('Live Activity Timeline fold', () => {
   });
 
   it('projects gaps and store-owned loss, capacity, cursor and expiry separately', () => {
-    const snapshot = replayTimeline(tail([
+    const events = [
       timelineEvent(4, 0, { type: 'progress', text: 'first observed' }),
       timelineEvent(4, 2, { type: 'progress', text: 'event gap' }),
       timelineEvent(7, 3, { type: 'turn_end' }),
-    ]));
+    ];
+    const source = tail(events);
+    let state = createTimelineState('task-1', source);
+    for (const event of events) state = foldTimelineEvent(state, event);
+    const snapshot = projectTimeline(state);
     expect(snapshot).toMatchObject({ dropped: 4, capacity: 50, expiresAt: '2026-08-16T13:00:00.000Z' });
     expect(snapshot.gaps.map(({ kind, missing }) => ({ kind, missing }))).toEqual([
       { kind: 'event', missing: 1 },

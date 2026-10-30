@@ -94,10 +94,10 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres board concurrency and I6', () => {
       );
       const tail = await activity.read(TENANT_A, 'activity-race');
       expect(tail?.entries).toHaveLength(100);
-      expect(tail?.entries.map((entry) => entry.batchSeq)).toEqual(
+      expect(tail?.entries.map((entry) => entry.kind === 'artifact' ? undefined : entry.batchSeq)).toEqual(
         Array.from({ length: 100 }, (_, index) => index + 1),
       );
-      expect(tail?.cursor).toEqual({ batchSeq: 100, eventIndex: 0 });
+      expect(tail?.cursor).toMatchObject({ version: 1, revision: 100 });
       expect(tail?.dropped).toBe(0);
     } finally {
       await scope.dispose();

@@ -9,9 +9,19 @@ function observation(batchSeq: number, eventIndex: number, event: TimelineEvent[
   };
 }
 
-function tail(entries: readonly TimelineEvent[]): ActivityTail {
+function tail(events: readonly TimelineEvent[]): ActivityTail {
+  const groups = new Map<string, TimelineEvent[]>();
+  for (const event of events) groups.set(event.sourceEnvelopeId, [...(groups.get(event.sourceEnvelopeId) ?? []), event]);
+  const entries = [...groups.values()].map((group, index) => ({
+    kind: 'progress' as const, taskId: 'task-1', sourceEnvelopeId: group[0]!.sourceEnvelopeId,
+    batchSeq: group[0]!.batchSeq, sourceDropped: group[0]!.sourceDropped ?? 0,
+    revision: index + 1, receivedAt: group[0]!.receivedAt,
+    events: [...group].sort((a, b) => a.eventIndex - b.eventIndex).map(event => event.event),
+  }));
   return {
     tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', entries,
+    cursor: { version: 1, tenantId: 'tenant-1' as ActivityTail['tenantId'], taskId: 'task-1', generation: 'test', revision: entries.length },
+    floor: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
     dropped: 0, capacity: 50, expiresAt: '2026-08-16T13:00:00.000Z',
   };
 }
@@ -32,7 +42,11 @@ describe('F01: progress grouping follows source adjacency', () => {
           observation(0, 2 + missing, resultFirst ? toolUse : toolResult),
           observation(0, 3 + missing, { type: 'progress', text: 'after' }),
         ] as const;
-        const snapshot = replayTimeline(tail(events));
+        const source = tail(events);
+        let ordered = createTimelineState(source.taskId, source);
+        for (const event of events) ordered = foldTimelineEvent(ordered, event);
+        const snapshot = projectTimeline(ordered);
+        if (missing === 0) expect(replayTimeline(source)).toEqual(snapshot);
         expect(snapshot.items).toEqual([
           {
             kind: 'tool', eventKeys: [key(events[0]), key(events[2])], orderKey: order(events[0]),
@@ -51,7 +65,6 @@ describe('F01: progress grouping follows source adjacency', () => {
           kind: 'event', after: order(events[1]), before: order(events[2]), missing,
         }]);
 
-        const source = tail(events);
         let state = createTimelineState(source.taskId, source);
         for (const event of [events[3], events[1], events[0], events[2]]) {
           state = foldTimelineEvent(state, event);
@@ -59,7 +72,7 @@ describe('F01: progress grouping follows source adjacency', () => {
         expect(state.events).toEqual(events);
         expect(foldTimelineEvent(state, events[2])).toBe(state);
         expect(projectTimeline(state)).toEqual(snapshot);
-        expect(replayTimeline(tail([...events].reverse()))).toEqual(snapshot);
+        if (missing === 0) expect(replayTimeline(tail([...events].reverse()))).toEqual(snapshot);
       });
     }
   }

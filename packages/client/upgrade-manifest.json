@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "8c171fc80d1ff341378744c4e6ce72462e4745485eb903c212401c437abc8d54"
+    "snapshotSha256": "438e65682419960802c5b55f615551d263bb3953bbca52d2583fdfe6284fc9cf"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,34 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "activity-log-read-contract",
+      "impact": "breaking",
+      "summary": "Activity is an envelope log with bounded bytes, durable revision cursors, plaintext artifact entries, opaque sealed progress and retained source fences (#1113 A1). A1 is not deployable or independently mergeable: Postgres fails closed until A2, and canonical lifecycle/wake/union integration follows in A3-A5. Hosts must update log-entry readers and handle explicit cursor gaps.",
+      "migration": "docs/migrations/1113-durable-activity-log.md#durable-activity-log-contract",
+      "items": [
+        "export:@byok-sdk/cloud#ACTIVITY_TERMINAL_TTL_MS",
+        "export:@byok-sdk/cloud#ActivityAppendInput",
+        "export:@byok-sdk/cloud#ActivityCursor",
+        "export:@byok-sdk/cloud#ActivityReadOptions",
+        "export:@byok-sdk/cloud#ActivityStore",
+        "export:@byok-sdk/cloud#ActivityTail",
+        "export:@byok-sdk/cloud#ActivityTailEntry",
+        "export:@byok-sdk/cloud#DEFAULT_ACTIVITY_CAPACITY",
+        "export:@byok-sdk/cloud#InMemoryActivityStore",
+        "export:@byok-sdk/cloud#MAX_ACTIVITY_BYTES",
+        "export:@byok-sdk/cloud#SealedActivityBatch",
+        "export:@byok-sdk/cloud#SealedActivityBatchSchema",
+        "export:@byok-sdk/cloud#TenantBoundActivity",
+        "export:@byok-sdk/cloud#activityCursor",
+        "export:@byok-sdk/cloud#activityEntryBytes",
+        "export:@byok-sdk/cloud#activitySourceBatchState",
+        "export:@byok-sdk/cloud#parseTimelineEvents",
+        "export:@byok-sdk/cloud#projectTimelineEvents",
+        "export:@byok-sdk/cloud-dataplane#PostgresActivityStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresActivityStore"
+      ]
+    },
     {
       "id": "activity-post-removed",
       "impact": "breaking",
@@ -1837,6 +1865,41 @@
       "entry": "runtime-environment-policy"
     },
     {
+      "item": "export:@byok-sdk/cloud#ACTIVITY_TERMINAL_TTL_MS",
+      "change": "added",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ActivityAppendInput",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ActivityCursor",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ActivityReadOptions",
+      "change": "added",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ActivityStore",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ActivityTail",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ActivityTailEntry",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
+    },
+    {
       "item": "export:@byok-sdk/cloud#AllowAllRateLimiter",
       "change": "changed",
       "entry": "device-route-rate-admission"
@@ -1877,9 +1940,19 @@
       "entry": "terminal-task-archive"
     },
     {
+      "item": "export:@byok-sdk/cloud#DEFAULT_ACTIVITY_CAPACITY",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
+    },
+    {
       "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
       "change": "changed",
       "entry": "messages-per-envelope-decode"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryActivityStore",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
@@ -1932,6 +2005,11 @@
       "entry": "terminal-task-archive"
     },
     {
+      "item": "export:@byok-sdk/cloud#MAX_ACTIVITY_BYTES",
+      "change": "added",
+      "entry": "activity-log-read-contract"
+    },
+    {
       "item": "export:@byok-sdk/cloud#MaintenanceStepReport",
       "change": "changed",
       "entry": "terminal-task-archive"
@@ -1955,6 +2033,16 @@
       "item": "export:@byok-sdk/cloud#RetentionPolicy",
       "change": "changed",
       "entry": "dead-letter-retention"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedActivityBatch",
+      "change": "removed",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedActivityBatchSchema",
+      "change": "removed",
+      "entry": "activity-log-read-contract"
     },
     {
       "item": "export:@byok-sdk/cloud#TASK_ABANDON_CAUSES",
@@ -2022,6 +2110,11 @@
       "entry": "device-retirement-settles-tasks"
     },
     {
+      "item": "export:@byok-sdk/cloud#TenantBoundActivity",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TenantBoundRateLimiter",
       "change": "changed",
       "entry": "device-route-rate-admission"
@@ -2037,6 +2130,21 @@
       "entry": "open-device-vocabularies"
     },
     {
+      "item": "export:@byok-sdk/cloud#activityCursor",
+      "change": "removed",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#activityEntryBytes",
+      "change": "added",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#activitySourceBatchState",
+      "change": "removed",
+      "entry": "activity-log-read-contract"
+    },
+    {
       "item": "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
       "change": "added",
       "entry": "capability-ports-two-way"
@@ -2047,6 +2155,16 @@
       "entry": "terminal-task-archive"
     },
     {
+      "item": "export:@byok-sdk/cloud#parseTimelineEvents",
+      "change": "removed",
+      "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#projectTimelineEvents",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#CLOUD_CLEANUP_ERROR_CODES",
       "change": "changed",
       "entry": "dead-letter-retention"
@@ -2055,6 +2173,11 @@
       "item": "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
       "change": "added",
       "entry": "mailbox-wake-probe"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresActivityStore",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresBoardStore",
@@ -2095,6 +2218,11 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#CLOUD_CLEANUP_ERROR_CODES",
       "change": "changed",
       "entry": "dead-letter-retention"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresActivityStore",
+      "change": "changed",
+      "entry": "activity-log-read-contract"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresBoardStore",
