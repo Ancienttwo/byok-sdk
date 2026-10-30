@@ -555,7 +555,7 @@ export class PiAdapter implements RuntimeAdapter {
               await gate.close();
               await retainedScratch.release();
             } });
-            // mkdtemp creates the directory 0700. Launch files in it are
+            // The scratch's sdk directory is created 0700. Launch files in it are
             // created 0600 ('wx': a new file, so the mode applies at creation)
             // and removed on every start failure and on close. The host config holds
             // `mcpEnv`, which already has no provider credential names
