@@ -244,7 +244,7 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
    */
   async function stopForWrapperReplacement(wrapper: 'missing' | 'differs'): Promise<void> {
     const result = await run('sc.exe', ['query', id]);
-    const detail = (result.stdout || result.stderr).trim();
+    const detail = [result.stdout, result.stderr].map((stream) => stream.trim()).filter(Boolean).join('\n');
     const denied = WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
     const match = result.code === 0 ? /\bSTATE\s*:\s*(\d+)\s+(\w+)/i.exec(detail) : null;
     const state = match ? `${match[1]} ${match[2]!.toUpperCase()}` : undefined;

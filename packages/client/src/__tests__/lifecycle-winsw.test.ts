@@ -279,6 +279,8 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
       ['missing', 'access denied', fail(5, '[SC] OpenService FAILED 5:\r\n\r\nAccess is denied.', '')],
       ['missing', '1060 with access denied', fail(1060, '', 'Access is denied.')],
       ['missing', 'an unknown failure', fail(1, '', 'boom')],
+      ['missing', '1060 on stdout with access denied on stderr', { code: 1060, stdout: 'The specified service does not exist as an installed service.', stderr: 'Access is denied.' }],
+      ['differing', 'STOPPED on stdout with access denied on stderr', { code: 0, stdout: 'SERVICE_NAME: Acme-Agent-\r\n        STATE              : 1  STOPPED', stderr: 'Access is denied.' }],
       ['differing', 'stop pending', scState('3  STOP_PENDING')],
       ['differing', 'paused', scState('7  PAUSED')],
       ['differing', 'exit 0 without a STATE', ok('')],
