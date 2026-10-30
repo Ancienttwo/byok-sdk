@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createByokCloud, createHmacTokenSigner, capabilityDeclarationForPorts, type ActivityStore, type ActivityAppendInput } from '@byok-sdk/cloud';
+import { createByokCloud, createInMemoryByokCloud, AGENT_HOME_CONTRACT_CAPABILITY, createHmacTokenSigner, capabilityDeclarationForPorts, type ActivityStore, type ActivityAppendInput } from '@byok-sdk/cloud';
 import { createEnvelope } from '@byok-sdk/protocol';
-import { createHarness, grantAgentHome, offerPayload, TEST_AGENT_REF } from '../../../cloud/src/__tests__/support/harness';
 import { TENANT_A, sealedOutputMember } from './fixtures';
 
 export interface ActivityCompositionHandle {
@@ -30,7 +29,7 @@ export function runActivityConformance(name: string, factory: ActivityCompositio
       await withActivityComposition(factory, async ({ store }) => {
         // Exercise the same authenticated HTTP admission with each activity adapter.
         const tokenSigner = createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(32)), { now: () => new Date() });
-        const base = createHarness({ tokenSigner });
+        const base = createInMemoryByokCloud({ tokenSigner });
         const cloud = createByokCloud({
           core: base.core, cloud: { ...base.stores, activity: store }, clock: base.clock,
           crypto: base.crypto, tokenSigner, mailboxWake: base.mailboxWake,
@@ -38,12 +37,30 @@ export function runActivityConformance(name: string, factory: ActivityCompositio
           capabilities: capabilityDeclarationForPorts({ blobContentProxy: base.blobContentProxy }),
           blobContentProxy: base.blobContentProxy,
         });
-        const harness = { ...base, cloud, async json(path: string, init: RequestInit) {
+        const json = async (path: string, init: RequestInit) => {
           const response = await cloud.fetch(new Request(`http://cloud.test${path}`, init));
           return { status: response.status, body: await response.json() };
+        };
+        const harness = { cloud, json, async pairDevice(tenant: typeof TENANT_A) {
+          await base.core.quota.writeEntitlement(tenant, {
+            version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
+            maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test',
+          });
+          const keys = await globalThis.crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+          if (!('publicKey' in keys)) throw new Error('Expected an Ed25519 key pair');
+          const publicKey = await globalThis.crypto.subtle.exportKey('jwk', keys.publicKey);
+          const pairing = await cloud.createPairingCode(tenant, { productId: 'test-product' });
+          const response = await json('/byok/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+            pairingCode: pairing.code, deviceName: 'test-device', devicePublicKey: publicKey.x,
+          }) });
+          expect(response.status).toBe(200);
+          const body = response.body as { deviceId: string; accessToken: string };
+          return { deviceId: body.deviceId, authorization: { authorization: `Bearer ${body.accessToken}` } };
         } };
+        const TEST_AGENT_REF = { agentId: 'test-agent', profileRevision: 'rev-1' };
+        const offerPayload = (instruction: string) => ({ instruction, agentRef: TEST_AGENT_REF, session: { mode: 'resume' as const, sessionRef: 'test-session' } });
         const device = await harness.pairDevice(TENANT_A);
-        await grantAgentHome(harness, TENANT_A, device.deviceId);
+        await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
         const taskId = 'empty-progress';
         await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: offerPayload('work') });
         const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
