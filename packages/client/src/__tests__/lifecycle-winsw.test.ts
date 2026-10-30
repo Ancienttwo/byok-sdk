@@ -154,7 +154,8 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
       calls.push(`${cmd} ${args.join(' ')}`);
       return args[0] === 'install' ? fail(1073, '', 'The specified service already exists.') : ok();
     });
-    await createWinswLifecycle(def(), { run, fs: installedFs() }).install();
+    const fs = memoryServiceFs({ [XML]: DRIFTED_MARKED_UNIT, [EXE]: 'winsw v2.12.0', [WINSW_BIN]: 'winsw v2.12.0' });
+    await createWinswLifecycle(def(), { run, fs }).install();
     expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe stopwait', 'C:\\acme\\logs/Acme-Agent-.exe install', 'C:\\acme\\logs/Acme-Agent-.exe start']);
   });
 
@@ -177,6 +178,7 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     const calls: string[] = [];
     const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
       calls.push(`${cmd} ${args.join(' ')}`);
+      if (cmd === 'sc.exe') return ok('SERVICE_NAME: Acme-Agent-\r\n        STATE              : 4  RUNNING');
       return args[0] === 'install' ? fail(1073, '', 'The specified service already exists.') : ok();
     });
     const fs = memoryServiceFs({ [XML]: DRIFTED_MARKED_UNIT, [EXE]: 'winsw v2.11.0', [WINSW_BIN]: 'winsw v2.12.0' });
@@ -189,11 +191,141 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
 
     expect(fs.files.get(EXE)).toBe('winsw v2.12.0');
     expect(calls).toEqual([
+      'sc.exe query Acme-Agent-',
       'C:\\acme\\logs/Acme-Agent-.exe stopwait',
       `copy ${WINSW_BIN} -> ${EXE}`,
       'C:\\acme\\logs/Acme-Agent-.exe install',
       'C:\\acme\\logs/Acme-Agent-.exe start',
     ]);
+  });
+
+  describe('the installed wrapper exe is part of the installed unit', () => {
+    const EXACT_XML = generateWinswXml({ id: 'Acme-Agent-', displayName: 'Acme Agent!!', program: def().program, logDir: 'C:\\acme\\logs' });
+    function scState(state: string): RunResult {
+      return ok(['SERVICE_NAME: Acme-Agent-', '        TYPE               : 10  WIN32_OWN_PROCESS', `        STATE              : ${state}`].join('\r\n'));
+    }
+    const NOT_INSTALLED = fail(1060, '[SC] EnumQueryServicesStatus:OpenService FAILED 1060:\r\n\r\nThe specified service does not exist as an installed service.', '');
+    function recording(fs: ReturnType<typeof memoryServiceFs>, sc: RunResult) {
+      const calls: string[] = [];
+      const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
+        calls.push(`${cmd} ${args.join(' ')}`);
+        if (cmd === 'sc.exe') return sc;
+        return args[0] === 'install' ? fail(1073, '', 'The specified service already exists.') : ok();
+      });
+      fs.copyFile.mockImplementation(async (from: string, to: string) => {
+        calls.push(`copy ${from} -> ${to}`);
+        fs.files.set(to, fs.files.get(from) ?? '');
+      });
+      return { calls, run };
+    }
+    function eacces(file: string): NodeJS.ErrnoException {
+      return Object.assign(new Error(`EACCES: permission denied, open '${file}'`), { code: 'EACCES' });
+    }
+
+    it('a missing wrapper exe under an exact descriptor is repairable, and a stopped service gets it back without running it', async () => {
+      const fs = memoryServiceFs({ [XML]: EXACT_XML, [WINSW_BIN]: 'winsw v2.12.0' });
+      const { calls, run } = recording(fs, scState('1  STOPPED'));
+      const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+      expect((await lifecycle.inspect()).state).toBe('repairable');
+      await expect(lifecycle.repair()).resolves.toEqual({ status: 'repaired' });
+
+      expect(calls).toEqual(['sc.exe query Acme-Agent-', `copy ${WINSW_BIN} -> ${EXE}`, `${EXE} install`, `${EXE} start`]);
+      expect(fs.files.get(EXE)).toBe('winsw v2.12.0');
+      expect((await lifecycle.inspect()).state).toBe('exact');
+    });
+
+    it('a wrapper exe whose bytes differ under an exact descriptor is repairable; while the SCM runs it, stopwait goes first', async () => {
+      const fs = memoryServiceFs({ [XML]: EXACT_XML, [EXE]: 'winsw v2.11.0', [WINSW_BIN]: 'winsw v2.12.0' });
+      const { calls, run } = recording(fs, scState('4  RUNNING'));
+      const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+      expect((await lifecycle.inspect()).state).toBe('repairable');
+      await expect(lifecycle.repair()).resolves.toEqual({ status: 'repaired' });
+
+      expect(calls).toEqual(['sc.exe query Acme-Agent-', `${EXE} stopwait`, `copy ${WINSW_BIN} -> ${EXE}`, `${EXE} install`, `${EXE} start`]);
+      expect((await lifecycle.inspect()).state).toBe('exact');
+    });
+
+    it.each([
+      ['stopped', scState('1  STOPPED')],
+      ['not installed (1060)', NOT_INSTALLED],
+    ])('a missing wrapper exe under a drifted descriptor: %s, the exe is copied before anything runs it', async (_name, sc) => {
+      const fs = memoryServiceFs({ [XML]: DRIFTED_MARKED_UNIT, [WINSW_BIN]: 'winsw v2.12.0' });
+      const { calls, run } = recording(fs, sc);
+
+      await expect(createWinswLifecycle(def(), { run, fs }).repair()).resolves.toEqual({ status: 'repaired' });
+
+      expect(calls).toEqual(['sc.exe query Acme-Agent-', `copy ${WINSW_BIN} -> ${EXE}`, `${EXE} install`, `${EXE} start`]);
+      expect(fs.files.get(XML)).toBe(EXACT_XML);
+    });
+
+    it('a stopped service with a corrupt wrapper exe never runs that exe: it is replaced first', async () => {
+      const fs = memoryServiceFs({ [XML]: EXACT_XML, [EXE]: 'MZ', [WINSW_BIN]: 'winsw v2.12.0' });
+      const { calls, run } = recording(fs, scState('1  STOPPED'));
+
+      await expect(createWinswLifecycle(def(), { run, fs }).repair()).resolves.toEqual({ status: 'repaired' });
+
+      expect(calls).toEqual(['sc.exe query Acme-Agent-', `copy ${WINSW_BIN} -> ${EXE}`, `${EXE} install`, `${EXE} start`]);
+      expect(fs.files.get(EXE)).toBe('winsw v2.12.0');
+    });
+
+    it.each([
+      ['missing', 'running', scState('4  RUNNING')],
+      ['missing', 'start pending', scState('2  START_PENDING')],
+      ['missing', 'stop pending', scState('3  STOP_PENDING')],
+      ['missing', 'paused', scState('7  PAUSED')],
+      ['missing', 'exit 0 without a STATE', ok('SERVICE_NAME: Acme-Agent-')],
+      ['missing', 'access denied', fail(5, '[SC] OpenService FAILED 5:\r\n\r\nAccess is denied.', '')],
+      ['missing', '1060 with access denied', fail(1060, '', 'Access is denied.')],
+      ['missing', 'an unknown failure', fail(1, '', 'boom')],
+      ['differing', 'stop pending', scState('3  STOP_PENDING')],
+      ['differing', 'paused', scState('7  PAUSED')],
+      ['differing', 'exit 0 without a STATE', ok('')],
+      ['differing', 'access denied', fail(5, '', 'Access is denied.')],
+    ])('a %s wrapper exe while the SCM reports %s fails closed: nothing is written, copied or activated', async (wrapper, _state, sc) => {
+      const fs = memoryServiceFs({ [XML]: DRIFTED_MARKED_UNIT, [WINSW_BIN]: 'winsw v2.12.0', ...(wrapper === 'differing' ? { [EXE]: 'winsw v2.11.0' } : {}) });
+      const { calls, run } = recording(fs, sc);
+
+      await expect(createWinswLifecycle(def(), { run, fs }).repair()).rejects.toThrow(/must be stopped in the Service Control Manager before repair/);
+
+      expect(calls).toEqual(['sc.exe query Acme-Agent-']);
+      expect(fs.writeFile).not.toHaveBeenCalled();
+      expect(fs.files.get(XML)).toBe(DRIFTED_MARKED_UNIT);
+    });
+
+    it('an exact descriptor and an identical wrapper exe are exact: repair is not needed and runs nothing', async () => {
+      const fs = memoryServiceFs({ [XML]: EXACT_XML, [EXE]: 'winsw v2.12.0', [WINSW_BIN]: 'winsw v2.12.0' });
+      const run = vi.fn<Runner>().mockResolvedValue(ok());
+      const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+      expect((await lifecycle.inspect()).state).toBe('exact');
+      await expect(lifecycle.repair()).resolves.toEqual({ status: 'not-needed', state: 'exact' });
+      expect(run).not.toHaveBeenCalled();
+      expect(fs.copyFile).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['the installed wrapper exe', EXE],
+      ['the winswBin source', WINSW_BIN],
+    ])('a read error other than ENOENT on %s propagates from inspect and repair', async (_name, unreadable) => {
+      const fs = memoryServiceFs({ [XML]: DRIFTED_MARKED_UNIT, [EXE]: 'winsw v2.12.0', [WINSW_BIN]: 'winsw v2.12.0' });
+      const read = fs.readFile.getMockImplementation()!;
+      fs.readFile.mockImplementation(async (file: string) => {
+        if (file === unreadable) throw eacces(file);
+        return read(file);
+      });
+      const run = vi.fn<Runner>().mockResolvedValue(ok());
+      const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+      fs.files.set(XML, EXACT_XML);
+      await expect(lifecycle.inspect()).rejects.toMatchObject({ code: 'EACCES' });
+      fs.files.set(XML, DRIFTED_MARKED_UNIT);
+      await expect(lifecycle.repair()).rejects.toMatchObject({ code: 'EACCES' });
+      expect(run).not.toHaveBeenCalled();
+      expect(fs.copyFile).not.toHaveBeenCalled();
+      expect(fs.files.get(XML)).toBe(DRIFTED_MARKED_UNIT);
+    });
   });
 
   it('install() uses windows.installDir when given instead of logDir', async () => {

@@ -933,8 +933,12 @@ reads at each start names the program. No unit holds a versioned path or an
 environment variable; `start --service` captures the login-shell environment
 (#392). Every generated unit carries the SDK marker comment. `inspect()`
 classifies the installed unit as `absent`, `exact`, `repairable` (marked, but
-it or its launcher differs) or `foreign` (no marker). `install()` and
-`repair()` rewrite a repairable unit whole. Nothing changes a foreign unit:
+it or its launcher differs) or `foreign` (no marker). On Windows the installed
+`<name>.exe` is part of the unit: missing, or not the `winswBin` bytes, it is
+repairable. Repair runs that exe only while the SCM reports the service
+RUNNING; otherwise the SCM must report it STOPPED or not installed, and a
+pending, paused or unreadable state fails before anything is written.
+`install()` and `repair()` rewrite a repairable unit whole. Nothing changes a foreign unit:
 `install`, `repair`, `uninstall`, `start` and `stop` throw `ServiceUnitError`
 `service_unit_unmarked`, and only `install({ replaceUnmarked: true })` (CLI
 `--replace-unmarked`) replaces it. No marker-less unit is adopted by content.

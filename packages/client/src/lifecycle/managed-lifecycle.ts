@@ -34,6 +34,8 @@ export interface PlatformUnit {
   query(): Promise<Pick<ServiceStatusResult, 'running' | 'determinate' | 'detail'>>;
   /** Extra preparation before the files are written (WinSW copies its executable). */
   prepare?(): Promise<void>;
+  /** Whether what `prepare()` puts in place is already exact; asked only once `files()` classify exact. */
+  preparedArtifactsExact?(): Promise<boolean>;
 }
 
 /**
@@ -49,7 +51,8 @@ export function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUni
   const owner = def.owner;
 
   async function inspect(): Promise<ServiceUnitInspection> {
-    const [state, record] = await Promise.all([classifyServiceUnit(fs, unit.files()), readServiceLifecycleOwner(def.storeDir, fs)]);
+    const [files, record] = await Promise.all([classifyServiceUnit(fs, unit.files()), readServiceLifecycleOwner(def.storeDir, fs)]);
+    const state = files === 'exact' && unit.preparedArtifactsExact && !(await unit.preparedArtifactsExact()) ? 'repairable' : files;
     return { state, unitPath: unit.unitPath, launcherPath: unit.launcherPath, ...(record ? { owner: record.owner } : {}) };
   }
 

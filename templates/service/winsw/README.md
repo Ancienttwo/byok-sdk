@@ -105,7 +105,12 @@ unit-tested template):
   installed `<id>.exe`, which reads this descriptor at each start, so a new
   program rewrites the descriptor and never the registration. The marker
   comment lets `service-status` classify it as `exact`, `repairable` or
-  `foreign`; the SDK never changes a descriptor without it.
+  `foreign`; the SDK never changes a descriptor without it. The installed
+  `<id>.exe` counts too: missing, or not the `--winsw-bin` bytes, the unit is
+  `repairable`. Repair runs that exe (`stopwait`) only while `sc.exe query`
+  reports RUNNING; otherwise the service must already be STOPPED or not
+  installed, and repair copies `--winsw-bin` back before anything runs it.
+  Stop a pending or paused service in the SCM first.
 - **`roll-by-size`** bounds WinSW's stdout/stderr redirect (1 MiB, 2 files);
   the daemon writes and rotates its own `daemon.log`.
 - **`--service`** makes a halt (a revoked device, an unpaired store, a

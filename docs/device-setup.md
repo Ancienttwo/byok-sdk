@@ -189,7 +189,8 @@ systemd `--user` (Linux) or WinSW (Windows, `--winsw-bin <WinSW.exe>`):
   Node or a moved binary changes the launcher, not the unit.
 
 `service-status` classifies the installed unit: `absent`, `exact`,
-`repairable` (an SDK unit or launcher that changed) or `foreign` (a unit at the
+`repairable` (an SDK unit or launcher that changed, or on Windows an installed
+`<name>.exe` that is missing or not the `--winsw-bin` bytes) or `foreign` (a unit at the
 same path without the SDK marker). Running `install` again rewrites a
 repairable unit. The SDK never changes a foreign unit: `install` refuses it
 with `ServiceUnitError` `service_unit_unmarked` until you pass

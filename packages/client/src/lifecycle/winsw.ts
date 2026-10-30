@@ -222,15 +222,41 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
     }
   }
 
-  async function sameBytes(source: string, target: string): Promise<boolean> {
+  /** The installed `<id>.exe` against `winswBin`. Only a missing `<id>.exe` is not an error. */
+  async function installedWrapper(): Promise<'exact' | 'missing' | 'differs'> {
     let installed;
     try {
-      installed = await fs.readFile(target);
+      installed = await fs.readFile(exePath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return false;
+      if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return 'missing';
       throw error;
     }
-    return Buffer.from(await fs.readFile(source)).equals(Buffer.from(installed));
+    return Buffer.from(await fs.readFile(winswBin)).equals(Buffer.from(installed)) ? 'exact' : 'differs';
+  }
+
+  /**
+   * Stops the service before a missing or differing `<id>.exe` is replaced.
+   * WinSW v2 loads only the same-basename `<id>.xml`, so the installed exe is
+   * the only stop path, and it runs only while the SCM reports it RUNNING.
+   * Otherwise the SCM must report the service STOPPED or not installed
+   * (1060); a pending, paused, unparsed or denied query fails closed before
+   * anything is written.
+   */
+  async function stopForWrapperReplacement(wrapper: 'missing' | 'differs'): Promise<void> {
+    const result = await run('sc.exe', ['query', id]);
+    const detail = (result.stdout || result.stderr).trim();
+    const denied = WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
+    const match = result.code === 0 ? /\bSTATE\s*:\s*(\d+)\s+(\w+)/i.exec(detail) : null;
+    const state = match ? `${match[1]} ${match[2]!.toUpperCase()}` : undefined;
+    if (!denied && wrapper === 'differs' && state === '4 RUNNING') {
+      await runIdempotent(run, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
+      return;
+    }
+    if (!denied && (state === '1 STOPPED' || result.code === 1060)) return;
+    const problem = wrapper === 'missing' ? 'is missing' : 'differs from winswBin';
+    throw new Error(
+      `winsw wrapper ${exePath} ${problem}; service "${id}" must be stopped in the Service Control Manager before repair (sc.exe query exit ${result.code}): ${detail}`,
+    );
   }
 
   return createManagedLifecycle(def, {
@@ -242,10 +268,18 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
       // `<id>.exe` is the running service's own image. `stopwait`, unlike
       // `stop`, returns only once the SCM reports the service stopped, and
       // the image is rewritten only when its bytes differ, so a descriptor
-      // repair never writes over the wrapper.
-      if (await fileExists(xmlPath)) await runIdempotent(run, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
+      // repair never writes over the wrapper. A missing or differing wrapper
+      // is never run unless the SCM reports it running.
+      const wrapper = await installedWrapper();
+      if (await fileExists(xmlPath)) {
+        if (wrapper === 'exact') await runIdempotent(run, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
+        else await stopForWrapperReplacement(wrapper);
+      }
       await fs.mkdir(installDir, { recursive: true });
-      if (!(await sameBytes(winswBin, exePath))) await fs.copyFile(winswBin, exePath);
+      if (wrapper !== 'exact') await fs.copyFile(winswBin, exePath);
+    },
+    async preparedArtifactsExact() {
+      return (await installedWrapper()) === 'exact';
     },
     async activate() {
       await runIdempotent(run, exePath, ['install'], 'winsw install', WINSW_ALREADY_INSTALLED);

@@ -109,7 +109,8 @@ describe.each(PLATFORMS)('lifecycle (#1097) unit classification on $platform', (
   });
 
   it('install({ replaceUnmarked: true }) replaces a marker-less unit with a marked one', async () => {
-    const fs = memoryServiceFs({ [unitPath]: UNMARKED_UNIT });
+    // On Windows the marker-less descriptor's own wrapper exe is installed beside it.
+    const fs = memoryServiceFs({ [unitPath]: UNMARKED_UNIT, ...WINSW_BIN, ...(platform === 'win32' ? { [launcherPath]: 'winsw v2.12.0' } : {}) });
     const lifecycle = lifecycleFor(platform, fs, okRunner());
     await lifecycle.install({ replaceUnmarked: true });
     expect(fs.files.get(unitPath)).toContain(SERVICE_UNIT_MARKER);
@@ -131,7 +132,7 @@ describe.each(PLATFORMS)('lifecycle (#1097) unit classification on $platform', (
   });
 
   it('uninstall removes the unit, the launcher and the owner record', async () => {
-    const fs = memoryServiceFs();
+    const fs = memoryServiceFs(WINSW_BIN);
     const lifecycle = lifecycleFor(platform, fs, okRunner());
     await lifecycle.install();
     expect(fs.files.has(OWNER_RECORD)).toBe(true);
@@ -142,7 +143,7 @@ describe.each(PLATFORMS)('lifecycle (#1097) unit classification on $platform', (
   });
 
   it('one lifecycle owner per store: another owner cannot install, repair or uninstall', async () => {
-    const fs = memoryServiceFs();
+    const fs = memoryServiceFs(WINSW_BIN);
     await lifecycleFor(platform, fs, okRunner(), { owner: 'app' }).install();
     const cli = lifecycleFor(platform, fs, okRunner());
     expect(await codeOf(cli.install())).toBe('lifecycle_owner_conflict');

@@ -12347,6 +12347,8 @@ export interface PlatformUnit {
     query(): Promise<Pick<ServiceStatusResult, 'running' | 'determinate' | 'detail'>>;
     /** Extra preparation before the files are written (WinSW copies its executable). */
     prepare?(): Promise<void>;
+    /** Whether what `prepare()` puts in place is already exact; asked only once `files()` classify exact. */
+    preparedArtifactsExact?(): Promise<boolean>;
 }
 /**
  * The install, repair, uninstall and status rules all three platforms share
