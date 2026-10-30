@@ -94,7 +94,7 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
     server.send(big);
     server.send(small);
 
-    const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big', EVENTUAL_STATE_BUDGET_MS);
+    const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big');
     expect(decline.payload).toEqual({ reason: DECLINE_REASON, retryable: false, agentRef: big.payload.agentRef });
     await vi.waitFor(async () => expect(await cursor()).toBe(small.seq), EVENTUAL_STATE_BUDGET_MS);
     const length = Buffer.byteLength(encodeEnvelope(big));
@@ -111,7 +111,7 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
     const big = envelopeOf('task.offer', 'big-agent', server.nextSeq(), { ...payload, instruction: 'x'.repeat(OVER_BOUND) });
     server.send(big);
 
-    const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big-agent', EVENTUAL_STATE_BUDGET_MS);
+    const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big-agent');
     expect(decline.payload).toEqual({ reason: DECLINE_REASON, retryable: false, agentRef: payload.agentRef });
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), EVENTUAL_STATE_BUDGET_MS);
   });
@@ -127,7 +127,7 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
     });
     server.send(big);
 
-    const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big-sealed', EVENTUAL_STATE_BUDGET_MS);
+    const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big-sealed');
     expect(decline.payload).toEqual({ reason: DECLINE_REASON, retryable: false, agentRef: payload.agentRef });
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), EVENTUAL_STATE_BUDGET_MS);
   });
@@ -136,7 +136,7 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
     const { storeDir, server, cursor } = await start();
     const big = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x'.repeat(OVER_BOUND), ...FRESH_OFFER }, { taskId: 'reused', seq: server.nextSeq() });
     server.send(big);
-    await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'reused', EVENTUAL_STATE_BUDGET_MS);
+    await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'reused');
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), EVENTUAL_STATE_BUDGET_MS);
 
     const again = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'hi', ...FRESH_OFFER }, { taskId: 'reused', seq: server.nextSeq() });

@@ -245,7 +245,6 @@ describe('task assertion broker: task_assertion.issue', () => {
     built: Started,
     taskId: string,
     requiredToolsets: readonly string[] = [READ_TOOLSET, PROPOSE_TOOLSET],
-    timeoutMs = 2000,
   ): Promise<Record<string, string>> {
     server.send(
       createEnvelope(
@@ -259,7 +258,7 @@ describe('task assertion broker: task_assertion.issue', () => {
         { taskId, seq: server.nextSeq() },
       ),
     );
-    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId, timeoutMs);
+    await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId);
     await vi.waitFor(() => expect(built.adapter.startCalls.length).toBeGreaterThan(0));
     // One offer per test, so the single start call is this task's.
     const servers = built.adapter.startCalls[0]!.ctx.mcpServers ?? {};
@@ -658,7 +657,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     const events: DaemonEvent[] = [];
     const unsubscribe = built.daemon.subscribe((event) => events.push(event));
     try {
-      expect(await offerAgentTask(built, 'task-discovery-timeout', undefined, 8000)).toEqual({});
+      expect(await offerAgentTask(built, 'task-discovery-timeout')).toEqual({});
       expect(events).toEqual(expect.arrayContaining([
         expect.objectContaining({ kind: 'device-assertion', lane: 'task', taskId: 'task-discovery-timeout', reason: 'capability_discovery_timeout' }),
       ]));

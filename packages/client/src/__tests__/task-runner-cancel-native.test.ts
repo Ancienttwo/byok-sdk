@@ -355,10 +355,8 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
       await daemon.pair('pairing-code'); await daemon.start();
       server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'Host cancellation', runtime },
         { taskId: 'host-task', seq: server.nextSeq() }));
-      // Long-poll delivery, native spawn and the progress batch flush can exceed
-      // the 2s default under load.
       await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
-        && event.payload.sealed === undefined && event.payload.events.some(event => event.type === 'tool_use'), 5_000);
+        && event.payload.sealed === undefined && event.payload.events.some(event => event.type === 'tool_use'));
       c.synchronizeInterruptClock();
       server.send(createEnvelope('task.cancel', { reason: 'Host stop' }, { taskId: 'host-task', seq: server.nextSeq() }));
       const terminal = await server.waitFor(event => event.type === 'task.cancelled' && event.task_id === 'host-task');

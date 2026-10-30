@@ -227,7 +227,7 @@ describe('daemon log chain for a failing provisioning handler', () => {
     daemons.push(daemon);
     deviceId = (await daemon.pair('pairing-code')).deviceId;
     await daemon.start();
-    await server.waitFor((envelope) => envelope.type === 'conn.hello', 5_000);
+    await server.waitFor((envelope) => envelope.type === 'conn.hello');
 
     const notice = createEnvelope('provider.provisioning.available', { requestId: REQUEST_ID }, { seq: server.nextSeq() });
     server.pushLongPollEvent(notice);

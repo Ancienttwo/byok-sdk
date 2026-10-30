@@ -258,7 +258,7 @@ describe('hosted journal integration (L-002)', () => {
     await vi.waitFor(() => expect(adapter.sessions[0]!.closeCalled).toBe(true));
     expect(daemon!.status().activeTaskCount).toBe(1);
     unavailable = false;
-    await server.waitFor(e => e.type === 'task.complete', 3_000);
+    await server.waitFor(e => e.type === 'task.complete');
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0));
     await vi.waitFor(() => expect(daemon!.status().activeTaskCount).toBe(0));
     expect(candidates.every(record => record.bytes === candidates[0]!.bytes && record.payloadHash === candidates[0]!.payloadHash)).toBe(true);

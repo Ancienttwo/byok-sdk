@@ -265,7 +265,7 @@ describe('public tool authorization decisions', () => {
       expect(session.interruptCalled).toBe(false);
       expect(session.closeCalled).toBe(false);
       session.queue.push({ type: 'progress', text: 'continuing with the safer alternative' });
-      await server.waitFor(e => e.type === 'task.progress', 4_000);
+      await server.waitFor(e => e.type === 'task.progress');
       expect(session.interruptCalled).toBe(false);
       expect(session.closeCalled).toBe(false);
       expect(server.received.filter(e => e.type === 'task.fail')).toEqual([]);

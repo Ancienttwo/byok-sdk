@@ -217,7 +217,7 @@ async function startDaemon(options: {
   const identity: Identity = { tenantId: TENANT, deviceId: record.deviceId };
   if (build !== undefined) bound = build(identity);
   await daemon.start();
-  const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 5_000);
+  const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
   if (hello.type !== 'conn.hello') throw new Error('unreachable');
   const cursor = () => new CursorStore(storeDir).load(server.url, record.deviceId);
   return { server, daemon, record, identity, storeDir, adapter, hello, cursor };
