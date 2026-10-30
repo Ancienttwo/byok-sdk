@@ -538,6 +538,16 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
       expect(message).toContain('re-writing');
     });
 
+    it('the refusal names the failed control-socket connect alongside the unknown service state', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const connectControl = fakeUnreachable('daemon control socket not reachable: connect ENOENT /store/control.sock');
+
+      await expect(runUnpairCommand({ unpair }, { confirmed: true, storeDir: '/store', productId: 'acme-product', connectControl })).rejects.toThrow(
+        'unpair refused: could not confirm whether a background service is running (daemon control socket not reachable: connect ENOENT /store/control.sock; no background-service lifecycle could be constructed for this platform/config)',
+      );
+      expect(unpair).not.toHaveBeenCalled();
+    });
+
     it('--force proceeds anyway when no lifecycle was supplied, and logs an explicit warning instead of the usual NOTE', async () => {
       const unpair = vi.fn().mockResolvedValue(undefined);
       const { log, lines } = collectLog();
