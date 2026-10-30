@@ -8,25 +8,10 @@ name: Release
 # runner cannot mint the OIDC identity npm trusts, so this job must stay on
 # ubuntu-latest; scripts/release/publish.mjs refuses any other runner.
 #
-# The default route publishes exact tarballs CI accepted for this commit: it finds
-# the successful explicit ci.yml release-validation run for github.sha (a pull_request run names its
-# artifact after the merge ref, not this commit), downloads its
-# release-pack-<sha> artifact, and hands it to publish.mjs --artifacts, which
-# re-hashes every tarball against the frozen release-manifest.json. Nothing is
-# built or packed here.
-#
-# The optional source-sha route is restricted to the owner-approved 0.28.1
-# source/run/artifact/manifest pins in scripts/ci/accepted-release.mjs. It verifies
-# original bytes and ancestry before checking out that source; nothing is rebuilt.
-#
-# The `sha` input pins the approved workflow commit: a dispatch whose main tip has moved
-# refuses to run, so a plan is never released from code nobody reviewed.
-#
-# Re-running the original run (`gh run rerun <id>`) is the recovery path. publish.mjs
-# skips versions already on the registry with the frozen bytes, resumes from the
-# first unpublished package, and, when every package is published but the tag is
-# missing, resumes with the readback and the tag.
-
+# Every publication, including local OTP execution, must consume the exact CI
+# archive identified by the explicit run/artifact/digest inputs. publish.mjs
+# independently checks GitHub metadata and downloads/authenticates the archive.
+# No rebuild or local evidence receipt can authorize execution.
 on:
   workflow_dispatch:
     inputs:
@@ -34,10 +19,18 @@ on:
         description: Full 40-character commit on main to release. The run refuses any other commit.
         type: string
         required: true
-      source-sha:
-        description: Optional owner-approved original 0.28.1 source; consumes its pinned accepted artifact without rebuilding.
+      ci-run-id:
+        description: Successful ci.yml workflow_dispatch run for this exact SHA on main or release/*.
         type: string
-        default: ''
+        required: true
+      ci-artifact-id:
+        description: ID of that run's unexpired release-pack-<sha> artifact.
+        type: string
+        required: true
+      ci-artifact-digest:
+        description: Exact sha256:<hex> digest from the GitHub artifact API.
+        type: string
+        required: true
       execute:
         description: Publish for real. Leave unchecked to print the full release plan only.
         type: boolean
@@ -87,65 +80,30 @@ jobs:
           node-version-file: .node-version
           package-manager-cache: false
 
-      - name: Verify the owner-approved original release artifact
-        if: inputs.source-sha != ''
-        id: accepted
+      # npm provenance identifies this release workflow SHA. The evidence records
+      # the separate CI build identity; never override GITHUB_SHA or rebuild bytes.
+      - name: Verify accepted CI artifact and release plan or publish
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SOURCE_SHA: ${{ inputs.source-sha }}
-        run: node scripts/ci/accepted-release.mjs
-
-      - name: Preserve original build and release workflow identities
-        if: inputs.source-sha != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: accepted-release-evidence-${{ github.run_id }}
-          path: ${{ runner.temp }}/accepted-release-evidence.json
-          if-no-files-found: error
-
-      - name: Checkout the verified original source for manifest checks and release tag
-        if: inputs.source-sha != ''
-        env:
-          SOURCE_SHA: ${{ steps.accepted.outputs.source-sha }}
-        run: git checkout --detach "$SOURCE_SHA"
-
-      - name: Find the successful CI run for this commit
-        if: inputs.source-sha == ''
-        id: ci
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event workflow_dispatch --branch main --commit "$GITHUB_SHA" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -z "$run_id" ]; then
-            echo "::error::no successful explicit ci.yml release-validation run for $GITHUB_SHA on main; wait for CI to pass on this commit"
-            exit 1
-          fi
-          echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
-
-      - name: Download the accepted release tarballs
-        if: inputs.source-sha == ''
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: release-pack-${{ github.sha }}
-          path: ${{ runner.temp }}/release-pack
-          run-id: ${{ steps.ci.outputs.run-id }}
-          github-token: ${{ github.token }}
-
-      # npm's provenance describes this release workflow SHA, not the earlier
-      # build. The separately uploaded evidence preserves original source/run/hash.
-      # Never override GITHUB_SHA or rebuild the accepted package bytes.
-      - name: Release plan or publish
-        env:
+          CI_RUN_ID: ${{ inputs.ci-run-id }}
+          CI_ARTIFACT_ID: ${{ inputs.ci-artifact-id }}
+          CI_ARTIFACT_DIGEST: ${{ inputs.ci-artifact-digest }}
           EXECUTE: ${{ inputs.execute }}
           DIST_TAG: ${{ inputs.dist-tag }}
-          ARTIFACTS: ${{ runner.temp }}/release-pack
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          args=(--trusted-publishing --artifacts "$ARTIFACTS")
+          args=(--trusted-publishing --ci-run-id "$CI_RUN_ID" --ci-artifact-id "$CI_ARTIFACT_ID" --ci-artifact-digest "$CI_ARTIFACT_DIGEST")
           if [ -n "$DIST_TAG" ]; then args+=(--tag "$DIST_TAG"); fi
           if [ "$EXECUTE" = 'true' ]; then args+=(--execute); else args+=(--dry-run); fi
           node scripts/release/publish.mjs "${args[@]}"
+
+      - name: Preserve verified build and release workflow identities
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-evidence.json
+          if-no-files-found: error
 
       - name: Push the release tag
         if: inputs.execute

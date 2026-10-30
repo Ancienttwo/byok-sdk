@@ -71,8 +71,10 @@ test('--dry-run, --execute and --trusted-publishing parse into one explicit mode
   assert.deepEqual(parseArguments(['--dry-run', '--artifacts', 'ci-pack']), {
     execute: false, otp: undefined, outDir: undefined, artifacts: 'ci-pack', tag: undefined, trustedPublishing: false,
   });
-  assert.deepEqual(parseArguments(['--execute', '--trusted-publishing', '--artifacts', 'ci-pack', '--tag', 'rc']), {
-    execute: true, otp: undefined, outDir: undefined, artifacts: 'ci-pack', tag: 'rc', trustedPublishing: true,
+  assert.deepEqual(parseArguments(['--execute', '--trusted-publishing', '--ci-run-id', '123',
+    '--ci-artifact-id', '456', '--ci-artifact-digest', `sha256:${'a'.repeat(64)}`, '--tag', 'rc']), {
+    execute: true, otp: undefined, outDir: undefined, artifacts: undefined, tag: 'rc', trustedPublishing: true,
+    ciRunId: '123', ciArtifactId: '456', ciArtifactDigest: `sha256:${'a'.repeat(64)}`,
   });
   assert.throws(() => parseArguments(['--dry-run', '--execute']), /--dry-run and --execute are mutually exclusive/);
   assert.throws(() => parseArguments(['--execute', '--dry-run']), /--dry-run and --execute are mutually exclusive/);

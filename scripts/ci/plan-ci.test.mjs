@@ -126,6 +126,7 @@ test('PR CLI pairs the tested merge with its actual main parent and rejects inco
   const commit = message => { git('add', '.'); git('-c', 'user.name=CI fixture', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message); return git('rev-parse', 'HEAD'); };
   try {
     git('init', '-b', 'main');
+    writeFileSync(path.join(cwd, 'package.json'), '{}');
     writeFileSync(path.join(cwd, 'README.md'), 'base\n');
     const eventBase = commit('event base');
     git('checkout', '-b', 'topic');
@@ -187,7 +188,7 @@ test('a routine plan never contains the complete test suite', () => {
 // installed packages; the other reviewed scripts run their tests without one.
 test('reviewed release scripts install only when their tests need packages', () => {
   const install = ['scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs', 'scripts/architecture/dependency-baseline.json', 'scripts/release/check-package-graph.mjs', 'scripts/release/pack-and-smoke.mjs', 'scripts/release/pack-and-smoke.test.mjs',
-    'scripts/release/publish.mjs'];
+    'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/publish-recovery.test.mjs'];
   for (const path of Object.keys(reviewedScripts)) {
     assert.equal(needsBuild(planCi({ event: 'push', sha, paths: [path] })), install.includes(path), path);
   }
