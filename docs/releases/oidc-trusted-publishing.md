@@ -1,13 +1,9 @@
 # npm trusted publishing (OIDC)
 
-Status: the workflow and the publisher support are in the repository.
-The current release route uses the owner's local npm session and OTP on
-release day. OIDC setup and the first OIDC publication are separate owner
-operations. They are not required for the current release route.
-
-Keep the nine-package setup below as the plan for that later change.
-Do not treat the workflow file or a passing local test as proof that npm
-trust is configured or that an OIDC publication has passed.
+The protected GitHub-hosted `release.yml` job is the OIDC/provenance route.
+Configuration and a successful real publication require separate owner evidence;
+repository code and local tests do not prove either operation has happened.
+Local OTP execution remains available, with the same mandatory CI evidence gate.
 
 ## Outcome
 
@@ -17,7 +13,7 @@ npm token. It does not ask for 2FA once per package. Each package gets a
 provenance attestation.
 
 - Workflow: [`.github/workflows/release.yml`](../../.github/workflows/release.yml).
-- Driver: `node scripts/release/publish.mjs --trusted-publishing --artifacts <dir>`.
+- Driver: `node scripts/release/publish.mjs --trusted-publishing --ci-run-id <run-id> --ci-artifact-id <artifact-id> --ci-artifact-digest sha256:<hex>`.
 - The package set stays the nine public packages of ADR-035. From 0.28.2,
   keys uses the release train version.
 
@@ -44,7 +40,7 @@ The npm documentation gives these constraints. They were read on 2026-10-19
      We expect that publish to fail closed (inferred: not run). The owner
      must then choose to keep the repository public or to remove provenance.
   3. A self-hosted runner still cannot use OIDC. The only other path is the
-     local OTP path (see [Local fallback](#local-fallback)).
+     local OTP path (see [Local OTP publication](#local-otp-publication)).
 - **npm and Node versions.** Trusted publishing needs npm 11.5.1 or later
   and Node 22.14.0 or later. `.node-version` pins Node 24.22.1, which ships
   npm 11.19.1 (verified: the `npm` field of `v24.22.1` in the
@@ -79,9 +75,10 @@ The npm documentation gives these constraints. They were read on 2026-10-19
 
 ## One-time owner setup
 
-Do these steps when the owner chooses to enable OIDC. They are not a gate
-for local OTP publication. Only the owner can do them. They need the npm
-owner account with 2FA and admin access to the GitHub repository.
+Do these steps when the owner chooses to enable OIDC. They are not an
+authentication gate for local OTP publication; CI evidence is mandatory for
+both routes. Only the owner can do them. They need the npm owner account with
+2FA and admin access to the GitHub repository.
 
 1. **Make the GitHub environment.** In the repository settings, add the
    environment `npm-release`. Add the owner as a required reviewer. Limit
@@ -113,35 +110,74 @@ owner account with 2FA and admin access to the GitHub repository.
 
 ## Release procedure
 
-Use this procedure only after the owner completes the setup above.
-Until then, use the [current local route](#local-fallback).
-
-1. Merge the release preparation to `main`. Wait for the `ci.yml` push run
-   for that commit to pass. That run keeps `release-pack-<sha>` for 30 days.
-2. Print the plan. Nothing is published:
-
-   ```sh
-   gh workflow run release.yml --ref main -f sha=<sha> -f execute=false
-   ```
-
-   `<sha>` is the full 40-character release commit. The run refuses to start
-   when the `main` tip is another commit. For a prerelease, add
-   `-f dist-tag=rc`. The plan lists each package with
-   its action (publish or skip), the auth mode, provenance, the dist-tag, the
-   readback schedule and the tag.
-3. Get the owner's authorization for that exact plan. Then run the release:
+1. Freeze the exact release commit on `main` or `release/*`. Dispatch `ci.yml`
+   on that ref with its release-validation inputs and wait for the entire run
+   to finish successfully. PR, push and nightly runs are not release acceptance.
+   Only explicit release validation retains `release-pack-<sha>` for 30 days.
+2. Record the full source SHA, successful run ID, artifact ID and the artifact's
+   `digest` from GitHub's API. Inspect the run and artifact, for example:
 
    ```sh
-   gh workflow run release.yml --ref main -f sha=<sha> -f execute=true
+   gh api repos/Ancienttwo/byok-sdk/actions/runs/<run-id>
+   gh api repos/Ancienttwo/byok-sdk/actions/runs/<run-id>/artifacts
+   gh api repos/Ancienttwo/byok-sdk/actions/artifacts/<artifact-id>
    ```
 
-   Use the same `<sha>` as the plan. If `main` has moved, the run stops, and
-   the release needs a new plan. The owner approves the `npm-release` deployment. The job publishes the
-   packages in dependency order. It waits for the registry to serve every
-   exact version, reads the registry back, makes the annotated
-   `v<version>` tag and pushes it.
-4. Record the publication in `docs/releases/v<version>-publication.md` as
-   before.
+   The verifier binds repository, `ci.yml` workflow ID/path, run ID, exact source
+   SHA, `workflow_dispatch`, `main`/`release/*` branch, completed success,
+   artifact ID/name/run/repository and unexpired `sha256:<hex>` archive digest.
+   It downloads the ZIP itself and checks that digest before parsing it. Only
+   flat regular manifest/tarball entries are accepted, with unique package/file
+   identities and SHA-256/SHA-512 checks against the release manifest. The
+   publisher additionally checks the full package set and packed manifests
+   against the checkout. A local receipt or directory cannot substitute for
+   GitHub verification.
+3. After owner OIDC setup, print the protected workflow plan on `main`:
+
+   ```sh
+   gh workflow run release.yml --ref main -f sha=<sha> \
+     -f ci-run-id=<run-id> -f ci-artifact-id=<artifact-id> \
+     -f ci-artifact-digest=sha256:<hex> -f execute=false
+   ```
+
+   The `main` tip must still be the approved `<sha>`. For a prerelease add
+   `-f dist-tag=rc`. The plan lists package/version/channel, publish/skip,
+   authentication and provenance. The publisher downloads and verifies the
+   identified CI archive; it never builds or packs when CI evidence is supplied.
+4. After owner authorization of that exact plan, repeat the same dispatch with
+   `-f execute=true`. The owner approves the `npm-release` environment, restricted
+   to `main`. Packages publish in dependency order, then registry readback must
+   pass before the annotated tag is created and pushed.
+5. Record publication in `docs/releases/v<version>-publication.md`. The workflow
+   retains `release-evidence-<release-run-id>` with original source/run/artifact
+   identity and manifest digest. npm provenance identifies the protected release
+   workflow; the separate evidence records the earlier CI build. `GITHUB_SHA` is
+   never overridden.
+
+## Operator migration (#1122)
+
+This is a breaking change to the maintainer release CLI and workflow inputs.
+`--execute` without all three CI identity flags fails with
+`RELEASE_CI_EVIDENCE_REQUIRED`. `--artifacts <dir>` and `--out-dir` may be used
+only for dry-run preparation and cannot be combined with CI identity flags.
+A local build, copied manifest or evidence JSON cannot authorize publication.
+The publisher re-queries GitHub and downloads verified bytes for every execute,
+including local OTP execution and resumed releases. Missing, expired, unsuccessful,
+wrong-event, wrong-branch, wrong-SHA or mismatched artifacts stop publication;
+prepare a new explicit CI release-validation run for the same source rather
+than rebuilding locally.
+
+The historical owner-pinned `0.28.1` `source-sha` workflow input and
+`scripts/ci/accepted-release.mjs` exception have been removed. There is no
+alternate source checkout or hardcoded source/run/artifact allowlist. Replace
+old dispatches with the three explicit CI identity inputs above and use the
+exact source checkout. Old local commands such as `--artifacts <dir> --execute`
+are refused. Plain dry runs can still build and pack for inspection; that
+output does not become publishable evidence.
+
+The SDK upgrade manifest inventories Host-visible package surfaces; it does
+not inventory maintainer release-script flags. This operator migration records
+the CLI change without assigning it an unrelated Host item.
 
 ## Recovery
 
@@ -149,7 +185,8 @@ Re-run the original run: `gh run rerun <run-id>`. A re-run keeps the commit
 and the inputs of the original run, so it cannot pick up a newer `main`. The
 owner approves the `npm-release` deployment again. Do not repack. Do not bump
 the version to recover. A new dispatch works only while `main` is still at
-the release commit.
+the release commit. Every invocation re-verifies the same run/artifact/digest;
+if the artifact expired, obtain fresh explicit CI acceptance for that exact source.
 
 - **A publish failed in the middle.** The next run skips each version that
   the registry holds with the frozen integrity. It continues from the first
@@ -171,23 +208,23 @@ the release commit.
   continue a partially published prerelease. Prepare a new exact
   prerelease version.
 
-## Local fallback
+## Local OTP publication
 
-This is the current release route. The owner completes npm write 2FA on
-release day. OIDC setup is not a prerequisite. The same route remains
-available as a fallback after OIDC is enabled.
-
-Use the accepted CI artifacts for the exact release commit. Print the plan
-first. After the owner authorizes that package/version/channel plan, run the
-publish command in an interactive terminal:
+Local execution needs an authenticated `gh` session (or `GH_TOKEN`) with read
+access to Actions runs/artifacts, and npm write 2FA. Use the exact source
+checkout and the CI identity from the release procedure above:
 
 ```sh
-node scripts/release/publish.mjs --artifacts <dir> --dry-run
-node scripts/release/publish.mjs --artifacts <dir> --execute --otp <code>
+node scripts/release/publish.mjs --dry-run \
+  --ci-run-id <run-id> --ci-artifact-id <artifact-id> \
+  --ci-artifact-digest sha256:<hex>
+node scripts/release/publish.mjs --execute --otp <code> \
+  --ci-run-id <run-id> --ci-artifact-id <artifact-id> \
+  --ci-artifact-digest sha256:<hex>
 ```
 
-It needs an npm session with `tfa.mode` `auth-and-writes`. A local run
-attaches no provenance. npm can ask for 2FA for each package on this path.
-The recovery behavior above applies to it too. After step 5 of the setup,
-we expect a session with 2FA to continue to work, because the setting
-blocks tokens only (inferred: not run). Check it once before you need it.
+The owner authorizes the exact package/version/channel plan before execution.
+This route requires npm `tfa.mode` `auth-and-writes`, downloads the same
+CI-built bytes without rebuilding, and attaches no provenance. npm can ask for
+2FA per package. The recovery rules above apply; write failures are not retried.
+OIDC authentication setup is separate from the CI evidence requirement.

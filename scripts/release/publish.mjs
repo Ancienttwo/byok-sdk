@@ -1,6 +1,6 @@
 import { assertFrozenRegistryExpectations, assertPrereleaseRegistryBaseline, frozenRuntimeDependencyMetadata, npmDistTags, npmPackageExists, npmView, readRegistryExpectations } from './registry-contract.mjs';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -8,16 +8,18 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { iterateTarballFiles } from './pi-runtime-identity.mjs';
 import { runtimeDependencyMetadata } from './registry-contract.mjs';
+import { fetchReleaseArtifact } from '../ci/release-artifact.mjs';
 
 // One-command release driver for the fixed-version train: version gate -> build ->
 // pack-and-smoke -> publish plan -> registry auth gate -> npm publish -> registry
 // readback -> annotated tag, so a release is one invocation instead of eight
 // hand-sequenced commands.
 //
-// --artifacts <dir> consumes the release-manifest.json that CI packed for the exact
-// HEAD: the build and the pack are skipped, every tarball the publish set needs is
-// re-hashed against the frozen manifest, and any mismatch aborts. It is mutually
-// exclusive with --out-dir, which only relocates a fresh local pack.
+// Every --execute requires --ci-run-id, --ci-artifact-id and --ci-artifact-digest.
+// The driver verifies GitHub metadata for HEAD, downloads the accepted ZIP itself,
+// authenticates its digest and publishes those bytes without building or packing.
+// --artifacts <dir> and --out-dir are dry-run inputs only; a local manifest or
+// receipt is never release authorization.
 //
 // Default mode is a dry run (--dry-run says so explicitly): steps 1-4 execute for
 // real and the full release plan is printed — every package with its action, the
@@ -109,6 +111,9 @@ export function parseArguments(argv) {
     ['--out-dir', 'outDir'],
     ['--artifacts', 'artifacts'],
     ['--tag', 'tag'],
+    ['--ci-run-id', 'ciRunId'],
+    ['--ci-artifact-id', 'ciArtifactId'],
+    ['--ci-artifact-digest', 'ciArtifactDigest'],
   ]);
   const switches = new Map([
     ['--execute', 'execute'],
@@ -148,6 +153,20 @@ export function parseArguments(argv) {
       '--artifacts and --out-dir are mutually exclusive: --artifacts publishes tarballs that were already packed, ' +
         '--out-dir only chooses where a fresh pack writes them',
     );
+  }
+  const hasCI = [parsed.ciRunId, parsed.ciArtifactId, parsed.ciArtifactDigest].some(value => value !== undefined);
+  if (parsed.execute && !hasCI) {
+    throw Object.assign(new Error('--execute requires --ci-run-id, --ci-artifact-id and --ci-artifact-digest; local artifacts cannot authorize publication'), { code: 'RELEASE_CI_EVIDENCE_REQUIRED' });
+  }
+  if (hasCI) {
+    if (!/^[1-9]\d*$/.test(parsed.ciRunId ?? '') || !Number.isSafeInteger(Number(parsed.ciRunId))
+      || !/^[1-9]\d*$/.test(parsed.ciArtifactId ?? '') || !Number.isSafeInteger(Number(parsed.ciArtifactId))
+      || !/^sha256:[a-f0-9]{64}$/.test(parsed.ciArtifactDigest ?? '')) {
+      throw new Error('Provide all CI evidence flags with exact positive run/artifact IDs and a sha256 artifact digest');
+    }
+    if (parsed.artifacts !== undefined || parsed.outDir !== undefined) {
+      throw new Error('CI evidence cannot be combined with --artifacts or --out-dir; accepted bytes are downloaded directly from GitHub');
+    }
   }
   return parsed;
 }
@@ -575,9 +594,14 @@ const registry = {
 async function main() {
   const {
     execute, otp, outDir: requestedOut, artifacts: requestedArtifacts, tag: requestedTag, trustedPublishing,
+    ciRunId, ciArtifactId, ciArtifactDigest,
   } = parseArguments(process.argv.slice(2));
   if (otp && !execute) throw new Error('--otp is only meaningful with --execute');
   const log = (message) => console.log(`[release-publish] ${message}`);
+  const headSha = capture('git', ['rev-parse', 'HEAD']);
+  const ciRequest = ciRunId === undefined ? undefined : {
+    sourceSha: headSha, runId: Number(ciRunId), artifactId: Number(ciArtifactId), artifactDigest: ciArtifactDigest,
+  };
 
   // --- Step 1: version consistency + registry candidacy -------------------
   const manifests = readPublicManifests(packagesDir);
@@ -637,19 +661,30 @@ async function main() {
 
   // --- Step 2: build -------------------------------------------------------
   const bunBin = process.platform === 'win32' ? 'bun.exe' : 'bun';
-  const frozen = requestedArtifacts !== undefined;
+  const frozen = ciRequest !== undefined || requestedArtifacts !== undefined;
   if (frozen) {
-    log('step 2/8: build skipped — --artifacts releases tarballs that are already packed');
+    log('step 2/8: build skipped — consuming frozen tarballs');
   } else {
     log('step 2/8: bun run build:release');
     stream(bunBin, ['run', 'build:release']);
   }
 
   // --- Step 3: frozen artifacts, packed here or downloaded from CI ---------
-  const ephemeralRoot = frozen || requestedOut ? undefined : mkdtempSync(path.join(os.tmpdir(), 'byok-release-publish-'));
-  const outDir = path.resolve(repoRoot, requestedArtifacts ?? requestedOut ?? path.join(ephemeralRoot, 'artifacts'));
+  const ephemeralRoot = ciRequest || (!frozen && !requestedOut) ? mkdtempSync(path.join(os.tmpdir(), 'byok-release-publish-')) : undefined;
+  const outDir = path.resolve(repoRoot, ciRequest ? ephemeralRoot : requestedArtifacts ?? requestedOut ?? path.join(ephemeralRoot, 'artifacts'));
   try {
-    if (frozen) {
+    if (ciRequest) {
+      const verified = fetchReleaseArtifact(ciRequest);
+      for (const [name, bytes] of verified.files) writeFileSync(path.join(outDir, name), bytes, { flag: 'wx', mode: 0o600 });
+      log(`step 3/8: verified CI run ${ciRequest.runId}, artifact ${ciRequest.artifactId} (${ciRequest.artifactDigest})`);
+      if (process.env.GITHUB_ACTIONS === 'true') {
+        const evidence = { ...verified.evidence, releaseWorkflowSha: process.env.GITHUB_SHA,
+          provenance: 'npm provenance identifies the protected release workflow; this evidence records the original CI build' };
+        writeFileSync(path.join(process.env.RUNNER_TEMP, 'release-evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`);
+        appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+          `## Accepted CI release artifact\n\nSource: ${headSha}\n\nCI: https://github.com/Ancienttwo/byok-sdk/actions/runs/${ciRequest.runId}\n\nArtifact: ${ciRequest.artifactId} (${ciRequest.artifactDigest})\n\n${evidence.provenance}\n`);
+      }
+    } else if (frozen) {
       log(`step 3/8: pack skipped — verifying frozen artifacts in ${outDir}`);
     } else {
       log(`step 3/8: pack-and-smoke into ${outDir}`);
@@ -657,9 +692,16 @@ async function main() {
     }
 
     const releaseManifestPath = path.join(outDir, 'release-manifest.json');
-    const headSha = capture('git', ['rev-parse', 'HEAD']);
     const publishSet = topologicalOrder(pendingEntries);
-    const plan = verifyFrozenArtifacts({ artifactsDir: outDir, headSha, trainVersion, publishSet });
+    // Validate all accepted packages, including already-published resume entries.
+    if (ciRequest) {
+      const manifest = JSON.parse(readFileSync(releaseManifestPath, 'utf8'));
+      if (manifest.packages.length !== manifests.size) throw new Error('Accepted CI artifact package set differs from the release train');
+    }
+    const verifiedEntries = verifyFrozenArtifacts({ artifactsDir: outDir, headSha, trainVersion,
+      publishSet: ciRequest ? [...manifests.values()] : publishSet });
+    const verifiedByName = new Map(verifiedEntries.map(entry => [entry.name, entry]));
+    const plan = publishSet.map(entry => verifiedByName.get(entry.name));
     const frozenManifest = JSON.parse(readFileSync(releaseManifestPath, 'utf8'));
     assertFrozenRegistryExpectations(frozenManifest, registryExpectations,
       Object.fromEntries([...manifests.values()].map((entry) => [entry.name, entry.version])));
