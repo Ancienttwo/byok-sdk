@@ -392,7 +392,7 @@ try {
         `for (const name of ${JSON.stringify(smokeImports.node)}) await import(name);\n` +
         `const { buildRuntimeEnvironment } = await import('@byok-sdk/client/adapters');\n` +
         `Object.assign(process.env, { CLAUDECODE: '1', BYOK_TEST: 'secret', NODE_OPTIONS: '--trace-warnings' });\n` +
-        `const smokeEnv = await buildRuntimeEnvironment({ base: 'allowlist', allow: ['NODE_OPTIONS'] });\n` +
+        `const { env: smokeEnv } = await buildRuntimeEnvironment({ base: 'allowlist', allow: ['NODE_OPTIONS'] });\n` +
         `assert.equal(smokeEnv.NODE_OPTIONS, '--trace-warnings');\n` +
         `assert.equal('CLAUDECODE' in smokeEnv || 'BYOK_TEST' in smokeEnv, false);\n` +
         `for (const name of ['CLAUDECODE', 'BYOK_TEST', 'NODE_OPTIONS']) delete process.env[name];\n` +

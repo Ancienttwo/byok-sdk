@@ -65,7 +65,7 @@ const ADAPTERS: Array<[string, AdapterFactory]> = [
 describe.each(ADAPTERS)('%s adapter constructed directly', (_id, create) => {
   it('default: the snapshot, without the Host variables', async () => {
     useSnapshot(captured);
-    const env = await (await create()).runtimeEnvironment();
+    const { env } = await (await create()).runtimeEnvironment();
     expect(env.SHELL_ONLY_SENTINEL).toBe('from-rc');
     expect(env).not.toHaveProperty('HOST_ONLY_SENTINEL');
     expect(env).not.toHaveProperty('HOST_PASSED_SENTINEL');
@@ -76,9 +76,12 @@ describe.each(ADAPTERS)('%s adapter constructed directly', (_id, create) => {
     useSnapshot(captured);
     const adapter = await create({ pass: ['HOST_PASSED_SENTINEL'] });
     process.env.HOST_PASSED_SENTINEL = 'written-after-construction';
-    const env = await adapter.runtimeEnvironment();
+    const { env, report } = await adapter.runtimeEnvironment();
     expect(env.HOST_PASSED_SENTINEL).toBe('written-after-construction');
     expect(env).not.toHaveProperty('HOST_ONLY_SENTINEL');
+    // The report doctor shows comes from the same build.
+    expect(report.names).toEqual(expect.arrayContaining([{ name: 'HOST_PASSED_SENTINEL', source: 'pass' }, { name: 'SHELL_ONLY_SENTINEL', source: 'login-shell' }]));
+    expect(report.names.map(({ name }) => name).sort()).toEqual(Object.keys(env).sort());
   });
 
   it('a failed capture: the environment is refused, and detect reports runtime_environment_unavailable with the code', async () => {
@@ -90,7 +93,7 @@ describe.each(ADAPTERS)('%s adapter constructed directly', (_id, create) => {
 
   it('allowlist: needs no snapshot and takes only the baseline from the live environment', async () => {
     useSnapshot(failed);
-    const env = await (await create({ base: 'allowlist', pass: ['HOST_PASSED_SENTINEL'] })).runtimeEnvironment();
+    const { env } = await (await create({ base: 'allowlist', pass: ['HOST_PASSED_SENTINEL'] })).runtimeEnvironment();
     expect(env.PATH).toBe(process.env.PATH);
     expect(env.HOST_PASSED_SENTINEL).toBe('passed');
     expect(env).not.toHaveProperty('HOST_ONLY_SENTINEL');
@@ -107,13 +110,18 @@ describe('Claude conflict rule', () => {
     useSnapshot({ ...captured, env: { ...SHELL_ENV, CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_MODEL: 'shell-model', CLAUDE_CODE_OAUTH_TOKEN: 'shell-oauth' } });
     process.env.ANTHROPIC_BASE_URL = 'https://gateway.example';
     try {
-      const env = await new ClaudeAdapter({ runtimeEnvironment: { pass: ['ANTHROPIC_BASE_URL'] } }).runtimeEnvironment();
+      const { env, report } = await new ClaudeAdapter({ runtimeEnvironment: { pass: ['ANTHROPIC_BASE_URL'] } }).runtimeEnvironment();
+      expect(report.removed).toEqual([
+        { name: 'ANTHROPIC_MODEL', rule: 'conflict' },
+        { name: 'CLAUDE_CODE_OAUTH_TOKEN', rule: 'conflict' },
+        { name: 'CLAUDE_CODE_USE_BEDROCK', rule: 'conflict' },
+      ]);
       expect(env.ANTHROPIC_BASE_URL).toBe('https://gateway.example');
       expect(env).not.toHaveProperty('CLAUDE_CODE_USE_BEDROCK');
       expect(env).not.toHaveProperty('ANTHROPIC_MODEL');
       expect(env).not.toHaveProperty('CLAUDE_CODE_OAUTH_TOKEN');
       expect(env.SHELL_ONLY_SENTINEL).toBe('from-rc');
-      const unpassed = await new ClaudeAdapter().runtimeEnvironment();
+      const { env: unpassed } = await new ClaudeAdapter().runtimeEnvironment();
       expect(unpassed.CLAUDE_CODE_USE_BEDROCK).toBe('1');
     } finally {
       delete process.env.ANTHROPIC_BASE_URL;
@@ -142,7 +150,7 @@ describe('daemon wiring', () => {
     useSnapshot(captured);
     const base = await config();
     const adapter = buildAdapter('claude', { ...base, runtimeEnvironment: { pass: ['HOST_PASSED_SENTINEL'] } }, undefined);
-    expect((await adapter.runtimeEnvironment()).HOST_PASSED_SENTINEL).toBe('passed');
+    expect((await adapter.runtimeEnvironment()).env.HOST_PASSED_SENTINEL).toBe('passed');
     expect(() => createDaemonWithAdapters({ ...base, runtimeEnvironment: {} }, [new StubRuntimeAdapter()]))
       .toThrow('DaemonConfig.runtimeEnvironment is only supported by createDaemon');
     expect(() => createDaemon({ ...base, runtimeEnvironment: { base: 'inherit' } as never })).toThrow('DaemonConfig.runtimeEnvironment.base must be login-shell or allowlist');
@@ -151,7 +159,7 @@ describe('daemon wiring', () => {
   it('a task child gets the adapter environment; a failed capture declines the offer and reports the refusal', async () => {
     useSnapshot(captured);
     const adapter = new StubRuntimeAdapter();
-    adapter.runtimeEnvironment = async () => ({ PATH: '/usr/bin', ADAPTER_ENV_SENTINEL: '1' });
+    adapter.runtimeEnvironment = async () => ({ env: { PATH: '/usr/bin', ADAPTER_ENV_SENTINEL: '1' }, report: { names: [], removed: [] } });
     daemon = createDaemonWithAdapters(await config(), [adapter]);
     await daemon.pair('code');
     await daemon.start();

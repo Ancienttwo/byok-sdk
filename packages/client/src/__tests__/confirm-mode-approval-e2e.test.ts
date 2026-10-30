@@ -1,4 +1,5 @@
-import { testRuntimeEnv } from './fixtures/runtime-env';
+import { testRuntimeEnvironment } from './fixtures/runtime-env';
+import type { RuntimeEnvironment } from '../runtime/environment';
 import type { RuntimeTaskInput } from '../types';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
@@ -82,8 +83,8 @@ class ApprovalAwareAdapter implements RuntimeAdapter {
   });
   readonly sessions: ApprovalAwareSession[] = [];
 
-  async runtimeEnvironment(): Promise<Record<string, string>> {
-    return testRuntimeEnv();
+  async runtimeEnvironment(): Promise<RuntimeEnvironment> {
+    return testRuntimeEnvironment();
   }
 
   async detect(): Promise<RuntimeDetectResult> {

@@ -5,7 +5,7 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { buildRuntimeEnvironment } from '../runtime/environment';
+import { buildRuntimeEnvironment, type RuntimeEnvironment } from '../runtime/environment';
 import type {
   RuntimeAdapter,
   RuntimeAdapterDescriptor,
@@ -24,7 +24,7 @@ export interface FakeRuntimeAdapterBehavior {
   /** Default: a non-retryable reject, so a fake starts nothing the test did not supply. */
   readonly prepare?: (input: RuntimeAdapterPrepareInput) => Promise<RuntimeAdapterPrepareResult>;
   /** Default: the `allowlist` runtime environment, which takes no login-shell snapshot. */
-  readonly runtimeEnvironment?: () => Promise<Record<string, string>>;
+  readonly runtimeEnvironment?: () => Promise<RuntimeEnvironment>;
 }
 
 /** The real adapter's default descriptor. Construction reads no file and spawns nothing. */

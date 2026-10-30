@@ -975,7 +975,12 @@ the sizes only.
 
 `RuntimeAdapter.runtimeEnvironment()` is the one source of the environment every
 child process of a runtime's tasks receives: the runtime CLI, its version and
-login probes, and the MCP servers the daemon probes for it. Each SDK adapter
+login probes, and the MCP servers the daemon probes for it. It returns
+`{ env, report }` from one build: `report` lists every name of `env` with its
+source (`login-shell`, `windows-session`, `allowlist`, `pass`, or `sdk` for the
+`NO_PROXY`/`no_proxy` the builder writes) and every name a base or `pass`
+admitted that the hard deny or the conflict rule then removed. It carries no
+value. Each SDK adapter
 builds it under its `runtimeEnvironment` constructor option; `createDaemon`
 passes `DaemonConfig.runtimeEnvironment` to the adapters it builds, and
 `createDaemonWithAdapters` rejects that field.
@@ -994,6 +999,19 @@ passes `DaemonConfig.runtimeEnvironment` to the adapters it builds, and
 include `127.0.0.1` and `localhost`. An adapter's conflict rule removes base
 names when `pass` supplies its trigger (Claude: a passed provider drops the
 shell's `ANTHROPIC_*`, Bedrock/Vertex switches and OAuth token).
+
+The running daemon is the only authority for the names. The authenticated
+control method `runtimes.environment` builds every adapter's environment on
+demand and answers with each report (`built`), the capture's failure code
+(`unavailable`) or `failed`, never a value. `byok-agent doctor` prints the
+names and sources in text and as the top-level `runtimeEnvironment` of its
+JSON. It does not rebuild them itself: its own process has another live
+environment and cannot see a Host's own adapters. Offline, or when the daemon
+does not answer with the exact shape, it reports `unknown`. Names an adapter
+adds to one task's environment when it starts that task are not listed. The diagnostics snapshot and the support bundle keep only counts per
+hashed runtime id, and `audit.jsonl` keeps no names. `byok-agent config check`
+starts no login shell, so it prints the file's `runtimeEnvironment` policy and
+no names.
 
 ### Local runtime probe observation
 
@@ -1120,7 +1138,7 @@ CLI: `doctor --repair restore-enrollment-metadata --expected-device-id <id>
 JSON mode. Typed action failures emit `{ repair: { action, scope, status: "failed", code } }` and exit nonzero. Both expected identities come from the authorized host enrollment,
 not the potentially stale file. Unsupported/missing actions and conflicting
 `--fix` are rejected. Existing `doctor --fix --yes` remains health-quarantine
-only; ordinary doctor retains its existing `{ diagnostics, fix? }` shape.
+only; ordinary doctor emits `{ diagnostics, logDir, environment, runtimeEnvironment, fix? }`.
 See [downstream integration](agent-diagnostics-integration.md).
 
 ### Prepared operations

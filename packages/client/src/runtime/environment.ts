@@ -31,6 +31,11 @@ import { loginShellSnapshot, type LoginShellSnapshot, type ServiceEnvironmentUna
  *
  * Every name in every list may be an exact match or a `*`-suffixed prefix
  * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
+ *
+ * The same pass that builds the environment builds its
+ * {@link RuntimeEnvironmentReport}: every name with its source, and the names
+ * the hard deny or the conflict rule removed. Never a value. `byok-agent
+ * doctor` reads it from the running daemon (`runtimes.environment`).
  */
 
 /** Inputs to {@link buildAllowlistedEnv}. */
@@ -205,6 +210,32 @@ export type RuntimeEnvironmentPolicy =
  */
 export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => readonly string[];
 
+/**
+ * Where a runtime environment name came from: the base (`login-shell`,
+ * `windows-session` or `allowlist`), the policy's `pass`, or `sdk` for the
+ * `NO_PROXY`/`no_proxy` this module writes.
+ */
+export type RuntimeEnvironmentSource = 'login-shell' | 'windows-session' | 'allowlist' | 'pass' | 'sdk';
+
+/** The rule that kept a name out: the hard deny (`CLAUDECODE`, `BYOK_*`) or the adapter's conflict rule. */
+export type RuntimeEnvironmentRemovalRule = 'deny' | 'conflict';
+
+/**
+ * The names of one runtime environment, sorted, never their values. `removed`
+ * lists the names a base or `pass` admitted and a rule then kept out, so a
+ * name is in exactly one of the two lists.
+ */
+export interface RuntimeEnvironmentReport {
+  readonly names: readonly { readonly name: string; readonly source: RuntimeEnvironmentSource }[];
+  readonly removed: readonly { readonly name: string; readonly rule: RuntimeEnvironmentRemovalRule }[];
+}
+
+/** One build: the environment and its {@link RuntimeEnvironmentReport}. `env` is a fresh object. */
+export interface RuntimeEnvironment {
+  readonly env: Record<string, string>;
+  readonly report: RuntimeEnvironmentReport;
+}
+
 /** The login-shell capture failed, so no `login-shell` runtime environment exists in this process. */
 export class RuntimeEnvironmentUnavailableError extends Error {
   readonly code = 'runtime_environment_unavailable' as const;
@@ -257,46 +288,74 @@ export interface ComposeRuntimeEnvironmentInput {
 }
 
 /**
- * The synchronous core of {@link buildRuntimeEnvironment}: a fresh object
- * from the given snapshot and live environment.
+ * The synchronous core of {@link buildRuntimeEnvironment}: a fresh
+ * environment and its report from the given snapshot and live environment.
  *
  * @internal
  */
-export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput): Record<string, string> {
+export function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput): RuntimeEnvironment {
   const platform = input.platform ?? process.platform;
   const caseInsensitive = platform === 'win32';
   const { policy, live } = input;
+  const denied = new Set<string>();
+  const admit = (source: Readonly<Record<string, string | undefined>>, admitted: (name: string) => boolean): Record<string, string> => {
+    const result: Record<string, string> = {};
+    for (const [name, value] of Object.entries(source)) {
+      if (value === undefined || !admitted(name)) continue;
+      if (matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) denied.add(name);
+      else result[name] = value;
+    }
+    return result;
+  };
   let base: Record<string, string>;
+  let baseSource: RuntimeEnvironmentSource;
   if (policy.base === 'allowlist') {
-    base = buildAllowlistedEnv({ ambient: live, allow: policy.allow ?? [], platform });
+    const patterns = allowlistPatterns(platform, policy.allow ?? []);
+    base = admit(live, (name) => matchesAny(name, patterns, caseInsensitive));
+    baseSource = 'allowlist';
   } else if (platform === 'win32') {
-    base = copyAdmitted(live, platform, (name, ci) => matchesAny(name, WINDOWS_SESSION_NAMES, ci));
+    base = admit(live, (name) => matchesAny(name, WINDOWS_SESSION_NAMES, caseInsensitive));
+    baseSource = 'windows-session';
   } else {
     const status = input.snapshot?.status;
     if (status?.source === 'unavailable') throw new RuntimeEnvironmentUnavailableError(status.code);
     if (status?.source !== 'login-shell' || input.snapshot?.env === undefined) throw new TypeError('a login-shell runtime environment requires a captured snapshot');
-    base = copyAdmitted(input.snapshot.env, platform, () => true);
+    base = admit(input.snapshot.env, () => true);
+    baseSource = 'login-shell';
   }
   const passPatterns = policy.pass ?? [];
-  const passed = new Map<string, string>();
-  for (const [name, value] of Object.entries(live)) {
-    if (value !== undefined && matchesAny(name, passPatterns, caseInsensitive) && !matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) passed.set(name, value);
-  }
+  const passed = admit(live, (name) => matchesAny(name, passPatterns, caseInsensitive));
   // win32 names are case-insensitive, so a rule sees them in upper case and its exact-name triggers match any spelling.
-  const removed = input.conflicts?.(new Set([...passed.keys()].map((name) => caseInsensitive ? name.toUpperCase() : name))) ?? [];
-  const result: Record<string, string> = {};
+  const removed = input.conflicts?.(new Set(Object.keys(passed).map((name) => caseInsensitive ? name.toUpperCase() : name))) ?? [];
+  const env: Record<string, string> = {};
+  const conflicted = new Set<string>();
   for (const [name, value] of Object.entries(base)) {
-    if (!matchesAny(name, removed, caseInsensitive)) result[name] = value;
+    if (matchesAny(name, removed, caseInsensitive)) conflicted.add(name);
+    else env[name] = value;
   }
-  for (const [name, value] of passed) result[name] = value;
-  return withLoopbackNoProxy(result, caseInsensitive);
+  Object.assign(env, passed);
+  const written = withLoopbackNoProxy(env, caseInsensitive);
+  const sources = new Map<string, RuntimeEnvironmentSource>();
+  for (const name of Object.keys(env)) sources.set(name, written.includes(name) ? 'sdk' : Object.hasOwn(passed, name) ? 'pass' : baseSource);
+  const removals = new Map<string, RuntimeEnvironmentRemovalRule>();
+  for (const name of conflicted) removals.set(name, 'conflict');
+  for (const name of denied) removals.set(name, 'deny');
+  const byName = (a: { name: string }, b: { name: string }): number => a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  return {
+    env,
+    report: {
+      names: [...sources].map(([name, source]) => ({ name, source })).sort(byName),
+      removed: [...removals].filter(([name]) => !Object.hasOwn(env, name)).map(([name, rule]) => ({ name, rule })).sort(byName),
+    },
+  };
 }
 
 /**
- * Every `NO_PROXY`/`no_proxy` entry plus the loopback names, written to both
- * spellings. win32 names are case-insensitive, so it gets one `NO_PROXY`.
+ * Merges every `NO_PROXY`/`no_proxy` entry plus the loopback names into
+ * both spellings, in place, and returns the names it wrote. win32 names are
+ * case-insensitive, so it gets one `NO_PROXY`.
  */
-function withLoopbackNoProxy(env: Record<string, string>, caseInsensitive: boolean): Record<string, string> {
+function withLoopbackNoProxy(env: Record<string, string>, caseInsensitive: boolean): string[] {
   const keys = Object.keys(env).filter((name) => caseInsensitive ? name.toUpperCase() === 'NO_PROXY' : name === 'NO_PROXY' || name === 'no_proxy');
   const entries: string[] = [];
   for (const key of keys) {
@@ -310,20 +369,25 @@ function withLoopbackNoProxy(env: Record<string, string>, caseInsensitive: boole
   }
   const value = entries.join(',');
   env.NO_PROXY = value;
-  if (!caseInsensitive) env.no_proxy = value;
-  return env;
+  if (caseInsensitive) return ['NO_PROXY'];
+  env.no_proxy = value;
+  return ['NO_PROXY', 'no_proxy'];
 }
 
 /**
- * The environment every child process of a task receives under `policy`, from
- * this process's login-shell snapshot (captured on first use) and the live
- * `process.env`. A fresh object. Throws
+ * The environment every child process of a task receives under `policy`, and
+ * its report, from this process's login-shell snapshot (captured on first
+ * use) and the live `process.env`. Throws
  * {@link RuntimeEnvironmentUnavailableError} when `login-shell` has no
  * snapshot to build from.
  */
-export async function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, conflicts?: RuntimeEnvironmentConflictRule): Promise<Record<string, string>> {
+export async function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, conflicts?: RuntimeEnvironmentConflictRule): Promise<RuntimeEnvironment> {
   const snapshot = policy.base === 'allowlist' || process.platform === 'win32' ? undefined : await loginShellSnapshot();
   return composeRuntimeEnvironment({ policy, live: process.env, ...(snapshot === undefined ? {} : { snapshot }), ...(conflicts === undefined ? {} : { conflicts }) });
+}
+
+function allowlistPatterns(platform: NodeJS.Platform, allow: readonly string[]): readonly string[] {
+  return [...BASE_PLATFORM_ALLOWLIST, ...(platform === 'win32' ? WINDOWS_BASE_ALLOWLIST : []), ...allow];
 }
 
 /**
@@ -332,10 +396,6 @@ export async function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, 
  */
 export function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string> {
   const platform = options.platform ?? process.platform;
-  const allowPatterns: readonly string[] = [
-    ...BASE_PLATFORM_ALLOWLIST,
-    ...(platform === 'win32' ? WINDOWS_BASE_ALLOWLIST : []),
-    ...(options.allow ?? []),
-  ];
+  const allowPatterns = allowlistPatterns(platform, options.allow ?? []);
   return copyAdmitted(options.ambient, platform, (name, caseInsensitive) => matchesAny(name, allowPatterns, caseInsensitive));
 }

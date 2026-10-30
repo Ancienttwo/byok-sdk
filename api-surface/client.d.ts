@@ -1,6 +1,6 @@
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
-import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { type ResolvedBin } from './resolve-bin';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type SpawnFn } from './process-client';
@@ -44,7 +44,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly nativeOptions?;
     private readonly environmentPolicy;
     constructor(options?: ClaudeAdapterOptions);
-    runtimeEnvironment(): Promise<Record<string, string>>;
+    runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private startPrepared;
@@ -384,7 +384,7 @@ export declare function resolveClaudeBin(): ResolvedBin;
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
-import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { type ResolvedBin } from './resolve-bin';
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
@@ -437,7 +437,7 @@ export declare class CodexAdapter implements RuntimeAdapter {
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     private readonly environmentPolicy;
     constructor(options?: CodexAdapterOptions);
-    runtimeEnvironment(): Promise<Record<string, string>>;
+    runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
@@ -470,7 +470,7 @@ export declare function resolveCodexBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/grok/grok-adapter.d.ts ====
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
-import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ResolvedBin } from '../codex/resolve-bin';
 export interface GrokAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
@@ -527,7 +527,7 @@ export declare class GrokAdapter implements RuntimeAdapter {
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     private readonly environmentPolicy;
     constructor(options?: GrokAdapterOptions);
-    runtimeEnvironment(): Promise<Record<string, string>>;
+    runtimeEnvironment(): Promise<RuntimeEnvironment>;
     /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -538,7 +538,7 @@ import { type HermesByokLauncher } from './hermes-custody';
 export type { HermesByokLauncher } from './hermes-custody';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
-import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ResolvedBin } from '../codex/resolve-bin';
 /** Provider choice written into each execution profile. Credentials stay in the environment. */
 export interface HermesModelSelection {
@@ -594,7 +594,7 @@ export declare class HermesAdapter implements RuntimeAdapter {
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     constructor(options: HermesAdapterOptions);
     private command;
-    runtimeEnvironment(): Promise<Record<string, string>>;
+    runtimeEnvironment(): Promise<RuntimeEnvironment>;
     /** The custody launcher's lane is the platform baseline of the runtime environment. */
     private launchEnvironment;
     private rootEnvironment;
@@ -659,7 +659,7 @@ export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } f
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../runtime/environment';
-export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from '../runtime/environment';
+export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from '../runtime/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
 // ==== @byok-sdk/client dist/adapters/packaging.d.ts ====
@@ -751,7 +751,7 @@ export interface SdkPackagingAssets {
  */
 export declare function copySdkPackagingAssets(options: CopySdkPackagingAssetsOptions): Promise<SdkPackagingAssets>;
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
-import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
@@ -806,7 +806,7 @@ export declare class PiAdapter implements RuntimeAdapter {
     private readonly agentResources;
     private readonly environmentPolicy;
     constructor(options?: PiAdapterOptions);
-    runtimeEnvironment(): Promise<Record<string, string>>;
+    runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private resolveBin;
@@ -4023,7 +4023,8 @@ import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../login-shell-environment';
+import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
+import type { RuntimeEnvironmentReport } from '../runtime/environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
@@ -4243,6 +4244,28 @@ export interface ControlStorageStatus extends RetentionSnapshot {
         readonly budgetBytes: number;
         readonly pressureState: StoragePressureState;
     };
+}
+/** The `runtimes.environment` method (#1095): every adapter's runtime environment names, built on demand. */
+export declare const RUNTIMES_ENVIRONMENT_METHOD = "runtimes.environment";
+/**
+ * One adapter's entry in {@link ControlRuntimesEnvironmentResult}: the report
+ * of a build (names and sources, never values), the login-shell capture's
+ * failure code, or `failed` when the adapter's build threw anything else.
+ */
+export type ControlRuntimeEnvironment = ({
+    readonly runtimeId: string;
+    readonly status: 'built';
+} & RuntimeEnvironmentReport) | {
+    readonly runtimeId: string;
+    readonly status: 'unavailable';
+    readonly code: ServiceEnvironmentUnavailableCode;
+} | {
+    readonly runtimeId: string;
+    readonly status: 'failed';
+};
+/** Result shape for the `runtimes.environment` method, in the daemon's adapter order. */
+export interface ControlRuntimesEnvironmentResult {
+    readonly runtimes: readonly ControlRuntimeEnvironment[];
 }
 /** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `bin/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
 export interface ControlStatusResult {
@@ -10759,7 +10782,7 @@ import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../type
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import type { ServiceEnvironmentRecord } from '../login-shell-environment';
+import type { ServiceEnvironmentRecord, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
     id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'clock-skew' | 'health' | 'journal' | 'quarantine';
@@ -10870,6 +10893,29 @@ export interface DiagnosticsSnapshot {
             sizeBytes: number;
         }>;
         truncated: boolean;
+    };
+    /**
+     * #1095: the running daemon's runtime environments as counts. Names stay
+     * out of the snapshot and the support bundle: only `doctor` prints them.
+     */
+    runtimeEnvironment: {
+        status: 'unknown';
+        reason: 'daemon-offline' | 'request-failed';
+    } | {
+        status: 'known';
+        runtimes: Array<{
+            idHash: string;
+            status: 'built';
+            names: number;
+            removed: number;
+        } | {
+            idHash: string;
+            status: 'unavailable';
+            code: ServiceEnvironmentUnavailableCode;
+        } | {
+            idHash: string;
+            status: 'failed';
+        }>;
     };
     checks: DiagnosticCheck[];
 }
@@ -11029,7 +11075,7 @@ export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/
 export { applyLoginShellEnvironment } from './lifecycle/service-environment';
 export { serviceEnvironmentStatus } from './login-shell-environment';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
-export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from './runtime/environment';
+export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from './runtime/environment';
 export type { RuntimeObservation } from './runtime-detection';
 export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
@@ -13935,6 +13981,11 @@ import { type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from 
  *
  * Every name in every list may be an exact match or a `*`-suffixed prefix
  * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
+ *
+ * The same pass that builds the environment builds its
+ * {@link RuntimeEnvironmentReport}: every name with its source, and the names
+ * the hard deny or the conflict rule removed. Never a value. `byok-agent
+ * doctor` reads it from the running daemon (`runtimes.environment`).
  */
 /** Inputs to {@link buildAllowlistedEnv}. */
 export interface BuildAllowlistedEnvOptions {
@@ -13973,6 +14024,34 @@ export type RuntimeEnvironmentPolicy = {
  * names arrive in upper case and the removed names match case-insensitively.
  */
 export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => readonly string[];
+/**
+ * Where a runtime environment name came from: the base (`login-shell`,
+ * `windows-session` or `allowlist`), the policy's `pass`, or `sdk` for the
+ * `NO_PROXY`/`no_proxy` this module writes.
+ */
+export type RuntimeEnvironmentSource = 'login-shell' | 'windows-session' | 'allowlist' | 'pass' | 'sdk';
+/** The rule that kept a name out: the hard deny (`CLAUDECODE`, `BYOK_*`) or the adapter's conflict rule. */
+export type RuntimeEnvironmentRemovalRule = 'deny' | 'conflict';
+/**
+ * The names of one runtime environment, sorted, never their values. `removed`
+ * lists the names a base or `pass` admitted and a rule then kept out, so a
+ * name is in exactly one of the two lists.
+ */
+export interface RuntimeEnvironmentReport {
+    readonly names: readonly {
+        readonly name: string;
+        readonly source: RuntimeEnvironmentSource;
+    }[];
+    readonly removed: readonly {
+        readonly name: string;
+        readonly rule: RuntimeEnvironmentRemovalRule;
+    }[];
+}
+/** One build: the environment and its {@link RuntimeEnvironmentReport}. `env` is a fresh object. */
+export interface RuntimeEnvironment {
+    readonly env: Record<string, string>;
+    readonly report: RuntimeEnvironmentReport;
+}
 /** The login-shell capture failed, so no `login-shell` runtime environment exists in this process. */
 export declare class RuntimeEnvironmentUnavailableError extends Error {
     readonly reason: ServiceEnvironmentUnavailableCode;
@@ -13992,20 +14071,20 @@ export interface ComposeRuntimeEnvironmentInput {
     platform?: NodeJS.Platform;
 }
 /**
- * The synchronous core of {@link buildRuntimeEnvironment}: a fresh object
- * from the given snapshot and live environment.
+ * The synchronous core of {@link buildRuntimeEnvironment}: a fresh
+ * environment and its report from the given snapshot and live environment.
  *
  * @internal
  */
-export declare function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput): Record<string, string>;
+export declare function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput): RuntimeEnvironment;
 /**
- * The environment every child process of a task receives under `policy`, from
- * this process's login-shell snapshot (captured on first use) and the live
- * `process.env`. A fresh object. Throws
+ * The environment every child process of a task receives under `policy`, and
+ * its report, from this process's login-shell snapshot (captured on first
+ * use) and the live `process.env`. Throws
  * {@link RuntimeEnvironmentUnavailableError} when `login-shell` has no
  * snapshot to build from.
  */
-export declare function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, conflicts?: RuntimeEnvironmentConflictRule): Promise<Record<string, string>>;
+export declare function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, conflicts?: RuntimeEnvironmentConflictRule): Promise<RuntimeEnvironment>;
 /**
  * The platform baseline plus `options.allow`, minus the hard deny (see this
  * module's own doc comment for its callers).
@@ -14210,6 +14289,7 @@ export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
     byokagentresult: readonly string[];
 }>;
 // ==== @byok-sdk/client dist/testing/index.d.ts ====
+import { type RuntimeEnvironment } from '../runtime/environment';
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
 /** The built-in adapters a fake can stand in for. */
 export type FakeRuntimeAdapterId = 'claude' | 'codex' | 'grok' | 'hermes' | 'pi';
@@ -14220,7 +14300,7 @@ export interface FakeRuntimeAdapterBehavior {
     /** Default: a non-retryable reject, so a fake starts nothing the test did not supply. */
     readonly prepare?: (input: RuntimeAdapterPrepareInput) => Promise<RuntimeAdapterPrepareResult>;
     /** Default: the `allowlist` runtime environment, which takes no login-shell snapshot. */
-    readonly runtimeEnvironment?: () => Promise<Record<string, string>>;
+    readonly runtimeEnvironment?: () => Promise<RuntimeEnvironment>;
 }
 /**
  * A runtime adapter double whose descriptor is the real adapter's default
@@ -14331,6 +14411,7 @@ export interface ToolReminder {
 }
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment';
+import type { RuntimeEnvironment } from './runtime/environment';
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { ToolAuthorizationGate } from './tool-authorization';
@@ -14878,12 +14959,13 @@ export interface RuntimeAdapter {
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     /**
      * The environment every child process of this runtime's tasks receives
-     * (#1095): a fresh object, built under the adapter's own
-     * `RuntimeEnvironmentPolicy` (`buildRuntimeEnvironment`). Rejects with
-     * `RuntimeEnvironmentUnavailableError` when that policy has no environment
-     * to build from; the daemon then refuses the runtime.
+     * (#1095), built under the adapter's own `RuntimeEnvironmentPolicy`
+     * (`buildRuntimeEnvironment`): a fresh `env` and, from the same pass, the
+     * `report` of its names and sources that `byok-agent doctor` shows. Rejects
+     * with `RuntimeEnvironmentUnavailableError` when that policy has no
+     * environment to build from; the daemon then refuses the runtime.
      */
-    runtimeEnvironment(): Promise<Record<string, string>>;
+    runtimeEnvironment(): Promise<RuntimeEnvironment>;
 }
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */
 export declare function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescriptor): RuntimeAdapterDescriptor;

@@ -1,4 +1,4 @@
-import { testRuntimeEnv } from './fixtures/runtime-env';
+import { testRuntimeEnvironment } from './fixtures/runtime-env';
 import { testAgentHomeConfig } from './fixtures/test-agent';
 import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
 import { createHash } from 'node:crypto';
@@ -32,6 +32,7 @@ import { loadSqliteModule } from '../daemon/journal/sqlite-support';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { DAEMON_OWNER_FILENAME } from '../daemon/daemon-owner';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
+import { RUNTIMES_ENVIRONMENT_METHOD } from '../daemon/control-protocol';
 
 const dirs: string[] = [];
 
@@ -60,9 +61,11 @@ function unreachable(): Promise<ConnectControlResult> {
   return Promise.resolve({ ok: false, reason: 'offline' });
 }
 
-function connected(overrides: Record<string, unknown> = {}): Promise<ConnectControlResult> {
-  const client: ControlClient = {
-    request: vi.fn().mockResolvedValue({
+/** Default `runtimes.environment` answer: a daemon with no runtimes. */
+const NO_RUNTIME_ENVIRONMENTS = { runtimes: [] };
+
+function connected(overrides: Record<string, unknown> = {}, runtimesEnvironment: () => Promise<unknown> = async () => NO_RUNTIME_ENVIRONMENTS): Promise<ConnectControlResult> {
+  const status = {
       storage: unmeasuredRetentionSnapshot(),
       pid: 1,
       uptimeMs: 1,
@@ -77,7 +80,9 @@ function connected(overrides: Record<string, unknown> = {}): Promise<ConnectCont
       approvalsPending: 0,
       operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 60_000, failureThreshold: 3, crashCount: 0 },
       ...overrides,
-    }),
+  };
+  const client: ControlClient = {
+    request: vi.fn(async (method: string) => method === RUNTIMES_ENVIRONMENT_METHOD ? runtimesEnvironment() : status) as ControlClient['request'],
     subscribe: () => ({ close: vi.fn() }),
     close: vi.fn(),
   };
@@ -217,6 +222,78 @@ describe('diagnostics collector', () => {
       await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({ clockSkew }), json: true, log: (line) => json.push(line) });
       const parsed = JSON.parse(json.join('')) as { diagnostics: { clockSkew: unknown } };
       expect(parsed.diagnostics.clockSkew).toEqual({ status: 'measured', ...clockSkew });
+    });
+  });
+
+  describe('#1095 runtime environment names', () => {
+    const report = {
+      runtimes: [
+        {
+          runtimeId: 'claude', status: 'built',
+          names: [{ name: 'HOME', source: 'login-shell' }, { name: 'HOST_PASSED_SENTINEL', source: 'pass' }, { name: 'NO_PROXY', source: 'sdk' }],
+          removed: [{ name: 'CLAUDECODE', rule: 'deny' }],
+        },
+        { runtimeId: 'codex', status: 'unavailable', code: 'timeout' },
+        { runtimeId: 'pi', status: 'failed' },
+      ],
+    };
+
+    it('the snapshot and so the support bundle keep counts and hashed runtime ids, never a name', async () => {
+      const dir = await tempDir();
+      const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected({}, async () => report) });
+      expect(snapshot.runtimeEnvironment).toEqual({
+        status: 'known',
+        runtimes: [
+          { idHash: expect.any(String), status: 'built', names: 3, removed: 1 },
+          { idHash: expect.any(String), status: 'unavailable', code: 'timeout' },
+          { idHash: expect.any(String), status: 'failed' },
+        ],
+      });
+      const serialized = JSON.stringify(snapshot);
+      for (const name of ['HOST_PASSED_SENTINEL', 'CLAUDECODE', '"claude"']) expect(serialized).not.toContain(name);
+    });
+
+    it('doctor prints each name with its source and each removed name with its rule; --json carries them outside the snapshot', async () => {
+      const dir = await tempDir();
+      const text: string[] = [];
+      await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({}, async () => report), log: (line) => text.push(line) });
+      expect(text).toEqual(expect.arrayContaining([
+        'runtime-environment claude: 3 names, 1 removed',
+        '  HOME (login-shell)',
+        '  HOST_PASSED_SENTINEL (pass)',
+        '  NO_PROXY (sdk)',
+        '  removed CLAUDECODE (deny)',
+        'runtime-environment codex: unavailable (timeout)',
+        'runtime-environment pi: failed',
+      ]));
+
+      const json: string[] = [];
+      await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({}, async () => report), json: true, log: (line) => json.push(line) });
+      const parsed = JSON.parse(json.join('')) as { diagnostics: unknown; runtimeEnvironment: unknown };
+      expect(parsed.runtimeEnvironment).toEqual({ status: 'known', ...report });
+      expect(JSON.stringify(parsed.diagnostics)).not.toContain('HOST_PASSED_SENTINEL');
+    });
+
+    it('offline, or a daemon that does not answer the method with the exact shape, is unknown', async () => {
+      const dir = await tempDir();
+      const offline: string[] = [];
+      await runDoctorCommand(config(dir), { adapters: [], connectControl: unreachable, log: (line) => offline.push(line) });
+      expect(offline).toContain('runtime-environment: unknown (daemon offline)');
+      expect((await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable })).runtimeEnvironment)
+        .toEqual({ status: 'unknown', reason: 'daemon-offline' });
+
+      for (const answer of [
+        async () => { throw new Error('unknown method'); },
+        async () => ({ runtimes: [{ runtimeId: 'claude', status: 'built', names: [{ name: 'HOME', source: 'login-shell', value: '/home/user' }], removed: [] }] }),
+        async () => ({ runtimes: [{ runtimeId: 'claude', status: 'built', names: [{ name: 'A=B', source: 'pass' }], removed: [] }] }),
+      ]) {
+        const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected({}, answer) });
+        expect(snapshot.control.status).toBe('online');
+        expect(snapshot.runtimeEnvironment).toEqual({ status: 'unknown', reason: 'request-failed' });
+      }
+      const failed: string[] = [];
+      await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({}, async () => { throw new Error('unknown method'); }), log: (line) => failed.push(line) });
+      expect(failed).toContain('runtime-environment: unknown (the daemon did not report it)');
     });
   });
 
@@ -401,7 +478,7 @@ describe('diagnostics collector', () => {
     const dir = await tempDir();
     await fs.writeFile(path.join(dir, 'device.json'), 'x'.repeat(70 * 1024));
     const hanging: RuntimeAdapter = {
-      runtimeEnvironment: async () => testRuntimeEnv(),
+      runtimeEnvironment: async () => testRuntimeEnvironment(),
       descriptor: freezeRuntimeAdapterDescriptor({
         id: 'hanging',
         supportsDispatchSelection: false,

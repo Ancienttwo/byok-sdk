@@ -629,7 +629,12 @@ daemon's own pre-capture `BYOK_*` values are restored, so rc files cannot set
 SDK control variables; task children still receive no `BYOK_*` at all. Only
 the source, a closed failure code and the shell's basename are recorded
 (`environment-resolved` in `audit.jsonl`, shown by `status`, `doctor` and the
-support bundle) — never variable values or paths. Windows spawns no login
+support bundle) — never variable values or paths. Variable names leave the
+daemon only through the authenticated control method `runtimes.environment`,
+which `doctor` prints (each runtime's names with their source and the names
+the deny or a conflict rule removed); they are never persisted. The support
+bundle and the diagnostics snapshot carry per-runtime counts only. No value is
+reported anywhere. Windows spawns no login
 shell (`windows-session`).
 The daemon emits this closed projection as `environment-resolved`; the ordinary
 audit subscriber records it. Live status and diagnostics read the daemon's

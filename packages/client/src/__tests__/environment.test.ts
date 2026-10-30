@@ -208,7 +208,7 @@ function snapshot(env: Record<string, string>): LoginShellSnapshot {
 const LOOPBACK = { NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' };
 
 function compose(policy: RuntimeEnvironmentPolicy, shell: Record<string, string>, live: Record<string, string | undefined>, platform: NodeJS.Platform = 'darwin', conflicts?: (passed: ReadonlySet<string>) => readonly string[]): Record<string, string> {
-  return composeRuntimeEnvironment({ policy, snapshot: snapshot(shell), live, platform, ...(conflicts === undefined ? {} : { conflicts }) });
+  return composeRuntimeEnvironment({ policy, snapshot: snapshot(shell), live, platform, ...(conflicts === undefined ? {} : { conflicts }) }).env;
 }
 
 describe('composeRuntimeEnvironment (#1095)', () => {
@@ -248,13 +248,13 @@ describe('composeRuntimeEnvironment (#1095)', () => {
     try { composeRuntimeEnvironment({ policy: {}, snapshot: failed, live: { PATH: '/usr/bin' }, platform: 'darwin' }); } catch (error) { caught = error; }
     expect(caught).toBeInstanceOf(RuntimeEnvironmentUnavailableError);
     expect(caught).toMatchObject({ code: 'runtime_environment_unavailable', reason: 'timeout' });
-    expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['ACME_HOME'] }, snapshot: failed, live: { PATH: '/usr/bin', ACME_HOME: '/a', OTHER: 'x' }, platform: 'darwin' }))
+    expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['ACME_HOME'] }, snapshot: failed, live: { PATH: '/usr/bin', ACME_HOME: '/a', OTHER: 'x' }, platform: 'darwin' }).env)
       .toEqual({ PATH: '/usr/bin', ACME_HOME: '/a', ...LOOPBACK });
   });
 
   it('win32: the base is the session baseline from the live environment, matched and denied case-insensitively', () => {
     const live = { Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', HOST_ONLY_SENTINEL: 'x', ClaudeCode: '1', byok_secret: 'must-not-leak', no_proxy: 'corp.example' };
-    expect(composeRuntimeEnvironment({ policy: {}, live, platform: 'win32' })).toEqual({ Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', NO_PROXY: 'corp.example,127.0.0.1,localhost' });
+    expect(composeRuntimeEnvironment({ policy: {}, live, platform: 'win32' }).env).toEqual({ Path: 'C:\\Windows', USERNAME: 'u', ProgramData: 'C:\\ProgramData', NO_PROXY: 'corp.example,127.0.0.1,localhost' });
   });
 
   it('an adapter conflict rule removes base names only when pass supplied the trigger', () => {
@@ -268,7 +268,7 @@ describe('composeRuntimeEnvironment (#1095)', () => {
   it('win32: a conflict rule sees a mixed-case passed name in upper case, so its trigger fires', () => {
     const rule = (passed: ReadonlySet<string>) => passed.has('ANTHROPIC_API_KEY') ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK'] : [];
     const live = { Path: 'C:\\Windows', Claude_Code_Use_Bedrock: '1', Anthropic_Api_Key: 'sk-ant-host' };
-    expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['CLAUDE_CODE_*'], pass: ['ANTHROPIC_API_KEY'] }, live, platform: 'win32', conflicts: rule }))
+    expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['CLAUDE_CODE_*'], pass: ['ANTHROPIC_API_KEY'] }, live, platform: 'win32', conflicts: rule }).env)
       .toEqual({ Path: 'C:\\Windows', Anthropic_Api_Key: 'sk-ant-host', NO_PROXY: '127.0.0.1,localhost' });
   });
 
@@ -284,6 +284,40 @@ describe('composeRuntimeEnvironment (#1095)', () => {
     result.PATH = 'changed';
     expect(shell).toEqual({ PATH: '/bin' });
     expect(live).toEqual({ PATH: '/bin', GHOST: undefined });
+  });
+
+  it('reports every name with its source and every removed name with its rule, never a value', () => {
+    const rule = (passed: ReadonlySet<string>) => passed.has('ANTHROPIC_BASE_URL') ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK'] : [];
+    const shell = { PATH: '/usr/bin', HOME: '/home/user', CLAUDECODE: '1', CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_MODEL: 'shell-model', ANTHROPIC_BASE_URL: 'https://shell.example' };
+    const live = { ANTHROPIC_BASE_URL: 'https://gw.example', BYOK_TOKEN: 'b-secret', BUILD: 'host-build', HOST_ONLY_SENTINEL: 'not-a-secret' };
+    const { env, report } = composeRuntimeEnvironment({ policy: { pass: ['ANTHROPIC_BASE_URL', 'B*'] }, snapshot: snapshot(shell), live, platform: 'darwin', conflicts: rule });
+    expect(report).toEqual({
+      names: [
+        { name: 'ANTHROPIC_BASE_URL', source: 'pass' },
+        { name: 'BUILD', source: 'pass' },
+        { name: 'HOME', source: 'login-shell' },
+        { name: 'NO_PROXY', source: 'sdk' },
+        { name: 'PATH', source: 'login-shell' },
+        { name: 'no_proxy', source: 'sdk' },
+      ],
+      removed: [
+        { name: 'ANTHROPIC_MODEL', rule: 'conflict' },
+        { name: 'BYOK_TOKEN', rule: 'deny' },
+        { name: 'CLAUDECODE', rule: 'deny' },
+        { name: 'CLAUDE_CODE_USE_BEDROCK', rule: 'conflict' },
+      ],
+    });
+    // The report names exactly the built keys, and no value appears in it.
+    expect(report.names.map(({ name }) => name).sort()).toEqual(Object.keys(env).sort());
+    const serialized = JSON.stringify(report);
+    for (const value of [...Object.values(shell), ...Object.values(live)]) expect(serialized).not.toContain(value);
+  });
+
+  it('reports the base it used: allowlist and windows-session', () => {
+    expect(composeRuntimeEnvironment({ policy: { base: 'allowlist', allow: ['ACME_HOME'] }, live: { PATH: '/usr/bin', ACME_HOME: '/a', OTHER: 'x' }, platform: 'darwin' }).report.names)
+      .toEqual([{ name: 'ACME_HOME', source: 'allowlist' }, { name: 'NO_PROXY', source: 'sdk' }, { name: 'PATH', source: 'allowlist' }, { name: 'no_proxy', source: 'sdk' }]);
+    expect(composeRuntimeEnvironment({ policy: {}, live: { Path: 'C:\\Windows', no_proxy: 'corp.example', HOST_ONLY_SENTINEL: 'x' }, platform: 'win32' }).report)
+      .toEqual({ names: [{ name: 'NO_PROXY', source: 'sdk' }, { name: 'Path', source: 'windows-session' }], removed: [] });
   });
 
   it('validates a policy at the boundary', () => {

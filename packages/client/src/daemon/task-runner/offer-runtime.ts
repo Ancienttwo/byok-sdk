@@ -57,7 +57,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   // capture leaves no environment to run in: a scratch-free decline.
   let runtimeEnv: Record<string, string>;
   try {
-    runtimeEnv = await pick.adapter.runtimeEnvironment();
+    ({ env: runtimeEnv } = await pick.adapter.runtimeEnvironment());
   } catch (error) {
     if (!(error instanceof RuntimeEnvironmentUnavailableError)) throw error;
     decline(`runtime environment unavailable: ${error.reason}`, false);

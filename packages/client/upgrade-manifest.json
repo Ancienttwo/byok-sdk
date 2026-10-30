@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "0752e842816676f87865fb0ed5b63c15be5b593408770b8a78897d81cc3f7f17"
+    "snapshotSha256": "f3912fb7fd542b7372f22673f184a474aeeb2b76260ed4e79cb9f9b0baebded7"
   },
   "configFields": {
     "status": "tracked",
@@ -606,7 +606,7 @@
     {
       "id": "runtime-environment-policy",
       "impact": "breaking",
-      "summary": "Runtimes no longer inherit the daemon's process.env (#1095). Every adapter builds its children's environment under a RuntimeEnvironmentPolicy (constructor option runtimeEnvironment; createDaemon passes DaemonConfig.runtimeEnvironment, createDaemonWithAdapters rejects that field). The default base is the user's login-shell snapshot, captured once per process with the account's login shell (read from the account database by uid, never $SHELL; a failed lookup is the new ServiceEnvironmentUnavailableCode account-shell-unavailable) from a closed seed and a fixed PATH, so CLIs on the user's shell PATH are found in embedded use too; 'allowlist' is the strict mode over the live environment; 'pass' names live variables a Host sets. CLAUDECODE and BYOK_* are always removed, NO_PROXY/no_proxy gain 127.0.0.1 and localhost, and Claude drops the shell's ANTHROPIC_*, Bedrock/Vertex switches and OAuth token when pass supplies a provider. A failed capture fails closed: RuntimeEnvironmentUnavailableError, detection refused with the new reason runtime_environment_unavailable and its code (RuntimeObservation.code), offers declined. win32 uses the session baseline names (ServiceEnvironmentStatus source 'windows-session'). RuntimeAdapter gains the required runtimeEnvironment(); custom adapters implement it with buildRuntimeEnvironment. Prepared input bindings use the Pi adapter's environment, so a daemon without a Pi adapter refuses them (detail pi_runtime_unconfigured). The adapters entry's buildRuntimeEnv is removed; the testing fake defaults to the allowlist environment. A Host whose runtime needs a variable it set itself lists the name in pass.",
+      "summary": "Runtimes no longer inherit the daemon's process.env (#1095). Every adapter builds its children's environment under a RuntimeEnvironmentPolicy (constructor option runtimeEnvironment; createDaemon passes DaemonConfig.runtimeEnvironment, createDaemonWithAdapters rejects that field). The default base is the user's login-shell snapshot, captured once per process with the account's login shell (read from the account database by uid, never $SHELL; a failed lookup is the new ServiceEnvironmentUnavailableCode account-shell-unavailable) from a closed seed and a fixed PATH, so CLIs on the user's shell PATH are found in embedded use too; 'allowlist' is the strict mode over the live environment; 'pass' names live variables a Host sets. CLAUDECODE and BYOK_* are always removed, NO_PROXY/no_proxy gain 127.0.0.1 and localhost, and Claude drops the shell's ANTHROPIC_*, Bedrock/Vertex switches and OAuth token when pass supplies a provider. A failed capture fails closed: RuntimeEnvironmentUnavailableError, detection refused with the new reason runtime_environment_unavailable and its code (RuntimeObservation.code), offers declined. win32 uses the session baseline names (ServiceEnvironmentStatus source 'windows-session'). RuntimeAdapter gains the required runtimeEnvironment(), which returns { env, report } from one build (RuntimeEnvironment); report names every variable with its source (login-shell, windows-session, allowlist, pass, or sdk for NO_PROXY/no_proxy) and every name the hard deny or a conflict rule removed, never a value. Custom adapters implement it with buildRuntimeEnvironment, which returns the same pair. byok-agent doctor prints each runtime's names from the running daemon (control method runtimes.environment) and unknown while it is offline; the diagnostics snapshot and support bundle carry counts per hashed runtime id only; config check prints the policy. Prepared input bindings use the Pi adapter's environment, so a daemon without a Pi adapter refuses them (detail pi_runtime_unconfigured). The adapters entry's buildRuntimeEnv is removed; the testing fake defaults to the allowlist environment. A Host whose runtime needs a variable it set itself lists the name in pass.",
       "migration": "docs/device-setup.md#runtime-environment",
       "items": [
         "config:runtimeEnvironment",
@@ -623,8 +623,12 @@
         "export:@byok-sdk/client#RuntimeAdapter",
         "export:@byok-sdk/client#RuntimeDetectResult",
         "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
+        "export:@byok-sdk/client#RuntimeEnvironment",
         "export:@byok-sdk/client#RuntimeEnvironmentConflictRule",
         "export:@byok-sdk/client#RuntimeEnvironmentPolicy",
+        "export:@byok-sdk/client#RuntimeEnvironmentRemovalRule",
+        "export:@byok-sdk/client#RuntimeEnvironmentReport",
+        "export:@byok-sdk/client#RuntimeEnvironmentSource",
         "export:@byok-sdk/client#RuntimeEnvironmentUnavailableError",
         "export:@byok-sdk/client#RuntimeObservation",
         "export:@byok-sdk/client#ServiceEnvironmentStatus",
@@ -643,8 +647,12 @@
         "export:@byok-sdk/client/adapters#RuntimeAdapter",
         "export:@byok-sdk/client/adapters#RuntimeDetectResult",
         "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironment",
         "export:@byok-sdk/client/adapters#RuntimeEnvironmentConflictRule",
         "export:@byok-sdk/client/adapters#RuntimeEnvironmentPolicy",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentRemovalRule",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport",
+        "export:@byok-sdk/client/adapters#RuntimeEnvironmentSource",
         "export:@byok-sdk/client/adapters#RuntimeEnvironmentUnavailableError",
         "export:@byok-sdk/client/adapters#RuntimeObservation",
         "export:@byok-sdk/client/adapters#buildRuntimeEnv",
@@ -1027,7 +1035,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=494803d4d57d5fbd",
-      "after": "K8 0.0.1 src-sha256=01911b29e0d5f0b7",
+      "after": "K8 0.0.1 src-sha256=c6917b2762392bcd",
       "entry": "execution-core-published"
     },
     {
@@ -1398,12 +1406,32 @@
       "entry": "runtime-environment-policy"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeEnvironment",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeEnvironmentConflictRule",
       "change": "added",
       "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeEnvironmentPolicy",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentRemovalRule",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentReport",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeEnvironmentSource",
       "change": "added",
       "entry": "runtime-environment-policy"
     },
@@ -1708,12 +1736,32 @@
       "entry": "runtime-environment-policy"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironment",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentConflictRule",
       "change": "added",
       "entry": "runtime-environment-policy"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentPolicy",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentRemovalRule",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentReport",
+      "change": "added",
+      "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeEnvironmentSource",
       "change": "added",
       "entry": "runtime-environment-policy"
     },

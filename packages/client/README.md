@@ -1134,7 +1134,9 @@ rejected. Claude also drops the shell's `ANTHROPIC_*`, Bedrock/Vertex switches
 and OAuth token when `pass` supplies `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`
 or `ANTHROPIC_AUTH_TOKEN`. Loader variables such as `NODE_OPTIONS`, `LD_*`, and
 `DYLD_*` are kept, as required by ADR-037. A custom adapter implements
-`runtimeEnvironment()` with the exported `buildRuntimeEnvironment(policy)`.
+`runtimeEnvironment()` with the exported `buildRuntimeEnvironment(policy)`,
+which returns `{ env, report }`: the environment, and its names with their
+sources for `byok-agent doctor` (never values).
 Names are case-insensitive on Windows.
 
 `createDaemonWithAdapters` rejects `DaemonConfig.runtimeEnvironment`: set the

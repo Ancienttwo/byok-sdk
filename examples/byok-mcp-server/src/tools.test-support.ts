@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { createByokServer } from '@byok-sdk/server';
-import { buildRuntimeEnvironment, createDaemonWithAdapters, freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
+import { buildRuntimeEnvironment, createDaemonWithAdapters, freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeEnvironment,
   type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type Session } from '@byok-sdk/client';
 import { createEnvelope, PROTOCOL_VERSION, type AgentRef, type BlobRef, type Envelope } from '@byok-sdk/protocol';
 import { policy } from '@byok-sdk/example-host-execution-core/test-support';
@@ -54,7 +54,7 @@ export class FakeRuntime implements RuntimeAdapter {
   /** What the daemon reported, quoted when a session does not start. */
   diagnostics: () => unknown = () => undefined;
   // A fake runtime spawns nothing: the allowlist environment takes no login-shell capture.
-  runtimeEnvironment(): Promise<Record<string, string>> { return buildRuntimeEnvironment({ base: 'allowlist' }); }
+  runtimeEnvironment(): Promise<RuntimeEnvironment> { return buildRuntimeEnvironment({ base: 'allowlist' }); }
   async detect(): Promise<RuntimeDetectResult> { return { kind: 'available', version: '0.0.0-fake' }; }
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     this.offers.push(input.offer);

@@ -1,4 +1,5 @@
-import { testRuntimeEnv } from './runtime-env';
+import { testRuntimeEnvironment } from './runtime-env';
+import type { RuntimeEnvironment } from '../../runtime/environment';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, existsSync, promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -160,8 +161,8 @@ class ControlledAdapter implements RuntimeAdapter {
     },
   });
 
-  async runtimeEnvironment(): Promise<Record<string, string>> {
-    return testRuntimeEnv();
+  async runtimeEnvironment(): Promise<RuntimeEnvironment> {
+    return testRuntimeEnvironment();
   }
 
   async detect() {

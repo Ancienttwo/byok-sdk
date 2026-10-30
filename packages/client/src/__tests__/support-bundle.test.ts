@@ -1,4 +1,4 @@
-import { testRuntimeEnv } from './fixtures/runtime-env';
+import { testRuntimeEnvironment } from './fixtures/runtime-env';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { execFileSync } from 'node:child_process';
@@ -13,6 +13,7 @@ import { runDoctorCommand } from '../bin/commands/doctor';
 import { appendAuditRecord, auditLogPath } from '../bin/audit-log';
 import { DAEMON_RECORD_KINDS } from '../daemon/daemon-record';
 import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
+import { RUNTIMES_ENVIRONMENT_METHOD } from '../daemon/control-protocol';
 import {
   createSupportBundle,
   isSupportBundleOutputInStore,
@@ -120,7 +121,7 @@ describe('support bundle privacy and bounds', () => {
   it('projects runtime identifiers and version output through a closed bounded shape', async () => {
     const dir = await tempDir();
     const runtime: RuntimeAdapter = {
-      runtimeEnvironment: async () => testRuntimeEnv(),
+      runtimeEnvironment: async () => testRuntimeEnvironment(),
       descriptor: freezeRuntimeAdapterDescriptor({
         id: 'SENTINEL_RUNTIME_ID',
         supportsDispatchSelection: false,
@@ -185,6 +186,32 @@ describe('support bundle privacy and bounds', () => {
 
     expect(bundle.lifecycle).toEqual({ status: 'known', source: 'audit', phase: 'halted', reason: 'device_revoked' });
     expect(bundle.checks).toContainEqual({ id: 'lifecycle', status: 'fail' });
+  });
+
+  it('#1095: carries runtime environment counts, never a variable name', async () => {
+    const dir = await tempDir();
+    const status = {
+      storage: unmeasuredRetentionSnapshot(), pid: 1, uptimeMs: 1, paired: false, lifecycle: { phase: 'running', connection: 'open' },
+      activeTasks: [], runtimes: [], queueWatermarks: [], approvals: [], approvalsPending: 0,
+      operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 60_000, failureThreshold: 3, crashCount: 0 },
+    };
+    const environments = {
+      runtimes: [{ runtimeId: 'SENTINEL_RUNTIME_ID', status: 'built', names: [{ name: 'SENTINEL_ENV_NAME', source: 'pass' }], removed: [{ name: 'SENTINEL_REMOVED_NAME', rule: 'conflict' }] }],
+    };
+    const connectControl = (): Promise<ConnectControlResult> => Promise.resolve({
+      ok: true,
+      client: {
+        request: (async (method: string) => method === RUNTIMES_ENVIRONMENT_METHOD ? environments : status) as never,
+        subscribe: () => ({ close: () => undefined }),
+        close: () => undefined,
+      },
+    });
+
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl });
+
+    expect(bundle.runtimeEnvironment).toEqual({ status: 'known', runtimes: [{ idHash: expect.any(String), status: 'built', names: 1, removed: 1 }] });
+    const serialized = JSON.stringify(bundle);
+    for (const sentinel of ['SENTINEL_RUNTIME_ID', 'SENTINEL_ENV_NAME', 'SENTINEL_REMOVED_NAME']) expect(serialized).not.toContain(sentinel);
   });
 
   it.skipIf(process.platform === 'win32')('does not block when audit.jsonl is a FIFO', async () => {

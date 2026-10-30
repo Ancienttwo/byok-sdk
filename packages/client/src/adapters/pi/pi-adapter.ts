@@ -1,4 +1,4 @@
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-capabilities';
 import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources';
 import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity';
@@ -243,13 +243,13 @@ export class PiAdapter implements RuntimeAdapter {
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
 
-  runtimeEnvironment(): Promise<Record<string, string>> {
+  runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const env = await this.runtimeEnvironment();
+      const { env } = await this.runtimeEnvironment();
       const host = this.options.sdkHelperHost;
       if (host !== undefined) {
         // The product bundles Pi at the SDK pin; there is no package to probe.

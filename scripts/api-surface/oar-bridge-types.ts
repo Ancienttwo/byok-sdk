@@ -108,8 +108,8 @@ export type CheckExitError = Assert<Equal<
   ReturnType<ReturnType<typeof spawnOwnedLineProcess>['exitError']>,
   ReturnType<NonNullable<LineProcess['exitError']>>
 >>;
-export type CheckEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildRuntimeEnvironment>>>, BridgeArgs[2]['env']>>;
-export type CheckVendorEnv = Assert<Assignable<Awaited<ReturnType<typeof buildRuntimeEnvironment>>, VendorArgs[2]['env']>>;
+export type CheckEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildRuntimeEnvironment>>['env']>, BridgeArgs[2]['env']>>;
+export type CheckVendorEnv = Assert<Assignable<Awaited<ReturnType<typeof buildRuntimeEnvironment>>['env'], VendorArgs[2]['env']>>;
 export type CheckProjectionRecord = Assert<Equal<Parameters<CodexProjection['consume']>[1], CodexRecord>>;
 export type CheckProjectionInput = Assert<Assignable<RawEvent, Parameters<CodexProjection['consume']>[1]>>;
 export type CheckHookRecord = Assert<Assignable<RawEvent, Parameters<NonNullable<NonNullable<BridgeArgs[4]>['onRecord']>>[0]>>;
@@ -182,7 +182,7 @@ export type CheckAcpHookRecord = Assert<Assignable<RawEvent, AcpBridge.AcpRecord
 // The real SDK transports fit the vendor seams.
 export type CheckAcpSpawn = Assert<Assignable<typeof spawnOwnedLineProcess, SpawnAcpLineProcess>>;
 export type CheckAcpTerminalSpawn = Assert<Assignable<typeof spawnOwnedTerminalProcess, SpawnAcpTerminal>>;
-export type CheckAcpEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildRuntimeEnvironment>>>, AcpBridgeArgs[3]['env']>>;
+export type CheckAcpEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildRuntimeEnvironment>>['env']>, AcpBridgeArgs[3]['env']>>;
 
 // The failure bridge (#869): the vendored OAR failure tables, typed with the
 // protocol's class. The protocol enum and OAR's `FailureClass` are one set.
