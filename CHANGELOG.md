@@ -9,7 +9,8 @@
   and bodies). The SDK's MCP core connects over stdio through its own process
   layer and uses neither OAuth nor the HTTP transports; the pin reaches every
   install. Upstream relicensed the package from MIT to Apache-2.0 in 2.3.0; it
-  stays an external dependency, not bundled into any published file.
+  stays an external dependency of every published file; a Host's single-file
+  bundle inlines it and ships its license notice.
 
 - **Security (protocol, core, client, cloud, keys, server)** — dependency
   floors raised past published advisories: `zod` `^4.6.6` (GHSA-mrhx-c7xc-m3w5),

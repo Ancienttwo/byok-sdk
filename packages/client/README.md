@@ -1183,6 +1183,9 @@ relocated Windows SEA CI fixture must pass before Windows qualification is claim
 `@byok-sdk/client/packaging` is the build-time helper for a Host that ships as one
 file: a single-file ESM bundle, a single-file CommonJS bundle, or a Node SEA (the
 CommonJS bundle the SEA embeds). It does not change a Host that does not use it.
+The bundle inlines the SDK's third-party dependencies, and the Host ships their
+license notices with it; `@modelcontextprotocol/client` and
+`@modelcontextprotocol/core` are Apache-2.0 (each package's `LICENSE`).
 
 ```js
 import { build } from 'esbuild';
