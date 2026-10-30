@@ -6,7 +6,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import {
-  buildRuntimeEnvironment, freezeRuntimeAdapterDescriptor, RuntimeDisposalFailure, RuntimeExecutionFailure, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
+  buildRuntimeEnvironment, freezeRuntimeAdapterDescriptor, RuntimeDisposalFailure, RuntimeExecutionFailure, type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeEnvironment,
   type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeOperationStartInput, type Session,
 } from '@byok-sdk/client';
 
@@ -162,7 +162,7 @@ export class FakeMeasurementAdapter implements RuntimeAdapter {
   constructor(private readonly script: (index: number) => FakeBehavior) {}
 
   // A fake runtime spawns nothing: the allowlist environment takes no login-shell capture.
-  runtimeEnvironment(): Promise<Record<string, string>> { return buildRuntimeEnvironment({ base: 'allowlist' }); }
+  runtimeEnvironment(): Promise<RuntimeEnvironment> { return buildRuntimeEnvironment({ base: 'allowlist' }); }
   async detect(): Promise<RuntimeDetectResult> { return { kind: 'available', version: '0.0.0-fake' }; }
 
   async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {

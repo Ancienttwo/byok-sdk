@@ -404,7 +404,7 @@ const __executionScratch = await testExecutionScratch();
       const { PI_PACKAGE_DIR: _assetRoot, ...env } = process.env;
       return env;
     };
-    const launch = async (adapter: PiAdapter) => startAdapter(adapter, baseTask, await makeCtx(await adapter.runtimeEnvironment()));
+    const launch = async (adapter: PiAdapter) => startAdapter(adapter, baseTask, await makeCtx((await adapter.runtimeEnvironment()).env));
 
     it('ignores an asset root only the Host process holds until the policy passes it', async () => {
       vi.stubEnv('PI_PACKAGE_DIR', PRODUCT_ASSETS);

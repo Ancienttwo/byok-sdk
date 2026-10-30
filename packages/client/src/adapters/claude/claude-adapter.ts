@@ -26,7 +26,7 @@ import {
   type Session,
 } from '../../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
 import { createClaudeControlChannel } from './control-channel';
@@ -182,13 +182,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
     });
   }
 
-  runtimeEnvironment(): Promise<Record<string, string>> {
+  runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy, claudeEnvironmentConflicts);
   }
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const env = await this.runtimeEnvironment();
+      const { env } = await this.runtimeEnvironment();
       const invocation = resolveRuntimeInvocation(this.resolveBin().command, runtimeInvocationHost(env));
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
       if (probe.kind !== 'available') return probe;
@@ -215,7 +215,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     }
     let invocation: RuntimeInvocation;
     try {
-      invocation = resolveRuntimeInvocation(bin.command, runtimeInvocationHost(await this.runtimeEnvironment()));
+      invocation = resolveRuntimeInvocation(bin.command, runtimeInvocationHost((await this.runtimeEnvironment()).env));
     } catch (error) {
       // As Codex: the reason names the detect kind only, never a local path.
       return { kind: 'reject', reason: `claude installation refused: ${classifyDetectError(error).kind}`, retryable: false };

@@ -19,7 +19,7 @@ import {
   type Session,
 } from '../../types';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
@@ -119,14 +119,14 @@ export class GrokAdapter implements RuntimeAdapter {
     this.options = { ...options };
   }
 
-  runtimeEnvironment(): Promise<Record<string, string>> {
+  runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
 
   /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const env = await this.runtimeEnvironment();
+      const { env } = await this.runtimeEnvironment();
       const command = (this.options.resolveBin ?? resolveGrokBin)().command;
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env);
       if (version.kind !== 'available') return version;

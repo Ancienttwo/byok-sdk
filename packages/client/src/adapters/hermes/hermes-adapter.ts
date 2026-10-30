@@ -20,7 +20,7 @@ import {
 } from '../../types';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { classifyDetectError } from '../detect-outcome';
 import type { ResolvedBin } from '../codex/resolve-bin';
@@ -229,13 +229,13 @@ export class HermesAdapter implements RuntimeAdapter {
     return (this.options.resolveBin ?? resolveHermesBin)().command;
   }
 
-  runtimeEnvironment(): Promise<Record<string, string>> {
+  runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
 
   /** The custody launcher's lane is the platform baseline of the runtime environment. */
   private async launchEnvironment(): Promise<Record<string, string>> {
-    const env = await this.runtimeEnvironment();
+    const { env } = await this.runtimeEnvironment();
     return this.options.byokLauncher ? buildAllowlistedEnv({ ambient: env }) : env;
   }
 

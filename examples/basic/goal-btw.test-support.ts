@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { buildRuntimeEnvironment, freezeRuntimeAdapterDescriptor, RuntimeDisposalFailure, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
+import { buildRuntimeEnvironment, freezeRuntimeAdapterDescriptor, RuntimeDisposalFailure, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeEnvironment,
   type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput, type RuntimeDetectResult, type Session } from '@byok-sdk/client';
 import { expect, vi } from 'vitest';
 type Event = Session['events'] extends AsyncIterable<infer E> ? E : never;
@@ -111,7 +111,7 @@ export class BotStubAdapter implements RuntimeAdapter {
   readonly starts: RuntimeOperationStartInput[] = [];
   rejectNext = false;
   // A fake runtime spawns nothing: the allowlist environment takes no login-shell capture.
-  runtimeEnvironment(): Promise<Record<string, string>> { return buildRuntimeEnvironment({ base: 'allowlist' }); }
+  runtimeEnvironment(): Promise<RuntimeEnvironment> { return buildRuntimeEnvironment({ base: 'allowlist' }); }
   async detect(): Promise<RuntimeDetectResult> { return { kind: 'available', version: '0.0.0' }; }
   async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     if (this.rejectNext) { this.rejectNext = false; return { kind: 'reject', reason: 'stub declined', retryable: true }; }

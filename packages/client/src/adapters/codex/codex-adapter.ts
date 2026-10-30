@@ -26,7 +26,7 @@ import {
   RuntimeStartupDisposalFailure,
   isRuntimeExecutionFailure,
 } from '../../runtime-failure';
-import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import {
@@ -149,12 +149,12 @@ export class CodexAdapter implements RuntimeAdapter {
     )
       throw new TypeError('invalid Codex operation timeout');
   }
-  runtimeEnvironment(): Promise<Record<string, string>> {
+  runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const env = await this.runtimeEnvironment();
+      const { env } = await this.runtimeEnvironment();
       const { command, args } = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command, runtimeInvocationHost(env));
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env, args);
       if (version.kind !== 'available') return version;
@@ -213,7 +213,7 @@ export class CodexAdapter implements RuntimeAdapter {
       };
     let invocation: RuntimeInvocation;
     try {
-      invocation = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command, runtimeInvocationHost(await this.runtimeEnvironment()));
+      invocation = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command, runtimeInvocationHost((await this.runtimeEnvironment()).env));
     } catch (error) {
       return { kind: 'reject', reason: `codex installation refused: ${classifyDetectError(error).kind}`, retryable: false };
     }
