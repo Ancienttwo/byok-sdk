@@ -46,7 +46,7 @@
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
-    "hono": "^4.12.30",
-    "zod": "^4.4.3"
+    "hono": "^4.13.11",
+    "zod": "^4.6.6"
   }
 }

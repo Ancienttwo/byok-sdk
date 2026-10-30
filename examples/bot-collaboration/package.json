@@ -29,5 +29,5 @@
     "@byok-sdk/server": "workspace:*",
     "@byok-sdk/example-host-execution-core": "workspace:*"
   },
-  "devDependencies": { "@byok-sdk/client": "workspace:*", "@byok-sdk/cloud": "workspace:*", "@hono/node-server": "^2.0.10", "@types/node": "^24", "typescript": "^7.0.2", "vitest": "^4.1.10" }
+  "devDependencies": { "@byok-sdk/client": "workspace:*", "@byok-sdk/cloud": "workspace:*", "@hono/node-server": "^2.1.3", "@types/node": "^24", "typescript": "^7.0.2", "vitest": "^4.1.10" }
 }
