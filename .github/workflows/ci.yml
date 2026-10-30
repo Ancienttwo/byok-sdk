@@ -1792,6 +1792,36 @@ jobs:
       - name: Build (needed for @byok-sdk/client's dist/index.js the smoke script imports)
         run: bun run build
 
+      # Temporary #1189 diagnostic (removed before #1189 leaves HOLD): hash and
+      # upload the built dist so Windows and Linux builds of one commit compare.
+      - name: "Temporary #1189 diagnostic: sha256 of built dist"
+        shell: node {0}
+        run: |
+          const { createHash } = require('node:crypto');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const rows = [];
+          const walk = dir => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+              const file = path.join(dir, entry.name);
+              if (entry.isDirectory()) walk(file);
+              else if (/\.(m?js|cjs)$/.test(entry.name)) rows.push(`${createHash('sha256').update(fs.readFileSync(file)).digest('hex')}  ${file.split(path.sep).join('/')}`);
+            }
+          };
+          for (const root of ['packages/client/dist', 'packages/server/dist']) walk(root);
+          console.log(rows.join('\n'));
+          console.log(`dist-1189 files=${rows.length} aggregate=${createHash('sha256').update(rows.join('\n')).digest('hex')}`);
+
+      - name: "Temporary #1189 diagnostic: upload built dist"
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-1189-${{ github.job }}-${{ runner.os }}
+          path: |
+            packages/client/dist/**/*.js
+            packages/server/dist/**/*.js
+          retention-days: 3
+          if-no-files-found: error
+
       - name: Download WinSW (pinned version + checksum-verified)
         shell: pwsh
         run: |
@@ -1866,6 +1896,36 @@ jobs:
 
       - name: Build (needed for @byok-sdk/client + @byok-sdk/server dist/ this script drives)
         run: bun run build
+
+      # Temporary #1189 diagnostic (removed before #1189 leaves HOLD): hash and
+      # upload the built dist so Windows and Linux builds of one commit compare.
+      - name: "Temporary #1189 diagnostic: sha256 of built dist"
+        shell: node {0}
+        run: |
+          const { createHash } = require('node:crypto');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const rows = [];
+          const walk = dir => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+              const file = path.join(dir, entry.name);
+              if (entry.isDirectory()) walk(file);
+              else if (/\.(m?js|cjs)$/.test(entry.name)) rows.push(`${createHash('sha256').update(fs.readFileSync(file)).digest('hex')}  ${file.split(path.sep).join('/')}`);
+            }
+          };
+          for (const root of ['packages/client/dist', 'packages/server/dist']) walk(root);
+          console.log(rows.join('\n'));
+          console.log(`dist-1189 files=${rows.length} aggregate=${createHash('sha256').update(rows.join('\n')).digest('hex')}`);
+
+      - name: "Temporary #1189 diagnostic: upload built dist"
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-1189-${{ github.job }}-${{ runner.os }}
+          path: |
+            packages/client/dist/**/*.js
+            packages/server/dist/**/*.js
+          retention-days: 3
+          if-no-files-found: error
 
       - name: Inspect bounded Windows credential runtime facts
         if: runner.os == 'Windows'
