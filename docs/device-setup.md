@@ -294,7 +294,7 @@ drain old protocol journals with the writing release when required.
 A service installed from a payload upgrades and rolls back through the SDK. A
 payload is a directory plus `byok-payload.json`:
 
-```json
+```
 { "format": "byok-service-payload", "version": 1, "id": "0.32.0",
   "files": { "byok-agent.mjs": "<sha256 hex>" } }
 ```
