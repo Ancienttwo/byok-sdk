@@ -1,4 +1,6 @@
+import path from 'node:path';
 import type { StoreCompatibility } from '@byok-sdk/core';
+import type { ServiceInstallation, ServiceUpgradeReceipt } from '../../lifecycle/service-installation';
 import { inspectDaemonStores } from '../../diagnostics/store-compatibility';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../official-release';
 
@@ -37,4 +39,47 @@ export async function runUpgradeStoreCheckCommand(options: UpgradeStoreCheckOpti
 function formatStore(store: StoreCompatibility): string {
   const code = store.code === undefined ? '' : ` code=${store.code}`;
   return `${store.verdict} ${store.store} ${store.path}${code} — ${store.reason}`;
+}
+
+export const UPGRADE_INSTALLATION_ACTIONS = ['apply', 'rollback', 'recover', 'status'] as const;
+export type UpgradeInstallationAction = (typeof UPGRADE_INSTALLATION_ACTIONS)[number];
+
+export interface UpgradeInstallationOptions {
+  readonly action: UpgradeInstallationAction;
+  /** The payload directory, for `apply`. */
+  readonly payload?: string;
+  readonly json: boolean;
+  readonly log?: (line: string) => void;
+}
+
+/**
+ * `byok-agent upgrade apply <payload>|rollback|recover|status` (#1097): the
+ * payload installation recorded for this store, through the same API an
+ * embedded Host calls. A refusal or a failed health check throws
+ * `ServiceInstallationError`; its receipt is written first.
+ */
+export async function runUpgradeInstallationCommand(installation: ServiceInstallation, options: UpgradeInstallationOptions): Promise<void> {
+  const log = options.log ?? ((line: string) => console.log(line));
+  let receipt: ServiceUpgradeReceipt | undefined;
+  switch (options.action) {
+    case 'apply':
+      receipt = await installation.upgrade(path.resolve(options.payload!));
+      break;
+    case 'rollback':
+      receipt = await installation.rollback();
+      break;
+    case 'recover':
+      receipt = await installation.recover();
+      break;
+    case 'status':
+      receipt = await installation.receipt();
+      break;
+  }
+  const current = await installation.currentVersion();
+  if (options.json) {
+    log(JSON.stringify({ current: current ?? null, receipt: receipt ?? null }, null, 2));
+    return;
+  }
+  log(`current: ${current ?? '(none)'}`);
+  log(receipt === undefined ? 'receipt: (none)' : `receipt: ${receipt.state} from=${receipt.from} to=${receipt.to} at=${receipt.at}${receipt.code === undefined ? '' : ` code=${receipt.code}`}`);
 }

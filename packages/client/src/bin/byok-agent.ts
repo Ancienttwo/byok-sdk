@@ -15,6 +15,7 @@ import { runConfigCheckCommand } from './commands/config-check';
 import { runRuntimesCommand } from './commands/runtimes';
 import {
   cliServiceDefinition,
+  cliServiceInstallation,
   runInstallCommand,
   runServiceStartCommand,
   runServiceStatusCommand,
@@ -31,7 +32,7 @@ import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runToolsetsReloadCommand } from './commands/toolsets';
 import { runTeamCreateCommand, runTeamJoinCommand, runTeamListCommand, runTeamOpenCommand, runTeamWatchCommand } from './commands/team';
 import { runUnpairCommand } from './commands/unpair';
-import { runUpgradeStoreCheckCommand } from './commands/upgrade';
+import { runUpgradeInstallationCommand, runUpgradeStoreCheckCommand, UPGRADE_INSTALLATION_ACTIONS, type UpgradeInstallationAction } from './commands/upgrade';
 import { runVersionCommand } from './version';
 
 /**
@@ -116,12 +117,14 @@ function usage(): never {
       '  byok-agent team open <workspace> --tmux-bin <absolute> [--session <name>] --config <path>',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
       '  byok-agent upgrade check --store [--json] [--config <path>]   (read-only; exit 2 when a store would be refused)',
+      '  byok-agent upgrade apply <payload-dir> | rollback | recover | status [--json] --config <path>   (an install --payload installation)',
       '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
       '  byok-agent approve <approvalId> [--config <path>]',
       '  byok-agent reject <approvalId> [--reason <text>] [--config <path>]',
       '',
       '  Background OS service (launchd/systemd/WinSW) — see templates/service/**:',
       '  byok-agent install [--config <path>] [--name <svc>] [--agent-bin <path>] [--node-bin <path>] [--winsw-bin <path>] [--winsw-install-dir <path>] [--replace-unmarked]',
+      '  byok-agent install --payload <dir> --install-root <dir> [--config <path>] [--name <svc>] [--node-bin <path>] [--winsw-bin <path>] [--replace-unmarked]',
       '  byok-agent uninstall [--config <path>] [--name <svc>]',
       '  byok-agent service-start [--config <path>] [--name <svc>]',
       '  byok-agent service-stop [--config <path>] [--name <svc>]',
@@ -342,11 +345,28 @@ async function main(): Promise<void> {
   }
 
   if (command === 'upgrade') {
-    const [action, ...flags] = positionalArgs(rest, ['--config']);
-    if (action !== 'check' || !flags.includes('--store') || flags.some((flag) => flag !== '--store' && flag !== '--json')) usage();
-    const config = loadConfig(configPathFrom(rest));
-    process.exitCode = await runUpgradeStoreCheckCommand({ storeDir: resolveStoreDir(config), json: hasFlag(rest, '--json') });
-    return;
+    const [action, ...operands] = positionalArgs(rest, ['--config', '--name', '--node-bin', '--winsw-bin', '--winsw-install-dir']);
+    if (action === 'check') {
+      if (!operands.includes('--store') || operands.some((flag) => flag !== '--store' && flag !== '--json')) usage();
+      const config = loadConfig(configPathFrom(rest));
+      process.exitCode = await runUpgradeStoreCheckCommand({ storeDir: resolveStoreDir(config), json: hasFlag(rest, '--json') });
+      return;
+    }
+    const args = operands.filter((operand) => operand !== '--json');
+    if (!UPGRADE_INSTALLATION_ACTIONS.includes(action as UpgradeInstallationAction) || args.length !== (action === 'apply' ? 1 : 0)) usage();
+    const configPath = configPathFrom(rest);
+    if (!configPath) {
+      console.error(`upgrade ${action} requires --config <path> or a BYOK_CONFIG env var`);
+      process.exit(1);
+    }
+    const installation = await cliServiceInstallation(loadConfig(configPath), configPath, rest, {});
+    if (installation === undefined) {
+      console.error('upgrade: no payload installation is recorded for this store (install it with byok-agent install --payload)');
+      process.exit(1);
+    }
+    return runUpgradeInstallationCommand(installation, {
+      action: action as UpgradeInstallationAction, ...(action === 'apply' ? { payload: args[0] } : {}), json: hasFlag(rest, '--json'),
+    });
   }
 
   if (command === 'approvals') {
