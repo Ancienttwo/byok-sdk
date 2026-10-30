@@ -1,5 +1,6 @@
 import {
   TimelineEventSchema,
+  projectTimelineEvents,
   type ActivityTail,
   type TimelineEvent,
 } from '@byok-sdk/cloud';
@@ -60,8 +61,8 @@ function validateMetadata(metadata: TimelineMetadata): TimelineMetadata {
     fail('timeline_input_invalid', 'Timeline metadata expiresAt must be a canonical ISO timestamp when present.');
   }
   if (metadata.cursor !== undefined && (
-    !Number.isSafeInteger(metadata.cursor.batchSeq) || metadata.cursor.batchSeq < 0
-    || !Number.isSafeInteger(metadata.cursor.eventIndex) || metadata.cursor.eventIndex < 0
+    metadata.cursor.version !== 1 || !Number.isSafeInteger(metadata.cursor.revision) || metadata.cursor.revision < 0
+    || typeof metadata.cursor.generation !== 'string' || typeof metadata.cursor.tenantId !== 'string' || !validTaskId(metadata.cursor.taskId)
   )) {
     fail('timeline_input_invalid', 'Timeline metadata cursor must contain non-negative integer coordinates.');
   }
@@ -377,9 +378,13 @@ export function replayTimeline(tail: ActivityTail): TaskTimelineSnapshot {
   let state = createTimelineState(tail.taskId, {
     dropped: tail.dropped,
     capacity: tail.capacity,
-    expiresAt: tail.expiresAt,
+    ...(tail.expiresAt === undefined ? {} : { expiresAt: tail.expiresAt }),
     ...(tail.cursor !== undefined ? { cursor: tail.cursor } : {}),
   });
-  for (const event of tail.entries) state = foldTimelineEvent(state, event);
+  for (const entry of tail.entries) {
+    if (entry.kind === 'sealed-progress') fail('timeline_input_invalid', 'A member must open sealed progress before timeline replay.');
+    if (entry.kind === 'artifact') continue;
+    for (const event of projectTimelineEvents(entry)) state = foldTimelineEvent(state, event);
+  }
   return projectTimeline(state);
 }

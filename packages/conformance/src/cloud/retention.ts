@@ -69,6 +69,10 @@ export function runCloudRetentionConformance(name: string, factory: CloudComposi
           : handle.stores.approvals.append(tenant, { taskId: `tail-${n}`, sourceEnvelopeId: `source-${n}`, event: { type: 'approval_requested', summary: 'Approve', approvalId: String(n) }, ttlMs: 1000 });
         for (let n = 1; n <= 3; n++) await seed(TENANT_A, n);
         await seed(TENANT_B, 4);
+        if (kind === 'activity') {
+          for (let n = 1; n <= 3; n++) await handle.stores.activity.settle(TENANT_A, `tail-${n}`, handle.now());
+          await handle.stores.activity.settle(TENANT_B, 'tail-4', handle.now());
+        }
         await handle.advanceTime(1000);
         const store = handle.stores[kind];
         const input = { now: handle.now(), limit: 2 };

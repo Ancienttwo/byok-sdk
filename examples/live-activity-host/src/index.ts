@@ -2,6 +2,7 @@ import {
   ApprovalObservationSchema,
   isTenantId,
   TimelineEventSchema,
+  projectTimelineEvents,
   type ActivityTail,
   type ApprovalObservation,
   type ApprovalTimelineTail,
@@ -173,24 +174,29 @@ export async function redactActivityTail<User>(
   user: User,
   redact: LiveActivityHostOptions<User, unknown>['redact'],
 ): Promise<ActivityTail> {
-  const entries: TimelineEvent[] = [];
-  for (const value of tail.entries) {
-    const original = TimelineEventSchema.parse(value) as TimelineEvent;
-    let redacted: TimelineEvent;
-    try {
-      redacted = TimelineEventSchema.parse(
-        // All compared authority is scalar on the envelope or event. Keep
-        // both originals private while allowing in-place content redaction.
-        await redact({ ...original, event: { ...original.event } }, { user, tenantId: tail.tenantId, taskId: tail.taskId }),
-      ) as TimelineEvent;
-    } catch (error) {
-      if (error instanceof LiveActivityHostError) throw error;
-      throw new LiveActivityHostError('redaction_invalid', 'Redactor returned an invalid timeline event.', {
-        cause: error,
-      });
+  const entries: ActivityTail['entries'][number][] = [];
+  for (const entry of tail.entries) {
+    if (entry.kind !== 'progress') {
+      throw new LiveActivityHostError('redaction_invalid',
+        entry.kind === 'artifact' ? 'Artifact entries require an artifact presentation/redaction contract.'
+          : 'A member must open sealed progress before this plaintext Host projection.');
     }
-    assertRedactionPreservesAuthority(original, redacted);
-    entries.push(redacted);
+    const events: TimelineEvent['event'][] = [];
+    for (const value of projectTimelineEvents(entry)) {
+      const original = TimelineEventSchema.parse(value) as TimelineEvent;
+      let redacted: TimelineEvent;
+      try {
+        redacted = TimelineEventSchema.parse(
+          await redact(structuredClone(original), { user, tenantId: tail.tenantId, taskId: tail.taskId }),
+        ) as TimelineEvent;
+      } catch (error) {
+        if (error instanceof LiveActivityHostError) throw error;
+        throw new LiveActivityHostError('redaction_invalid', 'Redactor returned an invalid timeline event.', { cause: error });
+      }
+      assertRedactionPreservesAuthority(original, redacted);
+      events.push(redacted.event);
+    }
+    entries.push({ ...entry, events });
   }
   return { ...tail, entries: Object.freeze(entries) };
 }

@@ -13,7 +13,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function projection(payload: Record<string, unknown>): Record<string, unknown> {
+export function sealedComparisonProjection(payload: Record<string, unknown>): Record<string, unknown> {
   const { sealed, ...plain } = payload;
   if (!isRecord(sealed)) return payload;
   return { ...plain, sealed: Object.fromEntries(STABLE_SEALED_FIELDS.map((field) => [field, sealed[field]])) };
@@ -45,5 +45,5 @@ export function firstSealedPayload(storedBody: string, proposed: SealedSubmissio
 
 /** True when two payloads of one sealed type have the same comparison projection. */
 export function sameSealedProjection(first: object, proposed: object): boolean {
-  return JSON.stringify(projection(first as Record<string, unknown>)) === JSON.stringify(projection(proposed as Record<string, unknown>));
+  return JSON.stringify(sealedComparisonProjection(first as Record<string, unknown>)) === JSON.stringify(sealedComparisonProjection(proposed as Record<string, unknown>));
 }

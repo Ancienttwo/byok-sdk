@@ -140,8 +140,8 @@ export function createTaskReadsApi({ root, controlPlane, options, sameAgentRef }
       return undefined;
     },
 
-    readActivity(tenant, taskId) {
-      return tenantStoresFor(controlPlane(tenant), root).activity.read(taskId);
+    readActivity(tenant, taskId, readOptions) {
+      return tenantStoresFor(controlPlane(tenant), root).activity.read(taskId, readOptions);
     },
 
     readApprovalTimeline(tenant, taskId) {

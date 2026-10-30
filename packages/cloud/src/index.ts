@@ -270,21 +270,20 @@ export {
 export type { ActivityBounds } from './coordination';
 export {
   TimelineEventSchema,
-  SealedActivityBatchSchema,
   ActivityAppendRequestSchema,
-  activityCursor,
-  activitySourceBatchState,
-  parseTimelineEvents,
   projectTimelineEvents,
   validateActivityAppend,
+  MAX_ACTIVITY_BYTES,
+  ACTIVITY_TERMINAL_TTL_MS,
+  activityEntryBytes,
 } from './activity';
 export type {
   ActivityAppendInput,
   ActivityCursor,
+  ActivityReadOptions,
   ActivityStore,
   ActivityTail,
   ActivityTailEntry,
-  SealedActivityBatch,
   TimelineEvent,
 } from './activity';
 export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';

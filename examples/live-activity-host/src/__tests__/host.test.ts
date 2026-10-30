@@ -33,15 +33,20 @@ function timelineEvent(
   };
 }
 
-function activityTail(entries: readonly TimelineEvent[]): ActivityTail {
+function activityTail(events: readonly TimelineEvent[]): ActivityTail {
+  const groups = new Map<string, TimelineEvent[]>();
+  for (const event of events) groups.set(event.sourceEnvelopeId, [...(groups.get(event.sourceEnvelopeId) ?? []), event]);
+  const entries = [...groups.values()].map((group, index) => ({
+    kind: 'progress' as const, taskId: 'task-1', sourceEnvelopeId: group[0]!.sourceEnvelopeId,
+    batchSeq: group[0]!.batchSeq, sourceDropped: group[0]!.sourceDropped ?? 0,
+    revision: index + 1, receivedAt: group[0]!.receivedAt,
+    events: [...group].sort((a, b) => a.eventIndex - b.eventIndex).map(event => event.event),
+  }));
   return {
-    tenantId: AUTHORIZED_TENANT,
-    taskId: 'task-1',
-    entries,
-    cursor: { batchSeq: 1, eventIndex: entries.length - 1 },
-    dropped: 0,
-    capacity: 50,
-    expiresAt: '2026-08-16T14:00:00.000Z',
+    tenantId: AUTHORIZED_TENANT, taskId: 'task-1', entries,
+    cursor: { version: 1, tenantId: AUTHORIZED_TENANT, taskId: 'task-1', generation: 'test', revision: entries.length },
+    floor: 0, sourceDropped: 0, byteCapacity: 4 * 1024 * 1024, retainedBytes: 0,
+    dropped: 0, capacity: 50, expiresAt: '2026-08-16T14:00:00.000Z',
   };
 }
 
@@ -271,7 +276,7 @@ describe('live activity host security boundary', () => {
       hostOptions({
         readActivity: () => ({
           ...activityTail([timelineEvent({ type: 'progress', text: 'working' })]),
-          cursor: { batchSeq: 2, eventIndex: 0 },
+          cursor: { ...activityTail([]).cursor, revision: 2 },
         }),
       }),
     ).fetch(request());
@@ -374,11 +379,11 @@ describe('live activity host security boundary', () => {
   it('preserves unknown events and loss/gap metadata through the host path', async () => {
     const tail: ActivityTail = {
       ...activityTail([]),
-      entries: [
+      entries: activityTail([
         timelineEvent({ type: 'progress', text: 'start' }, { batchSeq: 0 }),
         timelineEvent({ type: 'future_event', privateValue: '[redacted]' }, { batchSeq: 2, sourceEnvelopeId: 'envelope-2' }),
-      ],
-      cursor: { batchSeq: 2, eventIndex: 0 },
+      ]).entries,
+      cursor: { ...activityTail([]).cursor, revision: 2 },
       dropped: 3,
     };
     const response = await createLiveActivityHost(
@@ -451,5 +456,18 @@ describe('live activity host security boundary', () => {
       name: '@byok-sdk/example-live-activity-host',
       private: true,
     });
+  });
+});
+
+
+describe('log variants at the plaintext example boundary', () => {
+  it.each(['artifact', 'sealed-progress'] as const)('refuses %s explicitly before calling the event redactor', async kind => {
+    const tail = activityTail([]);
+    const redact = vi.fn((event: TimelineEvent) => event);
+    const entry = kind === 'artifact'
+      ? { kind, taskId: 'task-1', sourceEnvelopeId: 'a', revision: 1, receivedAt: '2026-08-16T12:00:00.000Z', artifact: { name: 'a', contentType: 'text/plain', inline: 'secret' } }
+      : { kind, taskId: 'task-1', sourceEnvelopeId: 's', revision: 1, receivedAt: '2026-08-16T12:00:00.000Z', batchSeq: 1, sourceDropped: 0, sealed: {} };
+    await expect(redactActivityTail({ ...tail, entries: [entry as ActivityTail['entries'][number]] }, {}, redact)).rejects.toMatchObject({ code: 'redaction_invalid' });
+    expect(redact).not.toHaveBeenCalled();
   });
 });

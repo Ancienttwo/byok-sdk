@@ -9,6 +9,10 @@
  */
 
 export const CLOUD_ERROR_CODES = {
+  activity_history_gap: 'activity_history_gap',
+  activity_cursor_invalid: 'activity_cursor_invalid',
+  activity_task_settled: 'activity_task_settled',
+  activity_store_unavailable: 'activity_store_unavailable',
   maintenance_invalid_input: 'maintenance_invalid_input',
   maintenance_result_invalid: 'maintenance_result_invalid',
   /** A pairing code that is unknown, expired, or already redeemed (§6.1). */

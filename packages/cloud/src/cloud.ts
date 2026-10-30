@@ -64,7 +64,7 @@ import {
   type TenantId,
   type TenantReadiness,
 } from '@byok-sdk/core';
-import type { ActivityTail } from './activity';
+import type { ActivityTail, ActivityReadOptions } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
 import type { StaleApprovalError } from './approval-control';
 import {
@@ -927,7 +927,7 @@ export interface ByokCloud {
   listPresence(tenant: TenantId): Promise<readonly PresenceHint[]>;
   /** SDK-owned observation only; never a scheduler or execution authority. */
   readTenantReadiness(tenant: TenantId): Promise<TenantReadiness>;
-  readActivity(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
+  readActivity(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
   readApprovalTimeline(
     tenant: TenantId,
     taskId: string,
