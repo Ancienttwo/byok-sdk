@@ -49,7 +49,8 @@ export type {
   NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode,
 } from '../native-interactions';
 
-export { buildRuntimeEnv } from '../daemon/environment';
+export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../runtime/environment';
+export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from '../runtime/environment';
 
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';

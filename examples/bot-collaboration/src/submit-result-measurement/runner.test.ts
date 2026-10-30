@@ -157,7 +157,8 @@ it.skipIf(process.platform === 'win32')('observes a real CodexAdapter through th
   const out = await tempDir('m610-codex-');
   const code = await main(['--runtime', 'codex', '--model', 'fake-codex-model', '--run-id', 'codex', '--rounds', '1', '--cases', 'C01-small',
     '--execute', '--authorization', 'synthetic-test', '--max-spend', '0', '--deadline-ms', '60000', '--out', out], {
-    adapters: () => [new CodexAdapter({ resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }) })], stdout: () => {},
+    // The test sets FAKE_CODEX_SUBMIT_RESULT itself: a Host variable reaches the runtime only through pass (#1095).
+    adapters: () => [new CodexAdapter({ resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }), runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_CODEX_SUBMIT_RESULT'] } })], stdout: () => {},
   });
   expect(code).toBe(0);
   const { manifest, trials } = await readRun(out);

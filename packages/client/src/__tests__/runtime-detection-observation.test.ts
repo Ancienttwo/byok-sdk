@@ -1,3 +1,4 @@
+import { testRuntimeEnv } from './fixtures/runtime-env';
 import * as childProcess from 'node:child_process';
 import { once } from 'node:events';
 import { promises as fs } from 'node:fs';
@@ -49,7 +50,7 @@ function controlledVersionProbe(command: string) {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const exec = vi.mocked(childProcess.execFile);
   exec.mockClear();
-  const result = probeRuntimeVersion(command, 1_000);
+  const result = probeRuntimeVersion(command, 1_000, testRuntimeEnv());
   const child: childProcess.ChildProcess = exec.mock.results[0]!.value;
   children.push(child);
   return { child, result };

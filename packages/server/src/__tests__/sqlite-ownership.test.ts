@@ -15,7 +15,7 @@ import { isSqliteAvailable, openSqliteDatabase } from '../sqlite-support';
  * exercised with a real second process that dies by `exit` and by SIGKILL.
  */
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const SQLITE_SUPPORT = fileURLToPath(new URL('../sqlite-support.ts', import.meta.url));
 
 /**

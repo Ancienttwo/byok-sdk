@@ -19,7 +19,7 @@ import {
   type Session,
 } from '../../types';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
-import { buildRuntimeEnv } from '../../daemon/environment';
+import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process';
@@ -45,6 +45,8 @@ const COMPAT_INSTRUCTIONS_OFF = Object.freeze({
 export interface GrokAdapterOptions {
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
+  /** The environment Grok and its MCP servers get (#1095). Default: the login-shell snapshot. */
+  runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
   model?: string;
   /**
@@ -106,7 +108,10 @@ export class GrokAdapter implements RuntimeAdapter {
     },
   }); }
 
+  private readonly environmentPolicy: RuntimeEnvironmentPolicy;
+
   constructor(private readonly options: GrokAdapterOptions = {}) {
+    this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'GrokAdapterOptions.runtimeEnvironment');
     const retained = options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES;
     if (!Number.isSafeInteger(retained) || retained < 1) throw new TypeError('invalid Grok retention budget');
     const interrupt = options.interruptTimeoutMs ?? DEFAULT_INTERRUPT_MS;
@@ -119,18 +124,23 @@ export class GrokAdapter implements RuntimeAdapter {
     this.options = { ...options };
   }
 
+  runtimeEnvironment(): Promise<Record<string, string>> {
+    return buildRuntimeEnvironment(this.environmentPolicy);
+  }
+
   /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
   async detect(): Promise<RuntimeDetectResult> {
     try {
+      const env = await this.runtimeEnvironment();
       const command = (this.options.resolveBin ?? resolveGrokBin)().command;
-      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS);
+      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env);
       if (version.kind !== 'available') return version;
       const text = version.stdout.trim() || version.stderr.trim();
       try {
         await execFileAsync(command, ['agent', 'stdio', '--help'], {
           timeout: DETECT_TIMEOUT_MS,
           killSignal: 'SIGKILL',
-          env: buildRuntimeEnv({ ambient: process.env }),
+          env,
         });
       } catch {
         return { kind: 'refused', reason: 'acp_unavailable' };
@@ -138,7 +148,7 @@ export class GrokAdapter implements RuntimeAdapter {
       return {
         kind: 'available',
         version: text,
-        authPresent: grokAuthPresent(process.env),
+        authPresent: grokAuthPresent(env),
         ...(!isQualifiedGrokVersion(text)
           ? { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: QUALIFIED_GROK_VERSION } as const }
           : {}),

@@ -15,7 +15,9 @@
  * function did, including the sequence it allocated.
  *
  * Lock order, the same for every writer: the tenant mailbox lock (limited
- * admission only), then the per-device `device_stream` row.
+ * admission only), then the per-device `device_stream` row. Dead-lettering
+ * outside retention (`expirePendingRows`) takes only the stream row: it can
+ * only lower the sum a limited append is checked against.
  *
  * - The tenant lock is a transaction-scoped advisory lock. A `limited` limit
  *   check reads an aggregate over other devices' rows, and under READ
@@ -180,6 +182,45 @@ export async function readMailboxBytes(
     [tenant],
   );
   return used.rows[0]!.bytes;
+}
+
+/**
+ * Takes the `device_stream` row lock of each device, in `device_id` order — the
+ * lock every writer and the ack take before touching an outbox row. A caller
+ * that holds it before {@link expirePendingRows} sees every row appended
+ * before it, and never holds an outbox row an ack is waiting behind.
+ */
+export async function lockDeviceStreams(
+  client: Pick<PoolClient, 'query'>,
+  tenant: TenantId,
+  deviceIds: readonly string[],
+): Promise<void> {
+  await client.query(
+    `SELECT 1 FROM device_stream WHERE tenant_id = $1 AND device_id = ANY($2::text[])
+      ORDER BY device_id FOR UPDATE`,
+    [tenant, [...deviceIds]],
+  );
+}
+
+/**
+ * Dead-letters a device's `pending` rows — every one, or exactly the listed
+ * seqs — under a stream lock the caller already holds. Only `pending` moves,
+ * only to `expired`; the stream row and every other row stay as they are.
+ */
+export async function expirePendingRows(
+  client: Pick<PoolClient, 'query'>,
+  tenant: TenantId,
+  deviceId: string,
+  seqs: 'all' | readonly (number | string)[],
+): Promise<number> {
+  if (seqs !== 'all' && seqs.length === 0) return 0;
+  const expired = await client.query(
+    `UPDATE outbox SET state = 'expired'
+      WHERE tenant_id = $1 AND device_id = $2 AND state = 'pending'
+        AND ($3::bigint[] IS NULL OR seq = ANY($3::bigint[]))`,
+    [tenant, deviceId, seqs === 'all' ? null : seqs.map(String)],
+  );
+  return expired.rowCount ?? 0;
 }
 
 /** Names the refusal. Runs inside the same locked transaction that refused. */

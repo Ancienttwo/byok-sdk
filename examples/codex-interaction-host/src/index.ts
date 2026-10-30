@@ -42,8 +42,9 @@ export async function startFixtureHost(options: FixtureHostOptions): Promise<{
   let detachAbort = () => {};
   try {
     const command = fileURLToPath(new URL('../fixtures/fake-codex.mjs', import.meta.url));
+    // The fixture is a node script: its version probe needs the Host's PATH, declared through the public policy.
     const adapter = new CodexAdapter({ resolveBin: () => ({ command, source: 'path' }),
-      nativeInteractions: host.nativeInteractions });
+      runtimeEnvironment: { pass: ['PATH'] }, nativeInteractions: host.nativeInteractions });
     workspace = await mkdtemp(path.join(tmpdir(), 'byok-codex-reference-'));
     // macOS tmpdir() resolves past the 61-byte scratch root limit; /tmp resolves to /private/tmp.
     scratchRoot = await mkdtemp(path.join(await realpath(process.platform === 'win32' ? tmpdir() : '/tmp'), 's-'));

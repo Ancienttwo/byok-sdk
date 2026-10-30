@@ -33,3 +33,35 @@ checks embedded server, hosted daemon journal and provider-profile persistence i
 Add `--sea` to build and run the same fixture as a relocated Node SEA executable using the
 existing recipe. See [SQLITE-VALIDATION.md](./SQLITE-VALIDATION.md) for the exact scope, commands,
 baseline reproduction and platform evidence; this fixture does not qualify native credential assets.
+
+## Embedded Host packaging consistency (#1104)
+
+`embedded-host-fixture.ts` is a complete embedded Host in one executable: an
+embedded server on `listenLoopback`, a daemon with the Pi adapter, and the SDK
+helper and keys launcher re-entered through its own argv. `embedded-host-smoke.mjs`
+bundles it with `byokSdkPackaging` from `@byok-sdk/client/packaging`, ships it in
+an empty directory beside only the files `copySdkPackagingAssets` writes, and runs
+it. The run pairs, starts Pi through the SDK helper re-entry and completes one
+dispatch against an in-process model endpoint, with no network and no OS
+credential store (the provider profile has `auth_mode: 'none'`).
+
+```sh
+node examples/packaging/embedded-host-smoke.mjs --format esm   # or cjs, sea
+```
+
+The `packaging-consistency` CI job runs each format on macOS, Linux and Windows.
+Every leg uses `node:sqlite` (server store and keys profile store). macOS and
+Windows also ship and admit the Agent memory helper, and Windows runs Pi under a
+Job Object through the shipped koffi addon. Linux memory needs no helper.
+The macOS and Windows legs build the helper first:
+`bun run --filter @byok-sdk/client build:agent-memory-helper`.
+
+A SEA is made from `SEA_NODE` (default: the Node running the smoke). It must be an
+official Node build: some package-manager builds, such as Homebrew's, omit the
+SEA fuse, and the smoke stops with that reason. CI uses the setup-node binary.
+
+`bundle-import-meta.test.ts` (`bun run --cwd examples/packaging test`) builds the
+same Host as CommonJS and requires exactly the plugin's reviewed
+`sdkBundleImportMetaExemptions` to warn, so a new SDK or dependency
+`import.meta` site, or a stale exemption, fails the targeted CI job.
+

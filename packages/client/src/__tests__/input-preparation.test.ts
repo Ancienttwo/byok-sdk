@@ -1627,7 +1627,7 @@ it('K7 binds a single submit_result schema in the real compiled request and dura
   const service = createInputPreparationService({
     storeDir: await tmpStoreDir(), limits: LIMITS, authorityResolver: ALWAYS_AUTHORIZED,
     compiler, toolSurface: createPreparedToolSurfaceAssembler({
-      toolsetRegistry: new McpToolsetRegistry({}), runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+      toolsetRegistry: new McpToolsetRegistry({}), runtimeEnv: async () => ({ PATH: process.env.PATH ?? '' }),
     }),
   });
   await service.open(); cleanups.push(() => service.stop());

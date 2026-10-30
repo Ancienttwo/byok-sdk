@@ -8,6 +8,7 @@ import { ByokCloudError } from '../errors';
 import { readAgentMessageDisposition, terminalReceiptKey } from '../inbound';
 import { projectTerminalResult, readDeviceTerminalReceipt } from '../terminal-result';
 import { assertTaskContentPresent } from '../task-redaction';
+import { isTaskAbandonCause } from '../stores/ports';
 import { tenantStoresFor, type CloudRootStores } from '../tenant-stores';
 
 interface Dependencies {
@@ -120,7 +121,23 @@ export function createTaskReadsApi({ root, controlPlane, options, sameAgentRef }
       const receipt = await stores.receipts.get(
         terminalReceiptKey(taskId),
       );
-      return receipt === undefined ? undefined : projectTerminalResult(taskId, receipt);
+      if (receipt !== undefined) return projectTerminalResult(taskId, receipt);
+      // Cloud settled the attempt itself (device retirement or abandonTask): the
+      // attempt row is the only terminal fact, and no device receipt is invented.
+      if (
+        attempt?.status === 'cancelled' &&
+        isTaskAbandonCause(attempt.terminalCause) &&
+        attempt.terminalAt !== undefined
+      ) {
+        return {
+          taskId,
+          state: 'cancelled',
+          terminalCause: attempt.terminalCause,
+          ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+          recordedAt: attempt.terminalAt,
+        };
+      }
+      return undefined;
     },
 
     readActivity(tenant, taskId) {

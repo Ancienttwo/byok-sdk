@@ -244,6 +244,12 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
     "maxConcurrentReaderAttemptsPerAgentHome": {
       "type": "number"
     },
+    "maxConcurrentTasks": {
+      "type": "number"
+    },
+    "defaultMaxDurationMs": {
+      "type": "number"
+    },
     "agentEgress": {
       "type": "object",
       "properties": {
@@ -567,6 +573,47 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
       "items": {
         "type": "string"
       }
+    },
+    "runtimeEnvironment": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "base": {
+              "const": "login-shell"
+            },
+            "pass": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "base": {
+              "const": "allowlist"
+            },
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pass": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "base"
+          ]
+        }
+      ]
     },
     "durablePi": {
       "type": "boolean"

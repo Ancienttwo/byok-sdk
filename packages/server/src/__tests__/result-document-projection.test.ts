@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PROTOCOL_VERSION, RESULT_DOCUMENT_MAX_BYTES, createEnvelope } from '@byok-sdk/protocol';
+import { PROTOCOL_VERSION, RESULT_DOCUMENT_MAX_BYTES, createEnvelope, type MessagesSendResponse } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer, type TaskHandle } from '../index';
 import {
   connectFakeDaemonLongPoll,
@@ -166,15 +166,16 @@ describe('additive-minor: task.complete.document projection', () => {
     // The awaited request IS the barrier: `POST /byok/messages` applies (or
     // refuses) its envelopes synchronously inside the request, so by the time
     // this resolves the oversized frame's (non-)effect is settled. The refusal
-    // is a whole-request 400 at the codec boundary — the batch schema is
-    // validated before any envelope is dispatched, so an over-cap document
+    // is that envelope's own `payload_invalid` outcome at the codec boundary
+    // (#1121): it is decoded before it is dispatched, so an over-cap document
     // cannot be half-applied.
     const oversizedRes = await fetch(`${baseUrl}/byok/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.accessToken}` },
       body: JSON.stringify({ messages: [oversized] }),
     });
-    expect(oversizedRes.status).toBe(400);
+    expect(oversizedRes.status).toBe(200);
+    expect((await oversizedRes.json() as MessagesSendResponse).outcomes).toEqual([{ id: oversized.id, outcome: 'rejected', reason: 'payload_invalid' }]);
 
     // The task is STILL RUNNING — the oversized completion neither completed
     // it nor half-applied. `handle.result()` is deliberately not awaited here;

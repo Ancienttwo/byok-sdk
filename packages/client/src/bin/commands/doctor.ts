@@ -8,9 +8,9 @@ import {
 } from '../../diagnostics/diagnostics';
 import { resolveStoreDir } from '../config';
 import { serviceLogDir } from '../../daemon/host-layout';
-import type { ServiceEnvironmentRecord } from '../../lifecycle/service-environment';
+import type { ServiceEnvironmentRecord } from '../../login-shell-environment';
 import { formatServiceEnvironment } from '../format';
-import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from '../../diagnostics/device-doctor';
+import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from '../../diagnostics/device-doctor';
 
 export interface DoctorOptions extends CollectDiagnosticsOptions {
   json?: boolean;
@@ -64,10 +64,25 @@ function formatDoctorLines(snapshot: DiagnosticsSnapshot, logDir: string, enviro
 
 export async function runDoctorCommand(config: DaemonConfig, options: DoctorOptions = {}): Promise<void> {
   if (options.repair !== undefined) {
-    if (options.fix || options.repair !== 'restore-enrollment-metadata') {
+    if (options.fix || (options.repair !== 'restore-enrollment-metadata' && options.repair !== 'reset-cursor')) {
       throw new Error('doctor requires one supported repair action; --fix cannot be combined with --repair');
     }
     const log = options.log ?? ((line: string) => console.log(line));
+    if (options.repair === 'reset-cursor') {
+      if (options.expectedDeviceId !== undefined || options.expectedTenantId !== undefined) {
+        throw new Error('expected identity flags require --repair restore-enrollment-metadata');
+      }
+      try {
+        const repair = await resetDeviceCursor(config, { confirmed: options.confirmed as true });
+        log(options.json ? JSON.stringify({ repair }, null, 2) : `repair ${repair.action}: ${repair.status} (${repair.scope})`);
+        return;
+      } catch (error) {
+        if (options.json && error instanceof DeviceCursorResetError) {
+          log(JSON.stringify({ repair: { action: 'reset-cursor', scope: 'device', status: 'failed', code: error.code } }, null, 2));
+        }
+        throw error;
+      }
+    }
     try {
       const repair = await repairDeviceEnrollmentMetadata(config, {
         confirmed: options.confirmed as true,

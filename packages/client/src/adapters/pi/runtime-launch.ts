@@ -1,5 +1,5 @@
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
-import { buildAllowlistedEnv } from '../../daemon/environment';
+import { buildAllowlistedEnv } from '../../runtime/environment';
 import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';

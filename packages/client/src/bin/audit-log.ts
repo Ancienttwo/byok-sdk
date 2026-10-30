@@ -4,7 +4,7 @@ import path from 'node:path';
 import { TASK_STATES, type TaskState, OUTBOUND_REFUSAL_REASONS, type OutboundRefusalReason } from '@byok-sdk/protocol';
 import { parseDaemonLifecycle, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { isDaemonRecordKind, type DaemonRecord } from '../daemon/daemon-record';
-import type { ServiceEnvironmentStatus, ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus, ServiceEnvironmentRecord } from '../login-shell-environment';
 import { parseEnvironmentRecord } from '../daemon/daemon-record';
 export { parseEnvironmentRecord } from '../daemon/daemon-record';
 import { atomicWriteFile } from '../util/atomic-write';

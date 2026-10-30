@@ -131,18 +131,18 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(await stop(child)).toBe(0);
   }, 60_000);
 
-  it('without --service: inherited, and claude stays not-found', async () => {
+  it('embedded (no --service, #1095): process.env stays as inherited, yet claude is found through the snapshot PATH', async () => {
     const server = await TestServer.start();
     cleanups.push(() => server.close());
     const { home, configPath } = await fixture(server.url);
     const { report, child } = await runChild(home, configPath, false);
 
-    expect(report.environment).toEqual({ source: 'inherited' });
+    expect(report.environment).toMatchObject({ source: 'login-shell', shell: path.basename(passwdShell!) });
     expect(report.pathHasFakeBin).toBe(false);
-    expect(report.detected).toEqual([]);
-    expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'not-found' }]);
+    expect(report.detected).toEqual(['claude']);
+    expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'available' }]);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 10_000);
-    expect((hello.payload as { runtimes: unknown[] }).runtimes).toEqual([]);
+    expect((hello.payload as { runtimes: Array<{ id: string }> }).runtimes.map((runtime) => runtime.id)).toEqual(['claude']);
     expect(await stop(child)).toBe(0);
   }, 60_000);
 

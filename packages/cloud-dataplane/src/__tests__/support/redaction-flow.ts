@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ByokPool } from '../../pool';
 import { expect } from 'vitest';
-import { createMutableClock, type CoreStores, type TenantId } from '@byok-sdk/core';
+import { createMutableClock, type CoreStores, type MutableClock, type TenantId } from '@byok-sdk/core';
 import {
   CLOUD_CAPABILITIES,
   createByokCloud,
@@ -32,7 +32,7 @@ import {
   type Envelope,
 } from '@byok-sdk/protocol';
 import { createDeviceSimulator } from '../../../../testkit/src/index';
-import { createPostgresCloudStores, createPostgresTaskRedactionStore } from '../../stores';
+import { createPostgresCloudStores, createPostgresTaskRedactionStore, PostgresProofReceiptRetentionAuthority } from '../../stores';
 import { createPostgresCoreStores } from '../../stores/core';
 import type { ObjectStorageScope } from './dataplane';
 import { canaryNeedles, type Needle } from './plaintext-scan';
@@ -78,6 +78,7 @@ export function createCanary(label: string): Canary {
 export interface RedactionHost {
   readonly cloud: ByokCloud;
   readonly core: CoreStores;
+  readonly clock: MutableClock;
   /** Each body the product consumer received. */
   readonly consumed: string[];
 }
@@ -115,8 +116,9 @@ export async function composeRedactionHost(
       },
     },
     taskRedactionStore: wrapStore(createPostgresTaskRedactionStore({ pool, clock, objectStorage: objectStorage.config })),
+    proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
   });
-  return { cloud, core, consumed };
+  return { cloud, core, clock, consumed };
 }
 
 export interface Device {

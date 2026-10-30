@@ -1,7 +1,7 @@
 import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
 import { DaemonHaltError, type DaemonHaltReason } from '../../daemon/daemon-lifecycle';
 import { createDaemonRecordProjector, type DaemonRecord } from '../../daemon/daemon-record';
-import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../lifecycle/service-environment';
+import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../login-shell-environment';
 import { createAuditAppender } from '../audit-log';
 import { ConfigError, resolveStoreDir } from '../config';
 import { DaemonOwnerActiveError } from '../../daemon/daemon-owner';

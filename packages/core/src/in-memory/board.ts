@@ -85,6 +85,10 @@ export class InMemoryBoardStore implements BoardStore {
     };
   }
 
+  async remove(tenant: TenantId, itemId: string): Promise<void> {
+    this.#items.delete(tenantKey(tenant, itemId));
+  }
+
   async claim(tenant: TenantId, input: BoardClaimInput): Promise<BoardItem> {
     const item = this.#require(tenant, input.itemId);
     const expectedStatus = input.expectedStatus ?? 'todo';

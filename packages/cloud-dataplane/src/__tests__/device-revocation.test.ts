@@ -9,7 +9,8 @@ import { createObjectStorageScope } from './support/dataplane';
  *    inbound dedup, assertion replay) is deleted with the row it hung off; the
  *    history keyed by the device_id STRING (task, agent_egress_event,
  *    proof_request_receipt) survives, because what a device did stays true
- *    after the grant that let it is gone.
+ *    after the grant that let it is gone. Its unfinished `task` rows are
+ *    settled as cancelled under the retirement cause (#1119), not deleted.
  * 2. That the delete never leaves a stranger's row short. `device_id` is
  *    globally unique but the DELETEs are tenant-first, and a tenant-blind
  *    dependent delete would be invisible to every port-level assertion.
@@ -34,6 +35,15 @@ const TENANT_A = tenantId('device-revocation-a');
 const TENANT_B = tenantId('device-revocation-b');
 const PRODUCT = 'test-product';
 const MACHINE = 'a'.repeat(64);
+
+/** The planted task's lifecycle columns after retirement. */
+async function plantedTask(pool: Pool, tenant: string, deviceId: string) {
+  const result = await pool.query<{ status: string; terminal_cause: string | null; terminal_at: Date | null }>(
+    'SELECT status, terminal_cause, terminal_at FROM task WHERE tenant_id = $1 AND task_id = $2',
+    [tenant, `${deviceId}-task`],
+  );
+  return result.rows[0];
+}
 
 /** Every table this module claims an opinion about, counted for one device. */
 async function rowCounts(
@@ -177,6 +187,13 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device revocation deletes the registra
         agent_egress_event: 1,
         proof_request_receipt: 1,
       });
+      // The surviving task row is settled under the revocation, not left offered.
+      await expect(plantedTask(scope.pool, TENANT_A, 'revoked-device')).resolves.toMatchObject({
+        status: 'cancelled',
+        terminal_cause: 'device_revoked',
+        terminal_at: expect.any(Date),
+      });
+      await expect(plantedTask(scope.pool, TENANT_A, 'kept-device')).resolves.toMatchObject({ status: 'offered' });
       // Neither the tenant's other device nor another tenant's lost anything.
       await expect(rowCounts(scope.pool, TENANT_A, 'kept-device')).resolves.toMatchObject({
         device: 1,
@@ -219,6 +236,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device revocation deletes the registra
         inbound_dedup: 1,
         device_assertion_replay: 1,
       });
+      await expect(plantedTask(scope.pool, TENANT_A, 'revoked-device')).resolves.toMatchObject({ status: 'offered' });
     } finally {
       await scope.dispose();
     }
@@ -252,6 +270,11 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device revocation deletes the registra
         agent_egress_event: 1,
         proof_request_receipt: 1,
       });
+      await expect(plantedTask(scope.pool, TENANT_A, 'first-device')).resolves.toMatchObject({
+        status: 'cancelled',
+        terminal_cause: 'device_superseded',
+      });
+      await expect(plantedTask(scope.pool, TENANT_B, 'stranger-device')).resolves.toMatchObject({ status: 'offered' });
       await expect(devices.list(TENANT_A)).resolves.toHaveLength(1);
       await expect(devices.resolveByDeviceId('first-device')).resolves.toBeUndefined();
       // The same physical machine legitimately holds a row in another tenant.
@@ -290,6 +313,8 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device revocation deletes the registra
         device: 1,
         device_presence: 1,
       });
+      // Not a supersession of itself: its own task is not retired.
+      await expect(plantedTask(scope.pool, TENANT_A, 'stable-device')).resolves.toMatchObject({ status: 'offered' });
       await expect(devices.get(TENANT_A, 'stable-device')).resolves.toMatchObject({
         devicePublicKey: 'stable-device-rotated-key',
         proofKeyEpoch: 1,

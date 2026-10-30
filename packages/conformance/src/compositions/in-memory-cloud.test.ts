@@ -8,7 +8,7 @@
  */
 import { createInMemoryCoreStores, createMutableClock } from '@byok-sdk/core';
 import { createInMemoryCloudStores, createInMemoryBlobBytes, createWebCrypto } from '@byok-sdk/cloud';
-import { ackAndCollectMailbox, runCloudConformance, type CloudCompositionFactory } from '../cloud/harness';
+import { ackAndCollectMailbox, conformanceMailbox, mailboxExpiryFaults, runCloudConformance, type CloudCompositionFactory } from '../cloud/harness';
 
 const inMemoryFactory: CloudCompositionFactory = {
   create() {
@@ -43,6 +43,7 @@ const inMemoryFactory: CloudCompositionFactory = {
         proofReceipts: stores.proofReceipts,
         blobs: stores.blobs,
         rateLimiter: stores.rateLimiter,
+        taskArchive: stores.taskArchive,
       },
       now: () => clock.now().toISOString(),
       advanceTime: (ms: number) => {
@@ -61,6 +62,8 @@ const inMemoryFactory: CloudCompositionFactory = {
         });
       },
       retireCancellationDelivery: (tenant, deviceId) => ackAndCollectMailbox(core.mailbox, tenant, deviceId),
+      mailbox: conformanceMailbox(core),
+      ...mailboxExpiryFaults(core.mailbox),
     };
   },
 };

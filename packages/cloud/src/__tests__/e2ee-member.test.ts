@@ -25,6 +25,7 @@ function setup(withStore = true, makeStore = (receipts: RequestReceiptStore) => 
   const base = createInMemoryByokCloud({ clock });
   const store = makeStore(base.stores.receipts);
   const cloud: ByokCloud = createByokCloud({
+    proofReceiptRetention: base.proofReceiptRetention,
     core: base.core,
     cloud: base.stores,
     mailboxWake: base.mailboxWake,

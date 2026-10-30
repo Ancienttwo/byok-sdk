@@ -100,7 +100,7 @@ const adapters = await import(new URL('../dist/adapters/index.js', import.meta.u
 const root = await import(new URL('../dist/index.js', import.meta.url));
 assert.deepEqual(
   Object.keys(adapters).sort(),
-  ['ClaudeAdapter', 'CodexAdapter', 'GrokAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnv', 'createExecutionScratch', 'isWireRuntimeId', 'observeRuntimeDetection', 'projectRuntimeObservation', 'taskRuntimeTarget', 'validateRuntimeDetectResult'],
+  ['ClaudeAdapter', 'CodexAdapter', 'GrokAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeEnvironmentUnavailableError', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnvironment', 'createExecutionScratch', 'isWireRuntimeId', 'observeRuntimeDetection', 'projectRuntimeObservation', 'taskRuntimeTarget', 'validateRuntimeDetectResult'],
 );
 // The public testing entry is transport-free too: a Host test must not load the daemon.
 const bundledTesting = readFileSync(new URL('../dist/testing/index.js', import.meta.url), 'utf8');

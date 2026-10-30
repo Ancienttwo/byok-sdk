@@ -15,6 +15,8 @@ import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 import type { Session, MessageDraftDelta } from '../types';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { RuntimeExecutionFailure } from '../runtime-failure';
+import { setLoginShellSnapshotSource } from '../login-shell-environment';
+import { TEST_LOGIN_SHELL_SNAPSHOT } from './fixtures/runtime-env';
 import { observationOf } from './fixtures/mcp-observation';
 import {
   projectMcpTools,
@@ -84,7 +86,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       byokLauncher:{command:'/opt/byok-pi-provider-launcher',profileDbPath:'/private/providers.sqlite',sessionDir:dir}});
     const task:RuntimeTaskInput={...baseTask,sessionRef:'fake-session-1',dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'}};
     let retained:import('../types').RuntimeSessionLease|undefined;
-    const wrapped:import('../types').RuntimeAdapter={descriptor:adapter.descriptor,detect:()=>adapter.detect(),prepare:async input=>{
+    const wrapped:import('../types').RuntimeAdapter={descriptor:adapter.descriptor,runtimeEnvironment:()=>adapter.runtimeEnvironment(),detect:()=>adapter.detect(),prepare:async input=>{
       const result=await adapter.prepare(input);if(result.kind!=='prepared')return result;
       retained=await result.operation.acquireSessionLease!(task.sessionRef!);
       return {...result,operation:{...result.operation,start:input=>result.operation.start({...input,sessionLease:{sessionRef:task.sessionRef!,release:async()=>{}}})}};
@@ -386,6 +388,66 @@ const __executionScratch = await testExecutionScratch();
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     await expect(prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: os.tmpdir(), env: {},  }))
       .rejects.toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start', message: 'pi_bundled_assets_unavailable: an interpreter + bundle product must set PI_PACKAGE_DIR to its Pi asset root' });
+  });
+
+  // #1095: the asset root of a single-file product is the PI_PACKAGE_DIR of the
+  // runtime environment, for detect as for the launch. A Host passes the name it sets.
+  describe('the Pi asset root comes from the runtime environment', () => {
+    const resolveBin = () => { throw new Error('a single-file product resolves no installed Pi package'); };
+    const bundle = { mode: 'self-executable', executable: process.execPath, entry: '/product/sdk.js' } as const;
+    const recordingSpawn = (spawned: Array<NodeJS.ProcessEnv | undefined>) => ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      spawned.push(options?.env);
+      return realSpawn(FIXTURE_PATH, args.slice(args.indexOf('__byok_sdk_helper') + 2), options);
+    }) as never;
+    const loginShell = (env: NodeJS.ProcessEnv) => setLoginShellSnapshotSource(async () => ({ status: TEST_LOGIN_SHELL_SNAPSHOT.status, env }));
+    const withoutAssetRoot = (): NodeJS.ProcessEnv => {
+      const { PI_PACKAGE_DIR: _assetRoot, ...env } = process.env;
+      return env;
+    };
+    const launch = async (adapter: PiAdapter) => startAdapter(adapter, baseTask, await makeCtx(await adapter.runtimeEnvironment()));
+
+    it('ignores an asset root only the Host process holds until the policy passes it', async () => {
+      vi.stubEnv('PI_PACKAGE_DIR', PRODUCT_ASSETS);
+      loginShell(withoutAssetRoot());
+      const spawned: Array<NodeJS.ProcessEnv | undefined> = [];
+      const hostOnly = new PiAdapter({ resolveBin, spawnFn: recordingSpawn(spawned), sdkHelperHost: bundle });
+      await expect(hostOnly.detect()).resolves.toEqual({ kind: 'not-found' });
+      await expect(launch(hostOnly)).rejects.toThrow('pi_bundled_assets_unavailable: an interpreter + bundle product must set PI_PACKAGE_DIR to its Pi asset root');
+      expect(spawned).toHaveLength(0);
+      const passed = new PiAdapter({ resolveBin, spawnFn: recordingSpawn(spawned), sdkHelperHost: bundle, runtimeEnvironment: { pass: ['PI_PACKAGE_DIR'] } });
+      await expect(passed.detect()).resolves.toMatchObject({ kind: 'available', version: resolvePiRuntimeIdentity().version });
+      openSessions.push(await launch(passed));
+      expect(spawned.map((env) => env?.PI_PACKAGE_DIR)).toEqual([PRODUCT_ASSETS]);
+    });
+
+    // win32 has no login-shell snapshot: its base is the live session names.
+    it.skipIf(process.platform === 'win32')('uses the snapshot asset root over a broken Host one, and a pass of the broken one refuses both', async () => {
+      const broken = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-broken-pi-assets-'));
+      try {
+        loginShell({ ...withoutAssetRoot(), PI_PACKAGE_DIR: PRODUCT_ASSETS });
+        vi.stubEnv('PI_PACKAGE_DIR', broken);
+        const spawned: Array<NodeJS.ProcessEnv | undefined> = [];
+        const snapshot = new PiAdapter({ resolveBin, spawnFn: recordingSpawn(spawned), sdkHelperHost: bundle });
+        await expect(snapshot.detect()).resolves.toMatchObject({ kind: 'available' });
+        openSessions.push(await launch(snapshot));
+        expect(spawned.map((env) => env?.PI_PACKAGE_DIR)).toEqual([PRODUCT_ASSETS]);
+        const passed = new PiAdapter({ resolveBin, spawnFn: recordingSpawn(spawned), sdkHelperHost: bundle, runtimeEnvironment: { pass: ['PI_PACKAGE_DIR'] } });
+        await expect(passed.detect()).resolves.toEqual({ kind: 'not-found' });
+        await expect(launch(passed)).rejects.toThrow('pi_bundled_assets_unavailable: PI_PACKAGE_DIR holds no SDK Pi asset manifest');
+        expect(spawned).toHaveLength(1);
+      } finally { await fs.rm(broken, { recursive: true, force: true }); }
+    });
+
+    it('finds a compiled executable\'s assets beside it with no PI_PACKAGE_DIR', async () => {
+      vi.stubEnv('PI_PACKAGE_DIR', '');
+      loginShell(withoutAssetRoot());
+      const spawned: Array<NodeJS.ProcessEnv | undefined> = [];
+      const compiled = new PiAdapter({ resolveBin, spawnFn: recordingSpawn(spawned), sdkHelperHost: { mode: 'self-executable', executable: path.join(PRODUCT_ASSETS, 'product') } });
+      await expect(compiled.detect()).resolves.toMatchObject({ kind: 'available' });
+      openSessions.push(await launch(compiled));
+      expect(spawned).toHaveLength(1);
+      expect(spawned[0]?.PI_PACKAGE_DIR ?? '').toBe('');
+    });
   });
 
   it('validates the BYOK launcher at construction before prepare or spawn', () => {

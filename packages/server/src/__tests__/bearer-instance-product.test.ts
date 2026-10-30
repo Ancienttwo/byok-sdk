@@ -102,16 +102,7 @@ describe('S1: a bearer token is only good on the instance serving its product', 
     return { deviceId, accessToken };
   }
 
-  // 2d gap: constructing a cross-product device row is no longer possible from
-  // this package's public surface — `createPairingCode` refuses a foreign
-  // product before a code exists, and there is no other way to enroll a device
-  // into an embedded instance. The bearer-time check this pinned lives in the
-  // kernel and is covered there by
-  // `packages/cloud/src/__tests__/bearer-instance-product.test.ts`, which drives
-  // `instanceProductId` directly against a multi-product device directory.
-  it.skip('refuses a cross-product device on every bearer-authed route', () => {
-    // intentionally empty — see the 2d gap note above.
-  });
+  // Cross-product bearer isolation is exercised by packages/cloud/src/__tests__/bearer-instance-product.test.ts.
 
   it('leaves a same-product device working on all three routes', async () => {
     const started = await startWith();
@@ -122,14 +113,7 @@ describe('S1: a bearer token is only good on the instance serving its product', 
     expect((await createBlob(started.baseUrl, local.accessToken, 'local-reservation')).status).toBe(200);
   });
 
-  // 2d gap: same reason as the first case — the cross-product token half of
-  // this comparison cannot be minted here any more. The "every auth failure
-  // answers identically" property it guarded is still pinned on this surface by
-  // `tenant-pairing-isolation.test.ts` ("answers unknown, wrong-tenant, and
-  // revoked identically — no existence oracle").
-  it.skip('answers a cross-product token and a garbage token identically', () => {
-    // intentionally empty — see the 2d gap note above.
-  });
+  // Auth-failure indistinguishability is exercised by tenant-pairing-isolation.test.ts.
 
   it('refuses to mint a pairing code for a product this instance does not serve, before any row exists', async () => {
     const started = await startWith();

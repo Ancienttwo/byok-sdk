@@ -2,7 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { MAX_TRACKED_TASKS, type AssertionLane, type DaemonEvent } from './observer';
-import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentStatus, type ServiceEnvironmentRecord, type ServiceEnvironmentUnavailableCode } from '../lifecycle/service-environment';
+import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentStatus, type ServiceEnvironmentRecord, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeObservation } from '../runtime-detection';
 
 /**
@@ -146,6 +146,7 @@ export function parseEnvironmentRecord(value: unknown): ServiceEnvironmentRecord
   const keys = Object.keys(record);
   const only = (...allowed: string[]): boolean => keys.every((key) => ['kind', 'ts', 'source', ...allowed].includes(key));
   if (record.source === 'inherited' && only()) return { ts: record.ts, status: { source: 'inherited' } };
+  if (record.source === 'windows-session' && only()) return { ts: record.ts, status: { source: 'windows-session' } };
   if (record.source === 'unavailable' && only('code') && typeof record.code === 'string' && UNAVAILABLE_CODES.has(record.code)) {
     return { ts: record.ts, status: { source: 'unavailable', code: record.code as ServiceEnvironmentUnavailableCode } };
   }

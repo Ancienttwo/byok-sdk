@@ -16,15 +16,15 @@ import type {
   RuntimeId,
   TaskApprovalResolvedPayload,
   TaskArtifactPayload,
-  TaskDeclinePayload,
-  TaskFailure,
+  TaskDeclineCodeReading,
+  TaskFailureReading,
   TaskState,
   ToolsetId,
   TerminalProjectionSelection,
   AgentHomeAccess,
   AgentMemorySelection,
 } from '@byok-sdk/protocol';
-import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types';
 import type { RateLimiterOptions } from './rate-limiter';
@@ -262,20 +262,23 @@ export interface TaskResult {
   artifactRefs?: BlobRef[];
   reason?: string;
   /**
-   * Verbatim home-busy decline code (`agent_home_writer_busy` /
-   * `agent_home_reader_busy`). Classify busy by this field; `reason` is
-   * display text only. Absent on every other terminal.
+   * The decline code (`agent_home_writer_busy` / `agent_home_reader_busy`).
+   * Classify busy by this field; `reason` is display text only. A code this
+   * version does not know reads as `unknown`, its raw token in `reportedCode`
+   * (#1121). Absent on every other terminal.
    */
-  code?: TaskDeclinePayload['code'];
+  code?: TaskDeclineCodeReading['code'];
+  reportedCode?: string;
   retryable?: boolean;
   /**
-   * The machine-readable runtime failure class of a failed task, verbatim
-   * `task.fail.failure`: `class` (a closed {@link TaskFailure} value, `unknown`
-   * when the runtime gave no structured evidence) and, on `quota`,
+   * The machine-readable runtime failure class of a failed task, read from
+   * `task.fail.failure`: `class` (`unknown` when the runtime gave no
+   * structured evidence, or when the class is one this version does not know,
+   * its raw token then in `reportedClass` — #1121) and, on `quota`,
    * `resetsAt` when the runtime reported it. Classify failures by this field;
    * `reason` is display text only. Absent when the daemon predates the field.
    */
-  failure?: TaskFailure;
+  failure?: TaskFailureReading;
   /**
    * The task's structured terminal result, projected verbatim from
    * `task.complete.document` (`@byok-sdk/protocol`'s `messages.ts`) — the
@@ -373,6 +376,8 @@ export interface TaskHandle {
    */
   events(): AsyncIterable<ServerTaskEvent>;
   cancel(reason?: string): Promise<void>;
+  /** Settle this task as one no device will finish (`ByokCloud.abandonTask`); a terminal task is left as it is. */
+  abandon(cause: TaskAbandonCause): Promise<void>;
   /**
    * M5 (approval targeting, docs/protocol.md §5.3): `opts.approvalId`
    * targets a SPECIFIC pending approval rather than "whichever one is

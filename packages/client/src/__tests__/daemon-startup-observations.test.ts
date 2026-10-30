@@ -11,7 +11,7 @@ import { runStatusCommand } from '../bin/commands/status';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
 import { createSupportBundle } from '../diagnostics/support-bundle';
 import * as runtimeProbe from '../bin/runtime-probe';
-import * as serviceEnvironment from '../lifecycle/service-environment';
+import * as serviceEnvironment from '../login-shell-environment';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { parseRuntimeObservations } from '../runtime-detection';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';

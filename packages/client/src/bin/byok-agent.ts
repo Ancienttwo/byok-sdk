@@ -101,6 +101,7 @@ function usage(): never {
       '  byok-agent config check [--strict] [--json] [--config <path>]   (validate a config file and print its effective values; --strict fails on warnings)',
       '  byok-agent doctor [--json] [--fix --yes] [--config <path>]',
       '  byok-agent doctor --repair restore-enrollment-metadata --expected-device-id <id> --expected-tenant-id <id> --yes [--json] [--config <path>]',
+      '  byok-agent doctor --repair reset-cursor --yes [--json] [--config <path>]   (after a cursor_unreadable halt: replay from 0)',
       '  byok-agent support-bundle --output <path> [--config <path>]',
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',

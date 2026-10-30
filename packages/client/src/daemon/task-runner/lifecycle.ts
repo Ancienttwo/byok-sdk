@@ -58,8 +58,9 @@ export async function awaitActiveSessionClose(this: TaskRunner, active: ActiveTa
   return true;
 }
 
-export async function interruptBounded(this: TaskRunner, active: ActiveTask, drainEvents = true): Promise<void> {
-  const timeoutMs = this['deps'].shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
+export async function interruptBounded(this: TaskRunner, active: ActiveTask, drainEvents = true, capMs?: number): Promise<void> {
+  const configuredMs = this['deps'].shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
+  const timeoutMs = capMs === undefined ? configuredMs : Math.min(configuredMs, capMs);
   const deadline = Date.now() + timeoutMs;
   await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
   // Close drains native stdio even if an ACK arrived before final usage, or
@@ -78,10 +79,12 @@ export async function interruptBounded(this: TaskRunner, active: ActiveTask, dra
   }
 }
 
-export async function teardownActiveTask(this: TaskRunner, active: ActiveTask, reason: string, retryable: boolean, drainEvents = true): Promise<boolean> {
+export async function teardownActiveTask(
+  this: TaskRunner, active: ActiveTask, reason: string, retryable: boolean, drainEvents = true, interruptTimeoutMs?: number,
+): Promise<boolean> {
   return this['settleSemanticTerminal'](active, async () => {
     active.blobAbort.abort();
-    await this['interruptBounded'](active, drainEvents);
+    await this['interruptBounded'](active, drainEvents, interruptTimeoutMs);
     await this['persistAgentTerminalEvidence'](active, 'failed', reason);
     return createEnvelope('task.fail', {
       reason,
@@ -94,8 +97,8 @@ export async function teardownActiveTask(this: TaskRunner, active: ActiveTask, r
   });
 }
 
-export async function shutdownTask(this: TaskRunner, active: ActiveTask, reason: string): Promise<void> {
-  const disposed = await this['teardownActiveTask'](active, `daemon shutting down: ${reason}`, true);
+export async function shutdownTask(this: TaskRunner, active: ActiveTask, reason: string, interruptTimeoutMs?: number): Promise<void> {
+  const disposed = await this['teardownActiveTask'](active, `daemon shutting down: ${reason}`, true, true, interruptTimeoutMs);
   if (!disposed) {
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',

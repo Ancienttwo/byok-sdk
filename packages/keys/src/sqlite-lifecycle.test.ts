@@ -37,7 +37,7 @@ afterEach(() => {
   }
 });
 
-describe.skipIf(!sqliteSupport.isSqliteAvailable())('keys SQLite open lifecycle', () => {
+describe.skipIf(!(sqliteSupport.isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('keys SQLite open lifecycle', () => {
   it.each(['after-open', 'after-wal', 'after-synchronous'] as const)(
     'closes the native handle when initialization fails at %s',
     (faultStep) => {

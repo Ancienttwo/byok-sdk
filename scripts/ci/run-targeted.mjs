@@ -27,10 +27,6 @@ for (const dir of plan.dirs) {
   const manifest = JSON.parse(readFileSync(`${dir}/package.json`, 'utf8'));
   for (const script of ['typecheck', 'test']) {
     if (!manifest.scripts?.[script]) {
-      // examples/packaging has no unit suite. Its runtime test is the
-      // packageability-smoke family, which runs for its owned paths and in
-      // release validation. A dependent-only selection runs its typecheck.
-      if (dir === 'examples/packaging' && script === 'test') continue;
       throw new Error(`Selected workspace ${dir} has no ${script} check; add a reviewed workspace check`);
     }
     const result = spawnSync('bun', ['run', '--cwd', dir, script], { stdio: 'inherit', env: process.env });

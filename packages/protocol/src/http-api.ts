@@ -1,6 +1,6 @@
 import { z } from 'zod';
+import { PROTOCOL_VERSION } from './version';
 import { CONTENT_HASH_RE } from './blob';
-import { EnvelopeSchema } from './envelope';
 import {
   AgentRefSchema,
   ConfiguredToolsetsSchema,
@@ -299,9 +299,17 @@ export const MAX_MESSAGES_PER_BATCH = 256;
 /** Request body ceiling for `POST /byok/messages`; the cloud answers 413 above it, so the client chunks its drain by it. */
 export const MESSAGES_SEND_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
-/** Annotated so declaration emit names `EnvelopeSchema` instead of copying it. Type-only. */
-export const MessagesSendRequestSchema: z.ZodObject<{ messages: z.ZodArray<typeof EnvelopeSchema> }, z.core.$strip> = z.object({
-  messages: z.array(EnvelopeSchema).max(MAX_MESSAGES_PER_BATCH),
+/**
+ * The batch frame only (#1121). Each entry must speak this wire major and
+ * carry the UUID its outcome is correlated by; everything else is decoded per
+ * entry with `parseMessage`, so one invalid envelope is answered
+ * `rejected: payload_invalid` on its own instead of failing every envelope in
+ * the batch — the same split as `EventsPollResponseSchema.events` (#386) on
+ * the receive side. A different `v` still fails the whole request: the wire
+ * major belongs to the sender, which could not read this version's outcomes.
+ */
+export const MessagesSendRequestSchema = z.object({
+  messages: z.array(z.looseObject({ v: z.literal(PROTOCOL_VERSION), id: z.uuid() })).max(MAX_MESSAGES_PER_BATCH),
 });
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 

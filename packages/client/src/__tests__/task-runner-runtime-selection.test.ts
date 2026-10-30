@@ -1,3 +1,4 @@
+import { testRuntimeEnv } from './fixtures/runtime-env';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
@@ -167,6 +168,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       const sessions: StubSession[] = [];
       const adapter: RuntimeAdapter = {
         descriptor: sourceDescriptor,
+        runtimeEnvironment: async () => testRuntimeEnv(),
         async detect() {
           return { kind: 'available', version: '0.0.0' };
         },

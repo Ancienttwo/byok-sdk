@@ -78,7 +78,7 @@ async function deviceFacts(): Promise<DeviceFacts> {
   const toolsets = registry();
   const assembler = createPreparedToolSurfaceAssembler({
     toolsetRegistry: toolsets,
-    runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+    runtimeEnv: async () => ({ PATH: process.env.PATH ?? '' }),
   });
   const assembled = await assembler.assemble({
     agentMemory: 'none',
@@ -248,7 +248,7 @@ async function countedFor(
 ): Promise<PreparedToolSurface> {
   const assembled = await createPreparedToolSurfaceAssembler({
     toolsetRegistry: toolsets,
-    runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+    runtimeEnv: async () => ({ PATH: process.env.PATH ?? '' }),
   }).assemble({ agentMemory: 'none', requiredToolsets, runtimeIdentity: RUNTIME_IDENTITY });
   if (!assembled.ok) throw new Error(`the daemon refused to assemble the counted surface: ${assembled.detail}`);
   return assembled.surface;
@@ -328,7 +328,7 @@ it('K7 launches exactly the counted submit_result tool and dispatches through it
     properties: { summary: { type: 'string' as const } },
   } };
   const assembled = await createPreparedToolSurfaceAssembler({
-    toolsetRegistry: new McpToolsetRegistry({}), runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+    toolsetRegistry: new McpToolsetRegistry({}), runtimeEnv: async () => ({ PATH: process.env.PATH ?? '' }),
   }).assemble({ agentMemory: 'none', requiredToolsets: [], runtimeIdentity: RUNTIME_IDENTITY, terminalProjection: selection });
   if (!assembled.ok) throw new Error(assembled.message);
   expect(assembled.surface.toolNames).toEqual(['submit_result']);

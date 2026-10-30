@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
-import { sdkReservedHelperKinds } from './sdk-reserved-helper-host';
-import { byok } from '../package.json';
+import { sdkReservedHelperKinds, type SdkReservedHelperKind } from './sdk-reserved-helper-host';
+import distributionBins from './sdk-distribution-bins.json';
+import { byok, engines } from '../package.json';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -89,6 +90,32 @@ export async function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): 
 }
 export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
 
+/**
+ * What a single-file product does with each published bin. `cli`: the daemon CLI, not shipped by an embedded Host.
+ * `reserved-helper` and `pi-host`: re-entered through `sdkHelperHost` as `kind`. `provider-launcher`: the keys
+ * custody launcher, which the product re-enters as its own command with `runPiProviderLauncher`.
+ */
+export type SdkDistributionBinRole = 'cli' | 'reserved-helper' | 'pi-host' | 'provider-launcher';
+export interface SdkDistributionBin {
+  readonly package: '@byok-sdk/client' | '@byok-sdk/keys';
+  readonly role: SdkDistributionBinRole;
+  readonly kind?: SdkReservedHelperKind;
+}
+
+/**
+ * The supported single-file formats. Every format ships the same asset layout (`copySdkPackagingAssets` in
+ * `@byok-sdk/client/packaging`): `pi` is `PI_PACKAGE_DIR`, `native` is `nativeAssetRoot` and
+ * `native/agent-memory-fs` is `agentMemoryHelperAssetRoot`, where the platform has native targets.
+ */
+export const sdkPackagingFormats = Object.freeze({
+  esm: Object.freeze({ esbuildFormat: 'esm', helperHost: 'node-entry', piRuntimeForm: 'interpreter+bundle' }),
+  cjs: Object.freeze({ esbuildFormat: 'cjs', helperHost: 'node-entry', piRuntimeForm: 'interpreter+bundle' }),
+  sea: Object.freeze({ esbuildFormat: 'cjs', helperHost: 'executable', piRuntimeForm: 'interpreter+bundle' }),
+} as const);
+export type SdkPackagingFormat = keyof typeof sdkPackagingFormats;
+export const sdkPackagingAssetLayout = Object.freeze({ pi: 'pi', native: 'native', agentMemoryHelper: 'native/agent-memory-fs' } as const);
+
 /** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
-export const sdkDistributionManifest = Object.freeze({ version: 1, piRuntimePin: byok.piRuntimePin, reservedHelperKinds: sdkReservedHelperKinds,
-  nativeTargets: sdkNativeAssetTargets });
+export const sdkDistributionManifest = Object.freeze({ version: 1, piRuntimePin: byok.piRuntimePin, nodeEngine: engines.node,
+  bins: Object.freeze(distributionBins as Readonly<Record<string, SdkDistributionBin>>), reservedHelperKinds: sdkReservedHelperKinds,
+  nativeTargets: sdkNativeAssetTargets, formats: sdkPackagingFormats, assetLayout: sdkPackagingAssetLayout });

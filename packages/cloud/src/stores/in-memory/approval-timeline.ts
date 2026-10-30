@@ -16,10 +16,19 @@ import {
   type ApprovalTimelineTail,
 } from '../../approval-timeline';
 
+const TAILS = new WeakMap<InMemoryApprovalTimelineStore, Map<string, ApprovalTimelineTail>>();
+
+/** Deletes the task's tail for the Host task archive (#1120); returns the rows removed. */
+export function deleteApprovalTimelineTail(store: InMemoryApprovalTimelineStore, tenant: TenantId, taskId: string): number {
+  return TAILS.get(store)!.delete(approvalTimelineKey(tenant, taskId)) ? 1 : 0;
+}
+
 export class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
   readonly #tails = new Map<string, ApprovalTimelineTail>();
 
-  constructor(private readonly clock: Clock) {}
+  constructor(private readonly clock: Clock) {
+    TAILS.set(this, this.#tails);
+  }
 
   async append(
     tenant: TenantId,

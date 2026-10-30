@@ -3,6 +3,8 @@ import {
   SteerRejectedError as KernelSteerRejectedError,
   type ByokCloud,
   type SteerRejectionCode,
+  type TaskAbandonCause,
+  type TaskAttempt,
   type TenantId,
 } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
@@ -264,6 +266,18 @@ export async function rejectPendingApproval(
  * same fact rather than two copies that can disagree. Nothing about the task is
  * cached here.
  */
+/**
+ * Announces the `Cancelled` transition an abandonment recorded. An attempt that
+ * was already terminal comes back with its own terminal, so only one settled
+ * under this cause is announced; a cancelled task already announced it when
+ * its tombstone was written, and the relay keeps the first terminal anyway.
+ */
+export function noteAbandoned(relay: TaskEventRelay, attempt: TaskAttempt, cause: TaskAbandonCause): void {
+  if (attempt.status !== 'cancelled' || attempt.terminalCause !== cause || attempt.terminalAt === undefined) return;
+  if (attempt.cancellation !== undefined) return;
+  relay.noteHostTransition(attempt.taskId, 'Cancelled', attempt.terminalAt);
+}
+
 export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle {
   // Captured once, at construction. Looking the barrier up later would resurrect
   // relay state for a task whose terminal was already reclaimed, and then wait
@@ -284,6 +298,10 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
       // `Cancelled` transition would contradict the recorded result.
       if (attempt.cancellation === undefined) return;
       deps.relay.noteHostTransition(taskId, 'Cancelled', attempt.cancellation.requestedAt);
+    },
+
+    async abandon(cause: TaskAbandonCause): Promise<void> {
+      noteAbandoned(deps.relay, await deps.cloud.abandonTask(deps.tenant, taskId, cause), cause);
     },
 
     approve(opts?: { approvalId?: string }): Promise<void> {

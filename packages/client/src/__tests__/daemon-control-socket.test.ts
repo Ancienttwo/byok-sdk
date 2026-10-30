@@ -1,3 +1,4 @@
+import { TEST_LOGIN_SHELL_SNAPSHOT } from './fixtures/runtime-env';
 import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
@@ -136,11 +137,29 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     expect(status.lifecycle).toEqual({ phase: 'running', connection: 'open' });
     expect(status.activeTasks).toEqual([]);
     expect(status.runtimes).toEqual([{ id: 'pi', present: true, outcome: 'available', version: '0.0.0', steer: true, resume: true }]);
-    expect(status.environment).toEqual({ source: 'inherited' });
+    // #1095: start takes the login-shell snapshot (the unit suite's seam).
+    expect(status.environment).toEqual(TEST_LOGIN_SHELL_SNAPSHOT.status);
     // M4 Phase 4 (part B.3): queue watermarks, empty with no active tasks.
     expect(status.queueWatermarks).toEqual([]);
     expect(status.approvalsPending).toBe(0);
     conn.client.close();
+  });
+
+  it('status carries the clock skew measured from the pair response Date header (#1114)', async () => {
+    const built = await pairedAndStarted('acme-ctl-clock-skew', new StubRuntimeAdapter('pi'));
+    daemon = built.daemon;
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+    const status = await conn.client.request<ControlStatusResult>('status');
+    conn.client.close();
+
+    // The test server runs on this machine's clock and Node stamps `Date`
+    // with whole-second resolution, so the device is within the 1 s header
+    // resolution plus the round trip of it.
+    expect(status.clockSkew).toBeDefined();
+    expect(Math.abs(status.clockSkew?.deviceAheadMs ?? Number.NaN)).toBeLessThanOrEqual(status.clockSkew?.uncertaintyMs ?? 0);
+    expect(status.clockSkew?.uncertaintyMs).toBeGreaterThanOrEqual(1000);
+    expect(Number.isFinite(Date.parse(status.clockSkew?.observedAt ?? ''))).toBe(true);
   });
 
   it('reloads the registry with CAS and reports only explicit, redacted lifecycle evidence', async () => {

@@ -299,7 +299,7 @@ describe('bin/format: formatLiveStatusLines', () => {
         windowMs: 60_000,
         crashCount: 0,
       },
-      outbound: { accepted: 0, duplicate: 0, rejected: 0, rejectedByReason: {}, rejectedTerminals: 0 },
+      outbound: { accepted: 0, duplicate: 0, rejected: 0, rejectedByReason: {}, rejectedTerminals: 0, droppedEphemeral: 0 },
       ...overrides,
     };
   }

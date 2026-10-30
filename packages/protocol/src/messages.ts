@@ -44,6 +44,7 @@ import {
   InputPreparationSelectionSchema,
   InputPreparationSourceSchema,
 } from './input-preparation';
+import { unrecognizedToken } from './open-vocabulary';
 import { ProviderProfileBindingSchema } from './provider-profile-binding';
 import { TerminalProjectionSelectionSchema } from './terminal-projection';
 import { canonicalizePlainJson, type PlainJsonCheck } from './plain-json';
@@ -645,7 +646,8 @@ export const AgentContentReceiptPayloadSchema = z.discriminatedUnion('decision',
       decodeAs: AgentContentDecodeAsSchema,
       decision: z.literal('denied'),
       byteCount: z.literal(0),
-      reason: AgentContentReadDenialReasonSchema,
+      /** Open (#1121): a well-formed reason this version does not know is accepted and kept verbatim. */
+      reason: z.union([AgentContentReadDenialReasonSchema, unrecognizedToken(AgentContentReadDenialReasonSchema.options)]),
     })
     .strict(),
 ]).superRefine((value, ctx) => {
@@ -938,14 +940,32 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
  * terminal-state consumer into "Failed or Declined, handle both".
  */
 const HOME_DECLINE_CODES = ['agent_home_writer_busy', 'agent_home_reader_busy'] as const;
+const DECLINE_CODES = [...HOME_DECLINE_CODES, ...SEALED_DECLINE_CODES] as const;
+export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
+/**
+ * The decline code is open (#1121): a well-formed code this version does not
+ * know is accepted and kept verbatim, so the decline is still recorded.
+ * {@link readDeclineCode} is the typed reading.
+ */
 const DeclineFields = z.object({
   ...NO_SEALED_MEMBER,
   reason: z.string(),
   retryable: z.boolean().optional(),
   agentRef: AgentRefSchema.optional(),
-  code: z.enum([...HOME_DECLINE_CODES, ...SEALED_DECLINE_CODES]).optional(),
+  code: z.union([z.enum(DECLINE_CODES), unrecognizedToken(DECLINE_CODES)]).optional(),
   admission: OfferAdmissionTimingsSchema.optional(),
 });
+
+/** A decline code as this version understands it: one it does not know reads as `unknown`, its raw token kept. */
+export type TaskDeclineCodeReading =
+  | { readonly code: TaskDeclineCode }
+  | { readonly code: 'unknown'; readonly reportedCode: string };
+
+export function readDeclineCode(code: string): TaskDeclineCodeReading {
+  return (DECLINE_CODES as readonly string[]).includes(code)
+    ? { code: code as TaskDeclineCode }
+    : { code: 'unknown', reportedCode: code };
+}
 /**
  * #654: a sealed decline code names a fixed, non-retryable outcome and
  * carries no content, so its `reason` is the code itself. A free-text reason
@@ -1283,7 +1303,7 @@ const TaskCompletePlainPayloadSchema = z.object({
   agentHomeMemoryChange: TerminalAgentHomeMemoryChangeSchema.optional(),
 });
 
-/** A closed runtime failure class (#869). `unknown` means the runtime gave no structured evidence. */
+/** A runtime failure class this version knows (#869). `unknown` means the runtime gave no structured evidence. */
 export const RuntimeFailureClassSchema = z.enum(RUNTIME_FAILURE_CLASSES);
 export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
 
@@ -1291,12 +1311,29 @@ export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
  * The machine-readable failure of a `task.fail` (#869); `reason` stays display
  * text. `resetsAt` (ISO 8601 UTC) exists only on `quota`, and only when the
  * runtime reported when the limit resets.
+ *
+ * The class is open (#1121): a well-formed class this version does not know,
+ * with whatever fields a newer device put beside it, is accepted and kept
+ * verbatim, so the terminal is still recorded. {@link readTaskFailure} is the
+ * typed reading.
  */
 export const TaskFailureSchema = z.union([
   z.object({ class: z.literal('quota'), resetsAt: z.iso.datetime().optional() }).strict(),
   z.object({ class: RuntimeFailureClassSchema.exclude(['quota']) }).strict(),
+  z.looseObject({ class: unrecognizedToken(RUNTIME_FAILURE_CLASSES) }),
 ]);
 export type TaskFailure = z.infer<typeof TaskFailureSchema>;
+
+/** A {@link TaskFailure} as this version understands it: a class it does not know reads as `unknown`, its raw token kept. */
+export type TaskFailureReading =
+  | { readonly class: 'quota'; readonly resetsAt?: string }
+  | { readonly class: Exclude<RuntimeFailureClass, 'quota' | 'unknown'> }
+  | { readonly class: 'unknown'; readonly reportedClass?: string };
+
+export function readTaskFailure(failure: TaskFailure): TaskFailureReading {
+  if ((RUNTIME_FAILURE_CLASSES as readonly string[]).includes(failure.class)) return failure as TaskFailureReading;
+  return { class: 'unknown', reportedClass: failure.class };
+}
 
 /** daemon -> server: task failed. */
 const TaskFailPlainPayloadSchema = z.object({
@@ -1428,7 +1465,10 @@ export type TaskFailSealedPayload = z.infer<typeof TaskFailSealedPayloadSchema>;
  * cannot open or use the scope key often cannot seal a reply either.
  */
 export const TaskDeclineSealedPayloadSchema = DeclineFields.omit({ reason: true })
-  .extend({ code: z.enum(HOME_DECLINE_CODES).optional(), sealed: SealedTaskOutputSchema })
+  .extend({
+    code: z.union([z.enum(HOME_DECLINE_CODES), unrecognizedToken(DECLINE_CODES)]).optional(),
+    sealed: SealedTaskOutputSchema,
+  })
   .strict();
 export type TaskDeclineSealedPayload = z.infer<typeof TaskDeclineSealedPayloadSchema>;
 

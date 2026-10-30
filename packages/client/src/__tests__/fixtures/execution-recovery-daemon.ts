@@ -1,3 +1,4 @@
+import { testRuntimeEnv } from './runtime-env';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, existsSync, promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -158,6 +159,10 @@ class ControlledAdapter implements RuntimeAdapter {
       mcpToolsets: true,
     },
   });
+
+  async runtimeEnvironment(): Promise<Record<string, string>> {
+    return testRuntimeEnv();
+  }
 
   async detect() {
     return { kind: 'available' as const, version: 'fixture', authPresent: true };

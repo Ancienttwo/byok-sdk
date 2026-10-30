@@ -35,10 +35,11 @@ OS boundary the Host supplies.
 
 ### Cross-cutting facts that apply to all three
 
-- **The full environment is inherited.** `buildRuntimeEnv` removes only
-  `CLAUDECODE` and `BYOK_*`; provider keys and other secrets in the daemon's
-  environment reach every agent child (*Environment inheritance*). A spawned
-  agent can read anything its OS identity allows.
+- **The user's login-shell environment is inherited** (#1095).
+  `buildRuntimeEnvironment` removes only `CLAUDECODE` and `BYOK_*`; provider
+  keys and other secrets the user's shell exports reach every agent child,
+  while a variable the Host sets reaches it only through `pass` (*Runtime
+  environment*). A spawned agent can read anything its OS identity allows.
 - **Proxy variables pass through by default**, including any credential
   embedded in a proxy URL — a deliberate, explicitly-costed trade-off
   (*Proxy variables pass through, deliberately*).
@@ -80,7 +81,14 @@ not enforce any of them at the mechanism level today.
       configuration or from the Host.
 - [ ] **Who provides egress control if the runtime cannot?** Host-side
       options include a network namespace, an egress proxy/firewall, or
-      denying the device the task. None of these ship here.
+      denying the device the task. None of these ship here. A network
+      namespace also bounds the path-mutation gates: every process that uses
+      one store's protected targets (the daemon, the adapters, the actual Pi
+      writer, the sweeper and relocation) must run as the same UID, in the
+      same Linux network namespace, through a consistent canonical path; the
+      pathless Pi rebinding barrier is shared per UID and network namespace.
+      Processes in different network namespaces do not exclude each other, so
+      give each namespace its own store (`docs/host-local-storage-layout.md`).
 - [ ] **Are the secrets in the daemon's environment safe to forward?**
       Every variable except `CLAUDECODE` and `BYOK_*` is forwarded, proxy
       credentials and provider keys included.

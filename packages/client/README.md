@@ -136,7 +136,10 @@ await copyPiRuntimeAssets({ outDir: 'release/pi-assets', form: 'interpreter+bund
 The helper requires the exact pinned pi package on the build machine and an
 empty `outDir`. It verifies the pi export resources and the SDK todo locale
 assets, and fails closed on a mismatch. Ship `outDir` with the product. Set
-`PI_PACKAGE_DIR` to it when the product starts. A Bun-compiled executable may
+`PI_PACKAGE_DIR` to it when the product starts, and pass the name explicitly
+through `DaemonConfig.runtimeEnvironment.pass` or
+`PiAdapterOptions.runtimeEnvironment`: detection and every launch read the
+asset root from the runtime environment. A Bun-compiled executable may
 use its own directory as the asset root instead: run the helper on that empty
 directory before you write the executable into it. Without the asset root, `detect()` reports pi `not-found` and a pi
 launch is refused with `pi_bundled_assets_unavailable`. Pi reads its photon
@@ -240,9 +243,15 @@ absolute keychain file. The client projects it as the launcher's reserved
 or widen the Pi child environment.
 
 Claude Code and Codex remain user-installed runtimes and use their own login
-state. Each runtime child inherits the daemon environment, provider API keys
-included. The daemon removes only `CLAUDECODE` and its own `BYOK_*` names.
-Loader names such as `NODE_OPTIONS` reach the child as the user set them.
+state. Each runtime child gets the user's login-shell environment, provider
+API keys included, as a new terminal would (#1095). The daemon captures it
+once per process and never from its own `process.env`, so a variable the Host
+sets reaches a runtime only when `runtimeEnvironment.pass` names it. The
+daemon removes `CLAUDECODE` and its own `BYOK_*` names, and adds `127.0.0.1`
+and `localhost` to `NO_PROXY`. Loader names such as `NODE_OPTIONS` reach the
+child as the user's shell set them. A failed capture refuses the runtimes with
+`runtime_environment_unavailable:<code>` instead of starting them in another
+environment.
 Claude loads the user's own MCP configuration,
 settings, deny rules and hooks. The SDK adds its task servers with
 `--mcp-config`. Ordinary Pi loads the user's own extensions and skills from
@@ -1103,12 +1112,33 @@ compatibility or a bundled product's complete distribution.
 
 ### Direct adapter environments
 
-Hosts that use `@byok-sdk/client/adapters` can import `buildRuntimeEnv` from that
-entry. Pass `buildRuntimeEnv({ ambient: process.env })` as the operation's `env`.
-It copies the environment and removes `CLAUDECODE` and `BYOK_*`. It retains
-loader variables such as `NODE_OPTIONS`, `LD_*`, and `DYLD_*`, as required by
-ADR-037. Direct adapters use the environment supplied by the Host. The builder
-uses case-insensitive names on Windows.
+Every adapter takes a `runtimeEnvironment` policy, the same type as
+`DaemonConfig.runtimeEnvironment`, and builds the environment of its children
+itself (`RuntimeAdapter.runtimeEnvironment()`), so a Host that constructs an
+adapter gets the same environment as `createDaemon`:
+
+```ts
+new ClaudeAdapter({ runtimeEnvironment: { pass: ['ACME_TOKEN_FILE'] } });
+new CodexAdapter({ runtimeEnvironment: { base: 'allowlist', allow: ['CODEX_HOME'] } });
+```
+
+- `login-shell` (default): the user's login-shell snapshot. On Windows, which
+  has no login shell, the platform baseline names of the live session.
+- `allowlist`: the platform baseline plus `allow`, from the live environment;
+  it takes no snapshot.
+- `pass`: names read from the live `process.env` each time an environment is
+  built, for variables the Host sets after it starts.
+
+`CLAUDECODE` and `BYOK_*` are always removed; a policy that names them is
+rejected. Claude also drops the shell's `ANTHROPIC_*`, Bedrock/Vertex switches
+and OAuth token when `pass` supplies `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`
+or `ANTHROPIC_AUTH_TOKEN`. Loader variables such as `NODE_OPTIONS`, `LD_*`, and
+`DYLD_*` are kept, as required by ADR-037. A custom adapter implements
+`runtimeEnvironment()` with the exported `buildRuntimeEnvironment(policy)`.
+Names are case-insensitive on Windows.
+
+`createDaemonWithAdapters` rejects `DaemonConfig.runtimeEnvironment`: set the
+policy on each injected adapter.
 
 `codexSandbox` belongs to `createDaemon`, which builds the default adapters.
 `createDaemonWithAdapters` rejects that key. Set `sandbox` on the injected
@@ -1147,3 +1177,48 @@ its digest and is refused. The Windows Agent memory helper may be
 Authenticode-signed: its `pe-content-v1` digest ignores the signature. Darwin memory helpers retain their separate product
 re-signing policy. Copying assets proves packaging, not platform execution: the
 relocated Windows SEA CI fixture must pass before Windows qualification is claimed.
+
+### Single-file packaging
+
+`@byok-sdk/client/packaging` is the build-time helper for a Host that ships as one
+file: a single-file ESM bundle, a single-file CommonJS bundle, or a Node SEA (the
+CommonJS bundle the SEA embeds). It does not change a Host that does not use it.
+
+```js
+import { build } from 'esbuild';
+import { byokSdkPackaging, copySdkPackagingAssets } from '@byok-sdk/client/packaging';
+
+const assets = await copySdkPackagingAssets({ outDir: shipDir, platform: 'darwin', arch: 'arm64' });
+await build({ entryPoints: ['src/host.ts'], bundle: true, platform: 'node', format: 'cjs',
+  outfile: `${shipDir}/host.cjs`, plugins: [byokSdkPackaging({ format: 'cjs' })] });
+```
+
+- `byokSdkPackaging({ format })` is an esbuild plugin, typed structurally, so
+  esbuild stays the Host's own build dependency. For ESM it adds the module-scoped
+  `require` that the bundled Pi host's CommonJS dependencies need. For CommonJS
+  and SEA it defines `import.meta.url` as the bundle's own file URL. It fails the
+  build on any empty `import.meta`, in any file, SDK included, except the
+  reviewed third-party sites in `sdkBundleImportMetaExemptions`, which stay
+  visible as warnings. esbuild already rejects top-level `await` in CommonJS.
+  One exemption has an effect a Host can see: in a CommonJS or SEA bundle, PDF
+  reads lose unpdf's standard font and CMap defaults.
+- `copySdkPackagingAssets({ outDir, platform, arch })` writes everything the SDK
+  needs beside the bundle or executable for one target, in
+  `sdkPackagingAssetLayout`: `pi/` is `PI_PACKAGE_DIR` (`copyPiRuntimeAssets`),
+  `native/` is `nativeAssetRoot` on Windows x64 and `native/agent-memory-fs` is
+  `agentMemoryHelperAssetRoot` on macOS and Windows x64 (`copySdkNativeAssets`).
+  Linux ships only `pi/`: its Agent memory needs no helper.
+- Inside the product, `bundledSdkHelperHost()` is the `sdkHelperHost`: the SEA
+  executable itself, or Node with the running bundle as its entry. The product
+  entrypoint calls `runSdkReservedHelperCommand()` before its own arguments.
+- `sdkDistributionManifest.bins` gives every published bin a role: `cli`
+  (`byok-agent`, which an embedded Host does not ship), `reserved-helper` and
+  `pi-host` (re-entered through `sdkHelperHost` as `kind`), and
+  `provider-launcher` (`byok-pi-provider-launcher` from `@byok-sdk/keys`, which
+  the product re-enters as its own command with `runPiProviderLauncher`). A new
+  bin without a role fails the SDK's CI. `nodeEngine` is the client's
+  `engines.node`, and `formats` lists the three formats.
+
+`examples/packaging/embedded-host-fixture.ts` is a complete embedded Host built
+this way, and the packaging consistency CI lane runs it in each format on macOS,
+Linux and Windows.

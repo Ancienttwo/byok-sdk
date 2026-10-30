@@ -283,13 +283,14 @@ export function policyRevisionMismatchPolicies(
 export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 
 export function buildAdapter(id: RuntimeId, config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter {
+  const environment = config.runtimeEnvironment === undefined ? {} : { runtimeEnvironment: config.runtimeEnvironment };
   switch (id) {
     case 'pi':
-      return new PiAdapter({ nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: true } : {}) });
+      return new PiAdapter({ nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...environment, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: true } : {}) });
     case 'claude':
-      return new ClaudeAdapter({ nativeAssetRoot: config.nativeAssetRoot });
+      return new ClaudeAdapter({ nativeAssetRoot: config.nativeAssetRoot, ...environment });
     case 'codex':
-      return new CodexAdapter({ nativeAssetRoot: config.nativeAssetRoot, ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }) });
+      return new CodexAdapter({ nativeAssetRoot: config.nativeAssetRoot, ...environment, ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }) });
   }
 }
 

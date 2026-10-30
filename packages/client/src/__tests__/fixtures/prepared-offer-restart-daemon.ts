@@ -7,7 +7,7 @@ import { AgentHomeLeaseManager, AgentHomeManager, stableAgentHomeOwnerId } from 
 import { AgentSessionHandoffStore } from '../../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../../daemon/approvals';
 import type { BlobResolver } from '../../daemon/blob-client';
-import { buildRuntimeEnv } from '../../daemon/environment';
+import { testRuntimeEnv } from './runtime-env';
 import { TaskRunner } from '../../daemon/task-runner';
 import {
   InputPreparationStore,
@@ -143,7 +143,7 @@ const MODEL: InputPreparationModelV1 = {
   maxTokens: 8_192,
 };
 
-const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(buildRuntimeEnv({ ambient: process.env }));
+const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(testRuntimeEnv());
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => { throw new Error('not used'); },

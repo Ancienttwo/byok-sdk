@@ -53,7 +53,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device assertion replay authority', ()
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const replay = new PostgresDeviceAssertionReplayAuthority(scope.pool);
-      const devices = new PostgresDeviceDirectory(scope.pool);
+      const devices = new PostgresDeviceDirectory(scope.pool, createMutableClock());
       const keys = generateKeyPairSync('ed25519');
       const publicJwk = keys.publicKey.export({ format: 'jwk' });
       if (publicJwk.x === undefined) throw new Error('Ed25519 JWK has no x');

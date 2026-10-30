@@ -41,6 +41,7 @@ import {
   type MailboxReadQuery,
   type MailboxRecordDeliveryInput,
   type MailboxCollectExpiredInput,
+  type MailboxExpirePendingInput,
   type CollectExpiredResult,
   type MailboxStore,
   type MailboxUsage,
@@ -48,7 +49,13 @@ import {
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 import type { ByokPool } from '../../pool';
-import { BEGIN_OUTBOX_WRITE, insertOutboxRow, readMailboxBytes } from './outbox-writer';
+import {
+  BEGIN_OUTBOX_WRITE,
+  expirePendingRows,
+  insertOutboxRow,
+  lockDeviceStreams,
+  readMailboxBytes,
+} from './outbox-writer';
 
 const DEFAULT_READ_LIMIT = 50;
 
@@ -315,6 +322,23 @@ export class PostgresMailboxStore implements MailboxStore {
       ackedSeq: row === undefined ? 0 : Number(row.acked_seq),
       updatedAt: row?.acked_at ?? this.#now(),
     };
+  }
+
+  async expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{ readonly expired: number }> {
+    this.#requireDeviceId(input.deviceId);
+    const client = await this.#pool.connect();
+    try {
+      await client.query(BEGIN_OUTBOX_WRITE);
+      await lockDeviceStreams(client, tenant, [input.deviceId]);
+      const expired = await expirePendingRows(client, tenant, input.deviceId, input.seqs);
+      await client.query('COMMIT');
+      return { expired };
+    } catch (cause) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw cause;
+    } finally {
+      client.release();
+    }
   }
 
   async collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult> {

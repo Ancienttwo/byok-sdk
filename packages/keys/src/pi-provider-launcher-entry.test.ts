@@ -108,7 +108,7 @@ function hostKeychain(prefix: string) {
   return { store, calls };
 }
 
-describe.skipIf(!isSqliteAvailable())('runPiProviderLauncher with a host-built store', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('runPiProviderLauncher with a host-built store', () => {
   it('launches Pi with the key read from the host store under its own storage marker', async () => {
     const f = await fixture();
     const host = hostKeychain(HOST_PREFIX);
@@ -165,7 +165,7 @@ describe.skipIf(!isSqliteAvailable())('runPiProviderLauncher with a host-built s
   });
 });
 
-describe.skipIf(!isSqliteAvailable())('keyless (auth_mode none) launch', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('keyless (auth_mode none) launch', () => {
   it('projects the fixed placeholder key for the rpc entry and reads no credential', async () => {
     const f = await fixture({ auth_mode: 'none' });
     const createSecretStore = vi.fn(() => hostKeychain(HOST_PREFIX).store);
@@ -186,7 +186,7 @@ describe.skipIf(!isSqliteAvailable())('keyless (auth_mode none) launch', () => {
   });
 });
 
-describe.skipIf(!isSqliteAvailable())('Anthropic base URL admission', () => {
+describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('Anthropic base URL admission', () => {
   it('refuses at admission a profile whose endpoint Pi cannot reach exactly', async () => {
     const f = await fixture({
       adapter: 'anthropic', auth_mode: 'x_api_key', base_url: 'https://gateway.example/anthropic',

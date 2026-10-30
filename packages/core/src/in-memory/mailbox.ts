@@ -23,12 +23,14 @@ import type {
   MailboxReadQuery,
   MailboxRecordDeliveryInput,
   MailboxCollectExpiredInput,
+  MailboxExpirePendingInput,
   MailboxStore,
   MailboxUsage,
 } from '../mailbox';
 import type { QuotaStore } from '../quota';
 import type { Clock } from '../stores';
 import { tenantKey, type TenantId } from '../tenant';
+import { registerArchiveAccess } from './archive-access';
 import { assertCanonicalTimestamp } from '../time';
 
 const DEFAULT_READ_LIMIT = 50;
@@ -52,6 +54,17 @@ export class InMemoryMailboxStore implements MailboxStore {
   constructor(clock: Clock, quota: Pick<QuotaStore, 'readEntitlement'>) {
     this.#clock = clock;
     this.#quota = quota;
+    registerArchiveAccess(this, {
+      messagesOf: (tenant, deviceId) => this.#devices.get(tenantKey(tenant, deviceId))?.messages ?? [],
+      replaceBody: (tenant, deviceId, seq, body) => {
+        const device = this.#devices.get(tenantKey(tenant, deviceId));
+        const index = device?.messages.findIndex((message) => message.seq === seq) ?? -1;
+        if (device === undefined || index < 0) return;
+        const replaced: MailboxMessage = { ...device.messages[index]!, ...body };
+        device.messages[index] = replaced;
+        device.byMessageId.set(replaced.messageId, replaced);
+      },
+    });
   }
 
   async append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage> {
@@ -247,6 +260,25 @@ export class InMemoryMailboxStore implements MailboxStore {
     }
     // Mailbox usage is the pending rows, never a mutable accounting counter, so no phase moves it.
     return { removed, expired, releasedBytes: 0n, more };
+  }
+
+  async expirePending(tenant: TenantId, input: MailboxExpirePendingInput): Promise<{ readonly expired: number }> {
+    const device = this.#devices.get(tenantKey(tenant, input.deviceId));
+    if (device === undefined) return { expired: 0 };
+    const selected = input.seqs === 'all' ? undefined : new Set(input.seqs);
+    const retired = device.mutationTail.then(() => {
+      let expired = 0;
+      for (const [index, message] of device.messages.entries()) {
+        if (message.state !== 'pending' || (selected !== undefined && !selected.has(message.seq))) continue;
+        const dead: MailboxMessage = { ...message, state: 'expired' };
+        device.messages[index] = dead;
+        device.byMessageId.set(dead.messageId, dead);
+        expired++;
+      }
+      return { expired };
+    });
+    device.mutationTail = retired.then(() => undefined, () => undefined);
+    return retired;
   }
 
   async #mailboxLimit(tenant: TenantId): Promise<bigint> {

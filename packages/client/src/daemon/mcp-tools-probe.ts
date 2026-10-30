@@ -36,7 +36,7 @@ export interface McpToolsProbeOptions {
   timeoutMs?: number;
   /**
    * The exact base environment the RUNTIME child of this task receives
-   * (`buildRuntimeEnv`, `./environment.ts`) — never `process.env`. The probe
+   * (`RuntimeAdapter.runtimeEnvironment`, `../runtime/environment.ts`) — never `process.env`. The probe
    * spawns a host-configured command, so it must not become the one place
    * this SDK's own `BYOK_*` control-plane variables reach a server the real
    * runtime path would have filtered out. Required, deliberately: a caller

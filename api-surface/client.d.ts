@@ -1,11 +1,14 @@
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { type ResolvedBin } from './resolve-bin';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type SpawnFn } from './process-client';
 export interface ClaudeAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Claude and its MCP servers get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** Override bin resolution — tests substitute the fake-claude fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
@@ -35,26 +38,13 @@ export interface ClaudeAdapterOptions {
      */
     agentSessionPersistence?: 'enabled' | 'disabled';
 }
-/**
- * Claude Code stream-json adapter.
- *
- * An ordinary session runs with `--dangerously-skip-permissions`, as in OAR:
- * in embedded use there is no human at an approval prompt, so a permission
- * gate is a hang, not safety. Claude keeps its own guardrails (the user's
- * `~/.claude` settings and deny rules).
- *
- * Explicit nativeInteractions opts into the Agent SDK stdio control handshake
- * (`--permission-prompt-tool stdio`) instead of the skip flag so that
- * AskUserQuestion reaches the local Host UI. Every other can_use_tool request
- * is allowed by the SDK at once: tool permission is decided only by the task's
- * `auto | all` mode (the PreToolUse gate), never by a second native prompt.
- * Remote boolean approvals remain unsupported, as does mid-turn steering.
- */
 export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
+    private readonly environmentPolicy;
     constructor(options?: ClaudeAdapterOptions);
+    runtimeEnvironment(): Promise<Record<string, string>>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private startPrepared;
@@ -394,6 +384,7 @@ export declare function resolveClaudeBin(): ResolvedBin;
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { type ResolvedBin } from './resolve-bin';
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
@@ -402,6 +393,8 @@ export declare function assertCodexSandboxSetting(value: unknown, label: string)
 export interface CodexAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Codex and its MCP servers get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /**
      * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
      * `danger-full-access`: no human answers an approval prompt, so a sandbox
@@ -442,7 +435,9 @@ export interface CodexAdapterOptions {
 export declare class CodexAdapter implements RuntimeAdapter {
     private readonly options;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
+    private readonly environmentPolicy;
     constructor(options?: CodexAdapterOptions);
+    runtimeEnvironment(): Promise<Record<string, string>>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
@@ -475,10 +470,13 @@ export declare function resolveCodexBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/grok/grok-adapter.d.ts ====
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ResolvedBin } from '../codex/resolve-bin';
 export interface GrokAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Grok and its MCP servers get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** Grok model id for every session (`session/set_model`). Absent: the user's Grok default. */
     model?: string;
     /**
@@ -527,7 +525,9 @@ export interface GrokAdapterOptions {
 export declare class GrokAdapter implements RuntimeAdapter {
     private readonly options;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
+    private readonly environmentPolicy;
     constructor(options?: GrokAdapterOptions);
+    runtimeEnvironment(): Promise<Record<string, string>>;
     /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -538,6 +538,7 @@ import { type HermesByokLauncher } from './hermes-custody';
 export type { HermesByokLauncher } from './hermes-custody';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ResolvedBin } from '../codex/resolve-bin';
 /** Provider choice written into each execution profile. Credentials stay in the environment. */
 export interface HermesModelSelection {
@@ -552,6 +553,8 @@ export interface HermesModelSelection {
 export interface HermesAdapterOptions {
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Hermes and its MCP servers get (#1095). Default: the login-shell snapshot. A `byokLauncher` narrows it further. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /**
      * Absolute path of the Hermes root that this SDK owns, for example under the
      * Host's store directory. Each execution runs in a fresh profile home below
@@ -585,11 +588,15 @@ export interface HermesAdapterOptions {
 export declare class HermesAdapter implements RuntimeAdapter {
     private readonly root;
     private readonly options;
+    private readonly environmentPolicy;
     /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
     private readonly liveHomes;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     constructor(options: HermesAdapterOptions);
     private command;
+    runtimeEnvironment(): Promise<Record<string, string>>;
+    /** The custody launcher's lane is the platform baseline of the runtime environment. */
+    private launchEnvironment;
     private rootEnvironment;
     /**
      * Prepares the SDK root, deletes profiles a dead Host left, runs
@@ -651,10 +658,100 @@ export { HermesAdapter } from './hermes/hermes-adapter';
 export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
-export { buildRuntimeEnv } from '../daemon/environment';
+export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../runtime/environment';
+export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from '../runtime/environment';
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
 export type { ExecutionScratch } from '../daemon/retention/scratch';
+// ==== @byok-sdk/client dist/adapters/packaging.d.ts ====
+import { type SdkPackagingFormat } from '../sdk-native-assets';
+export type { SdkPackagingFormat } from '../sdk-native-assets';
+/** The part of an esbuild build that this plugin reads and sets. Declared here so esbuild is not an SDK dependency. */
+export interface SdkPackagingBuild {
+    readonly initialOptions: {
+        bundle?: boolean;
+        platform?: string;
+        format?: string;
+        define?: Record<string, string>;
+        banner?: Record<string, string>;
+        logOverride?: Record<string, string>;
+    };
+    onEnd(callback: (result: {
+        readonly warnings: readonly SdkPackagingMessage[];
+    }) => {
+        errors: SdkPackagingMessage[];
+    } | undefined): void;
+}
+/** The part of an esbuild message that this plugin reads and reports. */
+export interface SdkPackagingMessage {
+    readonly id?: string;
+    readonly text: string;
+    readonly location?: {
+        readonly file: string;
+        readonly line?: number;
+        readonly column?: number;
+        readonly lineText?: string;
+    } | null;
+}
+export interface SdkBundleImportMetaExemption {
+    /** npm package name, as installed under `node_modules`. */
+    readonly package: string;
+    /** File within the package, `/`-separated. */
+    readonly file: string;
+    /** Why the empty `import.meta` is not reached, or what a bundle loses. */
+    readonly reason: string;
+}
+/**
+ * The reviewed third-party files whose `import.meta` esbuild empties in a CommonJS bundle of the SDK. Every other
+ * empty `import.meta`, in any file, fails the build. The SDK's own files are never exempt. A test bundles the embedded
+ * Host and requires exactly these files to warn, so an entry a dependency update made stale fails too.
+ */
+export declare const sdkBundleImportMetaExemptions: readonly SdkBundleImportMetaExemption[];
+/** Structurally an esbuild `Plugin`: pass it in `plugins`. */
+export interface SdkPackagingPlugin {
+    readonly name: string;
+    setup(build: SdkPackagingBuild): void;
+}
+export interface ByokSdkPackagingOptions {
+    readonly format: SdkPackagingFormat;
+}
+/**
+ * The esbuild plugin for a single-file Host bundle (`sdkPackagingFormats`). `sea` is the CommonJS bundle a Node SEA
+ * embeds. The build must be a `platform: 'node'` bundle in the format's esbuild output format.
+ *
+ * - ESM: a module-scoped `require`, which the CommonJS dependencies of the bundled Pi host need for Node built-ins.
+ * - CommonJS: `import.meta.url` is the bundle's own file URL (`__filename`; the executable inside a SEA). It is the only
+ *   `import.meta` property SDK code reads, so a Host must not define it too.
+ * - Every format: an empty `import.meta` is a build error in any file, SDK included, except the reviewed third-party
+ *   sites in `sdkBundleImportMetaExemptions`, which stay visible as warnings. esbuild already rejects top-level `await`
+ *   in CommonJS output. Neither is ever left for the bundle to hit at run time.
+ */
+export declare function byokSdkPackaging(options: ByokSdkPackagingOptions): SdkPackagingPlugin;
+export interface CopySdkPackagingAssetsOptions {
+    /** A new or empty directory that ships beside the product bundle or executable. */
+    readonly outDir: string;
+    readonly platform: 'darwin' | 'linux' | 'win32';
+    readonly arch: 'x64' | 'arm64';
+}
+/** Directories relative to `outDir`, for the product's daemon configuration and environment. */
+export interface SdkPackagingAssets {
+    /** Every written file, relative to `outDir`, sorted. */
+    readonly files: readonly string[];
+    /** `PI_PACKAGE_DIR` for the Pi host. */
+    readonly piPackageDir: string;
+    /** `DaemonConfig.nativeAssetRoot`; Windows x64 only. */
+    readonly nativeAssetRoot?: string;
+    /** `DaemonConfig.agentMemoryHelperAssetRoot`; macOS and Windows x64. Linux memory needs no helper. */
+    readonly agentMemoryHelperAssetRoot?: string;
+}
+/**
+ * Build-time copy of every SDK file a single-file Host ships for one target, in `sdkPackagingAssetLayout`: the Pi
+ * runtime assets, and the native assets of the platforms that have them (`sdkNativeAssetTargets`). It composes
+ * `copyPiRuntimeAssets` and `copySdkNativeAssets`, with their integrity checks; the Windows target downloads the
+ * integrity-pinned koffi archive.
+ */
+export declare function copySdkPackagingAssets(options: CopySdkPackagingAssetsOptions): Promise<SdkPackagingAssets>;
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
@@ -670,6 +767,8 @@ export interface PiAdapterOptions {
     agentExtensionPaths?: readonly string[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
+    /** The environment Pi and its MCP servers get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** Opt-in ordinary, lease-bound durable worker. */
     durablePi?: boolean;
     /** Override bin resolution — tests substitute the fake-pi fixture script. */
@@ -705,7 +804,9 @@ export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly agentResources;
+    private readonly environmentPolicy;
     constructor(options?: PiAdapterOptions);
+    runtimeEnvironment(): Promise<Record<string, string>>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private resolveBin;
@@ -3042,6 +3143,19 @@ export declare class AuthResponseInvalidError extends Error {
         cause: unknown;
     });
 }
+/**
+ * One measurement of this device's clock against the server's HTTP `Date`
+ * header (#1114). It is reported only (`byok-agent doctor`); token lifetime never
+ * reads it.
+ */
+export interface ClockSkewObservation {
+    /** Positive when the device clock is ahead of the server's. */
+    readonly deviceAheadMs: number;
+    /** Half the request round trip plus the header's one-second resolution. */
+    readonly uncertaintyMs: number;
+    /** ISO time the response arrived on the device clock. */
+    readonly observedAt: string;
+}
 export interface AuthManagerOptions {
     serverUrl: string;
     store: DeviceStore;
@@ -3085,11 +3199,14 @@ export declare class AuthManager {
     private activeMutation;
     private lastRenewedAt;
     private nearExpiryRenewals;
+    private lastClockSkew;
     private readonly credentials;
     private readonly requestDeadlineMs;
     constructor(opts: AuthManagerOptions);
     get deviceId(): string | undefined;
     isRevoked(): boolean;
+    /** The skew measured by the last successful pair or renewal, if its response carried a parseable `Date` and the device clock did not go back mid-request. */
+    clockSkew(): ClockSkewObservation | undefined;
     /**
      * Internal signer read: always recompose metadata with the current OS
      * secret authority. Like every OS read here it is a credential mutation, so
@@ -3483,6 +3600,11 @@ import type { DaemonHaltReason } from './daemon-lifecycle';
 import { type FleetJitter } from './deterministic-jitter';
 export { ReplayCursorTooOldError } from './replay-cursor';
 /**
+ * #1121: the most bytes of droppable envelopes the outbox holds while the
+ * Host is unreachable. Past it the oldest of them are dropped unsent.
+ */
+export declare const MAX_OUTBOX_EPHEMERAL_BYTES: number;
+/**
  * The daemon's one long-poll session: `open` from the moment the server
  * accepts this session's `conn.hello` until any route fails, `connecting`
  * otherwise.
@@ -3520,6 +3642,8 @@ export interface ConnectionManagerOptions {
     /** Await durable disposition before retiring the exact accepted/rejected bytes. */
     onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
     onOutboundQueued?: (envelope: Envelope) => void;
+    /** An ephemeral envelope left the outbox unsent because the outbox passed {@link MAX_OUTBOX_EPHEMERAL_BYTES}. */
+    onOutboundDropped?: (envelope: Envelope) => void;
     beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
     /**
      * Base of the capped exponential backoff (`backoffCeilingMs`) before each
@@ -3626,6 +3750,13 @@ export declare class ConnectionManager {
      * separately from `this.outbox` at all.
      */
     private inFlightBatch;
+    /**
+     * Every id in `outbox` or `inFlightBatch`, mapped to its encoded size when
+     * the envelope is droppable and 0 otherwise. `send()` dedups against it in
+     * O(1), and `ephemeralBytes` is the sum of its values.
+     */
+    private readonly queuedIds;
+    private ephemeralBytes;
     private draining;
     private stopped;
     private haltReason;
@@ -3696,8 +3827,21 @@ export declare class ConnectionManager {
      * `drainOutbox`.
      * An id still queued or in flight is not queued again, so a timer retry
      * during an outage keeps one copy in its original place (#693).
+     * An ended session (halted, crashed or stopped) queues nothing, so its
+     * outbox cannot grow; a terminal is journaled before it is sent (#1119).
      */
     send(envelope: Envelope): void;
+    /** The envelope left the outbox for good: settled, filtered out, or dropped. */
+    private forget;
+    /**
+     * #1121: an outage must not grow the outbox without bound. Over the cap, the
+     * oldest queued `task.progress` and `agent.message.draft` envelopes are
+     * dropped until it fits again. Nothing else is ever dropped: terminals are
+     * journaled and resent from the journal, and claim, started and approval
+     * envelopes carry task state. The Host tolerates a gap in progress seqs.
+     * An envelope already in flight is not dropped.
+     */
+    private dropOldestEphemeral;
     /** Publish a fresh local configuration snapshot while this daemon is running. */
     refreshHello(): void;
     /**
@@ -3845,8 +3989,8 @@ export declare class ConnectionManager {
     private advanceCursor;
     /**
      * Ends the session for good: stops the loop, the poll and the drain, then
-     * reports the reason once. The outbox keeps whatever it held, so
-     * `outboxLength()` stays an honest count of what never left.
+     * reports the reason once. The outbox keeps whatever it held and takes
+     * nothing more, so `outboxLength()` stays an honest count of what never left.
      */
     private halt;
     /** The defined end for an unexpected error: stop like a halt, then report it once. */
@@ -3855,12 +3999,13 @@ export declare class ConnectionManager {
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
+import type { ClockSkewObservation } from './auth-manager';
 import type { StoragePressureState } from './retention/pressure';
 import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
@@ -4125,6 +4270,13 @@ export interface ControlStatusResult {
      * peer that predates the cap.
      */
     agentHomeExecution?: AgentHomeExecutionStatus;
+    /**
+     * #1114: the device clock against the server's HTTP `Date` header at the
+     * last successful pair or renewal. Absent when the daemon has no
+     * observation (no pair or renewal since start, or the response carried no
+     * parseable `Date`) and from an older control peer: report unknown.
+     */
+    clockSkew?: ClockSkewObservation;
 }
 export interface ToolsetsReloadParams {
     expectedRevision: string;
@@ -4491,13 +4643,14 @@ export declare function parseInputPreparationCancelParams(value: unknown): Input
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
 import type { OutboundStatus } from './outbound-settlement';
 import { type RuntimeObservation } from '../runtime-detection';
-import { type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import { type ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
+import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
 import { type LocalToolApprovalPolicy } from './approvals';
 import { type DaemonLifecycle } from './daemon-lifecycle';
 import { type ControlStorageStatus } from './control-protocol';
@@ -4629,6 +4782,29 @@ export interface DaemonConfig {
      */
     maxConcurrentReaderAttemptsPerAgentHome?: number;
     /**
+     * How many tasks this daemon runs at once, across every Agent home, lane and
+     * runtime. Default {@link DEFAULT_MAX_CONCURRENT_TASKS} (8).
+     *
+     * Active tasks and offers already admitted but still starting both count.
+     * An offer over the cap is declined retryably (`task.decline` with
+     * `retryable: true` and no code) before adapter preparation, the claim, or
+     * any process side effect, so the Host can offer it again later or to
+     * another device.
+     *
+     * Validated up front: a positive safe integer. There is no "uncapped"
+     * value; `0`, a negative number, `NaN` and a non-integer are construction
+     * errors.
+     */
+    maxConcurrentTasks?: number;
+    /**
+     * Wall-clock limit, in milliseconds, for a task whose offer carries no
+     * `limits.maxDurationMs`. An offer's own limit always wins. Enforced the
+     * same way: the task fails with `resource limit exceeded: maxDurationMs`.
+     * Omitted, a task without an offer limit runs until it ends or is
+     * cancelled. Validated up front: a positive safe integer.
+     */
+    defaultMaxDurationMs?: number;
+    /**
      * Explicit Agent-local/cloud egress selection. Omission still enforces the
      * SDK metadata/status projection, but does not advertise or admit the new
      * policy/reliable protocol surface.
@@ -4647,6 +4823,14 @@ export interface DaemonConfig {
      * unchanged from M1/M2.
      */
     runtimeAllowlist?: string[];
+    /**
+     * The environment every runtime `createDaemon` builds gives its children
+     * (#1095): by default the user's login-shell snapshot, so a variable the
+     * Host sets in `process.env` reaches a runtime only when `pass` names it.
+     * `createDaemonWithAdapters` refuses this field: each injected adapter
+     * takes its own `runtimeEnvironment` option.
+     */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /**
      * Separate-process Pi BYOK credential boundary. Required only for a
      * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
@@ -5239,10 +5423,28 @@ export declare function createDaemon(config: DaemonConfig, overrides?: DaemonOve
  * `clear()` additionally lets `create-daemon.ts`'s `pair()` proactively wipe
  * the previous device's entry for this `serverUrl` as a hygiene measure.
  */
+/**
+ * #1121: the cursor file exists but holds no usable cursor, or cannot be read.
+ * Never read as "no cursor": a missing cursor means a fresh device, and a
+ * fresh device must not be inferred from a damaged store. Startup halts with
+ * `cursor_unreadable`; the operator resets the cursor with
+ * `byok-agent doctor --repair reset-cursor --yes` (or `resetDeviceCursor`).
+ */
+export declare class CursorUnreadableError extends Error {
+    constructor(options?: {
+        cause?: unknown;
+    });
+}
 export declare class CursorStore {
     private readonly storeDir;
     constructor(storeDir: string);
     private fileFor;
+    /**
+     * `undefined` only when no cursor file exists. A file that cannot be read,
+     * or that holds anything but a nonnegative integer cursor (the same guard
+     * the server applies to `GET /byok/events?cursor=`), throws
+     * {@link CursorUnreadableError}.
+     */
     load(serverUrl: string, deviceId: string): Promise<number | undefined>;
     save(serverUrl: string, deviceId: string, cursor: number): Promise<void>;
     /** Remove any persisted cursor for (serverUrl, deviceId) — a no-op if none exists. Called from `pair()` (finding F5) so a device that's about to be replaced never leaves a cursor a future, unrelated device could somehow inherit. */
@@ -5349,6 +5551,8 @@ export declare const DAEMON_HALT_REASONS: readonly [
 'handshake_rejected', 
 /** The server no longer retains the history after this device's acknowledged cursor. */
 'replay_cursor_too_old', 
+/** The durable delivery cursor file is unreadable: run `doctor --repair reset-cursor`. */
+'cursor_unreadable', 
 /** The configuration cannot work; a restart with the same configuration fails the same way. Thrown by `start()`; never reported through `lifecycle`. */
 'config_invalid'];
 export type DaemonHaltReason = (typeof DAEMON_HALT_REASONS)[number];
@@ -5406,7 +5610,7 @@ export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | 
 import type { ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { type AssertionLane, type DaemonEvent } from './observer';
-import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../login-shell-environment';
 import type { RuntimeObservation } from '../runtime-detection';
 /**
  * The content-free projection of what a daemon observed — the ONE shape every
@@ -5882,57 +6086,6 @@ export interface HostDeviceProofSigner extends DeviceProofSigner {
  */
 export declare function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner;
 export {};
-// ==== @byok-sdk/client dist/daemon/environment.d.ts ====
-/**
- * The environment of every child process of a task: the runtime CLI and the
- * MCP servers the daemon probes for it.
- *
- * {@link buildRuntimeEnv} inherits the daemon's full environment, as OAR
- * does. The user's own agent reads its own configuration and credentials from
- * it. Only two groups of names are removed:
- *
- * - `CLAUDECODE`: Claude Code sets it inside its own sessions. OAR removes
- *   it so that a child agent starts as its own top-level session.
- * - `BYOK_*`: this SDK's own control-plane variables (key custody).
- *
- * {@link buildAllowlistedEnv} is the narrow form. It is used by the durable
- * Pi tool shell, the prepared Pi lane on the Pi auth store, and Hermes launcher
- * or custody paths.
- *
- * Every name in every list may be an exact match or a `*`-suffixed prefix
- * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
- */
-/** Inputs to {@link buildAllowlistedEnv}. */
-export interface BuildAllowlistedEnvOptions {
-    /**
-     * The ambient environment (normally `process.env`). Never mutated — every
-     * returned variable is copied into a fresh object.
-     */
-    ambient: NodeJS.ProcessEnv;
-    /** Names admitted beyond the platform baseline, still subject to the hard deny. */
-    allow?: readonly string[];
-    /**
-     * Test seam: which platform's extra base vars to include
-     * ({@link WINDOWS_BASE_ALLOWLIST} vs none) — defaults to `process.platform`
-     * so callers never have to think about it, while still letting a test
-     * exercise the win32 branch deterministically on any host OS.
-     */
-    platform?: NodeJS.Platform;
-}
-/**
- * The environment every child process of a task receives: the full ambient
- * environment minus the hard deny. A fresh object; `ambient` is never
- * mutated.
- */
-export declare function buildRuntimeEnv(options: {
-    ambient: NodeJS.ProcessEnv;
-    platform?: NodeJS.Platform;
-}): Record<string, string>;
-/**
- * The platform baseline plus `options.allow`, minus the hard deny. Only two
- * Pi lanes use it (see this module's own doc comment).
- */
-export declare function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string>;
 // ==== @byok-sdk/client dist/daemon/execution-record.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { RuntimeAdapterDescriptor, Session } from '../types';
@@ -7193,7 +7346,7 @@ export interface McpToolsProbeOptions {
     timeoutMs?: number;
     /**
      * The exact base environment the RUNTIME child of this task receives
-     * (`buildRuntimeEnv`, `./environment.ts`) — never `process.env`. The probe
+     * (`RuntimeAdapter.runtimeEnvironment`, `../runtime/environment.ts`) — never `process.env`. The probe
      * spawns a host-configured command, so it must not become the one place
      * this SDK's own `BYOK_*` control-plane variables reach a server the real
      * runtime path would have filtered out. Required, deliberately: a caller
@@ -7266,7 +7419,7 @@ import { type AgentEvent, type BlobRef, type Envelope, type OfferAdmissionTiming
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { ExecutionRecord } from './execution-record';
 import type { RuntimeObservation } from '../runtime-detection';
-import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
  * live task feed, a task list, and approve/reject/unpair from, all LOCALLY
@@ -7879,6 +8032,8 @@ export interface OutboundStatus {
     rejected: number;
     rejectedByReason: Partial<Record<OutboundRefusalReason, number>>;
     rejectedTerminals: number;
+    /** `task.progress` / `agent.message.draft` envelopes dropped unsent because the outbox passed its byte cap. */
+    droppedEphemeral: number;
     lastRejection?: OutboundRejection;
 }
 // ==== @byok-sdk/client dist/daemon/prepared-agent-memory.d.ts ====
@@ -8921,6 +9076,11 @@ export declare const DEFAULT_MAX_TASK_OUTPUT_BYTES: number;
  * second writer would co-write `MEMORY.md`, `notes/` and `.git`.
  */
 export declare const DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME = 4;
+/**
+ * Default number of tasks one daemon runs at once, across every Agent home and
+ * runtime: active tasks plus offers already admitted past this cap.
+ */
+export declare const DEFAULT_MAX_CONCURRENT_TASKS = 8;
 export interface TaskRunnerDeps {
     adapters: RuntimeAdapter[];
     runtimeAllowlist?: string[];
@@ -8981,6 +9141,13 @@ export interface TaskRunnerDeps {
      * The writer limit is fixed at one.
      */
     maxConcurrentReaderAttemptsPerAgentHome?: number;
+    /**
+     * Device-wide task cap — see `DaemonConfig.maxConcurrentTasks`. Unset
+     * defaults to {@link DEFAULT_MAX_CONCURRENT_TASKS}.
+     */
+    maxConcurrentTasks?: number;
+    /** Wall-clock limit for an offer without `limits.maxDurationMs` — see `DaemonConfig.defaultMaxDurationMs`. */
+    defaultMaxDurationMs?: number;
     /** Exact host-selected policy accepted by a `task.offer` that carries `egressPolicy`. */
     agentEgressPolicy?: Readonly<AgentEgressPolicy>;
     /** Latest-value activity lane and reliable spool for Agent egress offers. */
@@ -9193,7 +9360,7 @@ export interface TaskRunnerDeps {
     /**
      * Production pre-runtime executability/handshake gate for the exact message
      * helper config. `env` is the same child environment the runtime
-     * gets (`buildRuntimeEnv`), so the helper is proved under the environment
+     * gets (`RuntimeAdapter.runtimeEnvironment`), so the helper is proved under the environment
      * it will actually run in.
      */
     agentMessageMcpPreflight?: (server: Readonly<McpStdioServerConfig>, env: Readonly<Record<string, string>>) => Promise<void>;
@@ -9385,6 +9552,8 @@ export declare class TaskRunner {
     private readonly sealedOpening;
     private readonly claimedHarnesses;
     private readonly homeReservations;
+    /** Offers admitted past the device-wide task cap that are not yet active; cleared when `handleOffer` returns. */
+    private readonly deviceTaskReservations;
     private readonly startupOwnership;
     /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
     private readonly inFlightBlobAborts;
@@ -9456,6 +9625,8 @@ export declare class TaskRunner {
     private get maxInlineEventBytes();
     /** Effective per-canonical-Agent-home reader cap — see {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}. */
     private get maxConcurrentReaderAttemptsPerAgentHome();
+    /** Effective device-wide task cap — see {@link DEFAULT_MAX_CONCURRENT_TASKS}. */
+    private get maxConcurrentTasks();
     /**
      * M4 Phase 4 (part B.3, observability): per-active-task queue watermarks
      * for the control socket's `status` result — see
@@ -9565,8 +9736,12 @@ export declare class TaskRunner {
      * own `stop()` call has already resolved), so it can no longer race
      * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
      * regression test for the exact scenario.
+     *
+     * `interruptTimeoutMs` caps each soft interrupt below the configured
+     * bound: a halted run passes its shutdown grace, so its tasks reach close
+     * and their `task.fail` is journaled within that grace (#1119).
      */
-    shutdownActiveTasks(reason: string): Promise<void>;
+    shutdownActiveTasks(reason: string, interruptTimeoutMs?: number): Promise<void>;
     private closeActiveSession;
     private awaitActiveSessionClose;
     /**
@@ -10411,6 +10586,38 @@ export declare class DeviceMetadataRepairError extends Error {
  * Ordinary doctor remains credential-blind; only this confirmed action opens the OS store.
  */
 export declare function repairDeviceEnrollmentMetadata(config: DaemonConfig, input: RepairDeviceEnrollmentMetadataInput): Promise<DeviceMetadataRepairResult>;
+export interface ResetDeviceCursorInput {
+    confirmed: true;
+}
+export interface DeviceCursorResetResult {
+    action: 'reset-cursor';
+    scope: 'device';
+    /** The cursor file now holds 0; nothing was replayed yet. */
+    status: 'reset';
+}
+declare const CURSOR_RESET_MESSAGES: {
+    readonly 'confirmation-required': 'Explicit confirmation is required to reset the delivery cursor.';
+    readonly 'daemon-running': 'Stop the daemon before resetting the delivery cursor.';
+    readonly 'store-busy': 'The store is owned by another operation; cursor reset refused.';
+    readonly unpaired: 'No readable device record exists; pair this device instead of resetting its cursor.';
+    readonly 'reset-failed': 'The delivery cursor could not be reset; inspect the store before retrying.';
+};
+export type DeviceCursorResetErrorCode = keyof typeof CURSOR_RESET_MESSAGES;
+/** Closed diagnostics only, like {@link DeviceMetadataRepairError}. */
+export declare class DeviceCursorResetError extends Error {
+    readonly code: DeviceCursorResetErrorCode;
+    constructor(code: DeviceCursorResetErrorCode);
+}
+/**
+ * #1121: the operator recovery for the `cursor_unreadable` halt. Rewrites the
+ * paired device's delivery cursor as 0, so the next start asks the server to
+ * replay everything it still retains for this device. Replay is safe: a
+ * redelivered offer this device journaled is matched by its id, and the
+ * server suppresses offers whose task already ended. If the server no longer
+ * retains seq 1, the next start halts `replay_cursor_too_old` as for any
+ * expired cursor. Refused while the daemon runs; takes the store's owner lease.
+ */
+export declare function resetDeviceCursor(config: DaemonConfig, input: ResetDeviceCursorInput): Promise<DeviceCursorResetResult>;
 // ==== @byok-sdk/client dist/diagnostics/operator-actions.d.ts ====
 import { type AgentRef } from '@byok-sdk/protocol';
 import type { DaemonConfig } from '../daemon/create-daemon';
@@ -10504,10 +10711,10 @@ import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../type
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import type { ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import type { ServiceEnvironmentRecord } from '../login-shell-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
-    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'quarantine';
+    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'clock-skew' | 'health' | 'journal' | 'quarantine';
     status: DiagnosticStatus;
     summary: string;
 }
@@ -10571,6 +10778,20 @@ export interface DiagnosticsSnapshot {
         source: 'live' | 'audit';
         lifecycle: DaemonLifecycle;
     };
+    /**
+     * #1114: the device clock against the server's HTTP `Date` header at the
+     * running daemon's last pair or renewal. Unknown while the daemon is
+     * offline: doctor stays network-free and keeps no state file of its own.
+     */
+    clockSkew: {
+        status: 'unknown';
+        reason: 'daemon-offline' | 'not-observed';
+    } | {
+        status: 'measured';
+        deviceAheadMs: number;
+        uncertaintyMs: number;
+        observedAt: string;
+    };
     health: OperationalHealthFileInspection;
     journal: {
         status: 'missing' | 'present' | 'corrupt' | 'unavailable';
@@ -10627,7 +10848,7 @@ export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './lo
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
-export { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, runSdkReservedHelperCommand, } from './sdk-reserved-helper-host';
+export { BYOK_SDK_HELPER_SUBCOMMAND, bundledSdkHelperHost, resolveSdkReservedHelperBin, runSdkReservedHelperCommand, } from './sdk-reserved-helper-host';
 export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host';
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
@@ -10749,17 +10970,12 @@ export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions,
 export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
-export { agentServiceDefinition } from './lifecycle/agent-service';
-export type { AgentServiceDefinitionInput } from './lifecycle/agent-service';
-export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit';
-export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit';
-export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
-export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes';
-export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log';
-export type { DaemonLog, DaemonLogOptions, ServiceLogReport } from './lifecycle/service-log';
-export { applyLoginShellEnvironment, serviceEnvironmentStatus } from './lifecycle/service-environment';
+export { applyLoginShellEnvironment } from './lifecycle/service-environment';
+export { serviceEnvironmentStatus } from './login-shell-environment';
+export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
+export type { RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy } from './runtime/environment';
 export type { RuntimeObservation } from './runtime-detection';
-export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './lifecycle/service-environment';
+export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
@@ -10772,8 +10988,8 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
 export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
-export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
-export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
+export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor';
+export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
 export { NativeInteractionController, NativeInteractionError } from './native-interactions';
@@ -10786,7 +11002,7 @@ export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } 
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
 export { isReservedMcpServerName } from './sdk-reserved-mcp';
-export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
+export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets';
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, } from './tool-authorization';
@@ -12134,92 +12350,27 @@ export interface PlatformUnit {
  */
 export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs): ServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/service-environment.d.ts ====
+import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment';
 /**
- * Issue #392 (parent #384 item 2): a daemon started by launchd or systemd
- * gets the service manager's minimal environment (launchd's default PATH is
- * `/usr/bin:/bin:/usr/sbin:/sbin`), not the user's. ADR-037 D2 lets every
- * runtime inherit the daemon's environment, which assumes the daemon's
- * environment IS the user's — so under a service, `claude`/`codex` installed
- * by Homebrew, nvm, bun or an official installer are `not-found`, and
- * rc-only settings (proxies, `ANTHROPIC_BASE_URL`, `CODEX_HOME`, ...) are
- * missing.
- *
- * D2 itself is unchanged: a child's environment is still the daemon's minus
- * `CLAUDECODE` and `BYOK_*` (`daemon/environment.ts`). This module only
- * changes where the daemon's environment comes from, once per process:
- * {@link applyLoginShellEnvironment} runs the passwd login shell
- * (`os.userInfo().shell`, never `$SHELL`) once as
- * `<shell> -i -l -c 'printf %s B; /usr/bin/env -0; printf %s E'`, with B and
- * E random per-run nonces, and replaces `process.env` with the NUL-separated
- * entries found between them. Bytes outside the frame — rc chatter on stdout
- * — are ignored. The capture is complete once the shell has exited and the
- * end nonce has been read; a background job the rc started may keep stdout
- * open, so the capture never waits for EOF after that. Caps:
- * {@link LOGIN_SHELL_ENV_TIMEOUT_MS} and {@link LOGIN_SHELL_ENV_MAX_BYTES}.
- * However the capture ends, the shell's whole process group is SIGKILLed.
- *
- * The shell gets this process's environment minus `BYOK_*`, so rc files
- * never see SDK control variables. `BYOK_*` names found in the capture are
- * dropped and the `BYOK_*` values this process had before the capture are
- * put back: rc files never set SDK control variables either.
- *
- * `byok-agent start --service` calls it first ({@link SERVICE_FLAG}; the
- * launchd plist, systemd unit and WinSW XML pass that flag). An embedding Host started
- * outside a terminal (an Electron app launched from the Dock has launchd's
- * PATH too) calls the same function at its own startup.
- *
- * Every report of the result — `start` stdout, `audit.jsonl`, `status` —
- * carries only {@link ServiceEnvironmentStatus}: a source, a closed code,
- * the shell's basename and a duration. Never a variable name, value or path.
+ * Issue #392: `byok-agent start --service` runs under a service manager's
+ * minimal environment. {@link applyLoginShellEnvironment} replaces this
+ * process's `process.env` with the login-shell snapshot
+ * (`../login-shell-environment.ts`, the base of every runtime environment)
+ * and puts back the `BYOK_*` values this process had, so that the daemon
+ * resolves its own config and binaries as the user's terminal would.
  */
 /** The `byok-agent start` flag generated service definitions pass. */
 export declare const SERVICE_FLAG = "--service";
-export declare const LOGIN_SHELL_ENV_TIMEOUT_MS = 10000;
-export declare const LOGIN_SHELL_ENV_MAX_BYTES: number;
-export declare const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES: readonly ['unsupported-shell', 'spawn-failed', 'timeout', 'output-too-large', 'bad-frame', 'shell-exit-nonzero'];
-export type ServiceEnvironmentUnavailableCode = (typeof SERVICE_ENVIRONMENT_UNAVAILABLE_CODES)[number];
-export type ServiceEnvironmentStatus = {
-    source: 'login-shell';
-    shell: string;
-    durationMs: number;
-} | {
-    source: 'inherited';
-} | {
-    source: 'unavailable';
-    code: ServiceEnvironmentUnavailableCode;
-};
-/** Timestamped closed environment observation shared by diagnostics and audit. */
-export interface ServiceEnvironmentRecord {
-    status: ServiceEnvironmentStatus;
-    ts: string;
-}
 /**
- * Test seams for {@link captureAndApply}. Not part of the public API:
- * {@link applyLoginShellEnvironment} takes no options.
- *
- * @internal
- */
-export interface ApplyLoginShellEnvironmentOptions {
-    /** Test seam: an absolute shell path instead of the passwd shell. */
-    shell?: string;
-    /** Test seam: the environment to replace. Defaults to `process.env`. */
-    env?: NodeJS.ProcessEnv;
-    timeoutMs?: number;
-    maxBytes?: number;
-    platform?: NodeJS.Platform;
-}
-/** What {@link applyLoginShellEnvironment} did in this process; `inherited` until it has run. */
-export declare function serviceEnvironmentStatus(): ServiceEnvironmentStatus;
-/**
- * Captures the login-shell environment and replaces `process.env` with it.
- * Runs once per process: later calls return the first call's result. On
- * failure `process.env` is left exactly as inherited. Never throws. win32
- * has no login shell: the result is `inherited`.
+ * Replaces `process.env` with this process's login-shell snapshot, keeping
+ * this process's own `BYOK_*` values. Runs once per process: later calls
+ * return the first call's result. On failure `process.env` is left exactly as
+ * inherited. Never throws.
  */
 export declare function applyLoginShellEnvironment(): Promise<ServiceEnvironmentStatus>;
 /**
- * The capture-and-replace step without the once-per-process latch; for
- * tests and for {@link applyLoginShellEnvironment} only.
+ * {@link captureLoginShellSnapshot} followed by the replacement
+ * {@link applyLoginShellEnvironment} makes, on `options.env`.
  *
  * @internal
  */
@@ -12781,6 +12932,131 @@ export declare const localStateRelocation: Readonly<{
     acquire: typeof acquire;
 }>;
 export {};
+// ==== @byok-sdk/client dist/login-shell-environment.d.ts ====
+/**
+ * Issue #392 (parent #384 item 2): a daemon started by launchd or systemd
+ * gets the service manager's minimal environment (launchd's default PATH is
+ * `/usr/bin:/bin:/usr/sbin:/sbin`), not the user's. ADR-037 D2 lets every
+ * runtime inherit the daemon's environment, which assumes the daemon's
+ * environment IS the user's — so under a service, `claude`/`codex` installed
+ * by Homebrew, nvm, bun or an official installer are `not-found`, and
+ * rc-only settings (proxies, `ANTHROPIC_BASE_URL`, `CODEX_HOME`, ...) are
+ * missing.
+ *
+ * #1095: this capture is also the base of every runtime environment
+ * (`runtime/environment.ts`). {@link loginShellSnapshot} runs the account's
+ * login shell once per process as
+ * `<shell> -i -l -c 'printf %s B; /usr/bin/env -0; printf %s E'`, with B and
+ * E random per-run nonces, and keeps the NUL-separated entries found between
+ * them. Bytes outside the frame — rc chatter on stdout — are ignored. The
+ * capture is complete once the shell has exited and the end nonce has been
+ * read; a background job the rc started may keep stdout open, so the capture
+ * never waits for EOF after that. Caps: {@link LOGIN_SHELL_ENV_TIMEOUT_MS} and
+ * {@link LOGIN_SHELL_ENV_MAX_BYTES}. However the capture ends, the shell's
+ * whole process group is SIGKILLed.
+ *
+ * The shell is read from the account database by uid, never from `$SHELL`
+ * (Bun's `os.userInfo().shell` returns `$SHELL`, so a Host variable would
+ * choose the shell): `/usr/bin/id -P <uid>` on darwin (Open Directory),
+ * `/usr/bin/getent passwd <uid>` on linux (NSS). The entry's uid field must be
+ * this process's uid and its last field an absolute path; anything else,
+ * including another platform, fails closed as `account-shell-unavailable`.
+ *
+ * The shell does not start from this process's environment: an embedding
+ * Host's own variables would come back out of `env -0`. It starts from
+ * {@link LOGIN_SHELL_SEED_NAMES} copied from this process, `PATH` set to
+ * {@link LOGIN_SHELL_SEED_PATH} and `SHELL` set to the account shell, what
+ * launchd and login(1) give a session;
+ * everything else in the snapshot is what the user's rc files produced.
+ * `BYOK_*` names found in the capture are dropped: rc files never set SDK
+ * control variables. The snapshot never changes `process.env`.
+ *
+ * `byok-agent start --service` additionally replaces `process.env` with the
+ * snapshot (`lifecycle/service-environment.ts`). win32 has no login shell:
+ * the snapshot source is `windows-session`, and the runtime environment takes
+ * its baseline names from the live session environment.
+ *
+ * Every report of the result — `start` stdout, `audit.jsonl`, `status` —
+ * carries only {@link ServiceEnvironmentStatus}: a source, a closed code,
+ * the shell's basename and a duration. Never a variable name, value or path.
+ */
+export declare const LOGIN_SHELL_ENV_TIMEOUT_MS = 10000;
+export declare const LOGIN_SHELL_ENV_MAX_BYTES: number;
+/**
+ * The names the login shell starts with, copied from this process: the
+ * account and locale, where the shell finds its rc files (`ZDOTDIR`,
+ * `XDG_*`), and the session sockets a login manager sets and no rc sets.
+ * Every other variable of this process stays out of the capture.
+ */
+export declare const LOGIN_SHELL_SEED_NAMES: readonly string[];
+/** The login shell's starting `PATH`; `/etc/zprofile` (path_helper) and `/etc/profile` build the rest. */
+export declare const LOGIN_SHELL_SEED_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+export declare const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES: readonly ['account-shell-unavailable', 'unsupported-shell', 'spawn-failed', 'timeout', 'output-too-large', 'bad-frame', 'shell-exit-nonzero'];
+export type ServiceEnvironmentUnavailableCode = (typeof SERVICE_ENVIRONMENT_UNAVAILABLE_CODES)[number];
+/**
+ * Where the runtime environment base came from. `inherited`: no snapshot has
+ * been taken in this process yet. `windows-session`: win32, which has no login
+ * shell.
+ */
+export type ServiceEnvironmentStatus = {
+    source: 'login-shell';
+    shell: string;
+    durationMs: number;
+} | {
+    source: 'inherited';
+} | {
+    source: 'windows-session';
+} | {
+    source: 'unavailable';
+    code: ServiceEnvironmentUnavailableCode;
+};
+/** One process's login-shell capture. `env` is present exactly when `status.source` is `login-shell`. */
+export interface LoginShellSnapshot {
+    readonly status: ServiceEnvironmentStatus;
+    readonly env?: Readonly<Record<string, string | undefined>>;
+}
+/** Timestamped closed environment observation shared by diagnostics and audit. */
+export interface ServiceEnvironmentRecord {
+    status: ServiceEnvironmentStatus;
+    ts: string;
+}
+/**
+ * Test seams for {@link captureLoginShellSnapshot} and `captureAndApply`.
+ * Not part of the public API.
+ *
+ * @internal
+ */
+export interface ApplyLoginShellEnvironmentOptions {
+    /** Test seam: an absolute shell path instead of the account shell, past the supported-shell gate. */
+    shell?: string;
+    /** Test seam: the account-database command (absolute path, then arguments) instead of the platform's. */
+    accountCommand?: readonly [string, ...string[]];
+    /** Test seam: the environment the seed is copied from (and, for `captureAndApply`, the one replaced). Defaults to `process.env`. */
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    maxBytes?: number;
+    platform?: NodeJS.Platform;
+}
+/** Where this process's runtime environment base came from; `inherited` until {@link loginShellSnapshot} has resolved. */
+export declare function serviceEnvironmentStatus(): ServiceEnvironmentStatus;
+/**
+ * This process's login-shell snapshot, captured on the first call. Later
+ * calls return the first call's result. Never throws.
+ */
+export declare function loginShellSnapshot(): Promise<LoginShellSnapshot>;
+/**
+ * Test seam: replaces how {@link loginShellSnapshot} obtains the snapshot and
+ * forgets an earlier one; `undefined` restores the real capture.
+ *
+ * @internal
+ */
+export declare function setLoginShellSnapshotSource(source: (() => Promise<LoginShellSnapshot>) | undefined): void;
+/**
+ * Takes one snapshot without the once-per-process latch.
+ *
+ * @internal
+ */
+export declare function captureLoginShellSnapshot(options: ApplyLoginShellEnvironmentOptions): Promise<LoginShellSnapshot>;
 // ==== @byok-sdk/client dist/mcp-server/dispatch.d.ts ====
 /**
  * JSON-RPC 2.0 classification and per-session id bookkeeping.
@@ -13108,7 +13384,7 @@ export interface McpStdioClientOptions {
     readonly label?: string;
     /**
      * The exact base environment the RUNTIME child of this task receives
-     * (`buildRuntimeEnv`) — never `process.env`. Required, deliberately: a
+     * (`RuntimeAdapter.runtimeEnvironment`) — never `process.env`. Required, deliberately: a
      * caller that forgets it fails to compile rather than passing this SDK's
      * own `BYOK_*` control-plane variables.
      */
@@ -13451,6 +13727,7 @@ export declare const LOCAL_AGENT_RELEASE_BUILD_ID_MAX_LENGTH = 128;
 export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleaseIdentity | undefined): Readonly<LocalAgentReleaseIdentity>;
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
 import type { RuntimeId } from '@byok-sdk/protocol';
+import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
 export interface RuntimeObservation {
@@ -13458,6 +13735,8 @@ export interface RuntimeObservation {
     present: boolean;
     outcome: RuntimeDetectResult['kind'];
     reason?: RuntimeDetectionRefusalReason;
+    /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture failed. */
+    code?: ServiceEnvironmentUnavailableCode;
     version?: string;
     qualifiedVersion?: string;
     authPresent?: boolean;
@@ -13565,10 +13844,120 @@ export declare class RuntimeStartupDisposalFailure extends Error {
     constructor(retryDisposal: () => Promise<void>, options?: ErrorOptions);
 }
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
+// ==== @byok-sdk/client dist/runtime/environment.d.ts ====
+import { type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
+/**
+ * The environment of every child process of a task: the runtime CLI and the
+ * MCP servers the daemon probes for it (#1095).
+ *
+ * {@link buildRuntimeEnvironment} builds it from a
+ * {@link RuntimeEnvironmentPolicy}, which each runtime adapter owns:
+ *
+ * - `login-shell` (default): the user's login-shell snapshot
+ *   (`../login-shell-environment.ts`), never the daemon's live
+ *   environment, so a variable an embedding Host puts into `process.env` does
+ *   not reach the runtime. A failed capture fails closed with
+ *   {@link RuntimeEnvironmentUnavailableError}. On win32, which has no login
+ *   shell, the base is {@link WINDOWS_SESSION_NAMES} from the live session
+ *   environment.
+ * - `allowlist`: the platform baseline plus `allow`, from the live
+ *   environment; it needs no snapshot.
+ *
+ * Then, in order: the adapter's conflict rule removes names from the base;
+ * `pass` copies the named variables from the live environment at every build;
+ * the hard deny removes `CLAUDECODE` (Claude Code sets it inside its own
+ * sessions; a child agent starts as its own top-level session) and `BYOK_*`
+ * (this SDK's control-plane variables), whatever listed them; `NO_PROXY` and
+ * `no_proxy` gain `127.0.0.1` and `localhost`, so a user's proxy never takes
+ * the traffic to the daemon's loopback gate and MCP servers.
+ *
+ * {@link buildAllowlistedEnv} is the narrow form over a given environment. It
+ * is used by the durable Pi tool shell, the prepared Pi lane on the Pi auth
+ * store, and Hermes launcher or custody paths.
+ *
+ * Every name in every list may be an exact match or a `*`-suffixed prefix
+ * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
+ */
+/** Inputs to {@link buildAllowlistedEnv}. */
+export interface BuildAllowlistedEnvOptions {
+    /**
+     * The ambient environment (normally `process.env`). Never mutated — every
+     * returned variable is copied into a fresh object.
+     */
+    ambient: Readonly<Record<string, string | undefined>>;
+    /** Names admitted beyond the platform baseline, still subject to the hard deny. */
+    allow?: readonly string[];
+    /**
+     * Test seam: which platform's extra base vars to include
+     * ({@link WINDOWS_BASE_ALLOWLIST} vs none) — defaults to `process.platform`
+     * so callers never have to think about it, while still letting a test
+     * exercise the win32 branch deterministically on any host OS.
+     */
+    platform?: NodeJS.Platform;
+}
+/**
+ * Which environment a runtime adapter gives its children (see this module's
+ * doc comment). `pass` names variables taken from the live `process.env` at
+ * every build, for a Host that sets them after it starts. Names never match
+ * `CLAUDECODE` or `BYOK_*`.
+ */
+export type RuntimeEnvironmentPolicy = {
+    readonly base?: 'login-shell';
+    readonly pass?: readonly string[];
+} | {
+    readonly base: 'allowlist';
+    readonly allow?: readonly string[];
+    readonly pass?: readonly string[];
+};
+/**
+ * An adapter's conflict rule: given the names `pass` actually supplied, the
+ * names (or `*` prefixes) to remove from the base. On win32 the supplied
+ * names arrive in upper case and the removed names match case-insensitively.
+ */
+export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => readonly string[];
+/** The login-shell capture failed, so no `login-shell` runtime environment exists in this process. */
+export declare class RuntimeEnvironmentUnavailableError extends Error {
+    readonly reason: ServiceEnvironmentUnavailableCode;
+    readonly code: 'runtime_environment_unavailable';
+    constructor(reason: ServiceEnvironmentUnavailableCode);
+}
+/** Validates a policy at the adapter or daemon boundary and returns a frozen copy. */
+export declare function assertRuntimeEnvironmentPolicy(value: unknown, label: string): RuntimeEnvironmentPolicy;
+/** Inputs to {@link composeRuntimeEnvironment}. */
+export interface ComposeRuntimeEnvironmentInput {
+    policy: RuntimeEnvironmentPolicy;
+    /** Required for `login-shell` off win32. */
+    snapshot?: LoginShellSnapshot;
+    /** The live environment (normally `process.env`). Never mutated. */
+    live: Readonly<Record<string, string | undefined>>;
+    conflicts?: RuntimeEnvironmentConflictRule;
+    platform?: NodeJS.Platform;
+}
+/**
+ * The synchronous core of {@link buildRuntimeEnvironment}: a fresh object
+ * from the given snapshot and live environment.
+ *
+ * @internal
+ */
+export declare function composeRuntimeEnvironment(input: ComposeRuntimeEnvironmentInput): Record<string, string>;
+/**
+ * The environment every child process of a task receives under `policy`, from
+ * this process's login-shell snapshot (captured on first use) and the live
+ * `process.env`. A fresh object. Throws
+ * {@link RuntimeEnvironmentUnavailableError} when `login-shell` has no
+ * snapshot to build from.
+ */
+export declare function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, conflicts?: RuntimeEnvironmentConflictRule): Promise<Record<string, string>>;
+/**
+ * The platform baseline plus `options.allow`, minus the hard deny (see this
+ * module's own doc comment for its callers).
+ */
+export declare function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string>;
 // ==== @byok-sdk/client dist/sdk-native-assets-runtime.d.ts ====
 /** Runtime loader: explicit absolute root only, no download or package-search fallback. */
 export declare function loadSdkKoffiAsset(root: string): unknown;
 // ==== @byok-sdk/client dist/sdk-native-assets.d.ts ====
+import { type SdkReservedHelperKind } from './sdk-reserved-helper-host';
 export declare const sdkNativeAssetTargets: Readonly<{
     'win32-x64': Readonly<{
         package: "@koromix/koffi-win32-x64";
@@ -13596,11 +13985,52 @@ export interface CopySdkNativeAssetsOptions {
 /** Build-time only. Fetches the integrity-pinned official Windows archive on any build host; never executes it. Both platforms copy the Agent memory helper through the release-helper copier. */
 export declare function copySdkNativeAssets(options: CopySdkNativeAssetsOptions): Promise<readonly string[]>;
 export { loadSdkKoffiAsset } from './sdk-native-assets-runtime';
+/**
+ * What a single-file product does with each published bin. `cli`: the daemon CLI, not shipped by an embedded Host.
+ * `reserved-helper` and `pi-host`: re-entered through `sdkHelperHost` as `kind`. `provider-launcher`: the keys
+ * custody launcher, which the product re-enters as its own command with `runPiProviderLauncher`.
+ */
+export type SdkDistributionBinRole = 'cli' | 'reserved-helper' | 'pi-host' | 'provider-launcher';
+export interface SdkDistributionBin {
+    readonly package: '@byok-sdk/client' | '@byok-sdk/keys';
+    readonly role: SdkDistributionBinRole;
+    readonly kind?: SdkReservedHelperKind;
+}
+/**
+ * The supported single-file formats. Every format ships the same asset layout (`copySdkPackagingAssets` in
+ * `@byok-sdk/client/packaging`): `pi` is `PI_PACKAGE_DIR`, `native` is `nativeAssetRoot` and
+ * `native/agent-memory-fs` is `agentMemoryHelperAssetRoot`, where the platform has native targets.
+ */
+export declare const sdkPackagingFormats: Readonly<{
+    readonly esm: Readonly<{
+        esbuildFormat: "esm";
+        helperHost: "node-entry";
+        piRuntimeForm: "interpreter+bundle";
+    }>;
+    readonly cjs: Readonly<{
+        esbuildFormat: "cjs";
+        helperHost: "node-entry";
+        piRuntimeForm: "interpreter+bundle";
+    }>;
+    readonly sea: Readonly<{
+        esbuildFormat: "cjs";
+        helperHost: "executable";
+        piRuntimeForm: "interpreter+bundle";
+    }>;
+}>;
+export type SdkPackagingFormat = keyof typeof sdkPackagingFormats;
+export declare const sdkPackagingAssetLayout: Readonly<{
+    readonly pi: 'pi';
+    readonly native: 'native';
+    readonly agentMemoryHelper: 'native/agent-memory-fs';
+}>;
 /** Machine-readable build inputs. Target presence is not runtime/platform qualification. */
 export declare const sdkDistributionManifest: Readonly<{
     version: 1;
     piRuntimePin: string;
-    reservedHelperKinds: readonly import("./sdk-reserved-helper-host").SdkReservedHelperKind[];
+    nodeEngine: string;
+    bins: Readonly<Readonly<Record<string, SdkDistributionBin>>>;
+    reservedHelperKinds: readonly SdkReservedHelperKind[];
     nativeTargets: Readonly<{
         'win32-x64': Readonly<{
             package: "@koromix/koffi-win32-x64";
@@ -13619,6 +14049,28 @@ export declare const sdkDistributionManifest: Readonly<{
             files: readonly string[];
             signingPolicy: "product-resigning-allowed";
         }>;
+    }>;
+    formats: Readonly<{
+        readonly esm: Readonly<{
+            esbuildFormat: "esm";
+            helperHost: "node-entry";
+            piRuntimeForm: "interpreter+bundle";
+        }>;
+        readonly cjs: Readonly<{
+            esbuildFormat: "cjs";
+            helperHost: "node-entry";
+            piRuntimeForm: "interpreter+bundle";
+        }>;
+        readonly sea: Readonly<{
+            esbuildFormat: "cjs";
+            helperHost: "executable";
+            piRuntimeForm: "interpreter+bundle";
+        }>;
+    }>;
+    assetLayout: Readonly<{
+        readonly pi: 'pi';
+        readonly native: 'native';
+        readonly agentMemoryHelper: 'native/agent-memory-fs';
     }>;
 }>;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
@@ -13645,6 +14097,15 @@ export interface ResolvedSdkReservedHelperBin {
 export declare const sdkReservedHelperKinds: readonly SdkReservedHelperKind[];
 /** SDK-owned launcher shape used by every reserved stdio helper. */
 export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind, host?: SdkHelperHostConfig): ResolvedSdkReservedHelperBin;
+/**
+ * The helper host of a single-file product, called from inside that product. A
+ * Node SEA re-enters its own executable; a bundle run by Node re-enters Node
+ * with the running bundle as its entry. `node:sea` decides which, so nothing is
+ * inferred from paths or names.
+ */
+export declare function bundledSdkHelperHost(): SdkHelperHostConfig & {
+    readonly executable: string;
+};
 /**
  * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
  * side effects for normal product commands; a reserved command is handled to
@@ -13700,11 +14161,13 @@ export interface FakeRuntimeAdapterBehavior {
     readonly detect?: RuntimeDetectResult | ((signal?: AbortSignal) => Promise<RuntimeDetectResult>);
     /** Default: a non-retryable reject, so a fake starts nothing the test did not supply. */
     readonly prepare?: (input: RuntimeAdapterPrepareInput) => Promise<RuntimeAdapterPrepareResult>;
+    /** Default: the `allowlist` runtime environment, which takes no login-shell snapshot. */
+    readonly runtimeEnvironment?: () => Promise<Record<string, string>>;
 }
 /**
  * A runtime adapter double whose descriptor is the real adapter's default
  * descriptor, so its capabilities, selection target and platforms follow the
- * SDK. Only `detect` and `prepare` are the test's.
+ * SDK. Only `detect`, `prepare` and `runtimeEnvironment` are the test's.
  */
 export declare function fakeRuntimeAdapter(id: FakeRuntimeAdapterId, behavior?: FakeRuntimeAdapterBehavior): RuntimeAdapter;
 // ==== @byok-sdk/client dist/tool-authorization.d.ts ====
@@ -13796,6 +14259,7 @@ export interface ToolReminder {
     readonly summary: string;
 }
 // ==== @byok-sdk/client dist/types.d.ts ====
+import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { ToolAuthorizationGate } from './tool-authorization';
@@ -13838,7 +14302,11 @@ export type RuntimeDetectResult = {
     readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'>;
 } | {
     readonly kind: 'refused';
-    readonly reason: RuntimeDetectionRefusalReason;
+    readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable'>;
+} | {
+    readonly kind: 'refused';
+    readonly reason: 'runtime_environment_unavailable';
+    readonly code: ServiceEnvironmentUnavailableCode;
 };
 /**
  * A local agent updates itself, so a version the SDK was not qualified against
@@ -13851,8 +14319,9 @@ export interface RuntimeDetectionAdvisory {
 /**
  * `app_server_unavailable`: Codex has no `app-server`. `acp_unavailable`: an ACP runtime has no stdio ACP mode.
  * `platform_unsupported`: the host platform is not in {@link RuntimeAdapterDescriptor.platforms}; no probe ran.
+ * `runtime_environment_unavailable`: the login-shell capture failed (`code`), so the runtime has no environment to start in (#1095).
  */
-export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported';
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported' | 'runtime_environment_unavailable';
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /**
@@ -14317,6 +14786,14 @@ export interface RuntimeAdapter {
     /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
     detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    /**
+     * The environment every child process of this runtime's tasks receives
+     * (#1095): a fresh object, built under the adapter's own
+     * `RuntimeEnvironmentPolicy` (`buildRuntimeEnvironment`). Rejects with
+     * `RuntimeEnvironmentUnavailableError` when that policy has no environment
+     * to build from; the daemon then refuses the runtime.
+     */
+    runtimeEnvironment(): Promise<Record<string, string>>;
 }
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */
 export declare function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescriptor): RuntimeAdapterDescriptor;

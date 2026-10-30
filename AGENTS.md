@@ -12,6 +12,8 @@ This is the root routing contract for Claude Code and Codex. Load this before ta
 
 ## Required Checks
 
+PR and main push CI run targeted checks selected from changed paths. Nightly CI on main runs the complete matrix, including the full macOS client suite, without uploading release tarballs. Release validation runs the same complete matrix only for an explicitly approved commit on main or release/*; only that mode uploads accepted release artifacts.
+
 - `bun run build`
 - `bun run typecheck`
 - `bun run test`
