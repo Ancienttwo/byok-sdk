@@ -1,5 +1,6 @@
 import { readRegistryExpectations, runtimeDependencyMetadata } from './registry-contract.mjs';
 import { cloudDoConsumerSmoke } from './cloud-do-consumer-smoke.mjs';
+import { assertNoStorePaths } from './published-store-paths.mjs';
 import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -348,6 +349,7 @@ try {
     const tarballPath = path.join(outDir, file);
     const expectedPackageVersion = expectedPackageVersions[packageName];
     assertTarballInternalEdges(tarballPath, packageName, expectedPackageVersion);
+    assertNoStorePaths(packageName, iterateTarballFiles(tarballPath));
     if (packageName === '@byok-sdk/cloud-dataplane') {
       migrationFiles = assertTarballCarriesMigrations(tarballPath);
     }

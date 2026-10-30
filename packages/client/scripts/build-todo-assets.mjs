@@ -34,7 +34,7 @@ const expectedInputs = new Map(thirdParty.packages.flatMap(pkg => pkg.files.map(
 const meta = JSON.parse(await readFile(new URL('dist/bin/metafile-esm.json', root), 'utf8'));
 const observedInputs = new Map();
 for (const input of Object.keys(meta.inputs)) {
-  if (!input.replaceAll('\\', '/').includes('/node_modules/')) continue;
+  if (!input.split(/[\\/]/).includes('node_modules')) continue;
   const file = path.resolve(fileURLToPath(root), input);
   // Find the owning manifest without resolving or executing package code.
   let directory = path.dirname(file);
