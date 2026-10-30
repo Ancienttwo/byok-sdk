@@ -19,6 +19,11 @@ export interface DaemonConfigJsonSchema {
   /** Always `{}` here: set only on a surface-restricted property, so any value fails a JSON Schema validator. */
   readonly not?: Readonly<Record<string, never>>;
   readonly 'x-byok-surface'?: DaemonConfigSurface;
+  /**
+   * `function`: an embedded Host may pass a function instead of this object
+   * schema (e.g. `toolAuthorization`); a config file must set the object.
+   */
+  readonly 'x-byok-embeddedAlternative'?: 'function';
   readonly 'x-byok-schemaVersion'?: number;
   readonly 'x-byok-removedFields'?: readonly { readonly path: string; readonly migration: string }[];
 }

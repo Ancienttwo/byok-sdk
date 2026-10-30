@@ -12,10 +12,12 @@ import {
   DaemonConfigFieldRemovedError,
   DaemonConfigInvalidError,
   checkDaemonConfig,
+  createDaemon,
   createDaemonWithAdapters,
   validateDaemonConfig,
   type DaemonConfig,
 } from '../index';
+import { staticToolAuthorizationResolver } from '../tool-authorization';
 import { describeEffectiveDaemonConfig } from '../daemon/config-schema/effective';
 import { AgentEgressPolicyError, DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { REMOVED_DAEMON_CONFIG_FIELDS } from '../daemon/config-schema/removed-fields';
@@ -61,9 +63,20 @@ describe('generated DaemonConfig schema (#1094)', () => {
     expect(manifest.files).toContain('daemon-config.schema.json');
     expect(schema['x-byok-schemaVersion']).toBe(DAEMON_CONFIG_SCHEMA_VERSION);
     expect(schema.required).toEqual(['productName', 'productId', 'serverUrl']);
-    for (const field of ['toolAuthorization', 'machineId', 'providerProvisioning', 'agentMemoryIntents', 'inputPreparation']) {
+    for (const field of ['machineId', 'providerProvisioning', 'agentMemoryIntents', 'inputPreparation']) {
       expect(schema.properties[field]).toMatchObject({ 'x-byok-surface': 'embedded-only', not: {} });
     }
+    // A config file sets the static policy; an embedded Host may pass a function instead.
+    expect(schema.properties.toolAuthorization).toMatchObject({
+      type: 'object', required: ['default'], 'x-byok-embeddedAlternative': 'function',
+      properties: { default: { enum: ['all', 'auto'] }, byRuntime: { type: 'object', additionalProperties: { enum: ['all', 'auto'] } } },
+    });
+    expect(schema.properties.toolAuthorization).not.toHaveProperty('x-byok-surface');
+    expect(schema.properties.runtimes.properties).toMatchObject({
+      pi: { properties: { agentUserContext: { enum: ['excluded', 'inherit'] } } },
+      claude: { properties: { agentUserContext: { enum: ['excluded', 'inherit'] }, agentSessionPersistence: { enum: ['disabled', 'enabled'] } } },
+      codex: { properties: { agentUserMcpServers: { enum: ['excluded', 'inherit'] } } },
+    });
     expect(schema.properties.agentHome.properties.projection).toMatchObject({ 'x-byok-surface': 'embedded-only' });
     expect(schema.properties.localAgentRelease).toMatchObject({ 'x-byok-surface': 'distribution-owned', not: {} });
     expect(schema.properties.codexSandbox).toMatchObject({ enum: ['danger-full-access', 'inherit', 'read-only', 'workspace-write'] });
@@ -89,7 +102,7 @@ describe('validateDaemonConfig', () => {
   });
 
   it('refuses embedded-only and distribution-owned fields only from a config file', () => {
-    const fileIssues = validateDaemonConfig({ ...base, toolAuthorization: 'auto', localAgentRelease: { version: '1' } }, { source: 'cli' }).issues;
+    const fileIssues = validateDaemonConfig({ ...base, toolAuthorization: () => 'auto', localAgentRelease: { version: '1' } }, { source: 'cli' }).issues;
     expect(fileIssues.map((issue) => issue.code)).toEqual(['embedded_only', 'distribution_owned']);
     const embedded = validateDaemonConfig({ ...base, toolAuthorization: () => 'auto', localAgentRelease: { version: '1' } }, { source: 'embedded' });
     expect(embedded).toEqual({ ok: true, issues: [] });
@@ -97,6 +110,133 @@ describe('validateDaemonConfig', () => {
 
   it('accepts a $schema key at the root for editors', () => {
     expect(validateDaemonConfig({ $schema: './daemon-config.schema.json', ...base }, { source: 'cli' })).toEqual({ ok: true, issues: [] });
+  });
+});
+
+describe('static toolAuthorization and runtimes (#1094)', () => {
+  const base = { productName: 'Acme', productId: 'acme', serverUrl: 'https://acme.example' };
+
+  async function bundled(extra: Partial<DaemonConfig>): Promise<DaemonConfig> {
+    return {
+      ...base, localAgentRelease: { version: '0.0.0-test' }, storeDir: await tmpDir('byok-static-auth-store-'),
+      storage: { scratchRoot: testScratchRoot() }, agentMemoryMcp: 'off', ...extra,
+    };
+  }
+
+  /** The same config as a config file would carry it: without the distribution-owned release identity. */
+  function cliInput(config: DaemonConfig): Record<string, unknown> {
+    const { localAgentRelease: _release, ...input } = config;
+    return input;
+  }
+
+  function constructionIssues(build: () => unknown): readonly unknown[] {
+    let thrown: unknown;
+    try { build(); } catch (error) { thrown = error; }
+    expect(thrown).toBeInstanceOf(DaemonConfigInvalidError);
+    return (thrown as DaemonConfigInvalidError).issues;
+  }
+
+  it.each<[string, Record<string, unknown>, string, string]>([
+    ['a bad default mode', { toolAuthorization: { default: 'ask' } }, 'invalid_value', 'toolAuthorization.default'],
+    ['a missing default mode', { toolAuthorization: { byRuntime: { claude: 'all' } } }, 'missing_required', 'toolAuthorization.default'],
+    ['a bad byRuntime mode', { toolAuthorization: { default: 'all', byRuntime: { claude: 'never' } } }, 'invalid_value', 'toolAuthorization.byRuntime.claude'],
+    ['a bad isolation value', { runtimes: { claude: { agentUserContext: 'none' } } }, 'invalid_value', 'runtimes.claude.agentUserContext'],
+    ['a bad codex isolation value', { runtimes: { codex: { agentUserMcpServers: true } } }, 'invalid_value', 'runtimes.codex.agentUserMcpServers'],
+  ])('refuses %s in a config file and at construction', async (_name, extra, code, issuePath) => {
+    const fileCheck = checkDaemonConfig({ ...base, ...extra }, { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE });
+    expect(fileCheck.ok).toBe(false);
+    expect(fileCheck.issues).toEqual([expect.objectContaining({ severity: 'error', code, path: issuePath })]);
+    const config = await bundled(extra as Partial<DaemonConfig>);
+    expect(constructionIssues(() => createDaemon(config))).toEqual(fileCheck.issues);
+  });
+
+  it('refuses a byRuntime key that names no runtime of the daemon', async () => {
+    const extra: Partial<DaemonConfig> = { runtimeAllowlist: ['claude'], toolAuthorization: { default: 'all', byRuntime: { codex: 'all' } } };
+    const issue = {
+      severity: 'error', code: 'invalid_value', path: 'toolAuthorization.byRuntime.codex',
+      message: 'DaemonConfig.toolAuthorization.byRuntime.codex names no runtime of this daemon (runtimes: claude)',
+    };
+    const config = await bundled(extra);
+    expect(checkDaemonConfig(cliInput(config), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE })).toEqual({ ok: false, issues: [issue] });
+    expect(constructionIssues(() => createDaemon(config))).toEqual([issue]);
+    // Injected adapters: the key must be one of their ids.
+    const injected = await bundled({ toolAuthorization: { default: 'all', byRuntime: { cladue: 'all' } } });
+    const adapters = [new StubRuntimeAdapter('claude')];
+    expect(constructionIssues(() => createDaemonWithAdapters(injected, adapters))).toEqual([expect.objectContaining({ path: 'toolAuthorization.byRuntime.cladue' })]);
+    expect(checkDaemonConfig(injected, { source: 'embedded', adapters }).issues).toEqual([expect.objectContaining({ path: 'toolAuthorization.byRuntime.cladue' })]);
+  });
+
+  it('refuses auto for a runtime without toolAuthorizationAuto (codex), at the field that sets it', async () => {
+    const fromDefault: Partial<DaemonConfig> = { runtimeAllowlist: ['claude', 'codex'], toolAuthorization: { default: 'auto' } };
+    const defaultIssue = {
+      severity: 'error', code: 'invalid_value', path: 'toolAuthorization.default',
+      message: 'DaemonConfig.toolAuthorization.default gives runtime codex the auto mode, which codex does not support (no toolAuthorizationAuto); set toolAuthorization.byRuntime.codex to "all" or remove codex from runtimeAllowlist',
+    };
+    const defaultConfig = await bundled(fromDefault);
+    expect(checkDaemonConfig(cliInput(defaultConfig), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE })).toEqual({ ok: false, issues: [defaultIssue] });
+    expect(constructionIssues(() => createDaemon(defaultConfig))).toEqual([defaultIssue]);
+
+    const fromEntry = await bundled({ runtimeAllowlist: ['codex'], toolAuthorization: { default: 'all', byRuntime: { codex: 'auto' } } });
+    expect(constructionIssues(() => createDaemon(fromEntry))).toEqual([expect.objectContaining({ path: 'toolAuthorization.byRuntime.codex' })]);
+
+    const injected = await bundled({ toolAuthorization: { default: 'auto' } });
+    expect(constructionIssues(() => createDaemonWithAdapters(injected, [new StubRuntimeAdapter('pi')]))).toEqual([expect.objectContaining({
+      path: 'toolAuthorization.default', message: expect.stringContaining('or do not pass the pi adapter'),
+    })]);
+  });
+
+  it('reports the resolved mode of every injected runtime', async () => {
+    const config = await bundled({ toolAuthorization: { default: 'auto', byRuntime: { pi: 'all' } } });
+    const adapters = [new StubRuntimeAdapter('pi'), new StubRuntimeAdapter('claude', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true, toolAuthorizationAuto: true })];
+    const daemon = createDaemonWithAdapters(config, adapters);
+    expect(daemon.status().config.toolAuthorization).toEqual({ mode: 'static', byRuntime: { pi: 'all', claude: 'auto' }, localToolApproval: 'host-only' });
+    expect(checkDaemonConfig(config, { source: 'embedded', adapters }).effective).toEqual(daemon.status().config);
+  });
+
+  it('keeps the function resolver embedded-only', async () => {
+    const resolver = () => 'auto' as const;
+    expect(validateDaemonConfig({ ...base, toolAuthorization: resolver }, { source: 'embedded' })).toEqual({ ok: true, issues: [] });
+    expect(validateDaemonConfig({ ...base, toolAuthorization: resolver }, { source: 'cli' }).issues).toEqual([
+      expect.objectContaining({ severity: 'error', code: 'embedded_only', path: 'toolAuthorization' }),
+    ]);
+    expect(validateDaemonConfig({ ...base, toolAuthorization: 'auto' }, { source: 'embedded' }).issues).toEqual([{
+      severity: 'error', code: 'invalid_type', path: 'toolAuthorization', message: 'DaemonConfig.toolAuthorization must be an object or a function, got string',
+    }]);
+    expect(validateDaemonConfig({ ...base, toolAuthorization: 'auto' }, { source: 'cli' }).issues).toEqual([
+      expect.objectContaining({ code: 'invalid_type', path: 'toolAuthorization', message: 'DaemonConfig.toolAuthorization must be an object, got string' }),
+    ]);
+    // No construction check for a function: an auto offer to a runtime without the capability is declined per offer.
+    const daemon = createDaemonWithAdapters(await bundled({ toolAuthorization: resolver }), [new StubRuntimeAdapter('pi')]);
+    expect(daemon.status().config.toolAuthorization).toEqual({ mode: 'host-resolver', localToolApproval: 'host-only' });
+  });
+
+  it.each([
+    ['codexSandbox', 'configure the injected Codex adapter directly'],
+    ['runtimeEnvironment', 'pass runtimeEnvironment to each injected adapter'],
+    ['runtimes', 'pass the isolation options to each injected adapter'],
+  ])('checkDaemonConfig refuses %s for injected adapters exactly where createDaemonWithAdapters throws', async (key, remedy) => {
+    const config = { ...await bundled({}), [key]: undefined };
+    const adapters = [new StubRuntimeAdapter('pi')];
+    const message = `DaemonConfig.${key} is only supported by createDaemon; ${remedy}`;
+    expect(() => createDaemonWithAdapters(config, adapters)).toThrow(new TypeError(message));
+    expect(checkDaemonConfig(config, { source: 'embedded', adapters })).toEqual({
+      ok: false, issues: [{ severity: 'error', code: 'invalid_value', path: key, message }],
+    });
+  });
+
+  it('checkDaemonConfig accepts injected adapters without the createDaemon-only keys', async () => {
+    const config = await bundled({});
+    const adapters = [new StubRuntimeAdapter('pi')];
+    expect(() => createDaemonWithAdapters(config, adapters)).not.toThrow();
+    expect(checkDaemonConfig(config, { source: 'embedded', adapters })).toEqual(expect.objectContaining({ ok: true, issues: [] }));
+  });
+
+  it('resolves a static policy per runtime id from a snapshot', () => {
+    const byRuntime: Record<string, 'auto' | 'all'> = { codex: 'all' };
+    const resolve = staticToolAuthorizationResolver({ default: 'auto', byRuntime });
+    byRuntime.claude = 'all';
+    const mode = (runtimeId: string) => resolve({ taskId: 't', runtimeId });
+    expect([mode('codex'), mode('claude'), mode('pi'), mode('constructor'), mode('__proto__')]).toEqual(['all', 'auto', 'auto', 'auto', 'auto']);
   });
 });
 

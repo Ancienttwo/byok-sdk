@@ -25,7 +25,7 @@ test('reviewed graph covers every workspace and all local dependency edges', () 
 
 test('docs and known CI contracts select light checks, not release families', () => {
   assert.deepEqual(selectImpact(['README.md', 'docs/releases/v0.28.1.md']), {
-    dirs: [], files: ['README.md', 'docs/releases/v0.28.1.md'], families: [], reason: 'docs-only',
+    dirs: [], files: ['README.md', 'docs/releases/v0.28.1.md'], families: [], reason: 'root-ci-scripts',
   });
   for (const path of ['.github/workflows/release.yml', 'scripts/ci/select-impact.mjs']) {
     assert.equal(selectImpact([path]).reason, 'root-ci-scripts');
@@ -145,6 +145,7 @@ test('a platform family is selected only by a path it owns', () => {
     'packageability-smoke': 'packages/client/src/sdk-native-assets.ts',
     'packaging-consistency': 'packages/client/src/adapters/packaging.ts',
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
+    'linux-systemd-smoke': 'templates/service/systemd/smoke-test.mjs',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
     'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
@@ -163,7 +164,7 @@ test('a platform family is selected only by a path it owns', () => {
 });
 
 test('shared Windows filesystem helpers select their real Windows consumers', () => {
-  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'windows-client', 'windows-service-smoke']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'linux-systemd-smoke', 'windows-client', 'windows-service-smoke']);
   assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-client']);
 });
 
@@ -314,12 +315,13 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/docs/device-setup.mjs', 'scripts/docs/device-setup.test.mjs',
     'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs',
     'scripts/release/check-upgrade-manifest.mjs', 'scripts/release/check-upgrade-manifest.test.mjs',
+    'scripts/release/cloud-do-consumer-smoke.mjs',
     'scripts/release/execution-submit-smoke.mjs',
     'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/packaging-plugin-smoke.mjs',
     'scripts/release/pi-launcher-smoke.mjs',
-    'scripts/release/publish.mjs', 'scripts/release/registry-readback.mjs',
+    'scripts/release/publish-recovery.test.mjs', 'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/registry-readback.mjs',
     'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
     'scripts/release/upgrade-manifest/snapshot.mjs',
   ]);
@@ -344,7 +346,10 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     return /(?:bun run check:release-pack|node scripts\/release\/pack-and-smoke\.mjs)(?:\s|$)/.test(workflow.slice(start, next < 0 ? undefined : start + 1 + next));
   });
   assert.deepEqual(selectImpact(['scripts/release/pack-and-smoke.mjs']).families, sorted(runners));
+  assert.deepEqual(selectImpact(['scripts/release/cloud-do-consumer-smoke.mjs']).families, sorted(runners));
   assert.ok(runners.includes('npm-release-pack'));
+  // Its store-path guard runs inside those same jobs.
+  assert.deepEqual(selectImpact(['scripts/release/published-store-paths.mjs']).families, sorted(runners));
 });
 
 // #1102: the upgrade-manifest data files run the root script checks; the shipped manifest also packs.
@@ -372,7 +377,7 @@ test('store precheck fixtures select the server, keys and client suites', () => 
 });
 
 test('release script siblings outside the reviewed list still fail closed', () => {
-  for (const path of ['scripts/release/publish.test.mjs', 'scripts/release/pg-migrate-smoke.mjs', 'scripts/release/registry-contract.mjs',
+  for (const path of ['scripts/release/publish-unreviewed.test.mjs', 'scripts/release/pg-migrate-smoke.mjs', 'scripts/release/registry-contract.mjs',
     'scripts/release/nested/publish.mjs', 'scripts/api-surface/check-api-surface.mjs', 'scripts/api-surface/check-version-authority.js']) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
   }
@@ -383,14 +388,14 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 18);
+  assert.equal(knownFamilies.length, 19);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {
   const script = fileURLToPath(new URL('./select-impact.mjs', import.meta.url));
   const good = spawnSync(process.execPath, [script], { input: '["README.md"]', encoding: 'utf8' });
   assert.equal(good.status, 0, good.stderr);
-  assert.equal(JSON.parse(good.stdout).reason, 'docs-only');
+  assert.equal(JSON.parse(good.stdout).reason, 'root-ci-scripts');
   for (const input of ['{', '[]', '["unknown"]']) {
     const bad = spawnSync(process.execPath, [script], { input, encoding: 'utf8' });
     assert.notEqual(bad.status, 0);
@@ -559,6 +564,15 @@ test('the sealed client build config retains the ordinary client build scope', (
   assert.deepEqual(sealed.dirs, ordinary.dirs);
   assert.deepEqual(sealed.families, ordinary.families);
   assert.equal(sealed.reason, ordinary.reason);
+});
+
+test('the todo build config selects the client build that runs it', () => {
+  // check-adapters-entry.mjs --build-todo runs tsup.todo.config.ts in the client build.
+  const runner = selectImpact(['packages/client/scripts/check-adapters-entry.mjs']);
+  const todo = selectImpact(['packages/client/tsup.todo.config.ts']);
+  assert.deepEqual(todo, { ...runner, files: todo.files });
+  assert.ok(todo.dirs.includes('packages/client'));
+  assert.ok(todo.families.includes('npm-release-pack'));
 });
 
 test('reviewed M package build configs keep owner consumers and packed artifacts, not adjacent unknown configs', () => {

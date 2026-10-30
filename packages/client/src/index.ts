@@ -133,6 +133,7 @@ export {
   type DaemonEffectiveConfig,
   type DaemonEffectiveMcpServer,
   type DaemonEffectiveRuntime,
+  type DaemonEffectiveToolAuthorization,
   type DaemonMemoryHelperResolution,
 } from './daemon/config-schema';
 export {
@@ -596,6 +597,6 @@ export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 
 export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
 export type {
-  ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask,
+  StaticToolAuthorization, ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask,
   ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason,
 } from './tool-authorization';

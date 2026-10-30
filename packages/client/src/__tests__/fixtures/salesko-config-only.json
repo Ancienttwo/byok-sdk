@@ -1,0 +1,11 @@
+{
+  "productId": "salesko",
+  "productName": "Salesko",
+  "serverUrl": "https://salesko.example",
+  "storeDir": "/Users/x/.salesko/computer",
+  "runtimes": {
+    "claude": { "agentUserContext": "excluded", "agentSessionPersistence": "disabled" },
+    "codex": { "agentUserMcpServers": "excluded" }
+  },
+  "toolAuthorization": { "default": "auto", "byRuntime": { "codex": "all" } }
+}

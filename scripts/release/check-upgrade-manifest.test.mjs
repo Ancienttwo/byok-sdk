@@ -141,7 +141,9 @@ test('a DaemonConfig field change demands an entry; a doc-only edit does not (#1
   assert.match(output, /config:newField added since \S+ without a manifest entry/);
   assert.match(output, /config:deviceName removed since \S+ without a manifest entry/);
   assert.match(buildSnapshot(f.root).items['config:productId'], /^required schema-sha256=[0-9a-f]{16}$/);
-  assert.match(buildSnapshot(f.root).items['config:toolAuthorization'], /^optional embedded-only schema-sha256=/);
+  assert.match(buildSnapshot(f.root).items['config:inputPreparation'], /^optional embedded-only schema-sha256=/);
+  // A config file can set the static form since #1168; its function form is an embedded alternative, not a surface.
+  assert.match(buildSnapshot(f.root).items['config:toolAuthorization'], /^optional schema-sha256=[0-9a-f]{16}$/);
   assert.match(buildSnapshot(f.root).items['config:localAgentRelease'], /^optional distribution-owned schema-sha256=/);
 });
 

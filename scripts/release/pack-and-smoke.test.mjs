@@ -11,6 +11,7 @@ import {
   parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_DIRECT_CLOSURE, PI_RUNTIME_CLOSURE, readInstalledPiClosure,
   readLockedPiClosure,
 } from './pi-runtime-identity.mjs';
+import { assertNoStorePaths } from './published-store-paths.mjs';
 
 const releasePackSource = readFileSync(
   fileURLToPath(new URL('./pack-and-smoke.mjs', import.meta.url)),
@@ -34,6 +35,19 @@ test('release pack includes keys and verifies its packed core edge', () => {
     'every packed package, keys included, must carry the release train version',
   );
   assert.doesNotMatch(releasePackSource, /keysVersion/, 'keys has no version of its own to pack against');
+});
+
+test('a published file that names the install store fails the release pack', () => {
+  const tarball = (body) => [
+    ['package/README.md', Buffer.from('# client\n')],
+    ['package/dist/bin/pi-todo-runtime.js', Buffer.from(body)],
+  ];
+  assert.throws(
+    () => assertNoStorePaths('@byok-sdk/client', tarball('__esm({"../../node_modules/.bun/typebox@1.3.27/node_modules/typebox/build/guard/string.mjs"(){}})')),
+    { message: '@byok-sdk/client: published files name the install store (node_modules/.bun/): package/dist/bin/pi-todo-runtime.js' },
+  );
+  assert.throws(() => assertNoStorePaths('@byok-sdk/client', tarball('..\\node_modules\\.bun\\typebox@1.3.27')), /pi-todo-runtime\.js/);
+  assertNoStorePaths('@byok-sdk/client', tarball('__esm({"node_modules/typebox/build/guard/string.mjs"(){}})'));
 });
 
 test('release graph requires keys to carry the release train version', (t) => {

@@ -2071,6 +2071,7 @@ enqueues the named `task.approve` / `task.reject`. The embedded server's
 `approvePendingApproval` / `rejectPendingApproval` project the task back to
 `Running`. Rejecting an approval does not itself record a `Failed` terminal;
 the daemon decides the runtime effect and reports any terminal outcome.
+Each committed `task.await_approval` emits one approval-request notification (even when a fresh envelope repeats the same `approvalId`); an exact envelope replay emits none.
 
 Cancellation has its own terminal authority. The embedded server's
 `TaskHandle.cancel()` projects `Cancelled`. The hosted cloud's tenant-scoped
@@ -3153,6 +3154,8 @@ server drops the envelope (and logs it) instead of processing it. A task
 with no owner on record yet, or that doesn't exist at all, is not rejected
 by this check — the latter is already covered by every handler's own
 no-op-on-missing-task behavior.
+
+An `AgentRef` mismatch is likewise refused as `agent_identity_mismatch` (wire outcome `not_permitted`), without writing a terminal or changing the legitimate task.
 
 **The mismatch is dropped, never force-failed.** Forcing the task to
 `Failed` on an ownership mismatch would turn this authorization check into

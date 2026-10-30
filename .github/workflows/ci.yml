@@ -1729,6 +1729,40 @@ jobs:
   # separate .NET runtime install needed on the runner) -- pinned to an
   # immutable release version and SHA256-verified before it is executed, so
   # an upstream release cannot silently change what CI installs and runs.
+  linux-systemd-smoke:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'linux-systemd-smoke') }}
+    name: Native systemd user service (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Verify pinned Bun archive
+        shell: node {0}
+        run: *verify-bun
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun ci
+      - run: bun run build
+      - name: Provision the runner user systemd manager
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes dbus-user-session
+          uid="$(id -u)"
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@${uid}.service"
+          export XDG_RUNTIME_DIR="/run/user/${uid}"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+          systemctl --user start dbus.socket
+          systemctl --user show-environment >/dev/null
+          echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}" >> "$GITHUB_ENV"
+      - name: Native systemd lifecycle smoke
+        run: node templates/service/systemd/smoke-test.mjs
+
   windows-service-smoke:
     needs: select
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'windows-service-smoke') }}
@@ -2017,7 +2051,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "runtime-contract"]
+    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows", "runtime-contract"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

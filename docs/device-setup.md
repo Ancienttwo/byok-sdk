@@ -100,8 +100,10 @@ For E2EE enrollment the Host also passes the base32 verification-secret string t
 `daemon.pair(code, { verificationSecret })`; use the Host's pairing flow rather
 than treating the combined UI string as an ordinary code.
 
-Embedded callbacks such as `toolAuthorization` and `agentHome.projection`
-cannot be encoded in CLI JSON. They remain typed Host integration points.
+Embedded callbacks such as a `toolAuthorization` function and
+`agentHome.projection` cannot be encoded in CLI JSON. They remain typed Host
+integration points; a config file sets the static `toolAuthorization` policy
+instead (see [Configuration](#configuration)).
 Custom adapters belong in `createDaemonWithAdapters`; the effective report
 marks them `injected`, without claiming SDK-built isolation settings for them.
 
@@ -143,8 +145,10 @@ Read `directories` for the resolved store, optional Host root, Agent-home parent
 service log directory (`logDir`) and scratch root (including its source and
 socket byte budget); `memory` for
 helper resolution/admission; `mcpServers` for mount availability; `runtimes` for
-adapter source, auto-authorization support and inherited isolation settings;
-and `toolAuthorization` for the resolver mode and local approval policy.
+adapter source, auto-authorization support and isolation settings (the
+configured `runtimes` value, else the adapter default); and `toolAuthorization`
+for the mode (`all`, `static` with each runtime's resolved mode in `byRuntime`,
+or `host-resolver`) and local approval policy.
 
 Missing required fields, invalid types/values, removed fields and CLI-forbidden
 values are errors. Unknown fields are warnings under the Q4' rollback contract;
@@ -152,6 +156,40 @@ they do not stop startup, but `--strict` fails on them. Correct warnings before
 shipping an installer config. The generated schema marks embedded-only and
 distribution-owned fields with `not: {}`; range and cross-field constraints are
 also checked by `config check`. Removed fields fail with a migration reference.
+
+### Runtime isolation and tool authorization
+
+A CLI config sets the isolation options of the bundled runtimes in `runtimes`
+and a static tool-authorization policy in `toolAuthorization`:
+
+```json
+{
+  "productName": "BYOK Example",
+  "productId": "byok-example-basic",
+  "serverUrl": "http://localhost:8787",
+  "storeDir": "/tmp/byok-example-store",
+  "runtimes": {
+    "claude": { "agentUserContext": "excluded", "agentSessionPersistence": "disabled" },
+    "codex": { "agentUserMcpServers": "excluded" }
+  },
+  "toolAuthorization": { "default": "auto", "byRuntime": { "codex": "all" } }
+}
+```
+
+- `runtimes.pi.agentUserContext`, `runtimes.claude.agentUserContext`,
+  `runtimes.claude.agentSessionPersistence` and
+  `runtimes.codex.agentUserMcpServers` go to the adapter constructors. An unset
+  option keeps the adapter default (`inherit`, `enabled`). Which runtimes run
+  stays `runtimeAllowlist`; the Codex sandbox stays `codexSandbox`.
+  `createDaemonWithAdapters` rejects `runtimes`: configure injected adapters
+  directly.
+- `toolAuthorization.byRuntime` gives a runtime its own mode; `default` covers
+  the rest. A `byRuntime` key that is not a runtime of the daemon is an error.
+- Static `auto` requires the runtime's `toolAuthorizationAuto` capability.
+  Codex has none: set it to `all` (as above), or remove it from
+  `runtimeAllowlist`.
+- An embedded Host may pass a function instead of the static policy; a config
+  file cannot.
 
 ## Operations
 
@@ -401,7 +439,9 @@ linked JSON schema for full array/union shapes and descriptions.
 | Field | Tier | Shape |
 |-------|------|-------|
 | `nativeAssetRoot` | advanced | string |
-| `toolAuthorization` | embedded-only | embedded-only |
+| `toolAuthorization` | advanced | object |
+| `toolAuthorization.default` | required when parent is set | "all" / "auto" |
+| `toolAuthorization.byRuntime` | advanced | object |
 | `localToolApproval` | common | "allow" |
 | `deviceCredentials` | advanced | object |
 | `deviceCredentials.macosKeychainPath` | advanced | string |
@@ -498,6 +538,14 @@ linked JSON schema for full array/union shapes and descriptions.
 | `agentEgress.contentRead.artifact.sensitiveNames` | advanced | array |
 | `agentEgress.contentRead.runtimeAllowlistedRoots` | advanced | array |
 | `runtimeAllowlist` | common | array |
+| `runtimes` | advanced | object |
+| `runtimes.pi` | advanced | object |
+| `runtimes.pi.agentUserContext` | advanced | "excluded" / "inherit" |
+| `runtimes.claude` | advanced | object |
+| `runtimes.claude.agentUserContext` | advanced | "excluded" / "inherit" |
+| `runtimes.claude.agentSessionPersistence` | advanced | "disabled" / "enabled" |
+| `runtimes.codex` | advanced | object |
+| `runtimes.codex.agentUserMcpServers` | advanced | "excluded" / "inherit" |
 | `runtimeEnvironment` | advanced | union |
 | `durablePi` | advanced | boolean |
 | `piByokLauncher` | advanced | object |
@@ -610,6 +658,7 @@ Manifest transition: **0.31.0 → 0.31.0**. Versions and entries below come from
 | capability-ports-two-way | breaking | createByokCloud now refuses a port passed without its capability declared (capability_port_undeclared), as it already refused a capability declared without its port (#1096). Hosts that pass a port without declaring it must either declare the capability or stop passing the port. createByokServer no longer passes an E2EE member store and derives its declaration from its ports with the new capabilityDeclarationForPorts; createInMemoryByokCloud's default declaration is derived the same way. SqliteSchemaErrorCode drops SQLITE_MIGRATION_REFUSED, which only the removed E2EE KEM-floor check raised. [Migration](../docs/architecture/process-namespace-topology.md#capability-ports-migration) |
 | device-resource-caps | breaking | A daemon runs at most DaemonConfig.maxConcurrentTasks tasks at once (default 8; a positive safe integer, no uncapped value), counted across every Agent home and runtime (#1121). Before, the device-wide count was unbounded. An offer over the cap is declined retryably before the claim, with no decline code, so a Host of any version accepts the decline. DaemonConfig.defaultMaxDurationMs (optional) is the wall-clock limit for a task whose offer carries no limits.maxDurationMs. While the Host is unreachable, the outbound queue keeps at most 8 MiB of task.progress and agent.message.draft envelopes and drops the oldest beyond that; terminals, claims, starts and approval requests are never dropped, and OutboundStatus.droppedEphemeral counts the drops. A Host that dispatches more than 8 concurrent tasks to one device sets maxConcurrentTasks to its own number. [Migration](../docs/device-setup.md#operations) |
 | runtime-environment-policy | breaking | Runtimes no longer inherit the daemon's process.env (#1095). Every adapter builds its children's environment under a RuntimeEnvironmentPolicy (constructor option runtimeEnvironment; createDaemon passes DaemonConfig.runtimeEnvironment, createDaemonWithAdapters rejects that field). The default base is the user's login-shell snapshot, captured once per process with the account's login shell (read from the account database by uid, never $SHELL; a failed lookup is the new ServiceEnvironmentUnavailableCode account-shell-unavailable) from a closed seed and a fixed PATH, so CLIs on the user's shell PATH are found in embedded use too; 'allowlist' is the strict mode over the live environment; 'pass' names live variables a Host sets. CLAUDECODE and BYOK_* are always removed, NO_PROXY/no_proxy gain 127.0.0.1 and localhost, and Claude drops the shell's ANTHROPIC_*, Bedrock/Vertex switches and OAuth token when pass supplies a provider. A failed capture fails closed: RuntimeEnvironmentUnavailableError, detection refused with the new reason runtime_environment_unavailable and its code (RuntimeObservation.code), offers declined. win32 uses the session baseline names (ServiceEnvironmentStatus source 'windows-session'). RuntimeAdapter gains the required runtimeEnvironment(); custom adapters implement it with buildRuntimeEnvironment. Prepared input bindings use the Pi adapter's environment, so a daemon without a Pi adapter refuses them (detail pi_runtime_unconfigured). The adapters entry's buildRuntimeEnv is removed; the testing fake defaults to the allowlist environment. A Host whose runtime needs a variable it set itself lists the name in pass. [Migration](../docs/device-setup.md#runtime-environment) |
+| config-file-static-tool-authorization | additive | A byok-agent config file can set toolAuthorization statically ({ default, byRuntime }) and the isolation options of the adapters createDaemon builds (runtimes.pi/claude/codex). The static form becomes the one per-offer resolver at construction; an unknown byRuntime key, or auto on a runtime without toolAuthorizationAuto, is a DaemonConfigInvalidError. An embedded Host may still pass a function. createDaemonWithAdapters rejects runtimes. The effective report gains toolAuthorization mode static with the resolved per-runtime modes. [Migration](../docs/device-setup.md#runtime-isolation-and-tool-authorization) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

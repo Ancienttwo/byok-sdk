@@ -6,7 +6,9 @@ import { REMOVED_DAEMON_CONFIG_FIELDS, type RemovedDaemonConfigField } from './r
  * Where a `DaemonConfig` comes from (#1094).
  *
  * - `cli`: a `byok-agent` JSON config file. Embedded-only fields (functions,
- *   transports) and the distribution-owned `localAgentRelease` are errors.
+ *   transports), the function form of a field that also has an object form
+ *   (`toolAuthorization`) and the distribution-owned `localAgentRelease` are
+ *   errors.
  * - `embedded`: an object a Host passes to `createDaemon` or
  *   `createDaemonWithAdapters`. Embedded-only fields are allowed and checked
  *   by daemon construction.
@@ -84,6 +86,14 @@ function validateValue(value: unknown, schema: DaemonConfigJsonSchema, path: str
       : { severity: 'error', code: 'distribution_owned', path, message: `config field "${path}" is distribution-owned and must not be supplied` });
     return;
   }
+  const functionAlternative = schema['x-byok-embeddedAlternative'] === 'function';
+  if (functionAlternative && typeof value === 'function') {
+    // Embedded construction resolves the function; a config file sets the object form.
+    if (source === 'cli') {
+      issues.push({ severity: 'error', code: 'embedded_only', path, message: `DaemonConfig.${path} as a function is not expressible in a config file; set its object form, or pass the function from an embedded Host` });
+    }
+    return;
+  }
   if (schema.anyOf !== undefined) {
     for (const branch of schema.anyOf) {
       const branchIssues: DaemonConfigIssue[] = [];
@@ -129,7 +139,7 @@ function validateValue(value: unknown, schema: DaemonConfigJsonSchema, path: str
       return;
     case 'object':
       if (!isPlainObject(value)) {
-        issues.push(typeIssue(path, 'an object', value));
+        issues.push(typeIssue(path, functionAlternative && source === 'embedded' ? 'an object or a function' : 'an object', value));
         return;
       }
       validateObject(value, schema, path, source, issues, false);

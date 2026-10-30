@@ -60,6 +60,8 @@ test('publish and readback reject a missing or latest prerelease tag before regi
         copyFileSync(path.join(releaseDirectory, entry.name), path.join(fixtureScripts, entry.name));
       }
     }
+    mkdirSync(path.join(fixtureRoot, 'scripts/ci'), { recursive: true });
+    copyFileSync(path.resolve(releaseDirectory, '../ci/release-artifact.mjs'), path.join(fixtureRoot, 'scripts/ci/release-artifact.mjs'));
     // Keep the release identity oracle's relative imports intact in isolation.
     const piOraclePath = 'packages/client/src/adapters/pi';
     mkdirSync(path.join(fixtureRoot, piOraclePath), { recursive: true });

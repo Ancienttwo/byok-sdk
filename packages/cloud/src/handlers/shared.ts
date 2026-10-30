@@ -11,11 +11,6 @@ import type { DevicePrincipal } from '@byok-sdk/core';
 import { authenticateBearer, type BearerAuthDeps } from '../auth/bearer';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores';
 
-/** Every error response on this surface is `{ error }` — the same shape the reference server uses. */
-export interface ErrorBody {
-  readonly error: string;
-}
-
 export interface BoundedJsonBodyResult {
   readonly body: unknown;
   readonly tooLarge: boolean;

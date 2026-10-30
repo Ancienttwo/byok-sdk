@@ -16,10 +16,10 @@ beforeAll(async () => {
     bundle: true, format: 'esm', platform: 'browser', external: ['cloudflare:workers'], write: false });
   persist = await mkdtemp(path.join(os.tmpdir(), 'byok-output-paging-'));
   mf = new Miniflare({ resourcePersistencePath: persist, log: new Log(LogLevel.ERROR), workers: [{ config: {
-    name: 'output-paging', type: 'worker', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
+    name: 'output-paging', compatibilityDate: '2026-08-18', compatibilityFlags: ['no_nodejs_compat', 'no_nodejs_compat_v2'],
     manifest: { mainModule: 'worker.js', modules: { 'worker.js': { type: 'esm', contents: bundled.outputFiles[0]!.text } } },
     exports: { OutputAuditDO: { type: 'durable-object', storage: 'sqlite' } },
-    env: { AGENTS: { type: 'durable-object', workerName: 'output-paging', exportName: 'OutputAuditDO' },
+    env: { AGENTS: { type: 'durable-object', worker: 'output-paging', exportName: 'OutputAuditDO' },
       AIPHABEE_ZAI_API_KEY: { type: 'text', value: 'Fixture~0123456789ABCDEFGHIJKLMNOP' } },
   }, dev: { outboundService: { type: 'node-handler', handler: async (request, response) => {
     for await (const _chunk of request) { /* Drain only this local fixture request. */ }

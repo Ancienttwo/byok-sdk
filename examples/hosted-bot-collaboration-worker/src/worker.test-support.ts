@@ -10,7 +10,6 @@ import { fork, spawn, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +25,8 @@ import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout
 import { hostScopeDdl, sha256Hex, writeHostScope } from './host-scopes';
 import type { ChildMessage, ParentMessage } from './device.child';
 import type { PassReport } from './worker';
+import { openWorkerEndpoint, verifyWorkerIdentity, type WorkerEndpoint } from './worker.test-endpoint';
+import { proxyDiagnostics } from './worker.test-diagnostics';
 
 const OPT_IN_ENV = 'BYOK_TEST_WORKER_DATAPLANE';
 const REQUIRE_ENV = 'BYOK_REQUIRE_WORKER_DATAPLANE';
@@ -119,17 +120,6 @@ function s3(bucketSeed: string) {
     secretAccessKey: 'byokminio', region: 'us-east-1', signingClock: { now: () => new Date() } };
 }
 
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') { reject(new Error('no port')); return; }
-      server.close(() => resolve(address.port));
-    });
-  });
-}
 function wranglerEntry(): string {
   const require = createRequire(import.meta.url);
   const manifestPath = require.resolve('wrangler/package.json', { paths: [EXAMPLE_DIR] });
@@ -147,6 +137,9 @@ export interface WorkerInstance {
   waitForOutput(marker: string, timeoutMs?: number): Promise<void>;
   /** The instance is destroyed: SIGKILL to wrangler and workerd, with no grace and no cleanup in the Worker. */
   kill(): Promise<void>;
+  /** Ends the session, including its retained device listener. */
+  dispose(): Promise<void>;
+  restart(options?: Omit<WorkerOptions, 'persist'>): Promise<WorkerInstance>;
   passes(): Promise<PassReport>;
   /** Fires the cron trigger through wrangler's `--test-scheduled` route: it arms the clock and runs no pass. */
   armClock(): Promise<void>;
@@ -155,7 +148,6 @@ export interface WorkerInstance {
 }
 
 export interface WorkerOptions {
-  port?: number;
   fault?: string;
   vars?: Record<string, string>;
   /**
@@ -166,8 +158,14 @@ export interface WorkerOptions {
 }
 
 export async function startWorker(substrate: Substrate, options: WorkerOptions = {}): Promise<WorkerInstance> {
-  const port = options.port ?? await freePort();
-  const base = `http://127.0.0.1:${port}`;
+  const endpoint = await openWorkerEndpoint();
+  try { return await startWorkerGeneration(substrate, options, endpoint); }
+  catch (error) { await endpoint.dispose(); throw error; }
+}
+
+async function startWorkerGeneration(substrate: Substrate, options: WorkerOptions, endpoint: WorkerEndpoint): Promise<WorkerInstance> {
+  const base = endpoint.base;
+  const identity = randomUUID();
   const adminToken = ADMIN_TOKEN;
   const persist = options.persist ?? mkdtempSync(path.join(tmpdir(), 'hw-persist-'));
   const storage = s3(substrate.sdkSchema);
@@ -176,9 +174,9 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
     BYOK_S3_SECRET_ACCESS_KEY: storage.secretAccessKey, BYOK_S3_REGION: storage.region,
     // Every pass reads the tried rows again: the suites drive the passes themselves and wait for the result.
     H_RECONCILE_POLL_MS: '0', ...(options.fault ? { H_FAULT: options.fault } : {}),
-    ...options.vars };
+    ...options.vars, H_TEST_INSTANCE: identity };
   let output = '';
-  const child = spawn(process.execPath, [wranglerEntry(), 'dev', '--config', WRANGLER_CONFIG, '--port', String(port), '--ip', '127.0.0.1', '--persist-to', persist,
+  const child = spawn(process.execPath, [wranglerEntry(), 'dev', fileURLToPath(new URL('./worker.test-entry.ts', import.meta.url)), '--config', WRANGLER_CONFIG, '--port', '0', '--ip', '127.0.0.1', '--persist-to', persist,
     '--test-scheduled', '--show-interactive-dev-session=false', ...Object.entries(vars).flatMap(([name, value]) => ['--var', `${name}:${value}`])],
   { cwd: EXAMPLE_DIR, detached: true, env: { ...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1',
     CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_BYOK_PG: substrate.connectionString } });
@@ -186,20 +184,40 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
   const onData = (chunk: Buffer) => { output += chunk.toString('utf8'); for (const wake of waiters) wake(); };
   child.stdout?.on('data', onData);
   child.stderr?.on('data', onData);
-  const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
+  // close drains both pipes so teardown cannot omit the last recovery warning.
+  const closed = new Promise<void>(resolve => child.once('close', (exitCode, signal) => {
+    const diagnostics = proxyDiagnostics(output);
+    for (const line of diagnostics.recoveries) console.warn(`[worker-proxy recovery] ${line}`);
+    for (const line of diagnostics.disconnects) console.warn(`[worker-proxy disconnect] ${line}`);
+    console.log('[worker-proxy summary]', JSON.stringify({ base,
+      recoveryWarnings: diagnostics.recoveries.length, disconnectLines: diagnostics.disconnects.length, exitCode, signal }));
+    resolve();
+  }));
+  let killed: Promise<void> | undefined;
   const kill = async () => {
-    if (child.exitCode === null && child.signalCode === null && child.pid !== undefined) {
-      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is gone */ }
-      await exited;
-    }
-    if (options.persist === undefined) rmSync(persist, { recursive: true, force: true });
-    // wrangler's bundle scratch next to the config; the next instance writes it again.
-    rmSync(path.join(path.dirname(WRANGLER_CONFIG), '.wrangler'), { recursive: true, force: true });
+    killed ??= (async () => {
+      endpoint.disconnect();
+      if (child.pid !== undefined) {
+        try { process.kill(-child.pid, 'SIGKILL'); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+      }
+      // close waits for the child's stdio as well as exit; every runtime in its group was signalled.
+      await closed;
+      if (options.persist === undefined) rmSync(persist, { recursive: true, force: true });
+      rmSync(path.join(path.dirname(WRANGLER_CONFIG), '.wrangler'), { recursive: true, force: true });
+    })();
+    await killed;
   };
   const authorized = (body: unknown, token: string): RequestInit => ({ method: 'POST', body: JSON.stringify(body),
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });
   const instance: WorkerInstance = {
     base, output: () => output, kill,
+    async dispose() { try { await kill(); } finally { await endpoint.dispose(); } },
+    async restart(next = {}) {
+      await kill();
+      try { return await startWorkerGeneration(substrate, { ...next, persist: options.persist }, endpoint); }
+      catch (error) { await endpoint.dispose(); throw error; }
+    },
     lines: marker => output.split('\n').filter(line => line.includes(marker)),
     waitForOutput: (marker, timeoutMs = 60_000) => new Promise((resolve, reject) => {
       const check = () => {
@@ -222,13 +240,27 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
     },
     input: (token, botId, key, request) => fetch(`${base}/host/input`, authorized({ botId, key, request }, token)),
   };
-  for (const deadline = Date.now() + 120_000; ;) {
-    if (child.exitCode !== null) { await kill(); throw new Error(`wrangler dev exited early (${child.exitCode}):\n${output}`); }
-    try {
-      if ((await fetch(base, { signal: AbortSignal.timeout(2_000) })).status === 404) break;
-    } catch { /* not up yet */ }
-    if (Date.now() > deadline) { await kill(); throw new Error(`wrangler dev never became ready:\n${output}`); }
-    await new Promise(resolve => setTimeout(resolve, 250));
+  try {
+    const runtimePort = await new Promise<number>((resolve, reject) => {
+      const finish = (error?: Error, port?: number) => {
+        clearTimeout(timer); waiters.delete(check); child.off('exit', onExit); child.off('error', onError);
+        if (error) reject(error); else resolve(port!);
+      };
+      const check = () => {
+        const match = /Ready on http:\/\/127\.0\.0\.1:(\d+)/u.exec(output);
+        if (match && Number(match[1]) > 0) finish(undefined, Number(match[1]));
+      };
+      const onExit = () => finish(new Error(`wrangler dev exited before readiness:\n${output}`));
+      const onError = (error: Error) => finish(error);
+      const timer = setTimeout(() => finish(new Error(`wrangler dev never became ready:\n${output}`)), 120_000);
+      child.once('exit', onExit); child.once('error', onError); waiters.add(check);
+      if (child.exitCode !== null || child.signalCode !== null) onExit(); else check();
+    });
+    endpoint.connect(runtimePort);
+    await verifyWorkerIdentity(base, identity);
+  } catch (error) {
+    await instance.dispose();
+    throw error;
   }
   return instance;
 }
@@ -332,19 +364,17 @@ export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}) {
     const { code } = await worker.admin<{ code: string }>('/host/pairing-code', { scope: home });
     device = await startDevice(worker.base, code);
   } catch (error) {
-    await device?.stop(); await worker?.kill(); await substrate.dispose();
+    await device?.stop(); await worker?.dispose(); await substrate.dispose();
     rmSync(persist, { recursive: true, force: true });
     throw error;
   }
-  const port = Number(new URL(worker.base).port);
   const h = substrate.hSchema;
   return {
     substrate, home, device,
     get worker() { return worker!; },
     /** Destroys the running instance and starts a new one on the same port, with these options (no fault by default). */
-    async restart(next: Omit<WorkerOptions, 'persist' | 'port'> = {}) {
-      await worker!.kill();
-      worker = await startWorker(substrate, { ...next, port, persist });
+    async restart(next: Omit<WorkerOptions, 'persist'> = {}) {
+      worker = await worker!.restart(next);
       return worker;
     },
     /** A Main Bot on the device with its own Agent, bound to H. Returns a new owner session token. */
@@ -397,7 +427,7 @@ export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}) {
       `SELECT task_id AS task, tries, submission, conclusion FROM "${h}".intent WHERE scope = $1 AND source = 'routine' ORDER BY ordinal`,
       [storedKey(home)])).rows,
     async close() {
-      await device?.stop(); await worker?.kill(); await substrate.dispose();
+      await device?.stop(); await worker?.dispose(); await substrate.dispose();
       rmSync(persist, { recursive: true, force: true });
     },
   };

@@ -12,8 +12,28 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
       "type": "string"
     },
     "toolAuthorization": {
-      "x-byok-surface": "embedded-only",
-      "not": {}
+      "type": "object",
+      "properties": {
+        "default": {
+          "enum": [
+            "all",
+            "auto"
+          ]
+        },
+        "byRuntime": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "all",
+              "auto"
+            ]
+          }
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "x-byok-embeddedAlternative": "function"
     },
     "localToolApproval": {
       "const": "allow"
@@ -572,6 +592,50 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "runtimes": {
+      "type": "object",
+      "properties": {
+        "pi": {
+          "type": "object",
+          "properties": {
+            "agentUserContext": {
+              "enum": [
+                "excluded",
+                "inherit"
+              ]
+            }
+          }
+        },
+        "claude": {
+          "type": "object",
+          "properties": {
+            "agentUserContext": {
+              "enum": [
+                "excluded",
+                "inherit"
+              ]
+            },
+            "agentSessionPersistence": {
+              "enum": [
+                "disabled",
+                "enabled"
+              ]
+            }
+          }
+        },
+        "codex": {
+          "type": "object",
+          "properties": {
+            "agentUserMcpServers": {
+              "enum": [
+                "excluded",
+                "inherit"
+              ]
+            }
+          }
+        }
       }
     },
     "runtimeEnvironment": {

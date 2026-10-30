@@ -164,19 +164,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // NOT Failed
     });
 
-    // 2d gap: the assertion split out of the test above. The old hub's
-    // `onAwaitApproval` structural guard returned early on an
-    // `AwaitApproval -> AwaitApproval` redelivery, so NOTHING was pushed onto
-    // `TaskHandle.events()`. The kernel has no execution state machine
-    // (ADR-028) and `TaskEventRelay.onInboundCommitted` folds every COMMITTED
-    // `task.await_approval` into the feed, so a fresh-id redelivery now emits
-    // an `await_approval` event plus an `AwaitApproval` state event. Only an
-    // envelope-id duplicate is suppressed (by the kernel's dedup step, pinned
-    // by the batch-retry test above). Orchestrator decision: accept the
-    // re-emission as the honest report of a new observation, or restore
-    // suppression in the relay.
-    // Decision D1: https://github.com/Ancienttwo/byok-sdk/issues/1153
-    it.skip('a fresh (non-duplicate-id) task.await_approval arriving while already AwaitApproval pushes nothing further onto TaskHandle.events()', async () => {
+    it('a fresh envelope with the same approvalId emits one approval request and state notification', async () => {
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
@@ -190,6 +178,9 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
 
       await daemon.send(createEnvelope('task.await_approval', { summary: 'second, redundant', approvalId: 'appr-first' }, { taskId: handle.taskId }));
 
+      expect((await iter.next()).value).toMatchObject({ kind: 'await_approval', summary: 'second, redundant', approvalId: 'appr-first' });
+      expect((await iter.next()).value).toMatchObject({ kind: 'state', state: 'AwaitApproval' });
+      expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-first');
       await expectNoMoreEvents(iter);
     });
   });
@@ -319,8 +310,8 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
     });
   });
 
-  describe('cancel/reject redelivery survives the terminal-task filter (N1/F4)', () => {
-    it('GET /byok/events includes an exempted task.cancel for an already-terminal task, and excludes task.offer/task.steer/task.approve for terminal tasks', async () => {
+  describe('durable mailbox delivery after cancellation (N1/F4)', () => {
+    it('GET /byok/events retains task.cancel and excludes offers with accepted cancellation', async () => {
       const started = await start();
       // S0: task1 gets steered below, so this device must advertise pi (the
       // one steerable runtime) and claim task1 as pi — the steer gate reads
@@ -330,7 +321,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
         runtimes: [PI_RUNTIME_INFO],
       });
 
-      // task1: Running -> steer (non-exempt, non-terminal at send time) -> cancel (exempt, terminal at send time).
+      // Queue a steer before accepting cancellation.
       const handle1 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task one' });
       await claimAndStart(daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
@@ -338,11 +329,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       await handle1.result();
       expect((await started.byok.tasks.get(handle1.taskId))?.state).toBe('Cancelled');
 
-      // task2: Running -> AwaitApproval -> approve (non-exempt, non-terminal
-      // at send time) -> cancel (exempt, terminal at send time) — proves
-      // approve's exemption would be moot (it's never sent on an
-      // already-terminal task) while still confirming it doesn't survive the
-      // filter once the task later goes terminal for an unrelated reason.
+      // Queue an approval before accepting cancellation.
       const handle2 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task two' });
       await claimAndStart(daemon, handle2);
       await daemon.send(
@@ -367,19 +354,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       expect(seen).not.toContain(`task.offer:${handle2.taskId}`);
     });
 
-    // 2d gap: the two exclusions split out of the test above. The old hub's
-    // `collectRelevant` filtered EVERY non-exempt envelope for an
-    // already-terminal task, with `task.cancel`/`task.reject` as the named
-    // exemptions. The kernel's `GET /byok/events` filter (`handlers/events.ts`)
-    // drops exactly one thing — an OFFER for a task with an accepted
-    // cancellation — and delivers every other durable row it owes the device,
-    // because the mailbox is an at-least-once delivery log rather than a
-    // re-derived relevance view. So a `task.steer`/`task.approve` enqueued
-    // while the task was still live is still delivered after it goes terminal.
-    // Orchestrator decision: accept the kernel's delivery semantics (packet
-    // §2), or add a terminal-task filter to the kernel's events handler.
-    // Decision D2: https://github.com/Ancienttwo/byok-sdk/issues/1153
-    it.skip('GET /byok/events excludes task.steer/task.approve enqueued before a task went terminal', async () => {
+    it('GET /byok/events retains task.steer/task.approve enqueued before a task went terminal', async () => {
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
         productId: PRODUCT_ID,
@@ -404,8 +379,8 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
 
       const body = (await (await daemon.replay(0)).json()) as { events: Envelope[] };
       const seen = body.events.map((e) => `${e.type}:${e.task_id ?? ''}`);
-      expect(seen).not.toContain(`task.steer:${handle1.taskId}`);
-      expect(seen).not.toContain(`task.approve:${handle2.taskId}`);
+      expect(seen).toContain(`task.steer:${handle1.taskId}`);
+      expect(seen).toContain(`task.approve:${handle2.taskId}`);
     });
   });
 });

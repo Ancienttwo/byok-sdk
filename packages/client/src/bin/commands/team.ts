@@ -39,21 +39,6 @@ export async function runTeamJoinCommand(config: DaemonConfig, workspaceId: stri
   } finally { client.close(); }
 }
 
-export async function runTeamPostCommand(config: DaemonConfig, context: string, body: string): Promise<void> {
-  const client = await connect(config);
-  try { process.stdout.write(`${JSON.stringify(await client.request('team_messages.post', { context, body }))}\n`); } finally { client.close(); }
-}
-
-export async function runTeamReadCommand(config: DaemonConfig, context: string, afterSeq?: number): Promise<void> {
-  const client = await connect(config);
-  try { process.stdout.write(`${JSON.stringify(await client.request('team_messages.read', { context, ...(afterSeq === undefined ? {} : { afterSeq }) }))}\n`); } finally { client.close(); }
-}
-
-export async function runTeamAckCommand(config: DaemonConfig, context: string, throughSeq: number): Promise<void> {
-  const client = await connect(config);
-  try { process.stdout.write(`${JSON.stringify(await client.request('team_messages.ack', { context, throughSeq }))}\n`); } finally { client.close(); }
-}
-
 export async function runTeamWatchCommand(config: DaemonConfig, workspaceId: string, signal: AbortSignal): Promise<void> {
   const client = await connect(config);
   let afterSeq = 0;

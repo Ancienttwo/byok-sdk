@@ -284,13 +284,30 @@ export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 
 export function buildAdapter(id: RuntimeId, config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter {
   const environment = config.runtimeEnvironment === undefined ? {} : { runtimeEnvironment: config.runtimeEnvironment };
+  // `DaemonConfig.runtimes`, already validated; an unset option keeps the adapter default.
+  const pi = config.runtimes?.pi;
+  const claude = config.runtimes?.claude;
+  const codex = config.runtimes?.codex;
   switch (id) {
     case 'pi':
-      return new PiAdapter({ nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...environment, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: true } : {}) });
+      return new PiAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...environment,
+        ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }),
+        ...(config.durablePi === true ? { durablePi: true } : {}),
+        ...(pi?.agentUserContext === undefined ? {} : { agentUserContext: pi.agentUserContext }),
+      });
     case 'claude':
-      return new ClaudeAdapter({ nativeAssetRoot: config.nativeAssetRoot, ...environment });
+      return new ClaudeAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        ...(claude?.agentUserContext === undefined ? {} : { agentUserContext: claude.agentUserContext }),
+        ...(claude?.agentSessionPersistence === undefined ? {} : { agentSessionPersistence: claude.agentSessionPersistence }),
+      });
     case 'codex':
-      return new CodexAdapter({ nativeAssetRoot: config.nativeAssetRoot, ...environment, ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }) });
+      return new CodexAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }),
+        ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
+      });
   }
 }
 
@@ -303,6 +320,24 @@ export function buildAdapter(id: RuntimeId, config: DaemonConfig, piByokLauncher
  * already applies to an unknown *requested* runtime — and it de-duplicates
  * repeated entries for free.
  */
+/**
+ * `DaemonConfig` keys that configure the adapters `createDaemon` builds.
+ * `createDaemonWithAdapters` rejects each one, even when undefined, and
+ * `checkDaemonConfig` reports the same keys for injected adapters.
+ */
+const CREATE_DAEMON_ONLY_KEYS = [
+  ['codexSandbox', 'configure the injected Codex adapter directly'],
+  ['runtimeEnvironment', 'pass runtimeEnvironment to each injected adapter'],
+  ['runtimes', 'pass the isolation options to each injected adapter'],
+] as const;
+
+/** The createDaemon-only keys `config` sets, in check order, with the message `createDaemonWithAdapters` throws. */
+export function injectedAdapterConfigConflicts(config: object): { readonly key: string; readonly message: string }[] {
+  return CREATE_DAEMON_ONLY_KEYS
+    .filter(([key]) => Object.hasOwn(config, key))
+    .map(([key, remedy]) => ({ key, message: `DaemonConfig.${key} is only supported by createDaemon; ${remedy}` }));
+}
+
 export function buildDefaultAdapters(config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter[] {
   const ids = config.runtimeAllowlist
     ? ALL_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))

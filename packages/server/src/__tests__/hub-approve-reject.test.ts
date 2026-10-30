@@ -85,17 +85,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     expect(await drainTypes(daemon)).toEqual(['task.offer', 'task.approve']);
   });
 
-  // 2d gap: the old `ConnectionHub.rejectTask` was authoritative over the TASK,
-  // moving the record straight to `Failed` and writing the caller's reason as
-  // the terminal result. The kernel's `rejectTask` resolves the APPROVAL and
-  // enqueues a `task.reject` for the runtime; the attempt itself stays
-  // `running` until the daemon reports its own terminal (`task.fail`), which is
-  // what `hub-approval-resolved.test.ts`'s "local reject" case already
-  // describes as the daemon's job. Orchestrator decision: accept the kernel's
-  // split (host resolves the approval, runtime owns the terminal) and document
-  // the break in Step 5, or have the façade force a terminal on reject.
-  // Decision D4: https://github.com/Ancienttwo/byok-sdk/issues/1153
-  it.skip('reject (with a reason) on a task currently AwaitApproval moves it to Failed with that reason', async () => {
+  it('reject resolves the approval and leaves the terminal outcome to the daemon', async () => {
     const { byok: instance, daemon } = await start();
 
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
@@ -104,8 +94,13 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
 
     await handle.reject('looked risky');
     const snapshot = await instance.tasks.get(handle.taskId);
-    expect(snapshot?.state).toBe('Failed');
-    expect(snapshot?.result?.state === 'Failed' ? snapshot.result.reason : undefined).toBe('looked risky');
+    expect(snapshot?.state).toBe('Running');
+    expect(snapshot?.result).toBeUndefined();
+    expect(snapshot?.pendingApprovalId).toBeUndefined();
+    const decisions = (await daemon.next()).filter((e) => e.type === 'task.reject');
+    expect(decisions).toMatchObject([{ type: 'task.reject', task_id: handle.taskId, payload: { approvalId: 'appr-1', reason: 'looked risky' } }]);
+    await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'runtime stopped after rejection', retryable: false }, { taskId: handle.taskId }));
+    expect((await instance.tasks.get(handle.taskId))?.result).toMatchObject({ state: 'Failed', reason: 'runtime stopped after rejection', retryable: false });
   });
 
   // An unknown taskId is refused through ByokServer.tasks.approve/reject, which names an arbitrary taskId: tasks-approval.test.ts.
@@ -295,11 +290,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
     });
 
-    // 2d gap: same divergence as the outer `reject` case above — the kernel's
-    // `rejectTask` resolves the approval and hands the runtime a `task.reject`;
-    // it does not write a `Failed` terminal on the host's behalf.
-    // Decision D5: https://github.com/Ancienttwo/byok-sdk/issues/1153
-    it.skip('reject(reason, {approvalId}) targets the CURRENT pending approval end to end through dispatch()', async () => {
+    it('reject(reason, {approvalId}) targets the CURRENT pending approval end to end through dispatch()', async () => {
       const { byok: instance, daemon } = await start();
 
       const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
@@ -308,8 +299,13 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
 
       await handle.reject('looked risky', { approvalId: 'appr-A' });
       const snapshot = await instance.tasks.get(handle.taskId);
-      expect(snapshot?.state).toBe('Failed');
-      expect(snapshot?.result?.state === 'Failed' ? snapshot.result.reason : undefined).toBe('looked risky');
+      expect(snapshot?.state).toBe('Running');
+      expect(snapshot?.result).toBeUndefined();
+      expect(snapshot?.pendingApprovalId).toBeUndefined();
+      const decisions = (await daemon.next()).filter((e) => e.type === 'task.reject');
+      expect(decisions).toMatchObject([{ type: 'task.reject', task_id: handle.taskId, payload: { approvalId: 'appr-A', reason: 'looked risky' } }]);
+      await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'runtime stopped after rejection', retryable: false }, { taskId: handle.taskId }));
+      expect((await instance.tasks.get(handle.taskId))?.result).toMatchObject({ state: 'Failed', reason: 'runtime stopped after rejection', retryable: false });
     });
 
     it("approve({approvalId}) against a STALE (superseded) approval throws StaleApprovalError — importable/catchable from the package's public entry point — leaving state unchanged; the CURRENT approval still works through the same handle", async () => {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -43,7 +44,9 @@ function publishEntry(name, version = TRAIN) {
   return { name, version, directory: `packages/${name.split('/').pop()}`, manifest: { name, version } };
 }
 
-test('--artifacts and --out-dir are mutually exclusive and the existing flags keep their rules', () => {
+const ciFlags = ['--ci-run-id', '123', '--ci-artifact-id', '456', '--ci-artifact-digest', `sha256:${'a'.repeat(64)}`];
+
+test('dry-run artifact inputs remain separate from verified CI execution', () => {
   assert.deepEqual(parseArguments(['--artifacts', 'ci-pack']), {
     execute: false,
     otp: undefined,
@@ -52,13 +55,16 @@ test('--artifacts and --out-dir are mutually exclusive and the existing flags ke
     tag: undefined,
     trustedPublishing: false,
   });
-  assert.deepEqual(parseArguments(['--execute', '--otp', '123456', '--artifacts', 'ci-pack']), {
+  assert.deepEqual(parseArguments(['--execute', '--otp', '123456', ...ciFlags]), {
     execute: true,
     otp: '123456',
     outDir: undefined,
-    artifacts: 'ci-pack',
+    artifacts: undefined,
     tag: undefined,
     trustedPublishing: false,
+    ciRunId: '123',
+    ciArtifactId: '456',
+    ciArtifactDigest: `sha256:${'a'.repeat(64)}`,
   });
   assert.throws(
     () => parseArguments(['--artifacts', 'ci-pack', '--out-dir', 'fresh']),
@@ -72,6 +78,34 @@ test('--artifacts and --out-dir are mutually exclusive and the existing flags ke
   assert.throws(() => parseArguments(['--artifacts']), /--artifacts requires a value/);
   assert.throws(() => parseArguments(['--execute', '--execute']), /--execute may be provided only once/);
   assert.throws(() => parseArguments(['--unknown']), /unknown flag --unknown/);
+});
+
+test('all execute authentication modes require complete live CI evidence and refuse local artifacts', () => {
+  for (const auth of [[], ['--otp', '123456'], ['--trusted-publishing']]) {
+    for (const input of [[], ['--artifacts', 'forged-receipt-dir'], ['--out-dir', 'local-rebuild']]) {
+      assert.throws(() => parseArguments(['--execute', ...auth, ...input]),
+        error => error.code === 'RELEASE_CI_EVIDENCE_REQUIRED');
+    }
+    assert.equal(parseArguments(['--execute', ...auth, ...ciFlags]).execute, true);
+  }
+  for (const input of [['--artifacts', 'forged'], ['--out-dir', 'rebuild']]) {
+    assert.throws(() => parseArguments(['--execute', ...ciFlags, ...input]), /cannot be combined/);
+  }
+  for (const flags of [ciFlags.slice(0, 2), ciFlags.slice(2),
+    ['--ci-run-id', '-1', ...ciFlags.slice(2)],
+    ['--ci-run-id', '9007199254740992', ...ciFlags.slice(2)],
+    [...ciFlags.slice(0, 4), '--ci-artifact-digest', 'sha256:fake']]) {
+    assert.throws(() => parseArguments(['--execute', ...flags]), /all CI evidence/);
+  }
+});
+
+test('the real CLI rejects local execute before invoking any build, registry or publishing command', () => {
+  const result = spawnSync(process.execPath, [publishSource, '--execute', '--artifacts', '/forged-local-receipt'], {
+    encoding: 'utf8', env: { ...process.env, PATH: '' },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /RELEASE_CI_EVIDENCE_REQUIRED/);
+  assert.doesNotMatch(result.stderr, /spawn.*ENOENT/);
 });
 
 test('a frozen artifact set matching the manifest, HEAD and the publish set produces the plan', () => {
