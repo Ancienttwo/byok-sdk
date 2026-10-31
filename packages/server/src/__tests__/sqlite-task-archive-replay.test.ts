@@ -15,7 +15,7 @@ import { createByokServer, createHmacTokenSigner } from '../index';
 import { isSqliteAvailable } from '../sqlite-support';
 import { connectFakeDaemonLongPoll, startServer, stopServer } from './test-support';
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const PRODUCT_ID = 'acme-task-archive';
 const AGENT = { agentId: 'archive-agent', profileRevision: 'rev-1' };
 const CAPABILITIES = [
