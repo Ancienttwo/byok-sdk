@@ -1005,6 +1005,7 @@ function buildDaemon(
     daemonOwnerLease: undefined,
     presencePublisher: undefined,
     detectedRuntimeFacts: [],
+    detectedRuntimeUnavailable: [],
     runtimeObservations: [],
     resolvedEnvironment: serviceEnvironmentStatus(),
     environmentResolvedAt: undefined,

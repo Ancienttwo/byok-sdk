@@ -85,6 +85,15 @@ export const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY = 'sealed-output-ciphertext
 export const RUNTIME_FAILURE_CLASS_CAPABILITY = 'runtime-failure-class' as const;
 
 /**
+ * The connection understands the typed pre-claim runtime-unavailable cause
+ * (#1103 D8): `task.decline.runtimeUnavailable`, `conn.hello.runtimeUnavailable`
+ * and the presence projection. A daemon declares it when it emits the cause.
+ * Older peers ignore the unknown flag; absence means the peer may not read
+ * the cause, so a Host falls back to `retryable` and treats the cause as
+ * unknown. It never infers availability or allow from absence.
+ */
+export const RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY = 'runtime-unavailable-cause' as const;
+/**
  * The closed classes of `task.fail.failure.class`: the vendored OAR
  * `FailureClass` values. `unknown` means the runtime gave no structured
  * evidence. Single value authority shared by schema validation and

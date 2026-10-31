@@ -35,7 +35,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
   if (run === undefined) return;
   const {
     record, activeJournal, activePressureEngine, journalIdentity, resultReplyRecoveryTasks,
-    sealedRun, recordRecoveryFailure, runtimes, harnesses, blobClient, agentMemoryIntentBackend,
+    sealedRun, recordRecoveryFailure, runtimes, harnesses, runtimeUnavailable, blobClient, agentMemoryIntentBackend,
   } = run;
   const {
     capabilities, agentHomeProjectionCompletion, processProviderProvisioningNotice,
@@ -67,7 +67,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
   });
 
   daemonState.connection = createStartConnection(daemonScope, {
-    record, capabilities, runtimes, harnesses, handleAgentHomeProjectionEnvelope,
+    record, capabilities, runtimes, harnesses, runtimeUnavailable, handleAgentHomeProjectionEnvelope,
     handleAgentInputPreparationEnvelope, handleProviderProvisioningEnvelope,
     handleAgentMemoryIntentEnvelope, handleE2eeKeyPackageEnvelope, handleAgentEgressEnvelope,
     handleAgentContentReadEnvelope, activePressureEngine, journalIdentity, activeJournal,

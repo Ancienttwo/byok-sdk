@@ -216,7 +216,7 @@ describe('conn.hello.capabilities', () => {
 
     // `blob-upload` is unconditional, not gated on any adapter's own
     // `capabilities()` the way `steer` is.
-    expect(hello.payload.capabilities).toEqual(['steer', 'blob-upload', 'terminal-projection-selection', 'dispatch-selection', 'toolset-selection', 'custom-harness']);
+    expect(hello.payload.capabilities).toEqual(['steer', 'blob-upload', 'runtime-unavailable-cause', 'terminal-projection-selection', 'dispatch-selection', 'toolset-selection', 'custom-harness']);
   });
 
   it('withholds dispatch-selection when a custom built-in-id adapter has not opted into exact target semantics', async () => {

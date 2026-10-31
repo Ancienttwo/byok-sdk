@@ -6,6 +6,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { bindMcpToolsetServerObservation, observeMcpServer } from '../../mcp/observation';
 import type { McpStdioServerConfig, McpToolsetToolObservation, MessageDraftDelta, RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeDetectResult, Session } from '../../types';
 import { startPreparedOperation, type PreparedOperationResources } from '../fixtures/prepared-operation';
+import { runtimeVersionPolicyProjection } from '../../runtime-version-policy';
 import { startEgressRecorder, type EgressAttempt, type EgressRecorder } from './loopback';
 
 /**
@@ -212,7 +213,13 @@ export function expectDetectedVersion(
   // applies to these fixture adapters.
   expect(result.versionVerdict, 'detect() must report the effective version policy verdict').toBeDefined();
   expect(result.versionVerdict?.qualifiedVersion).toBe(target.qualifiedVersion);
-  expect(result.versionVerdict?.state).toBe(qualified || !advisory ? 'allow' : 'warn');
+  const state = qualified || !advisory ? 'allow' : 'warn';
+  expect(result.versionVerdict?.state).toBe(state);
+  // #1103 B2b: the hello/presence projection is the same verdict, reduced to
+  // state + qualified token. A regression that invents allow, drops the
+  // projectable field or carries a local `matched` spec fails here for every
+  // bundled adapter.
+  expect(runtimeVersionPolicyProjection(result.versionVerdict)).toEqual({ state, qualifiedVersion: target.qualifiedVersion });
   if (advisory && !qualified) expect(result.advisory).toEqual({ reason: 'runtime_version_unqualified', qualifiedVersion: target.qualifiedVersion });
   else expect(result.advisory).toBeUndefined();
 }

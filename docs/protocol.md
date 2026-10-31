@@ -434,6 +434,8 @@ information in runtime/harness discovery and the claim snapshot. The three
 paths name one shared field in `WIRE_ADDITIONS`. See the
 [Agent message draft lane](spec.md#agent-message-draft-lane).
 
+**Landed additive minor: version policy and `runtime_unavailable` on hello/presence (#1103 B2b).** `conn.hello.runtimes[]` and `conn.hello.harnesses[]` gain an OPTIONAL `versionPolicy: { state: 'allow' | 'warn' | 'block', qualifiedVersion? }`, the effective policy verdict reduced to discovery data (`matched` and the policy's spec lists stay local). `conn.hello` and `PUT /byok/presence` gain an OPTIONAL top-level `runtimeUnavailable[]` of `{ id, cause, retryable }` for non-available runtimes; presence keeps the frozen `RuntimeId` domain, so a custom harness's policy travels only on `conn.hello.harnesses[]`. The new capability flag `runtime-unavailable-cause` announces the typed cause. Every field is strip-safe on a strip-unknown payload: an older receiver drops it, and absence means unknown — never `allow` or `available`. See §11.4.1.
+
 **Landed additive minor: `task.fail.failure` (#869).** `task.fail`, and so
 its sealed branch, gains an OPTIONAL strict `failure: { class, resetsAt? }`.
 `class` is a `RuntimeFailureClass` value: the vendored OAR
@@ -576,7 +578,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
-| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
+| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `harnesses?`, `runtimeUnavailable?` (additive — §11.4.1), `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
 | `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `runtime?`, `harnessId?`, `dispatchSelection?` (see below), `terminalProjection?`, `limits?`, `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
@@ -2875,15 +2877,21 @@ publishes the same lossy first-hop presence snapshot:
 PUT /byok/presence
   Request (PresencePublishRequestSchema):
     { level, detail?, configuredToolsets?, clientVersion?,
-      protocolVersions?, runtimes? }
+      protocolVersions?, runtimes?, runtimeUnavailable? }
 ```
 
 `clientVersion` is the U4a `localAgentRelease.version` value and is never
 derived from a package, runtime executable, or host. `runtimes[]` contains
 only the version/auth facts returned by the daemon's real local probe;
-unavailable fields are omitted. The `conn.hello` and this first HTTP presence
-publication use one frozen per-start snapshot, so identity has one authority.
-Presence remains a lossy TTL hint and is not an execution or admission signal.
+unavailable fields are omitted. `runtimes[].versionPolicy` and the top-level
+`runtimeUnavailable[]` are the same strip-safe discovery projection
+`conn.hello` carries (§11.4.1). Presence's identity domain stays the frozen
+`RuntimeId`: `runtimeUnavailable[].id` is a built-in runtime id, and a
+custom harness's policy or cause is available only on
+`conn.hello.harnesses[]` / `conn.hello.runtimeUnavailable[]`. The
+`conn.hello` and this first HTTP presence publication use one frozen
+per-start snapshot, so identity has one authority. Presence remains a lossy
+TTL hint and is not an execution or admission signal.
 
 ### 8.2 Send — `POST /byok/messages`
 
@@ -3485,6 +3493,55 @@ therefore per-adapter truth — whether that adapter's sessions call
 answers "what could this device run", for a client picking where to dispatch.
 It is deliberately NOT what any server-side control decision reads — per-task
 steer gating (§11.2) reads `task.claim.capabilities` (§11.5) instead.
+
+### 11.4.1 Runtime version policy and `runtime_unavailable` on hello/presence
+
+Two strip-safe discovery projections accompany the capability matrix (#1103
+B2b):
+
+```
+RuntimeInfo.versionPolicy?: { state: 'allow' | 'warn' | 'block', qualifiedVersion? }
+HarnessInfo.versionPolicy?: { ...the same... }
+ConnHelloPayload.runtimeUnavailable?: Array<{ id, cause, retryable }>   // max 16, unique id
+PresencePublishRequest.runtimes[].versionPolicy?: { ...the same... }
+PresencePublishRequest.runtimeUnavailable?: Array<{ id, cause, retryable }>
+```
+
+`state` is the effective Host-configured policy's verdict for the installed
+token. `qualifiedVersion` is that policy's qualified token; `matched` and the
+policy's `allow`/`warn`/`block` spec lists stay local. A runtime whose
+installed version is blocked remains in `runtimes[]` with `state: 'block'`
+(it was detected); it is not a `runtimeUnavailable` entry.
+
+`runtimeUnavailable[]` carries only non-available runtimes. `cause` comes
+from the append-only `RUNTIME_UNAVAILABLE_CAUSES` vocabulary (§3.2) and
+`retryable` is the same per-cause default a `task.decline` reports. A
+receiver that does not know a cause reads it as `unknown` with the raw token
+(`readRuntimeUnavailableCause`). The array is bounded to 16 and unique by
+id; an id is a built-in `RuntimeId` on presence and either a `RuntimeId` or a
+`HarnessId` on `conn.hello` (the existing identity domains).
+
+The `runtime-unavailable-cause` capability flag announces that this daemon
+emits the typed cause. It is a capability flag, not a gate on the fields: a
+device sends the strip-safe fields unconditionally, exactly as it sends the
+capability matrix, and an older peer ignores the unknown flag.
+
+**Old daemon / old Host boundary.** Every field above is optional and
+strip-safe. An older receiver drops it without changing what it executes or
+acknowledges. Absence means **unknown**, never `allow` and never
+`available`: a Host must not synthesize a verdict, infer a block from a
+missing `runtimes[]` entry, or treat a missing `runtimeUnavailable[]` as
+"everything works". A newer Host reading an older daemon's hello or presence
+sees no `versionPolicy` and no `runtimeUnavailable`, and keeps its previous
+dispatch behavior; a version block is still enforced locally by the daemon,
+so an old Host cannot bypass it.
+
+**Restart comparison stays local.** On start the daemon compares each present
+runtime's token with `<storeDir>/runtime-versions.json` and, on a change,
+warns on stderr and reports `versionChange` in local `status`/`doctor`.
+That comparison is never sent on `conn.hello` or presence, never written to
+`audit.jsonl` or `DaemonRecord`, and is not a wire field. Offline `doctor`
+reports it as unknown rather than reconstructing a previous version.
 
 ### 11.5 Claim-carried capabilities (`task.claim.capabilities`, additive)
 

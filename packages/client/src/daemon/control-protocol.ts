@@ -8,7 +8,7 @@ import type { StoragePressureState } from './retention/pressure';
 import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
-import type { RuntimeObservation } from '../runtime-detection';
+import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detection';
 import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentReport } from '../runtime/environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
@@ -453,6 +453,8 @@ export interface ControlStatusResult {
   runtimes?: RuntimeObservation[];
   /** #1103: verdicts for the same runtime ids as {@link runtimes}; absent from a pre-#1103 daemon. */
   runtimeVersionVerdicts?: Array<{ readonly id: string; readonly versionVerdict: RuntimeVersionVerdict }>;
+  /** #1103 §2.6: this run's restart comparison, same side-channel rule; absent from a pre-#1103 daemon. */
+  runtimeVersionChanges?: Array<{ readonly id: string; readonly versionChange: RuntimeVersionChange }>;
   /** Absent for a pre-#392 control peer. */
   environment?: ServiceEnvironmentStatus;
   /** Timestamp of the same environment-resolved event; absent before startup resolves it. */

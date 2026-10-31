@@ -1,3 +1,4 @@
+import type { RuntimeVersionPolicyProjection } from '@byok-sdk/protocol';
 import type {
   RuntimeDetectionAdvisory,
   RuntimeVersionPolicy,
@@ -229,6 +230,20 @@ export function runtimeVersionVerdict(
   if (warned !== undefined) return { state: 'warn', qualifiedVersion: policy.qualifiedVersion, matched: matchedText(warned) };
   if (policy.unqualified === 'block') return { state: 'block', qualifiedVersion: policy.qualifiedVersion, matched: 'unqualified' };
   return { state: policy.unqualified, qualifiedVersion: policy.qualifiedVersion };
+}
+
+/**
+ * The one wire projection of a verdict (#1103 D8). `matched` and the policy's
+ * spec lists stay local: presence and hello carry only what a Host needs to
+ * skip a runtime before dispatch. Absence of a verdict projects to `undefined`
+ * (unknown), never to `allow`.
+ */
+export function runtimeVersionPolicyProjection(
+  verdict: RuntimeVersionVerdict | undefined,
+): RuntimeVersionPolicyProjection | undefined {
+  return verdict === undefined
+    ? undefined
+    : { state: verdict.state, qualifiedVersion: verdict.qualifiedVersion };
 }
 
 /**

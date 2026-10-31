@@ -3,7 +3,7 @@ import { DeviceStore } from '../../daemon/store';
 import { createDeviceCredentialStore } from '../../daemon/device-credential-provider';
 import type { ControlStatusResult } from '../../daemon/control-protocol';
 import { auditLogPath, readAuditRecords, readLastEnvironmentRecord, parseEnvironmentRecord } from '../audit-log';
-import { attachRuntimeVersionVerdicts, parseRuntimeObservations } from '../../runtime-detection';
+import { attachRuntimeVersionChanges, attachRuntimeVersionVerdicts, parseRuntimeObservations } from '../../runtime-detection';
 import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
 import { serviceLogDir } from '../../daemon/host-layout';
@@ -74,7 +74,9 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
     const live = await conn.client.request<ControlStatusResult>('status');
     const environment = parseEnvironmentRecord({ kind: 'environment-resolved', ts: live.environmentResolvedAt, ...live.environment });
     const observed = parseRuntimeObservations(live.runtimes);
-    const runtimes = observed === undefined ? undefined : attachRuntimeVersionVerdicts(observed, live.runtimeVersionVerdicts);
+    const runtimes = observed === undefined
+      ? undefined
+      : attachRuntimeVersionChanges(attachRuntimeVersionVerdicts(observed, live.runtimeVersionVerdicts), live.runtimeVersionChanges);
     for (const line of formatLiveStatusLines({ ...live, runtimes, environment: environment?.status })) log(line);
   } catch (err) {
     log(`live status unavailable: ${err instanceof Error ? err.message : String(err)}`);

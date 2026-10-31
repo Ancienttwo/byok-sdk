@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "d491c9849147752984ad56af6e4f6a4c7f10a023ebad13bae803488fc7f99693"
+    "snapshotSha256": "1b66b959bb6ef254f1f231bb99f560b46a486948eab80f2eff37c8fa9f94e4a0"
   },
   "configFields": {
     "status": "tracked",
@@ -153,6 +153,24 @@
         "export:@byok-sdk/protocol#readRuntimeUnavailableCause",
         "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES",
         "export:@byok-sdk/protocol/constants#RuntimeUnavailableCause"
+      ]
+    },
+    {
+      "id": "runtime-hello-presence-discovery",
+      "impact": "additive",
+      "summary": "conn.hello and PUT /byok/presence carry strip-safe version-policy and runtime-unavailable discovery data (#1103 B2b): runtimes[].versionPolicy and harnesses[].versionPolicy project the effective policy verdict as state plus the qualified token, and a top-level runtimeUnavailable[] names non-available runtimes/harnesses with the append-only cause and its retryable default. Presence keeps the built-in RuntimeId domain; harness policy travels only on conn.hello.harnesses[]. The runtime-unavailable-cause capability flag announces the typed cause. An older receiver drops every new field, and absence means unknown, never allow or available. Restart version changes are local-only (status/doctor/stderr) and never enter hello, presence, audit or a support bundle. Nothing to change unless a Host reads the new discovery fields.",
+      "migration": "docs/protocol.md#1141-runtime-version-policy-and-runtime_unavailable-on-hellopresence",
+      "items": [
+        "export:@byok-sdk/client#RuntimeVersionChange",
+        "export:@byok-sdk/client#RuntimeVersionChangeDirection",
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+        "export:@byok-sdk/protocol#RuntimeUnavailableEntry",
+        "export:@byok-sdk/protocol#RuntimeUnavailableEntrySchema",
+        "export:@byok-sdk/protocol#RuntimeVersionPolicyProjection",
+        "export:@byok-sdk/protocol#RuntimeVersionPolicyProjectionSchema",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY"
       ]
     },
     {
@@ -1663,6 +1681,16 @@
       "entry": "pi-session-retention-lifecycle"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeVersionChange",
+      "change": "added",
+      "entry": "runtime-hello-presence-discovery"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeVersionChangeDirection",
+      "change": "added",
+      "entry": "runtime-hello-presence-discovery"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeVersionPolicy",
       "change": "added",
       "entry": "runtime-version-policy"
@@ -2783,6 +2811,11 @@
       "entry": "activity-post-removed"
     },
     {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "runtime-hello-presence-discovery"
+    },
+    {
       "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
       "change": "changed",
       "entry": "runtime-capability-matrix"
@@ -2833,6 +2866,11 @@
       "entry": "runtime-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+      "change": "added",
+      "entry": "runtime-hello-presence-discovery"
+    },
+    {
       "item": "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
       "change": "changed",
       "entry": "runtime-capability-matrix"
@@ -2851,6 +2889,26 @@
       "item": "export:@byok-sdk/protocol#RuntimeUnavailableCauseReading",
       "change": "added",
       "entry": "runtime-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeUnavailableEntry",
+      "change": "added",
+      "entry": "runtime-hello-presence-discovery"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeUnavailableEntrySchema",
+      "change": "added",
+      "entry": "runtime-hello-presence-discovery"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeVersionPolicyProjection",
+      "change": "added",
+      "entry": "runtime-hello-presence-discovery"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeVersionPolicyProjectionSchema",
+      "change": "added",
+      "entry": "runtime-hello-presence-discovery"
     },
     {
       "item": "export:@byok-sdk/protocol#TASK_FAIL_REASON_MAX_BYTES",
@@ -2978,9 +3036,19 @@
       "entry": "agent-memory-contract-in-protocol"
     },
     {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "runtime-hello-presence-discovery"
+    },
+    {
       "item": "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES",
       "change": "added",
       "entry": "runtime-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY",
+      "change": "added",
+      "entry": "runtime-hello-presence-discovery"
     },
     {
       "item": "export:@byok-sdk/protocol/constants#RuntimeUnavailableCause",

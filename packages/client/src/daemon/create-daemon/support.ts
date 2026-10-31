@@ -1,9 +1,11 @@
-import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy } from '@byok-sdk/protocol';
+import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
 import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal';
-import { encodeEnvelope, TERMINAL_PROJECTION_SELECTION_CAPABILITY, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
+import { encodeEnvelope, TERMINAL_PROJECTION_SELECTION_CAPABILITY, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY, RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY } from '@byok-sdk/protocol';
 import type { RuntimeAdapter } from '../../types';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
 import { type RuntimeObservation, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection';
+import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable';
+import { runtimeVersionPolicyProjection } from '../../runtime-version-policy';
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities';
 import { type AgentContentReadSurface, type AgentContentReadPolicySelection, AGENT_CONTENT_READ_CAPABILITIES, createAgentContentReadPolicy, type AgentContentReadPolicy } from '../agent-content-read';
 import { PiAdapter } from '../../adapters/pi/pi-adapter';
@@ -91,22 +93,55 @@ export function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIde
   };
 }
 
-/** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
-export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[]; observations: RuntimeObservation[] }> {
+/**
+ * Runtimes actually detected as present on this device, typed per protocol
+ * §10 gap #4 (`ConnHelloPayload.runtimes`), plus the strip-safe
+ * `runtimeUnavailable` projection of every non-available adapter (#1103 B2b).
+ * Computed once at `start()` — re-probing on every reconnect would mean
+ * re-spawning each runtime's `--version` check for no real benefit within one
+ * daemon lifetime.
+ *
+ * The unavailable list carries the existing identity domain (built-in runtime
+ * or custom harness id) on `conn.hello`; presence filters it to built-in
+ * runtime ids, because that id domain is frozen on the HTTP body.
+ */
+export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
+  runtimes: RuntimeInfo[];
+  harnesses: HarnessInfo[];
+  observations: RuntimeObservation[];
+  runtimeUnavailable: RuntimeUnavailableEntry[];
+}> {
   const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter) })));
   const runtimes: RuntimeInfo[] = [];
   const harnesses: HarnessInfo[] = [];
   const observations: RuntimeObservation[] = [];
+  const unavailable = new Map<string, RuntimeUnavailableEntry>();
   for (const { adapter, detected } of detections) {
     observations.push(projectRuntimeObservation(adapter.descriptor, detected));
-    if (detected.kind !== 'available') continue;
+    if (detected.kind !== 'available') {
+      // One typed cause per failure, with the same retryable default the
+      // decline path reports. Never a guessed cause from display text.
+      const admission = runtimeUnavailableForDetection(detected);
+      if (!unavailable.has(adapter.descriptor.id)) {
+        unavailable.set(adapter.descriptor.id, {
+          id: adapter.descriptor.id,
+          cause: admission.cause,
+          retryable: runtimeUnavailableRetryable(admission.cause),
+        });
+      }
+      continue;
+    }
     if (detected.advisory !== undefined) {
       console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.advisory.qualifiedVersion}; continuing`);
     }
+    // Absence of a verdict means the adapter declares no policy: omit the
+    // field rather than inventing `allow` (#1103 D8/D9).
+    const versionPolicy = runtimeVersionPolicyProjection(detected.versionVerdict);
     if (!isWireRuntimeId(adapter.descriptor.id)) {
       harnesses.push({ id: HarnessIdSchema.parse(adapter.descriptor.id),
         ...(detected.version === undefined ? {} : { version: detected.version }),
-        capabilities: toRuntimeInfoCapabilities(adapter.descriptor.capabilities) });
+        capabilities: toRuntimeInfoCapabilities(adapter.descriptor.capabilities),
+        ...(versionPolicy === undefined ? {} : { versionPolicy }) });
       continue;
     }
     const info: RuntimeInfo = { id: adapter.descriptor.id };
@@ -118,9 +153,13 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runt
     // the per-runtime wire field — see `toRuntimeInfoCapabilities`'s doc
     // comment.
     info.capabilities = toRuntimeInfoCapabilities(adapter.descriptor.capabilities);
+    if (versionPolicy !== undefined) info.versionPolicy = versionPolicy;
     runtimes.push(info);
   }
-  return { runtimes, harnesses, observations };
+  // `RuntimeUnavailableListSchema` caps a hello at 16 unique entries. A
+  // daemon with more adapters than that keeps the first sixteen; identity is
+  // never duplicated.
+  return { runtimes, harnesses, observations, runtimeUnavailable: [...unavailable.values()].slice(0, 16) };
 }
 
 /**
@@ -143,6 +182,10 @@ export function computeCapabilities(
   const flags: CapabilityFlag[] = [];
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   flags.push('blob-upload');
+  // #1103 B2b: this daemon understands the typed runtime-unavailable cause it
+  // emits on declines, hello and presence. Unconditional, like `blob-upload`:
+  // it is a property of this daemon version, not of any configured adapter.
+  flags.push(RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY);
   flags.push(TERMINAL_PROJECTION_SELECTION_CAPABILITY);
   const selectionAdapters = adapters.filter((adapter) =>
     ALL_RUNTIME_IDS.includes(adapter.descriptor.id as RuntimeId),

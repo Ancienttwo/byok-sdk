@@ -7,6 +7,8 @@ import {
   ProtocolVersionNumberSchema,
   RuntimeCapabilitiesSchema,
   RuntimeIdSchema,
+  RuntimeUnavailableEntrySchema,
+  RuntimeVersionPolicyProjectionSchema,
   AgentHomeProjectionAgentRefSchema,
 } from './messages';
 import {
@@ -175,7 +177,19 @@ const PresenceRuntimeFactSchema = z.object({
   version: z.string().min(1).max(PRESENCE_RUNTIME_VERSION_MAX_LENGTH).optional(),
   authPresent: z.boolean().optional(),
   capabilities: RuntimeCapabilitiesSchema.optional(),
+  /** #1103 D8: strip-safe discovery projection; absent means unknown. */
+  versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
 });
+
+/**
+ * Presence carries the built-in runtime identity domain only (#1103 D8): a
+ * custom harness id would fail an older server's whole-body decode, so
+ * harness policies and versions travel on `conn.hello.harnesses[]`, never
+ * here. The cause vocabulary is the same append-only one.
+ */
+const PresenceRuntimeUnavailableEntrySchema = RuntimeUnavailableEntrySchema.extend({ id: RuntimeIdSchema });
+const PresenceRuntimeUnavailableSchema = z.array(PresenceRuntimeUnavailableEntrySchema).max(16)
+  .refine(values => new Set(values.map(value => value.id)).size === values.length, 'duplicate runtime-unavailable identity');
 
 export const PresencePublishRequestSchema = z.object({
   level: z.enum(['online', 'thinking', 'working', 'error', 'offline']),
@@ -186,6 +200,8 @@ export const PresencePublishRequestSchema = z.object({
   protocolVersions: z.array(ProtocolVersionNumberSchema).max(16).optional(),
   /** Runtime version/auth facts from the same real probe as conn.hello. */
   runtimes: z.array(PresenceRuntimeFactSchema).max(16).optional(),
+  /** #1103 D8: non-available built-in runtimes; strip-safe and absent means unknown. */
+  runtimeUnavailable: PresenceRuntimeUnavailableSchema.optional(),
 });
 export type PresencePublishRequest = z.infer<typeof PresencePublishRequestSchema>;
 

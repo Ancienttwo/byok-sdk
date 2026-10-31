@@ -46,7 +46,7 @@ export type DaemonRecord =
   | { kind: 'lifecycle'; ts: string; lifecycle: DaemonLifecycle }
   | { kind: 'paired'; ts: string; deviceId: string }
   | { kind: 'unpaired'; ts: string }
-  | { kind: 'runtimes-detected'; ts: string; runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict'>> }
+  | { kind: 'runtimes-detected'; ts: string; runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict' | 'versionChange'>> }
   | { kind: 'shutdown-requested'; ts: string; reasonBytes: number }
   | { kind: 'shutdown-complete'; ts: string; reasonBytes: number; undeliveredOutboxCount?: number }
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reasonBytes?: number }
@@ -293,11 +293,12 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
     case 'runtimes-detected':
       // Actual runtime output is untrusted text; the advisory's qualified
       // version is adapter configuration and preserves its warning offline.
-      // The policy verdict is local status/doctor evidence (#1103): like the
-      // installed version, it does not enter audit or support sinks.
+      // The policy verdict and restart comparison are local status/doctor
+      // evidence (#1103): like the installed version, neither enters audit or
+      // support sinks.
       return {
         kind: 'runtimes-detected', ts,
-        runtimes: event.runtimes.map(({ version: _version, versionVerdict: _versionVerdict, ...observation }) => observation),
+        runtimes: event.runtimes.map(({ version: _version, versionVerdict: _versionVerdict, versionChange: _versionChange, ...observation }) => observation),
       };
     case 'environment-resolved': {
       const record = parseEnvironmentRecord({ kind: 'environment-resolved', ts, ...event.status });
