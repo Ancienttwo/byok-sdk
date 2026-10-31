@@ -7298,6 +7298,16 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
 }
 // ==== @byok-sdk/client dist/daemon/journal/sqlite-support.d.ts ====
 import type { DatabaseSync } from 'node:sqlite';
+/**
+ * The path handed to SQLite, which is not always the path the rest of the code
+ * uses. On Windows the SQLite VFS does not apply the extended-length prefix
+ * itself: past the legacy MAX_PATH the open fails, and a failed open is
+ * indistinguishable from a damaged file at the call site (the journal would
+ * quarantine a healthy database and refuse to start). The prefix is applied
+ * only when the path is long enough to need it, so ordinary installs keep the
+ * plain path.
+ */
+export declare function sqliteOpenPath(path: string, platform?: NodeJS.Platform): string;
 /** Every post-construction boundary crossed before a journal handle is returned to its owner. */
 export type JournalOpenStep = 'after-open' | 'after-auto-vacuum' | 'after-wal' | 'after-foreign-keys' | 'after-synchronous' | 'after-header-read';
 /**
