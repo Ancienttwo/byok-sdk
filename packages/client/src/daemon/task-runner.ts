@@ -696,6 +696,10 @@ export class TaskRunner {
         this.revokeAgentResultContext(taskId);
         this.revokeAgentMemoryContext(taskId);
         this.deleteHostToolsetContexts(taskId);
+        // #1099 S4: SH5 records the successful startup disposal. A failed
+        // disposal never reaches here, so startup ownership stays retained.
+        void hostFor(this).dispatch({ type: 'startup.disposed', taskId, atMs: Date.now(), ok: true })
+          .catch(() => undefined);
       },
       onDisposalFailure: (taskId, runtimeId, failure) => this.deps.onRuntimeDisposalFailure?.({
         taskId, runtimeId, stage: failure.stage, reason: failure.message,
@@ -1041,9 +1045,17 @@ export class TaskRunner {
     // task that became active keeps its state for the S4 claim/start/cancel
     // slice; everything else (decline, throw, a claimed start that never
     // registered) is archived here so a redelivery starts clean.
+    //
+    // A redelivered offer that bails at the guard above must not end the
+    // FIRST delivery's host state: that delivery is still in flight (for
+    // example parked in `inputPreparationLane.open()`) and S4 reads the
+    // state at the claim/start boundaries. `inFlightOffers` covers exactly
+    // that window, and is cleared before this finally runs for the owner.
     void outcome
       .finally(() => {
-        if (!this.tasks.has(taskId) && !this.startupOwnership.has(taskId)) hostFor(this).endOffer(taskId);
+        if (!this.tasks.has(taskId) && !this.startupOwnership.has(taskId) && !this.inFlightOffers.has(taskId)) {
+          hostFor(this).endOffer(taskId);
+        }
       })
       .catch(() => undefined);
     return outcome;

@@ -3,9 +3,10 @@
 // one strict-FIFO mailbox per taskId, and the effect executor that lets the
 // phase adapters keep their IO while the reducer owns the transition.
 //
-// S3 wires the offer/admission path only. Effects whose IO still lives in the
-// staged offer pipeline (and every S4–S6 effect) are recorded as `legacy`
-// and not executed here; the phase adapter performs them exactly as before.
+// S3 wired the offer/admission path; S4 wires claim/start/cancel. Effects
+// whose IO still lives in the staged offer pipeline (and every S5–S6 effect)
+// are recorded as `legacy` and not executed here; the phase adapter performs
+// them exactly as before.
 import {
   createRunnerState,
   reduce,
@@ -32,6 +33,12 @@ export interface HostOfferContext {
   runtimeUnavailable?: unknown;
   /** The adapter-owned decline send. Called synchronously, exactly once. */
   sendDecline?: (effect: EffectEnvelope, context: HostOfferContext) => void;
+  /**
+   * S4: the adapter-owned `task.claim` send. The host runs it inside the
+   * `claim.journaled -> send.claim -> claim.sent` atomic group, so no other
+   * event can be reduced between the journal receipt and the claim commit.
+   */
+  sendClaim?: (effect: EffectEnvelope, context: HostOfferContext) => void;
 }
 
 export interface HostEffectContext {
@@ -193,6 +200,12 @@ export class TaskRunnerHost {
   setRuntimeUnavailable(taskId: string, runtimeUnavailable: unknown): void {
     const context = this.offers.get(taskId);
     if (context !== undefined) context.runtimeUnavailable = runtimeUnavailable;
+  }
+
+  /** Installs the adapter-owned claim send for the current offer (S4). */
+  setSendClaim(taskId: string, sendClaim: HostOfferContext['sendClaim']): void {
+    const context = this.offers.get(taskId);
+    if (context !== undefined) context.sendClaim = sendClaim;
   }
 
   /** Ends an offer that never reached `active`; a retained state is archived. */
@@ -382,6 +395,18 @@ export class TaskRunnerHost {
       const offer = taskId === undefined ? undefined : this.offers.get(taskId);
       if (offer?.sendDecline !== undefined) {
         offer.sendDecline(envelope, offer);
+        this.record(envelope, 'executed');
+        this.completeAtomically(envelope, taskId);
+        return undefined;
+      }
+    }
+    if (envelope.effect.kind === 'send.claim') {
+      const offer = taskId === undefined ? undefined : this.offers.get(taskId);
+      if (offer?.sendClaim !== undefined) {
+        // The claim is the first external commitment: the send happens before
+        // the atomic `claim.sent` completion, and a throwing send leaves the
+        // state journaled-but-unsent exactly like the legacy path did.
+        offer.sendClaim(envelope, offer);
         this.record(envelope, 'executed');
         this.completeAtomically(envelope, taskId);
         return undefined;

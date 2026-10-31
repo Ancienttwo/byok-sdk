@@ -9,6 +9,7 @@ import type { ActiveTask } from './support';
 import { raceSettleFirst } from './support';
 import type { TaskRunner } from '../task-runner';
 import { DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS, MAX_DURATION_EXCEEDED_REASON_PREFIX, MAX_TRACKED_TASK_IDS } from './state';
+import { hostFor } from './host';
 
 export function stopAcceptingOffers(this: TaskRunner): void {
   this['stoppingOffers'] = true;
@@ -141,7 +142,46 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
   // window too — a taskId with no nonces is simply a no-op here.
   this['revokeHostToolsetContexts'](taskId);
   const active = this['tasks'].get(taskId);
+  const host = hostFor(this);
   if (!active) {
+    // #1099 S4: a task already in the reducer, but not registered active, is
+    // in the offer/start window. Where the reducer can decide now, it owns
+    // the transition. The bounded legacy marker remains the offer-window
+    // checkpoint record (unknown/pre-offer and the claimed-to-started
+    // handoff) and is consumed at checkpoint 2; it is not the cx authority.
+    const current = host.current(taskId);
+    // A pre-claim task is declined by the stage that observes the aborted
+    // admission signal (design §8.4): the bounded marker below keeps the
+    // exact legacy reason and the admission timing payload that only the
+    // waiting stage can record. O5 owns the decline.
+    if (current !== undefined && current.phase === 'claiming' && !current.claim.journaled && !current.claim.sent) {
+      // X2a (#1218): the journal is in flight, so the claim is not committed.
+      // No admission phase is pending here, so declining now keeps the same
+      // reason/retryable pair the deferred O5 path used.
+      this['inFlightBlobAborts'].get(taskId)?.abort();
+      host.dispatchSync({ type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire' });
+      return;
+    }
+    if (current !== undefined && current.phase === 'claimed') {
+      // X3 (startup ownership exists) or X3b (start is still in flight):
+      // checkpoint 2 reads cx.requested and makes runtime.started take C6,
+      // never task.started. The bounded marker stays the offer-window
+      // checkpoint record the start path consumes.
+      this['inFlightBlobAborts'].get(taskId)?.abort();
+      host.dispatchSync({
+        type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
+        ...(reason === undefined ? {} : { reason }),
+      });
+      this['setPendingCancelled'](taskId, reason);
+      return;
+    }
+    if (current !== undefined && (current.phase === 'terminalizing' || current.phase === 'retiring')) {
+      // X5: share the selected terminal; its IO is S6 scope.
+      host.dispatchSync({
+        type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
+        ...(reason === undefined ? {} : { reason }),
+      });
+    }
     if (this['startupOwnership'].has(taskId) && !this['inFlightOffers'].has(taskId)) {
       await this['startupOwnership'].dispose(taskId);
       return;
@@ -152,7 +192,9 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
     // checkpoints in handleOffer). A genuinely stale/unknown/already-
     // finished taskId just leaves a harmless, never-consulted entry —
     // identical in effect to the old silent-drop behavior for that case
-    // (M3-B: except now bounded — see `setPendingCancelled`).
+    // (M3-B: except now bounded — see `setPendingCancelled`). S4 retains
+    // this store because the bounded-collections oracle pins it; the
+    // reducer marker (X1/X3b) is not co-written here.
     this['setPendingCancelled'](taskId, reason);
     this['inFlightBlobAborts'].get(taskId)?.abort();
     return;

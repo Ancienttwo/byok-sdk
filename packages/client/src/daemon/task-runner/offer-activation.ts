@@ -10,6 +10,7 @@ import { outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferHeld, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
+import { hostFor } from './host';
 
 export interface OfferActivationInput
   extends Pick<OfferRequest, 'readerAttempt'>,
@@ -40,9 +41,13 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   try {
     await agentBinding.lease.bindSession(session.sessionRef);
   } catch (error) {
+    const reason = `Agent session execution lease could not bind the runtime session: ${outboundErrorMessage(error)}`;
+    // C8: bind/handoff/message failures are always a non-retryable failed
+    // terminal, recorded before the legacy evidence/close/commit IO runs.
+    hostFor(this).dispatchSync({ type: 'runtime.activation_failed', taskId, atMs: Date.now(), reason });
     await this['failClaimedAgent'](
       taskId,
-      `Agent session execution lease could not bind the runtime session: ${outboundErrorMessage(error)}`,
+      reason,
       false,
       {
         binding: agentBinding,
@@ -134,9 +139,11 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
         leaseId: agentBinding.lease.leaseId,
       }));
   } catch (error) {
+    const reason = `Agent session handoff could not be durably written before start: ${outboundErrorMessage(error)}`;
+    hostFor(this).dispatchSync({ type: 'runtime.activation_failed', taskId, atMs: Date.now(), reason });
     await this['failClaimedAgent'](
       taskId,
-      `Agent session handoff could not be durably written before start: ${outboundErrorMessage(error)}`,
+      reason,
       false,
       {
         binding: agentBinding,
@@ -159,9 +166,24 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   // so pump() never begins and no zombie turn runs — then report the
   // outcome exactly like a post-registration cancel would (M1 gap #6:
   // task.cancelled, not task.fail).
-  if (this['pendingCancelled'].has(taskId)) {
-    const reason = this['pendingCancelled'].get(taskId);
+  //
+  // #1099 S4: the reducer owns the decision. A cancel recorded while start
+  // was in flight (X3, or the legacy checkpoint marker deferred until the
+  // startup owner exists) makes runtime.started take C6: it selects the
+  // cancelled terminal and never sends task.started. Strict FIFO is what
+  // guarantees the cancel was reduced before this completion event.
+  const host = hostFor(this);
+  const markerReason = this['pendingCancelled'].get(taskId);
+  if (host.current(taskId)?.cancel.requested === true || markerReason !== undefined) {
+    if (host.current(taskId)?.cancel.requested !== true) {
+      host.dispatchSync({
+        type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
+        ...(markerReason === undefined ? {} : { reason: markerReason }),
+      });
+    }
+    const reason = host.current(taskId)?.cancel.reason ?? markerReason;
     this['pendingCancelled'].delete(taskId);
+    host.dispatchSync({ type: 'runtime.started', taskId, atMs: Date.now() });
     this['startupOwnership'].transferToActive(taskId);
     this['tasks'].set(taskId, active);
     held.owner = 'active';
@@ -178,7 +200,10 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
 
   // Claimed -> Running (M1 gap #2): report `task.started` only once the
   // adapter session has actually started — never implied by `task.claim`.
+  // #1099 S4: C5's send/register/arm/pump group stays on this one synchronous
+  // path; the reducer records running immediately after the wire send.
   this['deps'].send(createEnvelope('task.started', {}, { taskId }));
+  host.dispatchSync({ type: 'runtime.started', taskId, atMs: Date.now() });
 
   // This handoff (construct `active` -> register it -> kick off `pump()`)
   // must stay synchronous, with no `await` in between: a `task.cancel`
@@ -207,6 +232,9 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   } catch (error) {
     if (this['tasks'].has(taskId)) throw error;
     const reason = `runtime activation failed: ${outboundErrorMessage(error)}`;
+    // C8 for the unexpected-throw path (message activation, or any error
+    // outside the two explicit bind/handoff branches above).
+    hostFor(this).dispatchSync({ type: 'runtime.activation_failed', taskId, atMs: Date.now(), reason });
     await this['failClaimedAgent'](taskId, reason, false, {
       binding: agentBinding, runtimeId: pick.descriptor.id, sessionRef: session.sessionRef,
     });
