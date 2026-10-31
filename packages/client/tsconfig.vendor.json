@@ -5,10 +5,12 @@
     "checkJs": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "target": "ES2024"
+    "target": "ES2024",
+    "lib": ["ES2024"]
   },
   "include": [
     "vendor/rpiv-todo/2.15.0/**/*.ts",
+    "vendor/oar/044633e/**/*.ts",
     "src/bin/pi-todo-runtime.js",
     "vendor/pi-tui/0.85.1/**/*.d.ts",
     "vendor/get-east-asian-width/1.6.0/**/*.d.ts"
