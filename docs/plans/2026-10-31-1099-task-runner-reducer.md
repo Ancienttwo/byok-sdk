@@ -220,7 +220,7 @@ export function hostFor(runner: TaskRunner): Host { /* get or create */ }
 
 ### 3.3 与 api-surface / baseline 的关系
 
-- S1 的新模块没有被任何可达代码 import，声明闭包不变。
+- S1 在 S2 之后落地：reducer 位于已可达的 `state.ts`（D2），因此 golden 新增该内部 section 的类型声明（OD2 允许）。运行时闭包不变：S1 不接线，`TRANSITIONS`/`reduce` 未被入口 import，构建出的 client entry 与 S1 前逐字节相同（rebased base `be505b91a`：`dist/index.js` 1,671,995 bytes），closure budget 保持精确值 `1971724/1971724`（bin `1925068/1925068` 未变）。
 - S2 后 `state.ts` 被 `task-runner.ts` 和阶段文件 import，声明闭包会新增一个 `dist/daemon/task-runner/state.d.ts` section（S3 后可能再加 `host.d.ts`）。**有效导出符号集、公开 entry、closure budget 不变**；golden 文本新增内部 section。这与 #1205 新增 `agent-memory/tool-manifest.d.ts`、删除/新增 relocation section 的处理一致。若 owner 要求 golden 逐字不变，则 reducer 不能是新文件，只能塞进已可达模块，代价是继续混在 `support.ts` 或门面里；不推荐。见 OD2。
 - baseline 只在 S2 变化：34 条 `cycle:` 行全部删除，43 → 9；不新增任何行。
 - 先例：#1152 把 K4 执行核心移入 `server/execution-core` 并新增子路径 entry，验收用的是“有效导出集 + entry closure + 预算”而不是 golden 逐字不变；本设计不新增公开 entry，只沿用同一验收口径。
@@ -540,7 +540,7 @@ export interface EffectRequires {
 ```text
 Host.dispatch(event):
   1. freeze(event); ensure task generation matches or route to global.
-  2. enqueue(event); if draining return.
+  2. enqueue(event) at the TAIL of this task's mailbox; if draining return.
   3. while queue non-empty:
        event = queue.shift()
        { state', effects } = reduce(currentState(event.taskId), event)
@@ -549,17 +549,20 @@ Host.dispatch(event):
          if !admissible(state', effect): audit skip; continue
          if mode == atomic:
             run synchronously; if it returns a completion event,
-            enqueue it at the FRONT of the queue and continue this atomic group
+            reduce it inside THIS atomic group (never through the mailbox)
+            and continue with the group's remaining effects
          else:
-            await run(effect); enqueue completion/failure event; break to drain
+            await run(effect); enqueue completion/failure event at the TAIL
+            in arrival order (never ahead of an event already queued);
+            break to drain
   4. if task phase == finished: remove from task map; keep id in RunnerState.finished.
 ```
 
 关键规则：
 
-1. **单任务邮箱**：同一 taskId 的事件严格 FIFO；不同 taskId 可以并行，但全局事件（shutdown、device cap）由 RunnerState 串行处理。实现上可以一个全局队列 + per-task 子队列，但同一 task 的 reducer 应用不得并发。
-2. **atomic 组不可抢占**：`runtime.started` 的 `[send.started, register.active, arm.max_duration, start.pump]` 必须在一个 turn 内完成；否则 cancel/steer/approve 会在“注册前”看到任务不存在而静默丢弃（当前代码用同步 handoff 保证这一点，`offer-activation.ts:179-206`）。
-3. **barrier 前后**：barrier 完成后，执行器先把完成事件入队到队首，再继续；队列中已有的外部事件排在其后。这样 `claim.journaled -> send.claim` 与 `runtime.session_bound -> activation` 的同步链不会被插队。
+1. **单任务邮箱**：同一 taskId 的所有事件严格 FIFO——入队顺序就是 reduce 顺序，barrier 完成事件也在完成时入队队尾，绝不插到队首。不同 taskId 可以并行，但全局事件（shutdown、device cap）由 RunnerState 串行处理。实现上可以一个全局队列 + per-task 子队列，但同一 task 的 reducer 应用不得并发。
+2. **atomic 组不可抢占**：`runtime.started` 的 `[send.started, register.active, arm.max_duration, start.pump]` 必须在一个 turn 内完成；否则 cancel/steer/approve 会在“注册前”看到任务不存在而静默丢弃（当前代码用同步 handoff 保证这一点，`offer-activation.ts:179-206`）。atomic effect 产生的完成事件（如 `send.claim -> claim.sent`）在同一组内 reduce，外部事件不得插入；这是 FIFO 的唯一例外。
+3. **严格 FIFO 的后果（#1218）**：barrier 在飞期间到达的 cancel 先于该 barrier 的完成事件被 reduce。因此 `ph=claiming`、`claim.journaled` 尚未 reduce 时，cancel 必须走新的 X2a decline 行（与当前 `claimOffer` 在 `beforeClaim` 返回后再次检查 `admissionWithdrawn()` 的行为一致），随后到达的 `claim.journaled` 只 drop:stale，绝不发 `task.claim`。同理，`ph=claimed` 时先 reduce 的 cancel 记录为待定 cancel（X3/X3b），`runtime.started` 到达时走 C6：只发 `task.cancelled`，绝不发 `task.started`。不能再用“完成事件插队”来模拟同步链。
 4. **effect 准入**：`requires` 只检查 reducer 能表达的条件；不满足的 send/start 效果必须跳过并审计，不能“补发”。cleanup 效果带 `alwaysRun`，在 terminal 后仍执行。
 5. **失败不重入 reducer 两次**：每个 effect 只产生一个完成或失败事件；执行器保证 at-most-once。重试只由 `retry.finalization`/显式 retry effect 发起。
 
@@ -620,11 +623,11 @@ stage 失败映射（O5 的 reason/retryable/code 来源）：
 | C0 | `startup.registered` | `ph=claimed` 或 `terminalizing` | `startup.owner='startup'` | 无 | start 失败/取消后保留所有权；settle/release 由 `StartupOwnership` 执行。 |
 | C0b | `startup.transferred` | `startup.owner='startup'` | `startup.owner='active'` | 无 | 注册 active 后转移；之后由 finish 释放 lease/pin。 |
 | C1 | `admission.claimable` | `ph=admitting`，manifest 已封、pin 已持；`!admissionWithdrawn` | `ph=claiming`；`cl.journaled=false` | `barrier`[journal.admission] | 若 journal 前 cancel/shutdown 已置位 → O5 decline；journal 失败 → `claim.journal_failed`（C9：retryable decline）。 |
-| C2 | `claim.journaled` | `ph=claiming`，`!cl.sent` | `cl.journaled=true` | `!`[send.claim]；执行器同 turn 入队 `claim.sent` | 此事件后 cancel 不再 decline；若 state 已 terminal（并发 cancel）→ drop:stale，不 send claim。 |
-| C3 | `claim.sent` | `ph=claiming`，`cl.journaled` | `cl.sent=true`；`ph=claimed`；`admission.deviceSlot=false` | `barrier`[start.runtime] | 重复 `claim.sent` → drop；cancel 在 start 期间 → 记录 cx，start 结果走 C5/C7。 |
-| C4 | `runtime.session_bound` | `ph=claimed`；无 terminal | `execution={sessionRef,…,startedAtMs}` | `!`[bind.session]；`barrier`[persist.handoff, activate.message] | bind/handoff/message 失败 → C8 `activation_failed`；cancel 在飞 → 继续完成激活，C6 负责取消。 |
-| C5 | `runtime.started` | `ph=claimed`；`!cx.requested` | `ph=running`；`teardown.batcher=running` | `!`[send.started, register.active, arm.max_duration, start.pump]；清 in-flight/deviceSlot | 必须 atomic；中间不得插事件。cancel 若在 C5 前入队，走 C6。 |
-| C6 | `runtime.started`（带 cancel） | `ph=claimed`；`cx.requested` | `ph=terminalizing`；`tm={cancelled, reason:cx.reason}`；`td.batcher=stopped` | `!`[transfer.startup, register.active, start.pump]；`barrier`[revoke.contexts, stop.batcher, abort.blob, interrupt, persist.evidence, prepare.envelope] | 不发 `task.started`；这是 checkpoint 2（`offer-activation.ts:162-177`）。 |
+| C2 | `claim.journaled` | `ph=claiming`，`!cl.sent`，无 terminal | `cl.journaled=true` | `!`[send.claim]；执行器在同一 atomic 组内 reduce `claim.sent` | 此事件后 cancel 不再 decline（X2b 只记录 cx）；若 cancel 已先 reduce（X2a）→ 本行 guard 不中，fallback drop:stale，不 send claim。 |
+| C3 | `claim.sent` | `ph=claiming`，`cl.journaled` | `cl.sent=true`；`ph=claimed`；`admission.deviceSlot=false` | `barrier`[start.runtime] | 重复 `claim.sent` → drop。cancel 在 start 期间按 FIFO 先 reduce（X3/X3b 记录 cx），start 结果走 C6/C7。 |
+| C4 | `runtime.session_bound` | `ph=claimed`；无 terminal | `execution={sessionRef,…,startedAtMs}` | `barrier`[bind.session, persist.handoff, activate.message] | bind/handoff/message 失败 → C8 `activation_failed`；cancel 在飞（已 reduce 的 X3/X3b）→ 继续完成激活，C6 负责取消。 |
+| C5 | `runtime.started` | `ph=claimed`；`!cx.requested` | `ph=running`；`teardown.batcher=running` | `!`[send.started, register.active, arm.max_duration, start.pump]；清 in-flight/deviceSlot | 必须 atomic；中间不得插事件。cancel 若先于本事件 reduce（严格 FIFO），`cx.requested` 已置位，本行 guard 不中而走 C6。 |
+| C6 | `runtime.started`（带 cancel） | `ph=claimed`；`cx.requested` | `ph=terminalizing`；`tm={cancelled, reason:cx.reason}`；`td.batcher=stopped` | `!`[revoke.contexts, transfer.startup, register.active, stop.batcher, abort.blob, start.pump]；`barrier`[interrupt, persist.evidence, prepare.envelope] | 不发 `task.started`；这是 checkpoint 2（`offer-activation.ts:162-177`）。#1218：cancel 在 barrier 结束前已 reduce 时，即使 `runtime.started` 后到也走本行。 |
 | C7 | `runtime.start_failed` | `ph=claimed` 或 `claiming` | 有 cx：`ph=terminalizing`，`tm=cancelled`；无 cx：`tm=failed` | `barrier`[register.startup_owner, dispose.startup, send.cancelled 或 failClaimedAgent]；`bestEffort`[release…] | 有 cx 时发送 `task.cancelled`（`offer-launch.ts:456-502`）；否则 `failClaimedAgent` retryable 取 failure/stoppingOffers。 |
 | C8 | `runtime.activation_failed` | `ph=claimed` | `ph=terminalizing`；`tm={failed, reason, retryable:false}` | `barrier`[failClaimedAgent, persist.handoff evidence]；`bestEffort`[release…] | bind/handoff/message 失败一律 false；startup owner 保留到 cleanup。 |
 | C9 | `claim.journal_failed` | `ph=claiming`；`!cl.sent` | `ph=declined`；`tm={declined, reason:'claim journal unavailable: …', retryable:true}`；不改 `cl` | `!`[send.decline]；`bestEffort`[release.home, release.deviceSlot, release.scratch, release.lease, release.pin, revoke.contexts, finish.declined] | **#1217**：beforeClaim 失败归一为 retryable decline；claim 未发送，绝不发 `task.started`。cancel/shutdown 竞态仍由 `admissionWithdrawn` 改写 reason。 |
@@ -671,7 +674,9 @@ A6/A7 同时覆盖 timeout 与 registry eviction：定时器/eviction 调 `appro
 | ID | 事件 | Guard | State delta | Effects | 拒绝 / 竞态 |
 | --- | --- | --- | --- | --- | --- |
 | X1 | `cancel.received`（无任务） | taskId 不在 tasks，且不是 startup owner | RunnerState.pendingCancelled 插入或替换该 taskId（bounded 2000；优先淘汰非 in-flight 最老项） | `!`[abort.inFlightBlob（若有）]；若 startup owner 存在 → `barrier`[dispose.startup] | 未知 taskId 只留下 bounded 标记；不产生终态。 |
-| X2 | `cancel.received`（pre-claim） | `ph ∈ {received, admitting, claiming}` 且 `!cl.sent`；`!cx.requested` | `cx={requested:true,reason,source,atMs}`；`ph=declined`；`tm={declined, reason:'cancelled before claim[: reason]', retryable:false}` | `!`[consume.pendingCancelled]；同 O5 cleanup | 先命中者胜；后续 cancel 只 audit；pendingCancelled 必须删除。 |
+| X2 | `cancel.received`（pre-claim） | `ph ∈ {received, admitting}` 且 `!cl.sent`；`!cx.requested` | `cx={requested:true,reason,source,atMs}`；`ph=declined`；`tm={declined, reason:'cancelled before claim[: reason]', retryable:false}` | `!`[consume.pendingCancelled]；同 O5 cleanup | 先命中者胜；后续 cancel 只 audit；pendingCancelled 必须删除。 |
+| X2a | `cancel.received`（claiming，journal 在飞，#1218） | `ph=claiming`；`!cl.journaled`；`!cl.sent`；`!cx.requested` | 同 X2（`ph=declined`，`tm={declined,'cancelled before claim[: reason]',false}`） | 同 X2：`!`[revoke.host_contexts, send.decline, consume.pendingCancelled]；cleanup | 严格 FIFO 下 cancel 先于 `claim.journaled` reduce：decline 且绝不发 `task.claim`；随后到达的 journal 完成事件只 drop:stale。oracle 是当前 `claimOffer` 在 `beforeClaim` 返回后的第二次 `admissionWithdrawn()` 检查（`offer-launch.ts:282-283`）。 |
+| X2b | `cancel.received`（claiming，journal 已完成） | `ph=claiming`；`cl.journaled`；`!cl.sent`；`!cx.requested` | 只记录 `cx={requested:true,…}`；不改 phase/terminal | `!`[revoke.host_contexts, audit] | claim 已提交：不再 decline。atomic 的 `send.claim -> claim.sent` 组先完成，之后由 C6/C7 决定 cancelled/fail。 |
 | X3 | `cancel.received`（startup-owned） | `ph=claimed`；`startup.owner='startup'`；`!cx.requested` | `cx={requested:true,…}` | `barrier`[dispose.startup]；start path 看到 cx 后走 C6/C7 | 不直接发 `task.cancelled`；由 startup settle 或 activation checkpoint 2 发送，保证只发一次。 |
 | X4 | `cancel.received`（active） | `ph ∈ {running, awaiting_approval}`；`tm === undefined`；`source !== 'shutdown'`；`!cx.requested` | `cx={requested:true,…}`；若无 terminal → 同 T3 的 delta；`tm={cancelled, reason, cause:'cancelled'}` | 同 T3（revoke/stop/abort/interrupt/evidence/prepare/envelope） | 与 complete 竞态：第一个 terminal 胜；cancel 后 `turn_end` 只能 audit。 |
 | X5 | `cancel.received`（terminalizing/retiring） | `ph ∈ {terminalizing, retiring}`；`!cx.requested` | 只记录 `cx` | 若 terminal 尚未 sent → 共享 attempt；若已 sent → 无 | 绝不发第二个终态（`runtime-failure.test.ts:88`）。 |
@@ -715,7 +720,7 @@ shutdown 期间的 offer 不单列：仍走 O1，最后在 limits 阶段由 O5 d
 
 ### 8.1 单任务串行
 
-- 每个 taskId 一个邮箱；reducer 应用的输入顺序 = 事件入队顺序。执行器可以并行处理不同 taskId，但 `RunnerState`（acceptingOffers、pendingCancelled、homeReservations、device cap）由全局串行段处理。
+- 每个 taskId 一个邮箱；reducer 应用的输入顺序 = 事件入队顺序。同一 taskId 的所有事件严格 FIFO，barrier 完成事件也在完成时入队队尾，不插队（#1218）；唯一例外是 atomic 组内的同步完成事件。执行器可以并行处理不同 taskId，但 `RunnerState`（acceptingOffers、pendingCancelled、homeReservations、device cap）由全局串行段处理。
 - 阶段适配器不得直接改状态；只能 `dispatch`。任何“读当前状态”通过 `host.current(taskId)` 拿冻结快照。
 - 同一个异步操作只允许一个在飞：close receipt、terminal commit、disposal attempt 用 token 去重；重复 `retry.finalization` 共享同一 attempt。
 
@@ -743,8 +748,9 @@ shutdown 期间的 offer 不单列：仍走 O1，最后在 limits 阶段由 O5 d
 | --- | --- |
 | offer 尚未到达 | pendingCancelled 有界记录；下一个 offer 在 checkpoint 1 decline；startup owner 若存在则 dispose |
 | admission 中（未 claim） | admissionSignal abort；stage 看到 withdrawn → O5 decline；释放 home/scratch/lease |
-| `claim.journaled` 前 | decline（claim 未发） |
-| `claim.sent` 后、start 前 | 记录 cx；start 结果走 C6/C7，发 `task.cancelled`，不发 `task.started` |
+| `claim.journaled` 前（journal barrier 在飞，#1218） | cancel 先按 FIFO reduce → X2a decline（`cancelled before claim`，false），绝不发 `task.claim`；随后到达的 `claim.journaled` drop:stale。oracle：`claimOffer` 在 `beforeClaim` 返回后再次检查 `admissionWithdrawn()`（`offer-launch.ts:282-283`）。 |
+| `claim.journaled` 已 reduce、`claim.sent` 前 | X2b 只记录 cx；atomic 的 `send.claim -> claim.sent` 组先完成，之后走 C6/C7 |
+| `claim.sent` 后、start 前 | 记录 cx（X3/X3b）；start 结果走 C6/C7，发 `task.cancelled`，不发 `task.started` |
 | start 抛错 + cx | 发 `task.cancelled`，不发 `task.fail`（`offer-launch.ts:456-502`） |
 | running/awaiting | 选 cancelled 终态；与 complete 竞态时第一个胜 |
 | terminalizing/retiring | 共享 attempt；已 sent 则不重发 |
@@ -816,7 +822,7 @@ shutdown 期间的 offer 不单列：仍走 O1，最后在 limits 阶段由 O5 d
 ### S1 — 纯 reducer 核心与表契约测试（无生产接线）
 
 - 新增 `packages/client/src/daemon/task-runner/state.ts`：常量（暂不迁）、State/Event/Effect 类型、`TRANSITIONS` 数据行、`reduce()`、`serialize()`（测试工具）。
-- 新增 `packages/client/src/__tests__/task-runner-reducer.test.ts`、`task-runner-reducer-table.test.ts`：逐行执行、全组合覆盖、冻结/序列化、纯函数扫描、property/fuzz。
+- 新增 `packages/client/src/__tests__/task-runner-reducer.test.ts`、`task-runner-reducer-table.test.ts`：逐行执行、全组合覆盖、冻结/序列化、纯函数扫描、property/fuzz，以及 #1218 的 FIFO / atomic 组不可插入 / cancel-before-journal（X2a）顺序测试。
 - 不改任何生产 import/调用点。新模块不可达，声明闭包与 baseline 不变。
 - 退出：表 100% 行被执行；每个 (event, phase) 有明确 fallback；fuzz 不产生双终态/非法 phase；`state.ts` 不含 fs/net/timer/Date/random import。
 
