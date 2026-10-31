@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 1921590,
+      "budgetBytes": 1943077,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -28,17 +28,17 @@
         "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
-        "child_process",
-        "crypto",
-        "fs",
-        "fs/promises",
-        "module",
-        "net",
-        "os",
-        "path",
-        "url",
-        "util",
-        "zlib",
+        "node:child_process",
+        "node:crypto",
+        "node:fs",
+        "node:fs/promises",
+        "node:module",
+        "node:net",
+        "node:os",
+        "node:path",
+        "node:url",
+        "node:util",
+        "node:zlib",
         "zod"
       ],
       "lazyImports": [
@@ -49,8 +49,8 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-durable/storage/sqlite/node",
-        "http",
-        "koffi"
+        "koffi",
+        "node:http"
       ],
       "thirdParty": [
         "@cfworker/json-schema",
@@ -65,18 +65,18 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "child_process",
-          "crypto",
-          "fs",
-          "fs/promises",
-          "http",
-          "module",
-          "net",
-          "os",
-          "path",
-          "url",
-          "util",
-          "zlib"
+          "node:child_process",
+          "node:crypto",
+          "node:fs",
+          "node:fs/promises",
+          "node:http",
+          "node:module",
+          "node:net",
+          "node:os",
+          "node:path",
+          "node:url",
+          "node:util",
+          "node:zlib"
         ],
         "thirdParty": [
           "node:crypto"
@@ -110,7 +110,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 356454,
+      "budgetBytes": 356678,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -128,37 +128,37 @@
       ],
       "bareImports": [
         "@byok-sdk/protocol/constants",
-        "child_process",
-        "crypto",
-        "fs",
-        "module",
-        "net",
-        "os",
-        "path",
-        "url",
-        "util"
+        "node:child_process",
+        "node:crypto",
+        "node:fs",
+        "node:module",
+        "node:net",
+        "node:os",
+        "node:path",
+        "node:url",
+        "node:util"
       ],
       "lazyImports": [
         "#byok-acp-runtime",
         "#byok-hermes-session",
-        "http",
-        "koffi"
+        "koffi",
+        "node:http"
       ],
       "thirdParty": [],
       "unavailableOptional": [],
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "child_process",
-          "crypto",
-          "fs",
-          "http",
-          "module",
-          "net",
-          "os",
-          "path",
-          "url",
-          "util"
+          "node:child_process",
+          "node:crypto",
+          "node:fs",
+          "node:http",
+          "node:module",
+          "node:net",
+          "node:os",
+          "node:path",
+          "node:url",
+          "node:util"
         ],
         "thirdParty": []
       },
@@ -169,7 +169,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 64534,
+      "budgetBytes": 64559,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -188,11 +188,11 @@
       "bareImports": [
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
-        "child_process",
-        "crypto",
-        "fs",
-        "module",
-        "path"
+        "node:child_process",
+        "node:crypto",
+        "node:fs",
+        "node:module",
+        "node:path"
       ],
       "lazyImports": [],
       "thirdParty": [],
@@ -200,11 +200,11 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "child_process",
-          "crypto",
-          "fs",
-          "module",
-          "path"
+          "node:child_process",
+          "node:crypto",
+          "node:fs",
+          "node:module",
+          "node:path"
         ],
         "thirdParty": []
       },
@@ -215,7 +215,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 124437,
+      "budgetBytes": 124467,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -233,12 +233,12 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
-        "child_process",
-        "crypto",
-        "fs",
-        "net",
-        "os",
-        "path",
+        "node:child_process",
+        "node:crypto",
+        "node:fs",
+        "node:net",
+        "node:os",
+        "node:path",
         "zod"
       ],
       "lazyImports": [],
@@ -249,12 +249,12 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "child_process",
-          "crypto",
-          "fs",
-          "net",
-          "os",
-          "path"
+          "node:child_process",
+          "node:crypto",
+          "node:fs",
+          "node:net",
+          "node:os",
+          "node:path"
         ],
         "thirdParty": []
       },
@@ -313,7 +313,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 28384,
+      "budgetBytes": 28394,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -330,8 +330,8 @@
         "packages/client/dist/mcp-server/http.d.ts"
       ],
       "bareImports": [
-        "crypto",
-        "stream"
+        "node:crypto",
+        "node:stream"
       ],
       "lazyImports": [],
       "thirdParty": [],
@@ -339,8 +339,8 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "crypto",
-          "stream"
+          "node:crypto",
+          "node:stream"
         ],
         "thirdParty": []
       },
@@ -379,7 +379,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
-      "budgetBytes": 25682,
+      "budgetBytes": 25712,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -396,12 +396,12 @@
         "packages/client/dist/adapters/packaging.d.ts"
       ],
       "bareImports": [
-        "crypto",
-        "fs",
-        "module",
-        "path",
-        "url",
-        "zlib"
+        "node:crypto",
+        "node:fs",
+        "node:module",
+        "node:path",
+        "node:url",
+        "node:zlib"
       ],
       "lazyImports": [],
       "thirdParty": [],
@@ -409,12 +409,12 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "crypto",
-          "fs",
-          "module",
-          "path",
-          "url",
-          "zlib"
+          "node:crypto",
+          "node:fs",
+          "node:module",
+          "node:path",
+          "node:url",
+          "node:zlib"
         ],
         "thirdParty": []
       },
@@ -425,7 +425,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 346300,
+      "budgetBytes": 346526,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -443,37 +443,37 @@
       ],
       "bareImports": [
         "@byok-sdk/protocol/constants",
-        "child_process",
-        "crypto",
-        "fs",
-        "module",
-        "net",
-        "os",
-        "path",
-        "url",
-        "util"
+        "node:child_process",
+        "node:crypto",
+        "node:fs",
+        "node:module",
+        "node:net",
+        "node:os",
+        "node:path",
+        "node:url",
+        "node:util"
       ],
       "lazyImports": [
         "#byok-acp-runtime",
         "#byok-hermes-session",
-        "http",
-        "koffi"
+        "koffi",
+        "node:http"
       ],
       "thirdParty": [],
       "unavailableOptional": [],
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "child_process",
-          "crypto",
-          "fs",
-          "http",
-          "module",
-          "net",
-          "os",
-          "path",
-          "url",
-          "util"
+          "node:child_process",
+          "node:crypto",
+          "node:fs",
+          "node:http",
+          "node:module",
+          "node:net",
+          "node:os",
+          "node:path",
+          "node:url",
+          "node:util"
         ],
         "thirdParty": []
       },
@@ -484,7 +484,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok)",
-      "budgetBytes": 75757,
+      "budgetBytes": 75782,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -502,11 +502,11 @@
       ],
       "bareImports": [
         "@agentclientprotocol/sdk",
-        "crypto",
-        "fs",
-        "path",
-        "string_decoder",
-        "url"
+        "node:crypto",
+        "node:fs",
+        "node:path",
+        "node:string_decoder",
+        "node:url"
       ],
       "lazyImports": [],
       "thirdParty": [
@@ -517,11 +517,11 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "crypto",
-          "fs",
-          "path",
-          "string_decoder",
-          "url"
+          "node:crypto",
+          "node:fs",
+          "node:path",
+          "node:string_decoder",
+          "node:url"
         ],
         "thirdParty": []
       },
@@ -548,7 +548,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Hermes session runtime; loaded only when starting an execution",
-      "budgetBytes": 14606,
+      "budgetBytes": 14621,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -565,9 +565,9 @@
         "packages/client/dist/adapters/hermes/hermes-session-runtime.d.ts"
       ],
       "bareImports": [
-        "child_process",
-        "fs",
-        "path"
+        "node:child_process",
+        "node:fs",
+        "node:path"
       ],
       "lazyImports": [],
       "thirdParty": [],
@@ -575,9 +575,9 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "child_process",
-          "fs",
-          "path"
+          "node:child_process",
+          "node:fs",
+          "node:path"
         ],
         "thirdParty": []
       },
@@ -588,7 +588,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 438085,
+      "budgetBytes": 438112,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -619,22 +619,21 @@
         "@earendil-works/pi-durable/tools",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
-        "async_hooks",
-        "child_process",
-        "crypto",
-        "events",
-        "fs",
-        "fs/promises",
-        "module",
-        "net",
-        "os",
-        "path",
+        "node:async_hooks",
+        "node:child_process",
+        "node:crypto",
+        "node:events",
+        "node:fs",
+        "node:fs/promises",
+        "node:net",
+        "node:os",
+        "node:path",
+        "node:process",
+        "node:readline",
+        "node:stream/promises",
+        "node:string_decoder",
+        "node:url",
         "pi-web-access/dist/index.js",
-        "process",
-        "readline",
-        "stream/promises",
-        "string_decoder",
-        "url",
         "zod"
       ],
       "lazyImports": [
@@ -700,21 +699,20 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "async_hooks",
-          "child_process",
-          "crypto",
-          "events",
-          "fs",
-          "fs/promises",
-          "module",
-          "net",
-          "os",
-          "path",
-          "process",
-          "readline",
-          "stream/promises",
-          "string_decoder",
-          "url"
+          "node:async_hooks",
+          "node:child_process",
+          "node:crypto",
+          "node:events",
+          "node:fs",
+          "node:fs/promises",
+          "node:net",
+          "node:os",
+          "node:path",
+          "node:process",
+          "node:readline",
+          "node:stream/promises",
+          "node:string_decoder",
+          "node:url"
         ],
         "thirdParty": [
           "assert",
@@ -816,12 +814,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 32,
+          "line": 31,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 32,
+          "line": 31,
           "rule": "opaque import()"
         },
         {
@@ -866,7 +864,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 396824,
+      "budgetBytes": 396833,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2346,7 +2344,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 1870940,
+      "budgetBytes": 1896418,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2367,18 +2365,18 @@
         "@cfworker/json-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
-        "child_process",
-        "crypto",
-        "fs",
-        "fs/promises",
-        "module",
-        "net",
-        "os",
-        "path",
-        "readline",
-        "readline/promises",
-        "url",
-        "util",
+        "node:child_process",
+        "node:crypto",
+        "node:fs",
+        "node:fs/promises",
+        "node:module",
+        "node:net",
+        "node:os",
+        "node:path",
+        "node:readline",
+        "node:readline/promises",
+        "node:url",
+        "node:util",
         "zod"
       ],
       "lazyImports": [
@@ -2387,8 +2385,8 @@
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
         "@earendil-works/pi-durable/storage/sqlite/node",
-        "http",
-        "koffi"
+        "koffi",
+        "node:http"
       ],
       "thirdParty": [
         "@cfworker/json-schema",
@@ -2403,19 +2401,19 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "child_process",
-          "crypto",
-          "fs",
-          "fs/promises",
-          "http",
-          "module",
-          "net",
-          "os",
-          "path",
-          "readline",
-          "readline/promises",
-          "url",
-          "util"
+          "node:child_process",
+          "node:crypto",
+          "node:fs",
+          "node:fs/promises",
+          "node:http",
+          "node:module",
+          "node:net",
+          "node:os",
+          "node:path",
+          "node:readline",
+          "node:readline/promises",
+          "node:url",
+          "node:util"
         ],
         "thirdParty": [
           "node:crypto"
@@ -2449,7 +2447,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 43142,
+      "budgetBytes": 43162,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2463,10 +2461,10 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/protocol/constants",
-        "crypto",
-        "fs",
-        "net",
-        "path"
+        "node:crypto",
+        "node:fs",
+        "node:net",
+        "node:path"
       ],
       "lazyImports": [
         "#byok-pi-runtime-host"
@@ -2476,10 +2474,10 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "crypto",
-          "fs",
-          "net",
-          "path"
+          "node:crypto",
+          "node:fs",
+          "node:net",
+          "node:path"
         ],
         "thirdParty": []
       },
@@ -2490,7 +2488,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 43146,
+      "budgetBytes": 43166,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2504,10 +2502,10 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/protocol/constants",
-        "crypto",
-        "fs",
-        "net",
-        "path"
+        "node:crypto",
+        "node:fs",
+        "node:net",
+        "node:path"
       ],
       "lazyImports": [
         "#byok-pi-runtime-host"
@@ -2517,10 +2515,10 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "crypto",
-          "fs",
-          "net",
-          "path"
+          "node:crypto",
+          "node:fs",
+          "node:net",
+          "node:path"
         ],
         "thirdParty": []
       },
@@ -2531,7 +2529,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 43142,
+      "budgetBytes": 43162,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2545,10 +2543,10 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/protocol/constants",
-        "crypto",
-        "fs",
-        "net",
-        "path"
+        "node:crypto",
+        "node:fs",
+        "node:net",
+        "node:path"
       ],
       "lazyImports": [
         "#byok-pi-runtime-host"
@@ -2558,10 +2556,10 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "crypto",
-          "fs",
-          "net",
-          "path"
+          "node:crypto",
+          "node:fs",
+          "node:net",
+          "node:path"
         ],
         "thirdParty": []
       },
@@ -2572,7 +2570,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 43134,
+      "budgetBytes": 43154,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2586,10 +2584,10 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/protocol/constants",
-        "crypto",
-        "fs",
-        "net",
-        "path"
+        "node:crypto",
+        "node:fs",
+        "node:net",
+        "node:path"
       ],
       "lazyImports": [
         "#byok-pi-runtime-host"
@@ -2599,10 +2597,10 @@
       "opaqueImports": [],
       "nodeBuiltins": {
         "workspace": [
-          "crypto",
-          "fs",
-          "net",
-          "path"
+          "node:crypto",
+          "node:fs",
+          "node:net",
+          "node:path"
         ],
         "thirdParty": []
       },
