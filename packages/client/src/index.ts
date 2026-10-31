@@ -598,7 +598,7 @@ export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 
 export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
 export type {
-  StaticToolAuthorization, ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask,
+  ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationTask,
   ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason,
   ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule,
 } from './tool-authorization';

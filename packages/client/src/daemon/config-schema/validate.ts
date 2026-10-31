@@ -6,9 +6,7 @@ import { REMOVED_DAEMON_CONFIG_FIELDS, type RemovedDaemonConfigField } from './r
  * Where a `DaemonConfig` comes from (#1094).
  *
  * - `cli`: a `byok-agent` JSON config file. Embedded-only fields (functions,
- *   transports), the function form of a field that also has an object form
- *   (`toolAuthorization`) and the distribution-owned `localAgentRelease` are
- *   errors.
+ *   transports) and the distribution-owned `localAgentRelease` are errors.
  * - `embedded`: an object a Host passes to `createDaemon` or
  *   `createDaemonWithAdapters`. Embedded-only fields are allowed and checked
  *   by daemon construction.

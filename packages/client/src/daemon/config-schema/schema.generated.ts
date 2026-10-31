@@ -28,12 +28,86 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "auto"
             ]
           }
+        },
+        "rules": {
+          "type": "object",
+          "properties": {
+            "alwaysAsk": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "match": {
+                    "type": "object",
+                    "properties": {
+                      "toolName": {
+                        "type": "string"
+                      },
+                      "commandGlob": {
+                        "type": "string"
+                      },
+                      "pathGlob": {
+                        "type": "string"
+                      },
+                      "mcpServer": {
+                        "type": "string"
+                      },
+                      "mcpTool": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "match"
+                ]
+              }
+            },
+            "allowWithoutAsking": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "match": {
+                    "type": "object",
+                    "properties": {
+                      "toolName": {
+                        "type": "string"
+                      },
+                      "commandGlob": {
+                        "type": "string"
+                      },
+                      "pathGlob": {
+                        "type": "string"
+                      },
+                      "mcpServer": {
+                        "type": "string"
+                      },
+                      "mcpTool": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "match"
+                ]
+              }
+            }
+          }
         }
       },
       "required": [
         "default"
-      ],
-      "x-byok-embeddedAlternative": "function"
+      ]
     },
     "localToolApproval": {
       "const": "allow"

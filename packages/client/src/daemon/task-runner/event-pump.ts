@@ -45,7 +45,7 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
       }
       // `all` never blocks: classify the full reported input before any
       // spill, and only remind. `auto` already gated the call before it ran.
-      if (event.type === 'tool_use' && active.toolAuthorization.mode === 'all') noteToolReminder.call(this, active, event);
+      if (event.type === 'tool_use' && active.toolAuthorization.default === 'all') noteToolReminder.call(this, active, event);
 
       // DaemonConfig.maxInlineEventBytes: bound this ONE event before it is
       // counted, batched, or sent. An oversized `tool_use.input` /

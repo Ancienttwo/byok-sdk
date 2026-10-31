@@ -35,46 +35,52 @@ describe('tool authorization modes', () => {
 describe('tool authorization policy admission', () => {
   const rule = (id: string): ToolRule => ({ id, match: { toolName: 'bash' } });
 
-  it('normalizes mode strings and copies every policy layer before freezing', () => {
-    expect(parseToolAuthorizationPolicy('auto')).toEqual({ mode: 'auto' });
-    expect(parseToolAuthorizationPolicy('all')).toEqual({ mode: 'all' });
-    const input = { mode: 'auto', rules: { alwaysAsk: [{ id: 'review-shell', match: { toolName: 'bash' } }] } };
+  it('copies every policy layer before freezing', () => {
+    expect(parseToolAuthorizationPolicy({ default: 'auto' })).toEqual({ default: 'auto' });
+    expect(parseToolAuthorizationPolicy({ default: 'all' })).toEqual({ default: 'all' });
+    const input = { default: 'auto', rules: { alwaysAsk: [{ id: 'review-shell', match: { toolName: 'bash' } }] } };
     const policy = parseToolAuthorizationPolicy(input);
-    input.mode = 'all';
+    input.default = 'all';
     input.rules.alwaysAsk[0]!.match = { toolName: 'write' };
     input.rules.alwaysAsk.push({ id: 'later', match: { toolName: 'bash' } });
-    expect(policy).toEqual({ mode: 'auto', rules: { alwaysAsk: [{ id: 'review-shell', match: { toolName: 'bash' } }] } });
+    expect(policy).toEqual({ default: 'auto', rules: { alwaysAsk: [{ id: 'review-shell', match: { toolName: 'bash' } }] } });
     expect([policy, policy.rules, policy.rules!.alwaysAsk, policy.rules!.alwaysAsk![0], policy.rules!.alwaysAsk![0]!.match]
       .every(Object.isFrozen)).toBe(true);
     expect(policy.rules!.alwaysAsk).not.toBe(input.rules.alwaysAsk);
   });
 
   it.each([
-    undefined, null, [], 'inherit', {}, { mode: 'auto', extra: true }, { mode: 'auto', rules: undefined },
-    { mode: 'auto', rules: [] }, { mode: 'auto', rules: { deny: [] } },
-    { mode: 'auto', rules: { alwaysAsk: {} } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: '', match: { toolName: 'bash' } }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: '  ', match: { toolName: 'bash' } }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'a', description: false, match: { toolName: 'bash' } }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'a', match: {} }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { remote: 'origin' } }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { toolName: '' } }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { commandGlob: 3 } }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { pathGlob: undefined } }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { mcpTool: 'bad\0pattern' } }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { toolName: 'bash' }, action: 'deny' }] } },
-    { mode: 'auto', rules: { alwaysAsk: [null] } },
-    { mode: 'auto', rules: { alwaysAsk: [rule('same')], allowWithoutAsking: [rule('same')] } },
+    undefined, null, [], 'inherit', {}, { default: 'auto', extra: true }, { default: 'auto', rules: undefined },
+    { default: 'auto', rules: [] }, { default: 'auto', rules: { deny: [] } },
+    { default: 'auto', rules: { alwaysAsk: {} } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: '', match: { toolName: 'bash' } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: '  ', match: { toolName: 'bash' } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'a', description: false, match: { toolName: 'bash' } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'a', match: {} }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { remote: 'origin' } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { toolName: '' } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { commandGlob: 3 } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { pathGlob: undefined } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { mcpTool: 'bad\0pattern' } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'a', match: { toolName: 'bash' }, action: 'deny' }] } },
+    { default: 'auto', rules: { alwaysAsk: [null] } },
+    { default: 'auto', rules: { alwaysAsk: [rule('same')], allowWithoutAsking: [rule('same')] } },
   ])('rejects invalid policies instead of inventing a default: %j', value => {
     expect(() => parseToolAuthorizationPolicy(value)).toThrow(TypeError);
   });
 
   it.each(['{a,b}', '[ab]', '@(a)', '!(a)', '+(a)', '*(a)', '?(a)', '*'.repeat(17)])('F3/F5: admission rejects unsupported or unbounded glob syntax %j', commandGlob => {
-    expect(() => parseToolAuthorizationPolicy({ mode: 'auto', rules: { alwaysAsk: [{ id: 'restricted-grammar', match: { commandGlob } }] } })).toThrow(TypeError);
+    expect(() => parseToolAuthorizationPolicy({ default: 'auto', rules: { alwaysAsk: [{ id: 'restricted-grammar', match: { commandGlob } }] } })).toThrow(TypeError);
   });
 
   it.each(['notes/**', './notes/*', '../secrets/?', '~/.ssh/**'])('F5: admission rejects relative pathGlob %j', pathGlob => {
-    expect(() => parseToolAuthorizationPolicy({ mode: 'auto', rules: { alwaysAsk: [{ id: 'absolute-paths', match: { pathGlob } }] } })).toThrow(TypeError);
+    expect(() => parseToolAuthorizationPolicy({ default: 'auto', rules: { alwaysAsk: [{ id: 'absolute-paths', match: { pathGlob } }] } })).toThrow(TypeError);
+  });
+
+  // A resolved target never has these forms, so such an alwaysAsk rule would
+  // silently never fire. Admission must reject it instead of failing open.
+  it.each([`${WORKSPACE}/../secrets/**`, `${WORKSPACE}/sub//**`, `${WORKSPACE}/sub/`])('F5: admission rejects non-canonical pathGlob %j', pathGlob => {
+    expect(() => parseToolAuthorizationPolicy({ default: 'auto', rules: { alwaysAsk: [{ id: 'non-canonical', match: { pathGlob } }] } })).toThrow(TypeError);
   });
 
   it.each(['brace-expansion', 'repeated-stars'] as const)('F3: %s pathological patterns settle in milliseconds in an isolated process', mode => {
@@ -85,7 +91,7 @@ describe('tool authorization policy admission', () => {
       let rejected = false;
       let level;
       if (${JSON.stringify(mode)} === 'brace-expansion') {
-        try { parseToolAuthorizationPolicy({ mode: 'auto', rules: { alwaysAsk: [{ id: 'brace', match: { commandGlob: '{1..100000}' } }] } }); }
+        try { parseToolAuthorizationPolicy({ default: 'auto', rules: { alwaysAsk: [{ id: 'brace', match: { commandGlob: '{1..100000}' } }] } }); }
         catch (error) { rejected = error instanceof TypeError; }
       } else {
         for (const [command, commandGlob] of [['a'.repeat(2000), '*a*a*a*a*b'], ['a'.repeat(40000), '*git*push*--force*']]) {
@@ -107,9 +113,9 @@ describe('tool authorization policy admission', () => {
 
   it('bounds total rules, identifiers and rule text without silently truncating', () => {
     const rules = Array.from({ length: 128 }, (_, i) => rule(`r${i}`));
-    expect(parseToolAuthorizationPolicy({ mode: 'auto', rules: { alwaysAsk: rules } }).rules!.alwaysAsk).toHaveLength(128);
-    expect(() => parseToolAuthorizationPolicy({ mode: 'auto', rules: { alwaysAsk: rules, allowWithoutAsking: [rule('last')] } })).toThrow(/128/);
-    const parseRule = (value: unknown) => parseToolAuthorizationPolicy({ mode: 'all', rules: { alwaysAsk: [value] } });
+    expect(parseToolAuthorizationPolicy({ default: 'auto', rules: { alwaysAsk: rules } }).rules!.alwaysAsk).toHaveLength(128);
+    expect(() => parseToolAuthorizationPolicy({ default: 'auto', rules: { alwaysAsk: rules, allowWithoutAsking: [rule('last')] } })).toThrow(/128/);
+    const parseRule = (value: unknown) => parseToolAuthorizationPolicy({ default: 'all', rules: { alwaysAsk: [value] } });
     expect(parseRule({ id: 'a'.repeat(128), description: ''.padEnd(4096, 'x'), match: { toolName: 'x'.repeat(4096) } }).rules!.alwaysAsk![0]!.id).toHaveLength(128);
     expect(() => parseRule(rule('a'.repeat(129)))).toThrow(/128/);
     expect(() => parseRule({ ...rule('a'), description: 'x'.repeat(4097) })).toThrow(/4096/);
@@ -410,6 +416,32 @@ describe('auto gate', () => {
         .resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
       expect(requestAuthorization).not.toHaveBeenCalled();
     } finally { vi.useRealTimers(); }
+  });
+
+  it('audits denials that happen before classification', async () => {
+    const onDecision = vi.fn();
+    const rules: ToolAuthorizationRules = { alwaysAsk: [{ id: 'mcp-delete', match: { mcpServer: 's' } }] };
+    const gate = createAutoToolAuthorizationGate({ workspace: WORKSPACE, timeoutMs: 100, rules, onDecision,
+      mcpIdentities: new Map([['mcp__s__t', { server: 's', tool: 't' }]]), requestAuthorization: async () => ({ approved: true }) });
+    const audited = (toolName: string) => onDecision.mock.calls.at(-1)?.[0] as GateDecision | undefined;
+    await expect(gate.authorize({ ...call, toolName: 'mcp__s__missing', input: {} }, async () => undefined))
+      .resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
+    expect(audited('mcp__s__missing')).toMatchObject({
+      call: { toolName: 'mcp__s__missing' },
+      verdict: { decision: 'deny', code: 'tool_authorization_unavailable' },
+    });
+    expect(audited('mcp__s__missing')!.risk).toBeUndefined();
+    vi.useFakeTimers();
+    try {
+      const timedOut = gate.authorize({ ...call, toolName: 'mcp__s__slow', input: {} }, () => new Promise(() => {}));
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(timedOut).resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
+      expect(audited('mcp__s__slow')!.risk).toBeUndefined();
+      await expect(gate.authorize({ ...call, toolName: 'mcp__s__throw', input: {} }, () => { throw new Error('offline'); }))
+        .resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
+      expect(audited('mcp__s__throw')!.risk).toBeUndefined();
+    } finally { vi.useRealTimers(); }
+    expect(onDecision).toHaveBeenCalledTimes(3);
   });
 
   it('denies every unanswered call at its own wall-clock deadline and withdraws its request', async () => {

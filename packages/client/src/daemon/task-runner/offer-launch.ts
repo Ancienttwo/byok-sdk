@@ -53,7 +53,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   let toolAuthorization: ToolAuthorizationPolicy;
   try {
     const resolver = this['deps'].toolAuthorization;
-    toolAuthorization = parseToolAuthorizationPolicy(resolver === undefined ? 'all' : resolver(Object.freeze({
+    toolAuthorization = parseToolAuthorizationPolicy(resolver === undefined ? { default: 'all' } : resolver(Object.freeze({
       taskId, runtimeId: pick.descriptor.id, ...(agentBinding.resolution.agentRef === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
     })));
   } catch (error) {
@@ -61,7 +61,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     if (!admissionWithdrawn()) decline('tool_authorization_unresolved: local tool authorization policy could not be resolved', false);
     return;
   }
-  if (toolAuthorization.mode === 'auto' && (pick.descriptor.capabilities.toolAuthorizationAuto !== true || preparation !== undefined)) {
+  if (toolAuthorization.default === 'auto' && (pick.descriptor.capabilities.toolAuthorizationAuto !== true || preparation !== undefined)) {
     if (!admissionWithdrawn()) {
       decline(`tool_authorization_unsupported: runtime ${pick.descriptor.id} cannot gate ${preparation === undefined ? '' : 'prepared '}tool calls before execution, so auto mode cannot run`, false);
     }
@@ -433,14 +433,15 @@ async function startAndActivateRuntime(
     ...(pick.descriptor.capabilities.approvalInteractive ? { approvalChannel: { request: requestApproval } } : {}),
     // User authorization reuses the task's one approval path: the wire
     // `task.await_approval` and local `Daemon.approve`/`reject` resolve it.
-    ...(toolAuthorization.mode !== 'auto' ? {} : { toolAuthorization: createAutoToolAuthorizationGate({
+    ...(toolAuthorization.default !== 'auto' ? {} : { toolAuthorization: createAutoToolAuthorizationGate({
       workspace: manifest.workspace.workspaceDir,
       rules: toolAuthorization.rules,
       mcpIdentities: mcpEventIdentities(mcpToolsetTools),
       onDecision: ({ call, risk, verdict }) => this['deps'].onToolAuthorizationDecision?.(Object.freeze({
         taskId, toolName: call.toolName, toolCallId: call.toolCallId, decision: verdict.decision,
-        authorization: risk.authorization, reasons: risk.level === 'high' ? risk.reasons : Object.freeze([]),
-        ...(risk.level === 'normal' && risk.suppressedReasons !== undefined ? { suppressedReasons: risk.suppressedReasons } : {}),
+        authorization: risk?.authorization ?? Object.freeze({ source: 'built-in' as const, ruleIds: Object.freeze([]) }),
+        reasons: risk?.level === 'high' ? risk.reasons : Object.freeze([]),
+        ...(risk?.level === 'normal' && risk.suppressedReasons !== undefined ? { suppressedReasons: risk.suppressedReasons } : {}),
         ...(verdict.decision === 'deny' ? { code: verdict.code } : {}),
       })),
       timeoutMs: (this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS) + 5_000,

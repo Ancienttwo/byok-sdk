@@ -5,7 +5,7 @@ import {
   AGENT_MESSAGE_MCP_SERVER_NAME,
   AGENT_RESULT_MCP_SERVER_NAME,
 } from '../../sdk-reserved-mcp';
-import { staticToolAuthorizationMode, type ToolAuthorizationMode } from '../../tool-authorization';
+import { toolAuthorizationMode, type ToolAuthorizationMode } from '../../tool-authorization';
 import type { RuntimeAdapter } from '../../types';
 import { serviceLogDir } from '../host-layout';
 import { scratchRootSocketBudget } from '../retention/scratch';
@@ -99,12 +99,11 @@ export interface DaemonEffectiveConfig {
  * How this daemon decides each task's tool-authorization mode.
  *
  * - `all`: no `DaemonConfig.toolAuthorization`; every task runs `all`.
- * - `static`: a static policy; `byRuntime` holds the mode of every runtime of
- *   this daemon (its `byRuntime` entry, else `default`).
- * - `host-resolver`: a Host function decides per offer.
+ * - `static`: a policy; `byRuntime` holds the mode of every runtime of this
+ *   daemon (its `byRuntime` entry, else `default`).
  */
 export type DaemonEffectiveToolAuthorization = (
-  | { readonly mode: 'all' | 'host-resolver' }
+  | { readonly mode: 'all' }
   | { readonly mode: 'static'; readonly byRuntime: Readonly<Record<string, ToolAuthorizationMode>> }
 ) & {
   /** Who may approve a `tool-authorization` approval: `host-only` (default) or `allow` (the control socket too). */
@@ -151,8 +150,7 @@ function effectiveToolAuthorization(config: DaemonConfig, adapters: readonly Run
   const localToolApproval = config.localToolApproval === 'allow' ? 'allow' : 'host-only';
   const policy = config.toolAuthorization;
   if (policy === undefined) return { mode: 'all', localToolApproval };
-  if (typeof policy === 'function') return { mode: 'host-resolver', localToolApproval };
-  const byRuntime = Object.fromEntries(adapters.map((adapter) => [adapter.descriptor.id, staticToolAuthorizationMode(policy, adapter.descriptor.id)]));
+  const byRuntime = Object.fromEntries(adapters.map((adapter) => [adapter.descriptor.id, toolAuthorizationMode(policy, adapter.descriptor.id)]));
   return { mode: 'static', byRuntime, localToolApproval };
 }
 

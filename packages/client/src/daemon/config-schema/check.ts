@@ -9,7 +9,7 @@ import { resolveStorageConfig } from '../retention/config';
 import { ScratchRootPathError } from '../retention/scratch';
 import { DeviceStore } from '../store';
 import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './effective';
-import { staticToolAuthorizationIssues } from './static-tool-authorization';
+import { toolAuthorizationIssues } from './static-tool-authorization';
 import { validateDaemonConfig, type DaemonConfigIssue, type DaemonConfigSource } from './validate';
 
 export interface DaemonConfigCheckOptions {
@@ -58,8 +58,8 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
     const storage = resolveStorageConfig(storeDir, config.storage);
     const adapters = options.adapters ?? buildDefaultAdapters(config, scope.piByokLauncher);
     const runtimeSource = options.adapters === undefined ? 'sdk-built' : 'injected';
-    const toolAuthorizationIssues = staticToolAuthorizationIssues(config, adapters, runtimeSource);
-    if (toolAuthorizationIssues.length > 0) return { ok: false, issues: [...issues, ...toolAuthorizationIssues] };
+    const authorizationIssues = toolAuthorizationIssues(config, adapters, runtimeSource);
+    if (authorizationIssues.length > 0) return { ok: false, issues: [...issues, ...authorizationIssues] };
     const effective = describeEffectiveDaemonConfig({
       config, warnings: scope.configWarnings, memoryHelper: scope.memoryHelper,
       agentMemoryMcpAdmission: scope.agentMemoryMcpAdmission, storeDir, scratchRoot: storage.scratchRoot,

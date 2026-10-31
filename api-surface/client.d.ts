@@ -3441,12 +3441,11 @@ export interface DaemonEffectiveConfig {
  * How this daemon decides each task's tool-authorization mode.
  *
  * - `all`: no `DaemonConfig.toolAuthorization`; every task runs `all`.
- * - `static`: a static policy; `byRuntime` holds the mode of every runtime of
- *   this daemon (its `byRuntime` entry, else `default`).
- * - `host-resolver`: a Host function decides per offer.
+ * - `static`: a policy; `byRuntime` holds the mode of every runtime of this
+ *   daemon (its `byRuntime` entry, else `default`).
  */
 export type DaemonEffectiveToolAuthorization = ({
-    readonly mode: 'all' | 'host-resolver';
+    readonly mode: 'all';
 } | {
     readonly mode: 'static';
     readonly byRuntime: Readonly<Record<string, ToolAuthorizationMode>>;
@@ -3545,7 +3544,7 @@ export interface DaemonConfigJsonSchema {
     readonly 'x-byok-surface'?: DaemonConfigSurface;
     /**
      * `function`: an embedded Host may pass a function instead of this object
-     * schema (e.g. `toolAuthorization`); a config file must set the object.
+     * schema; a config file must set the object.
      */
     readonly 'x-byok-embeddedAlternative'?: 'function';
     readonly 'x-byok-schemaVersion'?: number;
@@ -3564,9 +3563,7 @@ import { type RemovedDaemonConfigField } from './removed-fields';
  * Where a `DaemonConfig` comes from (#1094).
  *
  * - `cli`: a `byok-agent` JSON config file. Embedded-only fields (functions,
- *   transports), the function form of a field that also has an object form
- *   (`toolAuthorization`) and the distribution-owned `localAgentRelease` are
- *   errors.
+ *   transports) and the distribution-owned `localAgentRelease` are errors.
  * - `embedded`: an object a Host passes to `createDaemon` or
  *   `createDaemonWithAdapters`. Embedded-only fields are allowed and checked
  *   by daemon construction.
@@ -4713,7 +4710,7 @@ import { type AgentMemoryExportOptions } from './agent-memory-export';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
 import { type AgentContentReadRoot } from './agent-content-read';
-import type { StaticToolAuthorization, ToolAuthorizationResolver } from '../tool-authorization';
+import type { ToolAuthorizationPolicy } from '../tool-authorization';
 import { type DaemonEffectiveConfig } from './config-schema/effective';
 import type { AgentMemoryExport, AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 /**
@@ -4740,19 +4737,15 @@ export interface DaemonConfig {
      * Per-task tool authorization, decided by this Host for every runtime:
      * `all` (default) never blocks and emits a `tool-reminder` event for each
      * high-risk call; `auto` asks the user through the task's approval path
-     * before a high-risk call runs. Not an OS sandbox or file scope.
-     *
-     * A static policy (`{ default, byRuntime }`, the only form a config file
-     * can set) gives each runtime a fixed mode: its `byRuntime` entry, else
-     * `default`. Daemon construction refuses a `byRuntime` key that is not a
-     * runtime of this daemon, and `auto` for a runtime without
-     * `toolAuthorizationAuto`.
-     *
-     * An embedded Host may pass a function instead. It is called once per
-     * offer; a throw or any other value declines the offer, and `auto` on a
-     * runtime without `toolAuthorizationAuto` declines it before claim.
+     * before a high-risk call runs and is declined before claim on a runtime
+     * without `toolAuthorizationAuto`. `byRuntime` overrides the mode for one
+     * runtime id. `rules` move single calls across the ask boundary and apply
+     * to every runtime. A config file and an embedded Host supply the same
+     * object; it is validated, copied and frozen before claim, once per offer
+     * (including resume). Invalid policies decline the offer. Rules never
+     * change the wire or native launch. Not an OS sandbox or file scope.
      */
-    toolAuthorization?: ToolAuthorizationResolver | StaticToolAuthorization;
+    toolAuthorization?: ToolAuthorizationPolicy;
     /**
      * Who may approve a `tool-authorization` approval (an `auto` high-risk tool
      * call). Absent (default): only the Host — a wire `task.approve` or an
@@ -5683,7 +5676,7 @@ export declare class DaemonHaltError extends Error {
  */
 export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefined;
 // ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
-import type { ToolRiskReason } from '../tool-authorization';
+import type { ToolAuthorizationReason, ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { type AssertionLane, type DaemonEvent } from './observer';
 import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../login-shell-environment';
@@ -5795,8 +5788,12 @@ export type DaemonRecord = Extract<DaemonEvent, {
     ts: string;
     taskId: string;
     reasons: readonly ToolRiskReason[];
+    suppressedReasons?: readonly ToolRiskReason[];
+    authorization: ToolAuthorizationReason;
     summaryBytes: number;
-} | {
+} | Omit<Extract<DaemonEvent, {
+    kind: 'tool-authorization';
+}>, 'toolName'> | {
     kind: 'runtime-disposal-failed';
     ts: string;
     taskId: string;
@@ -7490,7 +7487,7 @@ export declare function prependAgentReaderResultGuidance(instruction: string): s
 export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
-import type { ToolReminder } from '../tool-authorization';
+import type { ToolAuthorizationDecision, ToolReminder } from '../tool-authorization';
 import { type AgentEvent, type BlobRef, type Envelope, type OfferAdmissionTimings, type TaskState } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { ExecutionRecord } from './execution-record';
@@ -7602,7 +7599,12 @@ export type DaemonEvent = ({
  | ({
     kind: 'tool-reminder';
     ts: string;
-} & ToolReminder) | {
+} & ToolReminder)
+/** Local auto-gate decision; never a server protocol envelope. */
+ | ({
+    kind: 'tool-authorization';
+    ts: string;
+} & ToolAuthorizationDecision) | {
     kind: 'completed';
     ts: string;
     taskId: string;
@@ -7924,6 +7926,7 @@ export declare class DaemonObserver {
     }): void;
     /** M4 Phase 3 hardening: see the `stale-approval-decision` `DaemonEvent` variant's own doc comment. */
     noteToolReminder(reminder: ToolReminder): void;
+    noteToolAuthorizationDecision(decision: ToolAuthorizationDecision): void;
     noteStaleApprovalDecision(taskId: string, decision: 'approve' | 'reject', reason?: string): void;
     /** WP2I-S2: see the `agent-memory-intent-integrity` `DaemonEvent` variant's own doc comment. */
     noteAgentMemoryIntentIntegrity(event: {
@@ -9015,7 +9018,7 @@ import { type McpServerObservation } from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { type AgentMemoryAuditWarning, type AgentMemoryHostedProjection } from './agent-memory';
-import type { ToolAuthorizationResolver, ToolReminder } from '../tool-authorization';
+import type { ToolAuthorizationDecision, ToolAuthorizationResolver, ToolReminder } from '../tool-authorization';
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
  * before force-resolving an unanswered out-of-band approval as a fail-closed
@@ -9321,6 +9324,8 @@ export interface TaskRunnerDeps {
     toolAuthorization?: ToolAuthorizationResolver;
     /** One high-risk tool call observed in an `all` task; local observability only. */
     onToolReminder?: (reminder: ToolReminder) => void;
+    /** One classified auto-gate verdict, including silent allow; local observability only. */
+    onToolAuthorizationDecision?: (decision: ToolAuthorizationDecision) => void;
     /** Overrides the bounded soft-interrupt window before authoritative `Session.close()` disposal begins. */
     shutdownInterruptTimeoutMs?: number;
     startupTimeoutMs?: number;
@@ -11106,8 +11111,8 @@ export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets';
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
-export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
-export type { StaticToolAuthorization, ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationResolver, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, } from './tool-authorization';
+export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
+export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
@@ -14326,21 +14331,49 @@ export interface ToolAuthorizationTask {
     readonly runtimeId: string;
     readonly agentRef?: AgentRef;
 }
-export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationMode;
-/**
- * A tool-authorization policy that a config file can express (#1094):
- * `byRuntime` sets the mode of a runtime by its id, and `default` applies to
- * every other runtime.
- */
-export interface StaticToolAuthorization {
-    readonly default: ToolAuthorizationMode;
-    readonly byRuntime?: Readonly<Record<string, ToolAuthorizationMode>>;
+export interface ToolRule {
+    readonly id: string;
+    /** Host display text, never interpreted as executable policy. */
+    readonly description?: string;
+    readonly match: {
+        /** Exact, case-sensitive native tool name. */
+        readonly toolName?: string;
+        readonly commandGlob?: string;
+        readonly pathGlob?: string;
+        readonly mcpServer?: string;
+        readonly mcpTool?: string;
+    };
 }
+export interface ToolAuthorizationRules {
+    readonly alwaysAsk?: readonly ToolRule[];
+    readonly allowWithoutAsking?: readonly ToolRule[];
+}
+/**
+ * The one tool-authorization policy `DaemonConfig.toolAuthorization` accepts,
+ * whether it comes from a config file or an embedded Host. It is copied,
+ * validated and frozen by {@link parseToolAuthorizationPolicy} at admission.
+ */
+export interface ToolAuthorizationPolicy {
+    /** Mode for every runtime without a `byRuntime` entry. */
+    readonly default: ToolAuthorizationMode;
+    /** Per-runtime override, keyed by runtime id. */
+    readonly byRuntime?: Readonly<Record<string, ToolAuthorizationMode>>;
+    /** User-defined rules that move single calls across the ask boundary. */
+    readonly rules?: ToolAuthorizationRules;
+}
+/** Internal per-offer derivation; never part of the public config surface. */
+export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationPolicy;
 /** The mode `policy` gives `runtimeId`: its own `byRuntime` entry, else `default`. */
-export declare function staticToolAuthorizationMode(policy: StaticToolAuthorization, runtimeId: string): ToolAuthorizationMode;
-/** The resolver of a static policy, over a copy taken now so later edits to `policy` cannot change it. */
-export declare function staticToolAuthorizationResolver(policy: StaticToolAuthorization): ToolAuthorizationResolver;
+export declare function toolAuthorizationMode(policy: Pick<ToolAuthorizationPolicy, 'default' | 'byRuntime'>, runtimeId: string): ToolAuthorizationMode;
+/**
+ * Derive the daemon's internal resolver from one policy. The snapshot is
+ * taken now, so later edits to `policy` cannot change a decision; rules apply
+ * unchanged to every runtime.
+ */
+export declare function toolAuthorizationResolver(policy: ToolAuthorizationPolicy): ToolAuthorizationResolver;
 export declare function parseToolAuthorizationMode(value: unknown): ToolAuthorizationMode;
+/** The admission boundary: one copied, frozen policy for every source. */
+export declare function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy;
 /** One native tool call, before execution. `input` is the runtime's own argument object. */
 export interface ToolCall {
     readonly toolCallId: string;
@@ -14350,30 +14383,57 @@ export interface ToolCall {
     readonly cwd: string;
     readonly nativeAgentId?: string;
     readonly parentToolCallId?: string;
+    /** Trusted admitted identity; not inferred from a native tool's spelling. */
+    readonly mcp?: {
+        readonly server: string;
+        readonly tool: string;
+    };
 }
-export type ToolRiskReason = 'privilege-escalation' | 'recursive-delete' | 'system-modification' | 'destructive-git' | 'publish-or-deploy' | 'remote-script-execution' | 'permission-broadening' | 'sensitive-path' | 'write-outside-workspace';
+export type ToolRiskReason = 'privilege-escalation' | 'recursive-delete' | 'system-modification' | 'destructive-git' | 'publish-or-deploy' | 'remote-script-execution' | 'permission-broadening' | 'sensitive-path' | 'write-outside-workspace' | 'custom-rule';
+export interface ToolAuthorizationReason {
+    readonly source: 'rule' | 'built-in' | 'floor';
+    readonly ruleIds: readonly string[];
+}
 export type ToolRisk = {
     readonly level: 'normal';
+    readonly authorization: ToolAuthorizationReason;
+    readonly suppressedReasons?: readonly ToolRiskReason[];
 } | {
     readonly level: 'high';
     readonly reasons: readonly ToolRiskReason[];
+    readonly authorization: ToolAuthorizationReason;
 };
 /** Home-relative credential stores and login persistence points. */
 export declare const SENSITIVE_HOME_PATHS: readonly string[];
 /**
- * The single high-risk classifier for both modes. Paths resolve lexically
- * (`~` expands to `home`); symlinks are not followed. `workspace` is the task
- * cwd the daemon granted, not the runtime-reported cwd.
+ * The single classifier for both modes. Protected-path identity also follows
+ * the nearest existing ancestor; uncertainty cannot activate an allow rule.
+ * `workspace` is the daemon's grant, not the runtime-reported cwd.
  */
-export declare function classifyToolCall(call: Pick<ToolCall, 'toolName' | 'input' | 'cwd'>, workspace: string, home?: string): ToolRisk;
+export declare function classifyToolCall(call: Pick<ToolCall, 'toolName' | 'input' | 'cwd' | 'mcp'>, workspace: string, home?: string, rules?: ToolAuthorizationRules, context?: {
+    readonly platform?: NodeJS.Platform;
+}): ToolRisk;
 export type ToolAuthorizationDenialCode = 'tool_authorization_denied' | 'tool_authorization_unavailable';
 export type ToolAuthorizationVerdict = {
     readonly decision: 'allow';
+    readonly authorization?: ToolAuthorizationReason;
 } | {
     readonly decision: 'deny';
     readonly code: ToolAuthorizationDenialCode;
     readonly reason: string;
+    readonly authorization?: ToolAuthorizationReason;
 };
+/** Local audit projection; raw tool arguments and rule descriptions stay private. */
+export interface ToolAuthorizationDecision {
+    readonly taskId: string;
+    readonly toolName: string;
+    readonly toolCallId?: string;
+    readonly decision: 'allow' | 'deny';
+    readonly authorization: ToolAuthorizationReason;
+    readonly reasons: readonly ToolRiskReason[];
+    readonly suppressedReasons?: readonly ToolRiskReason[];
+    readonly code?: ToolAuthorizationDenialCode;
+}
 /**
  * The `auto` gate a daemon hands to an adapter that declares
  * `toolAuthorizationAuto`. The adapter calls it for every native tool call
@@ -14392,10 +14452,23 @@ export interface ToolAuthorizationGate {
         readonly tool: string;
     } | undefined>): Promise<ToolAuthorizationVerdict>;
 }
-export declare function describeHighRiskToolCall(call: Pick<ToolCall, 'toolName' | 'input'>, reasons: readonly ToolRiskReason[]): string;
+export declare function describeHighRiskToolCall(call: Pick<ToolCall, 'toolName' | 'input'>, reasons: readonly ToolRiskReason[], authorization?: ToolAuthorizationReason): string;
 export declare function createAutoToolAuthorizationGate(input: {
     readonly workspace: string;
+    readonly home?: string;
+    readonly platform?: NodeJS.Platform;
     readonly timeoutMs: number;
+    readonly rules?: ToolAuthorizationRules;
+    readonly mcpIdentities?: ReadonlyMap<string, {
+        readonly server: string;
+        readonly tool: string;
+    }>;
+    /** Called for every classified decision and for a denial that happened before classification. */
+    readonly onDecision?: (decision: {
+        readonly call: ToolCall;
+        readonly risk?: ToolRisk;
+        readonly verdict: ToolAuthorizationVerdict;
+    }) => void;
     /** Aborting `signal` must withdraw the request so a later decision cannot revive it. */
     readonly requestAuthorization: (summary: string, signal: AbortSignal) => Promise<{
         approved: boolean;
@@ -14412,6 +14485,8 @@ export interface ToolReminder {
     readonly toolCallId?: string;
     readonly reasons: readonly ToolRiskReason[];
     readonly summary: string;
+    readonly authorization: ToolAuthorizationReason;
+    readonly suppressedReasons?: readonly ToolRiskReason[];
 }
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment';

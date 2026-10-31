@@ -69,7 +69,7 @@ describe('daemon tool authorization', () => {
     const sent: Envelope[] = [];
     const decisions: ToolAuthorizationDecision[] = [];
     const { runner } = makeRunner(adapter, sent, {
-      toolAuthorization: () => ({ mode: 'auto', rules: { allowWithoutAsking: [
+      toolAuthorization: () => ({ default: 'auto', rules: { allowWithoutAsking: [
         { id: 'push-origin', match: { toolName: 'bash', commandGlob: 'git push origin *' } },
       ] } }),
       onToolAuthorizationDecision: decision => decisions.push(decision),
@@ -86,13 +86,32 @@ describe('daemon tool authorization', () => {
     expect(sent.some(event => event.type === 'task.await_approval')).toBe(false);
   });
 
+  it('audits a denial that happens before classification', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const decisions: ToolAuthorizationDecision[] = [];
+    const { runner } = makeRunner(adapter, sent, {
+      toolAuthorization: () => ({ default: 'auto', rules: { alwaysAsk: [{ id: 'mcp-delete', match: { mcpServer: 'linear' } }] } }),
+      onToolAuthorizationDecision: decision => decisions.push(decision),
+    });
+    await offer(runner, 'pre-classification-audit');
+    const input = adapter.inputs[0]!;
+    await expect(input.toolAuthorization!.authorize({ toolCallId: 'missing-identity', toolName: 'mcp__linear__delete_issue',
+      input: {}, cwd: input.manifest.workspace.workspaceDir }, async () => undefined))
+      .resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
+    expect(decisions).toEqual([{
+      taskId: 'pre-classification-audit', toolName: 'mcp__linear__delete_issue', toolCallId: 'missing-identity',
+      decision: 'deny', authorization: { source: 'built-in', ruleIds: [] }, reasons: [], code: 'tool_authorization_unavailable',
+    }]);
+  });
+
   it('F6 audits a high-risk all call suppressed by allow without emitting a reminder', async () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
     const sent: Envelope[] = [];
     const decisions: ToolAuthorizationDecision[] = [];
     const reminders: ToolReminder[] = [];
     const { runner } = makeRunner(adapter, sent, {
-      toolAuthorization: () => ({ mode: 'all', rules: { allowWithoutAsking: [
+      toolAuthorization: () => ({ default: 'all', rules: { allowWithoutAsking: [
         { id: 'push-origin', match: { toolName: 'bash', commandGlob: 'git push origin *' } },
       ] } }),
       onToolAuthorizationDecision: decision => decisions.push(decision),
@@ -117,7 +136,7 @@ describe('daemon tool authorization', () => {
       const sent: Envelope[] = [];
       const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => {
         if (scenario === 'resolver-throw') throw new Error(privateDetail);
-        return { mode: 'auto', rules: { alwaysAsk: [
+        return { default: 'auto', rules: { alwaysAsk: [
           { id: privateDetail, match: { toolName: 'read' } },
           { id: privateDetail, match: { toolName: 'write' } },
         ] } };
@@ -178,7 +197,7 @@ describe('daemon tool authorization', () => {
     const sent: Envelope[] = [];
     const reminders: ToolReminder[] = [];
     const seen: ToolAuthorizationTask[] = [];
-    const resolver: ToolAuthorizationResolver = (task) => { seen.push(task); return 'auto'; };
+    const resolver: ToolAuthorizationResolver = (task) => { seen.push(task); return { default: 'auto' }; };
     const { runner, approvalRegistry } = makeRunner(adapter, sent, { toolAuthorization: resolver, onToolReminder: r => reminders.push(r) });
     await offer(runner, 'task-auto');
     expect(seen).toEqual([expect.objectContaining({ taskId: 'task-auto', runtimeId: 'pi', agentRef: expect.any(Object) })]);
@@ -218,7 +237,7 @@ describe('daemon tool authorization', () => {
   it('auto: two concurrent unanswered calls are both denied within the gate deadline, queue wait included', async () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
     const sent: Envelope[] = [];
-    const { runner, approvalRegistry } = makeRunner(adapter, sent, { toolAuthorization: () => 'auto', approvalTimeoutMs: 6_000 });
+    const { runner, approvalRegistry } = makeRunner(adapter, sent, { toolAuthorization: () => ({ default: 'auto' }), approvalTimeoutMs: 6_000 });
     await offer(runner, 'task-queued');
     const gate = adapter.inputs[0]!.toolAuthorization!;
     const workspace = adapter.inputs[0]!.manifest.workspace.workspaceDir;
@@ -250,7 +269,7 @@ describe('daemon tool authorization', () => {
   it('auto: the gate withdraws a queued approval it stops waiting for, before it is ever dispatched', async () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
     const sent: Envelope[] = [];
-    const { runner, approvalRegistry } = makeRunner(adapter, sent, { toolAuthorization: () => 'auto', approvalTimeoutMs: 60_000 });
+    const { runner, approvalRegistry } = makeRunner(adapter, sent, { toolAuthorization: () => ({ default: 'auto' }), approvalTimeoutMs: 60_000 });
     await offer(runner, 'task-withdraw');
     const holder = runner.requestApproval('task-withdraw', 'hold the approval slot');
     const withdraw = new AbortController();
@@ -268,7 +287,7 @@ describe('daemon tool authorization', () => {
   it('auto on a runtime without a pre-execution gate is declined before claim, never run ungated', async () => {
     const adapter = new GateCapturingAdapter(NO_AUTO);
     const sent: Envelope[] = [];
-    const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => 'auto' });
+    const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => ({ default: 'auto' }) });
     await offer(runner, 'task-unsupported');
     expect(adapter.inputs).toEqual([]);
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
@@ -276,10 +295,10 @@ describe('daemon tool authorization', () => {
   });
 
   it.each([
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'empty', match: {} }] } },
-    { mode: 'auto', rules: { allowWithoutAsking: 'all' } },
-    { mode: 'all', rules: { alwaysAsk: [{ id: 'same', match: { toolName: 'read' } }], allowWithoutAsking: [{ id: 'same', match: { toolName: 'write' } }] } },
-    { mode: 'auto', rules: { alwaysAsk: [{ id: 'bad', match: { commandRegex: '.*' } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'empty', match: {} }] } },
+    { default: 'auto', rules: { allowWithoutAsking: 'all' } },
+    { default: 'all', rules: { alwaysAsk: [{ id: 'same', match: { toolName: 'read' } }], allowWithoutAsking: [{ id: 'same', match: { toolName: 'write' } }] } },
+    { default: 'auto', rules: { alwaysAsk: [{ id: 'bad', match: { commandRegex: '.*' } }] } },
   ])('declines malformed rule policies before claim: %j', async policy => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
     const sent: Envelope[] = [];
@@ -295,7 +314,7 @@ describe('daemon tool authorization', () => {
     const sent: Envelope[] = [];
     const reminders: ToolReminder[] = [];
     const { runner } = makeRunner(adapter, sent, {
-      toolAuthorization: () => ({ mode: 'all', rules: {
+      toolAuthorization: () => ({ default: 'all', rules: {
         alwaysAsk: [{ id: 'ask-tests', match: { commandGlob: 'npm test' } }],
         allowWithoutAsking: [{ id: 'allow-bash', match: { toolName: 'bash' } }],
       } }),
@@ -322,7 +341,7 @@ describe('daemon tool authorization', () => {
     const sent: Envelope[] = [];
     const reminders: ToolReminder[] = [];
     const { runner } = makeRunner(adapter, sent, {
-      toolAuthorization: () => ({ mode: 'all', rules: { alwaysAsk: [{ id: 'mcp-delete', match: { mcpServer: 'x__y', mcpTool: 'delete_*' } }] } }),
+      toolAuthorization: () => ({ default: 'all', rules: { alwaysAsk: [{ id: 'mcp-delete', match: { mcpServer: 'x__y', mcpTool: 'delete_*' } }] } }),
       onToolReminder: reminder => reminders.push(reminder),
     });
     await offer(runner, 'all-mcp-rules');
@@ -337,7 +356,7 @@ describe('daemon tool authorization', () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
     const sent: Envelope[] = [];
     const decisions: ToolAuthorizationDecision[] = [];
-    const policy = { mode: 'auto' as const, rules: { alwaysAsk: [{ id: 'read-once', match: { toolName: 'read' } }] } };
+    const policy = { default: 'auto' as const, rules: { alwaysAsk: [{ id: 'read-once', match: { toolName: 'read' } }] } };
     const { runner, approvalRegistry } = makeRunner(adapter, sent, {
       toolAuthorization: () => policy, onToolAuthorizationDecision: decision => decisions.push(decision),
     });
@@ -366,7 +385,7 @@ describe('daemon tool authorization', () => {
     let askOnResume = false;
     const { runner, approvalRegistry } = makeRunner(adapter, sent, { toolAuthorization: task => {
       seen.push(task.taskId);
-      return { mode: 'auto', rules: askOnResume
+      return { default: 'auto', rules: askOnResume
         ? { alwaysAsk: [{ id: 'resumed-read', match: { toolName: 'read' } }] }
         : { allowWithoutAsking: [{ id: 'first-read', match: { toolName: 'read' } }] } };
     } });
@@ -393,7 +412,7 @@ describe('daemon tool authorization', () => {
   it.each(['codex', 'grok', 'hermes'])('auto rules do not add missing pre-tool support to %s', async runtimeId => {
     const adapter = new GateCapturingAdapter(NO_AUTO, runtimeId);
     const sent: Envelope[] = [];
-    const { runner } = makeRunner(adapter, sent, { getServerCapabilities: () => ['custom-harness'], toolAuthorization: () => ({ mode: 'auto', rules: {
+    const { runner } = makeRunner(adapter, sent, { getServerCapabilities: () => ['custom-harness'], toolAuthorization: () => ({ default: 'auto', rules: {
       allowWithoutAsking: [{ id: 'allow-read', match: { toolName: 'read' } }],
     } }) });
     await offer(runner, `unsupported-${runtimeId}`);
@@ -425,7 +444,7 @@ describe('daemon tool authorization', () => {
   });
 
   it.each([
-    ['a legacy mode name', () => 'full access'],
+    ['a bare mode string', () => 'all'],
     ['a throwing resolver', () => { throw new Error('host policy store offline'); }],
   ])('declines on %s instead of picking a mode', async (_label, resolver) => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
@@ -450,7 +469,7 @@ async function withPublicDaemon(
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'tool-auth-public',
     serverUrl: server.url, storeDir, agentMemoryMcp: 'off',
     agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-    storage: { scratchRoot: testScratchRoot() }, toolAuthorization: () => 'auto', ...extra,
+    storage: { scratchRoot: testScratchRoot() }, toolAuthorization: { default: 'auto' }, ...extra,
   }, [adapter]);
   try {
     await daemon.pair('pairing-code');

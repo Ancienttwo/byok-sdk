@@ -3919,21 +3919,30 @@ Already-completed durable records remain readable immediately after restart.
 ## Tool authorization: `auto` and `all` (#1061)
 
 The local Host chooses one of exactly two tool-authorization modes per task
-through `DaemonConfig.toolAuthorization(task)`. It returns `'auto' | 'all'` or
-`{ mode: 'auto' | 'all', rules?: { alwaysAsk?: ToolRule[], allowWithoutAsking?: ToolRule[] } }`.
-Both input forms become one copied, frozen local policy before claim. The mode is
-one daemon-level contract shared by every runtime; adapters do not carry a
-permission policy of their own, and the remote offer never selects it. The
-resolver sees the local task identity (`taskId`, `runtimeId`, `agentRef`) and
-is called once, before claim. A throw or any other value (including legacy
-wording such as `full access` or `inherit`) declines the offer with
-`tool_authorization_unresolved`. Invalid rules also decline before claim. Without
-a resolver every task runs in `all`. A config file sets the static form
-`{ default: 'auto' | 'all', byRuntime? }` instead (#1094); daemon construction
-turns it into the same single resolver (`byRuntime[runtimeId] ?? default`). A
-`byRuntime` key that names no runtime of the daemon, or static `auto` on an
-adapter without `toolAuthorizationAuto`, raises `DaemonConfigInvalidError` at
-construction. Resolution failures use the fixed wire reason
+through one policy document, `DaemonConfig.toolAuthorization`:
+
+```ts
+interface ToolAuthorizationPolicy {
+  default: 'auto' | 'all';
+  byRuntime?: Record<string, 'auto' | 'all'>;
+  rules?: { alwaysAsk?: ToolRule[]; allowWithoutAsking?: ToolRule[] };
+}
+```
+
+`default` applies to every runtime without a `byRuntime` entry; `byRuntime`
+overrides the mode for one runtime id. `rules` applies to every runtime. A
+config file and an embedded Host supply the same object, and daemon
+construction parses it through the same admission boundary before deriving the
+internal per-offer resolver (`byRuntime[runtimeId] ?? default` with the same
+rules). That resolver is not part of the public config surface. A `byRuntime`
+key that names no runtime of the daemon, or `auto` for a runtime without
+`toolAuthorizationAuto`, raises `DaemonConfigInvalidError` at construction.
+The mode is one daemon-level contract shared by every runtime; adapters do not
+carry a permission policy of their own, and the remote offer never selects it.
+An invalid policy — including the removed `{ mode }` spelling, a bare mode
+string, a function or legacy wording such as `full access` or `inherit` —
+declines the offer with `tool_authorization_unresolved`. Without a policy
+every task runs in `all`. Resolution failures use the fixed wire reason
 `tool_authorization_unresolved: local tool authorization policy could not be resolved`;
 rule IDs and diagnostic details remain in local logs. Rules never enter the server protocol,
 native settings or model prompt. A running task and its native subagents keep
@@ -4016,7 +4025,10 @@ match any characters, including `/`; path `*` stays within one segment and
 Unicode code point (never a separator for paths). Path separators remain
 literal; `**` does not make a neighboring separator optional. Path matching
 folds case on darwin/win32 and normalizes Windows separators. Relative
-`pathGlob` patterns are rejected at admission. Commands above 64 KiB UTF-8
+`pathGlob` patterns, and patterns containing `.` or `..` segments, `//` or a
+trailing separator, are rejected at admission because a resolved target can
+never match them; rejecting them keeps an Always Ask rule from silently
+failing open. Commands above 64 KiB UTF-8
 cannot match any allow rule; a command selector in an ask rule conservatively
 matches them when its other selectors match. Missing required facts do not
 match. There is no regex matcher, natural-language reviewer, model call or
@@ -4031,7 +4043,10 @@ can never act as a wildcard. A gate keeps its validated snapshot.
 
 Classified gate verdicts and local `tool-authorization` decision events carry
 `authorization: { source: 'rule' | 'built-in' | 'floor', ruleIds: string[] }`;
-`tool-reminder` carries the same metadata. IDs identify winning rules, not
+`tool-reminder` carries the same metadata. A denial that happens before
+classification (missing or timed-out trusted MCP identity, or a gate
+exception) still emits a local `tool-authorization` decision event with the
+built-in authorization and empty reasons, so the audit trail is complete. IDs identify winning rules, not
 the rules overridden by a higher priority. Local daemon records retain this
 metadata without raw command/input/description content. Allowed calls retain
 the built-in codes they override as `suppressedReasons`; local decision events

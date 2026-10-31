@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -8,8 +8,7 @@ import path from 'node:path';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolAuthorizationRules, type ToolAuthorizationVerdict, type ToolCall } from '../tool-authorization';
-import { startToolAuthorizationIpc, TOOL_AUTHORIZATION_GATE_ENV } from '../tool-authorization-ipc';
-import { assertSubagentRunnerAuthorized } from '../subagents/tool-authorization-runner';
+import { readToolAuthorizationGateEnv, requestToolAuthorization, TOOL_AUTHORIZATION_GATE_ENV } from '../tool-authorization-ipc';
 import type { Session } from '../types';
 
 const roots: string[] = [];

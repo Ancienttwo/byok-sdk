@@ -39,36 +39,46 @@ export interface ToolAuthorizationRules {
   readonly allowWithoutAsking?: readonly ToolRule[];
 }
 
+/**
+ * The one tool-authorization policy `DaemonConfig.toolAuthorization` accepts,
+ * whether it comes from a config file or an embedded Host. It is copied,
+ * validated and frozen by {@link parseToolAuthorizationPolicy} at admission.
+ */
 export interface ToolAuthorizationPolicy {
-  readonly mode: ToolAuthorizationMode;
+  /** Mode for every runtime without a `byRuntime` entry. */
+  readonly default: ToolAuthorizationMode;
+  /** Per-runtime override, keyed by runtime id. */
+  readonly byRuntime?: Readonly<Record<string, ToolAuthorizationMode>>;
+  /** User-defined rules that move single calls across the ask boundary. */
   readonly rules?: ToolAuthorizationRules;
 }
 
-export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationMode | ToolAuthorizationPolicy;
-
-/**
- * A tool-authorization policy that a config file can express (#1094):
- * `byRuntime` sets the mode of a runtime by its id, and `default` applies to
- * every other runtime.
- */
-export interface StaticToolAuthorization {
-  readonly default: ToolAuthorizationMode;
-  readonly byRuntime?: Readonly<Record<string, ToolAuthorizationMode>>;
-}
+/** Internal per-offer derivation; never part of the public config surface. */
+export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationPolicy;
 
 /** The mode `policy` gives `runtimeId`: its own `byRuntime` entry, else `default`. */
-export function staticToolAuthorizationMode(policy: StaticToolAuthorization, runtimeId: string): ToolAuthorizationMode {
+export function toolAuthorizationMode(
+  policy: Pick<ToolAuthorizationPolicy, 'default' | 'byRuntime'>, runtimeId: string,
+): ToolAuthorizationMode {
   const { byRuntime } = policy;
   return byRuntime !== undefined && Object.hasOwn(byRuntime, runtimeId) ? byRuntime[runtimeId]! : policy.default;
 }
 
-/** The resolver of a static policy, over a copy taken now so later edits to `policy` cannot change it. */
-export function staticToolAuthorizationResolver(policy: StaticToolAuthorization): ToolAuthorizationResolver {
-  const snapshot: StaticToolAuthorization = Object.freeze({
+/**
+ * Derive the daemon's internal resolver from one policy. The snapshot is
+ * taken now, so later edits to `policy` cannot change a decision; rules apply
+ * unchanged to every runtime.
+ */
+export function toolAuthorizationResolver(policy: ToolAuthorizationPolicy): ToolAuthorizationResolver {
+  const snapshot: ToolAuthorizationPolicy = Object.freeze({
     default: policy.default,
     ...(policy.byRuntime === undefined ? {} : { byRuntime: Object.freeze({ ...policy.byRuntime }) }),
+    ...(policy.rules === undefined ? {} : { rules: policy.rules }),
   });
-  return (task) => staticToolAuthorizationMode(snapshot, task.runtimeId);
+  return (task) => Object.freeze({
+    default: toolAuthorizationMode(snapshot, task.runtimeId),
+    ...(snapshot.rules === undefined ? {} : { rules: snapshot.rules }),
+  });
 }
 
 export function parseToolAuthorizationMode(value: unknown): ToolAuthorizationMode {
@@ -88,7 +98,15 @@ function validateGlob(pattern: string, path: boolean): void {
     || [...pattern].filter(char => char === '*').length > 16) {
     throw new TypeError('tool authorization glob supports only literals, *, ** and ? with at most 16 stars');
   }
-  if (path && !isAbsolute(pattern)) throw new TypeError('tool authorization pathGlob must be absolute');
+  if (!path) return;
+  if (!isAbsolute(pattern)) throw new TypeError('tool authorization pathGlob must be absolute');
+  // A resolved target never contains a traversal segment, an empty segment or
+  // a trailing separator, so such a pattern could not match. Reject it at
+  // admission instead of letting an alwaysAsk rule fail open.
+  if (pattern.includes('//') || (pattern.length > 1 && pattern.endsWith('/'))
+    || pattern.split('/').some(segment => segment === '.' || segment === '..')) {
+    throw new TypeError('tool authorization pathGlob must not contain ".", "..", "//" or a trailing separator');
+  }
 }
 
 /** A bounded-state wildcard automaton: one forward scan, no expansion or backtracking. */
@@ -152,14 +170,30 @@ function ruleText(value: unknown, label: string, maxChars: number, allowEmpty = 
   return value;
 }
 
-/** The admission boundary: one copied, frozen policy for either public input form. */
+function parseByRuntime(value: unknown): Readonly<Record<string, ToolAuthorizationMode>> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
+    throw new TypeError('invalid tool authorization byRuntime');
+  }
+  const modes: [string, ToolAuthorizationMode][] = [];
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string' || key.length === 0) throw new TypeError('invalid tool authorization byRuntime key');
+    modes.push([key, parseToolAuthorizationMode((value as Record<string, unknown>)[key])]);
+  }
+  // Object.fromEntries defines own data properties, so a "__proto__" runtime
+  // id cannot mutate the map's prototype.
+  return Object.freeze(Object.fromEntries(modes));
+}
+
+/** The admission boundary: one copied, frozen policy for every source. */
 export function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy {
-  if (typeof value === 'string') return Object.freeze({ mode: parseToolAuthorizationMode(value) });
-  const raw = policyRecord(value, ['mode', 'rules'], 'policy');
-  const mode = parseToolAuthorizationMode(raw.mode);
-  if (!Object.hasOwn(raw, 'rules')) return Object.freeze({ mode });
+  const raw = policyRecord(value, ['default', 'byRuntime', 'rules'], 'policy');
+  const defaultMode = parseToolAuthorizationMode(raw.default);
+  const byRuntime = Object.hasOwn(raw, 'byRuntime') ? parseByRuntime(raw.byRuntime) : undefined;
+  const base = { default: defaultMode, ...(byRuntime === undefined ? {} : { byRuntime }) };
+  if (!Object.hasOwn(raw, 'rules')) return Object.freeze(base);
   const rawRules = policyRecord(raw.rules, ['alwaysAsk', 'allowWithoutAsking'], 'rules');
-  if (PARSED_RULES.has(rawRules)) return Object.freeze({ mode, rules: rawRules });
+  if (PARSED_RULES.has(rawRules)) return Object.freeze({ ...base, rules: rawRules });
   const ids = new Set<string>();
   let count = 0;
   const rules: { alwaysAsk?: readonly ToolRule[]; allowWithoutAsking?: readonly ToolRule[] } = {};
@@ -192,7 +226,7 @@ export function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationP
   }
   Object.freeze(rules);
   PARSED_RULES.add(rules);
-  return Object.freeze({ mode, rules });
+  return Object.freeze({ ...base, rules });
 }
 
 /** One native tool call, before execution. `input` is the runtime's own argument object. */
@@ -299,7 +333,7 @@ export function classifyToolCall(
   rules?: ToolAuthorizationRules,
   context: { readonly platform?: NodeJS.Platform } = {},
 ): ToolRisk {
-  const policy = parseToolAuthorizationPolicy({ mode: 'auto', ...(rules === undefined ? {} : { rules }) });
+  const policy = parseToolAuthorizationPolicy({ default: 'auto', ...(rules === undefined ? {} : { rules }) });
   rules = policy.rules;
   const platform = context.platform ?? process.platform;
   const reasons = new Set<ToolRiskReason>();
@@ -435,11 +469,12 @@ export function createAutoToolAuthorizationGate(input: {
   readonly timeoutMs: number;
   readonly rules?: ToolAuthorizationRules;
   readonly mcpIdentities?: ReadonlyMap<string, { readonly server: string; readonly tool: string }>;
-  readonly onDecision?: (decision: { readonly call: ToolCall; readonly risk: ToolRisk; readonly verdict: ToolAuthorizationVerdict }) => void;
+  /** Called for every classified decision and for a denial that happened before classification. */
+  readonly onDecision?: (decision: { readonly call: ToolCall; readonly risk?: ToolRisk; readonly verdict: ToolAuthorizationVerdict }) => void;
   /** Aborting `signal` must withdraw the request so a later decision cannot revive it. */
   readonly requestAuthorization: (summary: string, signal: AbortSignal) => Promise<{ approved: boolean; reason?: string }>;
 }): ToolAuthorizationGate {
-  const rules = parseToolAuthorizationPolicy({ mode: 'auto', ...(input.rules === undefined ? {} : { rules: input.rules }) }).rules;
+  const rules = parseToolAuthorizationPolicy({ default: 'auto', ...(input.rules === undefined ? {} : { rules: input.rules }) }).rules;
   const needsMcpIdentity = [...(rules?.alwaysAsk ?? []), ...(rules?.allowWithoutAsking ?? [])]
     .some(rule => rule.match.mcpServer !== undefined || rule.match.mcpTool !== undefined);
   return Object.freeze({
@@ -452,8 +487,12 @@ export function createAutoToolAuthorizationGate(input: {
       let risk: ToolRisk | undefined;
       const finish = (verdict: ToolAuthorizationVerdict): ToolAuthorizationVerdict => {
         const classifiedVerdict = risk === undefined ? verdict : { ...verdict, authorization: risk.authorization };
-        if (risk !== undefined) {
-          try { input.onDecision?.({ call, risk, verdict: classifiedVerdict }); } catch { /* Observers do not own authorization. */ }
+        // A denial before classification (missing/timed-out MCP identity, gate
+        // exception) still gets an audit record; it has no risk to project.
+        if (risk !== undefined || verdict.decision === 'deny') {
+          try {
+            input.onDecision?.({ call, ...(risk === undefined ? {} : { risk }), verdict: classifiedVerdict });
+          } catch { /* Observers do not own authorization. */ }
         }
         return classifiedVerdict;
       };
