@@ -16,7 +16,7 @@ import { createSqliteEmbeddedStores } from '../stores/sqlite';
  * schema, then this build opens it.
  */
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const V6_FIXTURE = fileURLToPath(new URL('../../../../scripts/release/fixtures/stores/0.31.0/server-sqlite.db', import.meta.url));
 const TENANT = tenantId('tenant-v6-upgrade');
 const NOW = '2026-10-01T00:00:00.000Z';

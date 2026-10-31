@@ -14,7 +14,7 @@ import { createWebCrypto, type TaskArchiveStoreInput, type TaskRedactionCodec } 
 import { isSqliteAvailable } from '../sqlite-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
-const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const TENANT = tenantId('sqlite-archive-settle');
 const TASK = 'task';
 const TERMINAL_KEY = `task:${TASK}:terminal`;
