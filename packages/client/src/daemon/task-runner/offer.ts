@@ -129,7 +129,13 @@ export async function handleOffer(
       // The legacy paths below send the decline themselves; the host only
       // sends when the reducer accepted the transition. Falling back keeps a
       // row that is stale in a later slice's phase a legacy send, not a drop.
-      if (result.disposition !== 'applied') {
+      //
+      // #1099 S4: once the reducer has settled the task (a cancel already
+      // declined it, or a terminal is selected), a later stage's late error
+      // must not produce a second task.decline.
+      const settled = host.current(taskId);
+      if (result.disposition !== 'applied'
+        && (settled === undefined || (settled.terminal === undefined && settled.phase !== 'declined'))) {
         this['decline'](
           taskId,
           admission,
@@ -235,6 +241,16 @@ export async function handleOffer(
   startupTimer.unref?.();
   const admissionWithdrawn = (): boolean => {
     if (!blobAbort.signal.aborted) return false;
+    // #1099 S4: the reducer owns the cancel transition. A cancel already
+    // declined during the claim journal (X2a) has sent its own task.decline
+    // and selected the terminal; the stage that observes the abort must not
+    // decline it a second time. Admission-stage cancels, shutdown and the
+    // startup deadline all decline through O5 and keep their exact legacy
+    // reasons/retryability.
+    const current = host.current(taskId);
+    if (current?.phase === 'declined' || current?.terminal !== undefined || current?.cancel.requested === true) return true;
+    // The bounded marker keeps the pre-claim cancel reason and non-retryable
+    // pair exactly as before; admission-stage cancels decline through O5.
     const cancelled = this['pendingCancelled'].has(taskId);
     decline(cancelled ? 'cancelled before claim' : this['stoppingOffers'] ? 'daemon is shutting down' : 'runtime startup deadline exceeded', !cancelled);
     return true;
@@ -273,9 +289,11 @@ export async function handleOffer(
   };
   try {
     if (this['admitOffer'](phase) === undefined) return;
-    // Checkpoint 1 passed. O3 moves received -> admitting; the legacy
-    // pendingCancelled check above remains the effective checkpoint until S4.
-    host.dispatchSync({ type: 'admission.begin', taskId, atMs: Date.now() });
+    // Checkpoint 1 passed. O3 moves received -> admitting; if the reducer
+    // already settled the offer while preparation was opening, O3 drops and
+    // no later stage runs for a task it has settled.
+    const began = host.dispatchSync({ type: 'admission.begin', taskId, atMs: Date.now() });
+    if (began.disposition !== 'applied' || began.task?.phase !== 'admitting') return;
     if (preparation !== undefined) stageSucceeded('preparation');
 
     stage('home');
@@ -321,10 +339,11 @@ export async function handleOffer(
     stageSucceeded('manifest');
     const { runtimeLaunch, manifest, preparedLaunch, preparedObservation, toolAuthorization } = sealed;
 
-    // S3's last wired transition: the manifest/pin are done, so the reducer
-    // records the claim precondition. `claimOffer` (journal + claim) is S4 and
-    // keeps its own IO and ordering here.
-    host.dispatchSync({ type: 'admission.claimable', taskId, atMs: Date.now() });
+    // The manifest/pin are done, so the reducer records the claim
+    // precondition. A cancel/shutdown/terminal selected while the manifest
+    // was in flight drops C1 and the claim path never runs.
+    const claimable = host.dispatchSync({ type: 'admission.claimable', taskId, atMs: Date.now() });
+    if (claimable.disposition !== 'applied' || claimable.task?.phase !== 'claiming') return;
 
     stage('claim');
     const claimed = await claimOffer.call(this, phase, {

@@ -228,7 +228,9 @@ describe('TaskRunnerHost: offer/admission reducer wiring', () => {
     expect(host.current('t1')?.claim.sent).toBe(true);
     expect(host.current('t1')?.phase).toBe('claimed');
     expect(host.current('t1')?.cancel.requested).toBe(true);
-    expect(host.runnerSnapshot().pendingCancelled.map(entry => entry.taskId)).toEqual(['t1']);
+    // X3b records only cx (design §7.6); the bounded pre-offer marker is the
+    // legacy adapter's offer-window record, not a second reducer write.
+    expect(host.runnerSnapshot().pendingCancelled).toEqual([]);
     host.endOffer('t1');
   });
 

@@ -2352,13 +2352,7 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
     apply: (snapshot, event) => {
       const task = taskOf(snapshot);
       return {
-        runner: runnerWith(snapshot.runner, {
-          pendingCancelled: upsertPendingCancel(snapshot.runner.pendingCancelled, {
-            taskId: task.taskId,
-            atMs: event.atMs,
-            ...(event.reason === undefined ? {} : { reason: event.reason }),
-          }),
-        }),
+        runner: snapshot.runner,
         task: taskWith(task, {
           cancel: {
             requested: true,
@@ -2374,7 +2368,7 @@ const LIFECYCLE_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'Claimed but no startup owner registered yet: record the cancel and pending marker; the start path observes it at checkpoint 2.',
+      'Claimed but no startup owner registered yet: record only cx; the start path observes it at checkpoint 2 (the bounded offer-window marker stays with the legacy adapter).',
   },
   {
     id: 'X4',

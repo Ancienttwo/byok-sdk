@@ -101,17 +101,20 @@ describe('TaskRunner offer/admission host wiring (S3)', () => {
     forgetHost(runner);
   });
 
-  it('stops at admission.claimable and lets the legacy claim path send task.claim', async () => {
+  it('advances through claim/start and leaves the task running in the reducer (S4 boundary)', async () => {
     const sent: Envelope[] = [];
     const runner = makeRunner(sent);
-    const taskId = 'task-s3-claimable-1';
+    const taskId = 'task-s4-started-1';
     await offer(runner, taskId);
 
     expect(sent.some(envelope => envelope.type === 'task.claim')).toBe(true);
+    expect(sent.some(envelope => envelope.type === 'task.started')).toBe(true);
     const current = hostFor(runner).current(taskId);
-    expect(current?.phase).toBe('claiming');
-    expect(current?.admission.stage).toBe('claimable');
-    expect(current?.claim.sent).toBe(false);
+    expect(current?.phase).toBe('running');
+    expect(current?.claim.journaled).toBe(true);
+    expect(current?.claim.sent).toBe(true);
+    expect(current?.execution?.sessionRef).toBe('stub-session-1');
+    expect(current?.startup.owner).toBe('active');
     forgetHost(runner);
   });
 });

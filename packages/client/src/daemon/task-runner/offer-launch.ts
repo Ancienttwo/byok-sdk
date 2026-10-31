@@ -31,6 +31,7 @@ import {
 import { fileScopeAdmission } from './file-scope-admission';
 import { mcpEventIdentities } from '../../mcp/event-identity';
 import { DEFAULT_APPROVAL_TIMEOUT_MS } from './state';
+import { hostFor } from './host';
 
 export interface OfferManifestInput
   extends Pick<OfferRequest, 'agentRef' | 'agentMemory' | 'preparation' | 'preparedMemorySelected' | 'readerAttempt' | 'sessionRef'>,
@@ -279,6 +280,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   // Claim is the first externally visible commitment; instruction bytes and
   // process creation remain after it.
   if (admissionWithdrawn()) return;
+  const host = hostFor(this);
   // The admission journal is the last barrier before the claim is committed.
   // A journal that cannot record it has admitted nothing (#1217): throwing
   // here escaped `handleOffer` before any terminal and left retry ownership
@@ -289,51 +291,76 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   try {
     await this['deps'].beforeClaim?.(taskId, manifest.descriptor.id);
   } catch (error) {
-    if (!admissionWithdrawn()) decline(`claim journal unavailable: ${outboundErrorMessage(error)}`, true);
+    if (!admissionWithdrawn()) {
+      const reason = `claim journal unavailable: ${outboundErrorMessage(error)}`;
+      // C9 (#1217/#1221): the journal failure is a retryable decline and the
+      // claim never sends. The reducer owns the terminal/reason; a stale row
+      // (cancel already declined) keeps the legacy send as the fallback.
+      const failed = host.dispatchSync({
+        type: 'claim.journal_failed', taskId, atMs: Date.now(), reason, retryable: true,
+      });
+      if (failed.disposition !== 'applied') decline(reason, true);
+    }
     return;
   }
   if (admissionWithdrawn()) return;
-  if (!isKnownRuntimeId(manifest.descriptor.id)) this['claimedHarnesses'].set(taskId, manifest.descriptor.id);
-  const timings = admission.snapshot();
-  this['deps'].send(
-    createEnvelope(
-      'task.claim',
-      {
-        deviceId: this['deps'].deviceId,
-        ...(manifest.agentRef === undefined ? {} : { agentRef: manifest.agentRef }),
-        // M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter
-        // `pickAdapter` just selected — covers both the explicit-runtime
-        // path (`payload.runtime` named one) and the auto-select
-        // (preference-ordered, pi last by default — M5 batch-3, see
-        // `DEFAULT_RUNTIME_PREFERENCE`) path (`payload.runtime` was
-        // absent) uniformly, since `pick.adapter` already reflects
-        // whichever one won either way. Distinct from `payload.runtime`
-        // (the merely REQUESTED runtime): this is what closes the gap
-        // where an auto-selected task left the server never learning
-        // which runtime actually ran.
-        runtime: isKnownRuntimeId(manifest.descriptor.id) ? manifest.descriptor.id : undefined,
-        ...(!isKnownRuntimeId(manifest.descriptor.id) ? { harnessId: manifest.descriptor.id } : {}),
-        // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
-        // selected adapter's own capability self-report, carried on the
-        // same message that establishes the task↔runtime binding. The
-        // server gates control messages (`task.steer`) on this and only
-        // this — connection-level `conn.hello.runtimes[].capabilities`
-        // stays device discovery on both transports and cannot replace
-        // the claim-time truth for this exact task/runtime binding.
-        //
-        // Sent UNCONDITIONALLY, deliberately NOT gated on
-        // `isKnownRuntimeId` the way `runtime` above is: `runtime` is a
-        // closed protocol enum a custom adapter has no member of, but
-        // capabilities are a self-report every adapter can make honestly.
-        // Gating them would silently strip a custom steer-capable
-        // adapter's own truth and leave the server fail-closing on it
-        // forever.
-        capabilities: toRuntimeInfoCapabilities(manifest.descriptor.capabilities),
-        ...(timings === undefined ? {} : { admission: timings }),
-      },
-      { taskId },
-    ),
-  );
+  // #1099 S4: journaled -> send.claim -> claim.sent is ONE atomic group. The
+  // host reduces C2, runs this send synchronously, and reduces the claim.sent
+  // completion inside the same turn; a cancel can only be queued behind it
+  // and then sees a claimed task (X3b), never a pre-claim X2a row.
+  host.setSendClaim(taskId, () => {
+    if (!isKnownRuntimeId(manifest.descriptor.id)) this['claimedHarnesses'].set(taskId, manifest.descriptor.id);
+    const timings = admission.snapshot();
+    this['deps'].send(
+      createEnvelope(
+        'task.claim',
+        {
+          deviceId: this['deps'].deviceId,
+          ...(manifest.agentRef === undefined ? {} : { agentRef: manifest.agentRef }),
+          // M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter
+          // `pickAdapter` just selected — covers both the explicit-runtime
+          // path (`payload.runtime` named one) and the auto-select
+          // (preference-ordered, pi last by default — M5 batch-3, see
+          // `DEFAULT_RUNTIME_PREFERENCE`) path (`payload.runtime` was
+          // absent) uniformly, since `pick.adapter` already reflects
+          // whichever one won either way. Distinct from `payload.runtime`
+          // (the merely REQUESTED runtime): this is what closes the gap
+          // where an auto-selected task left the server never learning
+          // which runtime actually ran.
+          runtime: isKnownRuntimeId(manifest.descriptor.id) ? manifest.descriptor.id : undefined,
+          ...(!isKnownRuntimeId(manifest.descriptor.id) ? { harnessId: manifest.descriptor.id } : {}),
+          // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
+          // selected adapter's own capability self-report, carried on the
+          // same message that establishes the task↔runtime binding. The
+          // server gates control messages (`task.steer`) on this and only
+          // this — connection-level `conn.hello.runtimes[].capabilities`
+          // stays device discovery on both transports and cannot replace
+          // the claim-time truth for this exact task/runtime binding.
+          //
+          // Sent UNCONDITIONALLY, deliberately NOT gated on
+          // `isKnownRuntimeId` the way `runtime` above is: `runtime` is a
+          // closed protocol enum a custom adapter has no member of, but
+          // capabilities are a self-report every adapter can make honestly.
+          // Gating them would silently strip a custom steer-capable
+          // adapter's own truth and leave the server fail-closing on it
+          // forever.
+          capabilities: toRuntimeInfoCapabilities(manifest.descriptor.capabilities),
+          ...(timings === undefined ? {} : { admission: timings }),
+        },
+        { taskId },
+      ),
+    );
+  });
+  try {
+    const journaled = host.dispatchSync({ type: 'claim.journaled', taskId, atMs: Date.now() });
+    // A cancel reduced while the journal was in flight (X2a) already declined
+    // and consumed the marker; the late journal drops and the claim is never
+    // sent (#1218, design §6.3 rule 3). The result carries C2's snapshot, so
+    // the committed claim is read from the host after the atomic group.
+    if (journaled.disposition !== 'applied' || host.current(taskId)?.claim.sent !== true) return;
+  } finally {
+    host.setSendClaim(taskId, undefined);
+  }
 
   // Resolve the instruction blob after claim.
   // A prepared Execution resolves nothing here — it carries no instruction,
@@ -490,7 +517,11 @@ async function startAndActivateRuntime(
       Math.max(0, startupDeadline - Date.now()));
   } catch (err) {
     const disposalFailure = isRuntimeStartupDisposalFailure(err);
-    const cancelled = this['pendingCancelled'].has(taskId);
+    const host = hostFor(this);
+    // Either the reducer already reduced the in-flight cancel (X3b) or the
+    // offer-window marker still carries it.
+    const cancelled = this['pendingCancelled'].has(taskId)
+      || host.current(taskId)?.cancel.requested === true;
     if (disposalFailure || cancelled) {
       if (cancelled) {
         this['revokeAgentMessageContext'](taskId);
@@ -523,6 +554,28 @@ async function startAndActivateRuntime(
         },
       });
       held.owner = 'startup';
+      // #1099 S4: startup ownership (C0) is registered before C7 decides the
+      // outcome. A cancel that raced the start (the legacy checkpoint marker)
+      // is reduced as X3 first, so C7 selects cancelled and never failed.
+      host.dispatchSync({ type: 'startup.registered', taskId, atMs: Date.now() });
+      const cancelReason = this['pendingCancelled'].get(taskId);
+      if (cancelled) {
+        host.dispatchSync({
+          type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
+          ...(cancelReason === undefined ? {} : { reason: cancelReason }),
+        });
+      }
+      host.dispatchSync({
+        type: 'runtime.start_failed',
+        taskId,
+        atMs: Date.now(),
+        ...(cancelled
+          ? (cancelReason === undefined ? {} : { reason: cancelReason })
+          : {
+              reason: this['stoppingOffers'] ? 'daemon shutting down during runtime startup' : errorMessage(err),
+              retryable: this['stoppingOffers'],
+            }),
+      });
       // An abort while the start still runs is not a disposal failure:
       // nothing has been disposed yet. `StartupOwnership.dispose` reports
       // it if a later attempt fails.
@@ -543,6 +596,11 @@ async function startAndActivateRuntime(
       // adapter's error can carry runtime output (issue #395).
       console.error(`[byok/client] runtime adapter ${pick.descriptor.id} start() returned an untyped failure for task ${taskId}`);
     }
+    // C7 (failed branch): the reducer records the failed terminal before the
+    // legacy failClaimedAgent performs the evidence/close/commit IO.
+    host.dispatchSync({
+      type: 'runtime.start_failed', taskId, atMs: Date.now(), reason: failure.reason, retryable: failure.retryable,
+    });
     await this['failClaimedAgent'](taskId, failure.reason, failure.retryable, {
       binding: agentBinding,
       runtimeId: pick.descriptor.id,
@@ -559,5 +617,23 @@ async function startAndActivateRuntime(
     },
   });
   held.owner = 'startup';
+  // #1099 S4: record the startup owner (C0) and the published session (C4)
+  // before activation's bind/handoff/message awaits. Those three effects stay
+  // in `activateOffer` as legacy IO; their failure becomes C8.
+  const host = hostFor(this);
+  host.dispatchSync({ type: 'startup.registered', taskId, atMs: Date.now() });
+  host.dispatchSync({
+    type: 'runtime.session_bound',
+    taskId,
+    atMs: Date.now(),
+    execution: {
+      sessionRef: session.sessionRef,
+      runtimeId: manifest.descriptor.id,
+      home: agentBinding.resolution.canonicalHome,
+      cwd: manifest.workspace.workspaceDir,
+      leaseId: agentBinding.lease.leaseId,
+      startedAtMs: Date.now(),
+    },
+  });
   await activateOffer.call(this, phase, held, { ...activation, session });
 }
