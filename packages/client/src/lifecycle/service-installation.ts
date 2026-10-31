@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { StoreCompatibility, StoreCompatibilityVerdict } from '@byok-sdk/core';
-import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
+import { connectControlClient, isControlDaemonGone } from '../daemon/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { assertDaemonStoreQuiescent, DaemonOwnerActiveError } from '../daemon/daemon-owner';

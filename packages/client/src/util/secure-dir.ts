@@ -2,7 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, type Runner } from '../lifecycle/exec-runner';
+import { type Runner } from '../lifecycle/exec-runner';
+import { defaultRunner } from './exec-runner';
 
 /**
  * Finding F7 (cross-model adversarial review): POSIX file MODES

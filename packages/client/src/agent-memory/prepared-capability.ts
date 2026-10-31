@@ -6,9 +6,9 @@ import {
   AGENT_MEMORY_TOOLS,
   PREPARED_AGENT_MEMORY_OPERATION_META_KEY,
   type AgentMemoryOperation,
-} from '../bin/agent-memory-mcp-server';
+} from './tool-manifest';
 
-export { PREPARED_AGENT_MEMORY_OPERATION_META_KEY } from '../bin/agent-memory-mcp-server';
+export { PREPARED_AGENT_MEMORY_OPERATION_META_KEY } from './tool-manifest';
 
 export interface PreparedAgentMemoryObservationTool {
   readonly name: string;

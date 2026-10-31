@@ -3,7 +3,7 @@ import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { AgentRefSchema, type AgentRef } from '@byok-sdk/protocol';
 import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeBusyError, AgentHomeLeaseManager, AgentHomeManager, stableAgentHomeOwnerId } from '../agent-home';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { AgentMessageOutbox, AGENT_MESSAGE_DIRECTORY, AGENT_MESSAGE_OUTBOX_FILENAME } from '../daemon/agent-message-outbox';

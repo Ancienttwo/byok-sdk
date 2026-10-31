@@ -102,10 +102,15 @@ describe('the embedded agent-memory entry module graph', () => {
     // #1058 reuses canonical memory tool names from `sdk-reserved-mcp.ts`
     // in the MCP server and adapter grants. That import-free name authority
     // adds no runtime dependency, I/O, or embedded public export.
+    // #1099 moves the memory tool table to `agent-memory/tool-manifest.ts` so
+    // the prepared capability and the stdio server share it without the lower
+    // agent-memory layer importing the bin entry; `util/exec-runner.ts` carries
+    // the shared `execFile` primitive under the same slice.
     expect(GRAPH.modules).toEqual([
       'agent-home-readers.ts',
       'agent-home.ts',
       'agent-memory/index.ts',
+      'agent-memory/tool-manifest.ts',
       'bin/agent-memory-mcp-server.ts',
       'daemon/agent-memory-filesystem.ts',
       'daemon/agent-memory-fs-helper.ts',
@@ -120,6 +125,7 @@ describe('the embedded agent-memory entry module graph', () => {
       'mcp-server/index.ts',
       'sdk-reserved-mcp.ts',
       'util/atomic-write.ts',
+      'util/exec-runner.ts',
       'util/path-mutation-gate.ts',
       'util/secure-dir.ts',
     ]);

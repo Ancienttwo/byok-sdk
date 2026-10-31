@@ -1,38 +1,30 @@
-import { AGENT_MEMORY_RECALL_TOOL_NAME as RECALL_TOOL, AGENT_MEMORY_SAVE_TOOL_NAME as SAVE_TOOL } from '../sdk-reserved-mcp';
+import {
+  AGENT_MEMORY_MCP_SERVER_INFO,
+  AGENT_MEMORY_RECALL_TOOL_NAME,
+  AGENT_MEMORY_SAVE_TOOL_NAME,
+  AGENT_MEMORY_TOOLS,
+  type AgentMemoryToolDefinition,
+} from '../agent-memory/tool-manifest';
 import {
   McpServerToolError,
   serveMcpOverStdio,
   type McpServerToolCall,
-  type McpServerToolDefinition,
 } from '../mcp-server';
 
-export const AGENT_MEMORY_RECALL_TOOL_NAME = RECALL_TOOL;
-export const AGENT_MEMORY_SAVE_TOOL_NAME = SAVE_TOOL;
-export const PREPARED_AGENT_MEMORY_OPERATION_META_KEY = 'byok.agent-memory.operation';
-
-export type AgentMemoryOperation = 'read' | 'write';
-
-export interface AgentMemoryToolDefinition extends McpServerToolDefinition {
-  readonly operation: AgentMemoryOperation;
-  readonly _meta: Readonly<Record<typeof PREPARED_AGENT_MEMORY_OPERATION_META_KEY, AgentMemoryOperation>>;
-}
+export {
+  AGENT_MEMORY_MCP_SERVER_INFO,
+  AGENT_MEMORY_RECALL_TOOL_NAME,
+  AGENT_MEMORY_SAVE_TOOL_NAME,
+  AGENT_MEMORY_TOOLS,
+  PREPARED_AGENT_MEMORY_OPERATION_META_KEY,
+  type AgentMemoryOperation,
+  type AgentMemoryToolDefinition,
+} from '../agent-memory/tool-manifest';
 
 export interface AgentMemoryMcpDeps {
   recall(input: { path: string; ifRevision?: string }): Promise<{ path: string; revision: string; content: string; auditWarning?: { code: 'agent_memory_audit_unavailable' } }>;
   save(input: { op: 'replace' | 'delete'; path: string; expectedRevision: string; content?: string }): Promise<{ path: string; revision?: string; deleted: boolean }>;
 }
-
-function agentMemoryTool(input: Omit<AgentMemoryToolDefinition, '_meta'>): AgentMemoryToolDefinition {
-  return Object.freeze({ ...input, _meta: Object.freeze({ [PREPARED_AGENT_MEMORY_OPERATION_META_KEY]: input.operation }) });
-}
-
-/** The exact tools this server advertises. This table is the sole schema and operation-classification authority. */
-export const AGENT_MEMORY_TOOLS: readonly AgentMemoryToolDefinition[] = Object.freeze([
-  agentMemoryTool({ name: AGENT_MEMORY_RECALL_TOOL_NAME, operation: 'read', description: 'Recall one SDK-owned memory file for this exact active Agent task. Identity and memory root are never model parameters.', inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string' }, ifRevision: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' } } } }),
-  agentMemoryTool({ name: AGENT_MEMORY_SAVE_TOOL_NAME, operation: 'write', description: 'Atomically replace or delete one SDK-owned memory file with exact sha256 compare-and-swap.', inputSchema: { type: 'object', additionalProperties: false, required: ['op', 'path', 'expectedRevision'], properties: { op: { type: 'string', enum: ['replace', 'delete'] }, path: { type: 'string' }, expectedRevision: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' }, content: { type: 'string' } } } }),
-]);
-
-export const AGENT_MEMORY_MCP_SERVER_INFO = Object.freeze({ name: 'byok-agent-memory-mcp', version: '0.0.1' });
 
 const invalid = (message: string): McpServerToolError => new McpServerToolError(-32602, message);
 const success = (value: unknown): Record<string, unknown> => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });

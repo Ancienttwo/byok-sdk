@@ -4,7 +4,7 @@ import {
   type DeviceAssertionEnvelopeV1,
   type TaskAssertionEnvelopeV1,
 } from '@byok-sdk/core';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from './control-client';
 import {
   ControlError,
   type AssertionIssueErrorCode,

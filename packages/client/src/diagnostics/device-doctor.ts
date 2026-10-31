@@ -4,7 +4,7 @@ import type { RuntimeAdapter } from '../types';
 import { DeviceStore } from '../daemon/store';
 import { createDeviceCredentialStore } from '../daemon/device-credential-provider';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { CursorStore } from '../daemon/cursor-store';
 import { collectDiagnostics } from './diagnostics';
 import type { DiagnosticsSnapshot } from './types';
