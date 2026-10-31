@@ -264,7 +264,10 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       expect(report.lookup).toMatch(/Cannot find (package|module)/u);
       expect(report.defaultDetect).toEqual({ kind: 'probe-failed' });
       // The default provider's models.json apiKey is pi's login (#345).
-      expect(report.detect).toEqual({ kind: 'available', version: '1.4.0', authPresent: true });
+      expect(report.detect).toEqual({
+        kind: 'available', version: '1.4.0', authPresent: true,
+        versionVerdict: { state: 'allow', qualifiedVersion: '1.4.0' },
+      });
       expect(report.launch).toEqual({ command: host.command, ...(host.entry === undefined ? {} : { entry: host.entry }),
         fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] });
       const events = report.events!;
