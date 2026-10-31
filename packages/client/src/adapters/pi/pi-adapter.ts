@@ -56,6 +56,7 @@ import {
 } from '../provider-credential-environment';
 import { probePiAuthPresent } from './auth-presence';
 import { startToolAuthorizationIpc } from '../../tool-authorization-ipc';
+import { serializeFileScopeGrant } from '../../file-scope-serialization';
 import { acquirePiSessionRetention, type PiSessionRetentionLease } from '../../util/pi-session-retention';
 
 async function disposePiStartup(rpc: PiRpcClient | undefined, scratch: ExecutionScratch, cause?: unknown): Promise<void> {
@@ -574,6 +575,13 @@ export class PiAdapter implements RuntimeAdapter {
           } });
           try {
             const gate = startInput.toolAuthorization === undefined ? undefined : await startToolAuthorizationIpc(startInput.toolAuthorization);
+            // The daemon bound the resolved grant to this attempt's gate. A
+            // scope that does not name the manifest's canonical home is a
+            // different authority, not something to paper over: refuse before
+            // writing a launch that would scope the wrong directory.
+            if (gate?.fileScope !== undefined && gate.fileScope.home.path !== startInput.manifest.lease?.canonicalHome) {
+              throw authorityFailure('Pi file scope home does not match the manifest lease');
+            }
             const retainedScratch = scratch;
             if (gate !== undefined) scratch = Object.freeze({ ...scratch, release: async () => {
               await gate.close();
@@ -595,7 +603,7 @@ export class PiAdapter implements RuntimeAdapter {
             // What is written is the START observation, already compared
             // above with the one this operation was admitted with.
             const serialized = serializePiHostConfig({
-              format: 'byok.pi.rpc-launch', version: 8,
+              format: 'byok.pi.rpc-launch', version: 9,
               // Digest-bound, as in the prepared lane: under `keys-profile`
               // the host takes the provider key over the launcher's private
               // IPC channel and refuses to start without it.
@@ -605,6 +613,7 @@ export class PiAdapter implements RuntimeAdapter {
               agentSkillPaths: resources.skillPaths,
               agentExtensionPaths: resources.extensionPaths,
               toolAuthorization: gate?.config ?? null,
+              fileScope: gate?.fileScope === undefined ? null : serializeFileScopeGrant(gate.fileScope),
               mcp: {
                 mcpEnv,
                 mcpServers: taskMcpServers,
@@ -617,6 +626,9 @@ export class PiAdapter implements RuntimeAdapter {
             await fs.writeFile(hostConfigPath, serialized.bytes, { mode: 0o600, flag: 'wx' });
           } catch (cause) {
             await scratch.release();
+            // A typed authority refusal (for example a file-scope grant that
+            // does not name the manifest's home) must stay non-retryable.
+            if (isRuntimeExecutionFailure(cause)) throw cause;
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
               reason: 'pi task-scoped MCP configuration could not be created',

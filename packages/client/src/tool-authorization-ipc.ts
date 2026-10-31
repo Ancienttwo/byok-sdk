@@ -3,6 +3,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { isAbsolute } from 'node:path';
 import type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationVerdict, ToolCall } from './tool-authorization';
+import type { FileScopeGrant } from './file-scope-guard';
+import { FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS, type FileScopeGuardCode, type FileScopeGuardReason } from './file-scope-types';
+import type { ScopedFileDenial } from './file-scope-tools';
+import { fileScopeGateBinding } from './file-scope-gate-binding';
 
 /**
  * Private loopback address of one runtime's `auto` gate. SDK-owned child sessions
@@ -63,6 +67,44 @@ function parseCall(value: unknown): ToolCall {
   };
 }
 
+const SCOPED_TOOL_NAMES: readonly string[] = Object.freeze(['read', 'write', 'edit']);
+const FILE_SCOPE_ACCESS: readonly string[] = Object.freeze(['read', 'write']);
+
+function boundedText(value: unknown, max: number): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000\r\n]/u.test(value)
+    ? value : undefined;
+}
+
+/** The child may only report the closed deny shape; paths and content are never accepted. */
+function parseFileScopeDenial(value: unknown): ScopedFileDenial {
+  if (!record(value) || Object.keys(value).some((key) => !['toolCallId', 'toolName', 'code', 'reason', 'rootId', 'access'].includes(key))) {
+    throw new Error('invalid file scope denial');
+  }
+  const toolName = boundedText(value.toolName, 128);
+  if (toolName === undefined || !SCOPED_TOOL_NAMES.includes(toolName)) throw new Error('invalid file scope denial tool');
+  if (typeof value.code !== 'string' || !(FILE_SCOPE_GUARD_CODES as readonly string[]).includes(value.code)) {
+    throw new Error('invalid file scope denial code');
+  }
+  if (typeof value.reason !== 'string' || !(FILE_SCOPE_GUARD_REASONS as readonly string[]).includes(value.reason)) {
+    throw new Error('invalid file scope denial reason');
+  }
+  const toolCallId = value.toolCallId === undefined ? undefined : boundedText(value.toolCallId, 256);
+  if (value.toolCallId !== undefined && toolCallId === undefined) throw new Error('invalid file scope denial call id');
+  const rootId = value.rootId === undefined ? undefined : boundedText(value.rootId, 128);
+  if (value.rootId !== undefined && rootId === undefined) throw new Error('invalid file scope denial root');
+  if (value.access !== undefined && (typeof value.access !== 'string' || !FILE_SCOPE_ACCESS.includes(value.access))) {
+    throw new Error('invalid file scope denial access');
+  }
+  return Object.freeze({
+    ...(toolCallId === undefined ? {} : { toolCallId }),
+    toolName: toolName as ScopedFileDenial['toolName'],
+    code: value.code as FileScopeGuardCode,
+    reason: value.reason as FileScopeGuardReason,
+    ...(rootId === undefined ? {} : { rootId }),
+    ...(value.access === undefined ? {} : { access: value.access as 'read' | 'write' }),
+  });
+}
+
 async function readBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -77,13 +119,31 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 /** One loopback endpoint per runtime process, closed with the runtime. */
 export async function startToolAuthorizationIpc(
   gate: ToolAuthorizationGate,
-): Promise<{ readonly config: ToolAuthorizationIpcConfig; close(): Promise<void> }> {
+): Promise<{ readonly config: ToolAuthorizationIpcConfig; readonly fileScope?: FileScopeGrant; close(): Promise<void> }> {
   const token = randomBytes(32).toString('hex');
+  const binding = fileScopeGateBinding(gate);
   let closed = false;
   const { createServer } = await import('node:http');
   const server = createServer(async (request, response) => {
-    if (request.method !== 'POST' || request.url !== '/authorize-tool' || request.headers.authorization !== `Bearer ${token}`) {
+    if (request.method !== 'POST' || request.headers.authorization !== `Bearer ${token}`) {
       response.writeHead(403).end();
+      return;
+    }
+    if (request.url === '/file-scope-audit') {
+      if (binding === undefined) {
+        response.writeHead(404).end();
+        return;
+      }
+      try {
+        binding.onDeny(parseFileScopeDenial(await readBody(request)));
+        response.writeHead(204).end();
+      } catch {
+        response.writeHead(400).end();
+      }
+      return;
+    }
+    if (request.url !== '/authorize-tool') {
+      response.writeHead(404).end();
       return;
     }
     let verdict: ToolAuthorizationVerdict;
@@ -106,7 +166,7 @@ export async function startToolAuthorizationIpc(
   if (!address || typeof address === 'string') throw new Error('tool authorization IPC did not bind');
   const config = Object.freeze({ url: `http://127.0.0.1:${address.port}/authorize-tool`, token, timeoutMs: gate.timeoutMs });
   let closing: Promise<void> | undefined;
-  return { config, close() {
+  return { config, ...(binding === undefined ? {} : { fileScope: binding.grant }), close() {
     if (closing) return closing;
     closed = true;
     closing = new Promise<void>((resolve, reject) => {
@@ -115,6 +175,23 @@ export async function startToolAuthorizationIpc(
     });
     return closing;
   } };
+}
+
+/**
+ * Report one scoped-tool denial to the daemon's local audit. The deny has
+ * already been enforced in the runtime when this runs; a transport failure
+ * returns false and is never turned into an allow.
+ */
+export async function reportFileScopeDenial(config: ToolAuthorizationIpcConfig, denial: ScopedFileDenial): Promise<boolean> {
+  try {
+    const response = await fetch(new URL('/file-scope-audit', config.url), {
+      method: 'POST', headers: { authorization: `Bearer ${config.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(denial), signal: AbortSignal.timeout(5_000), redirect: 'error',
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Any transport or shape failure denies: a missing authority never grants execution. */

@@ -9,6 +9,7 @@ import {
 } from '../tool-authorization';
 import { fileScopeAdmission } from '../daemon/task-runner/file-scope-admission';
 import type { FileScopeAudit } from '../file-scope-guard';
+import { fileScopeGateBinding } from '../file-scope-gate-binding';
 import { toolAuthorizationIssues } from '../daemon/config-schema/static-tool-authorization';
 import { describeEffectiveDaemonConfig } from '../daemon/config-schema/effective';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
@@ -363,6 +364,22 @@ describe('fileScope fail-closed admission through the task runner', () => {
     expect(declineReason(sent)).toBeUndefined();
     expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
     expect(adapter.inputs).toHaveLength(1);
+    // The resolved grant is bound to the exact gate the adapter receives, so
+    // the launch can carry it; a missing binding would be an unscoped start.
+    const binding = fileScopeGateBinding(adapter.inputs[0]!.toolAuthorization!);
+    expect(binding).toMatchObject({ taskId: 'scope-supported', lane: 'rpc', homeAccess: 'writer' });
+    expect(binding!.grant.mode).toBe('home');
+  });
+
+  it('uses the effective per-runtime mode when byRuntime selects auto over an all default', async () => {
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    await offer(makeRunner(adapter, sent,
+      () => ({ default: 'all', byRuntime: { pi: 'auto' }, fileScope: { mode: 'home' } })), 'scope-by-runtime');
+    expect(declineReason(sent)).toBeUndefined();
+    expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
+    expect(adapter.inputs).toHaveLength(1);
+    expect(fileScopeGateBinding(adapter.inputs[0]!.toolAuthorization!)).toBeDefined();
   });
 });
 

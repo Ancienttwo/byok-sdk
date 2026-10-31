@@ -278,6 +278,15 @@ on); an `auto` task for Codex, Grok, Hermes or a prepared/durable Pi
 lane is declined before claim. The classifier is lexical and is not an OS
 sandbox or a file-scope boundary.
 
+The optional `toolAuthorization.fileScope` policy gives the ordinary Pi RPC
+lane on darwin/linux a boundary for its file tools: SDK-owned `read`, `write`
+and `edit` replace the native definitions, native `find`, `grep` and `ls`
+are excluded, and every call is re-checked against the admitted roots before
+IO. Windows, prepared/durable Pi and other runtimes decline before claim rather
+than run unscoped. `bash`, MCP servers, user extensions and subagents (not
+offered in a scoped session in this slice) remain outside it, and the guard is
+not race-free against same-user processes.
+
 For ordinary Pi RPC Agent tasks, `new PiAdapter({ agentUserContext: 'excluded' })`
 loads no user extensions, skills, templates, themes, instruction files or
 session resource settings; Pi model and authentication stores are still used

@@ -98,11 +98,13 @@ export interface ToolAuthorizationPolicy {
    * effective mode is `auto`; an `all` runtime with a scope is rejected
    * before claim. An unsupported lane/adapter/platform is declined as
    * `file_scope_unsupported` before claim; on the admitted POSIX path every
-   * root is revalidated after claim and before runtime start, and an
-   * unresolvable root fails the claimed task as `file_scope_unavailable`.
-   * A configured scope is never silently dropped. Scoped file tools and
-   * tool-call enforcement ship in a later slice, so this is not yet file
-   * isolation.
+   * root is revalidated after claim, before runtime start, and again before
+   * the Pi session exists, and an unresolvable root fails the claimed task as
+   * `file_scope_unavailable`. A configured scope is never silently dropped.
+   * SDK-owned scoped read/write/edit tools enforce the admitted roots, and
+   * native Pi find/grep/ls are excluded for that session. Shell, MCP servers,
+   * user extensions and subagents are outside this boundary; it is not an OS
+   * sandbox.
    */
   readonly fileScope?: ToolFileScope;
 }

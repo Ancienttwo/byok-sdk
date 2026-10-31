@@ -41,9 +41,9 @@ describe('Pi Agent resources', () => {
       });
       sessions.push(session);
     }
-    expect(configs.map(config=>config.version)).toEqual([8,8]);
-    expect(configs[0]).toMatchObject({agentUserContext:'inherit',agentSkillPaths:[],agentExtensionPaths:[]});
-    expect(configs[1]).toMatchObject({agentUserContext:options.agentUserContext,agentSkillPaths:options.agentSkillPaths ?? [],agentExtensionPaths:options.agentExtensionPaths ?? []});
+    expect(configs.map(config=>config.version)).toEqual([9,9]);
+    expect(configs[0]).toMatchObject({agentUserContext:'inherit',agentSkillPaths:[],agentExtensionPaths:[],fileScope:null});
+    expect(configs[1]).toMatchObject({agentUserContext:options.agentUserContext,agentSkillPaths:options.agentSkillPaths ?? [],agentExtensionPaths:options.agentExtensionPaths ?? [],fileScope:null});
     for (const config of configs) expect(config).not.toHaveProperty('agentToolPolicy');
   });
 
