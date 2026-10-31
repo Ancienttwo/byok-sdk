@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "0cd747577dd3403e708f08221676aaa75421d51e470ce11a0ceabaa135bea605"
+    "snapshotSha256": "d491c9849147752984ad56af6e4f6a4c7f10a023ebad13bae803488fc7f99693"
   },
   "configFields": {
     "status": "tracked",
@@ -887,6 +887,23 @@
         "export:@byok-sdk/client#createServiceInstallation",
         "export:@byok-sdk/client#readPayloadManifest",
         "export:@byok-sdk/client#readServiceInstallationRecord"
+      ]
+    },
+    {
+      "id": "retired-device-stream-closed",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "A retired device's mailbox stream is now closed (#1160). Revoking or superseding a device closes its stream in the retirement's transaction, and every later append for that device id is refused, whatever its admission and even for a known messageId: core raises mailbox_stream_closed (MailboxStreamClosedError, with deviceId and closeCause), and ByokCloud raises device_retired (DeviceRetiredError, with deviceId and retirementCause). Before, a writer whose check ran before the retirement (offers, agent controls, scope-key notices, approve/reject, steer, inbound acks, dead-letter replay) could still commit a pending row for the retired device. An offer refused this way settles its attempt cancelled with the retirement cause in the same call and names its taskId; a scope-key notice skips a recipient retired after the list was read; a /byok/messages batch whose reply is refused answers 401. Registering the same device id again reopens the stream; rows, cursor, seq and recoverableFrom are kept. Custom stores must implement MailboxStore.closeStream and reopenStream, refuse appends on a closed stream, and close on revoke and supersede and reopen on register; MailboxStore.expirePending no longer takes seqs 'all'. Postgres: migration 0033 adds device_stream.closed_at and closed_cause and closes, as device_revoked, the stream of every device whose row is already gone (a supersede before the upgrade reads as a revoke); the migration writes the tombstone and does not expire those pending rows, which the dead-letter retention collects. Embedded SQLite: a schema 6 file is upgraded in place to 7 when it opens, with the same backfill, keeping its pairings and rows; older versions are refused as before, and a v7 file cannot be opened by an earlier build.",
+      "migration": "docs/hosted-host-contract.md#revokedevice",
+      "items": [
+        "export:@byok-sdk/cloud#DeviceRetiredError",
+        "export:@byok-sdk/core#CORE_ERROR_CODES",
+        "export:@byok-sdk/core#MAILBOX_STREAM_CLOSE_CAUSES",
+        "export:@byok-sdk/core#MailboxCloseStreamInput",
+        "export:@byok-sdk/core#MailboxReopenStreamInput",
+        "export:@byok-sdk/core#MailboxStreamCloseCause",
+        "export:@byok-sdk/core#MailboxStreamClosedError",
+        "store:server-sqlite"
       ]
     }
   ],
@@ -2326,6 +2343,11 @@
       "entry": "activity-log-read-contract"
     },
     {
+      "item": "export:@byok-sdk/cloud#DeviceRetiredError",
+      "change": "added",
+      "entry": "retired-device-stream-closed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
       "change": "changed",
       "entry": "messages-per-envelope-decode"
@@ -2661,6 +2683,11 @@
       "entry": "terminal-task-archive"
     },
     {
+      "item": "export:@byok-sdk/core#CORE_ERROR_CODES",
+      "change": "changed",
+      "entry": "retired-device-stream-closed"
+    },
+    {
       "item": "export:@byok-sdk/core#InMemoryBoardStore",
       "change": "changed",
       "entry": "terminal-task-archive"
@@ -2676,6 +2703,16 @@
       "entry": "store-compatibility-precheck"
     },
     {
+      "item": "export:@byok-sdk/core#MAILBOX_STREAM_CLOSE_CAUSES",
+      "change": "added",
+      "entry": "retired-device-stream-closed"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxCloseStreamInput",
+      "change": "added",
+      "entry": "retired-device-stream-closed"
+    },
+    {
       "item": "export:@byok-sdk/core#MailboxCollectExpiredInput",
       "change": "changed",
       "entry": "dead-letter-retention"
@@ -2686,9 +2723,24 @@
       "entry": "device-retirement-settles-tasks"
     },
     {
+      "item": "export:@byok-sdk/core#MailboxReopenStreamInput",
+      "change": "added",
+      "entry": "retired-device-stream-closed"
+    },
+    {
       "item": "export:@byok-sdk/core#MailboxStore",
       "change": "changed",
       "entry": "device-retirement-settles-tasks"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxStreamCloseCause",
+      "change": "added",
+      "entry": "retired-device-stream-closed"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxStreamClosedError",
+      "change": "added",
+      "entry": "retired-device-stream-closed"
     },
     {
       "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
@@ -3580,8 +3632,15 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
-      "after": "migrations=33 last=0034_activity_log.sql sha256=6cb9e1490d4524dc",
+      "after": "migrations=34 last=0034_activity_log.sql sha256=4c4c6101f62a0fd8",
       "entry": "dead-letter-retention"
+    },
+    {
+      "item": "store:server-sqlite",
+      "change": "changed",
+      "before": "schema_version=6",
+      "after": "schema_version=7",
+      "entry": "retired-device-stream-closed"
     },
     {
       "item": "union:daemon-event#tool-authorization",

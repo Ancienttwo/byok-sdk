@@ -1,5 +1,5 @@
 import { TASK_ATTEMPT_UNFINISHED_STATUSES, type TaskAbandonCause } from '@byok-sdk/cloud';
-import type { TenantId } from '@byok-sdk/core';
+import type { MailboxStreamCloseCause, TenantId } from '@byok-sdk/core';
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -26,6 +26,35 @@ export function expirePendingMailbox(
 }
 
 /**
+ * Closes a retired device's stream, creating it closed if it never had mail,
+ * and dead-letters every pending row on it. The first close instant is kept;
+ * the cause is the latest. The coordinator transaction orders it with every
+ * append, so no append for the device commits a pending row after it.
+ */
+export function closeMailboxStream(
+  db: DatabaseSync,
+  tenant: TenantId,
+  deviceId: string,
+  cause: MailboxStreamCloseCause,
+  now: string,
+): number {
+  db.prepare(
+    `INSERT INTO mailbox_cursor (tenant_id, device_id, updated_at, closed_at, closed_cause) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (tenant_id, device_id) DO UPDATE
+       SET closed_at = COALESCE(mailbox_cursor.closed_at, excluded.closed_at), closed_cause = excluded.closed_cause`,
+  ).run(tenant, deviceId, now, now, cause);
+  return expirePendingMailbox(db, tenant, deviceId, 'all');
+}
+
+/** Reopens a stream for a new registration of the same id; rows, cursor and seq stay. */
+export function reopenMailboxStream(db: DatabaseSync, tenant: TenantId, deviceId: string): void {
+  db.prepare(
+    `UPDATE mailbox_cursor SET closed_at = NULL, closed_cause = NULL
+     WHERE tenant_id = ? AND device_id = ? AND closed_at IS NOT NULL`,
+  ).run(tenant, deviceId);
+}
+
+/**
  * Settles the unfinished attempts the filter selects; terminal attempts and tombstones are left as they are.
  * `archive_after` takes the terminal instant in the same UPDATE, as every terminal transition sets it.
  */
@@ -44,7 +73,7 @@ function abandonAttempts(
   ).run(cause, now, now, now, tenant, ...TASK_ATTEMPT_UNFINISHED_STATUSES, ...parameters);
 }
 
-/** Device retirement: the device's unfinished attempts, then every pending row addressed to it. */
+/** Device retirement: the device's unfinished attempts, then its stream, closed with every pending row expired. */
 export function retireDevice(
   db: DatabaseSync,
   tenant: TenantId,
@@ -53,7 +82,7 @@ export function retireDevice(
   now: string,
 ): void {
   abandonAttempts(db, tenant, cause, now, 'device_id = ? OR owner_device_id = ?', [deviceId, deviceId]);
-  expirePendingMailbox(db, tenant, deviceId, 'all');
+  closeMailboxStream(db, tenant, deviceId, cause, now);
 }
 
 /**

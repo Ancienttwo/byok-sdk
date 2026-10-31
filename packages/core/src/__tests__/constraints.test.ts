@@ -240,6 +240,8 @@ describe('public API surface', () => {
       'InMemoryStorageLedger',
       'InMemoryTruthStore',
       'MAILBOX_MESSAGE_STATES',
+      'MAILBOX_STREAM_CLOSE_CAUSES',
+      'MailboxStreamClosedError',
       'NONCE_SIGNING_DOMAIN',
       'OBJECT_KEY_PREFIX_PATTERN',
       'OBJECT_STATES',

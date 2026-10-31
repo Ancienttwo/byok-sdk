@@ -227,6 +227,8 @@ function observingMailbox(inner: MailboxStore, presence: LeasedPresence): Mailbo
     },
     collectExpired: (tenant, input) => inner.collectExpired(tenant, input),
     expirePending: (tenant, input) => inner.expirePending(tenant, input),
+    closeStream: (tenant, input) => inner.closeStream(tenant, input),
+    reopenStream: (tenant, input) => inner.reopenStream(tenant, input),
   };
 }
 

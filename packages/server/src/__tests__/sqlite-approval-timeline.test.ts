@@ -119,7 +119,7 @@ describe('SQLite approval timeline persistence', () => {
     const db = new DatabaseSync(path);
     db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version);
     const before = db.prepare('SELECT * FROM approval_timeline_tail').all(); db.close();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '6' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '7' }));
     const inspect = new DatabaseSync(path, { readOnly: true });
     try {
       expect(inspect.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);
@@ -138,7 +138,7 @@ describe('SQLite approval timeline persistence', () => {
   it('refuses missing approval authority without recreating it', async () => {
     const { path, open, close } = fixture(); await close(open());
     const db = new DatabaseSync(path); db.exec('DROP TABLE approval_timeline_tail'); db.close();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '6' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '7' }));
     const inspect = new DatabaseSync(path, { readOnly: true });
     try { expect(inspect.prepare("SELECT name FROM sqlite_master WHERE name = 'approval_timeline_tail'").get()).toBeUndefined(); }
     finally { inspect.close(); }

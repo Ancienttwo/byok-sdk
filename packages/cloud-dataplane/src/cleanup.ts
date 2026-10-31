@@ -10,11 +10,13 @@ import { CloudCleanupError } from './maintenance-errors';
 import { createHash } from 'node:crypto';
 import {
   contentHash,
+  MailboxStreamClosedError,
   tenantId,
   type Clock,
   type ContentHash,
   type MailboxMessage,
   type MailboxMessageState,
+  type MailboxStreamCloseCause,
   type TenantId,
 } from '@byok-sdk/core';
 import { decodeEnvelope, encodeEnvelope, EnvelopeSchema, isServerToDaemonType } from '@byok-sdk/protocol';
@@ -185,7 +187,9 @@ export class PostgresCloudCleanup {
    *
    * The clone is a `limited` mailbox append: it goes through the one outbox
    * writer, so it is admitted against `mailboxLimitBytes` like any other new
-   * row and is ordered with live offers by the same locks.
+   * row and is ordered with live offers by the same locks. A retired device's
+   * stream is closed, so its rows replay only after the id is registered
+   * again; until then the replay throws `mailbox_stream_closed`.
    */
   async replayDeadLetter(
     tenant: TenantId,
@@ -209,6 +213,14 @@ export class PostgresCloudCleanup {
       if (original === undefined) {
         rejection = deadLetterMissing(input);
       } else {
+        // A retired device's closed stream refuses the replay, a known replay
+        // id included; the writer re-checks behind the stream lock.
+        const stream = await client.query<{ readonly closed_cause: MailboxStreamCloseCause | null }>(
+          'SELECT closed_cause FROM device_stream WHERE tenant_id = $1 AND device_id = $2',
+          [tenant, input.deviceId],
+        );
+        const closedCause = stream.rows[0]?.closed_cause ?? null;
+        if (closedCause !== null) throw new MailboxStreamClosedError(input.deviceId, closedCause);
         const existingResult = await client.query<OutboxRow>(
           `SELECT ${OUTBOX_COLUMNS} FROM outbox
             WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,

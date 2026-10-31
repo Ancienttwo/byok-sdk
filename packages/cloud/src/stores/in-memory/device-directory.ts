@@ -90,6 +90,7 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     }
     const key = tenantKey(tenant, record.deviceId);
     if (superseded.length === 0) {
+      await this.#mailbox.reopenStream(tenant, { deviceId: record.deviceId });
       this.#remember(key, record);
       return record;
     }
@@ -98,7 +99,10 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
       for (const [supersededKey, existing] of superseded) this.#forget(supersededKey, existing.deviceId);
       this.#remember(key, record);
       try {
-        for (const [, existing] of superseded) await this.#mailbox.expirePending(tenant, { deviceId: existing.deviceId, seqs: 'all' });
+        for (const [, existing] of superseded) {
+          await this.#mailbox.closeStream(tenant, { deviceId: existing.deviceId, cause: 'device_superseded' });
+        }
+        await this.#mailbox.reopenStream(tenant, { deviceId: record.deviceId });
       } catch (caught) {
         if (replaced === undefined) this.#forget(key, record.deviceId);
         else this.#remember(key, replaced);
@@ -127,7 +131,7 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
         if (record === undefined) return;
         this.#forget(key, deviceId);
         try {
-          await this.#mailbox.expirePending(tenant, { deviceId, seqs: 'all' });
+          await this.#mailbox.closeStream(tenant, { deviceId, cause: 'device_revoked' });
         } catch (caught) {
           this.#remember(key, record);
           throw caught;

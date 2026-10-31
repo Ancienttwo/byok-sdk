@@ -34,6 +34,7 @@
 --   deploy/sql/0030_task_attempt_phase_times.sql (nullable write-once attempt phase instants; no new table or key)
 --   deploy/sql/0031_mailbox_dead_letter_retention.sql (dead-letter retention column with a default; pending-only tenant-leading partial index replaces 0023's; no new table or key)
 --   deploy/sql/0032_terminal_task_archive.sql (terminal-task archive window column, backfilled to cover each stored policy's mailbox windows; nullable task archive instants; two tenant-leading partial task indexes; no new table or key)
+--   deploy/sql/0033_device_stream_closed.sql (retired-device stream tombstone on device_stream; no new table or key)
 --   deploy/sql/0034_activity_log.sql (tenant-first durable activity head, envelope rows and source identity fences; replaces activity_tail)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
@@ -1244,5 +1245,19 @@ BEGIN
     OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'task'::regclass
       AND conname = 'task_claimed_identity_exclusive' AND contype = 'c') THEN
     RAISE EXCEPTION 'custom harness discovery/claim identity migration is incomplete';
+  END IF;
+END $$;
+
+-- 0033 closes a retired device's stream on its own row: the two tombstone
+-- columns are both set or both NULL, and the cause is a closed enum.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+      AND table_name = 'device_stream' AND column_name = 'closed_at' AND data_type = 'text')
+    OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+      AND table_name = 'device_stream' AND column_name = 'closed_cause' AND data_type = 'text')
+    OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'device_stream'::regclass
+      AND conname = 'device_stream_closed_pair' AND contype = 'c') THEN
+    RAISE EXCEPTION 'control-plane invariants ran without complete 0033_device_stream_closed.sql: device_stream.closed_at/closed_cause or device_stream_closed_pair missing';
   END IF;
 END $$;

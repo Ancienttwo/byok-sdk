@@ -88,7 +88,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     expect(open).toThrow('Unsupported BYOK SQLite schema version');
     expect(open).toThrow(SqliteSchemaError);
     expect(open).toThrow(expect.objectContaining({
-      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '6',
+      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '7',
     }));
   });
 

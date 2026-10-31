@@ -6,7 +6,11 @@
  * `instanceof` chain. Cloud does not re-export core's codes — a cloud error is
  * about the hosted surface (a store contract the composition broke, a
  * declaration the host mis-configured), and core errors travel up unchanged.
+ * The one translation is a closed mailbox stream: at the hosted surface it
+ * means a retired device, so it surfaces as `device_retired`.
  */
+
+import type { MailboxStreamCloseCause } from '@byok-sdk/core';
 
 export const CLOUD_ERROR_CODES = {
   activity_history_gap: 'activity_history_gap',
@@ -81,6 +85,12 @@ export const CLOUD_ERROR_CODES = {
   e2ee_member_state_unreadable: 'e2ee_member_state_unreadable',
   /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
   device_not_found: 'device_not_found',
+  /**
+   * The device was retired (revoked or superseded), and its mailbox stream
+   * refused the append. Raised as {@link DeviceRetiredError}, which names the
+   * device and the retirement's cause; nothing was written for that device.
+   */
+  device_retired: 'device_retired',
   /**
    * A host `approveTask`/`rejectTask` names a task with no approval to
    * resolve: the durable timeline holds no unresolved `approval_requested`
@@ -174,6 +184,31 @@ export class TaskOfferAppendRefusedError extends ByokCloudError {
     );
     this.name = 'TaskOfferAppendRefusedError';
     this.taskId = taskId;
+  }
+}
+
+/**
+ * An append for a device whose retirement closed its mailbox stream. A refused
+ * task offer also names its task, which cloud settled `cancelled` with the
+ * retirement's cause in the same call, so the Host reads the outcome with
+ * `readTaskResult` and has nothing to retry or cancel.
+ */
+export class DeviceRetiredError extends ByokCloudError {
+  public readonly deviceId: string;
+  public readonly retirementCause: MailboxStreamCloseCause;
+  public readonly taskId: string | undefined;
+
+  constructor(deviceId: string, retirementCause: MailboxStreamCloseCause, options?: ErrorOptions & { readonly taskId?: string }) {
+    super(
+      'device_retired',
+      `Device ${deviceId} is retired (${retirementCause}); its mailbox accepts no new rows` +
+        (options?.taskId === undefined ? '.' : `, so task ${options.taskId} was settled cancelled.`),
+      options,
+    );
+    this.name = 'DeviceRetiredError';
+    this.deviceId = deviceId;
+    this.retirementCause = retirementCause;
+    this.taskId = options?.taskId;
   }
 }
 
