@@ -422,8 +422,10 @@ const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md',
 // #605 W5: w5-runner-probe.yml is workflow_dispatch only and reads no repo
 // file, so like release.yml it selects only the CI script checks.
 // #1103: runtime-contract-nightly.yml runs on a schedule against the latest CLIs; it never gates a PR.
+// #1105: client-retention-soak.yml is a schedule/workflow_dispatch artifact
+// producer, not a PR gate; it selects only the CI script checks too.
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml', '.github/workflows/w5-runner-probe.yml', '.github/workflows/security-advisories.yml',
-  '.github/workflows/runtime-contract-nightly.yml']);
+  '.github/workflows/runtime-contract-nightly.yml', '.github/workflows/client-retention-soak.yml']);
 const sorted = values => [...values].sort();
 // An unmapped path is a selector gap. Fix it with a reviewed mapping; a
 // feature PR never falls back to the complete release matrix.
@@ -559,6 +561,9 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/client/scripts/packed-cli-mcp-smoke.mjs' || path === 'packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
+    // #1105: the retention soak is a dev-only artifact producer run by its own
+    // workflow, not by a package test suite.
+    if (path === 'scripts/soak/client-retention-soak.mjs') { scripts = true; continue; }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
       || path === 'scripts/release/agent-memory-helper-source.test.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;

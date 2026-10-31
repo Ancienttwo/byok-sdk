@@ -53,6 +53,15 @@ test('the W5 runner probe workflow selects only the CI script checks (#605)', ()
   assert.doesNotMatch(workflow, /actions\/checkout|pull_request|push:/);
 });
 
+test('the retention soak workflow and harness select only reviewed light checks (#1105)', () => {
+  assert.deepEqual(selectImpact(['.github/workflows/client-retention-soak.yml']), {
+    dirs: [], files: ['.github/workflows/client-retention-soak.yml'], families: [], reason: 'root-ci-scripts',
+  });
+  assert.deepEqual(selectImpact(['scripts/soak/client-retention-soak.mjs']), {
+    dirs: [], files: ['scripts/soak/client-retention-soak.mjs'], families: [], reason: 'root-ci-scripts',
+  });
+});
+
 test('packages/AGENTS.md and packages/CLAUDE.md are docs-only like the root agent files', () => {
   assert.deepEqual(selectImpact(['packages/AGENTS.md', 'packages/CLAUDE.md']), {
     dirs: [], files: ['packages/AGENTS.md', 'packages/CLAUDE.md'], families: [], reason: 'docs-only',
