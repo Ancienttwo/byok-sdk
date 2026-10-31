@@ -66,12 +66,20 @@ export async function openPiRpcSession(cwd: string, session: string | undefined,
   return manager;
 }
 
+/** The loadout view a scoped-session assertion needs; structural so tests can fake it. */
+export interface PiToolLoadoutSession {
+  getAllTools(): readonly { readonly name: string; readonly sourceInfo?: { readonly path?: string } }[];
+  getActiveToolNames(): readonly string[];
+}
+
 /** One native session/services assembly for strict daemon RPC and operator CLI. */
 export async function runPiSessionRuntime(options: {
   cwd: string; session?: string; sessionDir?: string;
   provider?: string; model?: string;
   thinking?: CreateAgentSessionOptions['thinkingLevel'];
   tools?: string[]; excludeTools?: string[]; noTools?: 'all' | 'builtin';
+  /** Pre-prompt registry assertion for a scoped session; throwing disposes and refuses to run. */
+  assertToolLoadout?: (session: PiToolLoadoutSession) => void;
   /** Fresh SDK-owned resources directory. The original Pi directory remains the model/auth authority. */
   resourceAgentDir?: string;
   /**
@@ -202,6 +210,14 @@ export async function runPiSessionRuntime(options: {
       tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
     });
     if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
+    if (options.assertToolLoadout !== undefined) {
+      try {
+        options.assertToolLoadout(created.session);
+      } catch (error) {
+        created.session.dispose();
+        throw error;
+      }
+    }
     if (created.modelFallbackMessage && options.initialModel === 'required') {
       await created.session.dispose();
       options.reject(created.modelFallbackMessage);

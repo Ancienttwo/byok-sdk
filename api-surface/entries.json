@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2069149,
+      "budgetBytes": 2073737,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -110,7 +110,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 372158,
+      "budgetBytes": 375383,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -425,7 +425,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 360564,
+      "budgetBytes": 363781,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -588,7 +588,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 444013,
+      "budgetBytes": 472026,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -633,7 +633,9 @@
         "node:stream/promises",
         "node:string_decoder",
         "node:url",
+        "node:util",
         "pi-web-access/dist/index.js",
+        "typebox",
         "zod"
       ],
       "lazyImports": [
@@ -713,7 +715,8 @@
           "node:readline",
           "node:stream/promises",
           "node:string_decoder",
-          "node:url"
+          "node:url",
+          "node:util"
         ],
         "thirdParty": [
           "assert",
@@ -810,12 +813,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 31,
+          "line": 33,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 31,
+          "line": 33,
           "rule": "opaque import()"
         },
         {
@@ -860,7 +863,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 402734,
+      "budgetBytes": 430719,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -906,7 +909,9 @@
         "readline",
         "stream/promises",
         "string_decoder",
+        "typebox",
         "url",
+        "util",
         "zod"
       ],
       "lazyImports": [
@@ -986,7 +991,8 @@
           "readline",
           "stream/promises",
           "string_decoder",
-          "url"
+          "url",
+          "util"
         ],
         "thirdParty": [
           "assert",
@@ -2336,7 +2342,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2023822,
+      "budgetBytes": 2028427,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

@@ -29,7 +29,8 @@ import {
   type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolAuthorizationPolicy,
 } from '../../tool-authorization';
 import { fileScopeAdmission } from './file-scope-admission';
-import { FileScopeGuardError, fileScopePolicyDigest, resolveFileScopeGrant, type FileScopeAudit } from '../../file-scope-guard';
+import { FileScopeGuardError, fileScopePolicyDigest, resolveFileScopeGrant, type FileScopeAudit, type FileScopeGrant } from '../../file-scope-guard';
+import { bindFileScopeGate } from '../../file-scope-gate-binding';
 import { mcpEventIdentities } from '../../mcp/event-identity';
 import { DEFAULT_APPROVAL_TIMEOUT_MS } from './state';
 import { hostFor } from './host';
@@ -71,7 +72,8 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     if (!admissionWithdrawn()) decline('tool_authorization_unresolved: local tool authorization policy could not be resolved', false);
     return;
   }
-  if (toolAuthorization.default === 'auto' && (pick.descriptor.capabilities.toolAuthorizationAuto !== true || preparation !== undefined)) {
+  const effectiveToolAuthorization = toolAuthorizationMode(toolAuthorization, pick.descriptor.id);
+  if (effectiveToolAuthorization === 'auto' && (pick.descriptor.capabilities.toolAuthorizationAuto !== true || preparation !== undefined)) {
     if (!admissionWithdrawn()) {
       decline(`tool_authorization_unsupported: runtime ${pick.descriptor.id} cannot gate ${preparation === undefined ? '' : 'prepared '}tool calls before execution, so auto mode cannot run`, false);
     }
@@ -458,34 +460,37 @@ async function startAndActivateRuntime(
   const requestApproval = (summary: string, signal?: AbortSignal, kind: ApprovalKind = 'task-terminal') => launch.settled
     ? requestTaskApproval.call(this, taskId, summary, signal, kind)
     : launch.promise.then(() => requestTaskApproval.call(this, taskId, summary, signal, kind));
-  // #1061 slice 2 (D14): a configured scope is revalidated after claim and
-  // before any runtime starts. A root that is missing, is a symlink, changed
-  // dev+ino, or cannot be canonicalized fails the claimed task with a typed,
-  // non-retryable reason; it never degrades to an unscoped run. This slice
-  // does not install scoped file tools, so this is root validation, not file
-  // isolation: shell, MCP, extensions and Pi's native file tools stay outside
-  // it.
+  // #1061 (D14): a configured scope is revalidated after claim and before any
+  // runtime starts. A root that is missing, is a symlink, changed dev+ino, or
+  // cannot be canonicalized fails the claimed task with a typed, non-retryable
+  // reason; it never degrades to an unscoped run. The resolved grant is bound
+  // to this task's auto gate so the adapter can put it in the digest-bound Pi
+  // launch and the scoped tools can report per-call denies. Shell, MCP,
+  // extensions and (for the tools this slice has not replaced yet) native Pi
+  // tools remain the documented out-of-scope capabilities.
+  const fileScopeLane: ToolAuthorizationLane = pick.descriptor.capabilities.durablePi === true
+    ? 'durable' : preparedLaunch === undefined ? 'rpc' : 'prepared';
+  const fileScopeHomeAccess: ToolAuthorizationHomeAccess = readerAttempt ? 'memory-reader' : 'writer';
+  let fileScopeGrant: FileScopeGrant | undefined;
   if (toolAuthorization.fileScope !== undefined && !blobAbort.signal.aborted) {
     const audit = (event: FileScopeAudit): void => {
       this['deps'].onFileScopeAudit?.(Object.freeze(event));
     };
-    const lane: ToolAuthorizationLane = pick.descriptor.capabilities.durablePi === true
-      ? 'durable' : preparedLaunch === undefined ? 'rpc' : 'prepared';
-    const homeAccess: ToolAuthorizationHomeAccess = readerAttempt ? 'memory-reader' : 'writer';
     try {
       const grant = await resolveFileScopeGrant({
         fileScope: toolAuthorization.fileScope,
         home: { path: agentBinding.resolution.canonicalHome, identity: agentBinding.lease.homeIdentity },
       });
+      fileScopeGrant = grant;
       audit({
-        taskId, decision: 'policy-adoption', lane, homeAccess,
+        taskId, decision: 'policy-adoption', lane: fileScopeLane, homeAccess: fileScopeHomeAccess,
         scope: { source: 'host', mode: grant.mode, digest: grant.digest },
         rootIds: ['home', ...grant.roots.map((root) => root.id)],
       });
     } catch (error) {
       const guard = error instanceof FileScopeGuardError ? error : undefined;
       audit({
-        taskId, decision: 'deny', lane, homeAccess,
+        taskId, decision: 'deny', lane: fileScopeLane, homeAccess: fileScopeHomeAccess,
         scope: {
           source: 'host',
           mode: toolAuthorization.fileScope.mode,
@@ -503,6 +508,49 @@ async function startAndActivateRuntime(
       });
       return;
     }
+  }
+  const effectiveToolAuthorization = toolAuthorizationMode(toolAuthorization, pick.descriptor.id);
+  const toolAuthorizationGate = effectiveToolAuthorization !== 'auto' ? undefined : createAutoToolAuthorizationGate({
+    workspace: manifest.workspace.workspaceDir,
+    rules: toolAuthorization.rules,
+    mcpIdentities: mcpEventIdentities(mcpToolsetTools),
+    onDecision: ({ call, risk, verdict }) => this['deps'].onToolAuthorizationDecision?.(Object.freeze({
+      taskId, toolName: call.toolName, toolCallId: call.toolCallId, decision: verdict.decision,
+      authorization: risk?.authorization ?? Object.freeze({ source: 'built-in' as const, ruleIds: Object.freeze([]) }),
+      reasons: risk?.level === 'high' ? risk.reasons : Object.freeze([]),
+      ...(risk?.level === 'normal' && risk.suppressedReasons !== undefined ? { suppressedReasons: risk.suppressedReasons } : {}),
+      ...(verdict.decision === 'deny' ? { code: verdict.code } : {}),
+    })),
+    timeoutMs: (this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS) + 5_000,
+    requestAuthorization: (summary, signal) => requestApproval(summary, signal, 'tool-authorization'),
+  });
+  if (toolAuthorization.fileScope !== undefined && fileScopeGrant !== undefined && toolAuthorizationGate === undefined) {
+    // A configured scope with no auto gate would reach the adapter as an
+    // unscoped launch. Refuse the claimed task instead of dropping it.
+    await this['failClaimedAgent'](taskId, 'file_scope_unavailable: a scoped task requires the auto tool-authorization gate', false, {
+      binding: agentBinding, runtimeId: pick.descriptor.id,
+    });
+    return;
+  }
+  if (toolAuthorizationGate !== undefined && fileScopeGrant !== undefined) {
+    // The grant is bound to the exact gate object this attempt hands the
+    // adapter. The adapter writes it into the digest-bound launch; the gate
+    // IPC server records every scoped-tool denial against the same scope.
+    bindFileScopeGate(toolAuthorizationGate, {
+      grant: fileScopeGrant, taskId, lane: fileScopeLane, homeAccess: fileScopeHomeAccess,
+      onDeny: ({ toolName, toolCallId, code, reason, rootId, access }) => {
+        this['deps'].onFileScopeAudit?.(Object.freeze({
+          taskId, decision: 'deny' as const, lane: fileScopeLane, homeAccess: fileScopeHomeAccess,
+          scope: { source: 'host' as const, mode: fileScopeGrant!.mode, digest: fileScopeGrant!.digest },
+          ...(rootId === undefined ? {} : { rootId }),
+          ...(access === undefined ? {} : { access }),
+          code,
+          reason,
+          toolName,
+          ...(toolCallId === undefined ? {} : { toolCallId }),
+        }));
+      },
+    });
   }
   const startInput: RuntimeOperationStartInput = {
     scratch,
@@ -543,20 +591,7 @@ async function startAndActivateRuntime(
     ...(pick.descriptor.capabilities.approvalInteractive ? { approvalChannel: { request: requestApproval } } : {}),
     // User authorization reuses the task's one approval path: the wire
     // `task.await_approval` and local `Daemon.approve`/`reject` resolve it.
-    ...(toolAuthorization.default !== 'auto' ? {} : { toolAuthorization: createAutoToolAuthorizationGate({
-      workspace: manifest.workspace.workspaceDir,
-      rules: toolAuthorization.rules,
-      mcpIdentities: mcpEventIdentities(mcpToolsetTools),
-      onDecision: ({ call, risk, verdict }) => this['deps'].onToolAuthorizationDecision?.(Object.freeze({
-        taskId, toolName: call.toolName, toolCallId: call.toolCallId, decision: verdict.decision,
-        authorization: risk?.authorization ?? Object.freeze({ source: 'built-in' as const, ruleIds: Object.freeze([]) }),
-        reasons: risk?.level === 'high' ? risk.reasons : Object.freeze([]),
-        ...(risk?.level === 'normal' && risk.suppressedReasons !== undefined ? { suppressedReasons: risk.suppressedReasons } : {}),
-        ...(verdict.decision === 'deny' ? { code: verdict.code } : {}),
-      })),
-      timeoutMs: (this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS) + 5_000,
-      requestAuthorization: (summary, signal) => requestApproval(summary, signal, 'tool-authorization'),
-    }) }),
+    ...(toolAuthorizationGate === undefined ? {} : { toolAuthorization: toolAuthorizationGate }),
   };
   let session: Session;
   try {

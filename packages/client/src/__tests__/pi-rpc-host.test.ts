@@ -49,9 +49,9 @@ function fixture() {
   const entry = join(root, 'host-entry.ts');
   writeFileSync(entry, `import {runPiRpcHost} from ${JSON.stringify(resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js'))}; runPiRpcHost(process.argv.slice(2)).catch(error=>{console.error(String(error));process.exit(1)});`);
   const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
-  const config = { format: 'byok.pi.rpc-launch', version: 8, credentialSource: 'pi-auth-store', cwd,
+  const config = { format: 'byok.pi.rpc-launch', version: 9, credentialSource: 'pi-auth-store', cwd,
     agentUserContext: 'inherit', agentSkillPaths: [], agentExtensionPaths: [], toolAuthorization: null as unknown,
-    mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } };
+    fileScope: null, mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } };
   const configPath = join(root, 'config.json');
   const serialized=serializePiHostConfig(config);
   writeFileSync(configPath, serialized.bytes);
@@ -79,12 +79,12 @@ describe('SDK ordinary Pi RPC entry', () => {
       }
       const {credentialSource:_, ...withoutSource} = base;
       for (const cfg of [{...base, version:1}, {...base, version:3}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'auto'}}, {...base, binding:{}}, {...base, descendantPlan:null},
-        {...base, version:4}, withoutSource, {...base, credentialSource:'env'}]) {
+        {...base, version:4}, {...base, version:8}, withoutSource, {...base, credentialSource:'env'}]) {
         try { host.parsePiRpcHostConfig(cfg); rejected.push(false); } catch { rejected.push(true); }
       }
       console.log(JSON.stringify(rejected));
     `);
-    expect(result).toEqual(Array(15).fill(true));
+    expect(result).toEqual(Array(16).fill(true));
   });
 
   it('rejects v6, legacy tool policy and non-loopback gates instead of accepting an ungated launch', () => {
@@ -93,13 +93,33 @@ describe('SDK ordinary Pi RPC entry', () => {
       const base = ${JSON.stringify(f.config)};
       const gate = {url:'http://127.0.0.1:1/authorize-tool',token:'a'.repeat(64),timeoutMs:1000};
       console.log(JSON.stringify([
-        {...base, version:6}, {...base, version:7}, {...base, agentUserContext:undefined}, {...base, agentUserContext:'best-effort'},
+        {...base, version:6}, {...base, version:7}, {...base, version:8}, {...base, agentUserContext:undefined}, {...base, agentUserContext:'best-effort'},
         {...base, agentToolPolicy:{builtinTools:'inherit',userContext:'inherit',extensions:'inherit'}},
         {...base, toolAuthorization:undefined}, {...base, toolAuthorization:{mode:'full access'}},
         {...base, toolAuthorization:{...gate,url:'http://example.com:1/authorize-tool'}},
         {...base, toolAuthorization:{...gate,token:'short'}},
       ].map(value=>{try {host.parsePiRpcHostConfig(value);return false;}catch{return true;}})));
-    `)).toEqual(Array(9).fill(true));
+    `)).toEqual(Array(10).fill(true));
+  });
+
+  it('accepts a v9 serialized file scope and rejects a malformed one', () => {
+    const f = fixture();
+    const home = f.cwd;
+    const grant = {
+      mode: 'home' as const,
+      home: { id: 'home', path: home, lexicalPath: home, access: 'write' as const, dev: '1', ino: '2' },
+      roots: [] as const,
+      digest: 'a'.repeat(64),
+    };
+    const result = evaluate(`
+      const base = ${JSON.stringify(f.config)};
+      const good = ${JSON.stringify(grant)};
+      const parsed = host.parsePiRpcHostConfig({...base, fileScope: good});
+      const rejected = [{...good, extra:true}, {...good, digest:'short'}, {...good, home:{...good.home, path:'relative'}},
+        {...good, mode:'workspaces'}].map(value => { try { host.parsePiRpcHostConfig({...base, fileScope:value}); return false; } catch { return true; } });
+      console.log(JSON.stringify({digest: parsed.fileScope.digest, rejected}));
+    `);
+    expect(result).toEqual({ digest: grant.digest, rejected: [true, true, true, true] });
   });
 
   it('auto: denies a high-risk call before execution and runs an ordinary one, through the real Pi tool pipeline', async () => {

@@ -104,6 +104,10 @@ export type DaemonEvent =
       code?: 'file_scope_denied' | 'file_scope_unavailable' | 'file_scope_unsupported';
       /** Denial only: the typed failure reason. */
       reason?: string;
+      /** Denial only: the native tool name. */
+      toolName?: string;
+      /** Denial only: the runtime's call id, when it supplied one. */
+      toolCallId?: string;
     }
   | { kind: 'completed'; ts: string; taskId: string; summary: string; sessionRef: string }
   /**

@@ -5,6 +5,14 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolFileAccess, ToolFileScope } from './tool-authorization';
+import {
+  FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS,
+  type FileScopeGuardCode, type FileScopeGuardReason,
+} from './file-scope-types';
+export {
+  FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS,
+  type FileScopeGuardCode, type FileScopeGuardReason,
+} from './file-scope-types';
 
 /**
  * The internal POSIX path guard of the explicit file-scope policy (#1061
@@ -13,12 +21,13 @@ import type { ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolFileAccess
  * There is no native dependency, no descriptor-relative/openat helper and no
  * /proc/self/fd use.
  *
- * This module is not a file-isolation boundary and does not replace Pi's
- * native read/write/edit/bash tools. Slice 2 uses it to revalidate configured
- * roots after claim and before a runtime starts; the scoped file tools that
- * would call the target guard ship in a later slice. Shell, MCP servers,
- * extensions and runtime-native file tools remain outside it, and the
- * check-then-open path is not race-free against same-UID processes.
+ * This module is not a file-isolation boundary and does not sandbox
+ * bash/shell, MCP servers, user extensions or subagents. The SDK-owned scoped
+ * read/write/edit tools call the target guard immediately before IO, and the
+ * Pi host revalidates the serialized roots before creating a session; native
+ * find/grep/ls are excluded from a scoped session rather than left as a
+ * bypass. The check-then-open path is still not race-free against same-UID
+ * processes.
  *
  * Windows is refused outright as `file_scope_unsupported`: without native
  * code this guard cannot classify 8.3 short names, junctions/reparse points,
@@ -77,25 +86,6 @@ export interface FileScopeGrant {
   /** Stable digest over the canonical grant; audit/log only, never a wire value. */
   readonly digest: string;
 }
-
-/** The closed reasons this guard reports. */
-export type FileScopeGuardReason =
-  | 'outside_scope'
-  | 'read_only'
-  | 'symlink'
-  | 'hardlink'
-  | 'not_regular_file'
-  | 'cross_device'
-  | 'path_syntax'
-  | 'cwd_outside_scope'
-  | 'internal_path'
-  | 'root_identity_changed'
-  | 'unsupported_platform'
-  | 'root_missing'
-  | 'not_directory'
-  | 'io_error';
-
-export type FileScopeGuardCode = 'file_scope_denied' | 'file_scope_unavailable' | 'file_scope_unsupported';
 
 /**
  * A typed file-scope failure. Root problems are `file_scope_unavailable`
@@ -492,4 +482,8 @@ export interface FileScopeAudit {
   readonly code?: FileScopeGuardCode;
   /** Denial only: the typed failure reason. */
   readonly reason?: FileScopeGuardReason;
+  /** Denial only: the native tool name; never a path or content. */
+  readonly toolName?: string;
+  /** Denial only: the runtime's own call id, when it supplied one. */
+  readonly toolCallId?: string;
 }

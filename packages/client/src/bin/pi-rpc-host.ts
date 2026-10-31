@@ -16,6 +16,9 @@ import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { parseToolAuthorizationIpcConfig, setToolAuthorizationGateEnv, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
 import { createPiToolAuthorizationHook } from '../adapters/pi/tool-authorization-hook';
+import { parseSerializedFileScopeGrant, verifySerializedFileScopeGrant, type SerializedFileScopeGrant } from '../file-scope-launch';
+import { createPiFileScopeExtension } from '../adapters/pi/file-scope-extension';
+import { assertPiFileScopeRegistry } from '../adapters/pi/file-scope-registry';
 
 declare const __BYOK_PI_SUBAGENTS__: boolean;
 
@@ -23,7 +26,7 @@ const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 8;
+  readonly version: 9;
   /**
    * `keys-profile`: the keys launcher parents this host, and the provider key
    * arrives over its private IPC channel. `pi-auth-store`: the device's own
@@ -38,6 +41,13 @@ export interface PiRpcHostConfig {
   readonly agentExtensionPaths: readonly string[];
   /** The `auto` gate for this session and its native Pi subagents; null in `all`. */
   readonly toolAuthorization: ToolAuthorizationIpcConfig | null;
+  /**
+   * The daemon-resolved file scope, or null for an inherit launch. When
+   * present this session registers the SDK scoped read/write/edit tools,
+   * excludes the native find/grep/ls tools, and refuses to start if the
+   * registered loadout drifts (v9, #1061).
+   */
+  readonly fileScope: SerializedFileScopeGrant | null;
   readonly mcp: TaskScopedMcpConfig;
 }
 
@@ -64,11 +74,11 @@ function failUsage(message: string): never {
 export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('config must be an object');
   const raw = value as Record<string, unknown>;
-  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp', 'agentUserContext', 'agentSkillPaths', 'agentExtensionPaths', 'toolAuthorization'];
+  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp', 'agentUserContext', 'agentSkillPaths', 'agentExtensionPaths', 'toolAuthorization', 'fileScope'];
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
     fail(`config must contain exactly ${keys.join(', ')}`);
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 8) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 9) fail('unsupported config format/version');
   const resources = parsePiAgentResources({ userContext: raw.agentUserContext, skillPaths: raw.agentSkillPaths, extensionPaths: raw.agentExtensionPaths });
   const credentialSource = raw.credentialSource;
   if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
@@ -79,12 +89,13 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   return {
-    format: 'byok.pi.rpc-launch', version: 8,
+    format: 'byok.pi.rpc-launch', version: 9,
     credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
     agentUserContext: resources.userContext,
     agentSkillPaths: resources.skillPaths,
     agentExtensionPaths: resources.extensionPaths,
     toolAuthorization: raw.toolAuthorization === null ? null : parseToolAuthorizationIpcConfig(raw.toolAuthorization),
+    fileScope: raw.fileScope === null ? null : parseSerializedFileScopeGrant(raw.fileScope, fail),
   };
 }
 
@@ -168,6 +179,17 @@ export function parsePiRpcHostArgs(
 export async function runPiRpcHost(argv: readonly string[], packaging: 'installed' | 'bundled' = 'installed'): Promise<void> {
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
+  // #1061 D14: re-resolve every serialized root before an extension or
+  // session exists. A missing/replaced/symlinked root, a changed dev+ino, or
+  // a Windows/unknown platform fails here; the host never continues unscoped.
+  let fileScope: Awaited<ReturnType<typeof verifySerializedFileScopeGrant>> | undefined;
+  if (config.fileScope !== null) {
+    try {
+      fileScope = await verifySerializedFileScopeGrant(config.fileScope);
+    } catch (error) {
+      fail('file scope verification failed: ' + (error instanceof Error ? error.message : String(error)));
+    }
+  }
   let providerApiKey: { provider: string; apiKey: string } | undefined;
   let sessionDir: string | undefined;
   if (config.credentialSource === 'keys-profile') {
@@ -187,11 +209,20 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   // run time, so a bundled product has no subagents (the sealed build drops this
   // branch). Under keys-profile a child session opens its own model runtime and
   // would read the key marker from the projection, not the in-memory key.
-  if (__BYOK_PI_SUBAGENTS__ && packaging === 'installed' && config.credentialSource !== 'keys-profile') {
+  // A scoped session does not offer subagents in this slice: a
+  // pi-subagents child loads its own native file tool loadout and would be an
+  // unscoped bypass. Refusing to offer the tool is the honest option; a child
+  // that reloads and re-verifies the same grant is a later slice.
+  if (__BYOK_PI_SUBAGENTS__ && packaging === 'installed' && config.credentialSource !== 'keys-profile'
+    && config.fileScope === null) {
     const gateExtension = fileURLToPath(new URL('./pi-subagent-gate.js', import.meta.url));
     extensionFactories.push(...await loadPiSubagentsExtensions(config.toolAuthorization, gateExtension));
   }
   extensionFactories.push(createTodoExtension(localeAnchor));
+  if (fileScope !== undefined) {
+    if (config.toolAuthorization === null) fail('file scope requires the auto tool-authorization gate');
+    extensionFactories.push(createPiFileScopeExtension({ grant: fileScope, gate: config.toolAuthorization }));
+  }
   // Register last: earlier handlers may rewrite the input the gate must judge.
   // The environment hands the same gate to native Pi subagent children.
   setToolAuthorizationGateEnv(config.toolAuthorization, join(dirname(args.configPath), 'tool-authorization.json'));
@@ -215,6 +246,16 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       } : {}),
     },
     ...(providerApiKey === undefined ? {} : { providerApiKey }),
+    ...(fileScope === undefined ? {} : {
+      // find/grep/ls are not SDK-owned yet, so a scoped session removes them
+      // rather than leaving a path-reading native tool active. read/write/edit
+      // are shadowed by the extension above.
+      excludeTools: ['find', 'grep', 'ls'],
+      assertToolLoadout: (session: import('./pi-session-runtime').PiToolLoadoutSession) => assertPiFileScopeRegistry(session, {
+        required: ['read', 'write', 'edit'],
+        forbidden: ['find', 'grep', 'ls'],
+      }),
+    }),
     initialModel: 'required', label: 'byok-pi-rpc', reject: fail,
   });
 }

@@ -69,6 +69,8 @@ export type DaemonRecord =
       access?: ToolFileAccess;
       code?: 'file_scope_denied' | 'file_scope_unavailable' | 'file_scope_unsupported';
       reason?: string;
+      toolName?: string;
+      toolCallId?: string;
     }
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reasonBytes: number }
   /** Already content-free: counts and closed codes (`execution-record.ts`). */
@@ -366,6 +368,8 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
         ...(event.access === undefined ? {} : { access: event.access }),
         ...(event.code === undefined ? {} : { code: event.code }),
         ...(event.reason === undefined ? {} : { reason: event.reason }),
+        ...(event.toolName === undefined ? {} : { toolName: event.toolName }),
+        ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
       };
     case 'runtime-disposal-failed':
       return {
