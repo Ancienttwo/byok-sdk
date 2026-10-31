@@ -107,6 +107,17 @@ Other Agents can progress independently. SDK Agent-home admission remains the fi
 A device terminal does not prove native session cleanup or home release.
 The next offer can still receive a typed busy decline.
 
+The reference Host adds one explicit priority rule (#1229). A user-source
+intent goes ahead of the queued, never-submitted routine and bot_request
+intents of the same Agent FIFO. A submitted or in-flight execution keeps its
+order, its taskId and its generation. The rule changes only the ledger
+sequence values of intents that never reached the SDK, so a restart keeps the
+order. The Host also reserves one slot of each device's concurrent task limit
+for user-source work (`BotOptions.deviceConcurrency`, default 8, the daemon's
+`maxConcurrentTasks` default). Autonomous work may fill the other slots; a
+submitted execution is never cancelled to make room. The priority rule does
+not change this section's FIFO contract.
+
 The task ID is `SHA-256([intentKey, generation])` over canonical JSON.
 Persist the complete execution input before submit. Retain those bytes for recovery.
 Transport retries do not change generation or increment the attempt count.
@@ -546,6 +557,39 @@ defines the unimplemented two-process relay. The
 embedded SDK evidence from synthetic runtime and downstream gaps. Hosted
 `submitAgentExecution`, two Topology L Host processes and paid Pi acceptance
 remain open. Product PRD Q19 does not waive the cross-device §14.2 rows.
+
+### K8 Host policies: autonomy and user priority (#1229)
+
+The reference Host adds two policies over the same K4 state. They change no
+wire field, protocol type or K4 FIFO rule. The [collaboration
+example](../examples/bot-collaboration/README.md#bot-autonomy-observe-and-auto-1229)
+owns their text and acceptance.
+
+**Autonomy.** A Bot profile carries `autonomy: observe | auto`, and a new Bot
+starts in observe (the owner ruling of 2026-10-31). In observe, the outcome is
+still checked against its frozen schema, and `create_routine`, a cross-Bot
+`delegate` and a seat `room_call` are recorded once per `taskId` action as
+would-do rows. No routine, wake, delegation row, `bot_request` Turn, budget
+unit, round or seat is written. `messageEgress`, `confirmable_action` and
+`ask_user` are unchanged. Only the owner principal switches a Bot. A switch
+applies to outcomes recorded after it and never replays a row.
+
+**User priority.** See section 3. The K4 intent rows are the order authority:
+the Host moves the `sequence` of queued, never-submitted intents only. The
+device slot reservation is the `admitSubmit` decision of the Host core, so K4
+still owns submission and settlement. With input coalescing on, an open batch
+has no intent yet and seals when its Bot is idle, so queued autonomous work
+can delay it; the example records that remaining interaction.
+
+**Inbound disposition.** Every inbound human message has one destination
+projected from the existing ledger rows: `filtered(code)`, `coalesced(turnId)`,
+`answered(turnId)`, `failed(turnId)` or `cancelled(turnId)`. The Host stores no
+second disposition: the inbound row, the input batch and the Turn decide it.
+A recorded message with no live Turn and no open batch reads `failed`, never
+silence. Each transition is a projection id that names the destination, so a
+projection value never changes. The [collaboration
+example](../examples/bot-collaboration/README.md#inbound-disposition-1229)
+owns the row shape and acceptance.
 
 ## Required reply ingestion
 

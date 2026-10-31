@@ -28,6 +28,10 @@ Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
 Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, `endRoutine`, `cancelDelegation`, and `abandonDelegation`.
 Use `receive` for IM messages ([IM channel input](#im-channel-input)).
+Use `autonomy`, `wouldDoRecords` and `setBotAutonomy` for the owner's observe/auto switch
+([Bot autonomy](#bot-autonomy-observe-and-auto-1229)).
+Read `inboundDispositions` for the destination of every inbound human message
+([Inbound disposition](#inbound-disposition-1229)).
 Read `snapshot` or upload K4 projections with `core.flushProjections`.
 
 The execution template selects this Bot's Agent. It must use a runtime profile
@@ -110,6 +114,9 @@ root budget. Self delegation permits four continuations for that root. A
 continuation keeps the hop, authority, and open delegation of its parent.
 It does not consume the Bot budget. A refused action
 enters only its originating Bot's `ContextPack.rejectedActions`. Other accepted actions still apply.
+A Bot in `observe` records `create_routine`, a cross-Bot `delegate` and
+`room_call` instead of applying them; every other action applies as above
+([Bot autonomy](#bot-autonomy-observe-and-auto-1229)).
 
 `BotOptions.outcome` narrows that offer (#881). `actions.turn` lists the
 actions of a Bot Turn outside a room, from `delegate`, `ask_user`,
@@ -182,6 +189,51 @@ imports only `node:crypto`. The K4 root entry also loads `node:sqlite` and
 `node:async_hooks`, so the rules never import it. `src/rules-boundary.test.ts`
 holds both rules. The rules still need `node:crypto` and the global `Buffer`.
 Workers with `nodejs_compat` have both.
+
+## Bot autonomy: observe and auto (#1229)
+
+A Bot's autonomous actions start in `observe`. The owner sees what the
+Bot would do, then switches the Bot to `auto` per Bot. This is the
+owner ruling of 2026-10-31 on #1229. It is Host policy over the same
+frozen schema. K4, K8-S, the SDK wire and the protocol do not change.
+
+| Action | observe | auto |
+| --- | --- | --- |
+| `create_routine` | Recorded as would-do. No K4 routine, occurrence or wake. | Applied. |
+| `delegate` to another Bot | Recorded as would-do. No delegation row, `bot_request` Turn or budget unit. | Applied. |
+| `room_call` of a seat | Recorded as would-do. No new round or seat. The seat's speech still applies. | Applied. |
+| Self `delegate` (continuation) | Applied, as in auto. | Applied. |
+| `messageEgress`, `confirmable_action`, `ask_user` | Applied, as in auto. | Applied. |
+
+An outcome is still checked against its frozen schema in observe, and a
+would-do row is keyed by `hash([taskId, 'would-do', action, index])`. So
+applying the same outcome twice records one row. The row holds the frozen
+action itself, never a model summary. Rows live in
+`snapshot().wouldDo` and are published once as `would-do:<id>`, so a
+Host UI reads either the ledger or that projection. They are Host UI
+history: never in a ContextPack and never on the wire.
+
+The default of a new Bot is `observe`. A Bot profile without the field
+(an older ledger) reads as `observe` too. Only the owner principal
+switches it:
+
+```ts
+// The Host UI: the would-do feed and one switch per Bot.
+const records = bot.wouldDoRecords(reviewerId); // oldest first; omit the id for every Bot
+const current = bot.autonomy(reviewerId);        // 'observe' | 'auto'
+await bot.setBotAutonomy(reviewerId, 'auto', principal); // owner only
+```
+
+`setBotAutonomy` writes `bot-autonomy:<botId>:<revision>` for the Host
+UI. It applies to outcomes recorded after the switch. It does not replay
+a would-do row. A non-owner fails with `not_owner`; an unverified caller
+fails with `unverified_sender`. Both write an audit row first. The team
+authority's profile does not own this field, so a team snapshot cannot
+change it.
+
+Coalesced input is a policy before enqueue: see
+[User input priority](#user-input-priority-1229) for how it interacts
+with queued autonomous work.
 
 ## Routine invariants
 
@@ -1357,6 +1409,80 @@ inputs in order and answers them together.
 This example does not yet arm a timer at the window end, or publish
 `input-batch` projections (slice I2). Until then, a batch of a busy Bot seals
 at the next Host call or when the Bot becomes idle.
+
+## User input priority (#1229)
+
+The K4 FIFO stays one queue per `(tenant, deviceId, agentId)`, ordered by
+the ledger's `sequence` (`docs/host-execution-core.md` §3). The reference Host
+adds one explicit rule on top of it. A **user-source** intent goes ahead of
+the queued, never-submitted `routine` and `bot_request` intents of the same
+Agent FIFO. "User-source" is the K4 `source: 'user'`: an owner input, and
+an `answer` Turn. The rule runs in the same ledger transaction that enqueues
+the user intent, so it is durable and survives a restart.
+
+- Only intents with `phase: 'queued'` and `attempts: 0` move. A submitted or
+  in-flight execution keeps its `sequence`, its `taskId` and its generation,
+  and a cancel is not issued to make room.
+- The user intents and the autonomous intents keep their own arrival order.
+  A self continuation, an `action_result` or a Bot reply keeps its position.
+- `setBotAutonomy` and the observe mode never reorder anything.
+- A standalone K4 reader sees a plain ledger: the order is just `sequence`
+  values. No memory state and no second queue.
+
+The Host also reserves **one slot per device** for user work. The limit is
+`BotOptions.deviceConcurrency` (default 8, the SDK daemon's
+`maxConcurrentTasks` default). An intent occupies a slot once it is submitted
+or has attempt evidence. Autonomous work may fill `limit - 1` slots;
+user-source work may fill all of them. A limit of 1 has no spare slot, so the
+reservation is off there. A refused begin stays queued and is retried when a
+slot frees; a submitted execution is never cancelled.
+
+```ts
+const bot = new BotCollaboration(server, ledger, { ...options, deviceConcurrency: 8 });
+```
+
+The rule has no effect on the SDK wire, the protocol or the K4 FIFO contract.
+It changes only the `sequence` of intents that never reached the SDK.
+
+`coalesce` is a policy before enqueue, so an open batch has no intent yet.
+A batch seals when its Bot is idle (`idle`) or at its other seal reasons. A
+queued `bot_request` keeps the Bot busy, so with coalescing on, an open batch
+waits behind that work and its Turn joins the FIFO after the seal. Without
+coalescing, the user input becomes the next submitted intent. A Host that
+needs the strict order with coalescing must seal its batch sooner or leave
+coalescing off. This is the remaining interaction of #1229 item 1.
+
+## Inbound disposition (#1229)
+
+Every inbound human message gets one deterministic destination, derived from
+the rows the Host already writes. There is no second disposition table:
+`inboundDispositions()` reads the inbound, input-batch and Turn rows.
+
+| Destination | Meaning |
+| --- | --- |
+| `filtered(code)` | Refused before a Turn: `unverified_sender` or `not_owner`. The audit row stays. |
+| `coalesced(turnId)` | In the Turn `turnId`, including a merged input whose batch is still open. |
+| `answered(turnId)` | The Turn succeeded. |
+| `failed(turnId)` | The Turn failed, expired or was superseded. |
+| `cancelled(turnId)` | The owner cancelled the Turn or its batch. |
+
+A 1:1 input names the batch Turn that answers it. A room input names its round
+id; the round's seat Turns decide the destination. A recorded message whose
+Turn was retained away reads `failed`, never nothing, so the Host UI cannot
+show a message with no destination.
+
+```ts
+const rows = bot.inboundDispositions(); // oldest first, from the ledger
+```
+
+Each transition is published once as
+`inbound:<id>:<destination>:<turnId>` (or `inbound:<id>:filtered:<code>`).
+The id names the destination, so a projection value never changes. The rows
+are Host UI history: never in a ContextPack and never on the wire.
+
+`echo`, a direct bot message (`bot_audit`) and a group bot message
+(`bot_background`) keep their delivery, audit and round rows; this projection
+covers every inbound human message.
 
 ## IM channel input
 

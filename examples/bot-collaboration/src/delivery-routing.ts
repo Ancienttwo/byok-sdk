@@ -7,7 +7,11 @@ import { deliveryId } from './delivery';
 export interface IntentConclusions { readonly intents: Readonly<Record<string, { readonly conclusion?: Conclusion }>> }
 
 interface StoredInbound {
-  id: string; root: string; conversation: Conversation; channel: string; sequence: number;
+  id: string; conversation: Conversation; channel: string; sequence: number;
+  /** The Turn or open input batch that answers the message. Absent on a filtered message. */
+  root?: string;
+  /** The classification that refused the message before any Turn (#1229 item 3). */
+  filtered?: string;
   reply?: Omit<ReplyRoute, 'token'> & { token?: string };
 }
 export interface ChannelState {
@@ -44,6 +48,16 @@ export function rememberInbound(state: CollaborationState, message: InboundMessa
   const channels = channelState(state), id = inboundKey(message);
   channels.inbounds[id] ??= { id, root, conversation: { ...message.conversation }, channel: message.channel,
     sequence: ++state.sequence, ...(route ? { reply: { ...route } } : {}) };
+}
+/**
+ * Records a message that the Host refused before any Turn (#1229 item 3), so its disposition is visible in the Host UI.
+ * An adapter identity that cannot name the message records nothing: the audit row is still the authority for it.
+ */
+export function rememberFilteredInbound(state: CollaborationState, message: InboundMessage, code: string): void {
+  if (typeof message.channel !== 'string' || !message.channel.trim() || typeof message.platformMessageId !== 'string' || !message.platformMessageId) return;
+  const channels = channelState(state), id = inboundKey(message);
+  channels.inbounds[id] ??= { id, conversation: { ...message.conversation }, channel: message.channel,
+    sequence: ++state.sequence, filtered: code };
 }
 export function enablePush(state: CollaborationState, conversation: Conversation, channel: string, target: string, owner: string, now: number): PushRoute {
   if (!conversation.id || !channel.trim() || !target.trim()) throw new Error('Invalid push route');
@@ -107,7 +121,7 @@ export function refuseRoute(state: CollaborationState, row: Delivery): void {
 }
 export function cleanReplyTokens(ledger: IntentConclusions, state: CollaborationState, now: number): void {
   for (const row of Object.values(state.channel?.inbounds ?? {})) {
-    if (!row.reply?.token) continue;
+    if (!row.reply?.token || row.root === undefined) continue;
     const reserved = Object.values(state.channel!.deliveries).some(delivery => delivery.route.kind === 'reply'
       && delivery.route.inboundId === row.id && (delivery.state === 'pending' || delivery.state === 'sending'));
     if (now >= row.reply.expiresAt || !reserved && !rootOpen(ledger, state, row.root, row.conversation)) delete row.reply.token;

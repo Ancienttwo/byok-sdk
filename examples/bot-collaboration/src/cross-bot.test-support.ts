@@ -1,6 +1,6 @@
 import { expect, vi } from 'vitest';
 import { hash, type Json } from '@byok-sdk/server/execution-core';
-import type { TestTeam } from './team.test-support';
+import { autoBots, type TestTeam } from './team.test-support';
 import type { Delegation } from './model';
 
 /** Helpers over the real embedded server, daemon and submit_result helper. */
@@ -24,6 +24,8 @@ export function crossBot(fixture: () => TestTeam) {
       await host().drain();
       for (const bot of bots) expect(host().snapshot().team.bots[bot]!.readyRevision).toBe(host().snapshot().team.bots[bot]!.revision);
     }, { timeout: 5000 });
+    // Test fixture: these Bots run the autonomous actions that the cross-Bot cases exercise (#1229).
+    autoBots(fixture().ledger, bots);
     return bots;
   }
   const delegation = (id: string): Delegation => host().snapshot().delegations[id]!;

@@ -1,12 +1,18 @@
 import type { AgentHomeProjectionRequest } from '@byok-sdk/server';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import type { Room, Round, Seat } from './rules/rooms';
+import type { Autonomy } from './rules/autonomy';
 import type { ExternalTeam } from './rules/team';
 
 export type { Room, Round, Seat };
 export interface BotProfile {
   id: string; name: string; role: string; persona: string; model: string;
   mainBot: boolean; archived: boolean; revision: string; readyRevision: string | null;
+  /**
+   * Host autonomy policy (#1229). Absent reads as `observe`, the default of a new Bot: each create_routine, cross-Bot
+   * delegate and room_call is recorded as would-do until the owner switches this Bot to `auto`. Host state, never wire.
+   */
+  autonomy?: Autonomy;
   execution: ExecutionTemplate;
 }
 export interface HomeOperation {

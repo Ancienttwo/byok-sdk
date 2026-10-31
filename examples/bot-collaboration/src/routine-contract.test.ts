@@ -19,6 +19,8 @@ async function ledgerSubject(): Promise<RoutineSubject> {
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', execution: template(fixture.deviceId), connector: async () => null,
     now: () => clock });
   opened.push({ fixture, bot });
+  // Test fixture: the cases create routines through the Main Bot's outcomes (#1229).
+  fixture.ledger.transaction(s => { stateOf(s.application).team.bots.main!.autonomy = 'auto'; });
   const host = bot, ledger = () => fixture.ledger.snapshot();
   const intentOf = (key: string) => ledger().intents[hash(key)];
   return {

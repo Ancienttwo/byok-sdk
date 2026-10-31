@@ -33,9 +33,10 @@ async function setup(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> 
   fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal),
     agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   bot = new BotCollaboration(fixture.server, fixture.ledger, options());
-  // A second Bot on another device, and a room with both Bots.
+  // A second Bot on another device, and a room with both Bots. Test fixture: the Main Bot applies its actions (#1229).
   fixture.ledger.transaction(s => {
     const team = stateOf(s.application).team;
+    team.bots.main!.autonomy = 'auto';
     team.bots.b = { ...structuredClone(team.bots.main!), id: 'b', name: 'B', mainBot: false, execution: template(OTHER, 'b') };
     team.rooms.room = { id: 'room', ...roomFields(team, { name: 'Room', members: ['main', 'b'] }), messages: [] };
   });

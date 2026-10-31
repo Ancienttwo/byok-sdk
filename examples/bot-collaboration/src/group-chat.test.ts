@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { openTeam, type TestTeam } from './team.test-support';
+import { autoBots, openTeam, type TestTeam } from './team.test-support';
 import { ROOM_GRACE_MS } from './rooms';
 import { stateOf } from './model';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from '@byok-sdk/server/execution-core';
@@ -46,6 +46,8 @@ async function createTeam() {
     team_note: { text: 'State the evidence.' },
   });
   const profiles = Object.values(host().snapshot().team.bots).filter(b => b.id !== 'main');
+  // Test fixture: the owner already switched these Bots to auto, so their room_call applies (#1229).
+  autoBots(fixture.ledger, profiles.map(profile => profile.id));
   const room = Object.values(host().snapshot().team.rooms)[0]!;
   return { profiles, room };
 }

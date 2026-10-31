@@ -53,6 +53,7 @@ That entry imports only `node:crypto`, so a copy of this layer alone needs no
 `node:sqlite` or `node:async_hooks` (see [K4](#k4)).
 
 ```vendor rules
+src/rules/autonomy.ts
 src/rules/cards.ts
 src/rules/coalesce.ts
 src/rules/commands.ts
@@ -63,8 +64,10 @@ src/rules/delegation.ts
 src/rules/due.ts
 src/rules/frame.ts
 src/rules/history.ts
+src/rules/inbound.ts
 src/rules/message.ts
 src/rules/outcome.ts
+src/rules/priority.ts
 src/rules/rooms.ts
 src/rules/schema.ts
 src/rules/sync.ts
@@ -97,6 +100,7 @@ src/delivery.ts
 src/history.ts
 src/home-projections.ts
 src/host.ts
+src/inbound.ts
 src/index.ts
 src/migration.ts
 src/model.ts

@@ -114,8 +114,12 @@ it('seals the open batch before answer, action_result, routine and continuation 
   await finish(first, { delegate: [{ to: 'main', request: 'Continue the long task' }] });
   const turns = Object.values(bot.snapshot().turns);
   const of = (source: string) => turns.find(turn => turn.source === source)!.id;
-  const order = [first, u1, of('answer'), u2, of('action_result'), u3, of('routine'), u4, of('continuation')];
+  // The boundary seal keeps every non-autonomous Turn in arrival order. #1229 item 1 then puts the user input u4,
+  // frozen after the queued, never-submitted routine Turn, ahead of it. The continuation arrives later, so it stays
+  // after both. The routine Turn's own arrival order is unchanged; only a user intent moves ahead of it.
+  const order = [first, u1, of('answer'), u2, of('action_result'), u3, u4, of('routine'), of('continuation')];
   expect(order.map(sequence)).toEqual([...order.map(sequence)].sort((x, y) => x - y));
+  expect(sequence(u4)).toBeLessThan(sequence(of('routine')));
   for (const id of [u1, u2, u3, u4]) expect(bot.snapshot().inputBatches![id]).toMatchObject({ state: 'sealed', sealReason: 'boundary', inputIds: [id] });
 });
 

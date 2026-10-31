@@ -1,7 +1,8 @@
 import type { BotTurnOutcome, RoomFields } from '@byok-sdk/protocol';
 import { canonical, hash } from '@byok-sdk/server/execution-core/canonical';
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
-import type { TurnFields, TurnsState } from './turn';
+import { json, type TurnFields, type TurnsState } from './turn';
+import { observes, type AutonomyGate } from './autonomy';
 
 /**
  * Room seat arbitration as pure rules (#606 R1). Each function changes only the room slice that the
@@ -147,9 +148,10 @@ function observeStart(seat: Seat, now: number): void {
 /**
  * Apply the speech of the seat Turn `seatId`. An accepted `room_call` is copied back into `team`,
  * so pass the stored team object itself, not a copy of it.
+ * #1229: an observing Bot records an accepted `room_call` as would-do, so it creates no round and no seat.
  */
 export function applySpeech(team: RoomsState, seatId: string, document: Pick<BotTurnOutcome, 'speech' | 'room_call'>, taskId: string, now: number,
-  accept: (action: string, work: () => void) => void): void {
+  accept: (action: string, work: () => void) => void, gate?: AutonomyGate): void {
   const seat = team.seats[seatId]!;
   const round = team.rounds[seat.roundId]!, room = team.rooms[round.roomId]!;
   let accepted = false;
@@ -171,6 +173,7 @@ export function applySpeech(team: RoomsState, seatId: string, document: Pick<Bot
     seat.status = speech.kind; seat.released = true; accepted = true;
   });
   if (accepted && document.room_call) accept('room_call', () => {
+    if (observes(gate)) { gate.record('room_call', 0, json(document.room_call!)); return; }
     const members = [...document.room_call!.members];
     if (new Set(members).size !== members.length) throw new Error('Duplicate room_call member');
     // A batch is atomic. Refusal must not consume any seat or round budget.
