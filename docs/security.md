@@ -766,7 +766,7 @@ against the row's key. It does not and cannot check the rest:
 **Audit boundary.** One `device-assertion` `DaemonEvent` kind covers both
 outcomes. The signature and the envelope bytes are not fields of that event
 and cannot be — the isolation is structural, not a redact-after rule, so
-`bin/audit-log.ts` has nothing to leak even if its projection is later edited.
+`daemon/audit-log.ts` has nothing to leak even if its projection is later edited.
 What is persisted is the metadata an incident needs: `result`, the gate
 `reason` on a refusal, `jti` and `expiresAt` on an issuance, and the
 `audience` — verbatim when it came from the operator's own allowlist, as a

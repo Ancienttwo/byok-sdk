@@ -1651,19 +1651,65 @@ export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem';
 /** One file's state as reported by that filesystem authority. */
 export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
 /** Serves `memory_recall`/`memory_save` as a stdio MCP server over host-provided streams. */
-export { serveAgentMemoryMcpOverStdio } from '../bin/agent-memory-mcp-server';
+export { serveAgentMemoryMcpOverStdio } from './mcp-server';
 /** MCP tool name a host must allowlist for reads. */
-export { AGENT_MEMORY_RECALL_TOOL_NAME } from '../bin/agent-memory-mcp-server';
+export { AGENT_MEMORY_RECALL_TOOL_NAME } from './mcp-server';
 /** MCP tool name a host must allowlist for writes. */
-export { AGENT_MEMORY_SAVE_TOOL_NAME } from '../bin/agent-memory-mcp-server';
+export { AGENT_MEMORY_SAVE_TOOL_NAME } from './mcp-server';
 /** The two calls the stdio server delegates to; an `AgentMemoryService` satisfies it directly. */
-export type { AgentMemoryMcpDeps } from '../bin/agent-memory-mcp-server';
+export type { AgentMemoryMcpDeps } from './mcp-server';
 /** Runtime-neutral instructions telling the model how to use `MEMORY.md` and `notes/`. */
 export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance';
 /** Prepends that guidance to an Agent instruction, exactly as the daemon's task runner does. */
 export { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
 export type { AgentRef } from '../agent-home';
+// ==== @byok-sdk/client dist/agent-memory/mcp-server.d.ts ====
+import { type McpServerToolCall } from '../mcp-server';
+export { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_RECALL_TOOL_NAME, AGENT_MEMORY_SAVE_TOOL_NAME, AGENT_MEMORY_TOOLS, PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation, type AgentMemoryToolDefinition, } from './tool-manifest';
+export interface AgentMemoryMcpDeps {
+    recall(input: {
+        path: string;
+        ifRevision?: string;
+    }): Promise<{
+        path: string;
+        revision: string;
+        content: string;
+        auditWarning?: {
+            code: 'agent_memory_audit_unavailable';
+        };
+    }>;
+    save(input: {
+        op: 'replace' | 'delete';
+        path: string;
+        expectedRevision: string;
+        content?: string;
+    }): Promise<{
+        path: string;
+        revision?: string;
+        deleted: boolean;
+    }>;
+}
+/**
+ * One `tools/call`, returning the JSON-RPC `result` payload. The path policy,
+ * the compare-and-swap contract and the exact accepted argument set stay here;
+ * envelope, framing and protocol faults belong to `../mcp-server`.
+ */
+export declare function handleAgentMemoryToolCall(call: McpServerToolCall, deps: AgentMemoryMcpDeps, mode: 'read' | 'read-write'): Promise<Record<string, unknown>>;
+/** Lists the complete tool set; the prepared lane compares it with its sealed descriptor. */
+export declare function serveAgentMemoryMcpOverStdio(input: {
+    deps: AgentMemoryMcpDeps;
+    mode: 'read' | 'read-write';
+    stdin?: NodeJS.ReadableStream;
+    stdout?: NodeJS.WritableStream;
+}): void;
+/** Lists only the tools `mode` grants: a `read` helper lists `memory_recall` and no write tool. */
+export declare function serveGrantedAgentMemoryMcpOverStdio(input: Parameters<typeof serveAgentMemoryMcpOverStdio>[0]): void;
+/** A task-free descriptor has the same tools/list identity, but never an execution handler. */
+export declare function serveAgentMemoryDescriptorOverStdio(input: {
+    stdin?: NodeJS.ReadableStream;
+    stdout?: NodeJS.WritableStream;
+}): void;
 // ==== @byok-sdk/client dist/agent-memory/prepared-agent-memory.d.ts ====
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import { type PreparedAgentMemoryObservation } from './prepared-capability';
@@ -1799,79 +1845,6 @@ export type { RequestDeviceAssertionOptions } from '../daemon/assertion-client';
 export type { RequestDeviceAssertionErrorCode } from '../daemon/assertion-client';
 /** Typed result: a parsed `DeviceAssertionEnvelopeV1` with its expiry, or a refusal code and reason. Never throws for an expected outcome. */
 export type { RequestDeviceAssertionResult } from '../daemon/assertion-client';
-// ==== @byok-sdk/client dist/bin/agent-memory-mcp-server.d.ts ====
-import { type McpServerToolCall } from '../mcp-server';
-export { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_RECALL_TOOL_NAME, AGENT_MEMORY_SAVE_TOOL_NAME, AGENT_MEMORY_TOOLS, PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation, type AgentMemoryToolDefinition, } from '../agent-memory/tool-manifest';
-export interface AgentMemoryMcpDeps {
-    recall(input: {
-        path: string;
-        ifRevision?: string;
-    }): Promise<{
-        path: string;
-        revision: string;
-        content: string;
-        auditWarning?: {
-            code: 'agent_memory_audit_unavailable';
-        };
-    }>;
-    save(input: {
-        op: 'replace' | 'delete';
-        path: string;
-        expectedRevision: string;
-        content?: string;
-    }): Promise<{
-        path: string;
-        revision?: string;
-        deleted: boolean;
-    }>;
-}
-/**
- * One `tools/call`, returning the JSON-RPC `result` payload. The path policy,
- * the compare-and-swap contract and the exact accepted argument set stay here;
- * envelope, framing and protocol faults belong to `../mcp-server`.
- */
-export declare function handleAgentMemoryToolCall(call: McpServerToolCall, deps: AgentMemoryMcpDeps, mode: 'read' | 'read-write'): Promise<Record<string, unknown>>;
-/** Lists the complete tool set; the prepared lane compares it with its sealed descriptor. */
-export declare function serveAgentMemoryMcpOverStdio(input: {
-    deps: AgentMemoryMcpDeps;
-    mode: 'read' | 'read-write';
-    stdin?: NodeJS.ReadableStream;
-    stdout?: NodeJS.WritableStream;
-}): void;
-/** Lists only the tools `mode` grants: a `read` helper lists `memory_recall` and no write tool. */
-export declare function serveGrantedAgentMemoryMcpOverStdio(input: Parameters<typeof serveAgentMemoryMcpOverStdio>[0]): void;
-/** A task-free descriptor has the same tools/list identity, but never an execution handler. */
-export declare function serveAgentMemoryDescriptorOverStdio(input: {
-    stdin?: NodeJS.ReadableStream;
-    stdout?: NodeJS.WritableStream;
-}): void;
-// ==== @byok-sdk/client dist/bin/sdk-reserved-helper-command.d.ts ====
-/**
- * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
- * side effects for normal product commands; a reserved command is handled to
- * stdio EOF before this resolves `true`.
- */
-export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
-// ==== @byok-sdk/client dist/bin/team-tmux-view.d.ts ====
-export type TmuxRunner = (file: string, args: readonly string[]) => Promise<{
-    stdout?: string;
-    stderr?: string;
-}>;
-export declare class TeamTmuxViewError extends Error {
-    readonly code: 'unsupported_platform' | 'invalid_tmux_binary' | 'tmux_unavailable';
-    constructor(code: 'unsupported_platform' | 'invalid_tmux_binary' | 'tmux_unavailable', message: string);
-}
-export interface OpenTeamTmuxViewInput {
-    tmuxBin: string;
-    sessionName: string;
-    watcherCommand: string;
-    watcherArgs: readonly string[];
-    platform?: NodeJS.Platform;
-    run?: TmuxRunner;
-}
-export declare function openTeamTmuxView(input: OpenTeamTmuxViewInput): Promise<{
-    sessionName: string;
-}>;
 // ==== @byok-sdk/client dist/daemon/agent-content-audit-store.d.ts ====
 import type { AgentContentAuditReceipt } from './agent-content-read';
 /**
@@ -4319,7 +4292,7 @@ export type ControlRuntimeEnvironment = ({
 export interface ControlRuntimesEnvironmentResult {
     readonly runtimes: readonly ControlRuntimeEnvironment[];
 }
-/** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `bin/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
+/** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `diagnostics/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
 export interface ControlStatusResult {
     /** Process-immutable Local Agent application release; absent only for an older control peer. */
     localAgentRelease?: Readonly<LocalAgentReleaseIdentity>;
@@ -7255,7 +7228,7 @@ export type DaemonEvent = ({
  * having to correlate two.
  *
  * The signature and the envelope bytes are NOT fields of this event and
- * never can be. That is structural, not a redaction rule: `bin/audit-log.ts`
+ * never can be. That is structural, not a redaction rule: `daemon/audit-log.ts`
  * can only drop what it is handed, and an event type that cannot carry a
  * signature cannot leak one into a durable file no matter how the audit
  * projection is later edited. What IS carried is the metadata an incident
@@ -9430,7 +9403,7 @@ export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDesc
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
 export { BYOK_SDK_HELPER_SUBCOMMAND, bundledSdkHelperHost, resolveSdkReservedHelperBin, } from './sdk-reserved-helper-host';
-export { runSdkReservedHelperCommand } from './bin/sdk-reserved-helper-command';
+export { runSdkReservedHelperCommand } from './lifecycle/sdk-reserved-helper-command';
 export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host';
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
@@ -9443,7 +9416,7 @@ export { APPROVAL_REQUIRES_HOST } from './daemon/approvals';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals';
 export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/state';
 export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace';
-export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';
+export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './util/team-tmux-view';
 export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
 export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS, } from './daemon/provider-provisioning';
 export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning';
@@ -10838,6 +10811,13 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
  * they checked is still the owner when they write, deactivate or release.
  */
 export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs): ManagedServiceLifecycle;
+// ==== @byok-sdk/client dist/lifecycle/sdk-reserved-helper-command.d.ts ====
+/**
+ * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
+ * side effects for normal product commands; a reserved command is handled to
+ * stdio EOF before this resolves `true`.
+ */
+export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
 // ==== @byok-sdk/client dist/lifecycle/service-environment.d.ts ====
 import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment';
 /**
@@ -14197,3 +14177,23 @@ export declare function openJournalDatabase(path: string, busyTimeoutMs: number,
  * sibling that does not exist yet is skipped rather than treated as an error.
  */
 export declare function secureJournalFilePermissions(dbPath: string): void;
+// ==== @byok-sdk/client dist/util/team-tmux-view.d.ts ====
+export type TmuxRunner = (file: string, args: readonly string[]) => Promise<{
+    stdout?: string;
+    stderr?: string;
+}>;
+export declare class TeamTmuxViewError extends Error {
+    readonly code: 'unsupported_platform' | 'invalid_tmux_binary' | 'tmux_unavailable';
+    constructor(code: 'unsupported_platform' | 'invalid_tmux_binary' | 'tmux_unavailable', message: string);
+}
+export interface OpenTeamTmuxViewInput {
+    tmuxBin: string;
+    sessionName: string;
+    watcherCommand: string;
+    watcherArgs: readonly string[];
+    platform?: NodeJS.Platform;
+    run?: TmuxRunner;
+}
+export declare function openTeamTmuxView(input: OpenTeamTmuxViewInput): Promise<{
+    sessionName: string;
+}>;

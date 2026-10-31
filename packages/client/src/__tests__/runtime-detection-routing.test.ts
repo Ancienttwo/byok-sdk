@@ -11,7 +11,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
-import { appendAuditRecord } from '../bin/audit-log';
+import { appendAuditRecord } from '../daemon/audit-log';
 import { projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';

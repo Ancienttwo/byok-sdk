@@ -432,7 +432,7 @@ export interface ControlRuntimesEnvironmentResult {
   readonly runtimes: readonly ControlRuntimeEnvironment[];
 }
 
-/** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `bin/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
+/** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `diagnostics/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
 export interface ControlStatusResult {
   /** Process-immutable Local Agent application release; absent only for an older control peer. */
   localAgentRelease?: Readonly<LocalAgentReleaseIdentity>;

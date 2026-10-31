@@ -76,13 +76,13 @@ export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem';
 export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
 
 /** Serves `memory_recall`/`memory_save` as a stdio MCP server over host-provided streams. */
-export { serveAgentMemoryMcpOverStdio } from '../bin/agent-memory-mcp-server';
+export { serveAgentMemoryMcpOverStdio } from './mcp-server';
 /** MCP tool name a host must allowlist for reads. */
-export { AGENT_MEMORY_RECALL_TOOL_NAME } from '../bin/agent-memory-mcp-server';
+export { AGENT_MEMORY_RECALL_TOOL_NAME } from './mcp-server';
 /** MCP tool name a host must allowlist for writes. */
-export { AGENT_MEMORY_SAVE_TOOL_NAME } from '../bin/agent-memory-mcp-server';
+export { AGENT_MEMORY_SAVE_TOOL_NAME } from './mcp-server';
 /** The two calls the stdio server delegates to; an `AgentMemoryService` satisfies it directly. */
-export type { AgentMemoryMcpDeps } from '../bin/agent-memory-mcp-server';
+export type { AgentMemoryMcpDeps } from './mcp-server';
 
 /** Runtime-neutral instructions telling the model how to use `MEMORY.md` and `notes/`. */
 export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance';

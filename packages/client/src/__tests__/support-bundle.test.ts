@@ -10,7 +10,7 @@ import { freezeRuntimeAdapterDescriptor, type DaemonConfig, type RuntimeAdapter 
 import type { ConnectControlResult } from '../daemon/control-client';
 import { runSupportBundleCommand } from '../bin/commands/support-bundle';
 import { runDoctorCommand } from '../bin/commands/doctor';
-import { appendAuditRecord, auditLogPath } from '../bin/audit-log';
+import { appendAuditRecord, auditLogPath } from '../daemon/audit-log';
 import { DAEMON_RECORD_KINDS } from '../daemon/daemon-record';
 import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
 import { RUNTIMES_ENVIRONMENT_METHOD } from '../daemon/control-protocol';
@@ -346,9 +346,9 @@ describe('outbound rejection diagnostics #397', () => {
   });
 
   it('projects rejection audit to tasks without retaining payload fields', async () => {
-    const { appendAuditRecord, readAuditRecords } = await import('../bin/audit-log');
-    const { deriveTasksFromRecords } = await import('../bin/tasks-view');
-    const { formatTaskLine } = await import('../bin/format');
+    const { appendAuditRecord, readAuditRecords } = await import('../daemon/audit-log');
+    const { deriveTasksFromRecords } = await import('../diagnostics/tasks-view');
+    const { formatTaskLine } = await import('../diagnostics/format');
     const dir = await tempDir();
     const ts = new Date().toISOString();
     await appendAuditRecord(dir, { kind: 'offered', ts, taskId: 'task' });

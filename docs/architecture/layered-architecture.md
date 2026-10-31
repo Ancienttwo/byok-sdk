@@ -144,15 +144,15 @@ flowchart TB
   classDef adapt fill:#0f766e,stroke:#99f6e4,color:#fff
   classDef util fill:#3f3f46,stroke:#d4d4d8,color:#fff
 
-  subgraph E["入口 · 9.9k"]
+  subgraph E["入口 · 11.1k"]
     direction LR
-    Bin["bin 6.1k<br/>byok-agent · pi hosts<br/>保留 MCP helper"]:::entry
+    Bin["bin 4.9k<br/>byok-agent · pi hosts<br/>保留 MCP helper"]:::entry
     Idx["index.ts 与子路径入口<br/>公开 API re-export"]:::entry
-    Life["lifecycle 1.5k<br/>launchd · systemd · WinSW"]:::entry
-    Diag["diagnostics 1.7k<br/>doctor · support-bundle"]:::entry
+    Life["lifecycle 2.7k<br/>launchd · systemd · WinSW"]:::entry
+    Diag["diagnostics 2.8k<br/>doctor · support-bundle<br/>CLI 行格式化 · 任务读取"]:::entry
   end
 
-  subgraph O["编排 · daemon 41.1k"]
+  subgraph O["编排 · daemon 49.2k"]
     direction LR
     CD["create-daemon/<br/>组合与启动"]:::orch
     Conn["connection-manager<br/>auth-manager · long-poll"]:::orch
@@ -161,45 +161,46 @@ flowchart TB
     Ctl["control-server<br/>control-protocol"]:::orch
   end
 
-  subgraph A["runtime 适配 · 16.6k"]
+  subgraph A["runtime 适配 · 17.6k"]
     direction LR
-    Ad["adapters 13.6k<br/>pi · pi-durable · claude<br/>codex · hermes · grok · process-tree"]:::adapt
+    Ad["adapters 14.3k<br/>pi · pi-durable · claude<br/>codex · hermes · grok · process-tree"]:::adapt
     Mcp["mcp 1.0k · mcp-server 1.3k<br/>MCP client 与对外 server"]:::adapt
-    Sub["runtime 0.4k · subagents 0.2k<br/>agent-memory 0.2k"]:::adapt
+    Sub["runtime 0.6k<br/>agent-memory 0.4k"]:::adapt
   end
 
-  subgraph S["共享 · 6.2k"]
+  subgraph S["共享 · 10.9k"]
     direction LR
-    Root["根模块 5.3k<br/>agent-home · tool-authorization<br/>runtime-failure · types"]:::util
-    Util["util 0.8k<br/>atomic-write · durable-jsonl · secure-dir"]:::util
+    Root["根模块 8.4k<br/>agent-home · tool-authorization<br/>runtime-failure · types"]:::util
+    Util["util 2.5k<br/>atomic-write · durable-jsonl · secure-dir"]:::util
   end
 
-  Bin ==>|"19"| O
-  Bin ==>|"36"| Ad
-  Diag ==>|"16"| O
+  Bin ==>|"31"| O
+  Bin ==>|"39"| Ad
+  Diag ==>|"23"| O
   CD --> Conn
   CD --> TR
   CD --> Jr
   CD --> Ctl
   TR --> Ad
-  O ==>|"14"| Ad
+  O ==>|"15"| Ad
   O ==>|"8"| Mcp
   Ad ==>|"11"| Mcp
-  O ==>|"50"| Root
-  Ad ==>|"42"| Root
-  O ==>|"40"| Util
-  Ad ==>|"12"| Util
-  Bin <-.-|"3 · R-L1"| Sub
-  Diag -.->|"3 · R-L1"| Bin
+  O ==>|"65"| Root
+  Ad ==>|"52"| Root
+  O ==>|"52"| Util
+  Ad ==>|"14"| Util
+  Bin -.->|"16"| Diag
+  Bin -.->|"8"| Life
+  Life -.->|"1 · R-L1"| Bin
   Bin -.->|"4 · R-L1"| Idx
 ```
 
-边上的数字是值导入语句数，口径同 §2。公开入口（`index.ts`，以及 `adapters/`、`agent-memory/`、`assertion-client/`、`mcp-server/`、`testing/` 的子路径入口）只做 re-export，它们发出的边不计；其中 `index.ts` 发出 71 条，32 条指向 daemon。非公开入口模块的目录逆层值导入已清零；图中保留的 R-L1 虚线是公开入口 barrel 发出的入口边与同层边（`agent-memory/index.ts` → bin 3、`diagnostics` → bin 3、`bin` → `index.ts` 4）。公开入口 barrel 仍 re-export 高层实现，检查器按设计不计这些入口边。文件级环与同层互指见 R-L1。
+边上的数字是值导入语句数，口径同 §2；#1244 按同一口径重新实测了本节（部分计数相对 #1107 的快照已有变化）。公开入口（`index.ts`，以及 `adapters/`、`agent-memory/`、`assertion-client/`、`mcp-server/`、`testing/` 的子路径入口）只做 re-export，它们发出的边不计；其中 `index.ts` 发出 71 条，32 条指向 daemon。非公开入口模块的目录逆层值导入已清零；图中保留的 R-L1 虚线是公开入口 barrel 发出的入口边与同层边（`bin` → `index.ts` 4）。#1244 之后 `agent-memory/index.ts` → bin 与 `diagnostics` → bin 已归零；同层边改为 `bin` → `diagnostics` 16、`bin` → `lifecycle` 8、`lifecycle` → bin 1。公开入口 barrel 仍 re-export 高层实现，检查器按设计不计这些入口边。文件级环与同层互指见 R-L1。
 
 | 模块 | 职责 | 关键锚点 |
 | --- | --- | --- |
-| `bin/` | 8 个 bin 的入口：`byok-agent` 子命令、Pi 三种 host（rpc、prepared、durable）、4 个 SDK 保留 MCP helper。`audit-log.ts`、`format.ts`、`agent-memory-mcp-server.ts`、`sdk-reserved-helper-runners.ts`、`sdk-reserved-helper-command.ts` 也在这里，被 diagnostics、agent-memory 与根模块当库使用（R-L1）。`runtime-probe.ts` 已移到 `diagnostics/runtime-probe.ts`（#1099）；`control-client.ts` 已移到 `daemon/control-client.ts`，`lifecycle/exec-runner.ts` 已移到 `util/exec-runner.ts`（#1205）。 | `packages/client/src/bin/byok-agent.ts`；`packages/client/src/bin/sdk-reserved-helper-runners.ts`；`packages/client/src/bin/sdk-reserved-helper-command.ts` |
-| `index.ts` | 公开 API 汇总，只做 re-export；`adapters/`、`agent-memory/` 等子路径各有自己的入口。`bin/` 有 4 个文件从这里取 API；`runtime-probe` 的库代码已移到 `diagnostics/runtime-probe.ts`，不再经公开入口与 `diagnostics/` 成环（R-L1）。 | `packages/client/src/index.ts`；`packages/client/src/bin/commands/runtimes.ts` |
+| `bin/` | 8 个 bin 的入口：`byok-agent` 子命令、Pi 三种 host（rpc、prepared、durable）、4 个 SDK 保留 MCP helper。只剩 argv/config/exit 外壳与 bin 内部 runner；被非 bin 代码使用的库已按层移出：`audit-log.ts` → `daemon/audit-log.ts`，`format.ts`、`tasks-view.ts` → `diagnostics/`，`agent-memory-mcp-server.ts` → `agent-memory/mcp-server.ts`，`sdk-reserved-helper-command.ts` → `lifecycle/`，`team-tmux-view.ts` → `util/`（#1244）。`runtime-probe.ts` 已移到 `diagnostics/runtime-probe.ts`（#1099）；`control-client.ts` 已移到 `daemon/control-client.ts`，`lifecycle/exec-runner.ts` 已移到 `util/exec-runner.ts`（#1205）。 | `packages/client/src/bin/byok-agent.ts`；`packages/client/src/bin/sdk-reserved-helper-runners.ts`；`packages/client/src/lifecycle/sdk-reserved-helper-command.ts` |
+| `index.ts` | 公开 API 汇总，只做 re-export；`adapters/`、`agent-memory/` 等子路径各有自己的入口。`bin/` 有 4 个文件从这里取 API；`runtime-probe` 的库代码已移到 `diagnostics/runtime-probe.ts`，不再经公开入口与 `diagnostics/` 成环（R-L1）；`runSdkReservedHelperCommand` 与 `openTeamTmuxView` 的实现随 #1244 移到 `lifecycle/` 与 `util/`，re-export 名称不变。 | `packages/client/src/index.ts`；`packages/client/src/bin/commands/runtimes.ts` |
 | 根模块 | Agent home 布局、工具授权模式与 IPC、runtime 失败投影、共享类型。被 daemon 与 adapters 广泛依赖。 | `packages/client/src/agent-home.ts:28`；`packages/client/src/tool-authorization.ts:13`；`packages/client/src/tool-authorization-ipc.ts:74` |
 | `daemon/create-daemon/` | 把 store、journal、连接、TaskRunner、控制通道组合成 `Daemon`。`createDaemon` 只构建 pi、claude、codex，Hermes 与 Grok 由 Host 经 `createDaemonWithAdapters` 注入。`daemon.start()` 总会拉起控制通道，内嵌 Host 也一样。 | `packages/client/src/daemon/create-daemon.ts:718,963`；`packages/client/src/daemon/create-daemon/support.ts:288-292`；`packages/client/src/daemon/create-daemon/lifecycle.ts:41` |
 | `daemon/connection-manager.ts` 等 | 单会话 HTTP long-poll：`conn.hello` 握手、cursor 持久化即 ack、outbox 批量发送、token 续期。 | `packages/client/src/daemon/connection-manager.ts:273-327`；`packages/client/src/daemon/auth-manager.ts:312` |
@@ -208,7 +209,7 @@ flowchart TB
 | `daemon/environment.ts` | runtime 子进程的环境：完整继承与窄 allowlist 两种构造。adapters 有 8 条值导入指向它，`./adapters` 子路径入口也 re-export 它（R-L1）。 | `packages/client/src/daemon/environment.ts:1-14` |
 | `adapters/` | 每个 runtime 一个 `RuntimeAdapter`：拼命令行、写 MCP 配置、解析事件流、工具授权桥、进程树所有权。 | `packages/client/src/adapters/process-tree.ts`；`adapters/claude/claude-adapter.ts:344-366`；`adapters/pi/pi-adapter.ts` |
 | `mcp/`、`mcp-server/` | `mcp/` 是 daemon 探测 MCP server 用的 client；`mcp-server/` 是对外的 `./mcp-server` 子路径（stdio 与 HTTP）。 | `packages/client/src/daemon/mcp-tools-probe.ts`；`docs/mcp-server-http.md` |
-| `lifecycle/`、`diagnostics/` | 服务安装（launchd、systemd --user、WinSW）与 `doctor`、`support-bundle`。 | `packages/client/src/lifecycle/service-types.ts:63` |
+| `lifecycle/`、`diagnostics/` | 服务安装（launchd、systemd --user、WinSW）、保留 helper 命令入口（#1244），以及 `doctor`、`support-bundle` 与 CLI 行格式化/任务读取模型（#1244）。 | `packages/client/src/lifecycle/service-types.ts:63`；`packages/client/src/lifecycle/sdk-reserved-helper-command.ts`；`packages/client/src/diagnostics/format.ts` |
 
 ### 3.2 cloud：协调内核
 
@@ -489,7 +490,7 @@ sequenceDiagram
 
 | ID | 级别 | 问题 | 证据 | 方向与跟踪 |
 | --- | --- | --- | --- | --- |
-| R-L1 | 中 | client 内部目录没有方向规则。按 §3.1 的四层与口径，非公开入口模块的目录逆层值导入已清零；文件级环也已清零，基线只剩 0 条环内边 + 0 条目录逆层边 + 1 条 manifest 缺口 = 1。公开入口 barrel 仍 re-export 高层实现（`index.ts` 56 条、`agent-memory/index.ts` 11 条、`assertion-client/index.ts` 2 条、`adapters/index.ts` 1 条），检查器按设计不计。同层互指：diagnostics ↔ bin（3 / 5）、adapters ↔ runtime（14 / 2）；这些是同层目录互指，不构成文件级环。文件级环 0 个：`daemon/task-runner.ts` 与 14 个阶段文件之间的 34 条边已随 #1219 的 `state.ts` 常量下沉消失。 | §3.1 图；`packages/client/src/agent-memory/index.ts` → `bin/agent-memory-mcp-server.ts`；`packages/client/src/bin/commands/runtimes.ts` → `packages/client/src/diagnostics/runtime-probe.ts`；`packages/client/src/daemon/task-runner/state.ts` | `bin/` 只留 argv 外壳，库代码移出；被下层使用的原语下沉（本轮已下沉 `daemon-owner`、`sqlite-support`、`prepared-agent-*`、`agent-memory-helper-*`，并把 reserved-helper 命令移入 `bin/`；#1205 已移走 `control-client` 与 `exec-runner`；#1099 本轮已移走 `runtime-probe`）；TaskRunner 抽成纯 reducer。[#1099](https://github.com/Ancienttwo/byok-sdk/issues/1099)；检查由 [#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098) 提供，以只减不增的基线上线。 |
+| R-L1 | 中 | client 内部目录没有方向规则。按 §3.1 的四层与口径，非公开入口模块的目录逆层值导入已清零；文件级环也已清零，基线只剩 0 条环内边 + 0 条目录逆层边 + 1 条 manifest 缺口 = 1。公开入口 barrel 仍 re-export 高层实现（`index.ts` 56 条、`agent-memory/index.ts` 11 条、`assertion-client/index.ts` 2 条、`adapters/index.ts` 1 条），检查器按设计不计。同层互指：#1244 起 `diagnostics` ↔ bin（0 / 16）、`lifecycle` ↔ bin（1 / 8）、`adapters` ↔ `runtime`（14 / 2）；这些是同层目录互指，不构成文件级环。文件级环 0 个：`daemon/task-runner.ts` 与 14 个阶段文件之间的 34 条边已随 #1219 的 `state.ts` 常量下沉消失。 | §3.1 图；`packages/client/src/daemon/audit-log.ts`；`packages/client/src/diagnostics/format.ts`；`packages/client/src/agent-memory/mcp-server.ts`；`packages/client/src/lifecycle/sdk-reserved-helper-command.ts`；`packages/client/src/util/team-tmux-view.ts`；`packages/client/src/daemon/task-runner/state.ts` | `bin/` 只留 argv 外壳，库代码移出（#1244 已移走 `audit-log`、`format`、`tasks-view`、`agent-memory-mcp-server`、`sdk-reserved-helper-command`、`team-tmux-view`，无 alias 或第二实现）；被下层使用的原语下沉（本轮已下沉 `daemon-owner`、`sqlite-support`、`prepared-agent-*`、`agent-memory-helper-*`；#1205 已移走 `control-client` 与 `exec-runner`；#1099 本轮已移走 `runtime-probe`）；TaskRunner 抽成纯 reducer。[#1099](https://github.com/Ancienttwo/byok-sdk/issues/1099)；检查由 [#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098) 提供，以只减不增的基线上线。 |
 | R-L2 | 低 | 已收口（[#1100](https://github.com/Ancienttwo/byok-sdk/issues/1100)）。`createByokCloud` 只剩能力声明校验、路由登记和 `ByokCloud` 组装；`steerTask`、`submitAgentExecution` 与其余 Host API 按 #1012 的命名空间方式移到 `api/`，共享的入队闸门在 `api/enqueue.ts`。`parseAgentMessageDisposition` 移到叶子文件 `agent-message-disposition.ts`，cloud 的文件级值导入环为 0。`cloud.ts` 其余行数是公开类型 `ByokCloudOptions` 与 `ByokCloud`。 | `packages/cloud/src/cloud.ts`（`createByokCloud`）；`packages/cloud/src/api/steering.ts`；`packages/cloud/src/api/agent-executions.ts`；`packages/cloud/src/agent-message-disposition.ts` | 剩余：#1098 的目录检查把 `cloud.ts` 与领域文件分开计算。 |
 | R-L3 | 中 | 内嵌 `server` 把 `e2eeMemberStore` 传给 `createByokCloud`，但用不带参数的 `fullCapabilityDeclaration()`，它默认不含 `e2ee.member`、`truth.records`、`skills.pack`、`agent.memory.projection`、`host-mcp-task-context`，所以这些路由在 Topology L 永远不挂载，Host 看到的是 404。目前没有下游报告。 | `packages/server/src/index.ts:413,418`；`packages/cloud/src/capabilities.ts:157-178`；`packages/cloud/src/cloud.ts:1260` | 已修（#1096）：server 不再传 `e2eeMemberStore`，SQLite 的 E2EE 存储已删除；能力声明与 ports 双向校验，server 的声明由 ports 推导。proof receipt 的保留拆成独立的 `SqliteProofRequestReceiptStore` 与 `SqliteProofReceiptRetentionAuthority`（`packages/server/src/stores/sqlite/proof-receipts.ts`）。见[迁移说明](process-namespace-topology.md#capability-ports-migration)。 |
 | R-L4 | 低 | 已锁定（[#1098](https://github.com/Ancienttwo/byok-sdk/issues/1098)）。`ui-runtime` 仍有 2 条对 `cloud` 的值导入（`TimelineEventSchema`、`projectTimelineEvents`、`ApprovalObservationSchema`），浏览器端打包会带入这部分 cloud 代码。迁到 `protocol` 会新增 protocol 公开导出并改写 cloud/ui-runtime 的声明面（ui-runtime 的 `.d.ts` 再导出这些 cloud 类型），故用带理由的 reviewed allowlist 锁定精确文件、说明符与成员名；新增或缺少锁定的边都失败，后续可再清零。 | `packages/ui-runtime/src/timeline.ts:1-6`；`packages/ui-runtime/src/approval-timeline.ts:1-5`；`scripts/architecture/dependency-graph.mjs` 的 `UI_RUNTIME_CLOUD_VALUE_IMPORTS` | schema 迁移留作后续；当前由 checker 锁定。 |

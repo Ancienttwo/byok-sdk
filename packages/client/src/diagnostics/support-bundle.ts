@@ -4,7 +4,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { auditLogPath } from '../bin/audit-log';
+import { auditLogPath } from '../daemon/audit-log';
 import { isDaemonRecordKind, type DaemonRecordKind } from '../daemon/daemon-record';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir, ensureSecureFile, type EnsureSecureDirOptions } from '../util/secure-dir';

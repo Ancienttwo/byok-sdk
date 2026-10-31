@@ -9,8 +9,8 @@ import {
   MAX_AUDIT_LOG_BYTES,
   MAX_LIVE_TASK_ANCHORS,
   readAuditRecords,
-} from '../bin/audit-log';
-import { deriveTasksFromRecords } from '../bin/tasks-view';
+} from '../daemon/audit-log';
+import { deriveTasksFromRecords } from '../diagnostics/tasks-view';
 
 const stores: string[] = [];
 afterEach(async () => {

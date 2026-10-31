@@ -22,7 +22,7 @@ import {
   UnpairNotConfirmedError,
   UnpairUnknownDaemonStateError,
 } from '../bin/commands/unpair';
-import { appendAuditRecord, auditLogPath } from '../bin/audit-log';
+import { appendAuditRecord, auditLogPath } from '../daemon/audit-log';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 /** Fake `connectControlClient` returning an unreachable result — the default for tests below that don't care about the live control socket. */
@@ -792,7 +792,7 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
   });
 });
 
-describe('bin/audit-log path used consistently by commands', () => {
+describe('daemon/audit-log path used consistently by commands', () => {
   it('status/tasks read the SAME audit.jsonl path a command would append to', async () => {
     const storeDir = await tmpDir('byok-cmd-path-consistency-');
     const config = baseConfig(storeDir);

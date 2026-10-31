@@ -6,7 +6,7 @@ import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { DaemonEvent } from '../daemon/observer';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { connectControlClient } from '../daemon/control-client';
-import { createAuditAppender, readAuditRecords, readLastEnvironmentRecord } from '../bin/audit-log';
+import { createAuditAppender, readAuditRecords, readLastEnvironmentRecord } from '../daemon/audit-log';
 import { runStatusCommand } from '../bin/commands/status';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
 import { createSupportBundle } from '../diagnostics/support-bundle';

@@ -93,7 +93,7 @@ export {
   bundledSdkHelperHost,
   resolveSdkReservedHelperBin,
 } from './sdk-reserved-helper-host';
-export { runSdkReservedHelperCommand } from './bin/sdk-reserved-helper-command';
+export { runSdkReservedHelperCommand } from './lifecycle/sdk-reserved-helper-command';
 export type {
   SdkHelperHostConfig,
   SdkReservedHelperKind,
@@ -176,7 +176,7 @@ export {
   type TeamMemberLease,
   type TeamWorkspaceMemberReceipt,
 } from './daemon/team-workspace';
-export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';
+export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './util/team-tmux-view';
 export type {
   Daemon,
   DaemonConfig,

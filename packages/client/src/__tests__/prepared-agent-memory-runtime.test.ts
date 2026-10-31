@@ -11,7 +11,7 @@ import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import type { SpawnFn } from '../adapters/pi/rpc-client';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
-import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
+import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../agent-memory/mcp-server';
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';

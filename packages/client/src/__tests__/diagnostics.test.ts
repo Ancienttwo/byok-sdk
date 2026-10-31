@@ -11,8 +11,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DaemonConfig } from '../index';
 import type { ConnectControlResult, ControlClient } from '../daemon/control-client';
-import { appendAuditRecord } from '../bin/audit-log';
-import { formatHaltRemedy } from '../bin/format';
+import { appendAuditRecord } from '../daemon/audit-log';
+import { formatHaltRemedy } from '../diagnostics/format';
 import {
   DoctorConfirmationRequiredError,
   DoctorDaemonRunningError,

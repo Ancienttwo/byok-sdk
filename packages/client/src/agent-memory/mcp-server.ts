@@ -4,7 +4,7 @@ import {
   AGENT_MEMORY_SAVE_TOOL_NAME,
   AGENT_MEMORY_TOOLS,
   type AgentMemoryToolDefinition,
-} from '../agent-memory/tool-manifest';
+} from './tool-manifest';
 import {
   McpServerToolError,
   serveMcpOverStdio,
@@ -19,7 +19,7 @@ export {
   PREPARED_AGENT_MEMORY_OPERATION_META_KEY,
   type AgentMemoryOperation,
   type AgentMemoryToolDefinition,
-} from '../agent-memory/tool-manifest';
+} from './tool-manifest';
 
 export interface AgentMemoryMcpDeps {
   recall(input: { path: string; ifRevision?: string }): Promise<{ path: string; revision: string; content: string; auditWarning?: { code: 'agent_memory_audit_unavailable' } }>;

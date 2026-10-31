@@ -16,7 +16,7 @@ import {
   snapshotAndProjectAgentMemory,
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
-import { AGENT_MEMORY_TOOLS, handleAgentMemoryToolCall } from '../bin/agent-memory-mcp-server';
+import { AGENT_MEMORY_TOOLS, handleAgentMemoryToolCall } from '../agent-memory/mcp-server';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';

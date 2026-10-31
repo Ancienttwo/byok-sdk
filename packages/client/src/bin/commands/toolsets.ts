@@ -3,7 +3,7 @@ import type { ControlStatusResult } from '../../daemon/control-protocol';
 import type { McpToolsetReloadReceipt } from '../../types';
 import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
-import { formatToolsetsReloadReceiptLines } from '../format';
+import { formatToolsetsReloadReceiptLines } from '../../diagnostics/format';
 
 export interface ToolsetsReloadDeps {
   log?: (line: string) => void;

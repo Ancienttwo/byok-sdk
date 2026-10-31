@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../../adapters/process-tree';
 import { connectControlClient } from '../../daemon/control-client';
-import { runSdkReservedHelperCommand } from '../../bin/sdk-reserved-helper-command';
+import { runSdkReservedHelperCommand } from '../../lifecycle/sdk-reserved-helper-command';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonOverrides } from '../../daemon/create-daemon';
 import { SqliteLocalTaskJournal, type JournalFaultStep } from '../../daemon/journal/sqlite-journal';

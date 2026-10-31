@@ -31,7 +31,7 @@ import path from 'node:path';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectControlClient } from '../daemon/control-client';
-import { formatLiveStatusLines } from '../bin/format';
+import { formatLiveStatusLines } from '../diagnostics/format';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { CursorStore } from '../daemon/cursor-store';

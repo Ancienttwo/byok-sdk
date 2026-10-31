@@ -20,7 +20,7 @@ import {
   prependAgentMemoryReaderGuidance,
   prependAgentReaderResultGuidance,
 } from '../daemon/memory-guidance';
-import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } from '../bin/agent-memory-mcp-server';
+import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } from '../agent-memory/mcp-server';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { DaemonRecord } from '../index';
-import { deriveTasksFromRecords, lastLifecycle, tallyTaskStates } from '../bin/tasks-view';
+import { deriveTasksFromRecords, lastLifecycle, tallyTaskStates } from '../diagnostics/tasks-view';
 
-describe('bin/tasks-view: deriveTasksFromRecords', () => {
+describe('diagnostics/tasks-view: deriveTasksFromRecords', () => {
   it('replays offered -> claimed -> started -> turn -> completed into a single Complete task', () => {
     const records: DaemonRecord[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', runtime: 'pi' },
@@ -121,7 +121,7 @@ describe('bin/tasks-view: deriveTasksFromRecords', () => {
   });
 });
 
-describe('bin/tasks-view: lastLifecycle', () => {
+describe('diagnostics/tasks-view: lastLifecycle', () => {
   it('returns undefined when there are no lifecycle records', () => {
     expect(lastLifecycle([{ kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' }])).toBeUndefined();
   });
@@ -137,7 +137,7 @@ describe('bin/tasks-view: lastLifecycle', () => {
   });
 });
 
-describe('bin/tasks-view: tallyTaskStates', () => {
+describe('diagnostics/tasks-view: tallyTaskStates', () => {
   it('zero-fills every TaskState even when no tasks are in it', () => {
     const counts = tallyTaskStates([]);
     expect(counts).toEqual({

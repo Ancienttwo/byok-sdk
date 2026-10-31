@@ -1,5 +1,5 @@
 import { BYOK_SDK_HELPER_SUBCOMMAND, sdkReservedHelperKinds, type SdkReservedHelperKind } from '../sdk-reserved-helper-host';
-import { runSdkReservedHelper } from './sdk-reserved-helper-runners';
+import { runSdkReservedHelper } from '../bin/sdk-reserved-helper-runners';
 
 const RESERVED_HELPER_KIND_SET: ReadonlySet<string> = new Set(sdkReservedHelperKinds);
 

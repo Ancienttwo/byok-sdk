@@ -8,7 +8,7 @@ import {
   AGENT_MEMORY_MCP_SERVER_INFO,
   AGENT_MEMORY_TOOLS,
   serveAgentMemoryDescriptorOverStdio,
-} from '../bin/agent-memory-mcp-server';
+} from '../agent-memory/mcp-server';
 import {
   preparedAgentMemoryDescriptorDigest,
   preparedAgentMemoryExecutorFingerprints,

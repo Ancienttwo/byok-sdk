@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTestKeychain } from '../../../../scripts/testing/macos-keychain.mjs';
-import { readLastEnvironmentRecord } from '../bin/audit-log';
+import { readLastEnvironmentRecord } from '../daemon/audit-log';
 import { TestServer } from './fixtures/test-server';
 
 /**

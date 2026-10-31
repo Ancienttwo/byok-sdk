@@ -10,10 +10,10 @@ import {
 } from '../runtime-detection';
 import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
-import { formatRuntimeLines } from '../bin/format';
+import { formatRuntimeLines } from '../diagnostics/format';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
 import { createSupportBundle } from '../diagnostics/support-bundle';
-import { createAuditAppender, readAuditRecords } from '../bin/audit-log';
+import { createAuditAppender, readAuditRecords } from '../daemon/audit-log';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import type { DaemonEvent } from '../daemon/observer';
 import { freezeRuntimeAdapterDescriptor } from '../types';

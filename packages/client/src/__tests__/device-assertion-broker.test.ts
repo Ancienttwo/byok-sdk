@@ -25,9 +25,9 @@ import {
 import { buildDaemonWithAdapters, createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
 import { ControlError, type AssertionIssueResult } from '../daemon/control-protocol';
 import { connectControlClient, type ControlClient } from '../daemon/control-client';
-import { createAuditAppender, auditLogPath } from '../bin/audit-log';
+import { createAuditAppender, auditLogPath } from '../daemon/audit-log';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
-import { formatDaemonEventLine } from '../bin/format';
+import { formatDaemonEventLine } from '../diagnostics/format';
 import { NONCE_SIGNING_DOMAIN } from '../daemon/device-keys';
 import type { DaemonEvent } from '../daemon/observer';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
