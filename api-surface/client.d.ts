@@ -5675,6 +5675,15 @@ export declare class DaemonHaltError extends Error {
  * guessed.
  */
 export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefined;
+/**
+ * What a liveness probe may conclude from a lifecycle, in one place: `up` is
+ * a run that owns its store and answers on its control endpoint — `running`,
+ * or `awaiting-enrollment` for a service-enrollment daemon that has not
+ * paired yet, which is legitimately up rather than broken (#1097); `ended`
+ * is a run that stopped or cannot continue; `starting` is `stopped`, which
+ * a start in progress also reports until it resolves.
+ */
+export declare function daemonLifecycleHealth(lifecycle: DaemonLifecycle): 'up' | 'starting' | 'ended';
 // ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
 import type { ToolAuthorizationReason, ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
@@ -12571,8 +12580,9 @@ export interface ServiceInstallationOptions {
     precheck(versionDir: string): ServiceProgram;
     /**
      * Resolves when the started version is healthy and throws when it is not.
-     * Default: the daemon's control socket reports `lifecycle.phase` `running`
-     * (connecting or open); `halted` or `crashed` fails at once.
+     * Default: the daemon's control socket reports a live `lifecycle` — `running`
+     * (connecting or open), or `awaiting-enrollment` for a service-enrollment
+     * daemon that has not paired yet. `halted` or `crashed` fails at once.
      */
     healthCheck?(signal: AbortSignal): Promise<void>;
     /** How long the health check may take. Default 60000. */
@@ -12586,9 +12596,11 @@ export interface ServiceInstallationOptions {
  * The upgrade receipt a Host UI reads (`upgrade-receipt.json`):
  *
  * - `pending`: an upgrade or a rollback began and has not been confirmed.
- *   Only `recover()` resolves it, by restoring `from` with the snapshot
- *   taken for `to`. A rollback journals its target as `from`, so recover
- *   completes it.
+ *   It is written before the service is stopped, so it also covers a death
+ *   before the snapshot: `recover()` then starts `from` again without a
+ *   store restore. Only `recover()` resolves a pending receipt, by
+ *   restoring `from` with the snapshot taken for `to` when one exists. A
+ *   rollback journals its target as `from`, so recover completes it.
  * - `switched`: `to` runs and passed the health check.
  * - `rolled-back`: `from` runs again with its store snapshot; `code` says why.
  * - `failed`: nothing was switched (`code` and, for a store refusal,
@@ -12618,11 +12630,12 @@ export interface ServiceInstallation {
     /** Stages the payload as the first version, points `current` at it, installs and starts the service. */
     install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
     /**
-     * Stages the payload, stops the service, runs the candidate's precheck,
-     * snapshots the listed stores, switches `current` (the old one becomes
-     * `previous`), starts it and checks its health. A store refusal stops
-     * before the switch and restarts the old version; a failed health check
-     * restores the old version and its snapshot together.
+     * Stages the payload, writes the pending receipt, stops the service, runs
+     * the candidate's precheck, snapshots the listed stores, switches
+     * `current` (the old one becomes `previous`), starts it and checks its
+     * health. A store refusal stops before the switch and restarts the old
+     * version; a failed health check restores the old version and its snapshot
+     * together; a death after the receipt leaves `recover()` that work.
      */
     upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
     /**
@@ -12682,6 +12695,17 @@ export declare function readServiceInstallationState(installRoot: string): Promi
     receipt: ServiceUpgradeReceipt | undefined;
 }>;
 export declare function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation;
+/**
+ * The default health check: polls the daemon's control socket until its own
+ * lifecycle reports a live run ({@link daemonLifecycleHealth}). A
+ * service-enrollment daemon that has not paired yet is up, not a failed
+ * upgrade, so `awaiting-enrollment` is healthy; a halted or crashed run fails
+ * at once (#1097).
+ */
+export declare function defaultServiceHealthCheck(options: {
+    storeDir: string;
+    productId: string;
+}): (signal: AbortSignal) => Promise<void>;
 /**
  * @internal The installation over a given lifecycle; tests drive it with a
  * fake service manager. Every mutation runs inside `lifecycle.owned()`, so
@@ -15414,3 +15438,15 @@ export declare function ensureSecureFile(filePath: string, opts?: EnsureSecureDi
  * MAX_PATH while mkdir does not (#1097). An existing name throws EEXIST.
  */
 export declare function createPrivateTempDir(parent: string, prefix: string): Promise<string>;
+/**
+ * A private scratch directory directly under the canonical OS temp root, for
+ * a tool whose own path limit is shorter than the store's: the Windows
+ * credential bridge is compiled with `Add-Type`/csc, which fails with CS2021
+ * once the output name is too long, and the CS2021 limit is on the directory
+ * it is handed (#1097). Its length therefore cannot depend on where the store
+ * lives. The leaf is created by an exclusive mkdir under the real path of the
+ * temp root, so a pre-planted symlink or junction is never followed, and
+ * {@link ensureSecureDir} applies the same owner-only restriction every other
+ * scratch root gets. The caller removes it.
+ */
+export declare function createPrivateSystemTempDir(prefix: string): Promise<string>;

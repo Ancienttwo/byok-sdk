@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "557a90da645b522219f374861d7572624344f0b90aa5f3425ed376d37d3ebe79"
+    "snapshotSha256": "79e0052f0331da3d3033dc2cc7a360fc2b97854d51f1066ad5c915f27c1c20ef"
   },
   "configFields": {
     "status": "tracked",
@@ -85,31 +85,6 @@
         "export:@byok-sdk/client#DaemonConfig",
         "export:@byok-sdk/client#DiagnosticsSnapshot",
         "export:@byok-sdk/client#LocalToolApprovalPolicy"
-      ]
-    },
-    {
-      "id": "tool-authorization-rules",
-      "impact": "additive",
-      "summary": "Add task-level tool authorization rules and decision metadata. Claude MCP selectors use the shared trusted runtime identity observation within the callback deadline; custom ToolAuthorizationGate wrappers must forward the optional identity resolver to preserve MCP policy enforcement.",
-      "migration": "docs/spec.md#tool-authorization-auto-and-all-1061",
-      "items": [
-        "export:@byok-sdk/client#DaemonEvent",
-        "export:@byok-sdk/client#DaemonObserver",
-        "export:@byok-sdk/client#DaemonRecord",
-        "export:@byok-sdk/client#ToolAuthorizationDecision",
-        "export:@byok-sdk/client#ToolAuthorizationGate",
-        "export:@byok-sdk/client#ToolAuthorizationReason",
-        "export:@byok-sdk/client#ToolAuthorizationRules",
-        "export:@byok-sdk/client#ToolAuthorizationVerdict",
-        "export:@byok-sdk/client#ToolCall",
-        "export:@byok-sdk/client#ToolReminder",
-        "export:@byok-sdk/client#ToolRisk",
-        "export:@byok-sdk/client#ToolRiskReason",
-        "export:@byok-sdk/client#ToolRule",
-        "export:@byok-sdk/client#classifyToolCall",
-        "export:@byok-sdk/client#createAutoToolAuthorizationGate",
-        "export:@byok-sdk/client#parseToolAuthorizationPolicy",
-        "union:daemon-event#tool-authorization"
       ]
     },
     {
@@ -786,21 +761,12 @@
     {
       "id": "config-file-static-tool-authorization",
       "impact": "additive",
-      "summary": "A byok-agent config file can set the toolAuthorization policy ({ default, byRuntime, rules }) and the isolation options of the adapters createDaemon builds (runtimes.pi/claude/codex). The policy becomes the one per-offer resolver at construction; an unknown byRuntime key, or auto on a runtime without toolAuthorizationAuto, is a DaemonConfigInvalidError. createDaemonWithAdapters rejects runtimes. The effective report gains toolAuthorization mode static with the resolved per-runtime modes.",
+      "summary": "A byok-agent config file can set toolAuthorization statically ({ default, byRuntime }) and the isolation options of the adapters createDaemon builds (runtimes.pi/claude/codex). The static form becomes the one per-offer resolver at construction; an unknown byRuntime key, or auto on a runtime without toolAuthorizationAuto, is a DaemonConfigInvalidError. An embedded Host may still pass a function. createDaemonWithAdapters rejects runtimes. The effective report gains toolAuthorization mode static with the resolved per-runtime modes.",
       "migration": "docs/device-setup.md#runtime-isolation-and-tool-authorization",
       "items": [
         "config:runtimes",
-        "export:@byok-sdk/client#DaemonEffectiveToolAuthorization"
-      ]
-    },
-    {
-      "id": "tool-authorization-policy-unification",
-      "impact": "breaking",
-      "summary": "DaemonConfig.toolAuthorization is one policy document, { default, byRuntime?, rules? }, for both a config file and an embedded Host; the function-or-object union is gone. StaticToolAuthorization, staticToolAuthorizationMode, staticToolAuthorizationResolver and ToolAuthorizationResolver are removed, and ToolAuthorizationPolicy no longer has the { mode } spelling (a single mode is { default: mode }). Replace a function resolver with the policy object; per-runtime modes move to byRuntime and rules keep their reviewed precedence and admission rules.",
-      "migration": "docs/spec.md#tool-authorization-auto-and-all-1061",
-      "items": [
-        "export:@byok-sdk/client#ToolAuthorizationPolicy",
-        "export:@byok-sdk/client#ToolAuthorizationResolver"
+        "export:@byok-sdk/client#DaemonEffectiveToolAuthorization",
+        "export:@byok-sdk/client#StaticToolAuthorization"
       ]
     },
     {
@@ -1115,7 +1081,7 @@
     {
       "item": "config:toolAuthorization",
       "change": "added",
-      "after": "optional schema-sha256=1262d37ce5c5d509",
+      "after": "optional schema-sha256=b43d13279fec8ccd",
       "entry": "daemon-config-schema"
     },
     {
@@ -1151,6 +1117,11 @@
       "before": "K4 0.0.1 src-sha256=af951f5752164745",
       "after": "K4 0.0.1 src-sha256=29b76c2746aa7b33",
       "entry": "execution-core-published"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_PAYLOAD_ENTRY",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#APPROVAL_REQUIRES_HOST",
@@ -1206,6 +1177,11 @@
       "item": "export:@byok-sdk/client#AgentServiceDefinitionInput",
       "change": "added",
       "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentServiceInstallationInput",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#ApprovalKind",
@@ -1333,11 +1309,6 @@
       "entry": "config-file-static-tool-authorization"
     },
     {
-      "item": "export:@byok-sdk/client#DaemonEvent",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
-    },
-    {
       "item": "export:@byok-sdk/client#DaemonLog",
       "change": "added",
       "entry": "service-units-library-api"
@@ -1351,16 +1322,6 @@
       "item": "export:@byok-sdk/client#DaemonMemoryHelperResolution",
       "change": "added",
       "entry": "daemon-config-schema"
-    },
-    {
-      "item": "export:@byok-sdk/client#DaemonObserver",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#DaemonRecord",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
     },
     {
       "item": "export:@byok-sdk/client#DaemonStatus",
@@ -1583,6 +1544,11 @@
       "entry": "pi-session-retention-lifecycle"
     },
     {
+      "item": "export:@byok-sdk/client#SERVICE_PAYLOAD_MANIFEST",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
       "item": "export:@byok-sdk/client#SERVICE_REDIRECT_LIMITS",
       "change": "added",
       "entry": "service-units-library-api"
@@ -1628,6 +1594,31 @@
       "entry": "service-units-library-api"
     },
     {
+      "item": "export:@byok-sdk/client#ServiceInstallation",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationError",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationRecord",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
       "item": "export:@byok-sdk/client#ServiceLifecycle",
       "change": "changed",
       "entry": "service-units-library-api"
@@ -1641,6 +1632,11 @@
       "item": "export:@byok-sdk/client#ServiceLogReport",
       "change": "added",
       "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServicePayloadManifest",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#ServiceRepairResult",
@@ -1673,69 +1669,24 @@
       "entry": "service-units-library-api"
     },
     {
-      "item": "export:@byok-sdk/client#ToolAuthorizationDecision",
+      "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",
       "change": "added",
-      "entry": "tool-authorization-rules"
+      "entry": "service-installation-upgrade"
     },
     {
-      "item": "export:@byok-sdk/client#ToolAuthorizationGate",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolAuthorizationPolicy",
+      "item": "export:@byok-sdk/client#StaticToolAuthorization",
       "change": "added",
-      "entry": "tool-authorization-policy-unification"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolAuthorizationReason",
-      "change": "added",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolAuthorizationResolver",
-      "change": "removed",
-      "entry": "tool-authorization-policy-unification"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolAuthorizationRules",
-      "change": "added",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolAuthorizationVerdict",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolCall",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolReminder",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolRisk",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolRiskReason",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#ToolRule",
-      "change": "added",
-      "entry": "tool-authorization-rules"
+      "entry": "config-file-static-tool-authorization"
     },
     {
       "item": "export:@byok-sdk/client#agentServiceDefinition",
       "change": "added",
       "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#agentServiceInstallation",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#buildRuntimeEnvironment",
@@ -1758,14 +1709,9 @@
       "entry": "service-units-library-api"
     },
     {
-      "item": "export:@byok-sdk/client#classifyToolCall",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
-    },
-    {
-      "item": "export:@byok-sdk/client#createAutoToolAuthorizationGate",
-      "change": "changed",
-      "entry": "tool-authorization-rules"
+      "item": "export:@byok-sdk/client#createServiceInstallation",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#generateLaunchdPlist",
@@ -1798,9 +1744,14 @@
       "entry": "service-units-library-api"
     },
     {
-      "item": "export:@byok-sdk/client#parseToolAuthorizationPolicy",
+      "item": "export:@byok-sdk/client#readPayloadManifest",
       "change": "added",
-      "entry": "tool-authorization-rules"
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#readServiceInstallationRecord",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#readServiceLifecycleOwner",
@@ -3374,11 +3325,6 @@
       "before": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
       "after": "migrations=33 last=0034_activity_log.sql sha256=6cb9e1490d4524dc",
       "entry": "dead-letter-retention"
-    },
-    {
-      "item": "union:daemon-event#tool-authorization",
-      "change": "added",
-      "entry": "tool-authorization-rules"
     }
   ]
 }
