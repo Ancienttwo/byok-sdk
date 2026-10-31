@@ -13008,9 +13008,10 @@ export interface ToolAuthorizationPolicy {
      * the Pi session exists, and an unresolvable root fails the claimed task as
      * `file_scope_unavailable`. A configured scope is never silently dropped.
      * SDK-owned scoped read/write/edit tools enforce the admitted roots, and
-     * native Pi find/grep/ls are excluded for that session. Shell, MCP servers,
-     * user extensions and subagents are outside this boundary; it is not an OS
-     * sandbox.
+     * native Pi find/grep/ls are excluded for that session. Every other tool
+     * (shell, MCP servers, SDK and user extension tools) is outside the boundary
+     * and asks on every call, regardless of the built-in risk level; only an
+     * explicit allowWithoutAsking rule can opt one out. It is not an OS sandbox.
      */
     readonly fileScope?: ToolFileScope;
 }
@@ -13051,7 +13052,7 @@ export interface ToolCall {
         readonly tool: string;
     };
 }
-export type ToolRiskReason = 'privilege-escalation' | 'recursive-delete' | 'system-modification' | 'destructive-git' | 'publish-or-deploy' | 'remote-script-execution' | 'permission-broadening' | 'sensitive-path' | 'write-outside-workspace' | 'custom-rule';
+export type ToolRiskReason = 'privilege-escalation' | 'recursive-delete' | 'system-modification' | 'destructive-git' | 'publish-or-deploy' | 'remote-script-execution' | 'permission-broadening' | 'sensitive-path' | 'write-outside-workspace' | 'custom-rule' | 'outside-file-scope';
 export interface ToolAuthorizationReason {
     readonly source: 'rule' | 'built-in' | 'floor';
     readonly ruleIds: readonly string[];
@@ -13114,7 +13115,7 @@ export interface ToolAuthorizationGate {
         readonly tool: string;
     } | undefined>): Promise<ToolAuthorizationVerdict>;
 }
-export declare function describeHighRiskToolCall(call: Pick<ToolCall, 'toolName' | 'input'>, reasons: readonly ToolRiskReason[], authorization?: ToolAuthorizationReason): string;
+export declare function describeHighRiskToolCall(call: Pick<ToolCall, 'toolName' | 'input' | 'mcp'>, reasons: readonly ToolRiskReason[], authorization?: ToolAuthorizationReason): string;
 export declare function createAutoToolAuthorizationGate(input: {
     readonly workspace: string;
     readonly home?: string;

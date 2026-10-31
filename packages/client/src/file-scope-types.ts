@@ -2,7 +2,21 @@
  * The closed file-scope result vocabulary. It is deliberately separate from
  * `file-scope-guard` so the loopback IPC and the adapter's grant serializer can
  * import it without loading the guard's filesystem primitives.
+ *
+ * It also owns the three SDK tool names that are *inside* a scoped session's
+ * file boundary, so the per-task gate binding can brand the auto gate with the
+ * out-of-scope default-ask floor without importing the Pi/typebox tool
+ * implementations.
  */
+
+/** The only file tools this first scoped slice replaces. */
+export const SCOPED_FILE_TOOL_NAMES = Object.freeze(['read', 'write', 'edit'] as const);
+export type ScopedFileToolName = (typeof SCOPED_FILE_TOOL_NAMES)[number];
+
+const SCOPED_FILE_TOOL_NAME_SET: ReadonlySet<string> = new Set(SCOPED_FILE_TOOL_NAMES);
+export function isScopedFileToolName(value: string): value is ScopedFileToolName {
+  return SCOPED_FILE_TOOL_NAME_SET.has(value);
+}
 
 /** The closed reasons the guard reports. */
 export type FileScopeGuardReason =

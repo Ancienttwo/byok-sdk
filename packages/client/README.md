@@ -283,9 +283,15 @@ lane on darwin/linux a boundary for its file tools: SDK-owned `read`, `write`
 and `edit` replace the native definitions, native `find`, `grep` and `ls`
 are excluded, and every call is re-checked against the admitted roots before
 IO. Windows, prepared/durable Pi and other runtimes decline before claim rather
-than run unscoped. `bash`, MCP servers, user extensions and subagents (not
-offered in a scoped session in this slice) remain outside it, and the guard is
-not race-free against same-user processes.
+than run unscoped. Inside a scoped session the auto gate asks on every call
+for every tool outside those three — `bash`, MCP servers, SDK and user
+extension tools — no matter what the built-in risk level says; only an
+explicit `allowWithoutAsking` rule (an exact tool name, a bash command glob,
+or trusted MCP identity) opts one out, and a denial carries the closed reason
+`outside-file-scope`. Subagents are not offered in a scoped session in this
+slice. This approval default is not isolation: an approved shell command still
+runs with the OS user's access, and the guard is not race-free against
+same-user processes.
 
 For ordinary Pi RPC Agent tasks, `new PiAdapter({ agentUserContext: 'excluded' })`
 loads no user extensions, skills, templates, themes, instruction files or

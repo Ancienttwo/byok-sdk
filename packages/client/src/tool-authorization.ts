@@ -102,9 +102,10 @@ export interface ToolAuthorizationPolicy {
    * the Pi session exists, and an unresolvable root fails the claimed task as
    * `file_scope_unavailable`. A configured scope is never silently dropped.
    * SDK-owned scoped read/write/edit tools enforce the admitted roots, and
-   * native Pi find/grep/ls are excluded for that session. Shell, MCP servers,
-   * user extensions and subagents are outside this boundary; it is not an OS
-   * sandbox.
+   * native Pi find/grep/ls are excluded for that session. Every other tool
+   * (shell, MCP servers, SDK and user extension tools) is outside the boundary
+   * and asks on every call, regardless of the built-in risk level; only an
+   * explicit allowWithoutAsking rule can opt one out. It is not an OS sandbox.
    */
   readonly fileScope?: ToolFileScope;
 }
@@ -408,7 +409,7 @@ export interface ToolCall {
 export type ToolRiskReason =
   | 'privilege-escalation' | 'recursive-delete' | 'system-modification' | 'destructive-git'
   | 'publish-or-deploy' | 'remote-script-execution' | 'permission-broadening'
-  | 'sensitive-path' | 'write-outside-workspace' | 'custom-rule';
+  | 'sensitive-path' | 'write-outside-workspace' | 'custom-rule' | 'outside-file-scope';
 export interface ToolAuthorizationReason {
   readonly source: 'rule' | 'built-in' | 'floor';
   readonly ruleIds: readonly string[];
@@ -612,16 +613,36 @@ export interface ToolAuthorizationGate {
   authorize(call: ToolCall, resolveMcpIdentity?: () => Promise<{ readonly server: string; readonly tool: string } | undefined>): Promise<ToolAuthorizationVerdict>;
 }
 
+/**
+ * Internal brand of a gate whose task has an admitted file scope. The binding
+ * module (`file-scope-gate-binding`) writes the three in-scope SDK tool names
+ * onto this gate's `authorize` function under the same global symbol. A brand
+ * rather than an import keeps this module dependency-free: its classifier runs
+ * in an isolated-process probe that only resolves extensionless imports
+ * through a bundler, and the brand carries the one list both sides need.
+ */
+const FILE_SCOPE_GATE_MARKER = Symbol.for('byok.tool-authorization.file-scope-tools');
+
+function scopedFileToolNames(gate: ToolAuthorizationGate): readonly string[] | undefined {
+  const value = (gate.authorize as unknown as Record<symbol, unknown>)[FILE_SCOPE_GATE_MARKER];
+  return Array.isArray(value) ? value as readonly string[] : undefined;
+}
+
 const MAX_SUMMARY_CHARS = 1_000;
 export function describeHighRiskToolCall(
-  call: Pick<ToolCall, 'toolName' | 'input'>, reasons: readonly ToolRiskReason[], authorization?: ToolAuthorizationReason,
+  call: Pick<ToolCall, 'toolName' | 'input' | 'mcp'>, reasons: readonly ToolRiskReason[], authorization?: ToolAuthorizationReason,
 ): string {
   const subject = commandText(call.input)
     ?? PATH_KEYS.map(key => call.input[key]).find((value): value is string => typeof value === 'string')
     ?? '';
-  const label = authorization?.source === 'rule' ? `Tool authorization rule (${authorization.ruleIds.join(', ')})`
-    : authorization?.source === 'floor' ? 'Protected-path tool call' : 'High-risk tool call';
-  const summary = `${label} (${reasons.join(', ')}): ${call.toolName}${subject ? ` ${subject}` : ''}`;
+  // A human decides on this card, so it names the concrete identity: the
+  // shell command/path when the call has one, and the trusted MCP server/tool
+  // when the runtime label is an MCP tool.
+  const identity = call.mcp === undefined ? '' : ` [mcp ${call.mcp.server}/${call.mcp.tool}]`;
+  const label = reasons.includes('outside-file-scope') ? 'Tool call outside the file scope'
+    : authorization?.source === 'rule' ? `Tool authorization rule (${authorization.ruleIds.join(', ')})`
+      : authorization?.source === 'floor' ? 'Protected-path tool call' : 'High-risk tool call';
+  const summary = `${label} (${reasons.join(', ')}): ${call.toolName}${identity}${subject ? ` ${subject}` : ''}`;
   return summary.length > MAX_SUMMARY_CHARS ? `${summary.slice(0, MAX_SUMMARY_CHARS - 1)}…` : summary;
 }
 
@@ -640,7 +661,10 @@ export function createAutoToolAuthorizationGate(input: {
   const rules = parseToolAuthorizationPolicy({ default: 'auto', ...(input.rules === undefined ? {} : { rules: input.rules }) }).rules;
   const needsMcpIdentity = [...(rules?.alwaysAsk ?? []), ...(rules?.allowWithoutAsking ?? [])]
     .some(rule => rule.match.mcpServer !== undefined || rule.match.mcpTool !== undefined);
-  return Object.freeze({
+  // The reference is only used inside `authorize`, after the daemon has bound
+  // (or not bound) this attempt's file-scope grant; it is never called before
+  // the object exists.
+  const gate: ToolAuthorizationGate = {
     timeoutMs: input.timeoutMs,
     async authorize(rawCall: ToolCall, resolveMcpIdentity?: () => Promise<{ readonly server: string; readonly tool: string } | undefined>): Promise<ToolAuthorizationVerdict> {
       let call = rawCall;
@@ -674,6 +698,17 @@ export function createAutoToolAuthorizationGate(input: {
         }
         call = { ...nativeCall, ...(mcp === undefined ? {} : { mcp }) };
         risk = classifyToolCall(call, input.workspace, input.home, rules, { platform: input.platform });
+        // #1061: in a file-scoped session every tool outside the SDK file
+        // boundary asks on every call. Risk heuristics cannot auto-allow it;
+        // only an explicit allowWithoutAsking rule can, because that is the
+        // Host deliberately naming the tool/command it trusts. The three SDK
+        // file tools are inside the boundary and are guarded by the scoped
+        // tool itself.
+        const scopedTools = scopedFileToolNames(gate);
+        if (scopedTools !== undefined && risk.level === 'normal'
+          && risk.authorization.source !== 'rule' && !scopedTools.includes(call.toolName)) {
+          risk = { level: 'high', reasons: Object.freeze(['outside-file-scope']), authorization: FLOOR_AUTHORIZATION };
+        }
         if (risk.level === 'normal') return finish({ decision: 'allow' });
         const result = await Promise.race([input.requestAuthorization(describeHighRiskToolCall(call, risk.reasons, risk.authorization), withdraw.signal), expired]);
         if (result === 'expired') {
@@ -682,7 +717,9 @@ export function createAutoToolAuthorizationGate(input: {
         }
         if (result.approved === true) return finish({ decision: 'allow' });
         return finish({ decision: 'deny', code: 'tool_authorization_denied', reason: result.reason
-          ?? (risk.authorization.source === 'rule' ? 'user did not authorize this tool call' : 'user did not authorize this high-risk tool call') });
+          ?? (risk.reasons.includes('outside-file-scope') ? 'user did not authorize this tool call outside the file scope'
+            : risk.authorization.source === 'rule' ? 'user did not authorize this tool call'
+              : 'user did not authorize this high-risk tool call') });
       } catch {
         withdraw.abort();
         return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: 'tool authorization is unavailable' });
@@ -690,7 +727,8 @@ export function createAutoToolAuthorizationGate(input: {
         clearTimeout(timer);
       }
     },
-  });
+  };
+  return Object.freeze(gate);
 }
 
 export function formatToolAuthorizationDenial(verdict: Extract<ToolAuthorizationVerdict, { decision: 'deny' }>): string {
