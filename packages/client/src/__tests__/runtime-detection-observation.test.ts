@@ -9,7 +9,7 @@ import { classifyDetectError, probeRuntimeVersion } from '../adapters/detect-out
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { probeRuntimes } from '../bin/runtime-probe';
+import { probeRuntimes } from '../diagnostics/runtime-probe';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';

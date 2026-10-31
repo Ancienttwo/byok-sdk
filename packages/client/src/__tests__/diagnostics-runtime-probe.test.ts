@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { defaultRuntimeAdapters, probeRuntimes } from '../bin/runtime-probe';
+import { defaultRuntimeAdapters, probeRuntimes } from '../diagnostics/runtime-probe';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
-describe('bin/runtime-probe: defaultRuntimeAdapters', () => {
+describe('diagnostics/runtime-probe: defaultRuntimeAdapters', () => {
   it('with no allowlist, returns all three bundled runtimes in canonical order', () => {
     const adapters = defaultRuntimeAdapters({});
     expect(adapters.map((a) => a.descriptor.id)).toEqual(['pi', 'claude', 'codex']);
@@ -23,7 +23,7 @@ describe('bin/runtime-probe: defaultRuntimeAdapters', () => {
   });
 });
 
-describe('bin/runtime-probe: probeRuntimes', () => {
+describe('diagnostics/runtime-probe: probeRuntimes', () => {
   it('maps a present adapter\'s detect()+capabilities() into a flattened ProbedRuntime', async () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available', version: '1.2.3', authPresent: true });
     const [probed] = await probeRuntimes([adapter]);

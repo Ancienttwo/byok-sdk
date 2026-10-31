@@ -1,5 +1,4 @@
 [
-  "cycle: packages/client/src/bin/runtime-probe.ts -> packages/client/src/index.ts",
   "cycle: packages/client/src/daemon/task-runner.ts -> packages/client/src/daemon/task-runner/agent-memory.ts",
   "cycle: packages/client/src/daemon/task-runner.ts -> packages/client/src/daemon/task-runner/approvals.ts",
   "cycle: packages/client/src/daemon/task-runner.ts -> packages/client/src/daemon/task-runner/event-pump.ts",
@@ -34,12 +33,5 @@
   "cycle: packages/client/src/daemon/task-runner/support.ts -> packages/client/src/daemon/task-runner.ts",
   "cycle: packages/client/src/daemon/task-runner/terminal-evidence.ts -> packages/client/src/daemon/task-runner.ts",
   "cycle: packages/client/src/daemon/task-runner/terminal-evidence.ts -> packages/client/src/daemon/task-runner/support.ts",
-  "cycle: packages/client/src/diagnostics/device-doctor.ts -> packages/client/src/diagnostics/diagnostics.ts",
-  "cycle: packages/client/src/diagnostics/diagnostics.ts -> packages/client/src/bin/runtime-probe.ts",
-  "cycle: packages/client/src/diagnostics/operator-actions.ts -> packages/client/src/diagnostics/diagnostics.ts",
-  "cycle: packages/client/src/diagnostics/operator-actions.ts -> packages/client/src/diagnostics/support-bundle.ts",
-  "cycle: packages/client/src/diagnostics/support-bundle.ts -> packages/client/src/diagnostics/diagnostics.ts",
-  "cycle: packages/client/src/index.ts -> packages/client/src/diagnostics/device-doctor.ts",
-  "cycle: packages/client/src/index.ts -> packages/client/src/diagnostics/operator-actions.ts",
   "manifest: packages/conformance/src/simulator/harness.ts -> @byok-sdk/testkit"
 ]

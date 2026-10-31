@@ -20,13 +20,14 @@ import {
 } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { DaemonConfig, RuntimeAdapter } from '../index';
+import type { DaemonConfig } from '../daemon/create-daemon';
+import type { RuntimeAdapter } from '../types';
 import { readLastLifecycleRecord, readLastEnvironmentRecord, parseEnvironmentRecord } from '../bin/audit-log';
 import { parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection';
 import { connectControlClient } from '../daemon/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../bin/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { defaultRuntimeAdapters, probeRuntimes } from '../bin/runtime-probe';
+import { defaultRuntimeAdapters, probeRuntimes } from './runtime-probe';
 import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult, type ControlStatusResult } from '../daemon/control-protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment';
