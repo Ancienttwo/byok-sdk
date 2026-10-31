@@ -98,13 +98,28 @@ function alive(pid: number): boolean {
   }
 }
 
+// Child startup competes with the rest of the client suite, so a fixed
+// 400 x 10 ms (4 s) budget is too tight under load. Keep the wait bounded but
+// allow a slow spawn, backing off so a stalled child costs little CPU.
+const WAIT_FOR_FILE_LIMIT_MS = 15_000;
+const WAIT_FOR_FILE_INITIAL_DELAY_MS = 10;
+const WAIT_FOR_FILE_MAX_DELAY_MS = 250;
+
 async function waitForFile(file: string): Promise<string> {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
+  const startedAt = Date.now();
+  const deadline = startedAt + WAIT_FOR_FILE_LIMIT_MS;
+  let delay = WAIT_FOR_FILE_INITIAL_DELAY_MS;
+  for (;;) {
     const text = await fs.readFile(file, 'utf8').catch(() => undefined);
     if (text !== undefined && text.length > 0) return text;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      const waited = Date.now() - startedAt;
+      throw new Error(`timed out after ${waited}ms waiting for ${file} (limit ${WAIT_FOR_FILE_LIMIT_MS}ms)`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(delay, remaining)));
+    delay = Math.min(delay * 2, WAIT_FOR_FILE_MAX_DELAY_MS);
   }
-  throw new Error(`timed out waiting for ${file}`);
 }
 
 /**
@@ -116,12 +131,15 @@ async function hangingDescriptor(stage: 'initialize' | 'tools/list') {
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-memory-descriptor-')));
   dirs.push(dir);
   const pidFile = path.join(dir, 'pid');
+  const pidTempFile = `${pidFile}.tmp`;
   const listedFile = path.join(dir, 'listed');
   const script = path.join(dir, 'descriptor');
   await fs.writeFile(script, [
     `#!${process.execPath}`,
     `const fs = require('node:fs');`,
-    `fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));`,
+    // Publish the pid atomically so a reader can never observe a partial pid.
+    `fs.writeFileSync(${JSON.stringify(pidTempFile)}, String(process.pid));`,
+    `fs.renameSync(${JSON.stringify(pidTempFile)}, ${JSON.stringify(pidFile)});`,
     `setInterval(() => {}, 1000);`,
     `let buffered = '';`,
     `process.stdin.on('data', (chunk) => {`,
@@ -148,18 +166,24 @@ describe('a cancelled task-free descriptor probe leaves no child alive', () => {
   it.each([
     ['during initialize', 'initialize'],
     ['during tools/list, after the connection is established', 'tools/list'],
-  ] as const)('kills the descriptor child when the probe is cancelled %s', async (_label, stage) => {
-    const fixture = await hangingDescriptor(stage);
-    const controller = new AbortController();
-    const observed = observePreparedMemory(fixture.describe, fixture.env, controller.signal);
-    const settled = observed.then(() => 'resolved', () => 'rejected');
-    const pid = Number(await waitForFile(fixture.pidFile));
-    spawned.push(pid);
-    expect(alive(pid)).toBe(true);
-    if (stage === 'tools/list') await waitForFile(fixture.listedFile);
-    controller.abort();
+  ] as const)(
+    'kills the descriptor child when the probe is cancelled %s',
+    // Two bounded waits can run in this case; leave room for the wait to
+    // raise its own elapsed-time error instead of racing the suite default.
+    { timeout: 35_000 },
+    async (_label, stage) => {
+      const fixture = await hangingDescriptor(stage);
+      const controller = new AbortController();
+      const observed = observePreparedMemory(fixture.describe, fixture.env, controller.signal);
+      const settled = observed.then(() => 'resolved', () => 'rejected');
+      const pid = Number(await waitForFile(fixture.pidFile));
+      spawned.push(pid);
+      expect(alive(pid)).toBe(true);
+      if (stage === 'tools/list') await waitForFile(fixture.listedFile);
+      controller.abort();
 
-    expect(await settled).toBe('rejected');
-    expect(alive(pid)).toBe(false);
-  });
+      expect(await settled).toBe('rejected');
+      expect(alive(pid)).toBe(false);
+    },
+  );
 });
