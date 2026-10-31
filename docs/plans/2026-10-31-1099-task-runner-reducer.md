@@ -12,7 +12,7 @@
 
 | ID | 决定 | 状态 |
 | --- | --- | --- |
-| D1 | SCC 实际是 15 文件、34 条边。其中 7 条是阶段文件回指 `task-runner.ts` 的**常量导入**，其余 27 条是前向或阶段间边。把常量移到叶子模块后 SCC 整体消失，baseline 的 34 条环内边全部失效（43 → 9）。 | 提议 |
+| D1 | SCC 实际是 15 文件、34 条边。其中 7 条是阶段文件回指 `task-runner.ts` 的**常量导入**，其余 27 条是前向或阶段间边。把常量移到叶子模块后 SCC 整体消失，baseline 的 34 条环内边全部失效（#1213 已先删除 8 条 diagnostics/bin 环内边，故 43 → 1）。 | 提议 |
 | D2 | reducer 放在一个纯模块 `daemon/task-runner/state.ts`：常量、State/Event/Effect 类型、数据行转移表、`reduce()`。IO 执行器放在 `daemon/task-runner/host.ts`，用模块级 `WeakMap<TaskRunner, Host>` 持有，不新增 TaskRunner 私有字段/方法。 | 提议 |
 | D3 | State 是 JSON 可序列化、深度冻结、每任务 O(1) 大小的纯数据；不包含进程、timer、fs、网络、Promise、Session、lease、outbox、batcher、正文、schema。 | 提议 |
 | D4 | Event 在边界处冻结；所有时间戳、UUID、approvalId、requestId、terminalToken、generation 由执行器注入，reducer 不读 `Date.now()`、`Math.random()`、`crypto`。 | 提议 |
@@ -886,7 +886,7 @@ shutdown 期间的 offer 不单列：仍走 O1，最后在 limits 阶段由 O5 d
 | 现有 TaskRunner | `bunx vitest run packages/client/src/__tests__/task-runner-*.test.ts`（23 文件） | 全绿，断言不改 |
 | e2e / 竞态 | `handle-offer-characterization`、`daemon-task-loop`、`agent-message-completion-gate`、`device-task-cap`、`sealed-payload-daemon`、`real-server-cancel-redelivery` | 全绿；wire 消息序列、reason/retryable 不变 |
 | durability | `journal-integration`、`outbound-settlement`、`execution-recovery-kill`、`s10-f1-terminal-recovery` | claim/terminal 顺序、精确字节、恢复不重发 |
-| graph | `node --test scripts/architecture/dependency-graph.test.mjs` | S2 后 `dependency-baseline.json` 无 task-runner 条目；baseline 恰为 9；无新增边 |
+| graph | `node --test scripts/architecture/dependency-graph.test.mjs` | S2 后 `dependency-baseline.json` 无 task-runner 条目；baseline 恰为 1（只剩 conformance → testkit manifest 缺口）；无新增边 |
 | api-surface | `bun run check:api-surface` | 有效导出符号集不变；9 个 golden 的公开 entry/closure 绿；预算不变；golden 仅允许内部 section relocation/addition（OD2） |
 | build/typecheck | `bun run build`、`bun run typecheck` | 全 workspace 绿 |
 | 全量回归 | `bun run test` | 合并前至少跑一次；dataplane 按 AGENTS.md 可选 |
