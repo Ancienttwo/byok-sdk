@@ -8384,6 +8384,308 @@ export declare const PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX = "usage_unavailab
  * minted.
  */
 export declare const HOST_TOOLSET_CONTEXT_ENV = "BYOK_HOST_TOOLSET_CONTEXT";
+/** Internal task lifecycle phase. Not the wire TaskState (protocol/task-state.ts). */
+export type TaskPhase = 'received' | 'admitting' | 'claiming' | 'claimed' | 'running' | 'awaiting_approval' | 'terminalizing' | 'retiring' | 'finished' | 'declined';
+/** Ordered effect classes (§6.1): atomic groups cannot be interleaved. */
+export type EffectMode = 'atomic' | 'barrier' | 'bestEffort';
+export type TerminalKind = 'complete' | 'failed' | 'cancelled' | 'declined';
+export type TerminalCause = 'complete' | 'failed' | 'cancelled' | 'declined' | 'rejected' | 'shutdown';
+export type TerminalStage = 'selected' | 'evidence' | 'envelope' | 'sent' | 'closed' | 'committed';
+export type ApprovalKind = 'tool-authorization' | 'task-terminal';
+export type ApprovalDecision = 'approve' | 'reject';
+export type ApprovalOrigin = 'wire' | 'in-process' | 'control-socket' | 'timeout' | 'withdraw' | 'eviction' | 'fail-closed';
+/** Every effect the host executor knows, in one vocabulary (§6.2). */
+export type EffectKind = 'open.sealed' | 'journal.admission' | 'open.preparation' | 'reserve.home' | 'admission.limits' | 'prepare.runtime' | 'bind.workspace' | 'seal.manifest' | 'pin.preparation' | 'clear.sealedOpening' | 'track.inflight' | 'consume.pendingCancelled' | 'send.decline' | 'send.claim' | 'send.terminal' | 'send.started' | 'send.cancelled' | 'send.fail' | 'send.approval_request' | 'send.approval_resolved' | 'flush.batcher' | 'stop.batcher' | 'stop.draft' | 'mark.finished' | 'abort.blob' | 'abort.inflightBlob' | 'abort.inflightBlobs' | 'revoke.contexts' | 'revoke.host_contexts' | 'revoke.allHostContexts' | 'revoke.message_context' | 'delete.contexts' | 'delete.host_contexts' | 'register.startup_owner' | 'dispose.startup' | 'dispose.startup_all' | 'transfer.startup' | 'startup.stopRetry' | 'start.runtime' | 'bind.session' | 'persist.handoff' | 'activate.message' | 'register.active' | 'arm.max_duration' | 'start.pump' | 'register.approval' | 'arm.approval_timeout' | 'clear.timeout' | 'resolve.approval' | 'resolve.approval_promise' | 'dispatch.next_approval' | 'drain.approval_queue' | 'persist.evidence' | 'prepare.envelope' | 'interrupt.session' | 'await.close' | 'await.terminal_commit' | 'retry.close' | 'retry.commit' | 'publish.record' | 'snapshot.memory' | 'release.lease' | 'release.pin' | 'release.scratch' | 'release.home_reservation' | 'release.deviceSlot' | 'finish' | 'finish.declined' | 'failClaimedAgent' | 'steer.session' | 'await.offerSettlements' | 'shutdown.fail_active_tasks' | 'report.disposalFailure' | 'log' | 'audit';
+/** Pure effect description; never a handle or a closure. */
+export interface Effect {
+    readonly kind: EffectKind;
+    readonly taskId?: string;
+    readonly reason?: string;
+    readonly retryable?: boolean;
+    readonly token?: string;
+    readonly requestId?: string;
+    readonly approvalId?: string;
+    readonly decision?: ApprovalDecision;
+    readonly approved?: boolean;
+    readonly origin?: ApprovalOrigin;
+    readonly stage?: string;
+    readonly detail?: Readonly<Record<string, string | number | boolean>>;
+}
+/** Pre-execution predicate (§6.1). */
+export interface EffectRequires {
+    readonly phase?: readonly TaskPhase[];
+    readonly claim?: 'required' | 'forbidden';
+    readonly terminal?: 'none' | 'selected';
+    readonly generation?: number;
+    readonly alwaysRun?: boolean;
+}
+/** A completion event the host enqueues after a synchronous atomic effect. */
+export type ReducerEventTemplate = Omit<ReducerEvent, 'type' | 'taskId' | 'atMs'> & {
+    readonly type: ReducerEventType;
+};
+export interface EffectEnvelope {
+    readonly id: string;
+    readonly effect: Effect;
+    readonly asOfRevision: number;
+    readonly mode: EffectMode;
+    readonly requires?: EffectRequires;
+    /** Present only for atomic effects that produce their own completion synchronously. */
+    readonly completion?: ReducerEventTemplate;
+}
+/** Intermediate effect produced by a transition row, before envelope ids. */
+export interface EffectSpec {
+    readonly effect: Effect;
+    readonly mode: EffectMode;
+    readonly requires?: EffectRequires;
+    readonly completion?: ReducerEventTemplate;
+}
+export interface OfferMessageFactsV1 {
+    readonly required: boolean;
+    readonly contentType?: string;
+    readonly maxBytes?: number;
+}
+export interface OfferTerminalProjectionV1 {
+    readonly mode: string;
+    readonly contract?: string;
+}
+export interface OfferPreparationV1 {
+    readonly reference: string;
+    readonly memoryMode: string;
+}
+/** Decision-relevant offer facts only; no instruction/schema/payload bytes. */
+export interface OfferFactsV1 {
+    readonly digest: string;
+    readonly readerAttempt: boolean;
+    readonly homeAccess: 'writer' | 'memory-reader';
+    readonly egressEnabled: boolean;
+    readonly requiredToolsets: readonly string[];
+    readonly strict: boolean;
+    readonly sealed: boolean;
+    readonly requestedRuntime?: string;
+    readonly dispatchRuntime?: string;
+    readonly harnessId?: string;
+    readonly agentRef?: string;
+    readonly sessionRef?: string;
+    readonly maxDurationMs?: number;
+    readonly message?: OfferMessageFactsV1;
+    readonly terminalProjection?: OfferTerminalProjectionV1;
+    readonly preparation?: OfferPreparationV1;
+}
+export interface AdmissionDeclineV1 {
+    readonly stage: string;
+    readonly reason: string;
+    readonly retryable: boolean;
+    readonly code?: string;
+}
+export interface AdmissionStateV1 {
+    readonly stage: string;
+    readonly deviceSlot: boolean;
+    readonly scratch: boolean;
+    readonly lease: boolean;
+    readonly homeReservation?: string;
+    readonly pin?: string;
+    readonly decline?: AdmissionDeclineV1;
+}
+export interface StartupStateV1 {
+    readonly owner?: 'startup' | 'active';
+    readonly registered: boolean;
+    readonly dispose: 'none' | 'pending' | 'settled';
+}
+export interface ClaimStateV1 {
+    readonly journaled: boolean;
+    readonly sent: boolean;
+}
+export interface ExecutionFactsV1 {
+    readonly sessionRef: string;
+    readonly runtimeId: string;
+    readonly harnessId?: string;
+    readonly home: string;
+    readonly cwd: string;
+    readonly leaseId: string;
+    readonly startedAtMs: number;
+}
+export interface PendingApprovalV1 {
+    readonly approvalId: string;
+    readonly requestId: string;
+    readonly kind: ApprovalKind;
+}
+export interface ApprovalQueueEntryV1 {
+    readonly requestId: string;
+    readonly kind: ApprovalKind;
+}
+export interface ApprovalStateV1 {
+    readonly pending?: PendingApprovalV1;
+    readonly queue: readonly ApprovalQueueEntryV1[];
+}
+export interface MessageStateV1 {
+    readonly accepted: boolean;
+    readonly sendAttempted: boolean;
+}
+export interface CompletionStateV1 {
+    readonly token: string;
+    readonly kind: 'complete';
+    readonly atMs: number;
+}
+export interface TerminalStateV1 {
+    readonly token: string;
+    readonly kind: TerminalKind;
+    readonly cause: TerminalCause;
+    readonly stage: TerminalStage;
+    readonly evidence: 'none' | 'ok' | 'degraded';
+    readonly envelope: 'none' | 'ready';
+    readonly reason?: string;
+    readonly retryable?: boolean;
+    readonly failureClass?: string;
+}
+export interface CancelStateV1 {
+    readonly requested: boolean;
+    readonly reason?: string;
+    readonly source?: 'wire' | 'in-process' | 'shutdown' | 'timeout' | 'local';
+    readonly atMs?: number;
+}
+export interface TeardownStateV1 {
+    readonly hostContexts: 'live' | 'revoked' | 'deleted';
+    readonly batcher: 'stopped' | 'running';
+    readonly blob: 'live' | 'aborted';
+    readonly interrupt: 'none' | 'pending' | 'settled';
+    readonly close: 'none' | 'pending' | 'settled' | 'failed';
+    readonly commit: 'none' | 'pending' | 'ok' | 'failed';
+    readonly lease: 'none' | 'held' | 'released';
+    readonly pin: 'none' | 'held' | 'released';
+    readonly scratch: 'none' | 'held' | 'released';
+}
+/** Per-task state: JSON-serializable, deep frozen, O(1) sized. */
+export interface TaskStateV1 {
+    readonly v: 1;
+    readonly taskId: string;
+    readonly generation: number;
+    readonly revision: number;
+    readonly phase: TaskPhase;
+    readonly offer: OfferFactsV1;
+    readonly admission: AdmissionStateV1;
+    readonly startup: StartupStateV1;
+    readonly claim: ClaimStateV1;
+    readonly execution?: ExecutionFactsV1;
+    readonly approval: ApprovalStateV1;
+    readonly message: MessageStateV1;
+    readonly completion?: CompletionStateV1;
+    readonly terminal?: TerminalStateV1;
+    readonly cancel: CancelStateV1;
+    readonly teardown: TeardownStateV1;
+}
+export interface PendingCancelV1 {
+    readonly taskId: string;
+    readonly reason?: string;
+    readonly atMs: number;
+}
+export interface ShutdownStateV1 {
+    readonly reason: string;
+    readonly atMs: number;
+    readonly phase: 'stopping' | 'draining' | 'complete';
+}
+/** Runner-wide state: bounded collections and global gates. */
+export interface RunnerStateV1 {
+    readonly v: 1;
+    readonly revision: number;
+    readonly acceptingOffers: boolean;
+    readonly shutdown?: ShutdownStateV1;
+    readonly pendingCancelled: readonly PendingCancelV1[];
+    readonly finished: readonly string[];
+    readonly strictDeclined: readonly string[];
+    readonly sealedOpening: readonly string[];
+    readonly homeReservations: Readonly<Record<string, number>>;
+}
+export interface ReducerSnapshot {
+    readonly runner: RunnerStateV1;
+    readonly task?: TaskStateV1;
+}
+export type ReducerEventType = 'offer.sealed_opening' | 'offer.received' | 'offer.sealed_opened' | 'offer.sealed_declined' | 'admission.begin' | 'admission.stage' | 'admission.declined' | 'admission.claimable' | 'claim.journaled' | 'claim.journal_failed' | 'claim.sent' | 'startup.registered' | 'startup.transferred' | 'startup.disposed' | 'runtime.session_bound' | 'runtime.started' | 'runtime.activation_failed' | 'runtime.start_failed' | 'runtime.run_failed' | 'turn.ended' | 'stream.ended' | 'resource.exceeded' | 'approval.requested' | 'approval.dispatch_next' | 'approval.decided' | 'approval.withdrawn' | 'approval.stale' | 'terminal.requested' | 'terminal.evidence' | 'terminal.envelope_ready' | 'terminal.envelope_failed' | 'terminal.sent' | 'terminal.close' | 'terminal.commit' | 'finish.completed' | 'retry.finalization' | 'cancel.received' | 'steer.received' | 'steer.failed' | 'message.accepted' | 'message.refused' | 'message.send_attempted' | 'shutdown.stop_accepting' | 'shutdown.drain' | 'shutdown.completed';
+/**
+ * One internal event. Payloads are deliberately flat: a transition row names
+ * exactly the fields it reads, and every field stays JSON-serializable. Ids and
+ * timestamps are injected by the host; the reducer never mints them.
+ */
+export interface ReducerEvent {
+    readonly type: ReducerEventType;
+    readonly atMs: number;
+    readonly taskId?: string;
+    readonly generation?: number;
+    readonly offer?: OfferFactsV1;
+    readonly strict?: boolean;
+    readonly sealed?: boolean;
+    readonly stage?: string;
+    readonly reason?: string;
+    readonly retryable?: boolean;
+    readonly code?: string;
+    readonly kind?: TerminalKind | ApprovalKind;
+    readonly decision?: ApprovalDecision;
+    readonly origin?: ApprovalOrigin;
+    readonly approvalId?: string;
+    readonly requestId?: string;
+    readonly token?: string;
+    readonly ok?: boolean;
+    readonly source?: 'wire' | 'in-process' | 'shutdown' | 'timeout' | 'local';
+    readonly execution?: ExecutionFactsV1;
+    readonly completionToken?: string;
+}
+export type Disposition = 'applied' | 'dropped' | 'rejected' | 'threw';
+export interface RowOutcome {
+    readonly runner: RunnerStateV1;
+    readonly task?: TaskStateV1;
+    readonly effects: readonly EffectSpec[];
+    readonly disposition?: Disposition;
+    readonly threw?: boolean;
+}
+export interface TransitionRow {
+    readonly id: string;
+    readonly events: readonly ReducerEventType[];
+    /** Task phases this row accepts; `none` = task absent, `*` = any. */
+    readonly phase: readonly TaskPhase[] | 'none' | '*';
+    readonly when?: (snapshot: ReducerSnapshot, event: ReducerEvent) => boolean;
+    readonly apply: (snapshot: ReducerSnapshot, event: ReducerEvent) => RowOutcome;
+    /** Contract sentence: rejection / race semantics for this row. */
+    readonly rejection: string;
+    readonly disposition?: Disposition;
+}
+export interface ReduceResult {
+    readonly runner: RunnerStateV1;
+    readonly task?: TaskStateV1;
+    readonly effects: readonly EffectEnvelope[];
+    readonly disposition: Disposition;
+    /** Stable transition row id, or a cross-cutting guard id. */
+    readonly rowId: string;
+    readonly reason?: string;
+}
+export declare function terminalTokenFor(taskId: string, revision: number): string;
+export declare function createRunnerState(): RunnerStateV1;
+export declare function createOfferFacts(overrides?: Partial<OfferFactsV1>): OfferFactsV1;
+export interface CreateTaskStateInput {
+    readonly taskId: string;
+    readonly generation?: number;
+    readonly revision?: number;
+    readonly phase?: TaskPhase;
+    readonly offer?: OfferFactsV1;
+}
+export declare function createTaskState(input: CreateTaskStateInput): TaskStateV1;
+/** Canonical JSON for goldens/tests only — not a production API. */
+export declare function serialize(value: unknown): string;
+/** UTF-8 byte size of the canonical serialization. */
+export declare function stateBytes(value: unknown): number;
+/** The single data source for reducer behavior (§7). Order is priority. */
+export declare const TRANSITIONS: readonly TransitionRow[];
+/**
+ * The table is frozen on first use, not at module evaluation: S1 keeps the
+ * reducer out of the client entry bundle (the closure budget is exact), and a
+ * top-level freeze call defeats tree shaking.
+ */
+export declare function transitionTable(): readonly TransitionRow[];
+/**
+ * Applies one event to a frozen runner/task snapshot and returns the next
+ * frozen snapshot plus ordered effect descriptions. Pure: no clock, no ids,
+ * no IO, no mutation of the input. Stale generation / wrong task / already
+ * finished task ids drop before the table is consulted.
+ */
+export declare function reduce(snapshot: ReducerSnapshot, event: ReducerEvent): ReduceResult;
 // ==== @byok-sdk/client dist/daemon/team-workspace.d.ts ====
 /**
  * The local team channel is deliberately a small, versioned contract.  It is
