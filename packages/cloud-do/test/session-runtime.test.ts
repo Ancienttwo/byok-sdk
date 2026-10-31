@@ -7,6 +7,7 @@ import { build } from 'esbuild';
 import { Miniflare, Log, LogLevel } from 'miniflare';
 import type { CloudDoErrorCode } from '../src/errors';
 import { readThroughFirstEvent } from './sse-reader';
+import { readUtf8Body } from './request-body';
 
 const KEY = 'Primary~0123456789ABCDEFGHIJKLMNOP';
 const SECONDARY = 'Secondary~0123456789QRSTUVWXYZabcd';
@@ -46,8 +47,7 @@ function runtime() {
     env: { AGENTS: { type: 'durable-object', worker: 'cloud-session-runtime', exportName: 'SessionAuditDO' },
       AIPHABEE_ZAI_API_KEY: { type: 'text', value: KEY }, AIPHABEE_DEEPSEEK_API_KEY: { type: 'text', value: SECONDARY } },
   }, dev: { outboundService: { type: 'node-handler', handler: async (request: IncomingMessage, response: ServerResponse) => {
-    let text = '';
-    for await (const chunk of request) text += chunk.toString();
+    const text = await readUtf8Body(request);
     const body = JSON.parse(text) as ProviderBody;
     const index = calls.length;
     calls.push({ url: String(request.headers['mf-original-url']), body });
@@ -141,6 +141,8 @@ describe('cloud session native model → tool → model in workerd', () => {
     const toolResult = calls[1]!.body.messages.find(message => message.role === 'tool');
     expect(toolResult).toBeDefined();
     const loaded = JSON.parse(toolResult!.content);
+    // #1226: a transport chunk boundary inside a 3-byte code point must never reach the assertion as U+FFFD.
+    expect(loaded.data.instructions).not.toContain('\uFFFD');
     expect(loaded.data.instructions).toBe(instructions);
     expect(loaded.data.tool_catalog.map((tool: { name: string }) => tool.name)).toEqual([SKILL, 'search_f10_datasets', 'query_f10_dataset', 'get_ipo_profile']);
     const rows = await dump(name);

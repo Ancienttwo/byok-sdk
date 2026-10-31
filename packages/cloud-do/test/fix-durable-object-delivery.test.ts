@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, Log, LogLevel } from 'miniflare';
+import { readUtf8Body } from './request-body';
 
 let mf: Miniflare;
 let persist: string;
@@ -25,7 +26,7 @@ beforeAll(async () => {
     env: { AGENTS: { type: 'durable-object', worker: 'submit-delivery', exportName: 'DeliveryAuditDO' },
       AIPHABEE_ZAI_API_KEY: { type: 'text', value: 'Fixture~0123456789ABCDEFGHIJKLMNOP' } },
   }, dev: { outboundService: { type: 'node-handler', handler: async (request, response) => {
-    let body = ''; for await (const chunk of request) body += chunk.toString();
+    const body = await readUtf8Body(request);
     const input = JSON.parse(body) as { messages: { role: string; content: unknown }[] };
     if (input.messages.some(message => message.role === 'user' && JSON.stringify(message.content).includes('storage fault turn'))) storageFaultRequests++;
     const pause = input.messages.some(message => message.role === 'user' && JSON.stringify(message.content).includes('pause'));

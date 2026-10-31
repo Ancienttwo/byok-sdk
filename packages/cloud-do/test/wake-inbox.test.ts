@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { build } from 'esbuild';
 import { Miniflare, Log, LogLevel } from 'miniflare';
+import { readUtf8Body } from './request-body';
 
 const KEY = 'Primary~0123456789ABCDEFGHIJKLMNOP';
 const SECONDARY = 'Secondary~0123456789QRSTUVWXYZabcd';
@@ -44,7 +45,7 @@ function runtime(nativeObserver = '') {
       AIPHABEE_ZAI_API_KEY: { type: 'text', value: KEY }, AIPHABEE_DEEPSEEK_API_KEY: { type: 'text', value: SECONDARY },
       NATIVE_OBSERVER_PAUSE: { type: 'text', value: nativeObserver } },
   }, dev: { outboundService: { type: 'node-handler', handler: async (request: IncomingMessage, response: ServerResponse) => {
-    let text = ''; for await (const chunk of request) text += chunk.toString();
+    const text = await readUtf8Body(request);
     const url = String(request.headers['mf-original-url'] ?? new URL(request.url ?? '/', `https://${request.headers.host}`).href);
     if (url.startsWith('https://billing.fixture/')) {
       const { key, deny } = JSON.parse(text) as { key: string; deny?: boolean };
@@ -131,7 +132,7 @@ function wakeInput(index: number) { return JSON.parse(calls[index]!.body.message
 async function events(name: string, cursor: Row) { return (await rpc(name, 'events', { cursor })).body!.getReader(); }
 async function readFrames(reader: Awaited<ReturnType<typeof events>>, count: number) {
   const decoder = new TextDecoder(); let text = '';
-  while ((text.match(/^id: /gm) ?? []).length < count) { const next = await reader.read(); if (next.done) break; text += decoder.decode(next.value); }
+  while ((text.match(/^id: /gm) ?? []).length < count) { const next = await reader.read(); if (next.done) break; text += decoder.decode(next.value, { stream: true }); }
   await reader.cancel();
   return text.split('\n\n').filter(frame => frame.startsWith('id:')).map(frame => ({ id: Number(frame.match(/^id: (\d+)/m)![1]), type: frame.match(/^event: (.*)/m)![1], data: JSON.parse(frame.match(/^data: (.*)/m)![1]!) as Row }));
 }
