@@ -193,6 +193,57 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     await completeAdmitted(runner, adapter, sent, taskId);
   });
 
+  it('execution scratch creation failed: declines retryably and admits the redelivery', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const { runner, agentHome, sent, deps } = await agentRunner(adapter);
+    vi.spyOn(deps.scratchRoot, 'create').mockRejectedValueOnce(new Error('scratch fixture failure'));
+    const taskId = 'scratch-create-failed';
+
+    await runner.handleEnvelope(agentOffer(taskId, 1));
+
+    expect(declines(sent, taskId).map((entry) => entry.payload)).toEqual([{
+      reason: 'execution scratch unavailable: scratch fixture failure', retryable: true, agentRef: AGENT, admission: { totalMs: expect.any(Number) },
+    }]);
+    expect(claimed(sent, taskId)).toBe(0);
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(sent.some((entry) => entry.type === 'task.started' && entry.task_id === taskId)).toBe(false);
+    expect(runner.activeTaskCount).toBe(0);
+    expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 0, attempts: 0, readerAttempts: 0 });
+
+    // The decline is the terminal outcome: the same offer is admitted again.
+    await runner.handleEnvelope(agentOffer(taskId, 2));
+    expect(declines(sent, taskId)).toHaveLength(1);
+    expect(claimed(sent, taskId)).toBe(1);
+    await completeAdmitted(runner, adapter, sent, taskId);
+  });
+
+  it('claim journal admission failed: declines retryably without a claim or start and admits the redelivery', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const { runner, agentHome, sent, deps } = await agentRunner(adapter);
+    let journalFails = true;
+    deps.beforeClaim = async () => {
+      if (journalFails) { journalFails = false; throw new Error('journal fixture failure'); }
+    };
+    const taskId = 'claim-journal-failed';
+
+    await runner.handleEnvelope(agentOffer(taskId, 1));
+
+    expect(declines(sent, taskId).map((entry) => entry.payload)).toEqual([{
+      reason: 'claim journal unavailable: journal fixture failure', retryable: true, agentRef: AGENT, admission: { totalMs: expect.any(Number) },
+    }]);
+    expect(claimed(sent, taskId)).toBe(0);
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(sent.some((entry) => entry.type === 'task.started' && entry.task_id === taskId)).toBe(false);
+    expect(runner.activeTaskCount).toBe(0);
+    expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 0, attempts: 0, readerAttempts: 0 });
+
+    // The claim was never sent, so the journal can be recorded on retry.
+    await runner.handleEnvelope(agentOffer(taskId, 2));
+    expect(declines(sent, taskId)).toHaveLength(1);
+    expect(claimed(sent, taskId)).toBe(1);
+    await completeAdmitted(runner, adapter, sent, taskId);
+  });
+
   it('Agent home initialization failed: releases the execution lease before the decline', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const { runner, agentHome, sent } = await agentRunner(adapter);

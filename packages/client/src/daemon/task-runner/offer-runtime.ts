@@ -5,6 +5,7 @@ import { awaitAdmission } from '../admission-wait';
 import { observeRuntimeDetection } from '../../runtime-detection';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../../types';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment';
+import type { ExecutionScratch } from '../retention/scratch';
 import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
 import { McpAuthorityError, MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from '../mcp-tools-probe';
 import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation';
@@ -67,7 +68,19 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   // Scratch-free declines do not own an Execution resource or contend on
   // its store gate. Acquire it at the first consumer; handleOffer retains
   // ownership across this await and releases it on every pre-start exit.
-  const scratch = await input.acquireScratch();
+  //
+  // A scratch root that cannot create an Execution is an admission failure,
+  // not a runner crash (#1217): the offer never reached claim, so the only
+  // truthful wire outcome is a retryable decline. A cancel/shutdown that
+  // landed during the await keeps its own reason through
+  // `admissionWithdrawn()` instead.
+  let scratch: ExecutionScratch;
+  try {
+    scratch = await input.acquireScratch();
+  } catch (error) {
+    if (!admissionWithdrawn()) decline(`execution scratch unavailable: ${outboundErrorMessage(error)}`, true);
+    return undefined;
+  }
   if (admissionWithdrawn()) return undefined;
   const env = { ...runtimeEnv, ...scratch.env };
   const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;

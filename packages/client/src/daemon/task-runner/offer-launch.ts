@@ -19,7 +19,7 @@ import { toRuntimeInfoCapabilities } from '../runtime-capabilities';
 import { prependAgentMemoryModeGuidance } from '../memory-guidance';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
 import type { PreparedExecutionObservation, ActiveTask, OfferPhaseContext } from './support';
-import { isKnownRuntimeId, offeredInstruction, errorMessage } from './support';
+import { isKnownRuntimeId, offeredInstruction, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
@@ -272,14 +272,26 @@ export interface OfferClaimInput
 
 /** Claims the task, resolves its instruction and binds prepared Agent memory. */
 export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, input: OfferClaimInput) {
-  const { taskId, admissionWithdrawn, admission } = phase;
+  const { taskId, decline, admissionWithdrawn, admission } = phase;
   const { agentBinding, agentRef, pick, manifest, preparedLaunch, blobAbort, payload } = input;
   let { taskMcpServers } = input;
   // All semantic admission is now in `prepare()` and the frozen manifest.
   // Claim is the first externally visible commitment; instruction bytes and
   // process creation remain after it.
   if (admissionWithdrawn()) return;
-  await this['deps'].beforeClaim?.(taskId, manifest.descriptor.id);
+  // The admission journal is the last barrier before the claim is committed.
+  // A journal that cannot record it has admitted nothing (#1217): throwing
+  // here escaped `handleOffer` before any terminal and left retry ownership
+  // to chance. Decline retryably instead — still before the claim, so no
+  // `task.claim`/`task.started` can carry a journal-less task. A
+  // cancel/shutdown during the await keeps its own decline reason through
+  // `admissionWithdrawn()`.
+  try {
+    await this['deps'].beforeClaim?.(taskId, manifest.descriptor.id);
+  } catch (error) {
+    if (!admissionWithdrawn()) decline(`claim journal unavailable: ${outboundErrorMessage(error)}`, true);
+    return;
+  }
   if (admissionWithdrawn()) return;
   if (!isKnownRuntimeId(manifest.descriptor.id)) this['claimedHarnesses'].set(taskId, manifest.descriptor.id);
   const timings = admission.snapshot();
