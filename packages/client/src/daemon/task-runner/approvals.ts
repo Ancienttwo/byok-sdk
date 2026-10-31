@@ -1,12 +1,171 @@
 // `TaskRunner` members for approval requests and decisions
 // (see ./support.ts for how a member module runs).
+//
+// #1099 S5: the reducer owns the pending/queue authority
+// (`TaskStateV1.approval`); this module is the IO adapter that keeps the
+// registry, timers, wire bytes and promise resolvers exactly where they were.
+// Every request and every resolution is a host event, so the same strict FIFO
+// mailbox that orders claim/start/cancel also orders approvals (#1218).
 import { randomUUID } from 'node:crypto';
 import { createEnvelope } from '@byok-sdk/protocol';
 import type { ApprovalDecision, ApprovalKind, ApprovalOrigin } from '../approvals';
 import { DAEMON_TASK_FAILURE } from '../task-failure';
 import type { ActiveTask } from './support';
 import type { TaskRunner } from '../task-runner';
-import { DEFAULT_APPROVAL_TIMEOUT_MS, MAX_PENDING_APPROVALS_PER_TASK } from './state';
+import {
+  DEFAULT_APPROVAL_TIMEOUT_MS,
+  MAX_PENDING_APPROVALS_PER_TASK,
+  type ApprovalOrigin as ReducerApprovalOrigin,
+} from './state';
+import { hostFor, type HostApprovalRequest, type TaskRunnerHost } from './host';
+
+const WITHDRAWN = 'approval request was withdrawn by its requester';
+const NOT_ACTIVE = 'task is not currently active on this device';
+
+/**
+ * The approval effects are installed once per runner. Registering them lazily
+ * keeps the eager path (and therefore the entry closure) unchanged until the
+ * first approval is requested.
+ */
+const approvalHosts = new WeakSet<TaskRunner>();
+
+function approvalHost(this: TaskRunner): TaskRunnerHost {
+  const host = hostFor(this);
+  if (approvalHosts.has(this)) return host;
+  approvalHosts.add(this);
+
+  host.registerHandler('flush.batcher', (_envelope, context) => {
+    if (context.taskId === undefined) return;
+    // Progress accumulated this turn reaches the server BEFORE the task moves
+    // to AwaitApproval, exactly as the legacy dispatch did.
+    this['tasks'].get(context.taskId)?.batcher.flush();
+  });
+
+  host.registerHandler('send.approval_request', (_envelope, context) => {
+    const taskId = context.taskId;
+    const pending = context.snapshot.task?.approval.pending;
+    if (taskId === undefined || pending === undefined) return;
+    const request = host.approvalRequest(pending.requestId);
+    // Finding F4: `onApprovalDispatched` must fire BEFORE `deps.send` so the
+    // observer has already stashed this approvalId when that same synchronous
+    // send triggers its own `task.await_approval` handling.
+    this['deps'].onApprovalDispatched?.(taskId, pending.approvalId);
+    // M5 (approval targeting): approvalId is always included — see
+    // TaskAwaitApprovalPayloadSchema's own doc comment (@byok-sdk/protocol).
+    this['deps'].send(createEnvelope('task.await_approval', {
+      summary: request?.summary ?? '',
+      approvalId: pending.approvalId,
+    }, { taskId }));
+  });
+
+  host.registerHandler('register.approval', (_envelope, context) => {
+    const taskId = context.taskId;
+    const pending = context.snapshot.task?.approval.pending;
+    if (taskId === undefined || pending === undefined) return;
+    const request = host.approvalRequest(pending.requestId);
+    host.setApprovalDispatched(pending.requestId, pending.approvalId);
+    this['deps'].approvalRegistry.register(
+      {
+        approvalId: pending.approvalId,
+        taskId,
+        kind: pending.kind,
+        ...(request === undefined ? {} : { summary: request.summary }),
+        createdAt: new Date().toISOString(),
+      },
+      (decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin) => {
+        // Every resolution of this approval lands here: a wire decision, an
+        // in-process `Daemon.approve`/`reject`, a control-socket
+        // `approvals.resolve`, the timeout, withdrawal, `finish()`'s cleanup
+        // and registry eviction. The A5-A7 rows own the state transition.
+        const decided = {
+          type: 'approval.decided' as const,
+          taskId,
+          atMs: Date.now(),
+          approvalId: pending.approvalId,
+          decision,
+          ...(reason === undefined ? {} : { reason }),
+          origin: reducerOrigin(origin),
+        };
+        // Idle mailbox: reduce synchronously so a genuine failure inside the
+        // decision's own effects (for example a throwing `onApprovalDispatched`
+        // on the FIFO head A4 dispatches) reaches the registry caller, exactly
+        // like the legacy onResolve callback did. A resolution that is itself
+        // running inside an effect (A10 withdrawal, finish drain) queues at the
+        // tail and is reduced by the drain loop.
+        if (host.isDraining(taskId)) {
+          void host.dispatch(decided).catch(() => undefined);
+          return;
+        }
+        host.dispatchSync(decided);
+      },
+    );
+  });
+
+  host.registerHandler('arm.approval_timeout', (_envelope, context) => {
+    const pending = context.snapshot.task?.approval.pending;
+    if (pending === undefined) return;
+    const timeoutMs = this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      try {
+        this['deps'].approvalRegistry.resolve(
+          pending.approvalId,
+          'reject',
+          `approval timed out after ${timeoutMs}ms with no decision`,
+          'fail-closed',
+        );
+      } catch {
+        // Already resolved by a real decision that raced the timer.
+      }
+    }, timeoutMs);
+    timer.unref?.();
+    host.setApprovalTimer(pending.approvalId, timer);
+  });
+
+  host.registerHandler('clear.timeout', envelope => {
+    host.clearApprovalTimer(envelope.effect.approvalId);
+  });
+
+  host.registerHandler('send.approval_resolved', envelope => {
+    const { taskId, approvalId, decision } = envelope.effect;
+    if (taskId === undefined || approvalId === undefined) return;
+    this['sendApprovalResolved'](taskId, approvalId, decision ?? 'reject');
+  });
+
+  host.registerHandler('resolve.approval_promise', envelope => {
+    const effect = envelope.effect;
+    const request = effect.approvalId !== undefined
+      ? host.approvalRequestByApprovalId(effect.approvalId)
+      : effect.requestId === undefined ? undefined : host.approvalRequest(effect.requestId);
+    if (request === undefined) return;
+    host.settleApprovalRequest(request.requestId, {
+      approved: effect.approved === true,
+      ...(effect.reason === undefined ? {} : { reason: effect.reason }),
+    });
+  });
+
+  host.registerHandler('resolve.approval', envelope => {
+    const effect = envelope.effect;
+    if (effect.approvalId === undefined) return;
+    try {
+      // A dispatched withdrawal is the device's own fail-closed decision.
+      this['deps'].approvalRegistry.resolve(effect.approvalId, effect.decision ?? 'reject', effect.reason, 'fail-closed');
+    } catch {
+      // Already resolved (finish drain raced a real decision).
+    }
+  });
+
+  host.registerHandler('dispatch.next_approval', () => ({
+    // The reducer stays pure: the executor mints the approvalId the FIFO head
+    // is dispatched with, exactly like a direct A1 dispatch.
+    completion: { type: 'approval.dispatch_next', approvalId: randomUUID() },
+  }));
+
+  return host;
+}
+
+function reducerOrigin(origin: ApprovalOrigin): ReducerApprovalOrigin {
+  return origin === 'control' ? 'control-socket' : origin;
+}
 
 export async function requestApproval(
   this: TaskRunner,
@@ -19,98 +178,74 @@ export async function requestApproval(
   const active = this['tasks'].get(taskId);
   // Teardown may retain ownership solely to retry disposal or terminal commit.
   if (!active || active.beingTornDown) {
-    return { approved: false, reason: 'task is not currently active on this device' };
+    return { approved: false, reason: NOT_ACTIVE };
   }
-
-  if (active.pendingApproval !== undefined) {
-    if (active.approvalQueue.length >= MAX_PENDING_APPROVALS_PER_TASK) {
-      return {
-        approved: false,
-        reason: `too many approval requests already queued for task ${taskId} (max ${MAX_PENDING_APPROVALS_PER_TASK}) — rejected fail-closed`,
-      };
-    }
-    return new Promise((resolve) => {
-      const request = { summary, kind, resolve, ...(signal === undefined ? {} : { signal }) };
-      active.approvalQueue.push(request);
-      // A withdrawn request leaves the queue, so it is never dispatched and a
-      // later decision has nothing to revive.
-      signal?.addEventListener('abort', () => {
-        const index = active.approvalQueue.indexOf(request);
-        if (index === -1) return;
-        active.approvalQueue.splice(index, 1);
-        resolve({ approved: false, reason: WITHDRAWN });
-      }, { once: true });
-    });
+  const host = approvalHost.call(this);
+  // A request can only be dispatched or queued for a task whose reducer phase
+  // still accepts approvals. Anything else (cancel, terminal, a start that
+  // never activated) fails closed exactly like the legacy unknown-task path.
+  const current = host.current(taskId);
+  if (current === undefined || (current.phase !== 'running' && current.phase !== 'awaiting_approval')) {
+    return { approved: false, reason: NOT_ACTIVE };
   }
-
-  return this['dispatchApproval'](active, summary, signal, kind);
-}
-
-const WITHDRAWN = 'approval request was withdrawn by its requester';
-
-export function dispatchApproval(
-  this: TaskRunner,
-  active: ActiveTask,
-  summary: string,
-  signal: AbortSignal | undefined,
-  kind: ApprovalKind,
-): Promise<{ approved: boolean; reason?: string }> {
-  const { taskId } = active;
-  if (signal?.aborted) return Promise.resolve({ approved: false, reason: WITHDRAWN });
-  const approvalId = randomUUID();
-  active.pendingApproval = { approvalId, kind };
-  // Finding F4: see `onApprovalDispatched`'s own doc comment — must fire
-  // BEFORE `deps.send` below so the observer has already stashed this
-  // approvalId by the time that same synchronous call triggers
-  // `DaemonObserver.handleOutboundEnvelope`'s `task.await_approval` case.
-  this['deps'].onApprovalDispatched?.(taskId, approvalId);
-  // Progress already accumulated this turn reaches the server before the
-  // task's state moves to AwaitApproval, not after an indefinite pause.
-  active.batcher.flush();
-  // M5 (approval targeting): approvalId is always included — see
-  // TaskAwaitApprovalPayloadSchema's own doc comment (@byok-sdk/protocol) for
-  // why no capability gating is needed to send it safely.
-  this['deps'].send(createEnvelope('task.await_approval', { summary, approvalId }, { taskId }));
-
-  const timeoutMs = this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      try {
-        this['deps'].approvalRegistry.resolve(approvalId, 'reject', `approval timed out after ${timeoutMs}ms with no decision`, 'fail-closed');
-      } catch {
-        // Already resolved by a real decision that raced the timer — the
-        // registered onResolve callback below already fired; nothing left
-        // to do here.
-      }
-    }, timeoutMs);
-    timer.unref?.();
-    // Withdrawal resolves the entry like the timeout does, so a decision
-    // arriving afterwards is stale and cannot revive it.
-    const withdraw = () => {
-      try {
-        this['deps'].approvalRegistry.resolve(approvalId, 'reject', WITHDRAWN, 'fail-closed');
-      } catch {
-        // Already resolved.
-      }
+  if (current.approval.pending !== undefined
+    && current.approval.queue.length >= MAX_PENDING_APPROVALS_PER_TASK) {
+    return {
+      approved: false,
+      reason: `too many approval requests already queued for task ${taskId} (max ${MAX_PENDING_APPROVALS_PER_TASK}) — rejected fail-closed`,
     };
+  }
 
-    this['deps'].approvalRegistry.register(
-      { approvalId, taskId, kind, summary, createdAt: new Date().toISOString() },
-      (decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin) => {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', withdraw);
-        if (active.pendingApproval?.approvalId === approvalId) active.pendingApproval = undefined;
-        // Every resolution of this approval lands here: a wire decision, an
-        // in-process `Daemon.approve`/`reject`, a control-socket
-        // `approvals.resolve`, the timeout above, `finish()`'s fail-closed
-        // cleanup and registry eviction. All but a wire one are new to the
-        // server (see `ApprovalOrigin`).
-        if (origin !== 'wire') this['sendApprovalResolved'](taskId, approvalId, decision);
-        resolve({ approved: decision === 'approve', reason });
-        this['dispatchNextQueuedApproval'](active);
-      },
-    );
-    signal?.addEventListener('abort', withdraw, { once: true });
+  // Only an idle task dispatches directly (A1); a non-empty queue never lets
+  // this request jump the FIFO head (A2 waits for A4). The reducer mints the
+  // approvalId again for a queued request when it finally dispatches.
+  const approvalId = current.approval.pending === undefined && current.approval.queue.length === 0
+    ? randomUUID()
+    : undefined;
+  const requestId = host.nextApprovalRequestId();
+
+  return new Promise((resolve) => {
+    const onAbort = (): void => {
+      void host.dispatch({
+        type: 'approval.withdrawn',
+        taskId,
+        atMs: Date.now(),
+        requestId,
+      }).catch(() => undefined);
+    };
+    const request: HostApprovalRequest = {
+      taskId,
+      requestId,
+      summary,
+      kind,
+      resolve,
+      ...(signal === undefined
+        ? {}
+        : { detach: () => signal.removeEventListener('abort', onAbort) }),
+    };
+    host.beginApprovalRequest(request);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted === true) {
+      // Aborted after the caller's first check but before the request event.
+      host.settleApprovalRequest(requestId, { approved: false, reason: WITHDRAWN });
+      return;
+    }
+    const requested = host.dispatch({
+      type: 'approval.requested',
+      taskId,
+      atMs: Date.now(),
+      requestId,
+      kind,
+      ...(approvalId === undefined ? {} : { approvalId }),
+    });
+    // The rows own the happy path. This backstop only makes the "never strand
+    // a caller" guarantee total if a future phase makes the row inapplicable.
+    const failClosed = (): void => {
+      host.settleApprovalRequest(requestId, { approved: false, reason: 'approval request rejected fail-closed' });
+    };
+    void requested.then((result) => {
+      if (result.disposition !== 'applied') failClosed();
+    }).catch(failClosed);
   });
 }
 
@@ -123,7 +258,7 @@ export function dispatchApproval(
 export async function handleApprove(this: TaskRunner, taskId: string, approvalId: string, decidedBy: ApprovalOrigin): Promise<void> {
   const active = this['tasks'].get(taskId);
   if (!active) return;
-  if (!pendingMatches.call(this, active, approvalId, 'approve')) return;
+  if (!pendingMatches.call(this, taskId, approvalId, 'approve')) return;
   this['deps'].approvalRegistry.resolve(approvalId, 'approve', undefined, decidedBy);
 }
 
@@ -140,9 +275,9 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
     await this['settleSemanticTerminal'](active);
     return;
   }
-  if (!pendingMatches.call(this, active, approvalId, 'reject')) return;
-  // Snapshot before resolve: its callback can dispatch a queued approval.
-  const terminatesTask = active.pendingApproval!.kind === 'task-terminal';
+  if (!pendingMatches.call(this, taskId, approvalId, 'reject')) return;
+  // Snapshot before resolve: its callback dispatches the A7 terminal.
+  const terminatesTask = hostFor(this).current(taskId)?.approval.pending?.kind === 'task-terminal';
   // Before the terminal: `finish()` rejects whatever is still pending as a
   // local decision, which would echo this decision back to the server.
   this['deps'].approvalRegistry.resolve(approvalId, 'reject', reason, decidedBy);
@@ -163,16 +298,27 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
 
 /**
  * The pending id is set when an approval is dispatched and cleared in the
- * same synchronous callback that resolves it, so a match means the registry
- * still holds it. A late, repeated or mistargeted decision is audit-only.
+ * same reducer turn that resolves it, so a match means the registry still
+ * holds it. A late, repeated or mistargeted decision is audit-only: it is
+ * recorded as `approval.stale` and never revives or re-sends.
  */
-function pendingMatches(this: TaskRunner, active: ActiveTask, approvalId: string, decision: ApprovalDecision): boolean {
-  if (approvalId === active.pendingApproval?.approvalId) return true;
+function pendingMatches(this: TaskRunner, taskId: string, approvalId: string, decision: ApprovalDecision): boolean {
+  const host = hostFor(this);
+  const pending = host.current(taskId)?.approval.pending;
+  if (approvalId === pending?.approvalId) return true;
+  if (host.current(taskId) !== undefined) {
+    void host.dispatch({
+      type: 'approval.stale',
+      taskId,
+      atMs: Date.now(),
+      approvalId,
+    }).catch(() => undefined);
+  }
   this['deps'].onStaleApprovalDecision?.(
-    active.taskId,
+    taskId,
     decision,
     `approvalId ${approvalId} does not match the currently pending approval` +
-      (active.pendingApproval ? ` (${active.pendingApproval.approvalId})` : ' (none pending)'),
+      (pending ? ` (${pending.approvalId})` : ' (none pending)'),
   );
   return false;
 }

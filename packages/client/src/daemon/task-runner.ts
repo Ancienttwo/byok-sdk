@@ -47,7 +47,7 @@ import {
 import {
   type RuntimeDisposalStage,
 } from '../runtime-failure';
-import { type ApprovalDecision, type ApprovalKind, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
+import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { SealedTasks } from './sealed-task';
 import { taskFailureField } from './task-failure';
@@ -92,7 +92,7 @@ import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory,
 import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, evictPendingCancelled, handleSteer } from './task-runner/lifecycle';
 import { admitOffer, reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer, declineOfferMissingCapabilities } from './task-runner/offer-admission';
 import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime';
-import { requestApproval, dispatchApproval, handleApprove, handleReject } from './task-runner/approvals';
+import { requestApproval, handleApprove, handleReject } from './task-runner/approvals';
 import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence';
 import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin } from './task-runner/finish';
 import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump';
@@ -276,8 +276,8 @@ export interface TaskRunnerDeps {
    * Finding F4 (cross-model adversarial review): operators had no way to
    * ever learn a pending approval's `approvalId` short of reading raw
    * audit-log JSON — `approve`/`reject` require one, but nothing surfaced
-   * it. Called synchronously from `dispatchApproval`, BEFORE `deps.send`'s
-   * own `task.await_approval` — `create-daemon.ts` wires this to
+   * it. Called synchronously from the approval dispatch effect, BEFORE
+   * `deps.send`'s own `task.await_approval` — `create-daemon.ts` wires this to
    * `DaemonObserver.noteApprovalDispatched`, which stashes `approvalId`
    * keyed by `taskId` so the observer's `task.await_approval` handling
    * (triggered by that very `deps.send` call, synchronously, right after
@@ -750,11 +750,17 @@ export class TaskRunner {
    * approval count, not the adapter's own event-queue depth.
    */
   getQueueWatermarks(): TaskQueueWatermark[] {
-    return [...this.tasks.values()].map((active) => ({
-      taskId: active.taskId,
-      progressBatcherPending: active.batcher.pendingCount,
-      pendingApprovals: (active.pendingApproval !== undefined ? 1 : 0) + active.approvalQueue.length,
-    }));
+    // #1099 S5: the reducer owns the approval pending/queue counts; the
+    // batcher backlog stays the adapter's own data-plane counter.
+    const host = hostFor(this);
+    return [...this.tasks.values()].map((active) => {
+      const approval = host.current(active.taskId)?.approval;
+      return {
+        taskId: active.taskId,
+        progressBatcherPending: active.batcher.pendingCount,
+        pendingApprovals: (approval?.pending !== undefined ? 1 : 0) + (approval?.queue.length ?? 0),
+      };
+    });
   }
 
   /** Authenticated control-socket entry used only by the SDK-owned task MCP helper. */
@@ -1413,9 +1419,9 @@ export class TaskRunner {
    * Only ONE approval per task is DISPATCHED (registered +
    * `task.await_approval` sent + its own timeout window running) at a time,
    * so a decision always names exactly one pending id. A further concurrent
-   * call queues (FIFO, `active.approvalQueue`) and is dispatched — with its
-   * OWN approvalId and timeout window — once the dispatched one resolves
-   * (`dispatchNextQueuedApproval`). Bounded by
+   * call queues (FIFO, `TaskStateV1.approval.queue`, #1099 S5) and is
+   * dispatched — with its OWN approvalId and timeout window — once the
+   * dispatched one resolves (A4). Bounded by
    * {@link MAX_PENDING_APPROVALS_PER_TASK}: a request arriving once this
    * task's queue is full is rejected fail-closed immediately.
    *
@@ -1425,20 +1431,6 @@ export class TaskRunner {
    */
   requestApproval(taskId: string, summary: string, signal?: AbortSignal): Promise<{ approved: boolean; reason?: string }> {
     return requestApproval.call(this, taskId, summary, signal, 'task-terminal');
-  }
-
-  /**
-   * Actually dispatch one approval request for `active`'s task: register it
-   * in `deps.approvalRegistry`, send its `task.await_approval`, and start its
-   * own `deps.approvalTimeoutMs` window — see `requestApproval`'s own doc
-   * comment for why this is split out (only ever ONE dispatched per task at
-   * a time; everything else queues). Called either immediately
-   * (`requestApproval`, nothing else pending for this task) or from
-   * `dispatchNextQueuedApproval` once the previously-dispatched request for
-   * this same task resolves.
-   */
-  private dispatchApproval(active: ActiveTask, summary: string, signal: AbortSignal | undefined, kind: ApprovalKind): Promise<{ approved: boolean; reason?: string }> {
-    return dispatchApproval.call(this, active, summary, signal, kind);
   }
 
   /**
@@ -1460,18 +1452,6 @@ export class TaskRunner {
   private sendApprovalResolved(taskId: string, approvalId: string, decision: ApprovalDecision): void {
     const payload = { approvalId, decision, resolvedBy: 'local', at: new Date().toISOString() } as const;
     this.deps.send(createEnvelope('task.approval_resolved', payload, { taskId }));
-  }
-
-  /**
-   * FIFO: once a task's currently-dispatched approval resolves (real
-   * decision or timeout), dispatch the next queued request for that SAME
-   * task, if any — see `requestApproval`'s own doc comment. A no-op when
-   * nothing is queued.
-   */
-  private dispatchNextQueuedApproval(active: ActiveTask): void {
-    const next = active.approvalQueue.shift();
-    if (!next) return;
-    void this.dispatchApproval(active, next.summary, next.signal, next.kind).then(next.resolve);
   }
 
   /**

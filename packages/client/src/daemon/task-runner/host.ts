@@ -3,10 +3,10 @@
 // one strict-FIFO mailbox per taskId, and the effect executor that lets the
 // phase adapters keep their IO while the reducer owns the transition.
 //
-// S3 wired the offer/admission path; S4 wires claim/start/cancel. Effects
-// whose IO still lives in the staged offer pipeline (and every S5–S6 effect)
-// are recorded as `legacy` and not executed here; the phase adapter performs
-// them exactly as before.
+// S3 wired the offer/admission path; S4 wired claim/start/cancel; S5 wires
+// the approval path. Effects whose IO still lives in the staged offer
+// pipeline (and every S6 effect) are recorded as `legacy` and not executed
+// here; the phase adapter performs them exactly as before.
 import {
   createRunnerState,
   reduce,
@@ -39,6 +39,25 @@ export interface HostOfferContext {
    * event can be reduced between the journal receipt and the claim commit.
    */
   sendClaim?: (effect: EffectEnvelope, context: HostOfferContext) => void;
+}
+
+/**
+ * One in-flight `requestApproval` call: the side-table half the reducer must
+ * not serialize (summary, abort signal, promise resolver, timeout handle).
+ * The authoritative pending/queue shape lives in `TaskStateV1.approval`.
+ */
+export interface HostApprovalRequest {
+  readonly taskId: string;
+  readonly requestId: string;
+  readonly summary: string;
+  readonly kind: 'tool-authorization' | 'task-terminal';
+  readonly resolve: (outcome: { readonly approved: boolean; readonly reason?: string }) => void;
+  /** Set once the reducer dispatched this request (A1/A4). */
+  approvalId?: string;
+  /** Registry timeout handle; cleared by the `clear.timeout` effect. */
+  timer?: ReturnType<typeof setTimeout>;
+  /** Removes this request's abort listener once it settles. */
+  detach?: () => void;
 }
 
 export interface HostEffectContext {
@@ -123,9 +142,11 @@ export class TaskRunnerHost {
   private readonly archived = new Map<string, TaskStateV1>();
   private readonly mailboxes = new Map<string, Mailbox>();
   private readonly offers = new Map<string, HostOfferContext>();
+  private readonly approvalRequests = new Map<string, HostApprovalRequest>();
   private readonly handlers = new Map<EffectKind, HostEffectHandler>();
   private readonly audit: HostAuditEntry[] = [];
   private generation = 0;
+  private approvalSequence = 0;
 
   constructor(_runner: TaskRunner) {}
 
@@ -208,6 +229,63 @@ export class TaskRunnerHost {
     if (context !== undefined) context.sendClaim = sendClaim;
   }
 
+  /* ------------------------- S5 approval side table ------------------------ */
+
+  /** Mints the reducer-only requestId for one `requestApproval` call. */
+  nextApprovalRequestId(): string {
+    this.approvalSequence += 1;
+    return 'approval-' + String(this.approvalSequence);
+  }
+
+  beginApprovalRequest(request: HostApprovalRequest): void {
+    this.approvalRequests.set(request.requestId, request);
+  }
+
+  approvalRequest(requestId: string): HostApprovalRequest | undefined {
+    return this.approvalRequests.get(requestId);
+  }
+
+  approvalRequestByApprovalId(approvalId: string): HostApprovalRequest | undefined {
+    for (const request of this.approvalRequests.values()) {
+      if (request.approvalId === approvalId) return request;
+    }
+    return undefined;
+  }
+
+  /** Records the approvalId the reducer minted for an already-queued request. */
+  setApprovalDispatched(requestId: string, approvalId: string): void {
+    const request = this.approvalRequests.get(requestId);
+    if (request !== undefined) request.approvalId = approvalId;
+  }
+
+  setApprovalTimer(approvalId: string, timer: ReturnType<typeof setTimeout>): void {
+    const request = this.approvalRequestByApprovalId(approvalId);
+    if (request !== undefined) request.timer = timer;
+  }
+
+  clearApprovalTimer(approvalId: string | undefined): void {
+    if (approvalId === undefined) return;
+    const request = this.approvalRequestByApprovalId(approvalId);
+    if (request?.timer === undefined) return;
+    clearTimeout(request.timer);
+    request.timer = undefined;
+  }
+
+  /**
+   * Settles one request exactly once: removes the side-table entry (and its
+   * abort listener/timer) before resolving, so a re-entrant decision cannot
+   * settle it twice.
+   */
+  settleApprovalRequest(requestId: string, outcome: { readonly approved: boolean; readonly reason?: string }): boolean {
+    const request = this.approvalRequests.get(requestId);
+    if (request === undefined) return false;
+    request.detach?.();
+    if (request.timer !== undefined) clearTimeout(request.timer);
+    this.approvalRequests.delete(requestId);
+    request.resolve(outcome);
+    return true;
+  }
+
   /** Ends an offer that never reached `active`; a retained state is archived. */
   endOffer(taskId: string): void {
     const task = this.tasks.get(taskId);
@@ -215,6 +293,7 @@ export class TaskRunnerHost {
     this.tasks.delete(taskId);
     this.offers.delete(taskId);
     this.mailboxes.delete(taskId);
+    this.dropApprovals(taskId, 'task is not currently active on this device');
   }
 
   /** Terminal cleanup: the per-task map is bounded even after a claimed task ends. */
@@ -224,6 +303,12 @@ export class TaskRunnerHost {
     this.tasks.delete(taskId);
     this.offers.delete(taskId);
     this.mailboxes.delete(taskId);
+    this.dropApprovals(taskId, 'task is not currently active on this device');
+  }
+
+  /** Whether a barrier (or an atomic group) currently owns this task's mailbox. */
+  isDraining(taskId: string | undefined): boolean {
+    return this.mailboxes.get(taskId ?? GLOBAL_MAILBOX)?.draining === true;
   }
 
   /**
@@ -433,7 +518,10 @@ export class TaskRunnerHost {
     }
     this.record(envelope, 'executed');
     if (!isPromise(outcome)) {
-      this.completeAtomically(envelope, taskId);
+      // A synchronous handler may supply its own completion (S5 mints the
+      // next approvalId for `dispatch.next_approval` this way); the atomic
+      // group still reduces it inside this same turn.
+      this.completeAtomically(envelope, taskId, outcome?.completion);
       return undefined;
     }
     // A barrier completion goes to the mailbox tail; an envelope completion
@@ -450,8 +538,12 @@ export class TaskRunnerHost {
    * group: no other mailbox event can be reduced between the effect and its
    * completion, and the completion's own effects stay in this turn.
    */
-  private completeAtomically(envelope: EffectEnvelope, taskId: string | undefined): void {
-    const template = envelope.completion;
+  private completeAtomically(
+    envelope: EffectEnvelope,
+    taskId: string | undefined,
+    override?: ReducerEventTemplate,
+  ): void {
+    const template = override ?? envelope.completion;
     if (template === undefined) return;
     const event = this.normalize({
       ...template,
@@ -469,6 +561,21 @@ export class TaskRunnerHost {
       mode: envelope.mode,
       outcome: 'completion',
     });
+  }
+
+  /**
+   * A task that ends with approval requests still tracked here (only possible
+   * on a path that skipped `finish`) still settles every caller fail-closed:
+   * an unresolved `requestApproval` promise would otherwise hang forever.
+   */
+  private dropApprovals(taskId: string, reason: string): void {
+    for (const [requestId, request] of this.approvalRequests) {
+      if (request.taskId !== taskId) continue;
+      request.detach?.();
+      if (request.timer !== undefined) clearTimeout(request.timer);
+      this.approvalRequests.delete(requestId);
+      request.resolve({ approved: false, reason });
+    }
   }
 
   private archive(taskId: string, task: TaskStateV1): void {

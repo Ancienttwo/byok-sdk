@@ -7,6 +7,7 @@ import { DAEMON_TASK_FAILURE } from '../task-failure';
 import type { ActiveTask, ClaimedAgentFailureContext } from './support';
 import { executionTerminalOf, errorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
+import { hostFor } from './host';
 
 export async function fail(this: TaskRunner, taskId: string, reason: string, retryable: boolean, failure = DAEMON_TASK_FAILURE): Promise<void> {
   const active = this['tasks'].get(taskId);
@@ -108,38 +109,56 @@ export async function finishOnce(this: TaskRunner, taskId: string): Promise<bool
     }
     active.batcher.stop();
     active.messageDraft?.stop();
-    this['addFinishedTaskId'](taskId); // semantic terminal is authoritative even while disposal ownership is retained
 
-  // M4 Phase 4 (gatekeeper LOW advisory): a task can finish (complete,
-  // fail, or cancel) while ONE approval is still DISPATCHED
-  // (`active.pendingApproval`) and/or MORE are QUEUED behind it
-  // (`active.approvalQueue` — see `requestApproval`'s own doc comment for
-  // the full concurrent-approval design). Left alone, a queued request
+  // M4 Phase 4 (gatekeeper LOW advisory), #1099 S5: a task can finish
+  // (complete, fail, or cancel) while ONE approval is still DISPATCHED
+  // (`TaskStateV1.approval.pending`) and/or MORE are QUEUED behind it
+  // (`TaskStateV1.approval.queue` — see `requestApproval`'s own doc comment
+  // for the full concurrent-approval design). Left alone, a queued request
   // would eventually get dispatched (a fresh, pointless `task.await_approval`
   // + timeout window for a task that no longer exists) once whatever it
   // was queued behind finally resolves; the dispatched one's own timer
-  // would keep running for up to `approvalTimeoutMs` regardless. Both are
-  // resolved fail-closed HERE instead: the queue is drained and rejected
-  // FIRST (each queued promise settles immediately, never dispatched at
-  // all), so that resolving the dispatched one next — which triggers
-  // `dispatchNextQueuedApproval` via its own `onResolve` callback — finds
-  // an already-empty queue and dispatches nothing. Order matters: doing
-  // it the other way around would let that callback pull the first
-  // queued entry and dispatch it for real.
-    const queued = active.approvalQueue.splice(0);
-    for (const request of queued) {
-      request.resolve({
-        approved: false,
+  // would keep running for up to `approvalTimeoutMs` regardless.
+  //
+  // The queue is withdrawn and settled FIRST (each queued promise settles
+  // immediately, never dispatched at all), so that resolving the dispatched
+  // one next — whose A10 still asks for the next FIFO head — finds an
+  // already-empty queue and dispatches nothing. Order matters: doing it the
+  // other way around would let A4 pull the first queued entry and send a real
+  // `task.await_approval` for a task that is already finishing.
+  //
+  // This runs before `addFinishedTaskId` on purpose: that call ends the
+  // reducer's task entry, and a drain after it would find nothing to settle.
+    const host = hostFor(this);
+    for (const request of host.current(taskId)?.approval.queue ?? []) {
+      await host.dispatch({
+        type: 'approval.withdrawn',
+        taskId,
+        atMs: Date.now(),
+        requestId: request.requestId,
         reason: `task ${taskId} finished before this queued approval request could be dispatched`,
       });
     }
-    if (active.pendingApproval !== undefined) {
+    const pending = host.current(taskId)?.approval.pending;
+    if (pending !== undefined) {
+      // A10 releases the registry entry, its timeout and the caller; its
+      // registry callback re-enters as `approval.decided`, which is stale now
+      // and never re-selects a terminal. As before, a throwing local-send here
+      // must not fail the terminal disposal itself.
       try {
-        this['deps'].approvalRegistry.resolve(active.pendingApproval.approvalId, 'reject', `task ${taskId} finished`, 'fail-closed');
+        await host.dispatch({
+          type: 'approval.withdrawn',
+          taskId,
+          atMs: Date.now(),
+          requestId: pending.requestId,
+          reason: `task ${taskId} finished`,
+        });
       } catch {
         // Already resolved by a real decision/timeout that raced this.
       }
     }
+
+    this['addFinishedTaskId'](taskId); // semantic terminal is authoritative even while disposal ownership is retained
   }
 
   if (!await this['awaitActiveSessionClose'](active)) return false;
