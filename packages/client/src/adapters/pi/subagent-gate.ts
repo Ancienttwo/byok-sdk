@@ -1,6 +1,7 @@
 import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import { isScopedFileToolName } from '../../file-scope-types';
 import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
+import { piSubagentScopedToolSource } from './subagent-scope-registry';
 import { createPiToolAuthorizationHook } from './tool-authorization-hook';
 
 /**
@@ -8,10 +9,12 @@ import { createPiToolAuthorizationHook } from './tool-authorization-hook';
  *
  * A file-scoped parent marks its child gate config with `fileScopeRequired`
  * and passes the serialized grant. This extension refuses any of the six file
- * tools unless the SDK scoped file tools actually registered in this child, so
- * a child whose scope extension failed to load or whose grant did not verify
- * cannot fall back to the native Pi file tools. It checks the registered tool
- * source rather than trusting that the extra required extension loaded.
+ * tools unless the scope extension published the exact source path of the six
+ * SDK tool definitions, and the live registry still resolves that name to
+ * exactly one tool from that source. A shadowing non-builtin registration, a
+ * duplicate registration, a missing scope extension or a builtin fallback is
+ * blocked; builtin entries beside the SDK one are ignored so a builtin-first
+ * ordering does not brick a correctly registered scope.
  *
  * Non-file tools (bash, MCP, extensions) keep the ordinary per-call gate; this
  * extension does not turn them into scope violations.
@@ -22,14 +25,20 @@ export function createPiSubagentGateExtension(gate: ToolAuthorizationIpcConfig):
     if (requiresScope) {
       pi.on('tool_call', (event) => {
         if (!isScopedFileToolName(event.toolName)) return undefined;
-        try {
-          const tool = pi.getAllTools().find((candidate) => candidate.name === event.toolName);
-          if (tool !== undefined && tool.sourceInfo.path !== 'builtin:' + event.toolName) return undefined;
-        } catch { /* An unreadable loadout cannot prove the scope. */ }
+        const source = piSubagentScopedToolSource();
+        if (source !== undefined) {
+          try {
+            const entries = pi.getAllTools().filter((candidate) => candidate.name === event.toolName);
+            const builtin = 'builtin:' + event.toolName;
+            const scoped = entries.filter((candidate) => candidate.sourceInfo.path === source.sourcePath);
+            const shadows = entries.filter((candidate) => candidate.sourceInfo.path !== source.sourcePath && candidate.sourceInfo.path !== builtin);
+            if (scoped.length === 1 && shadows.length === 0) return undefined;
+          } catch { /* An unreadable loadout cannot prove the scope. */ }
+        }
         return {
           block: true,
           reason: 'file_scope_unavailable: a file-scoped Pi subagent child did not register the SDK scoped '
-            + event.toolName + ' tool, so the call is refused',
+            + event.toolName + ' tool from the verified file-scope source, so the call is refused',
         };
       });
     }

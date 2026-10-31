@@ -22,6 +22,7 @@ const roots: string[] = [];
 const sessions: Session[] = [];
 const servers: Server[] = [];
 afterEach(async () => {
+  delete (globalThis as unknown as Record<symbol, unknown>)[Symbol.for('byok.pi-subagent.file-scope.tool-source')];
   await Promise.all(sessions.splice(0).map(session => session.close()));
   await Promise.all(servers.splice(0).map(server => new Promise<void>((done, reject) => server.close(error => error ? reject(error) : done()))));
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
@@ -50,27 +51,43 @@ function gateConfig(fileScope?: SerializedFileScopeGrant, required = true): Tool
   };
 }
 
-interface FakePi {
-  readonly pi: {
-    on(event: string, handler: (event: { readonly toolName: string; readonly toolCallId?: string }, context: { readonly cwd: string }) => unknown): void;
-    registerTool(tool: { readonly name: string }): void;
-    getAllTools(): readonly { readonly name: string; readonly sourceInfo: { readonly path: string } }[];
-  };
-  readonly handlers: ((event: { readonly toolName: string; readonly toolCallId?: string }, context: { readonly cwd: string }) => unknown)[];
-  readonly tools: string[];
+interface FakeToolInfo {
+  readonly name: string;
+  readonly sourceInfo: { readonly path: string };
 }
 
+type Handler = (event: { readonly toolName: string; readonly toolCallId?: string }, context: { readonly cwd: string }) => unknown;
+
+interface FakePi {
+  readonly pi: {
+    on(event: string, handler: Handler): void;
+    registerTool(tool: { readonly name: string }): void;
+    getAllTools(): readonly FakeToolInfo[];
+  };
+  readonly handlers: Handler[];
+  /** The tool names this fake registered through the real scope extension. */
+  readonly registered: readonly { readonly name: string }[];
+  setTools(tools: readonly FakeToolInfo[]): void;
+}
+
+const SDK_SOURCE = '/sdk/pi-subagent-file-scope.js';
+
 /** The real child factory against a minimal Pi surface; builtins stand in for an unloaded scope extension. */
-function fakePi(options: { readonly builtin?: readonly string[]; readonly sdk?: readonly string[] } = {}): FakePi {
-  const handlers: ((event: { readonly toolName: string; readonly toolCallId?: string }, context: { readonly cwd: string }) => unknown)[] = [];
-  const tools: string[] = [];
+function fakePi(options: {
+  readonly builtin?: readonly string[];
+  readonly tools?: readonly FakeToolInfo[];
+} = {}): FakePi {
+  const handlers: Handler[] = [];
+  const registered: { readonly name: string }[] = [];
+  let override = options.tools;
   return {
-    handlers, tools,
+    handlers, registered,
+    setTools: (tools) => { override = tools; },
     pi: {
       on: (_event, handler) => { handlers.push(handler); },
-      registerTool: (tool) => { tools.push(tool.name); },
-      getAllTools: () => [
-        ...(options.sdk ?? []).map(name => ({ name, sourceInfo: { path: '/sdk/' + name + '.js' } })),
+      registerTool: (tool) => { registered.push(tool); },
+      getAllTools: () => override ?? [
+        ...registered.map(tool => ({ name: tool.name, sourceInfo: { path: SDK_SOURCE } })),
         ...(options.builtin ?? []).map(name => ({ name, sourceInfo: { path: 'builtin:' + name } })),
       ],
     },
@@ -83,6 +100,10 @@ async function callHandler(
   return fake.handlers[index]?.({ toolName, toolCallId: 'call-' + toolName, input } as never, { cwd });
 }
 
+function registeredSnapshot(fake: FakePi): FakeToolInfo[] {
+  return fake.registered.map(tool => ({ name: tool.name, sourceInfo: { path: SDK_SOURCE } }));
+}
+
 describe('file-scoped native Pi subagent children (#1061 D11)', () => {
   it('fails closed when the gate requires a scope but the serialized grant is missing', async () => {
     const fake = fakePi({ builtin: ['read', 'write', 'edit', 'find', 'grep', 'ls'] });
@@ -92,8 +113,8 @@ describe('file-scoped native Pi subagent children (#1061 D11)', () => {
     expect(await callHandler(fake, 0, 'write', '/tmp')).toMatchObject({ block: true, reason: expect.stringContaining('file_scope_unavailable') });
 
     const scope = fakePi();
-    await createPiSubagentFileScopeExtension(gateConfig())(scope.pi as never);
-    expect(scope.tools).toEqual([]);
+    await createPiSubagentFileScopeExtension(gateConfig(), { sourcePath: SDK_SOURCE })(scope.pi as never);
+    expect(scope.registered).toEqual([]);
     expect(await callHandler(scope, 0, 'read', '/tmp')).toMatchObject({ block: true, reason: expect.stringContaining('missing grant') });
     // bash is not a scoped file tool: the scope extension never inspects it.
     for (let index = 0; index < scope.handlers.length; index += 1) {
@@ -110,8 +131,8 @@ describe('file-scoped native Pi subagent children (#1061 D11)', () => {
     });
     const config = gateConfig(mismatched);
     const scope = fakePi();
-    await createPiSubagentFileScopeExtension(config)(scope.pi as never);
-    expect(scope.tools).toEqual([]);
+    await createPiSubagentFileScopeExtension(config, { sourcePath: SDK_SOURCE })(scope.pi as never);
+    expect(scope.registered).toEqual([]);
     const reason = await callHandler(scope, 0, 'read', home);
     expect(reason).toMatchObject({ block: true, reason: expect.stringContaining('file_scope_unavailable') });
     expect((reason as { reason: string }).reason).toContain('root_identity_changed');
@@ -125,15 +146,57 @@ describe('file-scoped native Pi subagent children (#1061 D11)', () => {
     const home = await tmpDir('byok-subagent-home-');
     await fs.writeFile(path.join(home, 'inside.txt'), 'inside');
     const grant = await homeGrant(home);
-    const scope = fakePi({ sdk: ['read', 'write', 'edit', 'find', 'grep', 'ls'] });
-    await createPiSubagentFileScopeExtension(gateConfig(serializeFileScopeGrant(grant)))(scope.pi as never);
-    expect(scope.tools).toEqual(['read', 'write', 'edit', 'find', 'grep', 'ls']);
-    // The registered SDK tools are not builtins, so the gate lets the call through to the guard.
-    const gate = fakePi({ sdk: ['read'] });
-    createPiSubagentGateExtension(gateConfig(serializeFileScopeGrant(grant)))(gate.pi as never);
-    expect(await callHandler(gate, 0, 'read', home)).toBeUndefined();
+    const config = gateConfig(serializeFileScopeGrant(grant));
+    const scope = fakePi();
+    await createPiSubagentFileScopeExtension(config, { sourcePath: SDK_SOURCE })(scope.pi as never);
+    expect(scope.registered.map(tool => tool.name)).toEqual(['read', 'write', 'edit', 'find', 'grep', 'ls']);
+    // The scope extension verifies the exact definitions and publishes the source path.
     expect(await callHandler(scope, 0, 'read', home)).toBeUndefined();
+    const gate = fakePi({ tools: registeredSnapshot(scope) });
+    createPiSubagentGateExtension(config)(gate.pi as never);
+    expect(await callHandler(gate, 0, 'read', home)).toBeUndefined();
     expect(await callHandler(scope, 1, 'read', home, { path: path.join(home, 'inside.txt') })).toBeUndefined();
+  });
+
+  it('rejects a shadowing non-builtin registration and duplicate registrations', async () => {
+    const home = await tmpDir('byok-subagent-home-');
+    await fs.writeFile(path.join(home, 'inside.txt'), 'inside');
+    const grant = await homeGrant(home);
+    const config = gateConfig(serializeFileScopeGrant(grant));
+    const scope = fakePi();
+    await createPiSubagentFileScopeExtension(config, { sourcePath: SDK_SOURCE })(scope.pi as never);
+    expect(await callHandler(scope, 0, 'read', home)).toBeUndefined();
+    const snapshot = registeredSnapshot(scope);
+    const read = snapshot.find(tool => tool.name === 'read')!;
+    const gate = fakePi({ tools: snapshot });
+    createPiSubagentGateExtension(config)(gate.pi as never);
+    expect(await callHandler(gate, 0, 'read', home)).toBeUndefined();
+
+    // A same-named non-builtin shadow replaces the SDK definition: the gate must refuse it.
+    const shadowed = [...snapshot.filter(tool => tool.name !== 'read'), { name: 'read', sourceInfo: { path: '/other/read.js' } }];
+    gate.setTools(shadowed);
+    expect(await callHandler(gate, 0, 'read', home)).toMatchObject({ block: true, reason: expect.stringContaining('file_scope_unavailable') });
+    // The scope extension's own re-check refuses it too.
+    scope.setTools(shadowed);
+    expect(await callHandler(scope, 0, 'read', home)).toMatchObject({ block: true, reason: expect.stringContaining('file_scope_registry_drift') });
+
+    // Two non-builtin registrations of the same name are ambiguous, not a pass.
+    gate.setTools([...snapshot, read]);
+    expect(await callHandler(gate, 0, 'read', home)).toMatchObject({ block: true, reason: expect.stringContaining('file_scope_unavailable') });
+    scope.setTools([...snapshot, read]);
+    expect(await callHandler(scope, 0, 'read', home)).toMatchObject({ block: true, reason: expect.stringContaining('file_scope_registry_drift') });
+
+    // A builtin entry beside the SDK one must not brick a correctly scoped child.
+    gate.setTools([{ name: 'read', sourceInfo: { path: 'builtin:read' } }, ...snapshot]);
+    scope.setTools([{ name: 'read', sourceInfo: { path: 'builtin:read' } }, ...snapshot]);
+    expect(await callHandler(scope, 0, 'read', home)).toBeUndefined();
+    expect(await callHandler(gate, 0, 'read', home)).toBeUndefined();
+
+    // A child tool allowlist may register only some of the six; present names
+    // are still checked and a called name that is absent stays refused.
+    scope.setTools(snapshot.filter(tool => tool.name === 'read' || tool.name === 'write'));
+    expect(await callHandler(scope, 0, 'read', home)).toBeUndefined();
+    expect(await callHandler(scope, 0, 'find', home)).toMatchObject({ block: true, reason: expect.stringContaining('file_scope_registry_drift') });
   });
 });
 
