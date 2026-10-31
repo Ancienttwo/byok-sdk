@@ -3,9 +3,10 @@
  *
  * Pi 1.4.0 lets a registered extension/custom tool shadow a same-named
  * built-in, but that precedence is upstream behaviour. A scoped session is
- * only valid when the three SDK tools really are the registered definitions
- * (not `builtin:read` etc.), and when the native tools this slice does not
- * replace are absent. Failure is a pre-prompt refusal, never a degraded run.
+ * only valid when all six SDK file tools (read/write/edit/find/grep/ls) really
+ * are the registered definitions (not `builtin:read` etc.), and when any
+ * additionally named native file-capable tool is absent. Failure is a
+ * pre-prompt refusal, never a degraded run.
  */
 export interface PiToolSourceInfo {
   readonly path?: string;

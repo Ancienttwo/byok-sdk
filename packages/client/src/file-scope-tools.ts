@@ -1,5 +1,5 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname, relative, sep } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
@@ -8,6 +8,7 @@ import {
   type FileScopeGrant,
   type FileScopeIo,
   type FileScopeTargetGrant,
+  type FileScopeTargetKind,
 } from './file-scope-guard';
 import type { FileScopeGuardCode, FileScopeGuardReason } from './file-scope-guard';
 import { isScopedFileToolName, type ScopedFileToolName } from './file-scope-types';
@@ -20,6 +21,14 @@ export {
 const MAX_READ_BYTES = 1_000_000;
 const MAX_EDIT_BYTES = 10_000_000;
 const MAX_PATH_CHARS = 4_096;
+/** Output budgets shared by the discovery tools; native Pi uses 50 KiB too. */
+const MAX_OUTPUT_BYTES = 50 * 1024;
+const DEFAULT_FIND_LIMIT = 1_000;
+const DEFAULT_GREP_LIMIT = 100;
+const DEFAULT_LS_LIMIT = 500;
+const MAX_RESULT_LIMIT = 10_000;
+const MAX_GREP_LINE_CHARS = 500;
+const MAX_GREP_FILE_BYTES = 10_000_000;
 
 /** One per-call denial the scoped tools report; allow is never reported (D12). */
 export interface ScopedFileDenial {
@@ -51,7 +60,7 @@ const REASON_TEXT: Readonly<Record<FileScopeGuardReason, string>> = Object.freez
   read_only: 'the matched root is read-only',
   symlink: 'a symlink is not allowed in a scoped path',
   hardlink: 'hard-linked files are not allowed',
-  not_regular_file: 'the target is not a regular file',
+  not_regular_file: 'the target is not a regular file or directory',
   cross_device: 'the target is on another device',
   path_syntax: 'the path syntax is invalid',
   cwd_outside_scope: 'the working directory is outside the authorized scope',
@@ -92,17 +101,35 @@ function isErrno(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && (error as NodeJS.ErrnoException).code === code;
 }
 
+function readOnlyTool(toolName: ScopedFileToolName): boolean {
+  return toolName === 'read' || toolName === 'find' || toolName === 'grep' || toolName === 'ls';
+}
+
+/** The path every discovery tool defaults to; read/write/edit still require one. */
+function scopedPath(toolName: ScopedFileToolName, value: unknown): unknown {
+  if (value === undefined && (toolName === 'find' || toolName === 'grep' || toolName === 'ls')) return '.';
+  return value;
+}
+
+function scopedKind(toolName: ScopedFileToolName): FileScopeTargetKind {
+  if (toolName === 'find' || toolName === 'ls') return 'directory';
+  if (toolName === 'grep') return 'entry';
+  return 'file';
+}
+
 async function resolveTarget(
   options: ScopedFileToolOptions,
   path: unknown,
   access: ToolFileAccess,
   cwd: unknown,
+  kind: FileScopeTargetKind = 'file',
 ): Promise<FileScopeTargetGrant> {
   return resolveFileScopeTarget({
     grant: options.grant,
     path: typeof path === 'string' ? path : '',
     access,
     cwd: checkedCwd(cwd),
+    kind,
     ...(options.io === undefined ? {} : { io: options.io }),
     ...(options.platform === undefined ? {} : { platform: options.platform }),
     ...(options.osHome === undefined ? {} : { osHome: options.osHome }),
@@ -121,7 +148,13 @@ export async function precheckScopedFileCall(
   call: { readonly toolName: string; readonly input: Readonly<Record<string, unknown>>; readonly cwd: string },
 ): Promise<void> {
   if (!isScopedFileToolName(call.toolName)) return;
-  await resolveTarget(options, call.input.path, call.toolName === 'read' ? 'read' : 'write', call.cwd);
+  await resolveTarget(
+    options,
+    scopedPath(call.toolName, call.input.path),
+    readOnlyTool(call.toolName) ? 'read' : 'write',
+    call.cwd,
+    scopedKind(call.toolName),
+  );
 }
 
 async function guarded<T>(
@@ -200,10 +233,173 @@ function applyEdits(
   return output + source.slice(cursor);
 }
 
+function boundedLimit(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(MAX_RESULT_LIMIT, Math.trunc(value)));
+}
+
+function truncateOutput(text: string): { text: string; truncated: boolean } {
+  if (Buffer.byteLength(text, 'utf8') <= MAX_OUTPUT_BYTES) return { text, truncated: false };
+  const kept: string[] = [];
+  let bytes = 0;
+  for (const line of text.split('\n')) {
+    const cost = Buffer.byteLength(line, 'utf8') + (kept.length === 0 ? 0 : 1);
+    if (bytes + cost > MAX_OUTPUT_BYTES) break;
+    kept.push(line);
+    bytes += cost;
+  }
+  return { text: kept.join('\n'), truncated: true };
+}
+
+function withNotices(text: string, notices: readonly string[]): string {
+  return notices.length === 0 ? text : text + '\n\n[' + notices.join('. ') + ']';
+}
+
+function truncateMatchLine(value: string): { text: string; truncated: boolean } {
+  const sanitized = value.replace(/\r/g, '');
+  return sanitized.length <= MAX_GREP_LINE_CHARS
+    ? { text: sanitized, truncated: false }
+    : { text: sanitized.slice(0, MAX_GREP_LINE_CHARS) + '... [truncated]', truncated: true };
+}
+
+function posixRelative(root: string, target: string): string {
+  return relative(root, target).split(sep).join('/');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+const GLOB_SPECIAL = new Set(['\\', '^', '$', '+', '.', '|', '(', ')', '[', ']', '{', '}']);
+function globToRegExp(pattern: string): RegExp {
+  let source = '';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index]!;
+    if (char === '*') {
+      if (pattern[index + 1] === '*') {
+        index += 1;
+        if (pattern[index + 1] === '/') {
+          index += 1;
+          source += '(?:[^/]+/)*';
+        } else {
+          source += '.*';
+        }
+      } else {
+        source += '[^/]*';
+      }
+    } else if (char === '?') {
+      source += '[^/]';
+    } else if (GLOB_SPECIAL.has(char)) {
+      source += '\\' + char;
+    } else {
+      source += char;
+    }
+  }
+  return new RegExp('^' + source + '$', 'u');
+}
+
+function globMatcher(pattern: string): (relativePath: string) => boolean {
+  const expression = globToRegExp(pattern);
+  const fullPath = pattern.includes('/');
+  return (relativePath: string) => expression.test(fullPath ? relativePath : basename(relativePath));
+}
+
+interface ScopedWalkEntry {
+  readonly target: FileScopeTargetGrant;
+  readonly relativePath: string;
+}
+
+/**
+ * Walk one guarded directory without ever calling fs on an unchecked path.
+ * Every entry is resolved by the same guard before it is visited; symlinks and
+ * cross-device/internally denied entries are skipped rather than followed.
+ * Returns false when the visitor stopped the walk.
+ */
+async function walkScopedDirectory(
+  options: ScopedFileToolOptions,
+  start: FileScopeTargetGrant,
+  cwd: string,
+  signal: AbortSignal | undefined,
+  visit: (entry: ScopedWalkEntry) => boolean | Promise<boolean>,
+): Promise<boolean> {
+  const stack: FileScopeTargetGrant[] = [start];
+  while (stack.length > 0) {
+    if (signal !== undefined && signal.aborted) throw new Error('Operation aborted');
+    const pending = stack.pop()!;
+    // Re-check immediately before readdir: a discovered directory may have
+    // been replaced while other entries were visited. A denial skips it; an
+    // unavailable authority fails the whole call closed.
+    let directory: FileScopeTargetGrant;
+    try {
+      directory = await resolveTarget(options, pending.path, 'read', cwd, 'directory');
+    } catch (error) {
+      if (error instanceof FileScopeGuardError && error.code === 'file_scope_denied') continue;
+      throw error;
+    }
+    if (!directory.exists) continue;
+    let names: string[];
+    try {
+      names = await fs.readdir(directory.path);
+    } catch (error) {
+      if (isErrno(error, 'ENOENT') || isErrno(error, 'ENOTDIR') || isErrno(error, 'EACCES')) continue;
+      throw error;
+    }
+    names.sort((left, right) => left.toLowerCase().localeCompare(right.toLowerCase()));
+    for (const name of names) {
+      if (signal !== undefined && signal.aborted) throw new Error('Operation aborted');
+      if (name === '.byok') continue;
+      let entry: FileScopeTargetGrant;
+      try {
+        entry = await resolveTarget(options, directory.path + sep + name, 'read', cwd, 'entry');
+      } catch (error) {
+        // Symlinks, hard links and internals are skipped during discovery; an
+        // unavailable guard authority is not a skip.
+        if (error instanceof FileScopeGuardError && error.code === 'file_scope_denied') continue;
+        throw error;
+      }
+      if (!entry.exists || entry.kind === undefined) continue;
+      const relativePath = posixRelative(start.path, entry.path);
+      if (!(await visit({ target: entry, relativePath }))) return false;
+      if (entry.kind === 'directory') stack.push(entry);
+    }
+  }
+  return true;
+}
+
+async function readTextFile(
+  target: FileScopeTargetGrant,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
+  if (signal !== undefined && signal.aborted) throw new Error('Operation aborted');
+  const handle = await openGuarded(target, fsConstants.O_RDONLY);
+  try {
+    const stat = await handle.stat({ bigint: true });
+    if (stat.size > BigInt(MAX_GREP_FILE_BYTES)) return undefined;
+    const buffer = Buffer.alloc(Number(stat.size));
+    let offset = 0;
+    while (offset < buffer.length) {
+      if (signal !== undefined && signal.aborted) throw new Error('Operation aborted');
+      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    const data = buffer.subarray(0, offset);
+    // Text-only: a NUL byte marks a binary file that this tool does not claim.
+    if (data.includes(0)) return undefined;
+    return data.toString('utf8');
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
 /**
  * Create the SDK-owned scoped file tools. Each tool re-runs the guard
- * immediately before touching the file; a guard failure becomes a typed tool
- * error and never a silent fallback to an unguarded fs call.
+ * immediately before touching a path; a guard failure becomes a typed tool
+ * error and never a silent fallback to an unguarded fs call or a native tool.
+ *
+ * find/grep/ls discover only inside the same roots. They refuse a requested
+ * path that leaves the scope and never follow a symlink entry; text-only grep
+ * skips binary files instead of claiming image/binary support.
  */
 export function createScopedFileTools(options: ScopedFileToolOptions): ToolDefinition[] {
   const readSchema = Type.Object({
@@ -221,6 +417,24 @@ export function createScopedFileTools(options: ScopedFileToolOptions): ToolDefin
       oldText: Type.String({ description: 'Exact text for one targeted replacement; must be unique in the original file' }),
       newText: Type.String({ description: 'Replacement text for this targeted edit' }),
     })),
+  });
+  const findSchema = Type.Object({
+    pattern: Type.String({ description: "Glob pattern to match files, e.g. '*.ts', '**/*.json', or 'src/**/*.spec.ts'" }),
+    path: Type.Optional(Type.String({ description: 'Directory to search in (default: current directory)' })),
+    limit: Type.Optional(Type.Number({ description: 'Maximum number of results (default: 1000)' })),
+  });
+  const grepSchema = Type.Object({
+    pattern: Type.String({ description: 'Search pattern (regex or literal string)' }),
+    path: Type.Optional(Type.String({ description: 'File or directory to search (default: current directory)' })),
+    glob: Type.Optional(Type.String({ description: "Filter files by glob pattern, e.g. '*.ts' or '**/*.spec.ts'" })),
+    ignoreCase: Type.Optional(Type.Boolean({ description: 'Case-insensitive search (default: false)' })),
+    literal: Type.Optional(Type.Boolean({ description: 'Treat pattern as literal string instead of regex (default: false)' })),
+    context: Type.Optional(Type.Number({ description: 'Number of lines to show before and after each match (default: 0)' })),
+    limit: Type.Optional(Type.Number({ description: 'Maximum number of matches to return (default: 100)' })),
+  });
+  const lsSchema = Type.Object({
+    path: Type.Optional(Type.String({ description: 'Directory to list (default: current directory)' })),
+    limit: Type.Optional(Type.Number({ description: 'Maximum number of entries to return (default: 500)' })),
   });
 
   const read = defineTool({
@@ -329,5 +543,186 @@ export function createScopedFileTools(options: ScopedFileToolOptions): ToolDefin
     },
   });
 
-  return [read, write, edit];
+  const find = defineTool({
+    name: 'find',
+    label: 'Find files',
+    description: 'Find files by glob pattern inside the authorized file scope. Returns paths relative to the search directory. Text-only; symlinks are not followed.',
+    parameters: findSchema,
+    async execute(toolCallId, { pattern, path, limit }, signal, _onUpdate, ctx) {
+      return guarded(options, 'find', toolCallId, path, async () => {
+        if (typeof pattern !== 'string' || pattern.length === 0) throw new Error('find requires a nonempty pattern');
+        const matcher = globMatcher(pattern);
+        const search = await resolveTarget(options, scopedPath('find', path), 'read', ctx.cwd, 'directory');
+        if (!search.exists || search.kind !== 'directory') throw new Error('Path not found: ' + String(scopedPath('find', path)));
+        const effectiveLimit = boundedLimit(limit, DEFAULT_FIND_LIMIT);
+        const results: string[] = [];
+        let resultLimitReached = false;
+        await walkScopedDirectory(options, search, checkedCwd(ctx.cwd), signal, ({ target, relativePath }) => {
+          if (target.kind !== 'file') return true;
+          if (!matcher(relativePath)) return true;
+          results.push(relativePath);
+          if (results.length >= effectiveLimit) {
+            resultLimitReached = true;
+            return false;
+          }
+          return true;
+        });
+        if (results.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No files found matching pattern' }], details: {} };
+        }
+        const truncated = truncateOutput(results.join('\n'));
+        const notices: string[] = [];
+        if (resultLimitReached) notices.push(effectiveLimit + ' results limit reached');
+        if (truncated.truncated) notices.push('50KB limit reached');
+        return {
+          content: [{ type: 'text' as const, text: withNotices(truncated.text, notices) }],
+          details: {},
+        };
+      });
+    },
+  });
+
+  const grep = defineTool({
+    name: 'grep',
+    label: 'Search contents',
+    description: 'Search text file contents inside the authorized file scope. Returns matching lines with file paths and line numbers. Binary files are skipped.',
+    parameters: grepSchema,
+    async execute(toolCallId, { pattern, path, glob, ignoreCase, literal, context, limit }, signal, _onUpdate, ctx) {
+      return guarded(options, 'grep', toolCallId, path, async () => {
+        if (typeof pattern !== 'string' || pattern.length === 0) throw new Error('grep requires a nonempty pattern');
+        let expression: RegExp;
+        try {
+          expression = new RegExp(literal === true ? escapeRegExp(pattern) : pattern, ignoreCase === true ? 'iu' : 'u');
+        } catch (error) {
+          throw new Error('invalid grep pattern: ' + (error instanceof Error ? error.message : String(error)));
+        }
+        const matcher = typeof glob === 'string' && glob.length > 0 ? globMatcher(glob) : undefined;
+        const search = await resolveTarget(options, scopedPath('grep', path), 'read', ctx.cwd, 'entry');
+        const requested = String(scopedPath('grep', path));
+        if (!search.exists) throw new Error('Path not found: ' + requested);
+        const effectiveLimit = boundedLimit(limit, DEFAULT_GREP_LIMIT);
+        const contextLines = typeof context === 'number' && Number.isFinite(context) && context > 0 ? Math.trunc(context) : 0;
+        const outputLines: string[] = [];
+        let matchCount = 0;
+        let lineTruncated = false;
+        let resultLimitReached = false;
+
+        const searchFile = async (target: FileScopeTargetGrant, displayPath: string): Promise<boolean> => {
+          const file = await readTextFile(target, signal);
+          if (file === undefined) return true;
+          const lines = file.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n').split('\n');
+          for (let index = 0; index < lines.length; index += 1) {
+            if (!expression.test(lines[index]!)) continue;
+            matchCount += 1;
+            const start = contextLines > 0 ? Math.max(1, index + 1 - contextLines) : index + 1;
+            const end = contextLines > 0 ? Math.min(lines.length, index + 1 + contextLines) : index + 1;
+            for (let current = start; current <= end; current += 1) {
+              const line = truncateMatchLine(lines[current - 1] ?? '');
+              if (line.truncated) lineTruncated = true;
+              outputLines.push(current === index + 1
+                ? displayPath + ':' + current + ': ' + line.text
+                : displayPath + '-' + current + '- ' + line.text);
+            }
+            if (matchCount >= effectiveLimit) {
+              resultLimitReached = true;
+              return false;
+            }
+          }
+          return true;
+        };
+
+        if (search.kind === 'file') {
+          const fileTarget = await resolveTarget(options, search.path, 'read', ctx.cwd, 'file');
+          await searchFile(fileTarget, basename(fileTarget.path));
+        } else if (search.kind === 'directory') {
+          await walkScopedDirectory(options, search, checkedCwd(ctx.cwd), signal, async ({ target, relativePath }) => {
+            if (target.kind !== 'file') return true;
+            if (matcher !== undefined && !matcher(relativePath)) return true;
+            let fileTarget: FileScopeTargetGrant;
+            try {
+              fileTarget = await resolveTarget(options, target.path, 'read', ctx.cwd, 'file');
+            } catch (error) {
+              // A hard link/symlink is skipped during directory search; a
+              // changed or unavailable root identity fails the call closed.
+              if (error instanceof FileScopeGuardError && error.code === 'file_scope_denied') return true;
+              throw error;
+            }
+            return searchFile(fileTarget, relativePath);
+          });
+        } else {
+          throw new Error('Path not found: ' + requested);
+        }
+
+        if (matchCount === 0) {
+          return { content: [{ type: 'text' as const, text: 'No matches found' }], details: {} };
+        }
+        const truncated = truncateOutput(outputLines.join('\n'));
+        const notices: string[] = [];
+        if (resultLimitReached) notices.push(effectiveLimit + ' matches limit reached');
+        if (truncated.truncated) notices.push('50KB limit reached');
+        if (lineTruncated) notices.push('Some lines truncated to ' + MAX_GREP_LINE_CHARS + ' chars');
+        return {
+          content: [{ type: 'text' as const, text: withNotices(truncated.text, notices) }],
+          details: {},
+        };
+      });
+    },
+  });
+
+  const ls = defineTool({
+    name: 'ls',
+    label: 'List directory',
+    description: 'List directory contents inside the authorized file scope. Returns entries sorted alphabetically, with "/" for directories. Symlinks are not followed.',
+    parameters: lsSchema,
+    async execute(toolCallId, { path, limit }, signal, _onUpdate, ctx) {
+      return guarded(options, 'ls', toolCallId, path, async () => {
+        const requested = String(scopedPath('ls', path));
+        const directory = await resolveTarget(options, scopedPath('ls', path), 'read', ctx.cwd, 'directory');
+        if (!directory.exists || directory.kind !== 'directory') throw new Error('Path not found: ' + requested);
+        let names: string[];
+        try {
+          names = await fs.readdir(directory.path);
+        } catch (error) {
+          if (isErrno(error, 'ENOENT') || isErrno(error, 'ENOTDIR')) throw new Error('Path not found: ' + requested);
+          throw new Error('Cannot read directory: ' + (error instanceof Error ? error.message : String(error)));
+        }
+        names.sort((left, right) => left.toLowerCase().localeCompare(right.toLowerCase()));
+        const effectiveLimit = boundedLimit(limit, DEFAULT_LS_LIMIT);
+        const results: string[] = [];
+        let entryLimitReached = false;
+        for (const name of names) {
+          if (signal !== undefined && signal.aborted) throw new Error('Operation aborted');
+          if (name === '.byok') continue;
+          if (results.length >= effectiveLimit) {
+            entryLimitReached = true;
+            break;
+          }
+          let entry: FileScopeTargetGrant;
+          try {
+            entry = await resolveTarget(options, directory.path + sep + name, 'read', ctx.cwd, 'entry');
+          } catch (error) {
+            // Symlinks and hard-linked files are not listed; an unavailable
+            // guard authority is a failure, not a skip.
+            if (error instanceof FileScopeGuardError && error.code === 'file_scope_denied') continue;
+            throw error;
+          }
+          if (!entry.exists || entry.kind === undefined) continue;
+          results.push(name + (entry.kind === 'directory' ? '/' : ''));
+        }
+        if (results.length === 0) {
+          return { content: [{ type: 'text' as const, text: '(empty directory)' }], details: {} };
+        }
+        const truncated = truncateOutput(results.join('\n'));
+        const notices: string[] = [];
+        if (entryLimitReached) notices.push(effectiveLimit + ' entries limit reached. Use limit=' + (effectiveLimit * 2) + ' for more');
+        if (truncated.truncated) notices.push('50KB limit reached');
+        return {
+          content: [{ type: 'text' as const, text: withNotices(truncated.text, notices) }],
+          details: {},
+        };
+      });
+    },
+  });
+
+  return [read, write, edit, find, grep, ls];
 }

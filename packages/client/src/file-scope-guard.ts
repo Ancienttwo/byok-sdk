@@ -22,12 +22,12 @@ export {
  * /proc/self/fd use.
  *
  * This module is not a file-isolation boundary and does not sandbox
- * bash/shell, MCP servers, user extensions or subagents. The SDK-owned scoped
- * read/write/edit tools call the target guard immediately before IO, and the
- * Pi host revalidates the serialized roots before creating a session; native
- * find/grep/ls are excluded from a scoped session rather than left as a
- * bypass. The check-then-open path is still not race-free against same-UID
- * processes.
+ * bash/shell, MCP servers, user extensions or subagents. The six SDK-owned
+ * scoped file tools (read/write/edit/find/grep/ls) call the target guard
+ * immediately before IO, and the Pi host revalidates the serialized roots
+ * before creating a session; the scoped tools shadow the native Pi tools of
+ * the same name rather than leaving an unscoped path tool as a bypass. The
+ * check-then-open path is still not race-free against same-UID processes.
  *
  * Windows is refused outright as `file_scope_unsupported`: without native
  * code this guard cannot classify 8.3 short names, junctions/reparse points,
@@ -76,7 +76,7 @@ export interface FileScopeRootGrant {
   readonly access: ToolFileAccess;
 }
 
-/** The immutable grant an admitted offer would hand to scoped tools in a later slice. */
+/** The immutable grant an admitted offer hands to the scoped tools. */
 export interface FileScopeGrant {
   readonly mode: 'home' | 'workspaces';
   /** The canonical Agent home; always read+write and never absent. */
@@ -296,12 +296,24 @@ export async function resolveFileScopeGrant(input: ResolveFileScopeGrantInput): 
   });
 }
 
+/**
+ * What a checked target may be:
+ * - `file` (default): one regular file, the read/write/edit contract;
+ * - `directory`: one real directory, used before readdir;
+ * - `entry`: an existing name of either kind, used while discovering paths.
+ *   It still rejects symlinks, hard-linked files and outside paths but does not
+ *   open or read file content, so it makes no content claim.
+ */
+export type FileScopeTargetKind = 'file' | 'directory' | 'entry';
+
 /** One checked target: canonical path, matched root and whether it already exists. */
 export interface FileScopeTargetGrant {
   readonly path: string;
   readonly root: FileScopeRootGrant;
   readonly access: ToolFileAccess;
   readonly exists: boolean;
+  /** Present only when the target exists. */
+  readonly kind?: 'file' | 'directory';
   readonly identity?: FileScopeIdentity;
 }
 
@@ -312,6 +324,8 @@ export interface ResolveFileScopeTargetInput {
   readonly access: ToolFileAccess;
   /** The runtime's current working directory; a relative path resolves against it. */
   readonly cwd: string;
+  /** Default `file`; `directory`/`entry` are for discovery tools only. */
+  readonly kind?: FileScopeTargetKind;
   readonly platform?: NodeJS.Platform;
   readonly io?: FileScopeIo;
   /** Overrides `os.homedir()` for a leading `~`; tests use a fixture home. */
@@ -345,15 +359,17 @@ function internalPath(roots: readonly FileScopeRootGrant[], absolute: string): b
 }
 
 /**
- * Check one file target against a resolved grant. This is the primitive the
- * later scoped file tools will call; slice 2 only proves it with stable
- * fixtures and does not wire it into Pi's tools.
+ * Check one target against a resolved grant. The scoped file tools call this
+ * primitive immediately before every fs operation; discovery tools pass
+ * `kind: 'directory'` before readdir and `kind: 'entry'` per discovered name.
  *
- * The check is canonical check-then-open: every existing segment is lstat'ed
- * for symlinks, the nearest existing ancestor is canonicalized and contained,
- * dev+ino and nlink are checked, and an existing regular file is opened with
- * O_NOFOLLOW and rechecked with fstat. It is not race-free, and it is not an
- * OS sandbox.
+ * The check is canonical check-then-open for regular files: every existing
+ * segment is lstat'ed for symlinks, the nearest existing ancestor is
+ * canonicalized and contained, dev+ino and nlink are checked, and an existing
+ * regular file is opened with O_NOFOLLOW and rechecked with fstat. Entries are
+ * checked the same way but are not opened; regular files still reject hard
+ * links, while directories are not hard-link filtered. It is not race-free,
+ * and it is not an OS sandbox.
  */
 export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput): Promise<FileScopeTargetGrant> {
   const platform = input.platform ?? process.platform;
@@ -394,13 +410,13 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     throw new FileScopeGuardError('file_scope_unavailable', 'root_identity_changed', { rootId: root.id, access: root.access });
   }
 
+  const kind = input.kind ?? 'file';
   const relative = path.relative(root.path, matched.path);
-  if (relative === '') throw fail('not_regular_file', root.id, input.access);
-  const segments = relative.split(path.sep);
+  const segments = relative === '' ? [] : relative.split(path.sep);
   let current = root.path;
   let existingCount = 0;
-  let lastStat: FileScopeStat | undefined;
-  let targetStat: FileScopeStat | undefined;
+  let lastStat: FileScopeStat | undefined = rootStat;
+  let targetStat: FileScopeStat | undefined = segments.length === 0 ? rootStat : undefined;
   for (const segment of segments) {
     current = path.join(current, segment);
     let currentStat: FileScopeStat;
@@ -431,24 +447,31 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
   const existingStat = targetStat ?? lastStat;
   if (existingStat !== undefined && existingStat.dev !== root.identity.dev) throw fail('cross_device', root.id, input.access);
   if (targetStat !== undefined) {
-    if (targetStat.kind !== 'file') throw fail('not_regular_file', root.id, input.access);
-    if (targetStat.nlink > 1n) throw fail('hardlink', root.id, input.access);
-    let opened: FileScopeOpenFile | undefined;
-    try {
-      opened = await io.open(canonicalTarget, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-      const openedStat = await opened.stat();
-      if (openedStat.dev !== targetStat.dev || openedStat.ino !== targetStat.ino) {
-        throw new FileScopeGuardError('file_scope_unavailable', 'root_identity_changed', { rootId: root.id, access: root.access });
+    if (kind === 'file' && targetStat.kind !== 'file') throw fail('not_regular_file', root.id, input.access);
+    if (kind === 'directory' && targetStat.kind !== 'directory') throw fail('not_regular_file', root.id, input.access);
+    if (kind === 'entry') {
+      if (targetStat.kind !== 'file' && targetStat.kind !== 'directory') throw fail('not_regular_file', root.id, input.access);
+      if (targetStat.kind === 'file' && targetStat.nlink > 1n) throw fail('hardlink', root.id, input.access);
+    }
+    if (kind === 'file') {
+      if (targetStat.nlink > 1n) throw fail('hardlink', root.id, input.access);
+      let opened: FileScopeOpenFile | undefined;
+      try {
+        opened = await io.open(canonicalTarget, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+        const openedStat = await opened.stat();
+        if (openedStat.dev !== targetStat.dev || openedStat.ino !== targetStat.ino) {
+          throw new FileScopeGuardError('file_scope_unavailable', 'root_identity_changed', { rootId: root.id, access: root.access });
+        }
+        if (openedStat.kind !== 'file') throw fail('not_regular_file', root.id, input.access);
+        if (openedStat.nlink > 1n) throw fail('hardlink', root.id, input.access);
+        if (openedStat.dev !== root.identity.dev) throw fail('cross_device', root.id, input.access);
+      } catch (error) {
+        if (error instanceof FileScopeGuardError) throw error;
+        if (isErrno(error, 'ELOOP')) throw fail('symlink', root.id, input.access);
+        throw new FileScopeGuardError('file_scope_unavailable', 'io_error', { rootId: root.id, access: root.access, cause: error });
+      } finally {
+        await opened?.close().catch(() => {});
       }
-      if (openedStat.kind !== 'file') throw fail('not_regular_file', root.id, input.access);
-      if (openedStat.nlink > 1n) throw fail('hardlink', root.id, input.access);
-      if (openedStat.dev !== root.identity.dev) throw fail('cross_device', root.id, input.access);
-    } catch (error) {
-      if (error instanceof FileScopeGuardError) throw error;
-      if (isErrno(error, 'ELOOP')) throw fail('symlink', root.id, input.access);
-      throw new FileScopeGuardError('file_scope_unavailable', 'io_error', { rootId: root.id, access: root.access, cause: error });
-    } finally {
-      await opened?.close().catch(() => {});
     }
   }
 
@@ -457,7 +480,10 @@ export async function resolveFileScopeTarget(input: ResolveFileScopeTargetInput)
     root,
     access: input.access,
     exists: targetStat !== undefined,
-    ...(targetStat === undefined ? {} : { identity: Object.freeze({ dev: targetStat.dev, ino: targetStat.ino }) }),
+    ...(targetStat === undefined ? {} : {
+      kind: targetStat.kind === 'directory' ? 'directory' as const : 'file' as const,
+      identity: Object.freeze({ dev: targetStat.dev, ino: targetStat.ino }),
+    }),
   });
 }
 

@@ -4052,7 +4052,7 @@ precedence is **Always Ask > sensitive-path floor > Allow without Asking >
 built-in classifier**. There is no deny rule. A floor still permits approval of
 this one call; it prevents an automatic allow rule from bypassing approval. A
 file-scoped session adds a scope floor after Allow: every tool outside the
-three SDK file tools asks unless an Allow rule matched, so the built-in
+six SDK file tools asks unless an Allow rule matched, so the built-in
 classifier never auto-allows it.
 Always Ask and Allow each match any rule in their list; fields within a rule
 must all match. A rule has a unique nonblank `id`, optional display-only
@@ -4153,24 +4153,27 @@ encoded payloads, aliases) are not recognized. It is a tool gate, not an
 execution sandbox and not a file-scope boundary: an allowed shell command can
 still reach any file, network or local resource the OS user can. The optional
 `toolAuthorization.fileScope` policy (#1061) is enforced on the ordinary Pi
-RPC lane on darwin/linux by SDK-owned scoped `read`, `write` and `edit`
-tools: each call re-runs the internal canonical guard immediately before IO,
-native `find`, `grep` and `ls` are excluded from that session, and the host
-re-verifies every serialized root and refuses to open a session whose
-registered loadout drifts. Every configured root is also revalidated after
+RPC lane on darwin/linux by six SDK-owned scoped tools: `read`, `write`,
+`edit`, `find`, `grep` and `ls`. They shadow the native Pi tools of the
+same names; each call re-runs the internal canonical guard immediately before
+IO, and the host re-verifies every serialized root and refuses to open a
+session whose registered loadout drifts. `find`, `grep` and `ls` walk or
+list only guarded paths under the admitted roots, never follow a symlink
+entry, skip `.byok`, and are text-only: `grep` skips binary files rather than
+claiming image/binary support. Every configured root is also revalidated after
 claim and before the runtime starts. The session never falls back to an
-unscoped run; Windows, prepared/durable Pi and other adapters decline before
-claim. Inside that session the `auto` gate asks on every call for any tool
-outside the three SDK file tools — `bash`, MCP tools, and SDK or user
-extension tools — regardless of the built-in risk level, so no risk heuristic
-can auto-allow one. An `allowWithoutAsking` rule is the only opt-out: an exact
-`toolName`, a `commandGlob` over the whole shell command, or trusted
+unscoped or native file tool; Windows, prepared/durable Pi and other adapters
+decline before claim. Inside that session the `auto` gate asks on every call
+for any tool outside the six SDK file tools — `bash`, MCP tools, and SDK or
+user extension tools — regardless of the built-in risk level, so no risk
+heuristic can auto-allow one. An `allowWithoutAsking` rule is the only
+opt-out: an exact `toolName`, a `commandGlob` over the whole shell command, or trusted
 `mcpServer`/`mcpTool` identity. A denied out-of-scope call is the tool's
 `tool_authorization_denied` result, never executes, and its local
 `tool-authorization` decision records the closed reason `outside-file-scope`;
 the approval summary names the concrete tool and, when present, the shell
 command/path and trusted MCP server/tool. This is a file-tool boundary for
-those three tools, not an OS sandbox: `bash`, MCP servers, user extensions
+those six tools, not an OS sandbox: `bash`, MCP servers, user extensions
 and (in this slice) subagents are not covered, the guard is canonical
 check-then-open using Node built-ins, and it is not race-free against
 same-user processes. The loopback gate token is inherited by SDK child

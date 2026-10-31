@@ -35,7 +35,7 @@ async function grantFixture(): Promise<{ home: string; grant: FileScopeGrant }> 
 }
 
 describe('scoped tools in a real Pi 1.4.0 session (#1061 slice 3)', () => {
-  it('shadows read/write/edit, excludes native find/grep/ls, and guards execution', async () => {
+  it('shadows all six native file tools and guards execution', async () => {
     const { home, grant } = await grantFixture();
     const agentDir = await tmpDir('byok-real-agent-');
     const outside = await tmpDir('byok-real-outside-');
@@ -60,21 +60,22 @@ describe('scoped tools in a real Pi 1.4.0 session (#1061 slice 3)', () => {
       cwd: home, agentDir, resourceLoader,
       settingsManager: SettingsManager.inMemory({}),
       sessionManager: SessionManager.inMemory(home),
-      excludeTools: ['find', 'grep', 'ls'],
     });
     try {
-      assertPiFileScopeRegistry(session, { required: ['read', 'write', 'edit'], forbidden: ['find', 'grep', 'ls'] });
+      assertPiFileScopeRegistry(session, { required: ['read', 'write', 'edit', 'find', 'grep', 'ls'], forbidden: [] });
       const tools = new Map(session.getAllTools().map((tool) => [tool.name, tool]));
-      expect(tools.get('read')?.sourceInfo?.path).not.toBe('builtin:read');
-      expect(tools.get('write')?.sourceInfo?.path).not.toBe('builtin:write');
-      expect(tools.get('edit')?.sourceInfo?.path).not.toBe('builtin:edit');
-      expect(tools.has('find')).toBe(false);
-      expect(tools.has('grep')).toBe(false);
-      expect(tools.has('ls')).toBe(false);
+      for (const name of ['read', 'write', 'edit', 'find', 'grep', 'ls']) {
+        expect(tools.get(name)?.sourceInfo?.path, name).not.toBe('builtin:' + name);
+      }
 
       const read = session.getToolDefinition('read')!;
       const write = session.getToolDefinition('write')!;
       const edit = session.getToolDefinition('edit')!;
+      const find = session.getToolDefinition('find')!;
+      const grep = session.getToolDefinition('grep')!;
+      const list = session.getToolDefinition('ls')!;
+      type Exec = (id: string, p: unknown, s: undefined, u: undefined, c: never) => Promise<{ content: { text: string }[] }>;
+      const run = (tool: { execute: unknown }): Exec => tool.execute as never as Exec;
       const ctx = { cwd: home } as never;
       await (write.execute as never as (id: string, p: unknown, s: undefined, u: undefined, c: never) => Promise<unknown>)(
         'write-1', { path: inScope, content: 'alpha\nbeta\n' }, undefined, undefined, ctx,
@@ -89,10 +90,22 @@ describe('scoped tools in a real Pi 1.4.0 session (#1061 slice 3)', () => {
       );
       expect(await fs.readFile(inScope, 'utf8')).toBe('alpha\ngamma\n');
 
+      expect((await run(find)('find-1', { pattern: '*.txt', path: home }, undefined, undefined, ctx)).content.map((part) => part.text).join(''))
+        .toBe('notes.txt');
+      expect((await run(list)('ls-1', { path: home }, undefined, undefined, ctx)).content.map((part) => part.text).join(''))
+        .toBe('notes.txt');
+      expect((await run(grep)('grep-1', { pattern: 'gamma', path: home }, undefined, undefined, ctx)).content.map((part) => part.text).join(''))
+        .toBe('notes.txt:2: gamma');
+
       await expect((read.execute as never as (id: string, p: unknown, s: undefined, u: undefined, c: never) => Promise<unknown>)(
         'read-outside', { path: outsideFile }, undefined, undefined, ctx,
       )).rejects.toThrow(/file_scope_denied: path is outside the authorized file scope \(outside_scope\)/);
-      expect(denials).toEqual([expect.objectContaining({ toolName: 'read', toolCallId: 'read-outside', reason: 'outside_scope' })]);
+      await expect(run(find)('find-outside', { pattern: '*', path: outside }, undefined, undefined, ctx))
+        .rejects.toThrow(/file_scope_denied: path is outside the authorized file scope \(outside_scope\)/);
+      expect(denials).toEqual([
+        expect.objectContaining({ toolName: 'read', toolCallId: 'read-outside', reason: 'outside_scope' }),
+        expect.objectContaining({ toolName: 'find', toolCallId: 'find-outside', reason: 'outside_scope' }),
+      ]);
     } finally {
       session.dispose();
     }

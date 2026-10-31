@@ -128,11 +128,15 @@ describe('scoped-session per-call approval floor (#1061 slice 4)', () => {
     expect(g.summaries[1]).toContain('web_fetch');
   });
 
-  it('keeps the three SDK file tools inside the boundary and does not ask for them', async () => {
+  it('keeps the six SDK file tools inside the boundary and does not ask for them', async () => {
     const home = await tmpDir('byok-floor-home-');
     const g = scopedGate({ workspace: home, grant: await homeGrant(home) });
     for (const toolName of ['read', 'write', 'edit']) {
       await expect(g.toolAuthorization.authorize(call(toolName, { path: path.join(home, 'notes.txt') }, home)))
+        .resolves.toMatchObject({ decision: 'allow' });
+    }
+    for (const toolName of ['find', 'grep', 'ls']) {
+      await expect(g.toolAuthorization.authorize(call(toolName, toolName === 'ls' ? {} : { pattern: '*', path: home }, home)))
         .resolves.toMatchObject({ decision: 'allow' });
     }
     expect(g.summaries).toEqual([]);
