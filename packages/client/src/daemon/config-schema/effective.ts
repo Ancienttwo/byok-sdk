@@ -6,7 +6,7 @@ import {
   AGENT_RESULT_MCP_SERVER_NAME,
 } from '../../sdk-reserved-mcp';
 import { toolAuthorizationMode, type ToolAuthorizationMode } from '../../tool-authorization';
-import type { RuntimeAdapter } from '../../types';
+import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types';
 import { serviceLogDir } from '../host-layout';
 import { scratchRootSocketBudget } from '../retention/scratch';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon';
@@ -52,6 +52,11 @@ export interface DaemonEffectiveRuntime {
    * for an injected adapter, whose options the Host set when it built it.
    */
   readonly isolation?: Readonly<Record<string, string>>;
+  /**
+   * The effective version policy (#1103), resolved once at adapter
+   * construction; only the policy, never the installed runtime token.
+   */
+  readonly versionPolicy?: RuntimeVersionPolicy;
 }
 
 /**
@@ -210,11 +215,13 @@ export function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput)
     runtimes: input.adapters.map((adapter) => {
       const id = adapter.descriptor.id;
       const isolation = input.runtimeSource === 'sdk-built' ? sdkBuiltIsolation(id, config) : undefined;
+      const versionPolicy = adapter.descriptor.versionPolicy;
       return {
         id,
         source: input.runtimeSource,
         toolAuthorizationAuto: adapter.descriptor.capabilities.toolAuthorizationAuto === true,
         ...(isolation === undefined ? {} : { isolation }),
+        ...(versionPolicy === undefined ? {} : { versionPolicy }),
       };
     }),
     toolAuthorization: effectiveToolAuthorization(config, input.adapters),

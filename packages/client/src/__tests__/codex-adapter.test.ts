@@ -96,6 +96,7 @@ describe('Codex persistent app-server adapter', () => {
       kind: 'available',
       version: 'codex-cli 0.160.0',
       authPresent: true,
+      versionVerdict: { state: 'allow', qualifiedVersion: '0.160.0' },
     });
   });
   it('keeps not-logged-in detection honest', async () => {
@@ -144,12 +145,31 @@ describe('Codex persistent app-server adapter', () => {
       kind: 'available',
       version: output,
       advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.160.0' },
+      versionVerdict: { state: 'warn', qualifiedVersion: '0.160.0' },
     });
   });
   it('detect admits the qualified version without an advisory', async () => {
     const detected = await adapter().detect();
-    expect(detected).toMatchObject({ kind: 'available', version: 'codex-cli 0.160.0' });
+    expect(detected).toMatchObject({
+      kind: 'available', version: 'codex-cli 0.160.0',
+      versionVerdict: { state: 'allow', qualifiedVersion: '0.160.0' },
+    });
     expect(detected).not.toHaveProperty('advisory');
+  });
+  it('keeps the Host policy as the whole effective descriptor policy, replacing the default', async () => {
+    const versionPolicy = {
+      qualifiedVersion: '0.160.0',
+      unqualified: 'allow' as const,
+      block: [{ kind: 'exact' as const, version: '0.161.0' }],
+    };
+    const host = adapter({ versionPolicy });
+    expect(host.descriptor.versionPolicy).toEqual(versionPolicy);
+    expect(host.descriptor.versionPolicy).not.toHaveProperty('warn');
+    expect(adapter().descriptor.versionPolicy).toEqual({ qualifiedVersion: '0.160.0', unqualified: 'warn' });
+    vi.stubEnv('FAKE_CODEX_VERSION', 'codex-cli 0.161.0');
+    expect(await host.detect()).toMatchObject({
+      versionVerdict: { state: 'block', qualifiedVersion: '0.160.0', matched: '0.161.0' },
+    });
   });
   it('detect refuses a missing app-server subcommand', async () => {
     vi.stubEnv('FAKE_CODEX_NO_APP_SERVER', '1');

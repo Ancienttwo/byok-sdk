@@ -14,6 +14,7 @@ import type {
 import type { InputPreparationModelV1 } from './input-preparation';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
+import { freezeRuntimeVersionPolicy } from './runtime-version-policy';
 
 export type { AgentRef } from './agent-home';
 
@@ -39,6 +40,40 @@ export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', 'timeout', 'probe-failed', 'refused'] as const;
 
 /**
+ * One version predicate (#1103). Only an exact token or a component-boundary
+ * prefix: no range, no minimum/maximum, no regular expression and no semver
+ * dependency, so the policy can never become a second version comparator.
+ */
+export type RuntimeVersionSpec =
+  | { readonly kind: 'exact'; readonly version: string }
+  | { readonly kind: 'prefix'; readonly prefix: string };
+
+/**
+ * Pure, serializable version policy (#1103). The descriptor default, an
+ * adapter option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
+ * objects that replace one another wholesale through
+ * `resolveRuntimeVersionPolicy`; a field is never merged across them.
+ */
+export interface RuntimeVersionPolicy {
+  /** The normalized token this SDK was qualified against, for example `0.160.0`. */
+  readonly qualifiedVersion: string;
+  /** What an unmatched token means. A descriptor default may not use `block`; only a Host layer may. */
+  readonly unqualified: 'allow' | 'warn' | 'block';
+  /** Explicitly known-good versions outside the qualified range. */
+  readonly allow?: readonly RuntimeVersionSpec[];
+  /** Versions that must stay a warning even where `unqualified` is `allow`. */
+  readonly warn?: readonly RuntimeVersionSpec[];
+  /** Versions this Host refuses before claim. Host layer only. */
+  readonly block?: readonly RuntimeVersionSpec[];
+}
+
+/** The one policy verdict for an installed runtime token (#1103). `matched` names the spec that decided a non-qualified verdict. */
+export type RuntimeVersionVerdict =
+  | { readonly state: 'allow'; readonly qualifiedVersion: string; readonly matched?: string }
+  | { readonly state: 'warn'; readonly qualifiedVersion: string; readonly matched?: string }
+  | { readonly state: 'block'; readonly qualifiedVersion: string; readonly matched: string };
+
+/**
  * One probe outcome, never a separately authored presence boolean. Authentication
  * observation is each adapter's native non-secret login-state probe (a status
  * command, credential env-var names, or Pi's shape-only agent-dir login check)
@@ -46,7 +81,7 @@ export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', '
  * contain no arbitrary diagnostics.
  */
 export type RuntimeDetectResult =
-  | { readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory }
+  | { readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory; readonly versionVerdict?: RuntimeVersionVerdict }
   | { readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'> }
   | { readonly kind: 'refused'; readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable'> }
   | { readonly kind: 'refused'; readonly reason: 'runtime_environment_unavailable'; readonly code: ServiceEnvironmentUnavailableCode };
@@ -269,6 +304,11 @@ export interface SessionEvidence {
 export interface RuntimeAdapterDescriptor {
   readonly id: string;
   readonly capabilities: RuntimeCapabilities;
+  /**
+   * The effective version policy (#1103), already resolved and frozen by the
+   * adapter constructor. Absent for a custom adapter with no policy.
+   */
+  readonly versionPolicy?: RuntimeVersionPolicy;
   /** Explicit opt-in to authoritative `task.offer.dispatchSelection` semantics. */
   readonly supportsDispatchSelection: boolean;
   /**
@@ -600,6 +640,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     ...(descriptor.progressEventsAreMessages === true ? { progressEventsAreMessages: true } : {}),
     ...(descriptor.trajectoryEvidence === 'event-stream' ? { trajectoryEvidence: 'event-stream' as const } : {}),
     ...(descriptor.platforms === undefined ? {} : { platforms: Object.freeze([...descriptor.platforms]) }),
+    ...(descriptor.versionPolicy === undefined ? {} : { versionPolicy: freezeRuntimeVersionPolicy(descriptor.versionPolicy) }),
     capabilities: Object.freeze({
       ...(descriptor.capabilities.toolAuthorizationAuto === undefined ? {} : { toolAuthorizationAuto: descriptor.capabilities.toolAuthorizationAuto === true }),
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),

@@ -89,9 +89,9 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     const effective = daemon.status().config;
     expect(effective.warnings).toEqual([]);
     expect(effective.runtimes).toEqual([
-      { id: 'pi', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'inherit' } },
-      { id: 'claude', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded', agentSessionPersistence: 'disabled' } },
-      { id: 'codex', source: 'sdk-built', toolAuthorizationAuto: false, isolation: { agentUserMcpServers: 'excluded', sandbox: 'danger-full-access' } },
+      { id: 'pi', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'inherit' }, versionPolicy: { qualifiedVersion: '1.4.0', unqualified: 'allow' } },
+      { id: 'claude', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded', agentSessionPersistence: 'disabled' }, versionPolicy: { qualifiedVersion: '2.1.312', unqualified: 'allow' } },
+      { id: 'codex', source: 'sdk-built', toolAuthorizationAuto: false, isolation: { agentUserMcpServers: 'excluded', sandbox: 'danger-full-access' }, versionPolicy: { qualifiedVersion: '0.160.0', unqualified: 'warn' } },
     ]);
     expect(effective.toolAuthorization).toEqual({
       mode: 'static', byRuntime: { pi: 'auto', claude: 'auto', codex: 'all' }, localToolApproval: 'host-only',

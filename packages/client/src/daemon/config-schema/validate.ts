@@ -18,6 +18,7 @@ export type DaemonConfigIssueCode =
   | 'missing_required'
   | 'invalid_type'
   | 'invalid_value'
+  | 'invalid_version_policy'
   | 'unknown_field'
   | 'removed_field'
   | 'embedded_only'

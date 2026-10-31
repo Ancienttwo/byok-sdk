@@ -1,7 +1,7 @@
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import type { RuntimeId } from '@byok-sdk/protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
-import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
+import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeVersionVerdict } from './types';
 
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
 export interface RuntimeObservation {
@@ -78,6 +78,17 @@ function isAdvisory(value: unknown): value is RuntimeDetectionAdvisory {
     && isVersionText(advisory.qualifiedVersion);
 }
 
+function isVersionVerdict(value: unknown): value is RuntimeVersionVerdict {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const verdict = value as Record<string, unknown>;
+  if (Object.keys(verdict).some((key) => !['state', 'qualifiedVersion', 'matched'].includes(key))) return false;
+  if (verdict.state !== 'allow' && verdict.state !== 'warn' && verdict.state !== 'block') return false;
+  if (!isVersionText(verdict.qualifiedVersion)) return false;
+  if (verdict.matched !== undefined && !isVersionText(verdict.matched)) return false;
+  // A block verdict always names what decided it; allow/warn may carry the matched spec.
+  return verdict.state !== 'block' || verdict.matched !== undefined;
+}
+
 /** Reject legacy/mixed authoring shapes; copy only validated, known facts. */
 export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -85,12 +96,24 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
   }
   const result = value as Record<string, unknown>;
   if (!Object.hasOwn(result, 'kind')) throw new TypeError('invalid runtime detection result');
-  const { kind, version, authPresent, advisory } = result;
+  const { kind, version, authPresent, advisory, versionVerdict } = result;
   if (kind === 'available') {
-    if (Object.keys(result).some((key) => !['kind', 'version', 'authPresent', 'advisory'].includes(key))
+    if (Object.keys(result).some((key) => !['kind', 'version', 'authPresent', 'advisory', 'versionVerdict'].includes(key))
       || (version !== undefined && typeof version !== 'string')
       || (authPresent !== undefined && typeof authPresent !== 'boolean')
-      || (advisory !== undefined && !isAdvisory(advisory))) {
+      || (advisory !== undefined && !isAdvisory(advisory))
+      || (versionVerdict !== undefined && !isVersionVerdict(versionVerdict))) {
+      throw new TypeError('invalid runtime detection result');
+    }
+    // A warning verdict and the legacy advisory are two projections of one
+    // fact: warn ⇔ advisory, with the same qualified version. An absent
+    // verdict keeps the old semantics (an advisory means warn).
+    const verdict = versionVerdict as RuntimeVersionVerdict | undefined;
+    const warn = verdict?.state === 'warn';
+    if (warn && (advisory === undefined || advisory.qualifiedVersion !== verdict!.qualifiedVersion)) {
+      throw new TypeError('invalid runtime detection result');
+    }
+    if (verdict !== undefined && !warn && advisory !== undefined) {
       throw new TypeError('invalid runtime detection result');
     }
     return Object.freeze({
@@ -98,6 +121,13 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
       ...(version === undefined ? {} : { version }),
       ...(authPresent === undefined ? {} : { authPresent }),
       ...(advisory === undefined ? {} : { advisory: Object.freeze({ reason: advisory.reason, qualifiedVersion: advisory.qualifiedVersion }) }),
+      ...(verdict === undefined ? {} : {
+        versionVerdict: Object.freeze({
+          state: verdict.state,
+          qualifiedVersion: verdict.qualifiedVersion,
+          ...(verdict.matched === undefined ? {} : { matched: verdict.matched }),
+        }) as RuntimeVersionVerdict,
+      }),
     });
   }
   if (kind === 'refused' && result.reason === 'runtime_environment_unavailable') {

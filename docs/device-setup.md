@@ -635,11 +635,29 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes` | advanced | object |
 | `runtimes.pi` | advanced | object |
 | `runtimes.pi.agentUserContext` | advanced | "excluded" / "inherit" |
+| `runtimes.pi.versionPolicy` | advanced | object |
+| `runtimes.pi.versionPolicy.qualifiedVersion` | required when parent is set | string |
+| `runtimes.pi.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
+| `runtimes.pi.versionPolicy.allow` | advanced | array |
+| `runtimes.pi.versionPolicy.warn` | advanced | array |
+| `runtimes.pi.versionPolicy.block` | advanced | array |
 | `runtimes.claude` | advanced | object |
 | `runtimes.claude.agentUserContext` | advanced | "excluded" / "inherit" |
 | `runtimes.claude.agentSessionPersistence` | advanced | "disabled" / "enabled" |
+| `runtimes.claude.versionPolicy` | advanced | object |
+| `runtimes.claude.versionPolicy.qualifiedVersion` | required when parent is set | string |
+| `runtimes.claude.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
+| `runtimes.claude.versionPolicy.allow` | advanced | array |
+| `runtimes.claude.versionPolicy.warn` | advanced | array |
+| `runtimes.claude.versionPolicy.block` | advanced | array |
 | `runtimes.codex` | advanced | object |
 | `runtimes.codex.agentUserMcpServers` | advanced | "excluded" / "inherit" |
+| `runtimes.codex.versionPolicy` | advanced | object |
+| `runtimes.codex.versionPolicy.qualifiedVersion` | required when parent is set | string |
+| `runtimes.codex.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
+| `runtimes.codex.versionPolicy.allow` | advanced | array |
+| `runtimes.codex.versionPolicy.warn` | advanced | array |
+| `runtimes.codex.versionPolicy.block` | advanced | array |
 | `runtimeEnvironment` | advanced | union |
 | `durablePi` | advanced | boolean |
 | `piByokLauncher` | advanced | object |
@@ -708,6 +726,7 @@ still need correction. Codes do not replace the reported field/path or cause.
 | `host_layout_input_invalid` | no | Fix the named HostLayoutOptions field, then call resolveHostLayout again. | [guide](#directory-ownership) |
 | `invalid_type` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `invalid_value` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
+| `invalid_version_policy` | no | Fix the reported runtime version policy field: use exact/prefix specs, end a prefix with ".", remove duplicates, and configure block only from the Host. | [guide](#configuration) |
 | `missing_required` | no | Supply the required field at the reported path. | [guide](#configuration) |
 | `not_an_object` | no | Supply a JSON object. | [guide](#configuration) |
 | `re_pair_required` | no | Obtain a fresh pairing code from the Host, pair this device, then start. | [guide](#reset) |

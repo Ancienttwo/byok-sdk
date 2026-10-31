@@ -173,6 +173,7 @@ describe('HermesAdapter construction and descriptor', () => {
       supportsDispatchSelection: false,
       requiresMcpToolsetToolObservation: false,
       platforms: ['darwin', 'linux', 'win32'],
+      versionPolicy: { qualifiedVersion: '0.22.2+2364.g0b10b9f', unqualified: 'warn' },
       capabilities: {
         steer: false, resume: false, approvalInteractive: false, mcpToolsets: true, messageDraft: true, preparedLane: false,
         isolation: { userContext: true, userMcpServers: true, sessionPersistence: false },
@@ -201,6 +202,7 @@ describe('HermesAdapter detect', () => {
         kind: 'available',
         version: 'Hermes Agent v0.22.2+2364.g0b10b9f (2026.9.24) · stable · local 0b10b9f8155a',
         authPresent: true,
+        versionVerdict: { state: 'allow', qualifiedVersion: '0.22.2+2364.g0b10b9f' },
       });
       const probe = await read();
       expect(probe.map((entry) => entry.method ?? entry.mode)).toEqual(['version', 'acp', 'initialize']);
@@ -235,6 +237,7 @@ describe('HermesAdapter detect', () => {
         version: 'Hermes Agent v0.23.0 (2026.10.1) · stable',
         authPresent: false,
         advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.22.2+2364.g0b10b9f' },
+        versionVerdict: { state: 'warn', qualifiedVersion: '0.22.2+2364.g0b10b9f' },
       });
     } finally {
       delete process.env.FAKE_HERMES_AUTH;

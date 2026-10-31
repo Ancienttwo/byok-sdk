@@ -15,6 +15,7 @@ import {
   PolicyUnsupportedError,
   type RuntimeAdapter,
   type RuntimeDetectResult,
+  type RuntimeVersionPolicy,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type MessageDraftDelta,
@@ -40,7 +41,8 @@ import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
 import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities';
-import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-version';
+import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers';
 
 const execFileAsync = promisify(execFile);
@@ -98,6 +100,10 @@ export interface CodexAdapterOptions {
    * unchanged. Default `inherit`.
    */
   agentUserMcpServers?: 'inherit' | 'excluded';
+  /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+  versionPolicy?: RuntimeVersionPolicy;
+  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+  versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 
 /**
@@ -123,8 +129,10 @@ export class CodexAdapter implements RuntimeAdapter {
       // Questions only: tool permission is the SDK `auto | all` decision.
       ...(this.options.nativeInteractions === undefined ? {} : { nativeInteractions: { approvalDecisions: [], structuredQuestions: true } }),
     },
+    ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
   }); }
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
+  private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
   constructor(private readonly options: CodexAdapterOptions = {}) {
     if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'CodexAdapterOptions.runtimeEnvironment');
@@ -148,6 +156,12 @@ export class CodexAdapter implements RuntimeAdapter {
       (options.operationTimeoutMs ?? DEFAULT_OPERATION_MS) > 2_147_483_647
     )
       throw new TypeError('invalid Codex operation timeout');
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
+      descriptor: CODEX_VERSION_POLICY,
+      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
+        ? { daemonConfig: options.versionPolicy }
+        : { adapterOption: options.versionPolicy }),
+    }).policy;
   }
   runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy);
@@ -182,9 +196,7 @@ export class CodexAdapter implements RuntimeAdapter {
         kind: 'available',
         version: text,
         authPresent,
-        ...(!isQualifiedCodexVersion(text)
-          ? { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: QUALIFIED_CODEX_VERSION } as const }
-          : {}),
+        ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, codexVersionToken(text)),
       };
     } catch (error) {
       return classifyDetectError(error);

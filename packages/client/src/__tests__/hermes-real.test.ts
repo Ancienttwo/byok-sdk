@@ -11,7 +11,7 @@ import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { hermesGatewayPipeName, identifyHermesGateway } from '../adapters/hermes/gateway-identity';
 import { exchangeHermesPipe, windowsLower } from '../adapters/hermes/gateway-pipe-win32';
 import { ownsHermesGatewayPid } from '../adapters/hermes/gateway-ownership';
-import { isQualifiedHermesVersion } from '../adapters/hermes/hermes-version';
+import { hermesVersionToken, QUALIFIED_HERMES_VERSION } from '../adapters/hermes/hermes-version';
 import { loadKoffi } from '../adapters/win32-job-object';
 import { testRuntimeEnv } from './fixtures/runtime-env';
 import type { MessageDraftDelta, Session } from '../types';
@@ -178,6 +178,6 @@ try { await runHermesProviderLauncher(request,{createSecretStore:()=>store}); } 
     expect(await fs.readdir(path.join(root, 'profiles'))).toEqual([]);
     for (const pid of pids) expect(alive(pid), `pid ${pid} outlived close`).toBe(false);
     console.log(`hermes real run: ${summary()}`);
-    expect(isQualifiedHermesVersion(version), version).toBe(true);
+    expect(hermesVersionToken(version), version).toBe(QUALIFIED_HERMES_VERSION);
   }, 20 * 60_000);
 });

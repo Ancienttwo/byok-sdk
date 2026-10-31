@@ -19,6 +19,7 @@ import {
   type MessageDraftDelta,
   type RuntimeAdapter,
   type RuntimeDetectResult,
+  type RuntimeVersionPolicy,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type RuntimeOperationStartInput,
@@ -36,6 +37,8 @@ import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAg
 import { ClaudeFailureEvidence } from './failure-evidence';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
 import { servedModelName } from '../served-model';
+import { CLAUDE_VERSION_POLICY, claudeVersionToken } from './claude-version';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 
 
 const execFileAsync = promisify(execFile);
@@ -122,6 +125,10 @@ export interface ClaudeAdapterOptions {
    * unchanged. Default `enabled`.
    */
   agentSessionPersistence?: 'enabled' | 'disabled';
+  /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+  versionPolicy?: RuntimeVersionPolicy;
+  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+  versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 
 /**
@@ -154,6 +161,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   readonly descriptor;
   private readonly nativeOptions?: NativeInteractionHostOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
+  private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
     const timeout = options.interruptTimeoutMs ?? 1000;
@@ -164,6 +172,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
       throw new TypeError('ClaudeAdapterOptions.agentSessionPersistence must be enabled or disabled');
     this.nativeOptions = options.nativeInteractions === undefined ? undefined : snapshotNativeInteractionHostOptions(options.nativeInteractions);
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'ClaudeAdapterOptions.runtimeEnvironment');
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
+      descriptor: CLAUDE_VERSION_POLICY,
+      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
+        ? { daemonConfig: options.versionPolicy }
+        : { adapterOption: options.versionPolicy }),
+    }).policy;
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
       supportsDispatchSelection: true,
@@ -178,6 +192,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         ...CLAUDE_RUNTIME_CAPABILITIES,
         ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
       },
+      ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
     });
   }
 
@@ -193,7 +208,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim();
       const authPresent = await this.probeAuthPresent(invocation, env);
-      return { kind: 'available', version, authPresent };
+      return {
+        kind: 'available', version, authPresent,
+        ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, claudeVersionToken(version)),
+      };
     } catch (error) {
       return classifyDetectError(error);
     }

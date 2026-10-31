@@ -295,18 +295,21 @@ export function buildAdapter(id: RuntimeId, config: DaemonConfig, piByokLauncher
         ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }),
         ...(config.durablePi === true ? { durablePi: true } : {}),
         ...(pi?.agentUserContext === undefined ? {} : { agentUserContext: pi.agentUserContext }),
+        ...(pi?.versionPolicy === undefined ? {} : { versionPolicy: pi.versionPolicy, versionPolicySource: 'daemon-config' as const }),
       });
     case 'claude':
       return new ClaudeAdapter({
         nativeAssetRoot: config.nativeAssetRoot, ...environment,
         ...(claude?.agentUserContext === undefined ? {} : { agentUserContext: claude.agentUserContext }),
         ...(claude?.agentSessionPersistence === undefined ? {} : { agentSessionPersistence: claude.agentSessionPersistence }),
+        ...(claude?.versionPolicy === undefined ? {} : { versionPolicy: claude.versionPolicy, versionPolicySource: 'daemon-config' as const }),
       });
     case 'codex':
       return new CodexAdapter({
         nativeAssetRoot: config.nativeAssetRoot, ...environment,
         ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }),
         ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
+        ...(codex?.versionPolicy === undefined ? {} : { versionPolicy: codex.versionPolicy, versionPolicySource: 'daemon-config' as const }),
       });
   }
 }

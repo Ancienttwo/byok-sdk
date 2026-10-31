@@ -151,12 +151,31 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     ['a bad byRuntime mode', { toolAuthorization: { default: 'all', byRuntime: { claude: 'never' } } }, 'invalid_value', 'toolAuthorization.byRuntime.claude'],
     ['a bad isolation value', { runtimes: { claude: { agentUserContext: 'none' } } }, 'invalid_value', 'runtimes.claude.agentUserContext'],
     ['a bad codex isolation value', { runtimes: { codex: { agentUserMcpServers: true } } }, 'invalid_value', 'runtimes.codex.agentUserMcpServers'],
+    ['a prefix without a component boundary', { runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy: { qualifiedVersion: '0.160.0', unqualified: 'warn', block: [{ kind: 'prefix', prefix: '0.16' }] } } } }, 'invalid_version_policy', 'runtimes.codex.versionPolicy.block[0].prefix'],
+    ['an empty exact version', { runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy: { qualifiedVersion: '0.160.0', unqualified: 'warn', block: [{ kind: 'exact', version: '' }] } } } }, 'invalid_version_policy', 'runtimes.codex.versionPolicy.block[0].version'],
+    ['a duplicate spec', { runtimeAllowlist: ['claude'], runtimes: { claude: { versionPolicy: { qualifiedVersion: '2.1.312', unqualified: 'allow', allow: [{ kind: 'exact', version: '2.1.313' }], warn: [{ kind: 'exact', version: '2.1.313' }] } } } }, 'invalid_version_policy', 'runtimes.claude.versionPolicy.warn[0]'],
   ])('refuses %s in a config file and at construction', async (_name, extra, code, issuePath) => {
     const fileCheck = checkDaemonConfig({ ...base, ...extra }, { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE });
     expect(fileCheck.ok).toBe(false);
     expect(fileCheck.issues).toEqual([expect.objectContaining({ severity: 'error', code, path: issuePath })]);
     const config = await bundled(extra as Partial<DaemonConfig>);
     expect(constructionIssues(() => createDaemon(config))).toEqual(fileCheck.issues);
+  });
+
+  it('accepts a valid version policy from DaemonConfig and reports it as effective', async () => {
+    const versionPolicy = {
+      qualifiedVersion: '0.160.0',
+      unqualified: 'allow' as const,
+      block: [{ kind: 'prefix' as const, prefix: '0.16.' }],
+    };
+    const config = await bundled({ runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy } } });
+    const report = checkDaemonConfig(cliInput(config), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE });
+    expect(report.ok).toBe(true);
+    expect(report.effective?.runtimes).toEqual([
+      { id: 'codex', source: 'sdk-built', toolAuthorizationAuto: false, isolation: { agentUserMcpServers: 'inherit', sandbox: 'danger-full-access' }, versionPolicy },
+    ]);
+    const daemon = createDaemon(config);
+    expect(daemon.status().config.runtimes[0]).toMatchObject({ id: 'codex', versionPolicy });
   });
 
   it('refuses a byRuntime key that names no runtime of the daemon', async () => {

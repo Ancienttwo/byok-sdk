@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "738cd3e8e5df7fe1ed8e7e2800aa69cc3d97e90910717fd6a257da448979c200"
+    "snapshotSha256": "14cdaab6b57133b3f03f46213c684234f753c32b66972e0f9762b56af0a8ec61"
   },
   "configFields": {
     "status": "tracked",
@@ -110,6 +110,19 @@
         "export:@byok-sdk/client#createAutoToolAuthorizationGate",
         "export:@byok-sdk/client#parseToolAuthorizationPolicy",
         "union:daemon-event#tool-authorization"
+      ]
+    },
+    {
+      "id": "runtime-version-policy",
+      "impact": "additive",
+      "summary": "Runtime version policies are pure data (#1103): an exact token or a component-boundary prefix, never a range, minimum, regular expression or semver dependency. A descriptor default, an adapter option and DaemonConfig.runtimes.<id>.versionPolicy are complete objects that replace one another wholesale through one resolver; default behavior is unchanged (Codex/Grok/Hermes still warn on an unqualified version, Claude/Pi still do not), and only a Host-configured block declines a runtime locally before claim with task.decline.code runtime_version_blocked and retryable false. A descriptor default may not configure a block (invalid_version_policy / block_requires_host). Nothing to change unless a Host opts into a block.",
+      "migration": "docs/device-setup.md#configuration",
+      "items": [
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client#RuntimeVersionPolicy",
+        "export:@byok-sdk/client#RuntimeVersionSpec",
+        "export:@byok-sdk/client#RuntimeVersionVerdict",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor"
       ]
     },
     {
@@ -1067,7 +1080,7 @@
     {
       "item": "config:runtimes",
       "change": "added",
-      "after": "optional schema-sha256=caecf4e4b22e42fd",
+      "after": "optional schema-sha256=a433ba0fb0c2e2f1",
       "entry": "config-file-static-tool-authorization"
     },
     {
@@ -1523,6 +1536,11 @@
       "entry": "runtime-environment-policy"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "runtime-version-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeCapabilities",
       "change": "changed",
       "entry": "runtime-capability-matrix"
@@ -1591,6 +1609,21 @@
       "item": "export:@byok-sdk/client#RuntimeSessionLease",
       "change": "added",
       "entry": "pi-session-retention-lifecycle"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeVersionPolicy",
+      "change": "added",
+      "entry": "runtime-version-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeVersionSpec",
+      "change": "added",
+      "entry": "runtime-version-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeVersionVerdict",
+      "change": "added",
+      "entry": "runtime-version-policy"
     },
     {
       "item": "export:@byok-sdk/client#SERVICE_PAYLOAD_MANIFEST",
@@ -1981,6 +2014,11 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapter",
       "change": "changed",
       "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "runtime-version-policy"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeCapabilities",

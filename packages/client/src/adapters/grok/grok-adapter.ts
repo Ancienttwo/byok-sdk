@@ -14,6 +14,7 @@ import {
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type RuntimeDetectResult,
+  type RuntimeVersionPolicy,
   type MessageDraftDelta,
   type RuntimeOperationStartInput,
   type Session,
@@ -31,7 +32,8 @@ import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-us
 import { GrokProjection, type GrokTurnOutcome } from './projection';
 import { resolveGrokBin } from './resolve-bin';
 import { GROK_RUNTIME_CAPABILITIES } from './grok-capabilities';
-import { isQualifiedGrokVersion, QUALIFIED_GROK_VERSION } from './grok-version';
+import { GROK_VERSION_POLICY, grokVersionToken } from './grok-version';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
@@ -78,6 +80,10 @@ export interface GrokAdapterOptions {
    * Default `inherit`.
    */
   agentUserMcpServers?: 'inherit' | 'excluded';
+  /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+  versionPolicy?: RuntimeVersionPolicy;
+  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+  versionPolicySource?: 'adapter-option' | 'daemon-config';
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -101,9 +107,11 @@ export class GrokAdapter implements RuntimeAdapter {
     // Windows has no Grok evidence (`docs/adapter-capabilities.md`).
     platforms: ['darwin', 'linux'],
     capabilities: GROK_RUNTIME_CAPABILITIES,
+    ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
   }); }
 
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
+  private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
 
   constructor(private readonly options: GrokAdapterOptions = {}) {
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'GrokAdapterOptions.runtimeEnvironment');
@@ -116,6 +124,12 @@ export class GrokAdapter implements RuntimeAdapter {
       throw new TypeError('GrokAdapterOptions.compatInstructions must be inherit or disabled');
     if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
       throw new TypeError('GrokAdapterOptions.agentUserMcpServers must be inherit or excluded');
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
+      descriptor: GROK_VERSION_POLICY,
+      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
+        ? { daemonConfig: options.versionPolicy }
+        : { adapterOption: options.versionPolicy }),
+    }).policy;
     this.options = { ...options };
   }
 
@@ -144,9 +158,7 @@ export class GrokAdapter implements RuntimeAdapter {
         kind: 'available',
         version: text,
         authPresent: grokAuthPresent(env),
-        ...(!isQualifiedGrokVersion(text)
-          ? { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: QUALIFIED_GROK_VERSION } as const }
-          : {}),
+        ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, grokVersionToken(text)),
       };
     } catch (error) {
       return classifyDetectError(error);

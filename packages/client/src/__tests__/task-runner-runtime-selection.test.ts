@@ -124,6 +124,52 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     expect(pi.startCalls).toHaveLength(0);
   });
 
+  describe('Host-configured version block (#1103)', () => {
+    const blockedDetect = {
+      kind: 'available' as const,
+      version: 'codex-cli 0.161.0',
+      versionVerdict: { state: 'block' as const, qualifiedVersion: '0.160.0', matched: '0.16.' },
+    };
+
+    it('declines an explicit blocked runtime non-retryably, without claiming or starting it', async () => {
+      const blocked = new StubRuntimeAdapter('codex', blockedDetect);
+      await setup([blocked]);
+      const taskId = 'task-version-block-explicit';
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'codex' },
+          { taskId, seq: server.nextSeq() },
+        ),
+      );
+      const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
+      expect(decline.payload).toMatchObject({ retryable: false, code: 'runtime_version_blocked' });
+      expect(decline.type === 'task.decline' ? (decline.payload as { reason?: string }).reason : '').toContain('blocked by the device version policy');
+      expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
+      expect(blocked.startCalls).toHaveLength(0);
+    });
+
+    it('auto selection skips a blocked candidate and keeps the candidate order', async () => {
+      const blocked = new StubRuntimeAdapter('codex', blockedDetect);
+      const claude = new StubRuntimeAdapter('claude');
+      await setup([blocked, claude], { runtimePreference: ['codex', 'claude'] });
+      const taskId = 'task-version-block-auto';
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+          { taskId, seq: server.nextSeq() },
+        ),
+      );
+      const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === taskId);
+      expect(claim.payload).toMatchObject({ runtime: 'claude' });
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+      expect(blocked.startCalls).toHaveLength(0);
+      expect(claude.startCalls).toHaveLength(1);
+      expect(server.received.some((e) => e.type === 'task.decline' && e.task_id === taskId)).toBe(false);
+    });
+  });
+
   describe('explicit-runtime regression pin (unchanged by this batch)', () => {
     it.each(['not-found', 'not-executable', 'timeout', 'probe-failed'] as const)('an explicit runtime with %s still declines pre-claim, never claims', async (kind) => {
       // Regression pin for the pre-existing (M1 gap #5) behavior — unchanged
