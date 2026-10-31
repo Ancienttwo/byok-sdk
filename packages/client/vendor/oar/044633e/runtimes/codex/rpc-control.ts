@@ -1,0 +1,147 @@
+import { SessionNotFoundError } from "../../contracts/session-not-found-error.js";
+import { SessionUnavailableError, type SessionUnavailableReason } from "../../contracts/session-unavailable-error.js";
+import { emptyInputRefusal } from "../../shared/control-input.js";
+import type {
+  ControlResult,
+  RequestBody,
+  RequestRecord,
+  ResponseBody,
+  ResponseRecord,
+} from "../../contracts/session.js";
+import { asRecord, type JsonRecord } from "../../shared/json.js";
+import type { SessionKernel } from "../../shared/session-kernel.js";
+import type { AppServerClient } from "./app-server-client.js";
+
+export interface RpcControlPlan {
+  readonly body: RequestBody;
+  /** Runtime-specific refusal before sending (busy, nothing active); null means proceed. May reserve adapter state. Reachability is not its job. */
+  readonly gate: (request: RequestRecord) => ResponseBody | null;
+  readonly method: string;
+  readonly params: () => JsonRecord;
+  readonly onReply: (reply: JsonRecord) => ResponseBody;
+  readonly onError: (message: string, native?: JsonRecord) => ResponseBody;
+  /** Arm a turn fallback that can take over and accept before the RPC settles. */
+  readonly onPending?: (accept: () => void) => void;
+}
+
+/**
+ * A control action backed by one app-server RPC: record the request; when the
+ * stream already says the runtime is unreachable (`kernel.unreachable()`:
+ * exited or disposed), or input is empty with no images, record that
+ * rejection without running the plan; if the
+ * plan's gate refuses, record that; otherwise send and record the reply AS
+ * the reply line is read (synchronously, through the client's onSettled hook)
+ * so the response sits in the stream before any notification codex wrote
+ * after it; a promise continuation would land after notifications from the
+ * same chunk.
+ */
+export async function rpcControl(
+  kernel: SessionKernel,
+  client: AppServerClient,
+  plan: RpcControlPlan,
+): Promise<ControlResult> {
+  const blocked = kernel.unreachable();
+  const request = kernel.request("toRuntime", plan.body);
+  const refused = blocked ?? emptyInputRefusal(plan.body) ?? plan.gate(request);
+  if (refused !== null) {
+    return { request, response: kernel.respond(request.id, refused) };
+  }
+  const { promise, resolve } = Promise.withResolvers<ResponseRecord>();
+  let recorded = false;
+  const record = (decided: ResponseBody): void => {
+    if (!recorded) {
+      recorded = true;
+      resolve(kernel.respond(request.id, decided));
+    }
+  };
+  plan.onPending?.(() => { record({ kind: "accepted" }); });
+  // A fallback answers independently of transport settlement. Keep observing
+  // the RPC: a late native reply remains a frame, never a second response.
+  const send = async (): Promise<void> => {
+    try {
+      await client.request(plan.method, plan.params(), (outcome) => {
+        if (recorded) {
+          const native = outcome.kind === "result" ? outcome.result : (outcome.kind === "error" ? outcome.native : undefined);
+          if (native !== undefined) { kernel.frame({ type: plan.method, native, events: [] }); }
+        } else if (outcome.kind === "exited") {
+          record({ kind: "rejected", code: "runtime_exited", reason: outcome.error.message });
+        } else {
+          record(outcome.kind === "result" ? plan.onReply(outcome.result) : plan.onError(outcome.error.message, outcome.native));
+        }
+      });
+    } catch (error) {
+      if (!recorded) { record(plan.onError(error instanceof Error ? error.message : String(error))); }
+    }
+  };
+  void send();
+  return { request, response: await promise };
+}
+
+/**
+ * A resume target codex keeps but will not open now, by its words on the
+ * `-32600` it shares with a missing rollout ([env] codex 0.162.0,
+ * experiments/codex-session-name.ts): the user archived it in their app, or
+ * another app-server (their app) is its writer.
+ */
+function unavailableReason(message: string): SessionUnavailableReason | null {
+  if (/^session \S+ is archived\./u.test(message)) {
+    return "archived";
+  }
+  return /^thread \S+ already has an active writer$/u.test(message) ? "in_use" : null;
+}
+
+/**
+ * The typed error for a resume codex refused, or null. Codex 0.162.0 uses
+ * -32600 for a missing rollout, an archived thread, an active writer and
+ * unloaded sub-agents alike, so its words are the last resort: the missing
+ * rollout's are pinned by missing-resume-errors.json, the other two by the
+ * codex-session-name vendor test.
+ */
+function resumeError(method: string, resumeId: string | undefined, cause: JsonRecord | null, message: string): Error | null {
+  const native = asRecord(cause?.native);
+  if (method !== "thread/resume" || resumeId === undefined || cause?.method !== method || native?.code !== -32_600 || typeof native.message !== "string") {
+    return null;
+  }
+  const text = `codex ${method} failed: ${message}`;
+  if (native.message.startsWith("no rollout found for thread id")) {
+    return new SessionNotFoundError(resumeId, text, { method, native });
+  }
+  const reason = unavailableReason(native.message);
+  return reason === null ? null : new SessionUnavailableError(resumeId, text, { reason, method, native });
+}
+
+/**
+ * The open RPCs, with their failure named after the method (a refused resume
+ * must say `thread/resume`: "no rollout found for thread id …" alone does
+ * not). The session opener owns process cleanup on every failure.
+ */
+export async function openThread(
+  method: "thread/start" | "thread/resume" | "thread/name/set",
+  send: () => Promise<JsonRecord>,
+  serviceTier?: string,
+  resumeId?: string,
+): Promise<JsonRecord> {
+  try {
+    return await send();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const typed = resumeError(method, resumeId, asRecord(error instanceof Error ? error.cause : undefined), message);
+    if (typed !== null) {
+      throw typed;
+    }
+    const detail = serviceTier === undefined ? message : `serviceTier ${serviceTier} could not be confirmed (actual unreported): ${message}`;
+    // oxlint-disable-next-line eslint/preserve-caught-error -- Keep the native diagnostic directly in cause, without another Error layer.
+    throw new Error(`codex ${method} failed: ${detail}`, { cause: error instanceof Error ? error.cause ?? error : error });
+  }
+}
+
+/** SessionOptions.name (#368) on the opened thread, when there is one to set (open.ts `codexThreadName`); a name codex refuses fails the open. */
+export async function nameThread(client: AppServerClient, threadId: string, name: string | null): Promise<void> {
+  if (name === null) {
+    return;
+  }
+  await openThread("thread/name/set", async () => {
+    const reply = await client.request("thread/name/set", { threadId, name });
+    return reply;
+  });
+}
