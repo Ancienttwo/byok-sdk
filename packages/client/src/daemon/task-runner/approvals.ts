@@ -6,7 +6,7 @@ import type { ApprovalDecision, ApprovalKind, ApprovalOrigin } from '../approval
 import { DAEMON_TASK_FAILURE } from '../task-failure';
 import type { ActiveTask } from './support';
 import type { TaskRunner } from '../task-runner';
-import { DEFAULT_APPROVAL_TIMEOUT_MS, MAX_PENDING_APPROVALS_PER_TASK } from '../task-runner';
+import { DEFAULT_APPROVAL_TIMEOUT_MS, MAX_PENDING_APPROVALS_PER_TASK } from './state';
 
 export async function requestApproval(
   this: TaskRunner,

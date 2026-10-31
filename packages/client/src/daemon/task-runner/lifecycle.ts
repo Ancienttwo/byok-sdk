@@ -8,7 +8,7 @@ import { MAX_TIMER_DELAY_MS } from '../../util/timer-delay';
 import type { ActiveTask } from './support';
 import { raceSettleFirst } from './support';
 import type { TaskRunner } from '../task-runner';
-import { DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS, MAX_DURATION_EXCEEDED_REASON_PREFIX, MAX_TRACKED_TASK_IDS } from '../task-runner';
+import { DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS, MAX_DURATION_EXCEEDED_REASON_PREFIX, MAX_TRACKED_TASK_IDS } from './state';
 
 export function stopAcceptingOffers(this: TaskRunner): void {
   this['stoppingOffers'] = true;

@@ -11,7 +11,7 @@ import type { ActiveTask } from './support';
 import { classifyToolCall, describeHighRiskToolCall } from '../../tool-authorization';
 import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage } from './support';
 import type { TaskRunner } from '../task-runner';
-import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from '../task-runner';
+import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
 
 export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> {
   try {

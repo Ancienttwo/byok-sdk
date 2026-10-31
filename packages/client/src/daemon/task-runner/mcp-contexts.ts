@@ -8,7 +8,7 @@ import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESU
 import type { AgentResultContext } from './support';
 import { freshHostToolsetContextToken } from './support';
 import type { TaskRunner } from '../task-runner';
-import { HOST_TOOLSET_CONTEXT_ENV } from '../task-runner';
+import { HOST_TOOLSET_CONTEXT_ENV } from './state';
 
 export function withAgentMessageMcp(
   this: TaskRunner,

@@ -74,7 +74,7 @@ export const AUDIT_LOG_TRIM_TARGET_LINES = 5000;
  * reach a terminal kind) accumulates one anchor per distinct taskId with no
  * upper bound, defeating `MAX_AUDIT_LOG_BYTES`'s own size cap and turning
  * every subsequent append into an ever-larger O(n) read + atomic-rewrite.
- * Mirrors `daemon/observer.ts`'s `MAX_TRACKED_TASKS`/`task-runner.ts`'s
+ * Mirrors `daemon/observer.ts`'s `MAX_TRACKED_TASKS`/`task-runner/state.ts`'s
  * `MAX_TRACKED_TASK_IDS` registries: bounded to a generously-sized "a
  * handful of genuinely concurrent tasks never gets close to this" cap, kept
  * the most RECENTLY-touched (by last-seen line index) and dropping the

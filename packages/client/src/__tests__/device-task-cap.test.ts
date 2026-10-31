@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
-import { MAX_DURATION_EXCEEDED_REASON_PREFIX } from '../daemon/task-runner';
+import { MAX_DURATION_EXCEEDED_REASON_PREFIX } from '../daemon/task-runner/state';
 import { TestServer } from './fixtures/test-server';
 import { until } from './fixtures/until';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';

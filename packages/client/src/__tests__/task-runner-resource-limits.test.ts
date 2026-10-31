@@ -7,12 +7,14 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import {
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
-  MAX_DURATION_EXCEEDED_REASON_PREFIX,
-  MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX,
-  ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX,
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
+import {
+  MAX_DURATION_EXCEEDED_REASON_PREFIX,
+  MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX,
+  ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX,
+} from '../daemon/task-runner/state';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 

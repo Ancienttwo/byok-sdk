@@ -30,7 +30,7 @@ import {
 } from '../../tool-authorization';
 import { fileScopeAdmission } from './file-scope-admission';
 import { mcpEventIdentities } from '../../mcp/event-identity';
-import { DEFAULT_APPROVAL_TIMEOUT_MS } from '../task-runner';
+import { DEFAULT_APPROVAL_TIMEOUT_MS } from './state';
 
 export interface OfferManifestInput
   extends Pick<OfferRequest, 'agentRef' | 'agentMemory' | 'preparation' | 'preparedMemorySelected' | 'readerAttempt' | 'sessionRef'>,
