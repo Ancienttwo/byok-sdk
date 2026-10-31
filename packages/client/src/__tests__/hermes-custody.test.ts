@@ -8,6 +8,7 @@ import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderPro
 import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { fakeHermesCommand } from './fixtures/fake-hermes-command';
+import { removeDirectoryWithRetry } from './support/cleanup-retry';
 import type { Session } from '../types';
 
 const dirs: string[] = [];
@@ -18,7 +19,7 @@ const fakeKey = 'fake-custody-test-key';
 const windows = process.platform === 'win32';
 afterEach(async () => {
   await Promise.all(sessions.splice(0).map(session => session.close()));
-  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0)) await removeDirectoryWithRetry(dir);
 });
 async function setup() {
   // Short POSIX path for the gateway's Unix socket; Windows uses a named pipe.
