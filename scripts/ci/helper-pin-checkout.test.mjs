@@ -7,7 +7,9 @@ import test from 'node:test';
 import { selectImpact } from './select-impact.mjs';
 
 const pin = 'packages/client/src/util/agent-memory-helper-release-pin.ts';
+const oldPin = 'packages/client/src/daemon/agent-memory-helper-release-pin.ts';
 const rule = `${pin} text eol=lf\n`;
+const previousRule = `${oldPin} text eol=lf\n`;
 const attributes = readFileSync(new URL('../../.gitattributes', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 function fixture(t, attrs) {
@@ -43,6 +45,25 @@ test('only the exact helper pin LF attribute addition selects client and release
   }
   for (const after of [before + '* text eol=lf\n', before + rule + '*.ts -text\n',
     before + rule.replace('eol=lf', 'eol=crlf'), before.replace('vendor/** -text', 'vendor/** text') + rule]) {
+    writeFileSync(join(cwd, '.gitattributes'), after);
+    assert.throws(() => selectImpact(['.gitattributes'], context), /reviewed|release validation/i);
+  }
+});
+
+test('only the exact daemon-to-util helper pin LF move selects client and release packaging', t => {
+  const before = attributes.replace(rule, previousRule);
+  const { cwd, base } = fixture(t, before);
+  const context = { cwd, base };
+  const moved = before.replace(previousRule, rule);
+  writeFileSync(join(cwd, '.gitattributes'), moved);
+  const plan = selectImpact(['.gitattributes'], context);
+  assert.ok(plan.dirs.includes('packages/client'));
+  for (const id of ['agent-memory-helper', 'agent-memory-helper-non-darwin', 'npm-release-pack']) {
+    assert.ok(plan.families.includes(id), id);
+  }
+  for (const after of [before + rule, moved + '* text eol=lf\n',
+    moved.replace(rule, rule.replace('eol=lf', 'eol=crlf')),
+    moved.replace('vendor/** -text', 'vendor/** text')]) {
     writeFileSync(join(cwd, '.gitattributes'), after);
     assert.throws(() => selectImpact(['.gitattributes'], context), /reviewed|release validation/i);
   }
