@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Security (build and test toolchain; #1122)** — clears the ten remaining
+  lockfile advisories: `glob` 13.0.6 → 14.0.2 (GHSA-3g3m-2fjr-6pw4),
+  `minimatch` 10.2.6 → 11.0.1 (GHSA-g3hv-75wg-m249) and `undici` 8.10.2 →
+  8.12.3 (GHSA-2m5v-pch6-74hx, GHSA-4qv8-2p9j-2685, GHSA-4w7w-5xrc-9h26,
+  GHSA-55wc-3pg8-jfw6, GHSA-9fm3-97px-rjf6, GHSA-f72v-6w45-q472,
+  GHSA-qrxm-fqhp-jwvm and GHSA-xjj6-f33q-929c). They are held by the dev-only
+  `sigstore` chain and by exact pins inside `@earendil-works/pi-coding-agent`
+  1.4.0, so the root manifest carries three overrides; Bun writes scoped
+  overrides as lockfile format v3, so `undici` is a top-level override. It
+  also moves `miniflare`'s copy from 7.30.1 to 8.12.3; wrangler's worker
+  dry-run and packaging checks pass. The accepted commit-pinned OAR coverage
+  gap is unchanged, so the scheduled workflow still exits non-zero on that
+  gap by design until an owner decides otherwise.
+
 - **Security (build and test toolchain)** — `bun.lock` moves to lockfile
   format v2 and clears the four dev advisories that format-v1 records pinned in
   place: `esbuild` 0.27.7 → 0.28.1 (GHSA-g7r4-m6w7-qqqr), `postcss` 8.5.19 →
