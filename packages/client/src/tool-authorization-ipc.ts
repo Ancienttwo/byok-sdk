@@ -4,7 +4,10 @@ import type { IncomingMessage } from 'node:http';
 import { isAbsolute } from 'node:path';
 import type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationVerdict, ToolCall } from './tool-authorization';
 import type { FileScopeGrant } from './file-scope-guard';
-import { FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS, type FileScopeGuardCode, type FileScopeGuardReason } from './file-scope-types';
+import {
+  FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS, SCOPED_FILE_TOOL_NAMES,
+  type FileScopeGuardCode, type FileScopeGuardReason,
+} from './file-scope-types';
 import type { ScopedFileDenial } from './file-scope-tools';
 import { fileScopeGateBinding } from './file-scope-gate-binding';
 
@@ -67,7 +70,6 @@ function parseCall(value: unknown): ToolCall {
   };
 }
 
-const SCOPED_TOOL_NAMES: readonly string[] = Object.freeze(['read', 'write', 'edit']);
 const FILE_SCOPE_ACCESS: readonly string[] = Object.freeze(['read', 'write']);
 
 function boundedText(value: unknown, max: number): string | undefined {
@@ -81,7 +83,7 @@ function parseFileScopeDenial(value: unknown): ScopedFileDenial {
     throw new Error('invalid file scope denial');
   }
   const toolName = boundedText(value.toolName, 128);
-  if (toolName === undefined || !SCOPED_TOOL_NAMES.includes(toolName)) throw new Error('invalid file scope denial tool');
+  if (toolName === undefined || !(SCOPED_FILE_TOOL_NAMES as readonly string[]).includes(toolName)) throw new Error('invalid file scope denial tool');
   if (typeof value.code !== 'string' || !(FILE_SCOPE_GUARD_CODES as readonly string[]).includes(value.code)) {
     throw new Error('invalid file scope denial code');
   }

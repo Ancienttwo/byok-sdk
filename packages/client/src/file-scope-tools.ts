@@ -10,16 +10,12 @@ import {
   type FileScopeTargetGrant,
 } from './file-scope-guard';
 import type { FileScopeGuardCode, FileScopeGuardReason } from './file-scope-guard';
+import { isScopedFileToolName, type ScopedFileToolName } from './file-scope-types';
 import type { ToolFileAccess } from './tool-authorization';
 
-/** The only file tools this first scoped slice replaces. */
-export const SCOPED_FILE_TOOL_NAMES = Object.freeze(['read', 'write', 'edit'] as const);
-export type ScopedFileToolName = (typeof SCOPED_FILE_TOOL_NAMES)[number];
-
-const SCOPED_FILE_TOOL_NAME_SET: ReadonlySet<string> = new Set(SCOPED_FILE_TOOL_NAMES);
-export function isScopedFileToolName(value: string): value is ScopedFileToolName {
-  return SCOPED_FILE_TOOL_NAME_SET.has(value);
-}
+export {
+  SCOPED_FILE_TOOL_NAMES, isScopedFileToolName, type ScopedFileToolName,
+} from './file-scope-types';
 
 const MAX_READ_BYTES = 1_000_000;
 const MAX_EDIT_BYTES = 10_000_000;

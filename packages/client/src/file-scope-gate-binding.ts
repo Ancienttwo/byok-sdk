@@ -1,6 +1,7 @@
 import type { ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane } from './tool-authorization';
 import type { FileScopeGrant } from './file-scope-guard';
 import type { ScopedFileDenial } from './file-scope-tools';
+import { SCOPED_FILE_TOOL_NAMES } from './file-scope-types';
 
 /**
  * The internal companion of one per-task auto gate. The daemon resolves the
@@ -20,8 +21,22 @@ export interface FileScopeGateBinding {
 
 const bindings = new WeakMap<ToolAuthorizationGate, FileScopeGateBinding>();
 
+/**
+ * The private brand the gate's own module reads. It lives on the `authorize`
+ * function because the gate object is frozen when it is returned; the function
+ * is not, and it is the exact object whose decisions the brand scopes. Both
+ * sides use the same registered symbol, so no module import is required.
+ */
+const FILE_SCOPE_GATE_MARKER = Symbol.for('byok.tool-authorization.file-scope-tools');
+
 export function bindFileScopeGate(gate: ToolAuthorizationGate, binding: FileScopeGateBinding): void {
   bindings.set(gate, Object.freeze({ ...binding }));
+  const authorize = gate.authorize as unknown as Record<symbol, unknown>;
+  if (authorize[FILE_SCOPE_GATE_MARKER] === undefined) {
+    Object.defineProperty(gate.authorize, FILE_SCOPE_GATE_MARKER, {
+      value: SCOPED_FILE_TOOL_NAMES, enumerable: false, configurable: false, writable: false,
+    });
+  }
 }
 
 export function fileScopeGateBinding(gate: ToolAuthorizationGate): FileScopeGateBinding | undefined {

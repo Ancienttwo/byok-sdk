@@ -194,6 +194,11 @@ and a static tool-authorization policy in `toolAuthorization`:
 - Static `auto` requires the runtime's `toolAuthorizationAuto` capability.
   Codex has none: set it to `all` (as above), or remove it from
   `runtimeAllowlist`.
+- `toolAuthorization.fileScope` (ordinary Pi RPC on darwin/linux) limits the
+  SDK `read`/`write`/`edit` tools to the Agent home plus explicit roots.
+  Other tools are outside that boundary and ask on every call; opt one out
+  deliberately with an `allowWithoutAsking` rule (exact tool name, bash
+  command glob, or trusted MCP identity). It is not an OS sandbox.
 - An embedded Host may pass a function instead of the static policy; a config
   file cannot.
 

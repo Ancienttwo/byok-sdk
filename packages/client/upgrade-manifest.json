@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "5a0836988d6dd39898a8db0618dde723470a7857dc6e8a96f5aef848863e9c97"
+    "snapshotSha256": "0d2a8ca77ab177b16e64129d22bc2d8c1ac9173cfafa667181fd37a27ddffb7c"
   },
   "configFields": {
     "status": "tracked",
@@ -90,7 +90,7 @@
     {
       "id": "tool-authorization-rules",
       "impact": "additive",
-      "summary": "Add task-level tool authorization rules and decision metadata. Claude MCP selectors use the shared trusted runtime identity observation within the callback deadline; custom ToolAuthorizationGate wrappers must forward the optional identity resolver to preserve MCP policy enforcement.",
+      "summary": "Add task-level tool authorization rules and decision metadata. Claude MCP selectors use the shared trusted runtime identity observation within the callback deadline; custom ToolAuthorizationGate wrappers must forward the optional identity resolver to preserve MCP policy enforcement. In a toolAuthorization.fileScope session the auto gate also asks on every call for every tool outside the SDK read/write/edit file boundary (bash, MCP and extension tools), regardless of the built-in risk level; an allowWithoutAsking rule (exact tool name, command glob, or trusted MCP identity) is the only opt-out, a denial never executes and records the closed reason outside-file-scope, and the approval summary names the concrete command/tool identity.",
       "migration": "docs/spec.md#tool-authorization-auto-and-all-1061",
       "items": [
         "export:@byok-sdk/client#DaemonEvent",

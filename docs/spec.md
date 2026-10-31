@@ -4044,7 +4044,10 @@ it never runs ungated, and no third mode exists. Current coverage:
 Classification is one function (`classifyToolCall`) used by both modes. The
 precedence is **Always Ask > sensitive-path floor > Allow without Asking >
 built-in classifier**. There is no deny rule. A floor still permits approval of
-this one call; it prevents an automatic allow rule from bypassing approval.
+this one call; it prevents an automatic allow rule from bypassing approval. A
+file-scoped session adds a scope floor after Allow: every tool outside the
+three SDK file tools asks unless an Allow rule matched, so the built-in
+classifier never auto-allows it.
 Always Ask and Allow each match any rule in their list; fields within a rule
 must all match. A rule has a unique nonblank `id`, optional display-only
 `description`, and a nonempty `match` with these optional selectors:
@@ -4151,11 +4154,21 @@ re-verifies every serialized root and refuses to open a session whose
 registered loadout drifts. Every configured root is also revalidated after
 claim and before the runtime starts. The session never falls back to an
 unscoped run; Windows, prepared/durable Pi and other adapters decline before
-claim. This is a file-tool boundary for those three tools, not an OS sandbox:
-`bash`, MCP servers, user extensions and (in this slice) subagents are not
-covered, the guard is canonical check-then-open using Node built-ins, and it
-is not race-free against same-user processes. The loopback gate token is
-inherited by SDK child sessions and does not isolate against same-user code.
+claim. Inside that session the `auto` gate asks on every call for any tool
+outside the three SDK file tools — `bash`, MCP tools, and SDK or user
+extension tools — regardless of the built-in risk level, so no risk heuristic
+can auto-allow one. An `allowWithoutAsking` rule is the only opt-out: an exact
+`toolName`, a `commandGlob` over the whole shell command, or trusted
+`mcpServer`/`mcpTool` identity. A denied out-of-scope call is the tool's
+`tool_authorization_denied` result, never executes, and its local
+`tool-authorization` decision records the closed reason `outside-file-scope`;
+the approval summary names the concrete tool and, when present, the shell
+command/path and trusted MCP server/tool. This is a file-tool boundary for
+those three tools, not an OS sandbox: `bash`, MCP servers, user extensions
+and (in this slice) subagents are not covered, the guard is canonical
+check-then-open using Node built-ins, and it is not race-free against
+same-user processes. The loopback gate token is inherited by SDK child
+sessions and does not isolate against same-user code.
 
 ## Daemon configuration contract (#1094)
 
