@@ -11,6 +11,13 @@ const read = (cwd, dir) => JSON.parse(readFileSync(resolve(cwd, dir, 'package.js
 const specs = record => Object.assign({}, ...fields.map(field => record?.[field] ?? {}));
 const external = (name, spec) => typeof spec === 'string' && spec.length > 0
   && !name.startsWith('@byok-sdk/') && !/^(workspace:|file:|link:)/.test(spec);
+// A new root override is outward-facing dependency data only when it names a
+// plain external package and pins an exact version or a bounded range. Nested
+// (parent>child/object), workspace, file:, link:, npm: and private overrides
+// still fall through to the reviewed-content deep comparison.
+const overrideName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
+const overrideVersion = /^(?:[~^]\s*)?(?:[<>]=?|=)?\s*v?\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const externalOverride = (name, spec) => external(name, spec) && overrideName.test(name) && overrideVersion.test(spec.trim());
 
 function workspaces(cwd) {
   return ['packages', 'examples'].flatMap(prefix => existsSync(resolve(cwd, prefix))
@@ -36,6 +43,14 @@ export function normalizeDependencyVersions(before, after, path, cwd) {
         after[field][name] = previous;
         changed = true;
       }
+    }
+  }
+  if (path === 'package.json' && after.overrides !== undefined) {
+    for (const [name, spec] of Object.entries(after.overrides)) {
+      if (Object.hasOwn(before.overrides ?? {}, name) || !externalOverride(name, spec)) continue;
+      before.overrides ??= {};
+      before.overrides[name] = spec;
+      changed = true;
     }
   }
   if (!changed) return [];

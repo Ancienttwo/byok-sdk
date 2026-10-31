@@ -53,6 +53,9 @@
     "@earendil-works/pi-tui": "1.4.0",
     "@earendil-works/pi-codemode": "1.4.0",
     "@earendil-works/pi-mcp": "1.4.0",
-    "@earendil-works/pi-durable": "1.4.0"
+    "@earendil-works/pi-durable": "1.4.0",
+    "glob": "14.0.2",
+    "minimatch": "11.0.1",
+    "undici": "8.12.3"
   }
 }

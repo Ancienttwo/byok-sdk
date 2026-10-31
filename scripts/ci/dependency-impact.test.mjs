@@ -30,6 +30,12 @@ function fixture(t) {
   return { cwd, base: git('rev-parse', 'HEAD'), root, client, ui, lock, write };
 }
 
+function commit(cwd, message) {
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qm', message], { cwd, stdio: 'pipe' });
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
+}
+
 test('never-listed dependency upgrade creates a build/typecheck/test and platform plan', t => {
   const f = fixture(t);
   f.client.dependencies['new-library'] = '2.0.0';
@@ -146,4 +152,55 @@ test('unchanged format and dependency-only changes retain their existing scope r
   assert.equal(plan.mode, 'targeted');
   assert.deepEqual(plan.dirs, ['examples/live-activity-host', 'packages/ui-runtime']);
   assert.deepEqual(plan.families, ['npm-release-pack']);
+});
+
+test('a new external root override is reviewed dependency data, not a mapping failure', t => {
+  const f = fixture(t);
+  f.root.overrides = { compiler: '2.0.0' };
+  f.lock.overrides = { compiler: '2.0.0' };
+  f.write('package.json', f.root); f.write('bun.lock', f.lock);
+  const plan = selectImpact(['package.json', 'bun.lock'], f);
+  assert.ok(plan.dirs.includes('packages/client'));
+  assert.ok(plan.dirs.includes('packages/ui-runtime'));
+  assert.ok(plan.families.includes('npm-release-pack'));
+});
+
+test('new root overrides of workspaces, file/link specs or private names still fail closed', t => {
+  for (const [name, spec] of [
+    ['@byok-sdk/client', '2.0.0'],
+    ['compiler', 'workspace:*'],
+    ['compiler', 'file:../compiler'],
+    ['compiler', 'link:../compiler'],
+    ['compiler', { nested: '2.0.0' }],
+    ['compiler', 'latest'],
+    ['compiler@>=2', '2.0.0'],
+  ]) {
+    const f = fixture(t);
+    f.root.overrides = { [name]: spec };
+    f.lock.overrides = { [name]: spec };
+    f.write('package.json', f.root); f.write('bun.lock', f.lock);
+    assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields/, name + '=' + JSON.stringify(spec));
+  }
+});
+
+test('a changed existing root override remains reviewed dependency data', t => {
+  const f = fixture(t);
+  f.root.overrides = { compiler: '1.0.0' };
+  f.lock.overrides = { compiler: '1.0.0' };
+  f.write('package.json', f.root); f.write('bun.lock', f.lock);
+  f.base = commit(f.cwd, 'baseline override');
+  f.root.overrides.compiler = '2.0.0';
+  f.lock.overrides.compiler = '2.0.0';
+  f.write('package.json', f.root); f.write('bun.lock', f.lock);
+  const plan = selectImpact(['package.json', 'bun.lock'], f);
+  assert.ok(plan.dirs.includes('packages/client') && plan.dirs.includes('packages/ui-runtime'));
+  assert.ok(plan.families.includes('npm-release-pack'));
+});
+
+test('lock overrides still must equal the root manifest', t => {
+  const f = fixture(t);
+  f.root.overrides = { compiler: '2.0.0' };
+  f.lock.overrides = { compiler: '1.0.0' };
+  f.write('package.json', f.root); f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /lock overrides differ from root manifest/);
 });

@@ -656,6 +656,7 @@
         "@earendil-works/pi-mcp",
         "@earendil-works/pi-telemetry",
         "@earendil-works/pi-tui",
+        "@isaacs/nonrecursive-glob-match",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
         "balanced-match",
@@ -775,11 +776,6 @@
         {
           "file": "@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
           "line": 18,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/auth/context.js",
-          "line": 10,
           "rule": "opaque import()"
         },
         {
@@ -932,6 +928,7 @@
         "@earendil-works/pi-mcp",
         "@earendil-works/pi-telemetry",
         "@earendil-works/pi-tui",
+        "@isaacs/nonrecursive-glob-match",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
         "balanced-match",
@@ -1052,11 +1049,6 @@
         {
           "file": "@earendil-works/pi-ai/dist/api/bedrock-converse-stream.lazy.js",
           "line": 18,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "@earendil-works/pi-ai/dist/auth/context.js",
-          "line": 10,
           "rule": "opaque import()"
         },
         {
