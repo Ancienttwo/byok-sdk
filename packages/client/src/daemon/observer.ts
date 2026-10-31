@@ -253,7 +253,7 @@ function terminalTaskPatch(envelope: Envelope): TerminalTaskPatch | undefined {
 }
 
 /**
- * M3-B parity (see `task-runner.ts`'s `MAX_TRACKED_TASK_IDS` doc comment,
+ * M3-B parity (see `task-runner/state.ts`'s `MAX_TRACKED_TASK_IDS` doc comment,
  * same rationale): this daemon is meant to run as a long-lived background
  * service, so a per-task registry that only ever grows is a slow memory
  * leak. Only TERMINAL entries (`Complete`/`Failed`/`Cancelled`) are ever

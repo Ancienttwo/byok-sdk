@@ -17,12 +17,14 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { testRuntimeEnv } from './fixtures/runtime-env';
 import {
-  PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX,
-  PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX,
-  RESULT_NOT_SUBMITTED_REASON_PREFIX,
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
+import {
+  PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX,
+  PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX,
+  RESULT_NOT_SUBMITTED_REASON_PREFIX,
+} from '../daemon/task-runner/state';
 import {
   InputPreparationStore,
   type CounterReservationInput,

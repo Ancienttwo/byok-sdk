@@ -12,7 +12,7 @@ import type { AgentResultRecord } from '../agent-result-store';
 import type { ActiveTask } from './support';
 import { AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS, isKnownRuntimeId, terminalUsageNumber, errorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
-import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS, RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from '../task-runner';
+import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS, RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './state';
 
 export function terminalInferenceUsagePayload(this: TaskRunner, active: ActiveTask): { usage?: TerminalInferenceUsage } {
   const release = this['deps'].localAgentRelease;

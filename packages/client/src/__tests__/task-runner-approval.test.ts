@@ -6,11 +6,13 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import {
-  DEFAULT_APPROVAL_TIMEOUT_MS,
-  MAX_PENDING_APPROVALS_PER_TASK,
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
+import {
+  DEFAULT_APPROVAL_TIMEOUT_MS,
+  MAX_PENDING_APPROVALS_PER_TASK,
+} from '../daemon/task-runner/state';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';

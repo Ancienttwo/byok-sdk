@@ -29,7 +29,7 @@ import { AgentMessageOutbox } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
 import type { ApprovalKind } from '../approvals';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
-import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from '../task-runner';
+import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
 import type { OfferAdmissionTiming } from './offer-admission-timing';
 
 /**

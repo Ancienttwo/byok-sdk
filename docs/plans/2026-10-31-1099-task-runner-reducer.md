@@ -473,8 +473,8 @@ export interface EffectRequires {
 
 | Effect | Mode | 完成事件 | 失败映射 |
 | --- | --- | --- | --- |
-| `decline` | atomic | 无（send 同步） | send throw：按当前 `handleOffer` finally 清理；不改终态（见 OD6） |
-| `journal.admission` | barrier | `claim.journaled` | `claim.journal_failed`；当前会抛出，OD6 |
+| `decline` | atomic | 无（send 同步） | send throw：保持当前抛出、不 decline；按当前 `handleOffer` finally 清理；见 follow-up #1217 |
+| `journal.admission` | barrier | `claim.journaled` | `claim.journal_failed`；保持当前抛出、不 decline；见 follow-up #1217 |
 | `open.preparation` | barrier | `admission.stage(preparation)` | `admission.declined`: `preparation_store_unavailable` false |
 | `reserve.home` | barrier | `admission.stage(home)` | `admission.declined`: busy/resolution，按现有 code/retryable |
 | `acquire.lease` | barrier | `admission.stage(workspace)` | `admission.declined`: lease/handoff/reader/outbox/store |
@@ -488,7 +488,7 @@ export interface EffectRequires {
 | `transfer.startup` | atomic | `startup.transferred` | 不适用 |
 | `release.deviceSlot` | atomic | 无 | 不适用 |
 | `send.claim` | atomic | `claim.sent` | 同 `decline` 的 send throw |
-| `send.terminal` | atomic | `terminal.sent` | send throw：记录并保留 envelope；OD6 |
+| `send.terminal` | atomic | `terminal.sent` | send throw：记录并保留 envelope；保持当前抛出、不 decline；见 follow-up #1217 |
 | `mark.finished` | atomic | 无 | 加入 bounded `RunnerState.finished` |
 | `flush.batcher` | atomic | 无 | batcher 超限 → `resource.exceeded` |
 | `stop.batcher` | atomic | 无 | 不适用 |
@@ -627,7 +627,7 @@ stage 失败映射（O5 的 reason/retryable/code 来源）：
 | C6 | `runtime.started`（带 cancel） | `ph=claimed`；`cx.requested` | `ph=terminalizing`；`tm={cancelled, reason:cx.reason}`；`td.batcher=stopped` | `!`[transfer.startup, register.active, start.pump]；`barrier`[revoke.contexts, stop.batcher, abort.blob, interrupt, persist.evidence, prepare.envelope] | 不发 `task.started`；这是 checkpoint 2（`offer-activation.ts:162-177`）。 |
 | C7 | `runtime.start_failed` | `ph=claimed` 或 `claiming` | 有 cx：`ph=terminalizing`，`tm=cancelled`；无 cx：`tm=failed` | `barrier`[register.startup_owner, dispose.startup, send.cancelled 或 failClaimedAgent]；`bestEffort`[release…] | 有 cx 时发送 `task.cancelled`（`offer-launch.ts:456-502`）；否则 `failClaimedAgent` retryable 取 failure/stoppingOffers。 |
 | C8 | `runtime.activation_failed` | `ph=claimed` | `ph=terminalizing`；`tm={failed, reason, retryable:false}` | `barrier`[failClaimedAgent, persist.handoff evidence]；`bestEffort`[release…] | bind/handoff/message 失败一律 false；startup owner 保留到 cleanup。 |
-| C9 | `claim.journal_failed` | `ph=claiming`；`!cl.sent` | 当前建议 `ph=declined`，retryable true | `!`[send.decline]；cleanup | **OD6**：当前 `beforeClaim` 抛错会逃出 `handleOffer`，不 decline；本设计建议归一为 retryable decline，需 owner 批准。 |
+| C9 | `claim.journal_failed` | `ph=claiming`；`!cl.sent` | 保持当前抛出，不改 phase（不 decline） | 无（异常继续逃出 `handleOffer`） | **OD6**：保持当前抛出、不 decline；归一为 retryable decline 见 follow-up [#1217](https://github.com/Ancienttwo/byok-sdk/issues/1217)。 |
 
 ### 7.4 Approval
 
@@ -657,7 +657,7 @@ A6/A7 同时覆盖 timeout 与 registry eviction：定时器/eviction 调 `appro
 | T5 | `terminal.requested`（重复） | `tm !== undefined` | 无 | `!`[audit.stale-terminal] | first-terminal-wins；不重算 reason、不重发。 |
 | T6 | `terminal.evidence` | `ph=terminalizing`；token 匹配 | `tm.evidence='ok'/'degraded'` | `barrier`[prepare.envelope] | degraded 仍继续（`terminal-evidence.ts:143-147`）；重试由 evidence effect 内部 3 次。 |
 | T7 | `terminal.envelope_ready` | token 匹配；`tm.evidence !== 'none'` | `tm.envelope='ready'`；`tm.stage='envelope'` | `!`[send.terminal]；执行器同 turn 入队 `terminal.sent` | materializer 只构建一次；失败 → T8。 |
-| T8 | `terminal.envelope_failed` | token 匹配 | `tm.envelope='none'`；保持 terminalizing | `!`[log]；可选 retry once（保持现有行为：build 失败会抛，OD6） | 不重新选择终态；不得换 reason。 |
+| T8 | `terminal.envelope_failed` | token 匹配 | `tm.envelope='none'`；保持 terminalizing | `!`[log]；保持当前抛出、不 decline（build 失败会抛）；见 follow-up #1217 | 不重新选择终态；不得换 reason。 |
 | T9 | `terminal.sent` | token 匹配；envelope='ready' | `tm.stage='sent'`；`ph=retiring` | `!`[mark.finished]；`barrier`[await.close（close receipt）] | 发完才 close；重复 sent → drop；`mark.finished` 对应 `finishOnce` 顶部的 `addFinishedTaskId`。 |
 | T10 | `terminal.close`（ok） | token 匹配；stage='sent' | `td.close='settled'` | `barrier`[await.terminal_commit] | close 失败 → T11。 |
 | T11 | `terminal.close`（fail） | token 匹配 | `td.close='failed'`；保持 retiring | `!`[report.disposalFailure, audit]；不产生新终态 | 保留 active/lease 所有权；`retry.finalization` 只重试 close，不重发 terminal（`finish.ts:145-146`）。 |
@@ -822,9 +822,9 @@ shutdown 期间的 offer 不单列：仍走 O1，最后在 limits 阶段由 O5 d
 
 ### S2 — 常量下沉与 SCC 清零（唯一改 baseline 的切片）
 
-- 把 `task-runner.ts:110-261` 的模块常量/reason 前缀移入 `state.ts`；`task-runner.ts` 以 `export { … } from './task-runner/state'` 保留原有导出名；7 个阶段文件改从 `state.ts` 导入。
-- SCC 消失；baseline 删除 34 条 `cycle:` 条目，43 → 9（8 条 diagnostics/bin + 1 条 manifest）。不新增行。
-- api-surface：有效导出集不变；closure budget 不变；golden 新增 `state.d.ts` section（OD2）。TaskRunner 成员段不变。后续切片若调整 State 类型，`state.d.ts` 内部内容会 churn，但不改公开导出。
+- 把 `task-runner.ts` 的 13 个模块常量/reason 前缀（含 `:627` 的 `HOST_TOOLSET_CONTEXT_ENV`，不只是 `:110-261`）移入 `state.ts`；`task-runner.ts` 自身用到的常量从 `state.ts` 导入，不留 re-export 别名；`index.ts` 的两个公开常量改为直接从 `state.ts` 导出；7 个阶段文件改从 `state.ts` 导入。
+- SCC 消失；baseline 删除 34 条 `cycle:` 条目，35 → 1（#1213 已删除 8 条 diagnostics/bin；只剩 1 条 manifest）。不新增行。
+- api-surface：有效导出集不变；closure budget 不变；golden 新增 `state.d.ts` section（OD2）。S2 后 `task-runner.ts` 不再是公开 entry 的声明可达模块（旧 golden 里唯一指向它的是 `index.ts` 的两个常量 re-export），所以 `task-runner.d.ts` 及其 6 个 type-only 依赖 section 退出 golden；这是内部 section 随可达性迁移，不是公开 API 变化。后续切片若调整 State 类型，`state.d.ts` 内部内容会 churn，但不改公开导出。
 - 测试：不改断言；跑 23 个 `task-runner-*` + `handle-offer-characterization`；`node --test scripts/architecture/dependency-graph.test.mjs`；`check:api-surface`。
 - 退出：`dependency-baseline.json` 无 task-runner 条目；无新增边；build/typecheck/api 绿。
 - 说明：S2 单独就能完成 issue 的“清环”目标；S1+S2 可以先合并，不等后续 reducer 接线。
@@ -844,7 +844,7 @@ shutdown 期间的 offer 不单列：仍走 O1，最后在 limits 阶段由 O5 d
 - 替换 `offer-launch.ts` 的 claim/start 决策、`offer-activation.ts` 的 checkpoint 2/started/注册、`lifecycle.ts` 的 cancel 分支。IO 保持。
 - 新测试：claim 边界矩阵、checkpoint 2、start-failure+cancel、startup dispose。
 - oracle：`cancel-race`、`cancel-native`、`close-receipt`、`shutdown-startup`、`offer-scratch`、`daemon-task-loop` cancel 行。
-- baseline/api-surface：baseline 无变化；公开导出/closure/budget 不变；TaskRunner 成员不变；`state.d.ts` 内部类型可 churn。
+- baseline/api-surface：baseline 无变化；公开导出/closure/budget 不变；`state.d.ts` 内部类型可 churn。
 
 ### S5 — approval
 
@@ -861,7 +861,7 @@ shutdown 期间的 offer 不单列：仍走 O1，最后在 limits 阶段由 O5 d
 - 删除 legacy 权威字段（`semanticTerminal`、`beingTornDown`、`finalizationStarted`、`pendingMessageCompletion` 等），保留 `ActiveTask` 句柄与 IO。
 - 新测试：终态竞态矩阵、close/commit 失败重试、shutdown 顺序、message accepted/refused/cancel 三态。
 - oracle：`shutdown`、`runtime-failure`、`resource-limits`、`execution-record`、`terminal-inference-usage`、`cancel-usage`、`final-message`、`event-spill`、`close-receipt`、`cancel-durability`、`agent-message-completion-gate`、`journal-integration`、`outbound-settlement`。
-- baseline/api-surface：baseline 无变化；公开导出/closure/budget 不变；TaskRunner 成员段不变（state host 在 WeakMap）；`state.d.ts` 内部类型可 churn。
+- baseline/api-surface：baseline 无变化；公开导出/closure/budget 不变；`state.d.ts` 内部类型可 churn。
 
 ### 切片独立性
 

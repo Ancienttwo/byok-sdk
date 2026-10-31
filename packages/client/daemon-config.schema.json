@@ -1391,7 +1391,7 @@
     },
     "maxTaskOutputBytes": {
       "type": "number",
-      "description": "M5 batch-3 (workstream 2): caps accumulated (approximate,\nserialized-event-length) agent-event output bytes this daemon will\ntolerate for a single task before tearing it down as a resource-limit\nviolation (`task.fail`, `retryable: false`, reason prefixed\n`resource limit exceeded: maxTaskOutputBytes` — see\n`MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX`, `task-runner.ts`) — see\n`TaskRunner.pump`'s own doc comment for exactly what's counted and what\nisn't. Default DEFAULT_MAX_TASK_OUTPUT_BYTES (64 MiB) when\nunset.\n\n`0` or a negative number is a config validation error, thrown\nsynchronously from `createDaemonWithAdapters`/`createDaemon` — NOT a\nsupported way to disable the cap. Pass `Number.POSITIVE_INFINITY`\nexplicitly instead to opt out of enforcement altogether."
+      "description": "M5 batch-3 (workstream 2): caps accumulated (approximate,\nserialized-event-length) agent-event output bytes this daemon will\ntolerate for a single task before tearing it down as a resource-limit\nviolation (`task.fail`, `retryable: false`, reason prefixed\n`resource limit exceeded: maxTaskOutputBytes` — see\n`MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX`, `task-runner/state.ts`) — see\n`TaskRunner.pump`'s own doc comment for exactly what's counted and what\nisn't. Default DEFAULT_MAX_TASK_OUTPUT_BYTES (64 MiB) when\nunset.\n\n`0` or a negative number is a config validation error, thrown\nsynchronously from `createDaemonWithAdapters`/`createDaemon` — NOT a\nsupported way to disable the cap. Pass `Number.POSITIVE_INFINITY`\nexplicitly instead to opt out of enforcement altogether."
     },
     "artifactLimits": {
       "type": "object",

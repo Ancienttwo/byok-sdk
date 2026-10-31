@@ -23,10 +23,10 @@ import { AgentReliableSpool } from '../daemon/agent-egress-spool';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import {
-  AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS,
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
+import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS } from '../daemon/task-runner/state';
 import { sealRuntimeOperationManifest } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';

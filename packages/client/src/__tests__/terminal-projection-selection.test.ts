@@ -10,10 +10,10 @@ import { AGENT_RESULT_DIRECTORY, AgentResultStore } from '../daemon/agent-result
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import {
-  RESULT_NOT_SUBMITTED_REASON_PREFIX,
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
+import { RESULT_NOT_SUBMITTED_REASON_PREFIX } from '../daemon/task-runner/state';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';

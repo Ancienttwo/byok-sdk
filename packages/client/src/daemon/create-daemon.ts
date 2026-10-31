@@ -382,7 +382,7 @@ export interface DaemonConfig {
    * tolerate for a single task before tearing it down as a resource-limit
    * violation (`task.fail`, `retryable: false`, reason prefixed
    * `resource limit exceeded: maxTaskOutputBytes` — see
-   * `MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX`, `task-runner.ts`) — see
+   * `MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX`, `task-runner/state.ts`) — see
    * `TaskRunner.pump`'s own doc comment for exactly what's counted and what
    * isn't. Default {@link DEFAULT_MAX_TASK_OUTPUT_BYTES} (64 MiB) when
    * unset.
