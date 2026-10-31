@@ -205,6 +205,14 @@ export function expectDetectedVersion(
   expect(typeof result.version).toBe('string');
   expect(identifies(result.version!, target.expectedVersion), `detected ${JSON.stringify(result.version)}, expected ${target.expectedVersion}`).toBe(true);
   const qualified = identifies(result.version!, target.qualifiedVersion);
+  // #1103: every bundled adapter reports the effective policy verdict. A
+  // qualified token is an allow; an unqualified one is a warn exactly where the
+  // adapter has the legacy advisory (Codex/Grok/Hermes), and an allow for
+  // Claude/Pi whose default policy admits everything. A Host block never
+  // applies to these fixture adapters.
+  expect(result.versionVerdict, 'detect() must report the effective version policy verdict').toBeDefined();
+  expect(result.versionVerdict?.qualifiedVersion).toBe(target.qualifiedVersion);
+  expect(result.versionVerdict?.state).toBe(qualified || !advisory ? 'allow' : 'warn');
   if (advisory && !qualified) expect(result.advisory).toEqual({ reason: 'runtime_version_unqualified', qualifiedVersion: target.qualifiedVersion });
   else expect(result.advisory).toBeUndefined();
 }

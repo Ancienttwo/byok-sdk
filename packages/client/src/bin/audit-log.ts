@@ -326,7 +326,9 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
     }
     case 'runtimes-detected': {
       const runtimes = parseRuntimeObservations(raw.runtimes);
-      if (runtimes?.some(runtime => runtime.version !== undefined)) return undefined;
+      // The installed version and the local policy verdict never enter audit
+      // (#1103); a record that carries either is not a record this reader wrote.
+      if (runtimes?.some(runtime => runtime.version !== undefined || runtime.versionVerdict !== undefined)) return undefined;
       return runtimes === undefined ? undefined : { kind: 'runtimes-detected', ts: raw.ts, runtimes };
     }
     case 'offered':

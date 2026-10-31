@@ -1,4 +1,4 @@
-import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
+import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeVersionVerdict } from '../types';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
@@ -29,6 +29,8 @@ export interface DiagnosticsSnapshot {
     outcome: RuntimeDetectResult['kind'];
     reason?: RuntimeDetectionRefusalReason;
     versionPresent: boolean;
+    /** #1103: the effective version policy's verdict. Absent from an older daemon, or a custom adapter with no policy. */
+    versionVerdict?: RuntimeVersionVerdict;
     authPresent?: boolean;
     steer: boolean;
     resume: boolean;

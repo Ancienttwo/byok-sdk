@@ -85,10 +85,14 @@ describe('daemon-record: createDaemonRecordProjector', () => {
   it('keeps the configured unqualified-version advisory without persisting actual runtime version text', () => {
     const [record] = createDaemonRecordProjector().project({
       kind: 'runtimes-detected', ts: 'T',
-      runtimes: [{ id: 'codex', present: true, outcome: 'available', version: SENTINEL, qualifiedVersion: '0.101.0', steer: true, resume: true }],
+      runtimes: [{
+        id: 'codex', present: true, outcome: 'available', version: SENTINEL, qualifiedVersion: '0.101.0',
+        versionVerdict: { state: 'block', qualifiedVersion: '0.101.0', matched: '0.10.' }, steer: true, resume: true,
+      }],
     });
     if (record?.kind !== 'runtimes-detected') throw new Error('expected a runtime record');
     expect(record.runtimes).toEqual([{ id: 'codex', present: true, outcome: 'available', qualifiedVersion: '0.101.0', steer: true, resume: true }]);
+    expect(JSON.stringify(record)).not.toContain('versionVerdict');
     expect(parseRuntimeObservations(record.runtimes)).toEqual(record.runtimes);
     expect(validateRuntimeDetectResult({ kind: 'available', advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.101.0' } }))
       .toEqual({ kind: 'available', advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.101.0' } });

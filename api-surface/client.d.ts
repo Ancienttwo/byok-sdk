@@ -4076,7 +4076,7 @@ import type { RuntimeObservation } from '../runtime-detection';
 import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentReport } from '../runtime/environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
-import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
+import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeVersionVerdict } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
 import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation';
 /**
@@ -4328,8 +4328,19 @@ export interface ControlStatusResult {
     /** Issues #391/#394: the same value as `Daemon.status().lifecycle`. */
     lifecycle: DaemonLifecycle;
     activeTasks: ControlActiveTask[];
-    /** Absent for a pre-#392 control peer: report unknown, never probe locally. */
+    /**
+     * Absent for a pre-#392 control peer: report unknown, never probe locally.
+     * A pre-#1103 client validates every key of each entry, so the policy verdict
+     * travels in {@link runtimeVersionVerdicts} instead of inside this array;
+     * that keeps an older CLI's strict observation parser working against a newer
+     * daemon. New readers merge the two.
+     */
     runtimes?: RuntimeObservation[];
+    /** #1103: verdicts for the same runtime ids as {@link runtimes}; absent from a pre-#1103 daemon. */
+    runtimeVersionVerdicts?: Array<{
+        readonly id: string;
+        readonly versionVerdict: RuntimeVersionVerdict;
+    }>;
     /** Absent for a pre-#392 control peer. */
     environment?: ServiceEnvironmentStatus;
     /** Timestamp of the same environment-resolved event; absent before startup resolves it. */
@@ -5845,7 +5856,7 @@ export type DaemonRecord = Extract<DaemonEvent, {
 } | {
     kind: 'runtimes-detected';
     ts: string;
-    runtimes: Array<Omit<RuntimeObservation, 'version'>>;
+    runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict'>>;
 } | {
     kind: 'shutdown-requested';
     ts: string;
@@ -10743,7 +10754,7 @@ export interface InspectDaemonStoresInput {
  */
 export declare function inspectDaemonStores(input: InspectDaemonStoresInput): Promise<readonly StoreCompatibility[]>;
 // ==== @byok-sdk/client dist/diagnostics/types.d.ts ====
-import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
+import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeVersionVerdict } from '../types';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
@@ -10782,6 +10793,8 @@ export interface DiagnosticsSnapshot {
         outcome: RuntimeDetectResult['kind'];
         reason?: RuntimeDetectionRefusalReason;
         versionPresent: boolean;
+        /** #1103: the effective version policy's verdict. Absent from an older daemon, or a custom adapter with no policy. */
+        versionVerdict?: RuntimeVersionVerdict;
         authPresent?: boolean;
         steer: boolean;
         resume: boolean;
@@ -13878,7 +13891,7 @@ export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleas
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
 import type { RuntimeId } from '@byok-sdk/protocol';
 import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
-import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
+import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeVersionVerdict } from './types';
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
 export interface RuntimeObservation {
     id: string;
@@ -13889,6 +13902,16 @@ export interface RuntimeObservation {
     code?: ServiceEnvironmentUnavailableCode;
     version?: string;
     qualifiedVersion?: string;
+    /**
+     * The effective version policy's verdict (#1103). Local-only: `Daemon.status()`
+     * carries it inline, while control `status` ships it through the additive
+     * `runtimeVersionVerdicts` side channel so a pre-#1103 client's strict
+     * observation parser still accepts `runtimes`. `doctor` merges the two. The
+     * wire still carries only the protocol's `RuntimeInfo` fields. Additive and
+     * optional: an observation from an older daemon has no verdict, and a reader
+     * must not infer `allow` from its absence.
+     */
+    versionVerdict?: RuntimeVersionVerdict;
     authPresent?: boolean;
     steer: boolean;
     resume: boolean;
@@ -13897,6 +13920,15 @@ export interface RuntimeObservation {
 export declare function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult): RuntimeObservation;
 /** Reject unreadable observations; never infer availability from an older discovery shape. */
 export declare function parseRuntimeObservations(value: unknown): RuntimeObservation[] | undefined;
+/**
+ * Merge the control status's additive {@link RuntimeVersionVerdict} channel
+ * (#1103) into observations. The verdicts travel outside `runtimes` so a
+ * pre-#1103 client's strict observation parser still accepts that array; a
+ * missing or malformed side channel means "unknown", never `allow`.
+ *
+ * @internal
+ */
+export declare function attachRuntimeVersionVerdicts(observations: RuntimeObservation[], value: unknown): RuntimeObservation[];
 /** Reject legacy/mixed authoring shapes; copy only validated, known facts. */
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
 /**

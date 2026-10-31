@@ -13,6 +13,16 @@ export interface RuntimeObservation {
   code?: ServiceEnvironmentUnavailableCode;
   version?: string;
   qualifiedVersion?: string;
+  /**
+   * The effective version policy's verdict (#1103). Local-only: `Daemon.status()`
+   * carries it inline, while control `status` ships it through the additive
+   * `runtimeVersionVerdicts` side channel so a pre-#1103 client's strict
+   * observation parser still accepts `runtimes`. `doctor` merges the two. The
+   * wire still carries only the protocol's `RuntimeInfo` fields. Additive and
+   * optional: an observation from an older daemon has no verdict, and a reader
+   * must not infer `allow` from its absence.
+   */
+  versionVerdict?: RuntimeVersionVerdict;
   authPresent?: boolean;
   steer: boolean;
   resume: boolean;
@@ -21,6 +31,13 @@ export interface RuntimeObservation {
 /** The daemon and explicit local probes project the same detection authority. */
 export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult): RuntimeObservation {
   const bounded = (value: string, max: number): string => value.replace(/[\r\n\t]/g, ' ').slice(0, max);
+  const verdict = detected.kind === 'available' && detected.versionVerdict !== undefined
+    ? Object.freeze({
+        state: detected.versionVerdict.state,
+        qualifiedVersion: bounded(detected.versionVerdict.qualifiedVersion, 256),
+        ...(detected.versionVerdict.matched === undefined ? {} : { matched: bounded(detected.versionVerdict.matched, 256) }),
+      }) as RuntimeVersionVerdict
+    : undefined;
   return {
     id: bounded(descriptor.id, 128),
     present: detected.kind === 'available',
@@ -29,6 +46,7 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
     ...(detected.kind === 'refused' && detected.reason === 'runtime_environment_unavailable' ? { code: detected.code } : {}),
     ...(detected.kind === 'available' && detected.version !== undefined ? { version: bounded(detected.version, 256) } : {}),
     ...(detected.kind === 'available' && detected.advisory !== undefined ? { qualifiedVersion: bounded(detected.advisory.qualifiedVersion, 256) } : {}),
+    ...(verdict === undefined ? {} : { versionVerdict: verdict }),
     ...(detected.kind === 'available' && detected.authPresent !== undefined ? { authPresent: detected.authPresent } : {}),
     steer: descriptor.capabilities.steer === true,
     resume: descriptor.capabilities.resume === true,
@@ -42,12 +60,13 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
   for (const raw of value) {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
     const r = raw as Record<string, unknown>;
-    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'authPresent', 'steer', 'resume'].includes(key))
+    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'versionVerdict', 'authPresent', 'steer', 'resume'].includes(key))
       || typeof r.id !== 'string' || r.id.length === 0 || r.id.length > 128 || /[\r\n\t]/.test(r.id)
       || typeof r.steer !== 'boolean' || typeof r.resume !== 'boolean'
       || r.present !== (r.outcome === 'available')
       || (r.version !== undefined && (typeof r.version !== 'string' || r.version.length > 256 || /[\r\n\t]/.test(r.version)))
-      || (r.qualifiedVersion !== undefined && (typeof r.qualifiedVersion !== 'string' || r.qualifiedVersion.length > 256 || /[\r\n\t]/.test(r.qualifiedVersion)))) return undefined;
+      || (r.qualifiedVersion !== undefined && (typeof r.qualifiedVersion !== 'string' || r.qualifiedVersion.length > 256 || /[\r\n\t]/.test(r.qualifiedVersion)))
+      || (r.versionVerdict !== undefined && !isVersionVerdict(r.versionVerdict))) return undefined;
     try {
       validateRuntimeDetectResult({
         kind: r.outcome,
@@ -56,11 +75,58 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
         ...(r.version === undefined ? {} : { version: r.version }),
         ...(r.authPresent === undefined ? {} : { authPresent: r.authPresent }),
         ...(r.qualifiedVersion === undefined ? {} : { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: r.qualifiedVersion } }),
+        ...(r.versionVerdict === undefined ? {} : { versionVerdict: r.versionVerdict }),
       });
     } catch { return undefined; }
-    observations.push({ ...r } as unknown as RuntimeObservation);
+    const verdict = r.versionVerdict as RuntimeVersionVerdict | undefined;
+    observations.push({
+      ...r,
+      ...(verdict === undefined ? {} : {
+        versionVerdict: Object.freeze({
+          state: verdict.state,
+          qualifiedVersion: verdict.qualifiedVersion,
+          ...(verdict.matched === undefined ? {} : { matched: verdict.matched }),
+        }) as RuntimeVersionVerdict,
+      }),
+    } as unknown as RuntimeObservation);
   }
   return observations;
+}
+
+/**
+ * Merge the control status's additive {@link RuntimeVersionVerdict} channel
+ * (#1103) into observations. The verdicts travel outside `runtimes` so a
+ * pre-#1103 client's strict observation parser still accepts that array; a
+ * missing or malformed side channel means "unknown", never `allow`.
+ *
+ * @internal
+ */
+export function attachRuntimeVersionVerdicts(observations: RuntimeObservation[], value: unknown): RuntimeObservation[] {
+  if (!Array.isArray(value)) return observations;
+  const verdicts = new Map<string, RuntimeVersionVerdict>();
+  for (const raw of value) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const entry = raw as Record<string, unknown>;
+    if (Object.keys(entry).some((key) => !['id', 'versionVerdict'].includes(key))) continue;
+    if (typeof entry.id !== 'string' || entry.id.length === 0 || entry.id.length > 128 || /[\r\n\t]/.test(entry.id)) continue;
+    if (!isVersionVerdict(entry.versionVerdict)) continue;
+    verdicts.set(entry.id, Object.freeze({
+      state: entry.versionVerdict.state,
+      qualifiedVersion: entry.versionVerdict.qualifiedVersion,
+      ...(entry.versionVerdict.matched === undefined ? {} : { matched: entry.versionVerdict.matched }),
+    }) as RuntimeVersionVerdict);
+  }
+  if (verdicts.size === 0) return observations;
+  return observations.map((observation) => {
+    const verdict = verdicts.get(observation.id);
+    if (verdict === undefined) return observation;
+    // Keep the legacy advisory (warn) and the verdict two projections of one
+    // fact; a side channel that disagrees is ignored, not rendered.
+    if (verdict.state === 'warn'
+      ? observation.qualifiedVersion !== verdict.qualifiedVersion
+      : observation.qualifiedVersion !== undefined) return observation;
+    return { ...observation, versionVerdict: verdict };
+  });
 }
 
 const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable', 'platform_unsupported']);

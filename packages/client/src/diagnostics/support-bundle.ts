@@ -29,7 +29,8 @@ export interface SupportBundle {
     runtimeAllowlistCount?: number;
   };
   device: { status: DiagnosticsSnapshot['device']['status']; deviceIdHash?: string };
-  runtimes: DiagnosticsSnapshot['runtimes'];
+  /** #1103: the policy verdict stays in local status/doctor; the bundle keeps only the existing observation facts. */
+  runtimes: Array<Omit<DiagnosticsSnapshot['runtimes'][number], 'versionVerdict'>>;
   runtimeSource: DiagnosticsSnapshot['runtimeSource'];
   control:
     | { status: 'offline' }
@@ -236,7 +237,7 @@ export async function createSupportBundle(
       status: snapshot.device.status,
       ...(snapshot.device.deviceIdHash ? { deviceIdHash: snapshot.device.deviceIdHash } : {}),
     },
-    runtimes: snapshot.runtimes,
+    runtimes: snapshot.runtimes.map(({ versionVerdict: _versionVerdict, ...runtime }) => runtime),
     runtimeSource: snapshot.runtimeSource,
     control: projectControl(snapshot.control),
     lifecycle: projectLifecycle(snapshot.lifecycle),

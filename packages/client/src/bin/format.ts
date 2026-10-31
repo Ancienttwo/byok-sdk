@@ -228,10 +228,15 @@ export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): str
     const caps: string[] = [];
     if (r.steer) caps.push('steer');
     if (r.resume) caps.push('resume');
+    const verdict = r.versionVerdict;
     const parts = [
       'present',
       r.version ? `version=${r.version}` : undefined,
       r.qualifiedVersion !== undefined ? `warning=unqualified-version(qualified=${r.qualifiedVersion})` : undefined,
+      verdict !== undefined ? `versionVerdict=${verdict.state}` : undefined,
+      verdict?.state === 'block'
+        ? `blockedBy=device-version-policy(matched=${verdict.matched},qualified=${verdict.qualifiedVersion})`
+        : undefined,
       r.authPresent !== undefined ? `authPresent=${r.authPresent}` : undefined,
       `capabilities=${caps.length ? caps.join(',') : '(none)'}`,
     ].filter((part): part is string => Boolean(part));
@@ -335,7 +340,13 @@ function refusalText(runtime: RuntimeObservation): string {
 }
 
 function formatRuntimeObservations(runtimes: readonly RuntimeObservation[]): string {
-  return runtimes.map(runtime => `${runtime.id}=${runtime.outcome === 'refused' ? `refused:${refusalText(runtime)}` : runtime.outcome}`).join(' ') || '(none)';
+  return runtimes.map(runtime => {
+    const outcome = runtime.outcome === 'refused' ? `refused:${refusalText(runtime)}` : runtime.outcome;
+    // #1103: a blocked runtime is still "present", so the compact status line
+    // must badge the one verdict that changes admission. allow/warn keep the
+    // existing shape (the detailed `runtimes` lines carry every state).
+    return `${runtime.id}=${outcome}${runtime.versionVerdict?.state === 'block' ? ':blocked' : ''}`;
+  }).join(' ') || '(none)';
 }
 
 /**
