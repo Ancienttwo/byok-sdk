@@ -977,8 +977,6 @@ function nextAdmissionEffect(stage: string | undefined): EffectSpec | undefined 
 /* --------------------------- Transition rows --------------------------- */
 
 const WITHDRAWN_REASON = 'approval request was withdrawn by its requester';
-/** The one fail-closed reason that means the approval frame never left the device. */
-const UNSENT_APPROVAL_REASON = 'the approval request could not be sealed for the Host';
 
 function taskIdOf(event: ReducerEvent): string {
   if (event.taskId === undefined) throw new Error(event.type + ' requires a taskId');
@@ -1674,8 +1672,9 @@ const APPROVAL_ROWS: readonly TransitionRow[] = [
       && event.approvalId === snapshot.task.approval.pending.approvalId
       && event.decision === 'reject'
       && snapshot.task.approval.pending.kind === 'task-terminal'
-      && (event.origin === 'control-socket'
-        || (event.origin === 'fail-closed' && event.reason === UNSENT_APPROVAL_REASON)),
+      && (event.origin === 'eviction'
+        || (event.origin === 'fail-closed'
+          && !(event.reason ?? '').startsWith('approval timed out'))),
     apply: (snapshot, event) => {
       const task = taskOf(snapshot);
       return {
@@ -1688,7 +1687,7 @@ const APPROVAL_ROWS: readonly TransitionRow[] = [
       };
     },
     rejection:
-      'A system resolution (timeout/withdrawal/eviction/unsendable) denies the approval, clears pending and lets the turn continue; it never selects a terminal. A deliberate reject is A7.',
+      'A system resolution that never selected a terminal (unsendable sealed frame, withdrawal, registry eviction) denies the approval, clears pending and lets the turn continue. A deliberate reject and a timeout (which registers its plan) are A7 and terminalize.'
   },
   {
     id: 'A7',

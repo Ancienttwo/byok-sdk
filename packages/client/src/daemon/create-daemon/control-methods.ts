@@ -233,15 +233,40 @@ function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unar
       }
     },
     'approvals.list': () => ({ approvals: approvalRegistry.list() }),
-    'approvals.resolve': (params) => {
+    'approvals.resolve': async (params) => {
       const parsed = parseApprovalsResolveParams(params);
       if (!parsed) throw new ControlError('bad_request', 'approvals.resolve requires {approvalId, decision}');
-      try {
-        approvalRegistry.resolve(parsed.approvalId, parsed.decision, parsed.reason, 'control');
-      } catch (err) {
+      const mapError = (err: unknown): never => {
         if (err instanceof ApprovalNotFoundError) throw new ControlError('not_found', err.message);
         if (err instanceof ApprovalRequiresHostError) throw new ControlError(err.code, err.message);
         throw err;
+      };
+      const approval = approvalRegistry.list().find((entry) => entry.approvalId === parsed.approvalId);
+      const runner = daemonState.runner;
+      // A control approve of a tool-authorization approval stays a Host-only
+      // decision: the registry enforces `approval_requires_host` before any
+      // local resolution path can see it.
+      const deliberate = approval !== undefined && runner !== undefined
+        && (parsed.decision === 'reject' || approval.kind !== 'tool-authorization');
+      if (deliberate && approval !== undefined && runner !== undefined) {
+        // A deliberate control-socket decision is the same decision as a wire
+        // one: a task-terminal reject registers its terminal plan and
+        // terminalizes, while a tool-authorization reject only denies the
+        // call. Startup/unknown approvals fall back to the registry below.
+        await runner.resolveApprovalLocally(
+          approval.taskId,
+          parsed.approvalId,
+          parsed.decision,
+          parsed.reason,
+        ).catch(mapError);
+        if (!approvalRegistry.list().some((entry) => entry.approvalId === parsed.approvalId)) {
+          return { resolved: true };
+        }
+      }
+      try {
+        approvalRegistry.resolve(parsed.approvalId, parsed.decision, parsed.reason, 'control');
+      } catch (err) {
+        mapError(err);
       }
       return { resolved: true };
     },

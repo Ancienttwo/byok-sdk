@@ -313,9 +313,33 @@ export async function handleApprove(this: TaskRunner, taskId: string, approvalId
  */
 export async function handleReject(this: TaskRunner, taskId: string, reason: string | undefined, approvalId: string, decidedBy: ApprovalOrigin): Promise<void> {
   const active = this['tasks'].get(taskId);
-  if (!active) return;
-  const current = hostFor(this).current(taskId);
+  if (!active) {
+    // A decision that names a task already finished is audit-only; report it
+    // rather than silently dropping it (the task may have terminalized while
+    // this wire frame was in flight).
+    const finishedHost = hostFor(this);
+    if (finishedHost.archivedTask(taskId) !== undefined
+      || finishedHost.runnerSnapshot().finished.includes(taskId)) {
+      void finishedHost.dispatch({ type: 'approval.stale', taskId, atMs: Date.now(), approvalId }).catch(() => undefined);
+      this['deps'].onStaleApprovalDecision?.(
+        taskId,
+        'reject',
+        `approvalId ${approvalId} arrived after task ${taskId} finished`,
+      );
+    }
+    return;
+  }
+  const host = hostFor(this);
+  const current = host.current(taskId);
   if (current?.terminal !== undefined || current?.phase === 'terminalizing' || current?.phase === 'retiring') {
+    // The task already selected its terminal; this reject is audit-only and
+    // never interrupts or fails it a second time.
+    void host.dispatch({ type: 'approval.stale', taskId, atMs: Date.now(), approvalId }).catch(() => undefined);
+    this['deps'].onStaleApprovalDecision?.(
+      taskId,
+      'reject',
+      `approvalId ${approvalId} arrived after the task's terminal was selected`,
+    );
     await this['settleSemanticTerminal'](active);
     return;
   }

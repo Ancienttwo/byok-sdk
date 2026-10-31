@@ -261,6 +261,38 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     cliConn.client.close();
   });
 
+  it('(b2) a deliberate control-socket reject of a task-terminal approval terminalizes the task exactly once', async () => {
+    const adapter = new ApprovalAwareAdapter();
+    const built = await pairedAndStarted('acme-confirm-reject-terminal', adapter);
+    daemon = built.daemon;
+
+    const taskId = 't-reject-terminal-1';
+    server.send(
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+    );
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+    const requestPromise = conn.client.request<ApprovalsRequestResult>('approvals.request', {
+      taskId,
+      summary: 'Bash: deliberate reject',
+    });
+    await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
+    const list = await conn.client.request<{ approvals: Array<{ approvalId: string }> }>('approvals.list');
+    await conn.client.request('approvals.resolve', {
+      approvalId: list.approvals[0]?.approvalId,
+      decision: 'reject',
+      reason: 'operator declined via CLI',
+    });
+
+    await expect(requestPromise).resolves.toEqual({ approved: false, reason: 'operator declined via CLI' });
+    await server.waitFor((e) => e.type === 'task.fail' && e.task_id === taskId);
+    expect(server.received.filter((e) => e.type === 'task.fail' && e.task_id === taskId)).toHaveLength(1);
+    expect(adapter.sessions[0]?.interruptCalls).toBe(1);
+    conn.client.close();
+  });
+
   it('dual-entry convergence: wire task.reject racing a local CLI approvals.resolve for the SAME approval — exactly one wins, the daemon never hangs or crashes, and the loser surfaces as a well-formed error rather than corrupting state', async () => {
     const adapter = new ApprovalAwareAdapter();
     const built = await pairedAndStarted('acme-confirm-race', adapter);
@@ -414,11 +446,15 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const outcome = await requestPromise;
     expect(outcome).toEqual({ approved: false, reason: 'operator declined via CLI' });
-    expect(adapter.sessions[0]?.interruptCalls).toBe(0);
+    // The control-socket reject is a DELIBERATE task-terminal reject: it
+    // terminalizes exactly like a wire reject, once.
+    await server.waitFor((e) => e.type === 'task.fail' && e.task_id === taskId);
+    expect(adapter.sessions[0]?.interruptCalls).toBe(1);
+    expect(server.received.filter((e) => e.type === 'task.fail' && e.task_id === taskId)).toHaveLength(1);
 
     // The stale wire task.reject arrives strictly after the local reject
-    // above already settled this exact approval: it must neither interrupt
-    // the session nor send task.fail.
+    // above already terminalized the task: it is audit-only and must not
+    // interrupt or fail the task a second time.
     server.send(createEnvelope('task.reject', { reason: 'stale server-side reject', approvalId: approvalId! }, { taskId, seq: server.nextSeq() }));
     await vi.waitFor(() => {
       expect(
@@ -426,14 +462,11 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
       ).toBe(true);
     });
 
-    // The session must NOT have been interrupted by the stale wire reject —
-    // proving handleReject's interrupt+task.fail+finish sequence never ran
-    // for it. The stubbed runtime is still alive and can still finish its
-    // turn normally.
-    expect(adapter.sessions[0]?.interruptCalls).toBe(0);
+    expect(adapter.sessions[0]?.interruptCalls).toBe(1);
     adapter.sessions[0]?.pushTurnEnd();
-    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === taskId);
-    expect(server.received.some((e) => e.type === 'task.fail' && e.task_id === taskId)).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(server.received.filter((e) => e.type === 'task.fail' && e.task_id === taskId)).toHaveLength(1);
+    expect(server.received.some((e) => e.type === 'task.complete' && e.task_id === taskId)).toBe(false);
 
     conn.client.close();
   });

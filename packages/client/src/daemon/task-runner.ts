@@ -84,7 +84,7 @@ import {
 } from './agent-memory';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
-import { offerSettlements, trackOffer } from './task-runner/support';
+import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/support';
 import { MAX_TRACKED_TASK_IDS } from './task-runner/state';
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
 import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts';
@@ -838,12 +838,9 @@ export class TaskRunner {
   }
 
   private canPublishAgentMessage(active: ActiveTask): boolean {
-    // S6: the reducer phase replaces the legacy beingTornDown flag. A terminal
-    // decision makes the message lane unpublishable immediately.
-    const phase = hostFor(this).current(active.taskId)?.phase;
-    return this.tasks.get(active.taskId) === active
-      && phase !== 'terminalizing' && phase !== 'retiring'
-      && phase !== 'finished' && phase !== 'declined';
+    // S6: one derivation with taskTearingDown, including its missing-entry
+    // rule: a task the reducer no longer tracks is not publishable.
+    return this.tasks.get(active.taskId) === active && !taskTearingDown(this, active.taskId);
   }
 
   /** All authors and startup use the same queue-time and post-I/O authority check. */
