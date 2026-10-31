@@ -209,14 +209,21 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   // run time, so a bundled product has no subagents (the sealed build drops this
   // branch). Under keys-profile a child session opens its own model runtime and
   // would read the key marker from the projection, not the in-memory key.
-  // A scoped session does not offer subagents in this slice: a
-  // pi-subagents child loads its own native file tool loadout and would be an
-  // unscoped bypass. Refusing to offer the tool is the honest option; a child
-  // that reloads and re-verifies the same grant is a later slice.
-  if (__BYOK_PI_SUBAGENTS__ && packaging === 'installed' && config.credentialSource !== 'keys-profile'
-    && config.fileScope === null) {
+  //
+  // A file-scoped parent does offer native subagents, but only through the
+  // same grant: the child gate config carries the serialized grant, both child
+  // extensions are required for every runner, and the scope extension
+  // re-resolves every root before registering the SDK scoped file tools. The
+  // gate extension refuses the six file tools when those tools did not
+  // register, so an unscoped child never appears. bash/MCP/extensions remain
+  // per-call approval.
+  if (__BYOK_PI_SUBAGENTS__ && packaging === 'installed' && config.credentialSource !== 'keys-profile') {
     const gateExtension = fileURLToPath(new URL('./pi-subagent-gate.js', import.meta.url));
-    extensionFactories.push(...await loadPiSubagentsExtensions(config.toolAuthorization, gateExtension));
+    const fileScopeExtension = fileURLToPath(new URL('./pi-subagent-file-scope.js', import.meta.url));
+    extensionFactories.push(...await loadPiSubagentsExtensions(
+      config.toolAuthorization, gateExtension,
+      config.fileScope === null || config.toolAuthorization === null ? undefined : fileScopeExtension,
+    ));
   }
   extensionFactories.push(createTodoExtension(localeAnchor));
   if (fileScope !== undefined) {
@@ -224,8 +231,14 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     extensionFactories.push(createPiFileScopeExtension({ grant: fileScope, gate: config.toolAuthorization }));
   }
   // Register last: earlier handlers may rewrite the input the gate must judge.
-  // The environment hands the same gate to native Pi subagent children.
-  setToolAuthorizationGateEnv(config.toolAuthorization, join(dirname(args.configPath), 'tool-authorization.json'));
+  // The environment hands the same gate to native Pi subagent children. A
+  // scoped session also marks the child gate config with the serialized grant
+  // and `fileScopeRequired`, so a child must re-verify it before any file tool.
+  const childGate = config.toolAuthorization === null ? null : {
+    ...config.toolAuthorization,
+    ...(config.fileScope === null ? {} : { fileScopeRequired: true as const, fileScope: config.fileScope }),
+  };
+  setToolAuthorizationGateEnv(childGate, join(dirname(args.configPath), 'tool-authorization.json'));
   if (config.toolAuthorization !== null) extensionFactories.push(createPiToolAuthorizationHook(config.toolAuthorization));
   let resourceAgentDir: string | undefined;
   if (config.agentUserContext === 'excluded') {
