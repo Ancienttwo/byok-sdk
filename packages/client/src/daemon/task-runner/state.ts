@@ -1144,6 +1144,9 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
           atom('send.decline', {
             reason: declined.reason,
             retryable: declined.task.terminal?.retryable ?? event.retryable ?? false,
+            ...(declined.task.admission.decline?.code === undefined
+              ? {}
+              : { detail: { code: declined.task.admission.decline.code } }),
           }),
           ...declineCleanupEffects(),
         ],
@@ -1189,7 +1192,8 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
         task: taskWith(task, { claim: { journaled: true, sent: false } }),
         effects: [
           atom('send.claim', { stage: 'claim' }, {
-            requires: CLAIMED,
+            // The claim is not sent yet: it requires journaled, not CLAIMED.
+            requires: NEVER,
             completion: { type: 'claim.sent' },
           }),
         ],
