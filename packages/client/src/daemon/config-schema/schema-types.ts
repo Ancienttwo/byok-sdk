@@ -21,7 +21,7 @@ export interface DaemonConfigJsonSchema {
   readonly 'x-byok-surface'?: DaemonConfigSurface;
   /**
    * `function`: an embedded Host may pass a function instead of this object
-   * schema (e.g. `toolAuthorization`); a config file must set the object.
+   * schema; a config file must set the object.
    */
   readonly 'x-byok-embeddedAlternative'?: 'function';
   readonly 'x-byok-schemaVersion'?: number;

@@ -1,5 +1,5 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { ToolRiskReason } from '../tool-authorization';
+import type { ToolAuthorizationReason, ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { MAX_TRACKED_TASKS, type AssertionLane, type DaemonEvent } from './observer';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentStatus, type ServiceEnvironmentRecord, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
@@ -50,7 +50,8 @@ export type DaemonRecord =
   | { kind: 'shutdown-requested'; ts: string; reasonBytes: number }
   | { kind: 'shutdown-complete'; ts: string; reasonBytes: number; undeliveredOutboxCount?: number }
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reasonBytes?: number }
-  | { kind: 'tool-reminder'; ts: string; taskId: string; reasons: readonly ToolRiskReason[]; summaryBytes: number }
+  | { kind: 'tool-reminder'; ts: string; taskId: string; reasons: readonly ToolRiskReason[]; suppressedReasons?: readonly ToolRiskReason[]; authorization: ToolAuthorizationReason; summaryBytes: number }
+  | Omit<Extract<DaemonEvent, { kind: 'tool-authorization' }>, 'toolName'>
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reasonBytes: number }
   /** Already content-free: counts and closed codes (`execution-record.ts`). */
   | Extract<DaemonEvent, { kind: 'execution-record' }>
@@ -99,6 +100,7 @@ const KIND_SET: Record<DaemonRecordKind, true> = {
   artifact: true,
   'awaiting-approval': true,
   'tool-reminder': true,
+  'tool-authorization': true,
   completed: true,
   failed: true,
   cancelled: true,
@@ -315,7 +317,16 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
         ...(event.reason === undefined ? {} : { reasonBytes: bytes(event.reason) }),
       };
     case 'tool-reminder':
-      return { kind: 'tool-reminder', ts, taskId: event.taskId, reasons: [...event.reasons], summaryBytes: bytes(event.summary) };
+      return { kind: 'tool-reminder', ts, taskId: event.taskId, reasons: [...event.reasons],
+        ...(event.suppressedReasons === undefined ? {} : { suppressedReasons: [...event.suppressedReasons] }),
+        authorization: { source: event.authorization.source, ruleIds: [...event.authorization.ruleIds] }, summaryBytes: bytes(event.summary) };
+    case 'tool-authorization':
+      return { kind: 'tool-authorization', ts, taskId: event.taskId,
+        ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }), decision: event.decision,
+        authorization: { source: event.authorization.source, ruleIds: [...event.authorization.ruleIds] }, reasons: [...event.reasons],
+        ...(event.suppressedReasons === undefined ? {} : { suppressedReasons: [...event.suppressedReasons] }),
+        ...(event.code === undefined ? {} : { code: event.code }),
+      };
     case 'runtime-disposal-failed':
       return {
         kind: 'runtime-disposal-failed',

@@ -82,10 +82,10 @@ import { composeDaemonWorkspaces } from './create-daemon/workspaces';
 import type { DaemonScope } from './create-daemon/scope';
 import { bindDaemonFunctions } from './create-daemon/functions';
 import { createControlMethods } from './create-daemon/control-methods';
-import type { StaticToolAuthorization, ToolAuthorizationResolver } from '../tool-authorization';
+import type { ToolAuthorizationPolicy } from '../tool-authorization';
 import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './config-schema/effective';
 import { DaemonConfigInvalidError } from './config-schema/errors';
-import { staticToolAuthorizationIssues } from './config-schema/static-tool-authorization';
+import { toolAuthorizationIssues } from './config-schema/static-tool-authorization';
 import type { AgentMemoryExport, AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 
 /**
@@ -113,19 +113,15 @@ export interface DaemonConfig {
    * Per-task tool authorization, decided by this Host for every runtime:
    * `all` (default) never blocks and emits a `tool-reminder` event for each
    * high-risk call; `auto` asks the user through the task's approval path
-   * before a high-risk call runs. Not an OS sandbox or file scope.
-   *
-   * A static policy (`{ default, byRuntime }`, the only form a config file
-   * can set) gives each runtime a fixed mode: its `byRuntime` entry, else
-   * `default`. Daemon construction refuses a `byRuntime` key that is not a
-   * runtime of this daemon, and `auto` for a runtime without
-   * `toolAuthorizationAuto`.
-   *
-   * An embedded Host may pass a function instead. It is called once per
-   * offer; a throw or any other value declines the offer, and `auto` on a
-   * runtime without `toolAuthorizationAuto` declines it before claim.
+   * before a high-risk call runs and is declined before claim on a runtime
+   * without `toolAuthorizationAuto`. `byRuntime` overrides the mode for one
+   * runtime id. `rules` move single calls across the ask boundary and apply
+   * to every runtime. A config file and an embedded Host supply the same
+   * object; it is validated, copied and frozen before claim, once per offer
+   * (including resume). Invalid policies decline the offer. Rules never
+   * change the wire or native launch. Not an OS sandbox or file scope.
    */
-  toolAuthorization?: ToolAuthorizationResolver | StaticToolAuthorization;
+  toolAuthorization?: ToolAuthorizationPolicy;
   /**
    * Who may approve a `tool-authorization` approval (an `auto` high-risk tool
    * call). Absent (default): only the Host — a wire `task.approve` or an
@@ -861,8 +857,8 @@ function buildDaemon(
   // Q4': an unknown field never stops the daemon; it is logged once and reported in status().config.
   for (const warning of configWarnings) console.warn(`[byok/client] ${warning.message}`);
   const adapters = buildAdapters(piByokLauncher);
-  const toolAuthorizationIssues = staticToolAuthorizationIssues(config, adapters, runtimeSource);
-  if (toolAuthorizationIssues.length > 0) throw new DaemonConfigInvalidError(toolAuthorizationIssues);
+  const authorizationIssues = toolAuthorizationIssues(config, adapters, runtimeSource);
+  if (authorizationIssues.length > 0) throw new DaemonConfigInvalidError(authorizationIssues);
   const {
     agentHomeReaderLimit, egressPolicy, egressBatcherOptions, presenceCadence, deviceAssertionAudiences,
     deviceAssertionTtlMs, storeDir, storageConfig, retentionClock, scratchRoot, storagePressure,

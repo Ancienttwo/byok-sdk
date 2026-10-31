@@ -149,6 +149,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     },
     ...(toolAuthorizationResolver === undefined ? {} : { toolAuthorization: toolAuthorizationResolver }),
     onToolReminder: (reminder) => observer.noteToolReminder(reminder),
+    onToolAuthorizationDecision: (decision) => observer.noteToolAuthorizationDecision(decision),
     // M4 (additive-minor, `task.approval_resolved`): read fresh at call
     // time via `connection` (assigned just below — safe by the time this
     // is actually invoked, same closure pattern `send` above already

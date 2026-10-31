@@ -149,7 +149,9 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
     case 'stale-approval-decision':
       return `${prefix} stale-approval-decision taskId=${event.taskId} decision=${event.decision}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
     case 'tool-reminder':
-      return `${prefix} tool-reminder taskId=${event.taskId} tool=${quote(event.toolName)} reasons=${event.reasons.join(',')} summary=${quote(event.summary)}`;
+      return `${prefix} tool-reminder taskId=${event.taskId} tool=${quote(event.toolName)} source=${event.authorization.source} ruleIds=${JSON.stringify(event.authorization.ruleIds)} reasons=${event.reasons.join(',')}${event.suppressedReasons === undefined ? '' : ` suppressedReasons=${event.suppressedReasons.join(',')}`} summary=${quote(event.summary)}`;
+    case 'tool-authorization':
+      return `${prefix} tool-authorization taskId=${event.taskId} tool=${quote(event.toolName)} decision=${event.decision} source=${event.authorization.source} ruleIds=${JSON.stringify(event.authorization.ruleIds)} reasons=${event.reasons.join(',')}${event.suppressedReasons === undefined ? '' : ` suppressedReasons=${event.suppressedReasons.join(',')}`}`;
     case 'agent-memory-intent-integrity':
       return `${prefix} agent-memory-intent-integrity intentId=${event.intentId} disposition=${event.disposition}`;
     case 'runtime-disposal-failed':

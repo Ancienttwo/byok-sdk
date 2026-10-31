@@ -17,7 +17,7 @@ import {
   validateDaemonConfig,
   type DaemonConfig,
 } from '../index';
-import { staticToolAuthorizationResolver } from '../tool-authorization';
+import { parseToolAuthorizationPolicy, toolAuthorizationResolver } from '../tool-authorization';
 import { describeEffectiveDaemonConfig } from '../daemon/config-schema/effective';
 import { AgentEgressPolicyError, DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { REMOVED_DAEMON_CONFIG_FIELDS } from '../daemon/config-schema/removed-fields';
@@ -66,12 +66,16 @@ describe('generated DaemonConfig schema (#1094)', () => {
     for (const field of ['machineId', 'providerProvisioning', 'agentMemoryIntents', 'inputPreparation']) {
       expect(schema.properties[field]).toMatchObject({ 'x-byok-surface': 'embedded-only', not: {} });
     }
-    // A config file sets the static policy; an embedded Host may pass a function instead.
+    // One policy document for a config file and an embedded Host alike.
     expect(schema.properties.toolAuthorization).toMatchObject({
-      type: 'object', required: ['default'], 'x-byok-embeddedAlternative': 'function',
-      properties: { default: { enum: ['all', 'auto'] }, byRuntime: { type: 'object', additionalProperties: { enum: ['all', 'auto'] } } },
+      type: 'object', required: ['default'],
+      properties: {
+        default: { enum: ['all', 'auto'] }, byRuntime: { type: 'object', additionalProperties: { enum: ['all', 'auto'] } },
+        rules: { type: 'object' },
+      },
     });
     expect(schema.properties.toolAuthorization).not.toHaveProperty('x-byok-surface');
+    expect(schema.properties.toolAuthorization).not.toHaveProperty('x-byok-embeddedAlternative');
     expect(schema.properties.runtimes.properties).toMatchObject({
       pi: { properties: { agentUserContext: { enum: ['excluded', 'inherit'] } } },
       claude: { properties: { agentUserContext: { enum: ['excluded', 'inherit'] }, agentSessionPersistence: { enum: ['disabled', 'enabled'] } } },
@@ -101,10 +105,15 @@ describe('validateDaemonConfig', () => {
     expect(JSON.stringify(issues)).not.toContain('SECRET-VALUE');
   });
 
-  it('refuses embedded-only and distribution-owned fields only from a config file', () => {
-    const fileIssues = validateDaemonConfig({ ...base, toolAuthorization: () => 'auto', localAgentRelease: { version: '1' } }, { source: 'cli' }).issues;
-    expect(fileIssues.map((issue) => issue.code)).toEqual(['embedded_only', 'distribution_owned']);
-    const embedded = validateDaemonConfig({ ...base, toolAuthorization: () => 'auto', localAgentRelease: { version: '1' } }, { source: 'embedded' });
+  it('takes the tool authorization policy from a config file and keeps distribution-owned fields embedded-only', () => {
+    // One shape: the policy document. A config file carries exactly what an
+    // embedded Host passes, so the earlier "function is embedded-only" rule is
+    // gone with the function form itself.
+    const accepted = validateDaemonConfig({ ...base, toolAuthorization: { default: 'auto', byRuntime: { pi: 'all' } } }, { source: 'cli' });
+    expect(accepted).toEqual({ ok: true, issues: [] });
+    const functionIssues = validateDaemonConfig({ ...base, toolAuthorization: () => 'auto', localAgentRelease: { version: '1' } }, { source: 'cli' }).issues;
+    expect(functionIssues.map((issue) => issue.code)).toEqual(['invalid_type', 'distribution_owned']);
+    const embedded = validateDaemonConfig({ ...base, toolAuthorization: { default: 'auto' }, localAgentRelease: { version: '1' } }, { source: 'embedded' });
     expect(embedded).toEqual({ ok: true, issues: [] });
   });
 
@@ -193,21 +202,18 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     expect(checkDaemonConfig(config, { source: 'embedded', adapters }).effective).toEqual(daemon.status().config);
   });
 
-  it('keeps the function resolver embedded-only', async () => {
-    const resolver = () => 'auto' as const;
-    expect(validateDaemonConfig({ ...base, toolAuthorization: resolver }, { source: 'embedded' })).toEqual({ ok: true, issues: [] });
-    expect(validateDaemonConfig({ ...base, toolAuthorization: resolver }, { source: 'cli' }).issues).toEqual([
-      expect.objectContaining({ severity: 'error', code: 'embedded_only', path: 'toolAuthorization' }),
-    ]);
-    expect(validateDaemonConfig({ ...base, toolAuthorization: 'auto' }, { source: 'embedded' }).issues).toEqual([{
-      severity: 'error', code: 'invalid_type', path: 'toolAuthorization', message: 'DaemonConfig.toolAuthorization must be an object or a function, got string',
-    }]);
-    expect(validateDaemonConfig({ ...base, toolAuthorization: 'auto' }, { source: 'cli' }).issues).toEqual([
-      expect.objectContaining({ code: 'invalid_type', path: 'toolAuthorization', message: 'DaemonConfig.toolAuthorization must be an object, got string' }),
-    ]);
-    // No construction check for a function: an auto offer to a runtime without the capability is declined per offer.
-    const daemon = createDaemonWithAdapters(await bundled({ toolAuthorization: resolver }), [new StubRuntimeAdapter('pi')]);
-    expect(daemon.status().config.toolAuthorization).toEqual({ mode: 'host-resolver', localToolApproval: 'host-only' });
+  it('accepts one policy object from a config file and an embedded Host', async () => {
+    const policy = { default: 'all' as const, rules: { alwaysAsk: [{ id: 'status', match: { commandGlob: 'git status' } }] } };
+    expect(validateDaemonConfig({ ...base, toolAuthorization: policy }, { source: 'embedded' })).toEqual({ ok: true, issues: [] });
+    expect(validateDaemonConfig({ ...base, toolAuthorization: policy }, { source: 'cli' })).toEqual({ ok: true, issues: [] });
+    // Neither a function nor a bare mode string is a policy document.
+    for (const value of [() => 'auto', 'auto']) {
+      expect(validateDaemonConfig({ ...base, toolAuthorization: value }, { source: 'embedded' }).issues).toEqual([
+        expect.objectContaining({ code: 'invalid_type', path: 'toolAuthorization' }),
+      ]);
+    }
+    const daemon = createDaemonWithAdapters(await bundled({ toolAuthorization: policy }), [new StubRuntimeAdapter('pi')]);
+    expect(daemon.status().config.toolAuthorization).toEqual({ mode: 'static', byRuntime: { pi: 'all' }, localToolApproval: 'host-only' });
   });
 
   it.each([
@@ -231,12 +237,16 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     expect(checkDaemonConfig(config, { source: 'embedded', adapters })).toEqual(expect.objectContaining({ ok: true, issues: [] }));
   });
 
-  it('resolves a static policy per runtime id from a snapshot', () => {
+  it('derives a per-runtime resolver from one policy snapshot', () => {
     const byRuntime: Record<string, 'auto' | 'all'> = { codex: 'all' };
-    const resolve = staticToolAuthorizationResolver({ default: 'auto', byRuntime });
+    const rules = { alwaysAsk: [{ id: 'read', match: { toolName: 'read' as const } }] } as const;
+    const resolve = toolAuthorizationResolver(parseToolAuthorizationPolicy({ default: 'auto', byRuntime, rules }));
     byRuntime.claude = 'all';
-    const mode = (runtimeId: string) => resolve({ taskId: 't', runtimeId });
-    expect([mode('codex'), mode('claude'), mode('pi'), mode('constructor'), mode('__proto__')]).toEqual(['all', 'auto', 'auto', 'auto', 'auto']);
+    const policy = (runtimeId: string) => resolve({ taskId: 't', runtimeId });
+    expect([policy('codex').default, policy('claude').default, policy('pi').default, policy('constructor').default, policy('__proto__').default])
+      .toEqual(['all', 'auto', 'auto', 'auto', 'auto']);
+    // Rules apply to every runtime, including one overridden by byRuntime.
+    expect(policy('codex').rules).toEqual(policy('pi').rules);
   });
 });
 
@@ -461,13 +471,13 @@ describe('effective values', () => {
     const effective = describeEffectiveDaemonConfig({
       config: {
         localAgentRelease: { version: '1' }, productName: 'A', productId: 'a', serverUrl: 'http://127.0.0.1:1',
-        mcpToolsets: { crm: { mcpServers: { salesko: { command: '/bin/salesko-mcp' } } } }, toolAuthorization: () => 'auto', localToolApproval: 'allow',
+        mcpToolsets: { crm: { mcpServers: { salesko: { command: '/bin/salesko-mcp' } } } }, toolAuthorization: { default: 'auto' }, localToolApproval: 'allow',
       },
       warnings: [], memoryHelper: { state: 'not-needed' }, agentMemoryMcpAdmission: 'unavailable', storeDir: '/s', scratchRoot: '/s/tmp',
       adapters: [], runtimeSource: 'injected', platform: 'linux',
     });
     expect(effective.mcpServers).toContainEqual({ name: 'salesko', kind: 'host-toolset', mount: 'per-task', detail: 'offers that require toolset crm' });
-    expect(effective.toolAuthorization).toEqual({ mode: 'host-resolver', localToolApproval: 'allow' });
+    expect(effective.toolAuthorization).toEqual({ mode: 'static', byRuntime: {}, localToolApproval: 'allow' });
     expect(effective.directories.scratchRoot).toEqual({ path: '/s/tmp', source: 'store', socketPathBytes: 6, socketPathMaximumBytes: expect.any(Number) });
   });
 });

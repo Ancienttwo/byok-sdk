@@ -53,3 +53,29 @@ export function claudeMcpEventIdentities(
   }
   return new Map([...byName].filter((entry): entry is [string, McpEventIdentity] => entry[1] !== null));
 }
+
+/** One runtime observation shared by the first authorization hook and event reporting. */
+export function createClaudeMcpIdentityResolver(
+  status: () => Promise<unknown>,
+  toolsetServers: ReadonlyMap<string, McpStdioServerConfig>,
+) {
+  const identities = new Map<string, McpEventIdentity>();
+  let pending: Promise<void> | undefined;
+  const observe = (): Promise<void> => {
+    pending ??= status().then(response => {
+      for (const [name, identity] of claudeMcpEventIdentities(response, toolsetServers)) identities.set(name, identity);
+    });
+    return pending;
+  };
+  return {
+    identities: identities as McpEventIdentities,
+    async resolve(name: string): Promise<McpEventIdentity | undefined> {
+      if (toolsetServers.size === 0 || !name.startsWith('mcp__')) return undefined;
+      await observe();
+      return identities.get(name);
+    },
+    async observe() {
+      if (toolsetServers.size > 0) await observe();
+    },
+  };
+}

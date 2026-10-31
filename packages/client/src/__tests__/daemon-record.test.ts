@@ -31,6 +31,10 @@ const EVERY_KIND: DaemonEvent[] = [
     blobRef: { blobId: 'b1', contentHash: 'sha256:abc', size: 9, contentType: 'text/plain', url: `https://x/${SENTINEL}` },
   },
   { kind: 'awaiting-approval', ts: 'T', taskId: 't1', approvalId: 'ap-1', summary: SENTINEL },
+  { kind: 'tool-authorization', ts: 'T', taskId: 't1', toolName: SENTINEL, toolCallId: 'c1',
+    decision: 'allow', authorization: { source: 'rule', ruleIds: ['approved-push'] }, reasons: [] },
+  { kind: 'tool-reminder', ts: 'T', taskId: 't1', toolName: SENTINEL, toolCallId: 'c2',
+    summary: SENTINEL, authorization: { source: 'floor', ruleIds: [] }, reasons: ['sensitive-path'] },
   { kind: 'stale-approval-decision', ts: 'T', taskId: 't1', decision: 'reject', reason: SENTINEL },
   { kind: 'runtime-disposal-failed', ts: 'T', taskId: 't1', runtimeId: 'pi', stage: 'cleanup', reason: SENTINEL },
   { kind: 'completed', ts: 'T', taskId: 't1', summary: SENTINEL, sessionRef: 'sess-1' },
@@ -48,6 +52,36 @@ const EVERY_KIND: DaemonEvent[] = [
 ];
 
 describe('daemon-record: createDaemonRecordProjector', () => {
+  it('F6 persists suppressed risk codes for both decisions and reminders without raw content', () => {
+    const projector = createDaemonRecordProjector();
+    const suppressedReasons = ['destructive-git'] as const;
+    const [decision] = projector.project({ kind: 'tool-authorization', ts: 'T', taskId: 't',
+      toolName: SENTINEL, toolCallId: 'push', decision: 'allow', reasons: [], suppressedReasons,
+      authorization: { source: 'rule', ruleIds: ['push-origin'] } });
+    expect(decision).toMatchObject({ kind: 'tool-authorization', taskId: 't', toolCallId: 'push', decision: 'allow',
+      authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [], suppressedReasons: ['destructive-git'] });
+    expect(JSON.stringify(decision)).not.toContain(SENTINEL);
+    const [reminder] = projector.project({ kind: 'tool-reminder', ts: 'T', taskId: 't', toolName: SENTINEL,
+      summary: SENTINEL, authorization: { source: 'rule', ruleIds: ['ask-push'] }, reasons: ['custom-rule'], suppressedReasons });
+    expect(reminder).toMatchObject({ kind: 'tool-reminder', taskId: 't', reasons: ['custom-rule'],
+      authorization: { source: 'rule', ruleIds: ['ask-push'] }, suppressedReasons: ['destructive-git'] });
+    expect(JSON.stringify(reminder)).not.toContain(SENTINEL);
+  });
+
+  it('retains authorization identifiers and provenance without persisting tool text', () => {
+    const projector = createDaemonRecordProjector();
+    const [decision] = projector.project({ kind: 'tool-authorization', ts: 'T', taskId: 't',
+      toolName: SENTINEL, toolCallId: 'call-1', decision: 'deny', code: 'tool_authorization_denied',
+      authorization: { source: 'rule', ruleIds: ['ask-before-write'] }, reasons: ['custom-rule'] });
+    expect(decision).toMatchObject({ kind: 'tool-authorization', taskId: 't', decision: 'deny',
+      authorization: { source: 'rule', ruleIds: ['ask-before-write'] }, reasons: ['custom-rule'] });
+    expect(JSON.stringify(decision)).not.toContain(SENTINEL);
+    const [reminder] = projector.project({ kind: 'tool-reminder', ts: 'T', taskId: 't',
+      toolName: SENTINEL, summary: SENTINEL, authorization: { source: 'floor', ruleIds: [] }, reasons: ['sensitive-path'] });
+    expect(reminder).toMatchObject({ kind: 'tool-reminder', taskId: 't',
+      authorization: { source: 'floor', ruleIds: [] }, reasons: ['sensitive-path'], summaryBytes: Buffer.byteLength(SENTINEL) });
+    expect(JSON.stringify(reminder)).not.toContain(SENTINEL);
+  });
   it('keeps the configured unqualified-version advisory without persisting actual runtime version text', () => {
     const [record] = createDaemonRecordProjector().project({
       kind: 'runtimes-detected', ts: 'T',

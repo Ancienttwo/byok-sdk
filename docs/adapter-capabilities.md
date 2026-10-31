@@ -88,7 +88,22 @@ non-question request through as allow; Codex keeps `approvalPolicy: never`.
 Tool permission is solely the task's `auto | all` decision.
 
 Tool authorization `all` needs no adapter support: the daemon reminds from the
-normalized `tool_use` stream for every runtime. See the spec's
+normalized `tool_use` stream for every runtime. Local task rules share the same
+classifier in both modes: Always Ask upgrades a call to approval (`auto`) or a
+reminder (`all`); Allow without Asking suppresses both, except for the
+non-overridable credential/login-persistence sensitive-path floor. The resolver
+accepts either a mode or `{ mode, rules }`, validates/copies/freezes it before
+claim and re-resolves it on a resume offer. Pi ordinary RPC/native children and
+Claude use their existing gates; Codex, Grok, Hermes and Pi prepared/durable
+still decline `auto` before claim. Rules and audit metadata remain local; the
+server wire protocol, Pi launch v8 and digest format are unchanged. No reviewer
+model, natural-language matching, deny rule or new dependency is introduced.
+The shared matcher has bounded wildcard syntax and identical Node/Bun results;
+shell control/substitution syntax cannot activate allow. The sensitive-path
+floor resolves home/nearest existing parents, recognizes darwin aliases and
+folds case on darwin/win32. Suppressed high-risk calls retain local audit codes,
+including in `all`; invalid-policy details stay out of wire decline reasons.
+See the spec's
 [Tool authorization](spec.md#tool-authorization-auto-and-all-1061) section for
 the classifier and the honest limits (tool gate, not file scope or sandbox).
 

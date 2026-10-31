@@ -22,11 +22,11 @@
 //   that requires such a member, is not JSON-expressible: the property is
 //   `x-byok-surface: "embedded-only"` with `not: {}`, so a config file that
 //   sets it fails any JSON Schema validator.
-// - A union of a function and one JSON-expressible object type (e.g.
-//   `toolAuthorization`) is the object's schema plus
-//   `x-byok-embeddedAlternative: "function"`: a config file sets the object
-//   form, and an embedded Host may pass the function instead. Any other union
-//   of embedded-only and JSON-expressible members is an error.
+// - A union of a function and one JSON-expressible object type is the
+//   object's schema plus `x-byok-embeddedAlternative: "function"`: a config
+//   file sets the object form, and an embedded Host may pass the function
+//   instead. Any other union of embedded-only and JSON-expressible members is
+//   an error. (No `DaemonConfig` field has such a union today.)
 // - `localAgentRelease` is `x-byok-surface: "distribution-owned"`: the
 //   distribution (the `byok-agent` bin) supplies it, a config file must not.
 // - Objects are open in the schema (no `additionalProperties: false`): an

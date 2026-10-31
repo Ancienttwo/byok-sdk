@@ -16,7 +16,8 @@
           "enum": [
             "all",
             "auto"
-          ]
+          ],
+          "description": "Mode for every runtime without a `byRuntime` entry."
         },
         "byRuntime": {
           "type": "object",
@@ -25,14 +26,100 @@
               "all",
               "auto"
             ]
-          }
+          },
+          "description": "Per-runtime override, keyed by runtime id."
+        },
+        "rules": {
+          "type": "object",
+          "properties": {
+            "alwaysAsk": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Host display text, never interpreted as executable policy."
+                  },
+                  "match": {
+                    "type": "object",
+                    "properties": {
+                      "toolName": {
+                        "type": "string",
+                        "description": "Exact, case-sensitive native tool name."
+                      },
+                      "commandGlob": {
+                        "type": "string"
+                      },
+                      "pathGlob": {
+                        "type": "string"
+                      },
+                      "mcpServer": {
+                        "type": "string"
+                      },
+                      "mcpTool": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "match"
+                ]
+              }
+            },
+            "allowWithoutAsking": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Host display text, never interpreted as executable policy."
+                  },
+                  "match": {
+                    "type": "object",
+                    "properties": {
+                      "toolName": {
+                        "type": "string",
+                        "description": "Exact, case-sensitive native tool name."
+                      },
+                      "commandGlob": {
+                        "type": "string"
+                      },
+                      "pathGlob": {
+                        "type": "string"
+                      },
+                      "mcpServer": {
+                        "type": "string"
+                      },
+                      "mcpTool": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "match"
+                ]
+              }
+            }
+          },
+          "description": "User-defined rules that move single calls across the ask boundary."
         }
       },
       "required": [
         "default"
       ],
-      "x-byok-embeddedAlternative": "function",
-      "description": "Per-task tool authorization, decided by this Host for every runtime:\n`all` (default) never blocks and emits a `tool-reminder` event for each\nhigh-risk call; `auto` asks the user through the task's approval path\nbefore a high-risk call runs. Not an OS sandbox or file scope.\n\nA static policy (`{ default, byRuntime }`, the only form a config file\ncan set) gives each runtime a fixed mode: its `byRuntime` entry, else\n`default`. Daemon construction refuses a `byRuntime` key that is not a\nruntime of this daemon, and `auto` for a runtime without\n`toolAuthorizationAuto`.\n\nAn embedded Host may pass a function instead. It is called once per\noffer; a throw or any other value declines the offer, and `auto` on a\nruntime without `toolAuthorizationAuto` declines it before claim."
+      "description": "Per-task tool authorization, decided by this Host for every runtime:\n`all` (default) never blocks and emits a `tool-reminder` event for each\nhigh-risk call; `auto` asks the user through the task's approval path\nbefore a high-risk call runs and is declined before claim on a runtime\nwithout `toolAuthorizationAuto`. `byRuntime` overrides the mode for one\nruntime id. `rules` move single calls across the ask boundary and apply\nto every runtime. A config file and an embedded Host supply the same\nobject; it is validated, copied and frozen before claim, once per offer\n(including resume). Invalid policies decline the offer. Rules never\nchange the wire or native launch. Not an OS sandbox or file scope."
     },
     "localToolApproval": {
       "const": "allow",

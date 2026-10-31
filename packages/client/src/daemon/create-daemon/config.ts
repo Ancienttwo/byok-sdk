@@ -15,7 +15,9 @@ import { validateProgressBatcherOptions } from '../progress-batcher';
 import type { DaemonStatus } from '../create-daemon';
 import type { DaemonInputs } from './scope';
 import { foldNameAliases } from '../../util/fold-name-aliases';
-import { staticToolAuthorizationResolver, type ToolAuthorizationResolver } from '../../tool-authorization';
+import {
+  parseToolAuthorizationPolicy, toolAuthorizationResolver as deriveToolAuthorizationResolver, type ToolAuthorizationResolver,
+} from '../../tool-authorization';
 
 /**
  * The first stage of `buildDaemonWithAdapters` (#926): validates
@@ -31,10 +33,12 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   const configWarnings = assertDaemonConfigValid(config);
   if (Object.hasOwn(overrides, 'hostedJournal')) throw removedFieldError('hostedJournal');
   if (Object.hasOwn(overrides, 'gitWorkspace')) throw removedFieldError('gitWorkspace');
-  // Validated above as a function (embedded) or a static policy; the task runner receives only this resolver.
-  const toolAuthorizationResolver: ToolAuthorizationResolver | undefined = config.toolAuthorization === undefined ? undefined
-    : typeof config.toolAuthorization === 'function' ? config.toolAuthorization
-      : staticToolAuthorizationResolver(config.toolAuthorization);
+  // The one parser admits both a config file's object and an embedded Host's
+  // object; the task runner receives only the derived resolver.
+  const toolAuthorization = config.toolAuthorization === undefined
+    ? undefined : parseToolAuthorizationPolicy(config.toolAuthorization);
+  const toolAuthorizationResolver: ToolAuthorizationResolver | undefined = toolAuthorization === undefined
+    ? undefined : deriveToolAuthorizationResolver(toolAuthorization);
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
   }
