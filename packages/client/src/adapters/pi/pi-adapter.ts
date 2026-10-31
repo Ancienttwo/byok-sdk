@@ -24,6 +24,7 @@ import {
   type McpToolsetToolObservation,
   type RuntimeAdapter,
   type RuntimeDetectResult,
+  type RuntimeVersionPolicy,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type RuntimeOperationManifest,
@@ -41,6 +42,8 @@ import {
 } from '../../input-preparation';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { clientPackageRoot, readClientPiRuntimePin } from './client-manifest';
+import { PI_VERSION_POLICY } from './pi-version';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { locateBundledPiAssets } from './todo-locale-assets';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
@@ -119,6 +122,10 @@ export interface PiAdapterOptions {
     binding: ProviderProfileBinding,
     launcher: PiByokLauncherConfig,
   ) => Promise<void>;
+  /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+  versionPolicy?: RuntimeVersionPolicy;
+  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+  versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 
 export interface PiByokLauncherConfig {
@@ -226,15 +233,26 @@ export class PiAdapter implements RuntimeAdapter {
 
   private readonly agentResources: PiAgentResources;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
+  private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
 
   constructor(private readonly options: PiAdapterOptions = {}) {
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'PiAdapterOptions.runtimeEnvironment');
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
+      descriptor: PI_VERSION_POLICY,
+      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
+        ? { daemonConfig: options.versionPolicy }
+        : { adapterOption: options.versionPolicy }),
+    }).policy;
     this.agentResources = parsePiAgentResources({
       userContext: options.agentUserContext === undefined ? 'inherit' : options.agentUserContext,
       skillPaths: options.agentSkillPaths === undefined ? [] : options.agentSkillPaths,
       extensionPaths: options.agentExtensionPaths === undefined ? [] : options.agentExtensionPaths,
     });
     if (options.durablePi !== undefined && typeof options.durablePi !== 'boolean') throw new Error('PiAdapterOptions.durablePi must be boolean; pass replicaRoot through durableContext');
+    this.descriptor = freezeRuntimeAdapterDescriptor({
+      ...this.descriptor,
+      ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
+    });
     // T0 verified the RPC lanes only. The durable worker's own frames and
     // respawn path are unverified, so it declares no trajectory evidence.
     // Windows waits for validated parent-death Job Object recovery.
@@ -263,7 +281,10 @@ export class PiAdapter implements RuntimeAdapter {
           return { kind: 'not-found' };
         }
         const authPresent = await probePiAuthPresent(env);
-        return { kind: 'available', version, authPresent };
+        return {
+          kind: 'available', version, authPresent,
+          ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, version),
+        };
       }
       const bin = this.resolveBin();
       const invocation = piInvocation(bin);
@@ -272,7 +293,10 @@ export class PiAdapter implements RuntimeAdapter {
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim() || probe.stderr.trim();
       const authPresent = await probePiAuthPresent(env);
-      return { kind: 'available', version, authPresent };
+      return {
+        kind: 'available', version, authPresent,
+        ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, version),
+      };
     } catch (error) {
       return classifyDetectError(error);
     }

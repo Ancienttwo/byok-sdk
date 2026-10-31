@@ -66,6 +66,7 @@ describe('GrokAdapter detection', () => {
     expect(await adapter().detect()).toEqual({
       kind: 'available', version: 'grok 1.0.62 (fixture)', authPresent: true,
       advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '1.0.52' },
+      versionVerdict: { state: 'warn', qualifiedVersion: '1.0.52' },
     });
   });
 
@@ -74,7 +75,10 @@ describe('GrokAdapter detection', () => {
     vi.stubEnv('XAI_API_KEY', '');
     vi.stubEnv('GROK_HOME', home);
     vi.stubEnv('FAKE_ACP_VERSION', 'grok 1.0.52 (fixture)');
-    expect(await adapter().detect()).toEqual({ kind: 'available', version: 'grok 1.0.52 (fixture)', authPresent: false });
+    expect(await adapter().detect()).toEqual({
+      kind: 'available', version: 'grok 1.0.52 (fixture)', authPresent: false,
+      versionVerdict: { state: 'allow', qualifiedVersion: '1.0.52' },
+    });
     await fs.writeFile(path.join(home, 'auth.json'), 'not read');
     await fs.chmod(path.join(home, 'auth.json'), 0o000);
     expect(await adapter().detect()).toMatchObject({ authPresent: true });
@@ -92,6 +96,7 @@ describe('GrokAdapter sessions', () => {
     const a = adapter();
     expect(a.descriptor).toEqual({
       id: 'grok', supportsDispatchSelection: false, requiresMcpToolsetToolObservation: false, platforms: ['darwin', 'linux'],
+      versionPolicy: { qualifiedVersion: '1.0.52', unqualified: 'warn' },
       capabilities: {
         steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true, preparedLane: false,
         isolation: { userContext: true, userMcpServers: true, sessionPersistence: false },

@@ -275,9 +275,20 @@ export interface QueuedApprovalRequest {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * A typed pre-claim admission cause that is not a human-readable reason
+ * (#1103). Today only a Host-configured version block: the nested wire field and
+ * the shared cause vocabulary are later slices, so `offer-runtime` projects the
+ * open `task.decline.code` token `runtime_version_blocked` and never parses the
+ * reason.
+ */
+export interface RuntimeVersionBlockedAdmission {
+  readonly cause: 'version_blocked';
+}
+
 export type PickResult =
   | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor }
-  | { ok: false; reason: string; retryable: boolean };
+  | { ok: false; reason: string; retryable: boolean; versionBlock?: RuntimeVersionBlockedAdmission };
 
 /** The closures that handleOffer builds once and gives to its phase methods. */
 export interface OfferPhaseContext {

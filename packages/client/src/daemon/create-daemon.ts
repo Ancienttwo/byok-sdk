@@ -9,6 +9,7 @@ import type {
 } from '@byok-sdk/protocol';
 import type {
   RuntimeAdapter,
+  RuntimeVersionPolicy,
   McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetObservation,
@@ -256,16 +257,22 @@ export interface DaemonConfig {
     pi?: {
       /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
       agentUserContext?: PiAdapterOptions['agentUserContext'];
+      /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+      versionPolicy?: RuntimeVersionPolicy;
     };
     claude?: {
       /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
       agentUserContext?: ClaudeAdapterOptions['agentUserContext'];
       /** `ClaudeAdapterOptions.agentSessionPersistence`: `disabled` does not save an Agent task's session transcript, so it cannot be resumed. Default `enabled`. */
       agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
+      /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+      versionPolicy?: RuntimeVersionPolicy;
     };
     codex?: {
       /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
       agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
+      /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+      versionPolicy?: RuntimeVersionPolicy;
     };
   };
   /**

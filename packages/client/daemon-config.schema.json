@@ -718,6 +718,142 @@
                 "inherit"
               ],
               "description": "`PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`."
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string",
+                  "description": "The normalized token this SDK was qualified against, for example `0.160.0`."
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ],
+                  "description": "What an unmatched token means. A descriptor default may not use `block`; only a Host layer may."
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Explicitly known-good versions outside the qualified range."
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions that must stay a warning even where `unqualified` is `allow`."
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions this Host refuses before claim. Host layer only."
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ],
+              "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             }
           }
         },
@@ -737,6 +873,142 @@
                 "enabled"
               ],
               "description": "`ClaudeAdapterOptions.agentSessionPersistence`: `disabled` does not save an Agent task's session transcript, so it cannot be resumed. Default `enabled`."
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string",
+                  "description": "The normalized token this SDK was qualified against, for example `0.160.0`."
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ],
+                  "description": "What an unmatched token means. A descriptor default may not use `block`; only a Host layer may."
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Explicitly known-good versions outside the qualified range."
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions that must stay a warning even where `unqualified` is `allow`."
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions this Host refuses before claim. Host layer only."
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ],
+              "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             }
           }
         },
@@ -749,6 +1021,142 @@
                 "inherit"
               ],
               "description": "`CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`."
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string",
+                  "description": "The normalized token this SDK was qualified against, for example `0.160.0`."
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ],
+                  "description": "What an unmatched token means. A descriptor default may not use `block`; only a Host layer may."
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Explicitly known-good versions outside the qualified range."
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions that must stay a warning even where `unqualified` is `allow`."
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions this Host refuses before claim. Host layer only."
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ],
+              "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             }
           }
         }

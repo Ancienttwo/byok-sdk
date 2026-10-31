@@ -38,7 +38,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   }
   if (admissionWithdrawn()) return undefined;
   if (!pick.ok) {
-    decline(pick.reason, pick.retryable);
+    decline(pick.reason, pick.retryable, pick.versionBlock === undefined ? undefined : 'runtime_version_blocked');
     return undefined;
   }
   if (readerAttempt && pick.descriptor.capabilities.durablePi === true) {
@@ -232,6 +232,17 @@ export async function pickAdapter(
       return { ok: false, reason: `runtime "${requestedRuntime}" cannot enforce Host MCP tool approvals`, retryable: false };
     }
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
+    // A Host-configured block is the one diagnostic verdict that changes
+    // admission (#1103): decline this runtime non-retryably before claim.
+    if (detected.kind === 'available' && detected.versionVerdict?.state === 'block') {
+      const token = (detected.version ?? detected.versionVerdict.qualifiedVersion).replace(/[\r\n\t]/g, ' ').slice(0, 256);
+      return {
+        ok: false,
+        reason: `runtime "${requestedRuntime}" version ${token} is blocked by the device version policy`,
+        retryable: false,
+        versionBlock: { cause: 'version_blocked' },
+      };
+    }
     // Another device may support this platform, as it may have the runtime installed.
     if (detected.kind === 'refused' && detected.reason === 'platform_unsupported') {
       return { ok: false, reason: `platform_unsupported: runtime "${requestedRuntime}" does not support ${process.platform}`, retryable: true };
@@ -257,7 +268,8 @@ export async function pickAdapter(
     if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
     if (requiresMcpToolApprovals && descriptor.mcpToolApprovals !== true) continue;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
-    if (detected.kind === 'available') return { ok: true, adapter, descriptor };
+    // Auto selection skips a blocked candidate and keeps the candidate order.
+    if (detected.kind === 'available' && detected.versionVerdict?.state !== 'block') return { ok: true, adapter, descriptor };
   }
   return {
     ok: false,

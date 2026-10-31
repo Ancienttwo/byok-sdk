@@ -679,6 +679,136 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "excluded",
                 "inherit"
               ]
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string"
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ]
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ]
             }
           }
         },
@@ -696,6 +826,136 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "disabled",
                 "enabled"
               ]
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string"
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ]
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ]
             }
           }
         },
@@ -706,6 +966,136 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               "enum": [
                 "excluded",
                 "inherit"
+              ]
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string"
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ]
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
               ]
             }
           }

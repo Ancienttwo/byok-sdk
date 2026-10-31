@@ -1,5 +1,5 @@
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
-import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { type ResolvedBin } from './resolve-bin';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
@@ -37,12 +37,17 @@ export interface ClaudeAdapterOptions {
      * unchanged. Default `enabled`.
      */
     agentSessionPersistence?: 'enabled' | 'disabled';
+    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+    versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
     private readonly environmentPolicy;
+    private readonly effectiveVersionPolicy;
     constructor(options?: ClaudeAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
@@ -383,7 +388,7 @@ export declare function resolveClaudeBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/codex/codex-adapter.d.ts ====
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { type ResolvedBin } from './resolve-bin';
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
@@ -430,12 +435,17 @@ export interface CodexAdapterOptions {
      * unchanged. Default `inherit`.
      */
     agentUserMcpServers?: 'inherit' | 'excluded';
+    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+    versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export declare class CodexAdapter implements RuntimeAdapter {
     private readonly options;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     private readonly environmentPolicy;
+    private readonly effectiveVersionPolicy;
     constructor(options?: CodexAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
@@ -469,7 +479,7 @@ export interface ResolvedBin {
 export declare function resolveCodexBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/grok/grok-adapter.d.ts ====
 import { type spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ResolvedBin } from '../codex/resolve-bin';
 export interface GrokAdapterOptions {
@@ -507,6 +517,10 @@ export interface GrokAdapterOptions {
      * Default `inherit`.
      */
     agentUserMcpServers?: 'inherit' | 'excluded';
+    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+    versionPolicySource?: 'adapter-option' | 'daemon-config';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
@@ -526,6 +540,7 @@ export declare class GrokAdapter implements RuntimeAdapter {
     private readonly options;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
     private readonly environmentPolicy;
+    private readonly effectiveVersionPolicy;
     constructor(options?: GrokAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
@@ -537,7 +552,7 @@ export declare class GrokAdapter implements RuntimeAdapter {
 import { type HermesByokLauncher } from './hermes-custody';
 export type { HermesByokLauncher } from './hermes-custody';
 import { spawn as nodeSpawn } from 'node:child_process';
-import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult } from '../../types';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ResolvedBin } from '../codex/resolve-bin';
 /** Provider choice written into each execution profile. Credentials stay in the environment. */
@@ -576,6 +591,10 @@ export interface HermesAdapterOptions {
     gatewayReadyTimeoutMs?: number;
     /** Deadline for a cancelled turn to settle before the session fails. Default 1 s. */
     interruptTimeoutMs?: number;
+    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+    versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 /**
  * Hermes Agent over ACP stdio (`hermes acp`). The `hermes acp` process is a
@@ -589,6 +608,7 @@ export declare class HermesAdapter implements RuntimeAdapter {
     private readonly root;
     private readonly options;
     private readonly environmentPolicy;
+    private readonly effectiveVersionPolicy;
     /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
     private readonly liveHomes;
     get descriptor(): import("..").RuntimeAdapterDescriptor;
@@ -753,7 +773,7 @@ export declare function copySdkPackagingAssets(options: CopySdkPackagingAssetsOp
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
-import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './rpc-client';
@@ -789,6 +809,10 @@ export interface PiAdapterOptions {
     sdkHelperHost?: SdkHelperHostConfig;
     /** Admission-time exact local profile check. Tests may replace the process boundary. */
     validateProviderProfileBinding?: (binding: ProviderProfileBinding, launcher: PiByokLauncherConfig) => Promise<void>;
+    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+    versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 export interface PiByokLauncherConfig {
     command: string;
@@ -805,6 +829,7 @@ export declare class PiAdapter implements RuntimeAdapter {
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly agentResources;
     private readonly environmentPolicy;
+    private readonly effectiveVersionPolicy;
     constructor(options?: PiAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
@@ -3351,7 +3376,7 @@ export interface DaemonConfigCheck {
 export declare function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOptions): DaemonConfigCheck;
 // ==== @byok-sdk/client dist/daemon/config-schema/effective.d.ts ====
 import { type ToolAuthorizationMode } from '../../tool-authorization';
-import type { RuntimeAdapter } from '../../types';
+import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon';
 import type { DaemonConfigIssue } from './validate';
 /**
@@ -3396,6 +3421,11 @@ export interface DaemonEffectiveRuntime {
      * for an injected adapter, whose options the Host set when it built it.
      */
     readonly isolation?: Readonly<Record<string, string>>;
+    /**
+     * The effective version policy (#1103), resolved once at adapter
+     * construction; only the policy, never the installed runtime token.
+     */
+    readonly versionPolicy?: RuntimeVersionPolicy;
 }
 /**
  * Effective values of one daemon's configuration (#1094): what it resolved
@@ -3572,7 +3602,7 @@ import { type RemovedDaemonConfigField } from './removed-fields';
  *   by daemon construction.
  */
 export type DaemonConfigSource = 'cli' | 'embedded';
-export type DaemonConfigIssueCode = 'not_an_object' | 'missing_required' | 'invalid_type' | 'invalid_value' | 'unknown_field' | 'removed_field' | 'embedded_only' | 'distribution_owned';
+export type DaemonConfigIssueCode = 'not_an_object' | 'missing_required' | 'invalid_type' | 'invalid_value' | 'invalid_version_policy' | 'unknown_field' | 'removed_field' | 'embedded_only' | 'distribution_owned';
 /**
  * One finding of {@link validateDaemonConfig}. Messages name the field path
  * and the expected type, never the supplied value.
@@ -4686,7 +4716,7 @@ import type { OutboundStatus } from './outbound-settlement';
 import { type RuntimeObservation } from '../runtime-detection';
 import { type ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
+import type { RuntimeAdapter, RuntimeVersionPolicy, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
@@ -4883,16 +4913,22 @@ export interface DaemonConfig {
         pi?: {
             /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
             agentUserContext?: PiAdapterOptions['agentUserContext'];
+            /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+            versionPolicy?: RuntimeVersionPolicy;
         };
         claude?: {
             /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
             agentUserContext?: ClaudeAdapterOptions['agentUserContext'];
             /** `ClaudeAdapterOptions.agentSessionPersistence`: `disabled` does not save an Agent task's session transcript, so it cannot be resumed. Default `enabled`. */
             agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
+            /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+            versionPolicy?: RuntimeVersionPolicy;
         };
         codex?: {
             /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
             agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
+            /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+            versionPolicy?: RuntimeVersionPolicy;
         };
     };
     /**
@@ -10957,7 +10993,7 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -14620,6 +14656,50 @@ export type { AgentEgressPolicy } from '@byok-sdk/protocol';
  */
 export declare const RUNTIME_DETECTION_FAILURE_KINDS: readonly ['not-found', 'not-executable', 'timeout', 'probe-failed', 'refused'];
 /**
+ * One version predicate (#1103). Only an exact token or a component-boundary
+ * prefix: no range, no minimum/maximum, no regular expression and no semver
+ * dependency, so the policy can never become a second version comparator.
+ */
+export type RuntimeVersionSpec = {
+    readonly kind: 'exact';
+    readonly version: string;
+} | {
+    readonly kind: 'prefix';
+    readonly prefix: string;
+};
+/**
+ * Pure, serializable version policy (#1103). The descriptor default, an
+ * adapter option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
+ * objects that replace one another wholesale through
+ * `resolveRuntimeVersionPolicy`; a field is never merged across them.
+ */
+export interface RuntimeVersionPolicy {
+    /** The normalized token this SDK was qualified against, for example `0.160.0`. */
+    readonly qualifiedVersion: string;
+    /** What an unmatched token means. A descriptor default may not use `block`; only a Host layer may. */
+    readonly unqualified: 'allow' | 'warn' | 'block';
+    /** Explicitly known-good versions outside the qualified range. */
+    readonly allow?: readonly RuntimeVersionSpec[];
+    /** Versions that must stay a warning even where `unqualified` is `allow`. */
+    readonly warn?: readonly RuntimeVersionSpec[];
+    /** Versions this Host refuses before claim. Host layer only. */
+    readonly block?: readonly RuntimeVersionSpec[];
+}
+/** The one policy verdict for an installed runtime token (#1103). `matched` names the spec that decided a non-qualified verdict. */
+export type RuntimeVersionVerdict = {
+    readonly state: 'allow';
+    readonly qualifiedVersion: string;
+    readonly matched?: string;
+} | {
+    readonly state: 'warn';
+    readonly qualifiedVersion: string;
+    readonly matched?: string;
+} | {
+    readonly state: 'block';
+    readonly qualifiedVersion: string;
+    readonly matched: string;
+};
+/**
  * One probe outcome, never a separately authored presence boolean. Authentication
  * observation is each adapter's native non-secret login-state probe (a status
  * command, credential env-var names, or Pi's shape-only agent-dir login check)
@@ -14631,6 +14711,7 @@ export type RuntimeDetectResult = {
     readonly version?: string;
     readonly authPresent?: boolean;
     readonly advisory?: RuntimeDetectionAdvisory;
+    readonly versionVerdict?: RuntimeVersionVerdict;
 } | {
     readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'>;
 } | {
@@ -14842,6 +14923,11 @@ export interface SessionEvidence {
 export interface RuntimeAdapterDescriptor {
     readonly id: string;
     readonly capabilities: RuntimeCapabilities;
+    /**
+     * The effective version policy (#1103), already resolved and frozen by the
+     * adapter constructor. Absent for a custom adapter with no policy.
+     */
+    readonly versionPolicy?: RuntimeVersionPolicy;
     /** Explicit opt-in to authoritative `task.offer.dispatchSelection` semantics. */
     readonly supportsDispatchSelection: boolean;
     /**

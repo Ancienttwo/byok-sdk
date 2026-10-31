@@ -11,6 +11,7 @@ import { DeviceStore } from '../store';
 import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './effective';
 import { toolAuthorizationIssues } from './static-tool-authorization';
 import { validateDaemonConfig, type DaemonConfigIssue, type DaemonConfigSource } from './validate';
+import { versionPolicyConfigIssues } from './version-policy';
 
 export interface DaemonConfigCheckOptions {
   readonly source: DaemonConfigSource;
@@ -49,6 +50,8 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
       return { ok: false, issues: [...issues, ...conflicts.map(({ key, message }): DaemonConfigIssue => ({ severity: 'error', code: 'invalid_value', path: key, message }))] };
     }
   }
+  const policyIssues = versionPolicyConfigIssues(input);
+  if (policyIssues.length > 0) return { ok: false, issues: [...issues, ...policyIssues] };
   const config = (options.localAgentRelease === undefined ? input : { ...(input as object), localAgentRelease: options.localAgentRelease }) as DaemonConfig;
   try {
     const scope = resolveDaemonConfig({ config, overrides: {} });

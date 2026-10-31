@@ -15,6 +15,7 @@ import {
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type RuntimeDetectResult,
+  type RuntimeVersionPolicy,
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
@@ -31,7 +32,8 @@ import {
   assertHermesModelSelection, createHermesProfile, ensureHermesRoot, removeHermesProfile, sweepStaleHermesProfiles,
 } from './hermes-home';
 import { HERMES_RUNTIME_CAPABILITIES } from './hermes-capabilities';
-import { hermesVersionLine, isQualifiedHermesVersion, QUALIFIED_HERMES_VERSION } from './hermes-version';
+import { HERMES_VERSION_POLICY, hermesVersionLine, hermesVersionToken } from './hermes-version';
+import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { resolveHermesBin } from './resolve-bin';
 
 const VERSION_TIMEOUT_MS = 5_000;
@@ -84,6 +86,10 @@ export interface HermesAdapterOptions {
   gatewayReadyTimeoutMs?: number;
   /** Deadline for a cancelled turn to settle before the session fails. Default 1 s. */
   interruptTimeoutMs?: number;
+  /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+  versionPolicy?: RuntimeVersionPolicy;
+  /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+  versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
 
 function assertDeadline(value: number | undefined, label: string): void {
@@ -195,6 +201,7 @@ export class HermesAdapter implements RuntimeAdapter {
   private readonly root: string;
   private readonly options: HermesAdapterOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
+  private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
   /** Profile homes of this adapter's open sessions; the stale-profile sweep keeps them. */
   private readonly liveHomes = new Set<string>();
 
@@ -204,6 +211,7 @@ export class HermesAdapter implements RuntimeAdapter {
       supportsDispatchSelection: false,
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: HERMES_RUNTIME_CAPABILITIES,
+      ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
     });
   }
 
@@ -221,6 +229,12 @@ export class HermesAdapter implements RuntimeAdapter {
     assertDeadline(options.gatewayReadyTimeoutMs, 'Hermes gateway ready timeout');
     assertDeadline(options.interruptTimeoutMs, 'Hermes interrupt timeout');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'HermesAdapterOptions.runtimeEnvironment');
+    this.effectiveVersionPolicy = resolveRuntimeVersionPolicy({
+      descriptor: HERMES_VERSION_POLICY,
+      ...(options.versionPolicy === undefined ? {} : options.versionPolicySource === 'daemon-config'
+        ? { daemonConfig: options.versionPolicy }
+        : { adapterOption: options.versionPolicy }),
+    }).policy;
     this.root = root;
     this.options = { ...options, ...(options.byokLauncher === undefined ? {} : { byokLauncher: ownHermesLauncher(options.byokLauncher) }), ...(options.model === undefined ? {} : { model: Object.freeze({ ...options.model }) }) };
   }
@@ -264,7 +278,7 @@ export class HermesAdapter implements RuntimeAdapter {
         kind: 'available',
         version: version.line,
         authPresent: probe.authPresent,
-        ...(isQualifiedHermesVersion(version.line) ? {} : { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: QUALIFIED_HERMES_VERSION } as const }),
+        ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, hermesVersionToken(version.line)),
       };
     } catch (error) {
       return classifyDetectError(error);

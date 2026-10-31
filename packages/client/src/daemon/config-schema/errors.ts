@@ -1,5 +1,6 @@
 import { DaemonConfigFieldRemovedError } from '../daemon-errors';
 import { removedDaemonConfigField, validateDaemonConfig, type DaemonConfigIssue } from './validate';
+import { versionPolicyConfigIssues } from './version-policy';
 
 /**
  * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:
@@ -32,7 +33,10 @@ export function assertDaemonConfigValid(config: unknown): readonly DaemonConfigI
   const { issues } = validateDaemonConfig(config, { source: 'embedded' });
   const removed = issues.find((issue) => issue.code === 'removed_field');
   if (removed !== undefined) throw removedFieldError(removed.path);
-  const errors = issues.filter((issue) => issue.severity === 'error');
+  // Semantic policy checks only make sense once the JSON shape is valid.
+  const semantic = issues.some((issue) => issue.severity === 'error') ? [] : versionPolicyConfigIssues(config);
+  const all = [...issues, ...semantic];
+  const errors = all.filter((issue) => issue.severity === 'error');
   if (errors.length > 0) throw new DaemonConfigInvalidError(errors);
-  return issues.filter((issue) => issue.severity === 'warning');
+  return all.filter((issue) => issue.severity === 'warning');
 }

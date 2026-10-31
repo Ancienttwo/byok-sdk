@@ -217,6 +217,32 @@ describe('one runtime detection authoring contract', () => {
     expect(JSON.stringify(results)).not.toContain(secret);
   });
 
+  it('keeps the version verdict and the legacy advisory as one consistent projection', () => {
+    const advisory = { reason: 'runtime_version_unqualified' as const, qualifiedVersion: '1.0.0' };
+    expect(validateRuntimeDetectResult({
+      kind: 'available', version: '2.0.0',
+      advisory, versionVerdict: { state: 'warn', qualifiedVersion: '1.0.0' },
+    })).toEqual({
+      kind: 'available', version: '2.0.0',
+      advisory, versionVerdict: { state: 'warn', qualifiedVersion: '1.0.0' },
+    });
+    expect(validateRuntimeDetectResult({
+      kind: 'available', version: '2.0.0',
+      versionVerdict: { state: 'block', qualifiedVersion: '1.0.0', matched: '2.0.0' },
+    })).toEqual(expect.objectContaining({ versionVerdict: { state: 'block', qualifiedVersion: '1.0.0', matched: '2.0.0' } }));
+    for (const value of [
+      // warn requires the advisory, with the same qualified version.
+      { kind: 'available', versionVerdict: { state: 'warn', qualifiedVersion: '1.0.0' } },
+      { kind: 'available', versionVerdict: { state: 'warn', qualifiedVersion: '1.0.0' }, advisory: { ...advisory, qualifiedVersion: '9.9.9' } },
+      // allow/block never carry an advisory, and a block names its match.
+      { kind: 'available', advisory, versionVerdict: { state: 'allow', qualifiedVersion: '1.0.0' } },
+      { kind: 'available', versionVerdict: { state: 'block', qualifiedVersion: '1.0.0' } },
+      { kind: 'available', versionVerdict: { state: 'invented', qualifiedVersion: '1.0.0' } },
+    ]) {
+      expect(() => validateRuntimeDetectResult(value)).toThrow('invalid runtime detection result');
+    }
+  });
+
   it('copies the validated result so later custom-adapter mutation cannot change the observation', () => {
     const value = { kind: 'available' as const, version: 'one' };
     const result = validateRuntimeDetectResult(value);
