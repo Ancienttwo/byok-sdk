@@ -15,7 +15,7 @@ export { CommitConflict, commitInLedger, retainInLedger, revisionOf } from './co
 export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent } from './commit';
 export type { BotRoutine, BotRoutineInput } from './routines';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model';
-export { ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES, type RoomMessage } from './rooms';
+export { DEFAULT_MEMBER_MENTIONS, ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES, memberMentions, type MemberMentions, type RoomMessage } from './rooms';
 export { TEAM_NOTE_LIMIT } from './team';
 export { TeamModeError, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot } from './rules/team';
 export { createBotPersonaProjection } from './persona';
