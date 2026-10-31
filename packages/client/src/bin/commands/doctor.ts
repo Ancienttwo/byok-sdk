@@ -45,6 +45,22 @@ function formatDoctorLines(diagnostics: DoctorDiagnostics, logDir: string, envir
     environment ? `environment: ${formatServiceEnvironment(environment.status)} at=${environment.ts}` : 'environment: unknown',
     // #1095: the running daemon's runtime environment names and sources, never values.
     ...formatRuntimeEnvironmentLines(diagnostics.runtimeEnvironment),
+    // #1103: the effective version policy's verdict per runtime. A block is
+    // the one verdict an operator must act on, so the line names its local
+    // cause; allow/warn stay one compact line. Older daemons and custom
+    // adapters without a policy simply omit the line.
+    ...snapshot.runtimes.flatMap((runtime) => {
+      const verdict = runtime.versionVerdict;
+      if (verdict === undefined) return [];
+      const details = [
+        `runtime-version: ${runtime.idHash}`,
+        `state=${verdict.state}`,
+        `qualifiedVersion=${verdict.qualifiedVersion}`,
+        ...(verdict.matched === undefined ? [] : [`matched=${verdict.matched}`]),
+      ];
+      if (verdict.state === 'block') details.push('blocked by the device version policy');
+      return [details.join(' ')];
+    }),
   ];
   for (const check of snapshot.checks) lines.push(`check ${check.id}: ${check.status} (${check.summary})`);
   // #1097: where the daemon log and the service manager's redirect files are, and how large.

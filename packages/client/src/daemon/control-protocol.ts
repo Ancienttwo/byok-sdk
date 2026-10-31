@@ -12,7 +12,7 @@ import type { RuntimeObservation } from '../runtime-detection';
 import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentReport } from '../runtime/environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
-import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
+import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeVersionVerdict } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
 import type {
   InputPreparationAccountingPolicyRefV1,
@@ -443,8 +443,16 @@ export interface ControlStatusResult {
   /** Issues #391/#394: the same value as `Daemon.status().lifecycle`. */
   lifecycle: DaemonLifecycle;
   activeTasks: ControlActiveTask[];
-  /** Absent for a pre-#392 control peer: report unknown, never probe locally. */
+  /**
+   * Absent for a pre-#392 control peer: report unknown, never probe locally.
+   * A pre-#1103 client validates every key of each entry, so the policy verdict
+   * travels in {@link runtimeVersionVerdicts} instead of inside this array;
+   * that keeps an older CLI's strict observation parser working against a newer
+   * daemon. New readers merge the two.
+   */
   runtimes?: RuntimeObservation[];
+  /** #1103: verdicts for the same runtime ids as {@link runtimes}; absent from a pre-#1103 daemon. */
+  runtimeVersionVerdicts?: Array<{ readonly id: string; readonly versionVerdict: RuntimeVersionVerdict }>;
   /** Absent for a pre-#392 control peer. */
   environment?: ServiceEnvironmentStatus;
   /** Timestamp of the same environment-resolved event; absent before startup resolves it. */

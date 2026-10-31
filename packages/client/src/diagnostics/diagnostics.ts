@@ -23,7 +23,7 @@ import path from 'node:path';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
 import { readLastLifecycleRecord, readLastEnvironmentRecord, parseEnvironmentRecord } from '../bin/audit-log';
-import { parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection';
+import { attachRuntimeVersionVerdicts, parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection';
 import { connectControlClient } from '../daemon/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../bin/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
@@ -792,7 +792,7 @@ export async function collectDoctorDiagnostics(
       const live = await controlConnection.client.request<ControlStatusResult>('status');
       const observed = parseRuntimeObservations(live.runtimes);
       if (observed !== undefined) {
-        observations = observed;
+        observations = attachRuntimeVersionVerdicts(observed, live.runtimeVersionVerdicts);
         runtimeSource = 'daemon';
       }
       if (live.environment !== undefined && live.environmentResolvedAt !== undefined) {
@@ -834,6 +834,7 @@ export async function collectDoctorDiagnostics(
     outcome: runtime.outcome,
     ...(runtime.outcome === 'refused' ? { reason: runtime.reason } : {}),
     versionPresent: runtime.version !== undefined,
+    ...(runtime.versionVerdict === undefined ? {} : { versionVerdict: { ...runtime.versionVerdict } }),
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
     steer: runtime.steer,
     resume: runtime.resume,

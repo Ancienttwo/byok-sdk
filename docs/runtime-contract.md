@@ -17,7 +17,7 @@ its descriptor advertises: `mcpToolsets`, `messageDraft`,
 
 | Case | Checks |
 | --- | --- |
-| `detect.version` | `detect()` is available. The suite reads the version text itself, so a broken adapter parser fails here. It also checks that the unqualified-version advisory appears exactly when the version is not the qualified one. |
+| `detect.version` | `detect()` is available. The suite reads the version text itself, so a broken adapter parser fails here. It also checks the effective version-policy verdict (allow for the qualified token, warn exactly where the unqualified-version advisory appears) and that the unqualified-version advisory appears exactly when the version is not the qualified one. |
 | `detect.auth.*` | `authPresent` is false with no credential, and true for an API key in the environment and for the runtime's own stored login. |
 | `mcp.submitResult` | A Host MCP server's `submit_result` call reaches the server, including through deferred-tool search (Claude `ToolSearch`, Grok `search_tool`/`use_tool`). |
 | `instructions.project` | The project instruction file (AGENTS.md, or CLAUDE.md for Claude) reaches the model. |
@@ -25,6 +25,15 @@ its descriptor advertises: `mcpToolsets`, `messageDraft`,
 | `drafts` | Streamed text reaches the Agent message draft, either as `message_draft_delta` events or as `progress` deltas, using the daemon's own rule. |
 | `gate.auto` | The `auto` gate refuses a high-risk native write before it executes. |
 | `egress.declaredHostsOnly` | No proxied request goes to an undeclared host. The proxy only sees clients that honor `HTTP(S)_PROXY`. |
+
+One case is synthetic and needs no installed CLI:
+`version-block.contract.ts` builds a Host-configured `versionPolicy` block,
+runs it through the same local admission as a real offer, and asserts that
+`pickAdapter` declines before claim (`runtime_version_blocked`, retryable
+false) without calling `prepare()` or `start()`. Real runtimes are never
+deliberately blocked; the fixture is the only exercise of that path. A policy
+block is admission-only: a nightly `latest` verdict of `warn` or `block`
+changes the reported verdict, not the suite's pass/fail rule.
 
 Declared hosts carry their reason in the adapter file. Currently there are
 two:

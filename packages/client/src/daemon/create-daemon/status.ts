@@ -40,6 +40,12 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
   // list's count) — same source `approvals.list` itself calls.
   const pendingApprovals = approvalRegistry.list();
   const clockSkew = daemonState.auth.clockSkew();
+  // #1103: keep verdicts out of `runtimes` so a pre-#1103 CLI's strict
+  // observation parser still accepts the array; new readers merge this
+  // additive side channel by runtime id.
+  const runtimeVersionVerdicts = daemonState.runtimeObservations.flatMap((observation) => observation.versionVerdict === undefined
+    ? []
+    : [{ id: observation.id, versionVerdict: { ...observation.versionVerdict } }]);
   return {
     localAgentRelease,
     pid: process.pid,
@@ -50,7 +56,8 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
     activeTasks,
     environment: { ...daemonState.resolvedEnvironment },
     ...(daemonState.environmentResolvedAt === undefined ? {} : { environmentResolvedAt: daemonState.environmentResolvedAt }),
-    runtimes: daemonState.runtimeObservations.map(observation => ({ ...observation })),
+    runtimes: daemonState.runtimeObservations.map(({ versionVerdict: _versionVerdict, ...observation }) => ({ ...observation })),
+    ...(runtimeVersionVerdicts.length === 0 ? {} : { runtimeVersionVerdicts }),
     // M4 Phase 4 (part B.3): queue watermarks come from TaskRunner's own
     // active-task map (distinct from `observer.tasks()` above, which is
     // derived from the envelope feed) — see `TaskRunner.getQueueWatermarks`'s
