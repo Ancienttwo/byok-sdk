@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
-import { ensureSecureDir } from '../util/secure-dir';
+import { ensureSecureDir } from './secure-dir';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,

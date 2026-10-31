@@ -214,7 +214,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   if (path === '.gitattributes') {
     // #603 pins both generated metadata and native build input bytes.
     // Admit only the reviewed additive LF rules, never unrelated attributes.
-    const rule = 'packages/client/src/daemon/agent-memory-helper-release-pin.ts text eol=lf\n';
+    const rule = 'packages/client/src/util/agent-memory-helper-release-pin.ts text eol=lf\n';
     const before = beforeText.replace(/\r\n/g, '\n');
     const after = afterText.replace(/\r\n/g, '\n');
     const nativeRules = 'packages/client/native/agent-memory-fs/*.go text eol=lf\n'

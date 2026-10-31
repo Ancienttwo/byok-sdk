@@ -1639,6 +1639,27 @@ export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance';
 export { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
 export type { AgentRef } from '../agent-home';
+// ==== @byok-sdk/client dist/agent-memory/prepared-agent-memory.d.ts ====
+import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import { type PreparedAgentMemoryObservation } from './prepared-capability';
+/** The SDK-owned Agent-memory helper launch (`resolveSdkReservedHelperBin`). */
+export interface PreparedAgentMemoryHelper {
+    readonly command: string;
+    readonly args: readonly string[];
+}
+/** The task-free descriptor observation a preparation is counted over. */
+export interface PreparedAgentMemoryState {
+    readonly observation: PreparedAgentMemoryObservation;
+}
+/** Spawn the task-free descriptor helper and read its tools/list answer. */
+export declare function observePreparedMemory(describe: PreparedAgentMemoryHelper, env: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<PreparedAgentMemoryState>;
+export declare function preparedMemoryProjection(mode: PreparedAgentMemoryMode, memory: PreparedAgentMemoryState | null, runtimeIdentity: string): {
+    tools: readonly import("./prepared-capability").PreparedAgentMemorySelectedTool[];
+    toolExecutors: {
+        [k: string]: string;
+    };
+};
+export declare function parsePreparedMemoryState(raw: unknown): PreparedAgentMemoryState | null;
 // ==== @byok-sdk/client dist/agent-memory/prepared-capability.d.ts ====
 import { type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import { PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation } from './tool-manifest';
@@ -1799,6 +1820,13 @@ export declare function serveAgentMemoryDescriptorOverStdio(input: {
     stdin?: NodeJS.ReadableStream;
     stdout?: NodeJS.WritableStream;
 }): void;
+// ==== @byok-sdk/client dist/bin/sdk-reserved-helper-command.d.ts ====
+/**
+ * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
+ * side effects for normal product commands; a reserved command is handled to
+ * stdio EOF before this resolves `true`.
+ */
+export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
 // ==== @byok-sdk/client dist/bin/team-tmux-view.d.ts ====
 export type TmuxRunner = (file: string, args: readonly string[]) => Promise<{
     stdout?: string;
@@ -2324,22 +2352,6 @@ export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
     canonicalHome: string;
     homeIdentity: AgentHomeLease['homeIdentity'];
 }>): Promise<AgentMemoryFilesystem>;
-// ==== @byok-sdk/client dist/daemon/agent-memory-helper-release.d.ts ====
-/** Resolve SDK release assets only: package-installed by default, or a complete SDK-copied product directory. No PATH or caller digest. */
-export declare function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string;
-export declare function verifyAgentMemoryFilesystemHelper(helperBin: string, assetRoot?: string): string;
-/** Build-time copy of the SDK release manifest and the targets of one platform into a new or empty product asset directory. */
-export interface CopyAgentMemoryHelperAssetsOptions {
-    readonly outDir: string;
-    /** `darwin` (default) copies both Darwin targets; `win32` copies the Windows x64 target. */
-    readonly platform?: 'darwin' | 'win32';
-}
-/**
- * Run against an installed SDK release, then ship these files with the product.
- * The manifest and the Mach-O or PE digest detect deployment errors, not signer trust.
- * Product re-signing remains supported. Returns sorted paths relative to outDir.
- */
-export declare function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelperAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/daemon/agent-memory-intent.d.ts ====
 import { type AgentMemoryIntentAvailablePayload, type AgentMemoryIntentCompletion, type AgentMemoryIntentFileObservation, type AgentMemoryIntentOperation, type AgentMemoryIntentReadback, type AgentMemoryIntentRejectionCode } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentHomeManager } from '../agent-home';
@@ -4702,7 +4714,7 @@ import { type OperationalHealthSnapshot } from './operational-health';
 import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { type DeviceEnrollment } from './store';
 import { type LocalTaskJournal } from './journal/journal';
-import type { JournalOpenFaultSeam } from './journal/sqlite-support';
+import type { JournalOpenFaultSeam } from '../util/sqlite-support';
 import { type StorageConfig } from './retention/config';
 import { type RetentionTimers } from './retention/sweeper';
 import { type ProgressBatcherOptions } from './progress-batcher';
@@ -7176,7 +7188,7 @@ export declare class JournalClosedError extends Error {
 }
 // ==== @byok-sdk/client dist/daemon/journal/sqlite-journal.d.ts ====
 import { type JournalIdentity, type AdmissionRecord, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord, type WithheldOfferRecord, type WithheldOfferTask } from './journal';
-import { JournalHandleCleanupError, type JournalOpenFaultSeam } from './sqlite-support';
+import { JournalHandleCleanupError, type JournalOpenFaultSeam } from '../../util/sqlite-support';
 export { JournalHandleCleanupError };
 /** The single database file, per §12.7.2's "建议单库 `<storeDir>/daemon.db`". */
 export declare const JOURNAL_DB_FILENAME = "daemon.db";
@@ -7299,113 +7311,6 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
     compact(options: CompactOptions): Promise<CompactResult>;
     close(): Promise<void>;
 }
-// ==== @byok-sdk/client dist/daemon/journal/sqlite-support.d.ts ====
-import type { DatabaseSync } from 'node:sqlite';
-/**
- * The path handed to SQLite, which is not always the path the rest of the code
- * uses. On Windows the SQLite VFS does not apply the extended-length prefix
- * itself: past the legacy MAX_PATH the open fails, and a failed open is
- * indistinguishable from a damaged file at the call site (the journal would
- * quarantine a healthy database and refuse to start). The prefix is applied
- * only when the path is long enough to need it, so ordinary installs keep the
- * plain path.
- */
-export declare function sqliteOpenPath(path: string, platform?: NodeJS.Platform): string;
-/** Every post-construction boundary crossed before a journal handle is returned to its owner. */
-export type JournalOpenStep = 'after-open' | 'after-auto-vacuum' | 'after-wal' | 'after-foreign-keys' | 'after-synchronous' | 'after-header-read';
-/**
- * Test-only fault seam for proving that every post-open initialization failure
- * closes the native handle before control returns to the journal constructor.
- */
-export interface JournalOpenFaultSeam {
-    onStep?(step: JournalOpenStep): void;
-    /** Test-only close override; production always calls `DatabaseSync.close()`. */
-    close?(db: DatabaseSync): void;
-}
-/**
- * Initialization failed after SQLite returned a native handle, and closing
- * that handle also failed. Callers must retain their cross-process ownership
- * lease because the helper can no longer prove that no writer remains alive.
- */
-export declare class JournalHandleCleanupError extends Error {
-    readonly failures: readonly unknown[];
-    constructor(message: string, failures: readonly unknown[]);
-}
-/**
- * Whether `nodeVersion` (a `major.minor.patch` string shaped like
- * `process.versions.node`) is new enough for `node:sqlite` to exist at all.
- * A version-string heuristic only — `node:sqlite` shipped in 22.5.0 behind
- * `--experimental-sqlite` and became usable unflagged later, so a runtime
- * passing this can still fail to load the module. {@link isSqliteAvailable}
- * is the authoritative check; this one only exists to turn the common
- * "Node too old" case into a specific message. Unparsable input returns
- * `true` (the `require` below is the real gate; don't false-negative on a
- * version shape this hasn't seen).
- */
-export declare function isSqliteCapableNodeVersion(nodeVersion: string): boolean;
-/**
- * Synchronously load `node:sqlite` via `process.getBuiltinModule` rather than a dynamic
- * `import()`. `DatabaseSync`'s entire API is synchronous, and the journal is
- * constructed synchronously from `createDaemonWithAdapters` alongside every
- * other daemon-local store (`DeviceStore`, `CursorStore`, ...) — an async
- * factory here would leak into every one of those call sites for nothing.
- * The built-in lookup needs no file URL, including in CJS bundles and SEA
- * executables. Memoized: the throw is re-derived per call from
- * the version check rather than cached, which keeps the failure message
- * accurate without keeping a rejected value around.
- */
-export declare function loadSqliteModule(): typeof import('node:sqlite');
-/**
- * Whether `node:sqlite` can ACTUALLY be loaded right now. This is what the
- * journal's own test suites use for `describe.skipIf(!isSqliteAvailable())`
- * (the same idiom `@byok-sdk/server`'s SQLite suites already use), and what
- * `createDaemonWithAdapters` calls before constructing a hosted journal so
- * the refusal is a typed, up-front error instead of a cryptic
- * `Cannot find module 'node:sqlite'` from deep inside the first append.
- */
-export declare function isSqliteAvailable(): boolean;
-/**
- * Open (or create) the journal database at `path` with the durability
- * settings architecture §12.7.2 pins, in the order they have to be applied:
- *
- * 1. `auto_vacuum = INCREMENTAL` — MUST precede table creation. `auto_vacuum`
- *    is only settable on a database with no schema yet; setting it afterward
- *    is silently ignored, and `compact()`'s `PRAGMA incremental_vacuum` would
- *    then be a no-op that reports success.
- * 2. `journal_mode = WAL` — a reader and the single writer proceed without
- *    blocking each other, and it is what makes "drop the instance, reopen the
- *    same file" (the entire crash-matrix method) reliable.
- * 3. `foreign_keys = ON` — the journal's tables are a real graph
- *    (transition -> task -> envelope); an orphan row here is corrupted
- *    recovery evidence, not a tolerable inconsistency.
- * 4. `synchronous = FULL` — every ack-critical transaction fsyncs before it
- *    reports committed. This is THE setting the "durable append then cursor
- *    ack" ordering rests on; NORMAL would let the WAL commit land in the OS
- *    page cache, so the cursor could advance over an envelope a power cut
- *    then erases. Applied database-wide rather than per-transaction: the
- *    journal's whole reason to exist is ack-critical writes, and the
- *    maintenance paths that do not need it (checkpoint, incremental vacuum)
- *    are off the hot path anyway.
- *
- * `busyTimeoutMs` bounds how long a write waits on the lock before throwing
- * `SQLITE_BUSY` — bounded on purpose, so contention surfaces as an error the
- * caller sees rather than an unbounded stall on the envelope path.
- *
- * Throws whatever `node:sqlite` throws (module load failure, a corrupt file,
- * an unreadable directory). Every caller is `SqliteLocalTaskJournal`'s
- * constructor, which turns each of those into its own typed error — see
- * `sqlite-journal.ts`.
- */
-export declare function openJournalDatabase(path: string, busyTimeoutMs: number, faults?: JournalOpenFaultSeam): DatabaseSync;
-/**
- * Restrict the journal database and its WAL/SHM siblings to owner-only
- * read/write. The journal holds raw task envelopes (instructions, policy) with
- * no other access-control layer of its own, so it must not be left at whatever
- * the process umask would give it. Call AFTER the schema exists, so the
- * WAL/SHM files SQLite creates lazily on first write are already there; a
- * sibling that does not exist yet is skipped rather than treated as an error.
- */
-export declare function secureJournalFilePermissions(dbPath: string): void;
 // ==== @byok-sdk/client dist/daemon/mcp-tools-probe.d.ts ====
 import type { McpStdioServerConfig } from '../types';
 import { McpAuthorityError } from '../mcp/client';
@@ -8137,27 +8042,6 @@ export interface OutboundStatus {
     droppedEphemeral: number;
     lastRejection?: OutboundRejection;
 }
-// ==== @byok-sdk/client dist/daemon/prepared-agent-memory.d.ts ====
-import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import { type PreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
-/** The SDK-owned Agent-memory helper launch (`resolveSdkReservedHelperBin`). */
-export interface PreparedAgentMemoryHelper {
-    readonly command: string;
-    readonly args: readonly string[];
-}
-/** The task-free descriptor observation a preparation is counted over. */
-export interface PreparedAgentMemoryState {
-    readonly observation: PreparedAgentMemoryObservation;
-}
-/** Spawn the task-free descriptor helper and read its tools/list answer. */
-export declare function observePreparedMemory(describe: PreparedAgentMemoryHelper, env: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<PreparedAgentMemoryState>;
-export declare function preparedMemoryProjection(mode: PreparedAgentMemoryMode, memory: PreparedAgentMemoryState | null, runtimeIdentity: string): {
-    tools: readonly import("../agent-memory/prepared-capability").PreparedAgentMemorySelectedTool[];
-    toolExecutors: {
-        [k: string]: string;
-    };
-};
-export declare function parsePreparedMemoryState(raw: unknown): PreparedAgentMemoryState | null;
 // ==== @byok-sdk/client dist/daemon/progress-batcher.d.ts ====
 import type { ActivityIngress, AgentEvent } from '@byok-sdk/protocol';
 export type ProgressEmitter = (seq: number, events: AgentEvent[]) => void;
@@ -10969,7 +10853,8 @@ export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './lo
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
-export { BYOK_SDK_HELPER_SUBCOMMAND, bundledSdkHelperHost, resolveSdkReservedHelperBin, runSdkReservedHelperCommand, } from './sdk-reserved-helper-host';
+export { BYOK_SDK_HELPER_SUBCOMMAND, bundledSdkHelperHost, resolveSdkReservedHelperBin, } from './sdk-reserved-helper-host';
+export { runSdkReservedHelperCommand } from './bin/sdk-reserved-helper-command';
 export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host';
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
@@ -11128,7 +11013,7 @@ export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInter
 export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement';
 export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
 export type { ExecutionScratch } from './daemon/retention/scratch';
-export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
+export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './util/agent-memory-helper-release';
 /** The reserved name of the SDK memory MCP server in an Agent task's MCP servers. */
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
@@ -11138,7 +11023,7 @@ export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
-import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
 /** Wire format tag for a preparation request. One strict shape, one version. */
 export declare const INPUT_PREPARATION_REQUEST_FORMAT = "byok.input-preparation.request";
@@ -14350,12 +14235,6 @@ export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind,
 export declare function bundledSdkHelperHost(): SdkHelperHostConfig & {
     readonly executable: string;
 };
-/**
- * Product entrypoint seam for single-file/SEA hosts. Returns `false` without
- * side effects for normal product commands; a reserved command is handled to
- * stdio EOF before this resolves `true`.
- */
-export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
 // ==== @byok-sdk/client dist/sdk-reserved-mcp.d.ts ====
 /** SDK-owned names shared by daemon injection, adapter policy, and MCP helpers. */
 export declare const AGENT_MESSAGE_MCP_SERVER_NAME = "byokagentmessage";
@@ -14597,7 +14476,7 @@ import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { ToolAuthorizationGate } from './tool-authorization';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type { AgentEvent, TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
@@ -15176,6 +15055,22 @@ export declare class SteerUnsupportedError extends Error {
     readonly runtimeId: string;
     constructor(runtimeId: string, message: string);
 }
+// ==== @byok-sdk/client dist/util/agent-memory-helper-release.d.ts ====
+/** Resolve SDK release assets only: package-installed by default, or a complete SDK-copied product directory. No PATH or caller digest. */
+export declare function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string;
+export declare function verifyAgentMemoryFilesystemHelper(helperBin: string, assetRoot?: string): string;
+/** Build-time copy of the SDK release manifest and the targets of one platform into a new or empty product asset directory. */
+export interface CopyAgentMemoryHelperAssetsOptions {
+    readonly outDir: string;
+    /** `darwin` (default) copies both Darwin targets; `win32` copies the Windows x64 target. */
+    readonly platform?: 'darwin' | 'win32';
+}
+/**
+ * Run against an installed SDK release, then ship these files with the product.
+ * The manifest and the Mach-O or PE digest detect deployment errors, not signer trust.
+ * Product re-signing remains supported. Returns sorted paths relative to outDir.
+ */
+export declare function copyAgentMemoryHelperAssets(options: CopyAgentMemoryHelperAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/util/exec-runner.d.ts ====
 /**
  * Result of running an external command, regardless of its exit code.
@@ -15463,3 +15358,110 @@ export declare function createPrivateTempDir(parent: string, prefix: string): Pr
  * scratch root gets. The caller removes it.
  */
 export declare function createPrivateSystemTempDir(prefix: string): Promise<string>;
+// ==== @byok-sdk/client dist/util/sqlite-support.d.ts ====
+import type { DatabaseSync } from 'node:sqlite';
+/**
+ * The path handed to SQLite, which is not always the path the rest of the code
+ * uses. On Windows the SQLite VFS does not apply the extended-length prefix
+ * itself: past the legacy MAX_PATH the open fails, and a failed open is
+ * indistinguishable from a damaged file at the call site (the journal would
+ * quarantine a healthy database and refuse to start). The prefix is applied
+ * only when the path is long enough to need it, so ordinary installs keep the
+ * plain path.
+ */
+export declare function sqliteOpenPath(path: string, platform?: NodeJS.Platform): string;
+/** Every post-construction boundary crossed before a journal handle is returned to its owner. */
+export type JournalOpenStep = 'after-open' | 'after-auto-vacuum' | 'after-wal' | 'after-foreign-keys' | 'after-synchronous' | 'after-header-read';
+/**
+ * Test-only fault seam for proving that every post-open initialization failure
+ * closes the native handle before control returns to the journal constructor.
+ */
+export interface JournalOpenFaultSeam {
+    onStep?(step: JournalOpenStep): void;
+    /** Test-only close override; production always calls `DatabaseSync.close()`. */
+    close?(db: DatabaseSync): void;
+}
+/**
+ * Initialization failed after SQLite returned a native handle, and closing
+ * that handle also failed. Callers must retain their cross-process ownership
+ * lease because the helper can no longer prove that no writer remains alive.
+ */
+export declare class JournalHandleCleanupError extends Error {
+    readonly failures: readonly unknown[];
+    constructor(message: string, failures: readonly unknown[]);
+}
+/**
+ * Whether `nodeVersion` (a `major.minor.patch` string shaped like
+ * `process.versions.node`) is new enough for `node:sqlite` to exist at all.
+ * A version-string heuristic only — `node:sqlite` shipped in 22.5.0 behind
+ * `--experimental-sqlite` and became usable unflagged later, so a runtime
+ * passing this can still fail to load the module. {@link isSqliteAvailable}
+ * is the authoritative check; this one only exists to turn the common
+ * "Node too old" case into a specific message. Unparsable input returns
+ * `true` (the `require` below is the real gate; don't false-negative on a
+ * version shape this hasn't seen).
+ */
+export declare function isSqliteCapableNodeVersion(nodeVersion: string): boolean;
+/**
+ * Synchronously load `node:sqlite` via `process.getBuiltinModule` rather than a dynamic
+ * `import()`. `DatabaseSync`'s entire API is synchronous, and the journal is
+ * constructed synchronously from `createDaemonWithAdapters` alongside every
+ * other daemon-local store (`DeviceStore`, `CursorStore`, ...) — an async
+ * factory here would leak into every one of those call sites for nothing.
+ * The built-in lookup needs no file URL, including in CJS bundles and SEA
+ * executables. Memoized: the throw is re-derived per call from
+ * the version check rather than cached, which keeps the failure message
+ * accurate without keeping a rejected value around.
+ */
+export declare function loadSqliteModule(): typeof import('node:sqlite');
+/**
+ * Whether `node:sqlite` can ACTUALLY be loaded right now. This is what the
+ * journal's own test suites use for `describe.skipIf(!isSqliteAvailable())`
+ * (the same idiom `@byok-sdk/server`'s SQLite suites already use), and what
+ * `createDaemonWithAdapters` calls before constructing a hosted journal so
+ * the refusal is a typed, up-front error instead of a cryptic
+ * `Cannot find module 'node:sqlite'` from deep inside the first append.
+ */
+export declare function isSqliteAvailable(): boolean;
+/**
+ * Open (or create) the journal database at `path` with the durability
+ * settings architecture §12.7.2 pins, in the order they have to be applied:
+ *
+ * 1. `auto_vacuum = INCREMENTAL` — MUST precede table creation. `auto_vacuum`
+ *    is only settable on a database with no schema yet; setting it afterward
+ *    is silently ignored, and `compact()`'s `PRAGMA incremental_vacuum` would
+ *    then be a no-op that reports success.
+ * 2. `journal_mode = WAL` — a reader and the single writer proceed without
+ *    blocking each other, and it is what makes "drop the instance, reopen the
+ *    same file" (the entire crash-matrix method) reliable.
+ * 3. `foreign_keys = ON` — the journal's tables are a real graph
+ *    (transition -> task -> envelope); an orphan row here is corrupted
+ *    recovery evidence, not a tolerable inconsistency.
+ * 4. `synchronous = FULL` — every ack-critical transaction fsyncs before it
+ *    reports committed. This is THE setting the "durable append then cursor
+ *    ack" ordering rests on; NORMAL would let the WAL commit land in the OS
+ *    page cache, so the cursor could advance over an envelope a power cut
+ *    then erases. Applied database-wide rather than per-transaction: the
+ *    journal's whole reason to exist is ack-critical writes, and the
+ *    maintenance paths that do not need it (checkpoint, incremental vacuum)
+ *    are off the hot path anyway.
+ *
+ * `busyTimeoutMs` bounds how long a write waits on the lock before throwing
+ * `SQLITE_BUSY` — bounded on purpose, so contention surfaces as an error the
+ * caller sees rather than an unbounded stall on the envelope path.
+ *
+ * Throws whatever `node:sqlite` throws (module load failure, a corrupt file,
+ * an unreadable directory). Every caller is `SqliteLocalTaskJournal`'s
+ * constructor, which turns each of those into its own typed error — see
+ * `sqlite-journal.ts`.
+ */
+export declare function openJournalDatabase(path: string, busyTimeoutMs: number, faults?: JournalOpenFaultSeam): DatabaseSync;
+/**
+ * Restrict the journal database and its WAL/SHM siblings to owner-only
+ * read/write. The journal holds raw task envelopes (instructions, policy) with
+ * no other access-control layer of its own, so it must not be left at whatever
+ * the process umask would give it. Call AFTER the schema exists, so the
+ * WAL/SHM files SQLite creates lazily on first write are already there; a
+ * sibling that does not exist yet is skipped rather than treated as an error.
+ */
+export declare function secureJournalFilePermissions(dbPath: string): void;

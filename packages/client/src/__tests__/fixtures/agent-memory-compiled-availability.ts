@@ -1,5 +1,5 @@
 import { createDaemonWithAdapters } from '../../daemon/create-daemon';
-import { resolveAgentMemoryFilesystemHelper } from '../../daemon/agent-memory-helper-release';
+import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release';
 
 const root = process.argv[2]!;
 const config = {

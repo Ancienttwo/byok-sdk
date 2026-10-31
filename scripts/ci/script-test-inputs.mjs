@@ -32,7 +32,7 @@ export const scriptTestInputs = Object.freeze({
     /^(?:package\.json|packages\/client\/package\.json)$/,
     /^scripts\/release\/(?:publish|pack-and-smoke)\.mjs$/,
     /^packages\/client\/scripts\/(?:check-agent-memory-helper-build|agent-memory-helper-source)\.mjs$/,
-    /^packages\/client\/src\/daemon\/agent-memory-helper-release-pin\.ts$/,
+    /^packages\/client\/src\/util\/agent-memory-helper-release-pin\.ts$/,
     /^packages\/client\/native\/agent-memory-fs\//,
   ] },
   'scripts/release/registry-contract.test.mjs': { inputs: [/^scripts\/release\/registry-expectations\.json$/] },

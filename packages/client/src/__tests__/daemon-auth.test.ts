@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager, DeviceRevokedError } from '../daemon/auth-manager';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
-import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../util/daemon-owner';
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { quarantineCorruptOperationalHealth } from '../diagnostics/diagnostics';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';

@@ -183,7 +183,7 @@ storeDir 的内容（Agent home 的布局见 [`host-local-storage-layout.md`](..
 
 | 名字空间 | 规则 | 证据 |
 | --- | --- | --- |
-| storeDir | `DeviceStore.resolveDir(productId, config.storeDir)`，默认 `~/.byok/<productId>`。同一 productId 的 daemon 与 CLI 共用，`mutex.sock` 与 `daemon-owner.json` 保证只有一个 daemon 持有它。 | `packages/client/src/daemon/store.ts:210,222`；`packages/client/src/daemon/daemon-owner.ts:12,92` |
+| storeDir | `DeviceStore.resolveDir(productId, config.storeDir)`，默认 `~/.byok/<productId>`。同一 productId 的 daemon 与 CLI 共用，`mutex.sock` 与 `daemon-owner.json` 保证只有一个 daemon 持有它。 | `packages/client/src/daemon/store.ts:210,222`；`packages/client/src/util/daemon-owner.ts:12,92` |
 | cursor 与 journal | `cursor-<key>.json` 按 server 与 device 分键；journal 是单库 `daemon.db`。 | `packages/client/src/daemon/cursor-store.ts:32`；`packages/client/src/daemon/journal/sqlite-journal.ts:69` |
 | 执行 scratch | 每次执行一个 12 位十六进制 token；`sdk/` 释放即删，`runtime/` 写 `released` 标记后由 retention 清理；路径放不下 Unix socket 时改到 `/tmp/byok-scratch-<hash>`（macOS `/private/tmp`）。 | `packages/client/src/daemon/retention/scratch.ts:28,60,158-187` |
 | Agent home | `hostStorageRoot/agents/<agentId>/`；`.byok/` 是其中唯一的 SDK 保留区，路径由 SDK 拼接并拒绝 symlink 与越界。 | `packages/client/src/agent-home.ts:27-28` |

@@ -7,7 +7,7 @@
 // falls through untouched.
 
 // #700: Node's own undici loads before Pi's npm copy (see `loadNodeUndici` in
-// `sdk-reserved-helper-host.ts`).
+// `sdk-reserved-helper-command.ts`).
 Reflect.get(globalThis, 'Headers');
 import('#byok-pi-runtime-host')
   .then(async (host) => {

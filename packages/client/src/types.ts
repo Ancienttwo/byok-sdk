@@ -4,7 +4,7 @@ import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { ToolAuthorizationGate } from './tool-authorization';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type {
   AgentEgressPolicy,

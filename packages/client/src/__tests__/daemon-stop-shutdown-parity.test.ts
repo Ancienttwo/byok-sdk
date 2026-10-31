@@ -10,7 +10,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
-import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../util/daemon-owner';
 import { controlEndpointPath, controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { OperationalHealthTracker } from '../daemon/operational-health';

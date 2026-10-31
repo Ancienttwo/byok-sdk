@@ -77,7 +77,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { TestServer } from './fixtures/test-server';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
-import { resolveAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
+import { resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import { createAgentMemoryIntentProcessor, helperAgentMemoryIntentBackend } from '../daemon/agent-memory-intent';
 
 const roots: string[] = [];

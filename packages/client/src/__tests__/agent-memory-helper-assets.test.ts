@@ -6,8 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { copyAgentMemoryHelperAssets, resolveAgentMemoryFilesystemHelper, verifyAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
-import { agentMemoryHelperDigest } from '../daemon/agent-memory-helper-digest';
+import { copyAgentMemoryHelperAssets, resolveAgentMemoryFilesystemHelper, verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
+import { agentMemoryHelperDigest } from '../util/agent-memory-helper-digest';
 import { hasAgentMemoryHelperBuild } from './fixtures/agent-memory-helper-build';
 
 vi.mock('node:fs', async importOriginal => ({ ...await importOriginal<typeof import('node:fs')>() }));

@@ -89,8 +89,8 @@ export {
   BYOK_SDK_HELPER_SUBCOMMAND,
   bundledSdkHelperHost,
   resolveSdkReservedHelperBin,
-  runSdkReservedHelperCommand,
 } from './sdk-reserved-helper-host';
+export { runSdkReservedHelperCommand } from './bin/sdk-reserved-helper-command';
 export type {
   SdkHelperHostConfig,
   SdkReservedHelperKind,
@@ -595,7 +595,7 @@ export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settle
 export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
 export type { ExecutionScratch } from './daemon/retention/scratch';
 
-export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
+export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './util/agent-memory-helper-release';
 /** The reserved name of the SDK memory MCP server in an Agent task's MCP servers. */
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */

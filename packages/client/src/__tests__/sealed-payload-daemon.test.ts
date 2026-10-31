@@ -44,7 +44,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
 import { journalHash } from '../daemon/journal/journal';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
-import { openJournalDatabase } from '../daemon/journal/sqlite-support';
+import { openJournalDatabase } from '../util/sqlite-support';
 import { DeviceMemberKeyStore } from '../daemon/device-member-custody';
 import { DeviceMemberKeyring } from '../daemon/e2ee-keyring';
 import { RuntimeExecutionFailure } from '../runtime-failure';

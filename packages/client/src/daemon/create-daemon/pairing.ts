@@ -2,7 +2,7 @@ import { assertServerUrlAllowed, formatServerUrl } from '../url';
 import { type DeviceEnrollment, type DeviceRecord, DeviceRecordRePairRequiredError } from '../store';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors';
 import { checkVerificationSecret, enrollDeviceMember } from '../device-member';
-import { acquireDaemonOwner } from '../daemon-owner';
+import { acquireDaemonOwner } from '../../util/daemon-owner';
 import { AgentEgressController } from '../agent-egress-controller';
 import { PairedWithoutMemberError } from './support';
 import type { DaemonScope } from './scope';

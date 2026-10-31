@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { agentMemoryHelperSourceDigest } from '../../packages/client/scripts/agent-memory-helper-source.mjs';
-import { AGENT_MEMORY_HELPER_RELEASE } from '../../packages/client/src/daemon/agent-memory-helper-release-pin.ts';
+import { AGENT_MEMORY_HELPER_RELEASE } from '../../packages/client/src/util/agent-memory-helper-release-pin.ts';
 import { selectImpact } from './select-impact.mjs';
 
 const sourcePath = 'packages/client/native/agent-memory-fs';

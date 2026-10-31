@@ -430,8 +430,8 @@ describe('no local listener for provisioning', () => {
       .sort();
     expect(offenders).toEqual([
       'client/src/daemon/control-server.ts',
-      'client/src/daemon/daemon-owner.ts',
       'client/src/tool-authorization-ipc.ts',
+      'client/src/util/daemon-owner.ts',
       'client/src/util/path-mutation-gate.ts',
     ]);
   });

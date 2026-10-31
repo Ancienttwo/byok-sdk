@@ -9,7 +9,7 @@ import { agentMemoryIntentOperationDigest } from '@byok-sdk/core';
 import { createEnvelope, type AgentMemoryIntentV1, type AgentMemoryIntentCompletion } from '@byok-sdk/protocol';
 import { expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
-import { copyAgentMemoryHelperAssets, resolveAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
+import { copyAgentMemoryHelperAssets, resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import * as helperClient from '../daemon/agent-memory-fs-helper';
 import { hasAgentMemoryHelperBuild } from './fixtures/agent-memory-helper-build';
 import { testScratchRoot } from './fixtures/execution-scratch';

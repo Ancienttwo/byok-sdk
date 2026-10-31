@@ -3,7 +3,7 @@ import type { DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
 import { DeviceStore } from '../daemon/store';
 import { createDeviceCredentialStore } from '../daemon/device-credential-provider';
-import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner';
 import { connectControlClient } from '../daemon/control-client';
 import { CursorStore } from '../daemon/cursor-store';
 import { collectDiagnostics } from './diagnostics';

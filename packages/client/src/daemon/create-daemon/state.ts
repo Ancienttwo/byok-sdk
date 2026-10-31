@@ -8,7 +8,7 @@ import type { BlobClient } from '../blob-client';
 import type { ConnectionManager } from '../connection-manager';
 import type { ControlServerHandle } from '../control-server';
 import type { DaemonLifecycle } from '../daemon-lifecycle';
-import type { DaemonOwnerLease } from '../daemon-owner';
+import type { DaemonOwnerLease } from '../../util/daemon-owner';
 import type { FleetJitter } from '../deterministic-jitter';
 import type { DeviceMemberKeyring, MemberFreshness } from '../e2ee-keyring';
 import type { InputPreparationService } from '../input-preparation-service';

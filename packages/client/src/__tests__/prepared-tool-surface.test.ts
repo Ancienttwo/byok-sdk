@@ -37,8 +37,8 @@ import type {
   CompiledPreparedInput,
   InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
-import * as preparedAgentMemory from '../daemon/prepared-agent-memory';
-import type { PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
+import * as preparedAgentMemory from '../agent-memory/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
 import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
 

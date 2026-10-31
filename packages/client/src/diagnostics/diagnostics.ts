@@ -31,7 +31,7 @@ import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, 
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment';
 import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal';
-import { isSqliteAvailable, loadSqliteModule } from '../daemon/journal/sqlite-support';
+import { isSqliteAvailable, loadSqliteModule } from '../util/sqlite-support';
 import {
   inspectOperationalHealthHandle,
   inspectOperationalHealthFile,
@@ -40,7 +40,7 @@ import {
   type OperationalHealthFileInspection,
   OPERATIONAL_HEALTH_FILENAME,
 } from '../daemon/operational-health';
-import { acquireDaemonOwner } from '../daemon/daemon-owner';
+import { acquireDaemonOwner } from '../util/daemon-owner';
 import { ensureSecureDir } from '../util/secure-dir';
 
 /**

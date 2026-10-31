@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { LocalStoreId, StoreCompatibility } from '@byok-sdk/core';
 import { inspectDaemonStores } from '../diagnostics/store-compatibility';
 import { runUpgradeStoreCheckCommand, UPGRADE_CHECK_REFUSED_EXIT_CODE } from '../bin/commands/upgrade';
-import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
+import { isSqliteAvailable } from '../util/sqlite-support';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { acquireReplicaLock, admitReplica, DURABLE_REPLICA_DIRNAME, replicaLockPath, resetReplica } from '../adapters/pi-durable/replica';
 import { openLocalDurableStorage } from '../adapters/pi-durable/storage';

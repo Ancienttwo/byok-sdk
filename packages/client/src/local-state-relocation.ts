@@ -4,7 +4,7 @@ import { AGENT_HOME_DIRECTORY, AGENT_HOME_INTERNAL_DIRECTORY } from './agent-hom
 import {
   assertDaemonStoreQuiescent,
   DaemonOwnerActiveError,
-} from './daemon/daemon-owner';
+} from './util/daemon-owner';
 import {
   acquirePathMutationGate,
   acquirePathMutationGates,

@@ -1,6 +1,6 @@
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import { McpStdioClient, MCP_OBSERVATION_MAX_STDOUT_BYTES } from '../mcp/client';
-import { validatePreparedAgentMemoryObservation, preparedAgentMemoryTools, preparedAgentMemoryExecutorFingerprints, type PreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
+import { validatePreparedAgentMemoryObservation, preparedAgentMemoryTools, preparedAgentMemoryExecutorFingerprints, type PreparedAgentMemoryObservation } from './prepared-capability';
 
 /** The SDK-owned Agent-memory helper launch (`resolveSdkReservedHelperBin`). */
 export interface PreparedAgentMemoryHelper {

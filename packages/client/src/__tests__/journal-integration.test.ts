@@ -27,7 +27,7 @@ import { TaskRunner, type AdmissionGuardDecision, type TaskRunnerDeps } from '..
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { DaemonConfigFieldRemovedError } from '../daemon/daemon-errors';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME } from '../daemon/journal/sqlite-journal';
-import { openJournalDatabase } from '../daemon/journal/sqlite-support';
+import { openJournalDatabase } from '../util/sqlite-support';
 import type { JournalIdentity, JournalReceipt, LocalTaskJournal, LocalTerminalRecord, ReceivedEnvelopeRecord, RecoverableTask } from '../daemon/journal/journal';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';

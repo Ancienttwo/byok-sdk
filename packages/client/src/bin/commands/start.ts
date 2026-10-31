@@ -4,7 +4,7 @@ import { createDaemonRecordProjector, type DaemonRecord } from '../../daemon/dae
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../login-shell-environment';
 import { createAuditAppender } from '../audit-log';
 import { ConfigError, resolveStoreDir } from '../config';
-import { DaemonOwnerActiveError } from '../../daemon/daemon-owner';
+import { DaemonOwnerActiveError } from '../../util/daemon-owner';
 import { isRuntimeDisposalFailure } from '../../runtime-failure';
 import { formatHaltRemedy, formatServiceEnvironment } from '../format';
 

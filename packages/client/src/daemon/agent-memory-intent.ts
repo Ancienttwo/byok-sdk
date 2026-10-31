@@ -38,7 +38,7 @@ import {
 } from './agent-memory';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
-import { verifyAgentMemoryFilesystemHelper } from './agent-memory-helper-release';
+import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import { snapshotPlainData } from '../util/plain-data';
 import { AgentMemoryValidationError, validateAgentMemoryPath, type AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 

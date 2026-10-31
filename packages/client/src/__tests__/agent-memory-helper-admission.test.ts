@@ -11,7 +11,7 @@ const capture = vi.hoisted(() => ({
   helper: vi.fn<() => string>(),
   surface: undefined as ReturnType<typeof import('../daemon/prepared-tool-surface').createPreparedToolSurfaceAssembler> | undefined,
 }));
-vi.mock('../daemon/agent-memory-helper-release', () => ({ resolveAgentMemoryFilesystemHelper: capture.helper }));
+vi.mock('../util/agent-memory-helper-release', () => ({ resolveAgentMemoryFilesystemHelper: capture.helper }));
 vi.mock('../daemon/prepared-tool-surface', async importOriginal => {
   const actual = await importOriginal<typeof import('../daemon/prepared-tool-surface')>();
   return { ...actual, createPreparedToolSurfaceAssembler: (deps: Parameters<typeof actual.createPreparedToolSurfaceAssembler>[0]) => {

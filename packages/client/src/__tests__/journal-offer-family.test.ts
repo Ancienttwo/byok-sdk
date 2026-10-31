@@ -12,7 +12,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
 import { JOURNAL_DB_FILENAME, DEFAULT_JOURNAL_BUSY_TIMEOUT_MS } from '../daemon/journal/sqlite-journal';
-import { openJournalDatabase } from '../daemon/journal/sqlite-support';
+import { openJournalDatabase } from '../util/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { agentMemoryHelperSourceDigest, agentMemoryHelperTargets } from './agent-memory-helper-source.mjs';
-import { agentMemoryHelperTargetDigest } from '../src/daemon/agent-memory-helper-digest.ts';
+import { agentMemoryHelperTargetDigest } from '../src/util/agent-memory-helper-digest.ts';
 
 const source = fileURLToPath(new URL('../native/agent-memory-fs/', import.meta.url));
 const output = new URL('../dist/native/agent-memory-fs/', import.meta.url);

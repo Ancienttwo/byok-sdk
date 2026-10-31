@@ -1,6 +1,6 @@
 import { assertDaemonConfigValid, removedFieldError } from '../config-schema/errors';
 import type { DaemonMemoryHelperResolution } from '../config-schema/effective';
-import { resolveAgentMemoryFilesystemHelper } from '../agent-memory-helper-release';
+import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release';
 import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
 import { isAgentMemoryFilesystemHelperSupported } from '../agent-memory-fs-helper';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';

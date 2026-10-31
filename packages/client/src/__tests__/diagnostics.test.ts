@@ -28,9 +28,9 @@ import {
   OPERATIONAL_HEALTH_FILENAME,
   OperationalHealthTracker,
 } from '../daemon/operational-health';
-import { loadSqliteModule } from '../daemon/journal/sqlite-support';
-import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
-import { DAEMON_OWNER_FILENAME } from '../daemon/daemon-owner';
+import { loadSqliteModule } from '../util/sqlite-support';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner';
+import { DAEMON_OWNER_FILENAME } from '../util/daemon-owner';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 import { RUNTIMES_ENVIRONMENT_METHOD } from '../daemon/control-protocol';
 

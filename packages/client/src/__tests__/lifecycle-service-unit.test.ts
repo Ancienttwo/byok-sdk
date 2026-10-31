@@ -15,7 +15,7 @@ import {
   ServiceUnitError,
   type ServiceOwnerFs,
 } from '../lifecycle/service-unit';
-import { acquireDaemonOwner, type DaemonOwnerLease } from '../daemon/daemon-owner';
+import { acquireDaemonOwner, type DaemonOwnerLease } from '../util/daemon-owner';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs, UNMARKED_UNIT, type MemoryServiceFs } from './support/service-fs';
 
 const OWNER_RECORD = '/store/service/lifecycle-owner.json';

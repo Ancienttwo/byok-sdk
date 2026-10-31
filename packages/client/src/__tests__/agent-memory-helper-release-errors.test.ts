@@ -6,8 +6,8 @@ vi.mock('node:fs', async importOriginal => ({
   ...await importOriginal<typeof import('node:fs')>(),
   readFileSync: assets.read,
 }));
-import { AGENT_MEMORY_HELPER_RELEASE } from '../daemon/agent-memory-helper-release-pin';
-import { resolveAgentMemoryFilesystemHelper } from '../daemon/agent-memory-helper-release';
+import { AGENT_MEMORY_HELPER_RELEASE } from '../util/agent-memory-helper-release-pin';
+import { resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 
 afterEach(() => { vi.resetAllMocks(); });
 

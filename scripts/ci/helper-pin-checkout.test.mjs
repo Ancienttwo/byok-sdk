@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path';
 import test from 'node:test';
 import { selectImpact } from './select-impact.mjs';
 
-const pin = 'packages/client/src/daemon/agent-memory-helper-release-pin.ts';
+const pin = 'packages/client/src/util/agent-memory-helper-release-pin.ts';
 const rule = `${pin} text eol=lf\n`;
 const attributes = readFileSync(new URL('../../.gitattributes', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 

@@ -9,7 +9,7 @@ import {
   LocalStateRelocationIntegrityError,
   localStateRelocation,
 } from '../index';
-import { acquireDaemonOwner } from '../daemon/daemon-owner';
+import { acquireDaemonOwner } from '../util/daemon-owner';
 import { claimServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError } from '../lifecycle/service-unit';
 import * as mutationGate from '../util/path-mutation-gate';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
