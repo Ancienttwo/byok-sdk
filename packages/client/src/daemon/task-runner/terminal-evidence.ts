@@ -10,7 +10,7 @@ import type { AgentTerminalCause } from '../agent-session-handoff-store';
 import { AGENT_RESULT_TOOL_NAME } from '../../sdk-reserved-mcp';
 import type { AgentResultRecord } from '../agent-result-store';
 import type { ActiveTask } from './support';
-import { AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS, isKnownRuntimeId, terminalUsageNumber, errorMessage } from './support';
+import { AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS, isKnownRuntimeId, terminalUsageNumber, errorMessage, taskTearingDown, taskMessageSendAttempted } from './support';
 import type { TaskRunner } from '../task-runner';
 import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS, RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './state';
 
@@ -80,12 +80,12 @@ export async function resolveStagedResult(
     if (active.resultStore === undefined) throw new Error('the task has no Agent result store');
     record = await active.resultStore.get(active.taskId);
   } catch (err) {
-    if (this['tasks'].get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
+    if (this['tasks'].get(active.taskId) !== active || taskTearingDown(this, active.taskId)) return { deliver: false };
     if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
     await this['fail'](active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result for contract ${selection.contract} could not be read: ${errorMessage(err)}`, false);
     return { deliver: false };
   }
-  if (this['tasks'].get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
+  if (this['tasks'].get(active.taskId) !== active || taskTearingDown(this, active.taskId)) return { deliver: false };
   if (record === undefined) {
     if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-missing' };
     await this['fail'](
@@ -114,7 +114,7 @@ export async function persistAgentTerminalEvidence(
   // Cancellation revokes publication. Ordinary failure preserves a message that
   // may already be in transport, including its existing admission recovery gate.
   // For unsent messages, join activation and revoke before terminal truth.
-  if (cause === 'cancelled' || (cause === 'failed' && !active.messageSendAttempted)) {
+  if (cause === 'cancelled' || (cause === 'failed' && !taskMessageSendAttempted(this, active.taskId))) {
     await active.messageOutbox?.revoke(active.taskId);
   }
   active.terminalCause = cause;

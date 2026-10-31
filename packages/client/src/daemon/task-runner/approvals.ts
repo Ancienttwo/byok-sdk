@@ -18,6 +18,8 @@ import {
   type ApprovalOrigin as ReducerApprovalOrigin,
 } from './state';
 import { hostFor, type HostApprovalRequest, type TaskRunnerHost } from './host';
+import { taskTearingDown } from './support';
+import { beginTerminal, drainApprovals } from './finish';
 
 const WITHDRAWN = 'approval request was withdrawn by its requester';
 const NOT_ACTIVE = 'task is not currently active on this device';
@@ -50,12 +52,31 @@ function approvalHost(this: TaskRunner): TaskRunnerHost {
     // observer has already stashed this approvalId when that same synchronous
     // send triggers its own `task.await_approval` handling.
     this['deps'].onApprovalDispatched?.(taskId, pending.approvalId);
-    // M5 (approval targeting): approvalId is always included — see
-    // TaskAwaitApprovalPayloadSchema's own doc comment (@byok-sdk/protocol).
-    this['deps'].send(createEnvelope('task.await_approval', {
-      summary: request?.summary ?? '',
-      approvalId: pending.approvalId,
-    }, { taskId }));
+    try {
+      // M5 (approval targeting): approvalId is always included — see
+      // TaskAwaitApprovalPayloadSchema's own doc comment (@byok-sdk/protocol).
+      this['deps'].send(createEnvelope('task.await_approval', {
+        summary: request?.summary ?? '',
+        approvalId: pending.approvalId,
+      }, { taskId }));
+    } catch (error) {
+      // Sealed/oversized approval frames can fail locally. Deny this request
+      // fail-closed and let the existing A10 withdrawal clear the reducer
+      // pending; A1's remaining effects never run, so no registry entry or
+      // timeout survives and the turn goes on.
+      host.settleApprovalRequest(pending.requestId, {
+        approved: false,
+        reason: 'approval request could not be sent',
+      });
+      void host.dispatch({
+        type: 'approval.withdrawn',
+        taskId,
+        atMs: Date.now(),
+        requestId: pending.requestId,
+        reason: 'approval request could not be sent',
+      }).catch(() => undefined);
+      throw error;
+    }
   });
 
   host.registerHandler('register.approval', (_envelope, context) => {
@@ -86,17 +107,21 @@ function approvalHost(this: TaskRunner): TaskRunnerHost {
           ...(reason === undefined ? {} : { reason }),
           origin: reducerOrigin(origin),
         };
-        // Idle mailbox: reduce synchronously so a genuine failure inside the
-        // decision's own effects (for example a throwing `onApprovalDispatched`
-        // on the FIFO head A4 dispatches) reaches the registry caller, exactly
-        // like the legacy onResolve callback did. A resolution that is itself
-        // running inside an effect (A10 withdrawal, finish drain) queues at the
-        // tail and is reduced by the drain loop.
-        if (host.isDraining(taskId)) {
+        // #1099 S6: an A7 task-terminal reject continues into the reducer's
+        // terminal effects (interrupt/evidence/envelope are barriers), so that
+        // decision enters through the mailbox: `dispatchSync` would refuse its
+        // own barrier. Every other decision stays synchronous on an idle
+        // mailbox, exactly as S5 shipped, so a throwing dispatch callback still
+        // reaches the registry caller.
+        if (decision === 'reject' && pending.kind === 'task-terminal') {
           void host.dispatch(decided).catch(() => undefined);
           return;
         }
-        host.dispatchSync(decided);
+        if (!host.isDraining(taskId)) {
+          host.dispatchSync(decided);
+          return;
+        }
+        void host.dispatch(decided).catch(() => undefined);
       },
     );
   });
@@ -106,13 +131,31 @@ function approvalHost(this: TaskRunner): TaskRunnerHost {
     if (pending === undefined) return;
     const timeoutMs = this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
     const timer = setTimeout(() => {
+      const reason = `approval timed out after ${timeoutMs}ms with no decision`;
+      // A7 (task-terminal reject) needs its terminal plan before the decision
+      // resolves; a denied tool authorization (A6) never ends the turn.
+      const active = context.taskId === undefined ? undefined : this['tasks'].get(context.taskId);
+      if (active !== undefined && pending.kind === 'task-terminal') {
+        beginTerminal.call(this, active, {
+          kind: 'failed',
+          cause: 'rejected',
+          reason,
+          retryable: false,
+          prepare: async () => {
+            await this['persistAgentTerminalEvidence'](active, 'failed', reason);
+            return createEnvelope('task.fail', {
+              reason,
+              retryable: false,
+              ...this['failurePayload'](DAEMON_TASK_FAILURE),
+              ...this['terminalInferenceUsagePayload'](active),
+              ...this['preparedObservationPayload'](active),
+              ...this['agentTerminalPayload'](active),
+            }, { taskId: active.taskId });
+          },
+        });
+      }
       try {
-        this['deps'].approvalRegistry.resolve(
-          pending.approvalId,
-          'reject',
-          `approval timed out after ${timeoutMs}ms with no decision`,
-          'fail-closed',
-        );
+        this['deps'].approvalRegistry.resolve(pending.approvalId, 'reject', reason, 'fail-closed');
       } catch {
         // Already resolved by a real decision that raced the timer.
       }
@@ -177,7 +220,7 @@ export async function requestApproval(
   if (signal?.aborted) return { approved: false, reason: WITHDRAWN };
   const active = this['tasks'].get(taskId);
   // Teardown may retain ownership solely to retry disposal or terminal commit.
-  if (!active || active.beingTornDown) {
+  if (!active || taskTearingDown(this, taskId)) {
     return { approved: false, reason: NOT_ACTIVE };
   }
   const host = approvalHost.call(this);
@@ -271,29 +314,43 @@ export async function handleApprove(this: TaskRunner, taskId: string, approvalId
 export async function handleReject(this: TaskRunner, taskId: string, reason: string | undefined, approvalId: string, decidedBy: ApprovalOrigin): Promise<void> {
   const active = this['tasks'].get(taskId);
   if (!active) return;
-  if (active.semanticTerminal !== undefined || active.finalizationStarted) {
+  const current = hostFor(this).current(taskId);
+  if (current?.terminal !== undefined || current?.phase === 'terminalizing' || current?.phase === 'retiring') {
     await this['settleSemanticTerminal'](active);
     return;
   }
   if (!pendingMatches.call(this, taskId, approvalId, 'reject')) return;
   // Snapshot before resolve: its callback dispatches the A7 terminal.
-  const terminatesTask = hostFor(this).current(taskId)?.approval.pending?.kind === 'task-terminal';
+  const terminatesTask = current?.approval.pending?.kind === 'task-terminal';
+  // A7's terminal effects need the plan before the decision resolves.
+  const receipt = terminatesTask
+    ? beginTerminal.call(this, active, {
+        kind: 'failed',
+        cause: 'rejected',
+        reason: reason ?? 'rejected',
+        retryable: false,
+        prepare: async () => {
+          await this['interruptBounded'](active);
+          // As with cancel, the server has already closed its progress stream.
+          await this['persistAgentTerminalEvidence'](active, 'failed', reason ?? 'rejected');
+          return createEnvelope('task.fail', {
+            reason: reason ?? 'rejected', retryable: false,
+            ...this['failurePayload'](DAEMON_TASK_FAILURE),
+            ...this['terminalInferenceUsagePayload'](active),
+            ...this['preparedObservationPayload'](active),
+            ...this['agentTerminalPayload'](active),
+          }, { taskId });
+        },
+      })
+    : undefined;
   // Before the terminal: `finish()` rejects whatever is still pending as a
   // local decision, which would echo this decision back to the server.
   this['deps'].approvalRegistry.resolve(approvalId, 'reject', reason, decidedBy);
-  if (!terminatesTask) return;
-  await this['settleSemanticTerminal'](active, async () => {
-    await this['interruptBounded'](active);
-    // As with cancel, the server has already closed its progress stream.
-    await this['persistAgentTerminalEvidence'](active, 'failed', reason ?? 'rejected');
-    return createEnvelope('task.fail', {
-      reason: reason ?? 'rejected', retryable: false,
-      ...this['failurePayload'](DAEMON_TASK_FAILURE),
-      ...this['terminalInferenceUsagePayload'](active),
-      ...this['preparedObservationPayload'](active),
-      ...this['agentTerminalPayload'](active),
-    }, { taskId });
-  });
+  if (receipt === undefined) return;
+  // Settle the queued requests behind the one just decided before the
+  // terminal bytes are sent.
+  void drainApprovals.call(this, taskId);
+  await receipt;
 }
 
 /**

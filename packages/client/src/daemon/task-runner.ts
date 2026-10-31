@@ -94,7 +94,7 @@ import { admitOffer, reserveOfferHome, admitOfferLimits, handleSealedOffer, decl
 import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime';
 import { requestApproval, handleApprove, handleReject } from './task-runner/approvals';
 import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence';
-import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin } from './task-runner/finish';
+import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin, retryTerminalFinalization, type TerminalPlan } from './task-runner/finish';
 import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump';
 import { handleOffer } from './task-runner/offer';
 import { hostFor } from './task-runner/host';
@@ -689,7 +689,10 @@ export class TaskRunner {
    * `TaskRunner` instance; a fresh one is constructed on the daemon's next
    * `start()`.
    */
-  private stoppingOffers = false;
+  private get stoppingOffers(): boolean {
+    // #1099 S6: SH1 owns the gate; this is a derived read, not a second write.
+    return !hostFor(this).runnerSnapshot().acceptingOffers;
+  }
 
   constructor(private readonly deps: TaskRunnerDeps) {
     this.startupOwnership = new StartupOwnership({
@@ -835,7 +838,12 @@ export class TaskRunner {
   }
 
   private canPublishAgentMessage(active: ActiveTask): boolean {
-    return this.tasks.get(active.taskId) === active && !active.beingTornDown;
+    // S6: the reducer phase replaces the legacy beingTornDown flag. A terminal
+    // decision makes the message lane unpublishable immediately.
+    const phase = hostFor(this).current(active.taskId)?.phase;
+    return this.tasks.get(active.taskId) === active
+      && phase !== 'terminalizing' && phase !== 'retiring'
+      && phase !== 'finished' && phase !== 'declined';
   }
 
   /** All authors and startup use the same queue-time and post-I/O authority check. */
@@ -901,11 +909,25 @@ export class TaskRunner {
    * and their `task.fail` is journaled within that grace (#1119).
    */
   async shutdownActiveTasks(reason: string, interruptTimeoutMs?: number): Promise<void> {
+    // S6: SH3 records the drain and SH6 the completion. The task-level work
+    // stays here so each `shutdownTask` keeps its own X8 terminal receipt.
+    const host = hostFor(this);
     const offers = offerSettlements.get(this);
     if (offers?.size) await Promise.all(offers);
+    // `shutdownActiveTasks` is also used as a per-runner task cleanup by
+    // embedders/tests. Only a real shutdown (stopAcceptingOffers already
+    // reduced SH1) records the global shutdown state; otherwise a later offer
+    // on the same runner would be declined as "daemon is shutting down".
+    const announce = !host.runnerSnapshot().acceptingOffers;
+    // Start every shutdown terminal synchronously, before any dispatch can
+    // yield: a concurrent `task.cancel` must lose first-terminal-wins to the
+    // device's own shutdown fail (task-runner-cancel-native oracle).
     const active = [...this.tasks.values()];
-    await Promise.all(active.map((task) => this.shutdownTask(task, reason, interruptTimeoutMs)));
+    const terminations = active.map((task) => this.shutdownTask(task, reason, interruptTimeoutMs));
+    if (announce) await host.dispatch({ type: 'shutdown.drain', atMs: Date.now(), reason: reason });
+    await Promise.all(terminations);
     await this.startupOwnership.disposeAll();
+    if (announce) await host.dispatch({ type: 'shutdown.completed', atMs: Date.now() });
   }
 
   private closeActiveSession(active: ActiveTask): Promise<void> {
@@ -1655,8 +1677,9 @@ export class TaskRunner {
   }
 
   async retryTerminalFinalization(taskId: string): Promise<void> {
-    const active = this.tasks.get(taskId);
-    if (active) await this.settleSemanticTerminal(active);
+    // S6: retry only the failed close/commit barrier with the same terminal
+    // token and bytes; if no terminal is pending this is a no-op.
+    await retryTerminalFinalization.call(this, taskId);
   }
 
   private readonly finalizationAttempts = new Map<string, Promise<boolean>>();
@@ -1679,8 +1702,8 @@ export class TaskRunner {
     return attempt;
   }
 
-  private finishOnce(taskId: string): Promise<boolean> {
-    return finishOnce.call(this, taskId);
+  private finishOnce(taskId: string, envelope?: Envelope): Promise<boolean> {
+    return finishOnce.call(this, taskId, envelope);
   }
 
   /**
@@ -1688,12 +1711,12 @@ export class TaskRunner {
    * final) and the terminal commit. Synchronous and in memory: it cannot hold
    * the terminal or the lease release, and a failure here is only logged.
    */
-  private publishExecutionRecord(active: ActiveTask): void {
-    return publishExecutionRecord.call(this, active);
+  private publishExecutionRecord(active: ActiveTask, envelope?: Envelope): void {
+    return publishExecutionRecord.call(this, active, envelope);
   }
 
-  private settleSemanticTerminal(active: ActiveTask, prepare?: () => Promise<Envelope>): Promise<boolean> {
-    return settleSemanticTerminal.call(this, active, prepare);
+  private settleSemanticTerminal(active: ActiveTask, plan?: TerminalPlan): Promise<boolean> {
+    return settleSemanticTerminal.call(this, active, plan);
   }
 
   /**
@@ -1710,15 +1733,20 @@ export class TaskRunner {
   }
 
   /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap. */
-  private addFinishedTaskId(taskId: string): void {
+  private markFinishedTaskId(taskId: string): void {
     this.finishedTaskIds.add(taskId);
-    // The reducer host is bounded too: a finished task's per-task state is
-    // archived, not retained for the daemon's lifetime.
-    hostFor(this).endTask(taskId);
     if (this.finishedTaskIds.size > MAX_TRACKED_TASK_IDS) {
       const oldest = this.finishedTaskIds.values().next().value;
       if (oldest !== undefined) this.finishedTaskIds.delete(oldest);
     }
+  }
+
+  /** Terminal cleanup: record the bounded id and end the reducer entry too. */
+  private addFinishedTaskId(taskId: string): void {
+    this.markFinishedTaskId(taskId);
+    // The reducer host is bounded too: a finished task's per-task state is
+    // archived, not retained for the daemon's lifetime.
+    hostFor(this).endTask(taskId);
   }
 
   private addStrictDeclinedTaskId(taskId: string): void {
