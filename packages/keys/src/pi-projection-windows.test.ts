@@ -5,6 +5,14 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nativeAclProbeObserver, type OwnedAclProbe } from './fixtures/owned-acl-probe';
+import {
+  PI_ACL_CLIENT_STARTUP_DEADLINE_MS,
+  PI_ACL_COLD_EVIDENCE_BUDGET_MS,
+  PI_ACL_ICACLS_DEADLINE_MS,
+  PI_ACL_TEARDOWN_EVIDENCE_BUDGET_MS,
+  PI_ACL_WARM_EVIDENCE_BUDGET_MS,
+  remainingAclEvidenceMs,
+} from './fixtures/acl-evidence-budget';
 import { assertPiProjectionDirectory, assertWindowsPiProjectionAcl } from './pi-provider-launcher-core';
 
 // These wrappers only observe one matching test-owned invocation. The original
@@ -43,26 +51,18 @@ async function createPrivateFixture(directory: string): Promise<void> {
   await exec('icacls', privateFixtureArgs(directory), { windowsHide: true });
 }
 
-// Phased timing instrumentation for the positive case only: on windows-latest
-// this test has run at ~5s against vitest's default 5000ms testTimeout and the
-// log could not attribute the time (fixture icacls spawn vs powershell Get-Acl
-// probe vs assertion). Every phase prints one `[pi-acl-positive]` line, and
-// each test-owned icacls child gets a hard sub-deadline: on expiry the child
-// is killed and the phase reports elapsed time plus whatever output it
-// produced, so the next CI run can distinguish environment latency from probe
-// failure. None of this changes an assertion, the approval standard, or the
-// 5000ms budget; phase observation now also retains failed-test disposal ownership.
+// Phased timing instrumentation for the positive cases only: a cold first ACL
+// query can sit close to its evidence budget, and the log must attribute the
+// time (fixture icacls spawn vs the fixed-system Windows PowerShell probe vs
+// assertion). Every phase prints one `[pi-acl-positive]` line, and each
+// test-owned icacls child gets a hard sub-deadline: on expiry the child is
+// killed and the phase reports elapsed time plus whatever output it produced,
+// so the next CI run can distinguish environment latency from probe failure.
+// None of this changes an assertion or the approval standard. The budgets live
+// in ./fixtures/acl-evidence-budget so a cross-platform regression can assert
+// the cold watchdog stays inside the client deadline and the others stay
+// inside Vitest's default test/hook timeouts.
 const PHASE_LOG_PREFIX = '[pi-acl-positive]';
-const ICACLS_DEADLINE_MS = 2_000;
-const TEST_EVIDENCE_BUDGET_MS = 4_800;
-// The product's real deadline for the first ACL query is the client's task
-// startup timeout (`startupTimeoutMs ?? 30_000` in
-// packages/client/src/daemon/task-runner.ts). The cold case is bound to it.
-const CLIENT_DEFAULT_STARTUP_DEADLINE_MS = 30_000;
-const COLD_EVIDENCE_BUDGET_MS = CLIENT_DEFAULT_STARTUP_DEADLINE_MS - 200;
-// Report unresolved disposal inside Vitest's unchanged 10s default hook budget.
-// This does not extend either the existing 4.8s evidence or 5s test budget.
-const TEARDOWN_EVIDENCE_BUDGET_MS = 9_800;
 
 interface BoundedExecResult {
   stdout: string;
@@ -113,7 +113,7 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
   afterEach(async () => {
     const pending = pendingCleanup;
     if (!pending) return;
-    await pending.owner.dispose(TEARDOWN_EVIDENCE_BUDGET_MS, async () => {
+    await pending.owner.dispose(PI_ACL_TEARDOWN_EVIDENCE_BUDGET_MS, async () => {
       const started = Date.now();
       await fs.rm(pending.directory, { recursive: true, force: true });
       pending.log('cleanup', `elapsed=${Date.now() - started}ms (owned child closed before fs.rm)`);
@@ -137,10 +137,10 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
     let owner: OwnedAclProbe | undefined;
     try {
       // Phase: process spawn -- the fixture's own icacls child.
-      const fixture = await execFileBounded('icacls', privateFixtureArgs(directory), ICACLS_DEADLINE_MS);
+      const fixture = await execFileBounded('icacls', privateFixtureArgs(directory), PI_ACL_ICACLS_DEADLINE_MS);
       logPhase('process-spawn', `icacls fixture ${describeBoundedResult(fixture)}`);
       if (fixture.timedOut) {
-        throw new Error(`${logPrefix} fixture icacls exceeded its ${ICACLS_DEADLINE_MS}ms sub-deadline and was killed; no ACL was ever asserted`);
+        throw new Error(`${logPrefix} fixture icacls exceeded its ${PI_ACL_ICACLS_DEADLINE_MS}ms sub-deadline and was killed; no ACL was ever asserted`);
       }
       if (fixture.exitCode !== 0) {
         throw new Error(`${logPrefix} fixture icacls failed (exit ${fixture.exitCode}): ${fixture.stderr}`);
@@ -150,7 +150,7 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
       // probe is about to judge, so a probe failure in the next phase can be
       // attributed to the fixture state vs the probe itself. Its own timeout
       // never changes the verdict.
-      const readBack = await execFileBounded('icacls', [directory], ICACLS_DEADLINE_MS);
+      const readBack = await execFileBounded('icacls', [directory], PI_ACL_ICACLS_DEADLINE_MS);
       if (readBack.timedOut) {
         logPhase('icacls-readback', `DIAGNOSTIC ONLY, timed out and was killed: ${describeBoundedResult(readBack)}`);
       } else {
@@ -164,7 +164,7 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
       // fails with the phase log above instead of a bare vitest timeout. The
       // probe is invocation-owned. Expiry cancels the captured child (or
       // suppresses a late native start); afterEach awaits its disposal receipt.
-      const probeBudgetMs = Math.max(evidenceBudgetMs - (Date.now() - testStart), 0);
+      const probeBudgetMs = remainingAclEvidenceMs(evidenceBudgetMs, Date.now() - testStart);
       const probeStarted = Date.now();
       owner = nativeAclProbeObserver.create({
         executable: path.win32.join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
@@ -204,15 +204,25 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
   // product pays inside the client's startup deadline. CI runs no prepay before
   // this suite, so this case must be the process's first ACL query; the counter
   // checks that precondition instead of trusting declaration order.
+  //
+  // Nightly run 41143045892 failed the bound: the first probe produced no
+  // output for 29,741ms and the next was still over 4.7s. The three later
+  // cases then passed in 2,309ms, 322ms and 397ms (test durations, including
+  // their fixture setup) once the interpreter was warm; no ACL assertion
+  // failed. The monotonic warm-up points at the hosted runner's fresh-account
+  // first-use cost (Defender/disk), not an ACL-policy regression. The bound is
+  // deliberately unchanged here: a rerun must show whether that cost
+  // reproduces before the cold budget or the product deadline is revisited.
   it('accepts a private empty directory on the account\'s first Windows PowerShell use (cold, client startup deadline)', async () => {
     expect(nativeAclProbeObserver.matchingInvocations, 'the cold first-use case must be the first ACL query').toBe(0);
-    await runOwnedPositiveCase({ label: 'cold', evidenceBudgetMs: COLD_EVIDENCE_BUDGET_MS });
-  }, CLIENT_DEFAULT_STARTUP_DEADLINE_MS);
-  // Warm steady state: a fresh directory, after first use was paid above, under
-  // the original 4.8s evidence budget and the default 5s test timeout.
+    await runOwnedPositiveCase({ label: 'cold', evidenceBudgetMs: PI_ACL_COLD_EVIDENCE_BUDGET_MS });
+  }, PI_ACL_CLIENT_STARTUP_DEADLINE_MS);
+  // Warm steady state: a fresh directory, after the first ACL query was paid
+  // above, under the original 4.8s evidence budget and the default 5s test
+  // timeout.
   it('accepts a private empty directory with the approved ACL', async () => {
     expect(nativeAclProbeObserver.matchingInvocations, 'the cold first-use case must run first').toBeGreaterThanOrEqual(1);
-    await runOwnedPositiveCase({ label: 'warm', evidenceBudgetMs: TEST_EVIDENCE_BUDGET_MS });
+    await runOwnedPositiveCase({ label: 'warm', evidenceBudgetMs: PI_ACL_WARM_EVIDENCE_BUDGET_MS });
   });
   it('refuses a real external Allow ACE', async () => {
     const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-acl-foreign-')));
