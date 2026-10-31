@@ -1,4 +1,4 @@
-import { createDaemonScratch } from './retention/scratch';
+import { createPrivateSystemTempDir } from '../util/secure-dir';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
@@ -328,7 +328,6 @@ export interface OsCredentialEntryOptions extends DeviceCredentialConfig {
  * fallback.
  */
 export class OsCredentialEntry {
-  readonly #storeDir: string;
   readonly #service: string;
   readonly #account: string;
   readonly #windowsTarget: string;
@@ -341,7 +340,6 @@ export class OsCredentialEntry {
   readonly #macosKeychainPath: string | undefined;
 
   constructor(options: OsCredentialEntryOptions & { readonly account: string; readonly label: string; readonly subject: string }) {
-    this.#storeDir = options.storeDir;
     this.#service = serviceFor(options.productId);
     this.#account = options.account;
     // Windows keys a generic credential by its target name alone. The
@@ -462,7 +460,9 @@ export class OsCredentialEntry {
   }
 
   async #windows(operation: 'read' | 'replace' | 'clear', encoded: string | undefined, signal: AbortSignal | undefined): Promise<DeviceCommandResult> {
-    const directory = await createDaemonScratch(this.#storeDir, 'credential');
+    // Not under the store: the compiler's own path limit is shorter than a
+    // long store path, so the bridge lives directly under the OS temp root.
+    const directory = await createPrivateSystemTempDir('byok-credential-');
     const executable = path.join(directory, 'credential-bridge.exe');
     const request = [
       operation,

@@ -238,3 +238,25 @@ export async function createPrivateTempDir(parent: string, prefix: string): Prom
   await fs.mkdir(directory, { mode: 0o700 });
   return directory;
 }
+
+/**
+ * A private scratch directory directly under the canonical OS temp root, for
+ * a tool whose own path limit is shorter than the store's: the Windows
+ * credential bridge is compiled with `Add-Type`/csc, which fails with CS2021
+ * once the output name is too long, and the CS2021 limit is on the directory
+ * it is handed (#1097). Its length therefore cannot depend on where the store
+ * lives. The leaf is created by an exclusive mkdir under the real path of the
+ * temp root, so a pre-planted symlink or junction is never followed, and
+ * {@link ensureSecureDir} applies the same owner-only restriction every other
+ * scratch root gets. The caller removes it.
+ */
+export async function createPrivateSystemTempDir(prefix: string): Promise<string> {
+  const directory = await createPrivateTempDir(await fs.realpath(os.tmpdir()), prefix);
+  try {
+    await ensureSecureDir(directory);
+  } catch (error) {
+    await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+  return directory;
+}
