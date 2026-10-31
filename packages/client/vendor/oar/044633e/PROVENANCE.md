@@ -6,6 +6,34 @@ Source: https://github.com/botiverse/oar, version 0.80.1, fixed commit `044633e9
 
 The SDK typechecks this source with the ES2024 library (`packages/client/tsconfig.json`, `scripts/api-surface/tsconfig.oar-bridge.json`). The emit target stays ES2022, and the Node 24 engine floor provides the ES2023/ES2024 built-ins upstream uses (`Array.prototype.toSorted`, `Promise.withResolvers`).
 
+## Authoritative release binding
+
+`@botiverse/oar@0.80.1` is the public npm release of this commit. Checked on
+2026-10-31:
+
+- The registry publishes `0.80.1` with tarball integrity
+  `sha512-PDTmr6fvEKyRs+NFGDpmRrvlxqh840FUs6Lyw5pI+aiWqlzq2Sf+VPCOznIPROJjd1ZA6XNamgu3zecAt/U0XA==`;
+  the downloaded tarball has sha512
+  `3c34e6afa7ef10ac91b3e345183a6646bbe5c6a87ce34154b3a2f2c39a48f9a896aa5cead927fe54f08ece720f44e263775640e9735a9a0bb7cde700b7f5345c`
+  and its `package.json` declares `"name": "@botiverse/oar"`, `"version": "0.80.1"`.
+- Its SLSA v1 provenance attestation
+  (`https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.80.1`)
+  built `.github/workflows/release.yml` from
+  `git+https://github.com/botiverse/oar@refs/heads/main` at
+  `044633e9be0dfbae6d171591ef03ea31593e9fb5`, the same commit recorded here.
+- The annotated tag `refs/tags/v0.80.1` dereferences to that commit, whose
+  message is `chore: release v0.80.1 (#565)`.
+- All 93 `upstreamSha256` values in `source-manifest.json` match the files at
+  that commit's tree.
+
+The scheduled advisory scan therefore queries `@botiverse/oar@0.80.1` as an
+npm package-version, not the bare commit. `source-manifest.json` keeps the
+commit and records the release name, version, tarball integrity and provenance
+URL under `release`; the scanner refuses the release claim unless every field
+agrees with the vendored identity and commit. The query covers the released
+upstream base, not the sixteen local deltas, which OSV has no package identity
+for.
+
 ## Maintained deltas
 
 Policy: follow upstream. A file is maintained only where the SDK's ownership of the process, environment or interaction policy requires it. Operation deadlines and the retained-record budget live in the SDK adapters, not in this fork. Each modified file starts with an Apache-2.0 change notice, and `BYOK change` comments mark its seams. Everything else keeps upstream bytes, including type-only contracts that the closure pulls in.

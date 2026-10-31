@@ -5,6 +5,14 @@
   "packageVersion": "0.80.1",
   "repository": "https://github.com/botiverse/oar",
   "commit": "044633e9be0dfbae6d171591ef03ea31593e9fb5",
+  "release": {
+    "ecosystem": "npm",
+    "name": "@botiverse/oar",
+    "version": "0.80.1",
+    "integrity": "sha512-PDTmr6fvEKyRs+NFGDpmRrvlxqh840FUs6Lyw5pI+aiWqlzq2Sf+VPCOznIPROJjd1ZA6XNamgu3zecAt/U0XA==",
+    "gitCommit": "044633e9be0dfbae6d171591ef03ea31593e9fb5",
+    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.80.1"
+  },
   "license": "Apache-2.0",
   "files": [
     {
