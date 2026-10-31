@@ -4142,10 +4142,13 @@ root or target resolution disables automatic allow rules; built-in handling
 remains. Unknown indirect command forms (scripts, `eval`,
 encoded payloads, aliases) are not recognized. It is a tool gate, not an
 execution sandbox and not a file-scope boundary: an allowed shell command can
-still reach any file, network or local resource the OS user can. File-scope
-grants (additional workspaces, canonical-path enforcement) remain open under
-#1061. The loopback gate token is inherited by SDK child sessions and does not
-isolate against same-user code.
+still reach any file, network or local resource the OS user can. The optional
+`toolAuthorization.fileScope` policy (#1061) and its fail-closed admission
+exist, and every configured root is revalidated after claim and before the
+runtime starts; canonical-path enforcement by scoped file tools remains open
+under #1061, so Pi's native file tools are not yet a file boundary. The
+loopback gate token is inherited by SDK child sessions and does not isolate
+against same-user code.
 
 ## Daemon configuration contract (#1094)
 

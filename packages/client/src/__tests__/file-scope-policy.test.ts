@@ -8,6 +8,7 @@ import {
   type ToolAuthorizationResolver, type ToolAuthorizationTask,
 } from '../tool-authorization';
 import { fileScopeAdmission } from '../daemon/task-runner/file-scope-admission';
+import type { FileScopeAudit } from '../file-scope-guard';
 import { toolAuthorizationIssues } from '../daemon/config-schema/static-tool-authorization';
 import { describeEffectiveDaemonConfig } from '../daemon/config-schema/effective';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
@@ -53,6 +54,7 @@ function makeRunner(
   adapter: StubRuntimeAdapter,
   sent: Envelope[],
   toolAuthorization: ToolAuthorizationResolver,
+  extra: Partial<Pick<TaskRunnerDeps, 'onFileScopeAudit'>> = {},
 ): TaskRunner {
   return new TaskRunner({
     advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget,
@@ -60,6 +62,7 @@ function makeRunner(
     deviceId: 'device-1', send: (envelope) => { sent.push(envelope); },
     blobClient: unusedBlobClient, approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir', productId: 'unused-product-id', toolAuthorization,
+    ...extra,
   });
 }
 
@@ -79,6 +82,10 @@ async function tmpDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   dirs.push(dir);
   return dir;
+}
+
+async function canonicalTmpDir(prefix: string): Promise<string> {
+  return fs.realpath(await tmpDir(prefix));
 }
 
 afterEach(async () => {
@@ -332,11 +339,14 @@ describe('fileScope fail-closed admission through the task runner', () => {
   it('does not change an existing offer without a file scope', async () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
     const sent: Envelope[] = [];
-    await offer(makeRunner(adapter, sent, () => ({ default: 'auto' })), 'no-scope');
+    const audits: FileScopeAudit[] = [];
+    await offer(makeRunner(adapter, sent, () => ({ default: 'auto' }),
+      { onFileScopeAudit: (event) => audits.push(event) }), 'no-scope');
     expect(declineReason(sent)).toBeUndefined();
     expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
     expect(adapter.inputs).toHaveLength(1);
     expect(adapter.inputs[0]!.toolAuthorization).toBeDefined();
+    expect(audits).toEqual([]);
   });
 
   it('admits an ordinary Pi POSIX offer with a file scope and shows lane/homeAccess to a Host resolver', async () => {
@@ -353,5 +363,82 @@ describe('fileScope fail-closed admission through the task runner', () => {
     expect(declineReason(sent)).toBeUndefined();
     expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
     expect(adapter.inputs).toHaveLength(1);
+  });
+});
+
+describe('fileScope root validation at task start (#1061 slice 2)', () => {
+  const failReason = (sent: Envelope[]): string | undefined => {
+    const fail = sent.find((envelope) => envelope.type === 'task.fail');
+    if (fail?.type !== 'task.fail') return undefined;
+    return 'reason' in fail.payload ? fail.payload.reason : undefined;
+  };
+
+  it('revalidates a real workspace root after claim, then starts and records adoption', async () => {
+    const root = await canonicalTmpDir('byok-scope-root-');
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const audits: FileScopeAudit[] = [];
+    await offer(makeRunner(adapter, sent,
+      () => ({ default: 'auto', fileScope: { mode: 'workspaces', roots: [{ id: 'repo', path: root, access: 'write' }] } }),
+      { onFileScopeAudit: (event) => audits.push(event) }), 'scope-root-valid');
+    expect(declineReason(sent)).toBeUndefined();
+    expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
+    expect(failReason(sent)).toBeUndefined();
+    expect(adapter.inputs).toHaveLength(1);
+    expect(audits).toEqual([expect.objectContaining({
+      taskId: 'scope-root-valid',
+      decision: 'policy-adoption',
+      lane: 'rpc',
+      homeAccess: 'writer',
+      scope: expect.objectContaining({ source: 'host', mode: 'workspaces', digest: expect.stringMatching(/^[0-9a-f]{64}$/) }),
+      rootIds: ['home', 'repo'],
+    })]);
+    // D12: allow is never recorded; only the one adoption event exists.
+    expect(audits.every((event) => event.decision !== 'deny')).toBe(true);
+  });
+
+  it('fails a claimed task with a typed reason when a root is missing, before start', async () => {
+    const root = path.join(await canonicalTmpDir('byok-scope-missing-'), 'gone');
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const audits: FileScopeAudit[] = [];
+    await offer(makeRunner(adapter, sent,
+      () => ({ default: 'auto', fileScope: { mode: 'workspaces', roots: [{ id: 'repo', path: root, access: 'write' }] } }),
+      { onFileScopeAudit: (event) => audits.push(event) }), 'scope-root-missing');
+    // Post-claim failure, not a pre-claim decline and not an unscoped start.
+    expect(declineReason(sent)).toBeUndefined();
+    expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
+    expect(failReason(sent)).toMatch(/^file_scope_unavailable: file scope root_missing for root "repo"/);
+    expect(sent.some((envelope) => envelope.type === 'task.started')).toBe(false);
+    expect(adapter.inputs).toEqual([]);
+    expect(audits).toEqual([expect.objectContaining({
+      taskId: 'scope-root-missing',
+      decision: 'deny',
+      lane: 'rpc',
+      homeAccess: 'writer',
+      scope: expect.objectContaining({ mode: 'workspaces', digest: expect.stringMatching(/^[0-9a-f]{64}$/) }),
+      rootId: 'repo',
+      access: 'write',
+      code: 'file_scope_unavailable',
+      reason: 'root_missing',
+    })]);
+  });
+
+  it('fails a claimed task when a configured root is a symlink', async () => {
+    const target = await canonicalTmpDir('byok-scope-link-target-');
+    const link = path.join(await canonicalTmpDir('byok-scope-link-parent-'), 'linked');
+    await fs.symlink(target, link, 'dir');
+    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
+    const sent: Envelope[] = [];
+    const audits: FileScopeAudit[] = [];
+    await offer(makeRunner(adapter, sent,
+      () => ({ default: 'auto', fileScope: { mode: 'workspaces', roots: [{ id: 'repo', path: link, access: 'read' }] } }),
+      { onFileScopeAudit: (event) => audits.push(event) }), 'scope-root-symlink');
+    expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(true);
+    expect(failReason(sent)).toMatch(/^file_scope_unavailable: file scope symlink for root "repo"/);
+    expect(adapter.inputs).toEqual([]);
+    expect(audits).toEqual([expect.objectContaining({
+      decision: 'deny', rootId: 'repo', access: 'read', code: 'file_scope_unavailable', reason: 'symlink',
+    })]);
   });
 });

@@ -152,6 +152,22 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
       return `${prefix} tool-reminder taskId=${event.taskId} tool=${quote(event.toolName)} source=${event.authorization.source} ruleIds=${JSON.stringify(event.authorization.ruleIds)} reasons=${event.reasons.join(',')}${event.suppressedReasons === undefined ? '' : ` suppressedReasons=${event.suppressedReasons.join(',')}`} summary=${quote(event.summary)}`;
     case 'tool-authorization':
       return `${prefix} tool-authorization taskId=${event.taskId} tool=${quote(event.toolName)} decision=${event.decision} source=${event.authorization.source} ruleIds=${JSON.stringify(event.authorization.ruleIds)} reasons=${event.reasons.join(',')}${event.suppressedReasons === undefined ? '' : ` suppressedReasons=${event.suppressedReasons.join(',')}`}`;
+    case 'file-scope': {
+      const parts = [
+        `${prefix} file-scope taskId=${event.taskId}`,
+        `decision=${event.decision}`,
+        `lane=${event.lane}`,
+        `homeAccess=${event.homeAccess}`,
+        `mode=${event.scope.mode}`,
+        `digest=${event.scope.digest}`,
+        event.rootIds === undefined ? undefined : `rootIds=${JSON.stringify(event.rootIds)}`,
+        event.rootId === undefined ? undefined : `rootId=${quote(event.rootId)}`,
+        event.access === undefined ? undefined : `access=${event.access}`,
+        event.code === undefined ? undefined : `code=${event.code}`,
+        event.reason === undefined ? undefined : `reason=${event.reason}`,
+      ].filter((part): part is string => part !== undefined);
+      return parts.join(' ');
+    }
     case 'agent-memory-intent-integrity':
       return `${prefix} agent-memory-intent-integrity intentId=${event.intentId} disposition=${event.disposition}`;
     case 'runtime-disposal-failed':

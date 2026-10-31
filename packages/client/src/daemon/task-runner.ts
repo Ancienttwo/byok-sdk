@@ -100,6 +100,7 @@ import { handleOffer } from './task-runner/offer';
 import { hostFor } from './task-runner/host';
 import { OfferAdmissionTiming } from './task-runner/offer-admission-timing';
 import type { ToolAuthorizationDecision, ToolAuthorizationResolver, ToolReminder } from '../tool-authorization';
+import type { FileScopeAudit } from '../file-scope-guard';
 
 /**
  * M5 batch-3 (workstream 2): default cap (64 MiB) on accumulated
@@ -292,6 +293,11 @@ export interface TaskRunnerDeps {
   onToolReminder?: (reminder: ToolReminder) => void;
   /** One classified auto-gate verdict, including silent allow; local observability only. */
   onToolAuthorizationDecision?: (decision: ToolAuthorizationDecision) => void;
+  /**
+   * #1061 D12 local file-scope audit: one event per denial and one per Attempt
+   * that adopts a configured scope. Allow is never recorded.
+   */
+  onFileScopeAudit?: (event: FileScopeAudit) => void;
   /** Overrides the bounded soft-interrupt window before authoritative `Session.close()` disposal begins. */
   shutdownInterruptTimeoutMs?: number;
   startupTimeoutMs?: number;
