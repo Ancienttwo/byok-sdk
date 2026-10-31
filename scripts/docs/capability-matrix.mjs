@@ -27,7 +27,7 @@ export const COLUMNS = [
   ['Pi (`durablePi`)', PI_DURABLE_RUNTIME_CAPABILITIES, piPin],
 ];
 
-const ROWS = [
+export const ROWS = [
   ['Resume a known native session', 'resume', (c) => c.resume],
   ['Redirect the active turn', 'steer', (c) => c.steer],
   ['Display-only message draft', 'messageDraft', (c) => c.messageDraft],

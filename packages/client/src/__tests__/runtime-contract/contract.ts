@@ -71,8 +71,13 @@ export function contractTarget(runtime: Exclude<ContractRuntime, 'pi'>, qualifie
   return { runtime, mode, qualifiedVersion, expectedVersion, bin };
 }
 
-/** Register every case for one adapter. */
-export function defineRuntimeContract(title: string, descriptor: RuntimeAdapterDescriptor, plan: ContractPlan): void {
+/**
+ * The plan's own admission, before any case registers: every case is present,
+ * a skip names a nonempty reason, and no skip hides a capability the adapter
+ * descriptor advertises. Extracted so the fail-closed rules are testable
+ * without a real runtime CLI.
+ */
+export function assertContractPlan(descriptor: RuntimeAdapterDescriptor, plan: ContractPlan): void {
   const capabilities = descriptor.capabilities;
   const advertised: Partial<Record<ContractCaseId, boolean>> = {
     'mcp.submitResult': capabilities.mcpToolsets === true,
@@ -82,10 +87,18 @@ export function defineRuntimeContract(title: string, descriptor: RuntimeAdapterD
     'isolation.userMcp': capabilities.isolation?.userMcpServers === true,
     'isolation.sessionPersistence': capabilities.isolation?.sessionPersistence === true,
   };
+  for (const id of Object.keys(CONTRACT_CASES) as ContractCaseId[]) {
+    if (!(id in plan)) throw new Error(`${descriptor.id}: contract plan is missing the ${id} case`);
+  }
   for (const [id, entry] of Object.entries(plan) as Array<[ContractCaseId, ContractCheck | ContractSkip]>) {
     if ('skip' in entry && advertised[id] === true) throw new Error(`${descriptor.id}: ${id} is advertised by the descriptor and cannot be skipped`);
     if ('skip' in entry && entry.skip.trim() === '') throw new Error(`${descriptor.id}: ${id} skip needs a reason`);
   }
+}
+
+/** Register every case for one adapter. */
+export function defineRuntimeContract(title: string, descriptor: RuntimeAdapterDescriptor, plan: ContractPlan): void {
+  assertContractPlan(descriptor, plan);
   describe(title, () => {
     for (const id of Object.keys(CONTRACT_CASES) as ContractCaseId[]) {
       const entry = plan[id];
