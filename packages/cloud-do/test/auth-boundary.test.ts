@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { build } from 'esbuild';
 import { Log, LogLevel, Miniflare, type MiniflareOptions } from 'miniflare';
 import type { Fault } from './auth-boundary-worker';
+import { readUtf8Body } from './request-body';
 
 const KEY = 'sk-proj-~~~Platform~0123456789+Tail/Z9';
 const RAW_CAUSE = 'raw-credential-reader-cause';
@@ -63,8 +64,7 @@ beforeAll(async () => {
         AIPHABEE_ZAI_API_KEY: { type: 'text', value: KEY }, FAULT: { type: 'text', value: fault },
       },
     }, dev: { outboundService: { type: 'node-handler', handler: async (request: IncomingMessage, response: ServerResponse) => {
-      let body = '';
-      for await (const chunk of request) body += chunk.toString();
+      const body = await readUtf8Body(request);
       calls.push({ url: request.headers['mf-original-url'] as string ?? new URL(request.url!, `https://${request.headers.host}`).href, body });
       if (providerStatus !== 200) {
         response.writeHead(providerStatus, { 'content-type': 'application/json' });

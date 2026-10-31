@@ -3,6 +3,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFirstTextDelta } from './credentials-first-event';
+import { readUtf8Body } from './request-body';
 import { build } from 'esbuild';
 import { Log, LogLevel, Miniflare, type MiniflareOptions, type WorkerdStructuredLog } from 'miniflare';
 
@@ -54,8 +55,7 @@ beforeAll(async () => {
     },
       dev: { outboundService: { type: 'node-handler', handler: async (request: IncomingMessage, response: ServerResponse) => {
         const currentScenario = scenario;
-        let body = '';
-        for await (const chunk of request) body += chunk.toString();
+        const body = await readUtf8Body(request);
         const headers = Object.fromEntries(Object.entries(request.headers).map(([key, value]) => [key, Array.isArray(value) ? value.join(',') : value ?? '']));
         calls.push({ url: headers['mf-original-url'] ?? new URL(request.url!, `https://${headers.host}`).href, headers, body });
         if (currentScenario.status) {

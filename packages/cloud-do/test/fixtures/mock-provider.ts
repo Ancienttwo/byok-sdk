@@ -1,5 +1,7 @@
+import { readUtf8Body } from '../request-body';
+
 type ProviderBody = { messages: { role: string; content: string }[] };
-type BodyRequest = AsyncIterable<{ toString(): string }> & { destroy(): unknown };
+type BodyRequest = AsyncIterable<Uint8Array | string> & { destroy(): unknown };
 type ProviderResponse = {
   writeHead(status: number, headers: Record<string, string>): unknown;
   end(body: string): unknown;
@@ -29,11 +31,7 @@ export function createMockProvider(tools: string[][] = [['render_widget']]) {
       const cancelled = new Promise<undefined>(resolve => {
         cancel = () => { resolve(undefined); request.destroy(); response.destroy(); };
       });
-      const body = (async () => {
-        let text = '';
-        for await (const chunk of request) text += chunk.toString();
-        return text;
-      })();
+      const body = readUtf8Body(request);
       const handled = (async () => {
         const text = await Promise.race([body, cancelled]);
         if (text === undefined || closed) return;
