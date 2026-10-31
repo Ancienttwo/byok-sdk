@@ -13,7 +13,7 @@ const MIGRATION = '0033_device_stream_closed.sql';
 const TENANT = tenantId('stream-closed-migration');
 
 describe.skipIf(SKIP_DATAPLANE)(`Postgres 0033 and the streams stored before it — ${SKIP_REASON}`, () => {
-  it('closes and dead-letters the stream of a device retired before it and leaves a registered device open', async () => {
+  it('closes the stream of a device retired before it, leaves a registered device open and leaves pending rows to retention', async () => {
     const scope = await createDataplaneScope();
     const before = await mkdtemp(join(tmpdir(), 'byok-before-0033-'));
     try {
@@ -54,7 +54,11 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0033 and the streams stored before it 
         'SELECT device_id, state FROM outbox WHERE tenant_id = $1 ORDER BY device_id',
         [TENANT],
       );
-      expect(rows.rows).toEqual([{ device_id: 'gone', state: 'expired' }, { device_id: 'kept', state: 'pending' }]);
+      // The migration writes the tombstone and nothing else: the release gate
+      // asserts a candidate migration leaves every seeded row byte equal, and
+      // the pending rows nobody can ack belong to the dead-letter retention
+      // (#1115), not to a one-shot UPDATE.
+      expect(rows.rows).toEqual([{ device_id: 'gone', state: 'pending' }, { device_id: 'kept', state: 'pending' }]);
 
       const mailbox = new PostgresMailboxStore(scope.pool, createMutableClock(new Date('2026-10-30T00:00:00.000Z')));
       const refused = await mailbox.append(TENANT, {

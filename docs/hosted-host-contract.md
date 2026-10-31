@@ -169,10 +169,13 @@ Registering the same device id again reopens its stream (`MailboxStore.reopenStr
 transaction. Rows, cursor, `seq` and `recoverableFrom` are kept across the close and the reopen.
 
 Upgrade: Postgres migration `0033_device_stream_closed.sql` adds the two columns. It closes the stream of every
-device whose `device` row is already gone, and expires that stream's `pending` rows. Those streams read
-`closed_cause: 'device_revoked'`: a supersede before the upgrade was not stored apart from a revoke, so that
-provenance is lost. The embedded SQLite store upgrades a schema 6 file to 7 in place when it opens, with the same
-backfill, and keeps its pairings and rows. It refuses every other older version as before.
+device whose `device` row is already gone. Those streams read `closed_cause: 'device_revoked'`: a supersede before
+the upgrade was not stored apart from a revoke, so that provenance is lost. The migration writes the tombstone and
+nothing else — it does not expire that stream's `pending` rows, because a migration that rewrites stored rows is
+indistinguishable from a bug to the release gate; the dead-letter retention (#1115) collects them, and runtime
+retirement still expires them in the transaction that closes the stream. The embedded SQLite store upgrades a
+schema 6 file to 7 in place when it opens, with the same backfill, and keeps its pairings and rows. It refuses every
+other older version as before.
 
 ### abandonTask
 

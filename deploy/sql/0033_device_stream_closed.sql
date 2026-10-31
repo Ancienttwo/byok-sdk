@@ -16,22 +16,23 @@ ALTER TABLE device_stream ADD COLUMN closed_cause text
 ALTER TABLE device_stream ADD CONSTRAINT device_stream_closed_pair
   CHECK ((closed_at IS NULL) = (closed_cause IS NULL));
 
--- One-shot backfill: a stream whose device row is gone belongs to a device
--- retired before this migration, and is closed as a retirement closes it: its
--- pending rows become expired, since no device will ever ack them. Its cause
--- is device_revoked, because the revoke/supersede distinction was never
--- stored and cannot be recovered; a pre-upgrade supersede reads as a revoke.
--- Streams of registered devices stay open. The instant is the migration's
--- own, as no earlier one was recorded.
+-- Backfill the tombstone only. A stream whose device row is gone belongs to a
+-- device retired before this migration, and is closed with the cause a revoke
+-- records; the revoke/supersede distinction was never stored and cannot be
+-- recovered, so a pre-upgrade supersede reads as a revoke. Streams of
+-- registered devices stay open, and the instant is the migration's own because
+-- no earlier one was recorded.
+--
+-- The migration does NOT expire those streams' pending rows. A migration that
+-- rewrites rows is indistinguishable from a bug to the release gate
+-- (`scripts/release/pg-migrate-smoke.mjs` asserts every seeded row is byte
+-- equal after the candidate migration), and the retention policy that owns
+-- dead letters already collects pending rows nobody can ack (#1115). Runtime
+-- retirement still dead-letters them in the transaction that closes the
+-- stream; only the historical backfill leaves them alone.
 UPDATE device_stream s
    SET closed_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
        closed_cause = 'device_revoked'
  WHERE NOT EXISTS (
    SELECT 1 FROM device d WHERE d.tenant_id = s.tenant_id AND d.device_id = s.device_id
  );
-
-UPDATE outbox o
-   SET state = 'expired'
-  FROM device_stream s
- WHERE s.tenant_id = o.tenant_id AND s.device_id = o.device_id
-   AND s.closed_cause IS NOT NULL AND o.state = 'pending';

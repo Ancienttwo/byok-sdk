@@ -2718,7 +2718,10 @@ export declare function readDeviceClientPairingMac(ctx: E2eeMemberContext, devic
  * `instanceof` chain. Cloud does not re-export core's codes — a cloud error is
  * about the hosted surface (a store contract the composition broke, a
  * declaration the host mis-configured), and core errors travel up unchanged.
+ * The one translation is a closed mailbox stream: at the hosted surface it
+ * means a retired device, so it surfaces as `device_retired`.
  */
+import type { MailboxStreamCloseCause } from '@byok-sdk/core';
 export declare const CLOUD_ERROR_CODES: {
     readonly activity_history_gap: 'activity_history_gap';
     readonly activity_cursor_invalid: 'activity_cursor_invalid';
@@ -2792,6 +2795,12 @@ export declare const CLOUD_ERROR_CODES: {
     readonly e2ee_member_state_unreadable: 'e2ee_member_state_unreadable';
     /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
     readonly device_not_found: 'device_not_found';
+    /**
+     * The device was retired (revoked or superseded), and its mailbox stream
+     * refused the append. Raised as {@link DeviceRetiredError}, which names the
+     * device and the retirement's cause; nothing was written for that device.
+     */
+    readonly device_retired: 'device_retired';
     /**
      * A host `approveTask`/`rejectTask` names a task with no approval to
      * resolve: the durable timeline holds no unresolved `approval_requested`
@@ -2869,6 +2878,20 @@ export declare class ByokCloudError extends Error {
 export declare class TaskOfferAppendRefusedError extends ByokCloudError {
     readonly taskId: string;
     constructor(taskId: string, cause: unknown);
+}
+/**
+ * An append for a device whose retirement closed its mailbox stream. A refused
+ * task offer also names its task, which cloud settled `cancelled` with the
+ * retirement's cause in the same call, so the Host reads the outcome with
+ * `readTaskResult` and has nothing to retry or cancel.
+ */
+export declare class DeviceRetiredError extends ByokCloudError {
+    readonly deviceId: string;
+    readonly retirementCause: MailboxStreamCloseCause;
+    readonly taskId: string | undefined;
+    constructor(deviceId: string, retirementCause: MailboxStreamCloseCause, options?: ErrorOptions & {
+        readonly taskId?: string;
+    });
 }
 export declare function isCloudError(value: unknown, code?: CloudErrorCode): value is ByokCloudError;
 // ==== @byok-sdk/cloud dist/handlers/board.d.ts ====
@@ -3185,7 +3208,7 @@ export { DEFAULT_BOARD_PAGE_LIMIT, DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS, D
 export { DEFAULT_SKILL_PACK_PAGE_LIMIT } from './handlers/skill-packs';
 export { createInMemoryByokCloud } from './composition/in-memory';
 export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory';
-export { ByokCloudError, CLOUD_ERROR_CODES, TaskOfferAppendRefusedError, isCloudError } from './errors';
+export { ByokCloudError, CLOUD_ERROR_CODES, DeviceRetiredError, TaskOfferAppendRefusedError, isCloudError } from './errors';
 export type { CloudErrorCode } from './errors';
 export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
@@ -4196,7 +4219,7 @@ export declare const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, stri
 // ==== @byok-sdk/cloud dist/stores/ports.d.ts ====
 import type { AgentMessageDraftStore } from '../agent-message-draft';
 import type { TaskArchiveStore } from '../task-archive';
-import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
+import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * The cloud-local store ports.
@@ -4302,15 +4325,17 @@ export interface DeviceRegistration {
  *    `device_revoked` or `device_superseded` and, when it has none,
  *    `terminalAt`. A terminal attempt is never touched; a cancellation
  *    tombstone stays as it was.
- * 2. Every `pending` mailbox row addressed to that device becomes `expired`
- *    (see `MailboxStore.expirePending`): the rows stop holding mailbox quota
- *    and raise the device's `recoverableFrom`, and nothing is deleted.
+ * 2. The device's mailbox stream is closed with the same cause, and every
+ *    `pending` row on it becomes `expired` (see `MailboxStore.closeStream`):
+ *    the rows stop holding mailbox quota and raise the device's
+ *    `recoverableFrom`, nothing is deleted, and no later append for that id
+ *    commits until the id is registered again, which reopens the stream.
  *
  * Neither the task history nor the mailbox rows go away: what the device did
  * and what it was sent stay readable after its grant is gone.
  */
 export interface DeviceDirectory {
-    /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. */
+    /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row — and retires each under `device_superseded`. In the same transaction it reopens the registered id's mailbox stream (`MailboxStore.reopenStream`), so a fresh grant for a retired id receives mail again. */
     register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
     /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
@@ -4435,7 +4460,7 @@ export declare const TASK_ATTEMPT_UNFINISHED_STATUSES: readonly ["offered", "cla
  * `ByokCloud.abandonTask`. An attempt settled this way is `cancelled` and
  * carries no device terminal receipt.
  */
-export declare const TASK_ABANDON_CAUSES: readonly ['operator', 'device_revoked', 'device_superseded'];
+export declare const TASK_ABANDON_CAUSES: readonly ["operator", "device_revoked", "device_superseded"];
 export type TaskAbandonCause = (typeof TASK_ABANDON_CAUSES)[number];
 export declare function isTaskAbandonCause(value: unknown): value is TaskAbandonCause;
 /** One store aggregate; host cancellation is counted separately because it outranks status. */
