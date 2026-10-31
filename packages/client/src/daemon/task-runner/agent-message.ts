@@ -6,7 +6,12 @@ import type { AgentResultDescribeParams, AgentResultDescribeResult, AgentResultS
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from '../agent-message-outbox';
 import { AGENT_RESULT_TOOL_NAME, AGENT_RESULT_TOOL_DESCRIPTION } from '../../sdk-reserved-mcp';
 import { AgentResultStore } from '../agent-result-store';
+import { DAEMON_TASK_FAILURE } from '../task-failure';
 import type { TaskRunner } from '../task-runner';
+import { hostFor } from './host';
+import { beginTerminal } from './finish';
+import { taskMessageSendAttempted } from './support';
+import { successfulCompletionPlan } from './event-pump';
 
 export async function publishAgentMessage(this: TaskRunner, input: {
   readonly contextToken: string;
@@ -46,7 +51,7 @@ export async function publishAgentMessage(this: TaskRunner, input: {
   const current = this['tasks'].get(taskId);
   if (current === undefined) return { messageId: record.messageId, state: 'staged' };
   const activated = await this['activateAgentMessage'](context.outbox, taskId, current.session.sessionRef, isCurrent,
-    () => current.messageSendAttempted === true);
+    () => taskMessageSendAttempted(this, taskId));
   if (!isCurrent()) throw new Error('invalid or expired Agent message task context');
   if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
   this['sendAgentMessageRecord'](context.outbox, activated);
@@ -173,7 +178,12 @@ export function sendAgentMessageRecord(this: TaskRunner, outbox: AgentMessageOut
   if (active !== undefined) {
     active.messageDraft?.finalize(record.body);
     active.messageDraft?.stop();
-    active.messageSendAttempted = true;
+    // M3: the send attempt only affects a failed terminal's outbox revoke.
+    void hostFor(this).dispatch({
+      type: 'message.send_attempted',
+      taskId: record.taskId,
+      atMs: Date.now(),
+    }).catch(() => undefined);
   }
   const envelope = this['agentMessageEnvelopes'].get(record) ?? createEnvelope('agent.message.publish', outbox.publishPayload(record), {
     taskId: record.taskId,
@@ -229,11 +239,22 @@ export async function handleAgentMessageDisposition(this: TaskRunner, taskId: st
     active.messageRetryTimer = undefined;
     return;
   }
+  const host = hostFor(this);
+  const current = host.current(taskId);
+  const completionToken = current?.completion?.token;
   if (outcome === 'refused') {
     if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
     active.messageRetryTimer = undefined;
     this['revokeAgentMessageContext'](taskId);
-    active.pendingMessageCompletion = undefined;
+    host.clearMessageCompletion(taskId);
+    if (current?.terminal !== undefined) {
+      // M4: the terminal was selected first; a late refusal only audits.
+      void host.dispatch({
+        type: 'message.refused', taskId, atMs: Date.now(),
+        ...(completionToken === undefined ? {} : { completionToken }),
+      }).catch(() => undefined);
+      return;
+    }
     await this['fail'](taskId, 'required Agent message was refused', false);
     return;
   }
@@ -242,14 +263,41 @@ export async function handleAgentMessageDisposition(this: TaskRunner, taskId: st
     clearTimeout(active.messageRetryTimer);
     active.messageRetryTimer = undefined;
   }
-  active.messageAccepted = true;
   this['revokeAgentMessageContext'](taskId);
-  if (active.pendingMessageCompletion !== undefined) {
-    const completion = active.pendingMessageCompletion;
-    active.pendingMessageCompletion = undefined;
-    if (completion.failureReason !== undefined) await this['fail'](taskId, completion.failureReason, false);
-    else await this['publishSuccessfulCompletion'](active, completion.finalOutput, completion.document);
+  if (current?.terminal !== undefined) {
+    // M4: cancel/terminal first; acceptance never revives the task.
+    void host.dispatch({
+      type: 'message.accepted', taskId, atMs: Date.now(),
+      ...(completionToken === undefined ? {} : { completionToken }),
+    }).catch(() => undefined);
+    return;
   }
+  const completion = host.clearMessageCompletion(taskId);
+  if (completion?.failureReason !== undefined) {
+    // An accepted message whose staged result failed still fails the task; the
+    // gate never turns that into a successful completion.
+    await this['fail'](taskId, completion.failureReason, false);
+    return;
+  }
+  if (current?.completion !== undefined) {
+    // M1: the open completion gate is resolved by the acceptance. Register the
+    // exact completion plan first so M1's terminal effects find it.
+    const receipt = beginTerminal.call(this, active, successfulCompletionPlan.call(
+      this, active, completion?.finalOutput ?? '', completion?.document,
+    ));
+    void host.dispatch({
+      type: 'message.accepted',
+      taskId,
+      atMs: Date.now(),
+      completionToken: current.completion.token,
+    }).catch((error: unknown) => host.rejectTerminal(taskId, error));
+    await receipt;
+    return;
+  }
+  // M0: accepted before turn_end only records the flag; the turn keeps running.
+  void host.dispatch({
+    type: 'message.accepted', taskId, atMs: Date.now(),
+  }).catch(() => undefined);
 }
 
 export function agentResultStore(this: TaskRunner, homeDir: string): Promise<AgentResultStore> {

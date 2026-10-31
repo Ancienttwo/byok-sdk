@@ -6,20 +6,26 @@ import { RuntimeDisposalFailure, isRuntimeDisposalFailure } from '../../runtime-
 import { DAEMON_TASK_FAILURE } from '../task-failure';
 import { MAX_TIMER_DELAY_MS } from '../../util/timer-delay';
 import type { ActiveTask } from './support';
-import { raceSettleFirst } from './support';
+import { raceSettleFirst, taskFinalizing } from './support';
 import type { TaskRunner } from '../task-runner';
 import { DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS, MAX_DURATION_EXCEEDED_REASON_PREFIX, MAX_TRACKED_TASK_IDS } from './state';
 import { hostFor } from './host';
+import { beginTerminal, drainApprovals, retryTerminalFinalization, terminalEffectsHost } from './finish';
 
 export function stopAcceptingOffers(this: TaskRunner): void {
-  this['stoppingOffers'] = true;
-  // Contract §8.2(1): a daemon on its way down signs nothing more for any
-  // task. The control handler's own `shutting_down` gate answers first, so
-  // this is not the refusal a caller sees — it is the registry telling the
-  // truth regardless of which path initiated the shutdown.
-  this['revokeAllHostToolsetContexts']();
-  this['startupOwnership'].stopRetry();
-  for (const abort of this['inFlightBlobAborts'].values()) abort.abort();
+  // #1099 S6: SH1 owns the shutdown gate and its three side effects
+  // (revoke all host contexts, stop startup retry, abort in-flight blobs).
+  // `stoppingOffers` is now derived from `RunnerStateV1.acceptingOffers`.
+  const host = terminalEffectsHost.call(this);
+  if (!host.runnerSnapshot().acceptingOffers) return;
+  const event = { type: 'shutdown.stop_accepting' as const, atMs: Date.now(), reason: 'shutdown' };
+  if (host.isDraining(undefined)) {
+    // A shutdown is already in flight on the global mailbox; queue the
+    // idempotent gate rather than refusing it.
+    void host.dispatch(event).catch(() => undefined);
+    return;
+  }
+  host.dispatchSync(event);
 }
 
 export function closeActiveSession(this: TaskRunner, active: ActiveTask): Promise<void> {
@@ -83,23 +89,78 @@ export async function interruptBounded(this: TaskRunner, active: ActiveTask, dra
 export async function teardownActiveTask(
   this: TaskRunner, active: ActiveTask, reason: string, retryable: boolean, drainEvents = true, interruptTimeoutMs?: number,
 ): Promise<boolean> {
-  return this['settleSemanticTerminal'](active, async () => {
-    active.blobAbort.abort();
-    await this['interruptBounded'](active, drainEvents, interruptTimeoutMs);
-    await this['persistAgentTerminalEvidence'](active, 'failed', reason);
-    return createEnvelope('task.fail', {
-      reason,
-      retryable,
-      ...this['failurePayload'](DAEMON_TASK_FAILURE),
-      ...this['terminalInferenceUsagePayload'](active),
-      ...this['preparedObservationPayload'](active),
-      ...this['agentTerminalPayload'](active),
-    }, { taskId: active.taskId });
+  return this['settleSemanticTerminal'](active, {
+    kind: 'failed',
+    cause: 'failed',
+    reason,
+    retryable,
+    prepare: async () => {
+      active.blobAbort.abort();
+      await this['interruptBounded'](active, drainEvents, interruptTimeoutMs);
+      await this['persistAgentTerminalEvidence'](active, 'failed', reason);
+      return createEnvelope('task.fail', {
+        reason,
+        retryable,
+        ...this['failurePayload'](DAEMON_TASK_FAILURE),
+        ...this['terminalInferenceUsagePayload'](active),
+        ...this['preparedObservationPayload'](active),
+        ...this['agentTerminalPayload'](active),
+      }, { taskId: active.taskId });
+    },
   });
 }
 
 export async function shutdownTask(this: TaskRunner, active: ActiveTask, reason: string, interruptTimeoutMs?: number): Promise<void> {
-  const disposed = await this['teardownActiveTask'](active, `daemon shutting down: ${reason}`, true, true, interruptTimeoutMs);
+  // X8: shutdown's terminal semantics are `task.fail` (retryable), never
+  // `task.cancelled`. The plan is registered before the event so the selecting
+  // row's terminal effects can find it.
+  const shutdownReason = `daemon shutting down: ${reason}`;
+  const host = hostFor(this);
+  const needsRetry = host.current(active.taskId)?.terminal !== undefined
+    && host.terminalSettled(active.taskId) === true;
+  const receipt = beginTerminal.call(this, active, {
+    kind: 'failed',
+    cause: 'shutdown',
+    reason: shutdownReason,
+    retryable: true,
+    prepare: async () => {
+      active.blobAbort.abort();
+      await this['interruptBounded'](active, true, interruptTimeoutMs);
+      await this['persistAgentTerminalEvidence'](active, 'failed', shutdownReason);
+      return createEnvelope('task.fail', {
+        reason: shutdownReason,
+        retryable: true,
+        ...this['failurePayload'](DAEMON_TASK_FAILURE),
+        ...this['terminalInferenceUsagePayload'](active),
+        ...this['preparedObservationPayload'](active),
+        ...this['agentTerminalPayload'](active),
+      }, { taskId: active.taskId });
+    },
+  });
+  const current = host.current(active.taskId);
+  if (needsRetry) {
+    // A failed attempt (revoke/evidence/close/commit) is retried with the same
+    // token and bytes.
+    const retried = await retryTerminalFinalization.call(this, active.taskId, true);
+    if (!retried) {
+      throw new RuntimeDisposalFailure({
+        stage: 'quiescence',
+        reason: `${active.adapter.descriptor.id} runtime ownership remains active after shutdown disposal failed`,
+      });
+    }
+    return;
+  }
+  if (current?.terminal === undefined) {
+    await host.dispatch({
+      type: 'cancel.received',
+      taskId: active.taskId,
+      atMs: Date.now(),
+      source: 'shutdown',
+      reason,
+    });
+  }
+  void drainApprovals.call(this, active.taskId);
+  const disposed = await receipt;
   if (!disposed) {
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',
@@ -118,7 +179,7 @@ export function armMaxDurationTimer(this: TaskRunner, active: ActiveTask, maxDur
     const capped = remainingMs > MAX_TIMER_DELAY_MS;
     const timer = setTimeout(() => {
       if (capped) {
-        if (!active.finalizationStarted) arm(Math.max(0, limitAt - Date.now()));
+        if (!taskFinalizing(this, active.taskId)) arm(Math.max(0, limitAt - Date.now()));
         return;
       }
       void this['failActiveTaskForResourceLimit'](
@@ -199,29 +260,54 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
     this['inFlightBlobAborts'].get(taskId)?.abort();
     return;
   }
-  await this['settleSemanticTerminal'](active, async () => {
-    active.blobAbort.abort();
-    await this['interruptBounded'](active);
-    // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
-    // §4's "server state is authoritative on its own action" rule means the
-    // server already moved this task to `Cancelled` — and already closed
-    // this task's ServerTaskEvent queue (hub.ts's onStateChange, called
-    // synchronously from cancelTask() before task.cancel is even sent) —
-    // before this notification reaches the daemon at all. Any progress
-    // still buffered in the batcher at this point can therefore never reach
-    // an embedder no matter what: sending it only draws a
-    // dropped/illegal-transition warning on the server for a `task.progress`
-    // arriving against an already-terminal task (hub.ts's onProgress has no
-    // §9 stale-terminal-message idempotency for task.progress the way it
-    // does for task.complete/fail/cancelled). `finish()` below already stops
-    // the batcher; nothing else needs to happen with its buffer contents.
-    // M1 gap #6: the canonical, explicit cancellation message — no longer
-    // `task.fail({reason:'cancelled'})`.
-    await this['persistAgentTerminalEvidence'](active, 'cancelled', reason);
-    return createEnvelope('task.cancelled', {
-      reason, ...this['terminalInferenceUsagePayload'](active), ...this['agentTerminalPayload'](active),
-    }, { taskId });
+  // A previous attempt that settled as failed (revoke/evidence/close/commit)
+  // is retried with the SAME token and bytes; a competing control shares it.
+  const needsRetry = host.current(taskId)?.terminal !== undefined
+    && host.terminalSettled(taskId) === true;
+  // X4/X5: the reducer selects `cancelled` (first-terminal-wins) and orders
+  // revoke -> abort -> interrupt -> evidence -> envelope. This adapter keeps
+  // the exact IO and sends the plan's bytes.
+  const receipt = beginTerminal.call(this, active, {
+    kind: 'cancelled',
+    cause: 'cancelled',
+    reason,
+    retryable: false,
+    prepare: async () => {
+      active.blobAbort.abort();
+      await this['interruptBounded'](active);
+      // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
+      // §4's "server state is authoritative on its own action" rule means the
+      // server already moved this task to `Cancelled` — and already closed
+      // this task's ServerTaskEvent queue (hub.ts's onStateChange, called
+      // synchronously from cancelTask() before task.cancel is even sent) —
+      // before this notification reaches the daemon at all. Any progress
+      // still buffered in the batcher at this point can therefore never reach
+      // an embedder no matter what: sending it only draws a
+      // dropped/illegal-transition warning on the server for a `task.progress`
+      // arriving against an already-terminal task (hub.ts's onProgress has no
+      // §9 stale-terminal-message idempotency for task.progress the way it
+      // does for task.complete/fail/cancelled). `finish()` below already stops
+      // the batcher; nothing else needs to happen with its buffer contents.
+      // M1 gap #6: the canonical, explicit cancellation message — no longer
+      // `task.fail({reason:'cancelled'})`.
+      await this['persistAgentTerminalEvidence'](active, 'cancelled', reason);
+      return createEnvelope('task.cancelled', {
+        reason, ...this['terminalInferenceUsagePayload'](active), ...this['agentTerminalPayload'](active),
+      }, { taskId });
+    },
   });
+  if (needsRetry) {
+    await retryTerminalFinalization.call(this, taskId, true);
+    return;
+  }
+  if (host.current(taskId)?.terminal === undefined) {
+    await host.dispatch({
+      type: 'cancel.received', taskId, atMs: Date.now(), source: 'wire',
+      ...(reason === undefined ? {} : { reason }),
+    }).catch(() => undefined);
+  }
+  void drainApprovals.call(this, taskId);
+  await receipt;
 }
 
 export function evictPendingCancelled(this: TaskRunner): void {

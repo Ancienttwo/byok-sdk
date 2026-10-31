@@ -208,6 +208,9 @@ export const ROW_FIXTURES: ReadonlyMap<string, RowFixture> = new Map<string, Row
   }), {
     task: { phase: 'awaiting_approval', approval: { pending, queue: [] } },
   })],
+  ['A8', fixture(makeEvent('approval.decided', { approvalId: 'a1', decision: 'reject', origin: 'fail-closed', reason: 'the approval request could not be sealed for the Host' }), {
+    task: { phase: 'awaiting_approval', approval: { pending, queue: [] } },
+  })],
   ['A9', fixture(makeEvent('approval.withdrawn', { requestId: 'r1' }), {
     task: { phase: 'running', approval: { queue: [queued] } },
   })],
@@ -269,6 +272,15 @@ export const ROW_FIXTURES: ReadonlyMap<string, RowFixture> = new Map<string, Row
       terminal: terminalState({ stage: 'sent' }),
       teardown: { close: 'failed' },
     },
+  })],
+  ['T14a', fixture(makeEvent('retry.finalization'), {
+    task: { phase: 'terminalizing', terminal: terminalState() },
+  })],
+  ['T14b', fixture(makeEvent('retry.finalization'), {
+    task: { phase: 'terminalizing', terminal: terminalState({ evidence: 'ok' }) },
+  })],
+  ['T14c', fixture(makeEvent('retry.finalization'), {
+    task: { phase: 'terminalizing', terminal: terminalState({ evidence: 'ok', envelope: 'ready', stage: 'envelope' }) },
   })],
   ['T15', fixture(makeEvent('finish.completed'), {
     task: { phase: 'retiring', terminal: terminalState({ stage: 'committed' }) },

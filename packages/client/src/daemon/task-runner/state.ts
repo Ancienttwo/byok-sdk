@@ -819,13 +819,16 @@ function selectTerminal(
 }
 
 function declineFacts(
-  snapshot: ReducerSnapshot, event: ReducerEvent,
+  snapshot: ReducerSnapshot, event: ReducerEvent, stage: string,
 ): { readonly reason: string; readonly retryable: boolean; readonly code?: string } {
   const task = taskOf(snapshot);
   if (task.cancel.requested) {
     return { reason: terminalReasonForCancel(task.cancel.reason), retryable: false };
   }
-  if (snapshot.runner.shutdown !== undefined || !snapshot.runner.acceptingOffers) {
+  // Shutdown only owns the limits-stage verdict: an offer already parked on a
+  // busy Agent home still reports that concrete, machine-readable cause first.
+  if (stage === 'limits'
+    && (snapshot.runner.shutdown !== undefined || !snapshot.runner.acceptingOffers)) {
     return { reason: 'daemon is shutting down', retryable: true };
   }
   return {
@@ -841,7 +844,7 @@ function declinedTask(
   forced?: { readonly reason: string; readonly retryable: boolean; readonly code?: string },
 ): { readonly task: TaskStateV1; readonly reason: string } {
   const task = taskOf(snapshot);
-  const facts = forced ?? declineFacts(snapshot, event);
+  const facts = forced ?? declineFacts(snapshot, event, stage);
   const terminal = selectTerminal(task, {
     kind: 'declined',
     cause: 'declined',
@@ -1661,6 +1664,32 @@ const APPROVAL_ROWS: readonly TransitionRow[] = [
     rejection: 'A tool-authorization rejection denies that call only; the turn continues.',
   },
   {
+    id: 'A8',
+    events: ['approval.decided'],
+    phase: ['running', 'awaiting_approval'],
+    when: (snapshot, event) =>
+      snapshot.task?.approval.pending !== undefined
+      && event.approvalId === snapshot.task.approval.pending.approvalId
+      && event.decision === 'reject'
+      && snapshot.task.approval.pending.kind === 'task-terminal'
+      && (event.origin === 'eviction'
+        || (event.origin === 'fail-closed'
+          && !(event.reason ?? '').startsWith('approval timed out'))),
+    apply: (snapshot, event) => {
+      const task = taskOf(snapshot);
+      return {
+        runner: snapshot.runner,
+        task: taskWith(task, {
+          phase: 'running',
+          approval: { queue: task.approval.queue },
+        }),
+        effects: approvalResolvedEffects(event, false),
+      };
+    },
+    rejection:
+      'A system resolution that never selected a terminal (unsendable sealed frame, withdrawal, registry eviction) denies the approval, clears pending and lets the turn continue. A deliberate reject and a timeout (which registers its plan) are A7 and terminalize.'
+  },
+  {
     id: 'A7',
     events: ['approval.decided'],
     phase: ['running', 'awaiting_approval'],
@@ -2183,6 +2212,80 @@ const TERMINAL_ROWS: readonly TransitionRow[] = [
     },
     rejection:
       'Only the failed barrier is retried; the token and terminal selection stay unchanged.',
+  },
+  {
+    id: 'T14a',
+    events: ['retry.finalization'],
+    phase: ['terminalizing'],
+    when: (snapshot) =>
+      snapshot.task?.terminal !== undefined
+      && snapshot.task.terminal.evidence === 'none'
+      && snapshot.task.terminal.stage === 'selected',
+    apply: (snapshot) => {
+      const task = taskOf(snapshot);
+      const token = task.terminal?.token;
+      return {
+        runner: snapshot.runner,
+        task: snapshot.task,
+        effects: [
+          barrier('persist.evidence', {
+            ...(token === undefined ? {} : { token }),
+            stage: 'evidence',
+          }),
+        ],
+      };
+    },
+    rejection:
+      'A terminal whose prepare barrier failed retries that same barrier; the token and selection never change.',
+  },
+  {
+    id: 'T14b',
+    events: ['retry.finalization'],
+    phase: ['terminalizing'],
+    when: (snapshot) =>
+      snapshot.task?.terminal !== undefined
+      && snapshot.task.terminal.evidence !== 'none'
+      && snapshot.task.terminal.envelope === 'none',
+    apply: (snapshot) => {
+      const task = taskOf(snapshot);
+      const token = task.terminal?.token;
+      return {
+        runner: snapshot.runner,
+        task: snapshot.task,
+        effects: [
+          barrier('prepare.envelope', {
+            ...(token === undefined ? {} : { token }),
+            stage: 'envelope',
+          }),
+        ],
+      };
+    },
+    rejection:
+      'Already-persisted evidence is not rewritten; only the envelope build is re-emitted from the cached bytes.',
+  },
+  {
+    id: 'T14c',
+    events: ['retry.finalization'],
+    phase: ['terminalizing'],
+    when: (snapshot) =>
+      snapshot.task?.terminal !== undefined
+      && snapshot.task.terminal.envelope === 'ready'
+      && snapshot.task.terminal.stage === 'envelope',
+    apply: (snapshot) => {
+      const task = taskOf(snapshot);
+      const token = task.terminal?.token;
+      return {
+        runner: snapshot.runner,
+        task: snapshot.task,
+        effects: [
+          atom('send.terminal', {
+            ...(token === undefined ? {} : { token }),
+          }, { completion: { type: 'terminal.sent' as const } }),
+        ],
+      };
+    },
+    rejection:
+      'A synchronous sender failure retains the exact envelope; retry re-sends the same bytes, never rebuilding or reselecting.',
   },
   {
     id: 'T15',

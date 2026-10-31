@@ -30,6 +30,7 @@ import { AgentMessageOutbox } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
+import { hostFor } from './host';
 import type { OfferAdmissionTiming } from './offer-admission-timing';
 
 /**
@@ -196,17 +197,7 @@ export interface ActiveTask {
    * call and the observation it feeds is first-call and maximum, not a sum.
    */
   prepared?: PreparedExecutionObservation;
-  /** Distinguishes runner-initiated teardown from an unexpected event-stream end. */
-  beingTornDown?: boolean;
-  /** Set before the first disposal await so no racing path can publish a second semantic terminal. */
-  finalizationStarted?: boolean;
-  /** The first terminal decision owns all retries, including pre-publication durability. */
-  semanticTerminal?: {
-    readonly prepare: () => Promise<Envelope>;
-    envelope?: Envelope;
-    attempt?: Promise<boolean>;
-  };
-  /** Shared receipt for concurrent finish/shutdown callers; cleared after a failed attempt so shutdown can retry. */
+  /** Shared close receipt for concurrent finish/shutdown callers; cleared after a failed attempt so shutdown can retry. */
   disposalAttempt?: Promise<void>;
   messageRequirement?: Readonly<AgentMessageEgressRequirement>;
   messageDraft?: AgentMessageDraftPublisher;
@@ -214,11 +205,7 @@ export interface ActiveTask {
   /** Present exactly for a result-document task: where its `submit_result` outcome is staged. */
   resultStore?: AgentResultStore;
   messageOutbox?: AgentMessageOutbox;
-  /** A send attempt may already have entered transport; failure must preserve its admission recovery. */
-  messageSendAttempted?: boolean;
-  messageAccepted?: boolean;
   resultReplyFailure?: ResultReplyFailure;
-  pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown; readonly failureReason?: string };
   messageRetryTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -693,6 +680,30 @@ export async function trackOffer(runner: TaskRunner, operation: Promise<void>): 
   offers.add(operation);
   try { await operation; }
   finally { offers.delete(operation); }
+}
+
+/**
+ * #1099 S6: the reducer's phase replaces the legacy `beingTornDown` field.
+ * A missing task entry is "gone" and therefore tearing down for every caller
+ * that used the old flag.
+ */
+export function taskTearingDown(runner: TaskRunner, taskId: string): boolean {
+  const phase = hostFor(runner).current(taskId)?.phase;
+  return phase === undefined || phase === 'terminalizing' || phase === 'retiring'
+    || phase === 'finished' || phase === 'declined';
+}
+
+/** The old `finalizationStarted` flag: the terminal is sent and cleanup owns the task. */
+export function taskFinalizing(runner: TaskRunner, taskId: string): boolean {
+  return hostFor(runner).current(taskId)?.phase === 'retiring';
+}
+
+export function taskMessageAccepted(runner: TaskRunner, taskId: string): boolean {
+  return hostFor(runner).current(taskId)?.message.accepted === true;
+}
+
+export function taskMessageSendAttempted(runner: TaskRunner, taskId: string): boolean {
+  return hostFor(runner).current(taskId)?.message.sendAttempted === true;
 }
 
 export function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {

@@ -9,15 +9,17 @@ import { spillOversizedEvent } from '../event-spill';
 import { ProgressEventTooLargeError } from '../progress-batcher';
 import type { ActiveTask } from './support';
 import { classifyToolCall, describeHighRiskToolCall } from '../../tool-authorization';
-import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage } from './support';
+import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage, taskFinalizing, taskTearingDown, taskMessageAccepted, taskMessageSendAttempted } from './support';
 import type { TaskRunner } from '../task-runner';
 import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
+import { hostFor } from './host';
+import type { TerminalPlan } from './finish';
 
 export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> {
   try {
     for await (let event of active.session.events) {
-      if (this['tasks'].get(active.taskId) !== active || active.finalizationStarted) return;
-      if (active.beingTornDown) {
+      if (this['tasks'].get(active.taskId) !== active || taskFinalizing(this, active.taskId)) return;
+      if (taskTearingDown(this, active.taskId)) {
         // Cancellation owns the result, but the native interrupt may still
         // deliver metering after a tool result/diagnostic. Consume only that
         // observation, never progress, artifacts, approvals or a new terminal.
@@ -63,14 +65,14 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
         taskId: active.taskId,
         signal: active.blobAbort.signal,
         log: (message) => {
-          if (!active.beingTornDown) console.error(`[byok/client] ${message}`);
+          if (!taskTearingDown(this, active.taskId)) console.error(`[byok/client] ${message}`);
         },
       });
       // The upload above is a real await: a concurrent cancel/reject may
       // have finished this task while it was in flight. Same guard, same
       // reason as the two above — see this loop's own top-of-body checks.
-      if (this['tasks'].get(active.taskId) !== active || active.finalizationStarted) return;
-      if (active.beingTornDown) continue; // skip the aborted spill, then drain queued interrupt usage
+      if (this['tasks'].get(active.taskId) !== active || taskFinalizing(this, active.taskId)) return;
+      if (taskTearingDown(this, active.taskId)) continue; // skip the aborted spill, then drain queued interrupt usage
       // After the spill (it reads `spill.unstoredReason`) and the teardown
       // guards, so the record ends exactly where the terminal decision is.
       active.executionRecord.observe(event);
@@ -159,13 +161,13 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
     // `ActiveTask.beingTornDown`'s own doc comment for why the identity
     // check alone doesn't cover that path's pre-finish() hard-kill
     // `close()` call.
-    if (this['tasks'].get(active.taskId) !== active || active.beingTornDown) return;
+    if (this['tasks'].get(active.taskId) !== active || taskTearingDown(this, active.taskId)) return;
     active.executionRecord.streamEnded();
     const failure = projectRuntimeBoundaryFailure(undefined, 'run');
     console.error('[byok/client] runtime adapter events iterable ended without terminal authority');
     await this['fail'](active.taskId, failure.reason, failure.retryable, failure.failure);
   } catch (err) {
-    if (this['tasks'].get(active.taskId) !== active || active.beingTornDown) return;
+    if (this['tasks'].get(active.taskId) !== active || taskTearingDown(this, active.taskId)) return;
     active.batcher.flush();
     if (err instanceof ProgressEventTooLargeError) {
       await this['failActiveTaskForResourceLimit'](
@@ -221,7 +223,7 @@ async function pumpTurnEnd(this: TaskRunner, active: ActiveTask, event: Extract<
     if (this['deps'].recordResultReplyFailure === undefined) throw new Error('required reply result failure has no durable intent writer');
     await this['deps'].recordResultReplyFailure(active.taskId, outcome.failure);
   };
-  if (active.messageRequirement !== undefined && !active.messageAccepted) {
+  if (active.messageRequirement !== undefined && !taskMessageAccepted(this, active.taskId)) {
     // Tool-authored and daemon-authored replies share one immutable
     // draft and one append → failure intent → activation boundary.
     // A recovery binding stays inert until the journal intent exists.
@@ -246,16 +248,20 @@ async function pumpTurnEnd(this: TaskRunner, active: ActiveTask, event: Extract<
             maxPendingEvents: 64, maxPendingBytes: 4 * 1024 * 1024 });
         } catch (error) {
           // An in-flight tool author may win the immutable draft.
-          if (!active.messageAccepted && outbox.get(active.taskId) === undefined) throw error;
+          if (!taskMessageAccepted(this, active.taskId) && outbox.get(active.taskId) === undefined) throw error;
         }
       }
       if (!this['canPublishAgentMessage'](active)) return;
       await recordFailure();
       if (!this['canPublishAgentMessage'](active)) return;
-      if (!active.messageAccepted) {
-        active.pendingMessageCompletion = { finalOutput, ...(failureReason === undefined ? {} : { failureReason }), ...(outcome.document === undefined ? {} : { document: outcome.document }) };
+      if (!taskMessageAccepted(this, active.taskId)) {
+        const host = hostFor(this);
+        host.setMessageCompletion(active.taskId, { finalOutput, ...(failureReason === undefined ? {} : { failureReason }), ...(outcome.document === undefined ? {} : { document: outcome.document }) });
+        // T1 records the open completion gate (and its token) in the reducer;
+        // M1/M2 resolve it when the disposition arrives.
+        void host.dispatch({ type: 'turn.ended', taskId: active.taskId, atMs: Date.now() }).catch(() => undefined);
         const activated = await this['activateAgentMessage'](outbox, active.taskId, active.session.sessionRef,
-          () => this['canPublishAgentMessage'](active), () => active.messageSendAttempted === true);
+          () => this['canPublishAgentMessage'](active), () => taskMessageSendAttempted(this, active.taskId));
         if (!this['canPublishAgentMessage'](active)) return;
         if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
         this['sendAgentMessageRecord'](outbox, activated);
@@ -264,7 +270,7 @@ async function pumpTurnEnd(this: TaskRunner, active: ActiveTask, event: Extract<
     } catch (err) {
       if (outcome.failure !== undefined) throw err; // preserve the runtime-boundary failure projection
       if (!this['canPublishAgentMessage'](active)) return;
-      active.pendingMessageCompletion = undefined;
+      hostFor(this).clearMessageCompletion(active.taskId);
       await this['fail'](active.taskId, refusalReason ?? `failed to deliver the required Agent message: ${errorMessage(err)}`, false);
       return;
     }
@@ -277,20 +283,32 @@ async function pumpTurnEnd(this: TaskRunner, active: ActiveTask, event: Extract<
   return;
 }
 
+/** The exact `task.complete` plan, shared by turn_end and the message gate. */
+export function successfulCompletionPlan(
+  this: TaskRunner, active: ActiveTask, finalOutput: string, document?: unknown,
+): TerminalPlan {
+  return {
+    kind: 'complete',
+    cause: 'complete',
+    retryable: false,
+    prepare: async () => {
+      await this['persistAgentTerminalEvidence'](active, 'complete');
+      const finalMessage = closingReply(active);
+      return createEnvelope('task.complete', {
+        summary: finalOutput,
+        ...(finalMessage === undefined ? {} : { finalMessage }),
+        sessionRef: active.session.sessionRef,
+        ...(document !== undefined ? { document } : {}),
+        ...this['terminalInferenceUsagePayload'](active),
+        ...this['preparedObservationPayload'](active),
+        ...this['agentTerminalPayload'](active),
+      }, { taskId: active.taskId, sessionRef: active.session.sessionRef });
+    },
+  };
+}
+
 export async function publishSuccessfulCompletion(this: TaskRunner, active: ActiveTask, finalOutput: string, document?: unknown): Promise<void> {
-  await this['settleSemanticTerminal'](active, async () => {
-    await this['persistAgentTerminalEvidence'](active, 'complete');
-    const finalMessage = closingReply(active);
-    return createEnvelope('task.complete', {
-      summary: finalOutput,
-      ...(finalMessage === undefined ? {} : { finalMessage }),
-      sessionRef: active.session.sessionRef,
-      ...(document !== undefined ? { document } : {}),
-      ...this['terminalInferenceUsagePayload'](active),
-      ...this['preparedObservationPayload'](active),
-      ...this['agentTerminalPayload'](active),
-    }, { taskId: active.taskId, sessionRef: active.session.sessionRef });
-  });
+  await this['settleSemanticTerminal'](active, successfulCompletionPlan.call(this, active, finalOutput, document));
 }
 
 export async function sendArtifact(this: TaskRunner, active: ActiveTask, name: string, contentType: string): Promise<void> {
@@ -313,7 +331,7 @@ export async function sendArtifact(this: TaskRunner, active: ActiveTask, name: s
     await opened.handle.close().catch(() => {});
   }
 
-  if (this['tasks'].get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
+  if (this['tasks'].get(active.taskId) !== active || active.blobAbort.signal.aborted || taskTearingDown(this, active.taskId)) return;
   const sealedTasks = this['deps'].sealedTasks;
   if (sealedTasks?.sealsOutput(active.taskId)) {
     // #654 decision 12b: a sealed task's artifact is sealed inline content.
@@ -325,7 +343,7 @@ export async function sendArtifact(this: TaskRunner, active: ActiveTask, name: s
     }
     try {
       const sealed = await sealedTasks.sealArtifact(active.taskId, { name, contentType, inline });
-      if (this['tasks'].get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
+      if (this['tasks'].get(active.taskId) !== active || active.blobAbort.signal.aborted || taskTearingDown(this, active.taskId)) return;
       if (sealed === undefined) this['reportArtifactError'](active, name, `artifact "${name}" was not sent: no sealing key`);
       else this['deps'].send(sealed);
     } catch (err) {
@@ -345,7 +363,7 @@ export async function sendArtifact(this: TaskRunner, active: ActiveTask, name: s
     const blobRef: BlobRef = await this['deps'].blobClient.uploadArtifact(bytes, contentType, {
       signal: active.blobAbort.signal,
     });
-    if (this['tasks'].get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
+    if (this['tasks'].get(active.taskId) !== active || active.blobAbort.signal.aborted || taskTearingDown(this, active.taskId)) return;
     this['deps'].send(createEnvelope('task.artifact', { name, contentType, blobRef }, { taskId: active.taskId }));
   } catch (err) {
     this['reportArtifactError'](active, name, `failed to upload artifact "${name}": ${errorMessage(err)}`);
@@ -353,7 +371,7 @@ export async function sendArtifact(this: TaskRunner, active: ActiveTask, name: s
 }
 
 export function reportArtifactError(this: TaskRunner, active: ActiveTask, name: string, reason: string): void {
-  if (active.blobAbort.signal.aborted || active.beingTornDown) return;
+  if (active.blobAbort.signal.aborted || taskTearingDown(this, active.taskId)) return;
   // The name and reason go to the task's own progress stream; stderr is a
   // service log and gets sizes only (issue #395).
   console.error(
