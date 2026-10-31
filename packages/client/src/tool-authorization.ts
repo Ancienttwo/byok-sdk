@@ -99,6 +99,10 @@ function validateGlob(pattern: string, path: boolean): void {
     throw new TypeError('tool authorization glob supports only literals, *, ** and ? with at most 16 stars');
   }
   if (!path) return;
+  // One separator, checked before absoluteness so the message is the same on
+  // every platform: a backslash pattern is split only on '/', so a "..\\"
+  // segment would slip past the traversal check and the rule would fail open.
+  if (pattern.includes('\\')) throw new TypeError('tool authorization pathGlob must use "/" separators');
   if (!isAbsolute(pattern)) throw new TypeError('tool authorization pathGlob must be absolute');
   // A resolved target never contains a traversal segment, an empty segment or
   // a trailing separator, so such a pattern could not match. Reject it at

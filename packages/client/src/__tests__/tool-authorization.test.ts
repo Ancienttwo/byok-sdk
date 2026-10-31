@@ -83,6 +83,15 @@ describe('tool authorization policy admission', () => {
     expect(() => parseToolAuthorizationPolicy({ default: 'auto', rules: { alwaysAsk: [{ id: 'non-canonical', match: { pathGlob } }] } })).toThrow(TypeError);
   });
 
+  // One separator: a backslash pattern is split only on '/', so a traversal
+  // segment written with backslashes would pass the check above and the rule
+  // would silently never fire. Reject the second spelling at admission.
+  it('F5: admission rejects a backslash pathGlob on every platform', () => {
+    const backslashGlob = ['C:', 'work', '..', 'secrets', '**'].join('\\');
+    expect(() => parseToolAuthorizationPolicy({ default: 'auto', rules: { alwaysAsk: [{ id: 'backslash', match: { pathGlob: backslashGlob } }] } }))
+      .toThrow(/separators/);
+  });
+
   it.each(['brace-expansion', 'repeated-stars'] as const)('F3: %s pathological patterns settle in milliseconds in an isolated process', mode => {
     const moduleUrl = pathToFileURL(resolve(import.meta.dirname, '../tool-authorization.ts')).href;
     const probe = `
