@@ -17,6 +17,20 @@ function fixture(t, manifest = { format: 'byok.vendor-source', version: 1, packa
   return { root, output: join(root, 'report'), scannerPath: 'test-scanner' };
 }
 
+const oarCommit = '044633e9be0dfbae6d171591ef03ea31593e9fb5';
+const oarRelease = {
+  ecosystem: 'npm',
+  name: '@botiverse/oar',
+  version: '0.80.1',
+  integrity: 'sha512-PDTmr6fvEKyRs+NFGDpmRrvlxqh840FUs6Lyw5pI+aiWqlzq2Sf+VPCOznIPROJjd1ZA6XNamgu3zecAt/U0XA==',
+  gitCommit: oarCommit,
+  provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.80.1',
+};
+const oarManifest = (overrides = {}) => ({
+  format: 'byok.vendor-source', version: 1, package: '@botiverse/oar', packageVersion: '0.80.1',
+  commit: oarCommit, repository: 'https://github.com/botiverse/oar', release: oarRelease, ...overrides,
+});
+
 test('known lodash advisory is retained without severity exemptions and fails the report', t => {
   const options = fixture(t);
   const calls = [];
@@ -55,6 +69,50 @@ test('commit-only OAR provenance remains a coverage gap after a zero-advisory qu
   assert.equal(report.coverageGaps.length, 1);
   const input = JSON.parse(readFileSync(join(options.output, 'vendor-osv-scanner.json')));
   assert.deepEqual(input.results[0].packages[0].package, { name: 'https://github.com/botiverse/oar', commit: 'a'.repeat(40) });
+});
+
+test('release evidence makes a commit-pinned vendor query the authoritative npm version', t => {
+  const options = fixture(t, oarManifest());
+  const report = audit({ ...options, execute: () => result() });
+  assert.equal(report.status, 'NO KNOWN ADVISORIES');
+  assert.equal(report.coverageGaps.length, 0);
+  assert.equal(report.coverage.length, 1);
+  assert.deepEqual(report.coverage[0], {
+    source: 'packages/client/vendor/example/source-manifest.json',
+    name: '@botiverse/oar', version: '0.80.1', ecosystem: 'npm', commit: oarCommit,
+    integrity: oarRelease.integrity, provenance: oarRelease.provenance,
+  });
+  assert.equal(report.inventory[0].commit, oarCommit);
+  assert.deepEqual(report.inventory[0].release, {
+    ecosystem: 'npm', name: '@botiverse/oar', version: '0.80.1', integrity: oarRelease.integrity,
+    commit: oarCommit, provenance: oarRelease.provenance,
+  });
+  const input = JSON.parse(readFileSync(join(options.output, 'vendor-osv-scanner.json')));
+  assert.deepEqual(input.results[0].packages[0].package, { name: '@botiverse/oar', version: '0.80.1', ecosystem: 'npm' });
+  assert.match(readFileSync(join(options.output, 'summary.md'), 'utf8'), /AUTHORITATIVE COVERAGE: .*@botiverse\/oar@0\.80\.1 from npm release \(provenance commit 044633e/);
+});
+
+test('release evidence that disagrees with the vendored identity fails closed', t => {
+  const mismatches = [
+    { gitCommit: 'b'.repeat(40) },
+    { version: '0.80.0' },
+    { name: '@botiverse/other' },
+    { integrity: 'sha256-abc' },
+    { provenance: 'https://example.com/attestation' },
+  ];
+  for (const mismatch of mismatches) {
+    const options = fixture(t, oarManifest({ release: { ...oarRelease, ...mismatch } }));
+    const report = audit({ ...options, execute: () => assert.fail('must not scan a contradictory release claim') });
+    assert.equal(report.status, 'SCAN ERROR');
+    assert.match(report.errors[0], /Release evidence disagrees/);
+  }
+});
+
+test('the authoritative release query still fails the report when OSV finds an advisory', t => {
+  const report = audit({ ...fixture(t, oarManifest()), execute: () => result([advisory]) });
+  assert.equal(report.status, 'ADVISORIES FOUND');
+  assert.equal(report.coverageGaps.length, 0);
+  assert.equal(report.findings.length, 2);
 });
 
 test('missing or ranged vendor versions are coverage gaps, never inferred from paths', t => {

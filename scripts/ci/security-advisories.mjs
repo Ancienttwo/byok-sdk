@@ -12,6 +12,31 @@ export const scanner = Object.freeze({
 });
 const json = (path, data) => writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
 const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const sha512Integrity = /^sha512-[A-Za-z0-9+/]{86}==$/;
+const npmAttestation = 'https://registry.npmjs.org/-/npm/v1/attestations/';
+
+// A commit-pinned fork can name the authoritative release it was cut from.
+// The declaration only counts when the published package, version, tarball
+// integrity and provenance commit all agree with the recorded vendor identity.
+// The commit stays in the inventory as provenance; the advisory query uses the
+// package version, which OSV can actually cover.
+function authoritativeRelease(manifest, item, source) {
+  if (manifest.release === undefined) return null;
+  const release = manifest.release;
+  if (!release || typeof release !== 'object' || Array.isArray(release)) throw new Error(`Malformed release evidence: ${source}`);
+  const expectedProvenance = `${npmAttestation}${item.name.replace('/', '%2f')}@${item.version}`;
+  const valid = release.ecosystem === 'npm'
+    && release.name === item.name
+    && release.version === item.version
+    && exactVersion.test(item.version ?? '')
+    && release.gitCommit === item.commit
+    && /^[a-f0-9]{40}$/.test(release.gitCommit ?? '')
+    && typeof release.integrity === 'string'
+    && sha512Integrity.test(release.integrity)
+    && release.provenance === expectedProvenance;
+  if (!valid) throw new Error(`Release evidence disagrees with vendor identity or commit: ${source}`);
+  return { ecosystem: release.ecosystem, name: release.name, version: release.version, integrity: release.integrity, commit: release.gitCommit, provenance: release.provenance };
+}
 
 export function vendorInventory(root) {
   const inventory = [];
@@ -34,10 +59,13 @@ export function vendorInventory(root) {
         for (const pkg of packages) {
           if (typeof pkg.name !== 'string' || !pkg.name.trim()) throw new Error(`Missing vendor package identity: ${source}`);
           const item = { source, name: pkg.name, version: pkg.version ?? null, commit: pkg.commit ?? null, repository: pkg.repository ?? null };
+          const release = authoritativeRelease(manifest, item, source);
+          if (release) item.release = release;
           inventory.push(item);
           if (item.commit !== null) {
-            // Commit provenance is not an assertion that the fork equals an npm release.
-            gaps.push({ ...item, reason: 'Commit-pinned source/fork: OSV commit data is incomplete; a zero-result query does not establish package-version coverage.' });
+            // Commit provenance alone is not an assertion that the fork equals an
+            // npm release; without release evidence the version stays uncovered.
+            if (!release) gaps.push({ ...item, reason: 'Commit-pinned source/fork: OSV commit data is incomplete; a zero-result query does not establish package-version coverage.' });
             if (!/^[a-f0-9]{40}$/.test(item.commit) || typeof item.repository !== 'string' || !item.repository.startsWith('https://github.com/')) {
               throw new Error(`Malformed commit provenance: ${source}`);
             }
@@ -53,10 +81,16 @@ export function vendorInventory(root) {
     if (entry.isDirectory() && existsSync(vendorRoot)) walk(vendorRoot);
   }
   if (!inventory.length) throw new Error('No canonical vendor manifests found');
-  const packages = inventory.flatMap(item => item.commit !== null
-    ? [{ package: { name: item.repository, commit: item.commit } }]
-    : exactVersion.test(item.version ?? '') ? [{ package: { name: item.name, version: item.version, ecosystem: 'npm' } }] : []);
-  return { inventory, gaps, input: { results: [{ packages }] } };
+  const packages = inventory.flatMap(item => {
+    if (item.release) return [{ package: { name: item.release.name, version: item.release.version, ecosystem: item.release.ecosystem } }];
+    if (item.commit !== null) return [{ package: { name: item.repository, commit: item.commit } }];
+    return exactVersion.test(item.version ?? '') ? [{ package: { name: item.name, version: item.version, ecosystem: 'npm' } }] : [];
+  });
+  const coverage = inventory.filter(item => item.release).map(item => ({
+    source: item.source, name: item.release.name, version: item.release.version, ecosystem: item.release.ecosystem,
+    commit: item.release.commit, integrity: item.release.integrity, provenance: item.release.provenance,
+  }));
+  return { inventory, gaps, coverage, input: { results: [{ packages }] } };
 }
 
 // v2.7.0 JSON schema and exit codes: google/osv-scanner docs/output.md.
@@ -86,12 +120,13 @@ export function parseResult(run) {
 
 export function audit({ root, output, scannerPath, execute = spawnSync }) {
   mkdirSync(output, { recursive: true });
-  const report = { scanner, status: 'SCAN ERROR', inventory: [], coverageGaps: [], scans: [], findings: [], errors: [] };
+  const report = { scanner, status: 'SCAN ERROR', inventory: [], coverage: [], coverageGaps: [], scans: [], findings: [], errors: [] };
   try {
     const vendors = vendorInventory(root);
     report.inputs = { lockfileSha256: createHash('sha256').update(readFileSync(join(root, 'bun.lock'))).digest('hex'),
       vendorInventorySha256: createHash('sha256').update(JSON.stringify(vendors.inventory)).digest('hex') };
     report.inventory = vendors.inventory;
+    report.coverage = vendors.coverage;
     report.coverageGaps = vendors.gaps;
     json(join(output, 'vendor-osv-scanner.json'), vendors.input);
     // Explicit empty config overrides every repository-local ignore or package override.
@@ -122,6 +157,7 @@ export function writeReport(output, report) {
   json(join(output, 'report.json'), report);
   const lines = [`# Security advisories: ${report.status}`, '', `Scanner: OSV ${scanner.version}. Known-advisory queries do not establish absence of vulnerabilities.`, '', `Advisories: ${report.findings.length}; coverage gaps: ${report.coverageGaps.length}; scan errors: ${report.errors.length}.`, ''];
   for (const finding of report.findings) lines.push(`- ${finding.advisory.id}: ${finding.package.name}@${finding.package.version ?? finding.package.commit} — https://osv.dev/vulnerability/${encodeURIComponent(finding.advisory.id)}`);
+  for (const coverage of report.coverage ?? []) lines.push(`- AUTHORITATIVE COVERAGE: ${coverage.source}: ${coverage.name}@${coverage.version} from ${coverage.ecosystem} release (provenance commit ${coverage.commit}).`);
   for (const gap of report.coverageGaps) lines.push(`- COVERAGE GAP: ${gap.source}: ${gap.name}@${gap.version ?? gap.commit ?? 'unknown'}: ${gap.reason}`);
   for (const error of report.errors) lines.push(`- SCAN ERROR: ${error}`);
   lines.push('', 'Full advisory records, exact vendor inventory, scanner output and stderr are retained in the report artifact.');

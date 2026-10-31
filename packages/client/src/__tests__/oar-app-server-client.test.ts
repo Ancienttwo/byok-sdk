@@ -188,6 +188,9 @@ describe('OAR session kernel record redaction', () => {
 it('accounts for every vendored file and the sixteen maintained source deltas', () => {
   const root = path.resolve(import.meta.dirname, '../../vendor/oar/044633e');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
+    packageVersion: string;
+    commit: string;
+    release: { ecosystem: string; name: string; version: string; integrity: string; gitCommit: string; provenance: string };
     files: Array<{ path: string; sourcePath: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
   };
   const files = readdirSync(root, { recursive: true, withFileTypes: true }).filter(entry => entry.isFile())
@@ -198,6 +201,12 @@ it('accounts for every vendored file and the sixteen maintained source deltas', 
     if (!row.delta) expect(row.vendoredSha256).toBe(row.upstreamSha256);
     if (row.path.endsWith('.ts')) expect(row.sourcePath).toBe(`packages/oar/src/${row.path}`);
   }
+  expect(manifest.release).toEqual({
+    ecosystem: 'npm', name: '@botiverse/oar', version: manifest.packageVersion,
+    integrity: 'sha512-PDTmr6fvEKyRs+NFGDpmRrvlxqh840FUs6Lyw5pI+aiWqlzq2Sf+VPCOznIPROJjd1ZA6XNamgu3zecAt/U0XA==',
+    gitCommit: manifest.commit,
+    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.80.1',
+  });
   expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['contracts/failure.ts', 'observe/events.ts', 'runtimes/codex/app-server-client.ts', 'runtimes/codex/failure.ts', 'runtimes/codex/open.ts', 'runtimes/codex/session.ts', 'runtimes/grok/session.ts', 'shared/acp/client-app.ts', 'shared/acp/errors.ts', 'shared/acp/failure.ts', 'shared/acp/process.ts', 'shared/acp/session.ts', 'shared/acp/terminal.ts', 'shared/acp/turns.ts', 'shared/executable/process-tree.ts', 'shared/failure-class.ts']);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');
 });
