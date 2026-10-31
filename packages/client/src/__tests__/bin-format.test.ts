@@ -51,6 +51,16 @@ describe('bin/format: formatDaemonEventLine', () => {
       .toBe('[T] tool-reminder taskId=t tool="bash" source=rule ruleIds=["ask-push"] reasons=custom-rule suppressedReasons=destructive-git summary="review"');
   });
 
+  it('renders file-scope deny and adoption audit without paths', () => {
+    expect(formatDaemonEventLine({ kind: 'file-scope', ts: 'T', taskId: 't1', decision: 'deny', lane: 'rpc',
+      homeAccess: 'writer', scope: { source: 'host', mode: 'workspaces', digest: 'd1' }, rootId: 'repo',
+      access: 'write', code: 'file_scope_unavailable', reason: 'symlink' }))
+      .toBe('[T] file-scope taskId=t1 decision=deny lane=rpc homeAccess=writer mode=workspaces digest=d1 rootId="repo" access=write code=file_scope_unavailable reason=symlink');
+    expect(formatDaemonEventLine({ kind: 'file-scope', ts: 'T', taskId: 't2', decision: 'policy-adoption', lane: 'rpc',
+      homeAccess: 'writer', scope: { source: 'host', mode: 'home', digest: 'd2' }, rootIds: ['home'] }))
+      .toBe('[T] file-scope taskId=t2 decision=policy-adoption lane=rpc homeAccess=writer mode=home digest=d2 rootIds=["home"]');
+  });
+
   it('renders local rule decisions and reminder provenance without additional input content', () => {
     expect(formatDaemonEventLine({ kind: 'tool-authorization', ts: 'T', taskId: 't1', toolName: 'bash', toolCallId: 'c1',
       decision: 'allow', authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [] }))

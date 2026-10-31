@@ -29,6 +29,7 @@ import {
   type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolAuthorizationPolicy,
 } from '../../tool-authorization';
 import { fileScopeAdmission } from './file-scope-admission';
+import { FileScopeGuardError, fileScopePolicyDigest, resolveFileScopeGrant, type FileScopeAudit } from '../../file-scope-guard';
 import { mcpEventIdentities } from '../../mcp/event-identity';
 import { DEFAULT_APPROVAL_TIMEOUT_MS } from './state';
 import { hostFor } from './host';
@@ -457,6 +458,52 @@ async function startAndActivateRuntime(
   const requestApproval = (summary: string, signal?: AbortSignal, kind: ApprovalKind = 'task-terminal') => launch.settled
     ? requestTaskApproval.call(this, taskId, summary, signal, kind)
     : launch.promise.then(() => requestTaskApproval.call(this, taskId, summary, signal, kind));
+  // #1061 slice 2 (D14): a configured scope is revalidated after claim and
+  // before any runtime starts. A root that is missing, is a symlink, changed
+  // dev+ino, or cannot be canonicalized fails the claimed task with a typed,
+  // non-retryable reason; it never degrades to an unscoped run. This slice
+  // does not install scoped file tools, so this is root validation, not file
+  // isolation: shell, MCP, extensions and Pi's native file tools stay outside
+  // it.
+  if (toolAuthorization.fileScope !== undefined && !blobAbort.signal.aborted) {
+    const audit = (event: FileScopeAudit): void => {
+      this['deps'].onFileScopeAudit?.(Object.freeze(event));
+    };
+    const lane: ToolAuthorizationLane = pick.descriptor.capabilities.durablePi === true
+      ? 'durable' : preparedLaunch === undefined ? 'rpc' : 'prepared';
+    const homeAccess: ToolAuthorizationHomeAccess = readerAttempt ? 'memory-reader' : 'writer';
+    try {
+      const grant = await resolveFileScopeGrant({
+        fileScope: toolAuthorization.fileScope,
+        home: { path: agentBinding.resolution.canonicalHome, identity: agentBinding.lease.homeIdentity },
+      });
+      audit({
+        taskId, decision: 'policy-adoption', lane, homeAccess,
+        scope: { source: 'host', mode: grant.mode, digest: grant.digest },
+        rootIds: ['home', ...grant.roots.map((root) => root.id)],
+      });
+    } catch (error) {
+      const guard = error instanceof FileScopeGuardError ? error : undefined;
+      audit({
+        taskId, decision: 'deny', lane, homeAccess,
+        scope: {
+          source: 'host',
+          mode: toolAuthorization.fileScope.mode,
+          digest: fileScopePolicyDigest(toolAuthorization.fileScope),
+        },
+        ...(guard?.rootId === undefined ? {} : { rootId: guard.rootId }),
+        ...(guard?.access === undefined ? {} : { access: guard.access }),
+        ...(guard === undefined ? {} : { code: guard.code, reason: guard.reason }),
+      });
+      const reason = guard === undefined
+        ? 'file_scope_unavailable: the local file scope could not be resolved'
+        : `${guard.code}: ${guard.message}`;
+      await this['failClaimedAgent'](taskId, reason, false, {
+        binding: agentBinding, runtimeId: pick.descriptor.id,
+      });
+      return;
+    }
+  }
   const startInput: RuntimeOperationStartInput = {
     scratch,
     ...(input.sessionLease === undefined ? {} : { sessionLease: input.sessionLease }),

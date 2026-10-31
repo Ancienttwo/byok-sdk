@@ -1,5 +1,5 @@
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
-import type { ToolAuthorizationDecision, ToolReminder } from '../tool-authorization';
+import type { ToolAuthorizationDecision, ToolFileAccess, ToolReminder } from '../tool-authorization';
 import {
   partitionAgentEvents,
   TASK_TRANSITIONS,
@@ -80,6 +80,31 @@ export type DaemonEvent =
   | ({ kind: 'tool-reminder'; ts: string } & ToolReminder)
   /** Local auto-gate decision; never a server protocol envelope. */
   | ({ kind: 'tool-authorization'; ts: string } & ToolAuthorizationDecision)
+  /**
+   * #1061 slice 2 local file-scope audit (D12): one record per denial and one
+   * per Attempt adopting a configured scope. Allow is never recorded. The
+   * shape carries closed codes and a digest only — no raw or canonical path,
+   * command, file content or rule body.
+   */
+  | {
+      kind: 'file-scope';
+      ts: string;
+      taskId: string;
+      decision: 'deny' | 'policy-adoption';
+      lane: 'rpc' | 'prepared' | 'durable';
+      homeAccess: 'writer' | 'memory-reader';
+      scope: { source: 'host'; mode: 'home' | 'workspaces'; digest: string };
+      /** Adoption only: every root id the grant covers, home first. */
+      rootIds?: readonly string[];
+      /** Denial only: the root that failed, when one was identified. */
+      rootId?: string;
+      /** Denial only: the requested access, when one was identified. */
+      access?: ToolFileAccess;
+      /** Denial only: the typed failure code. */
+      code?: 'file_scope_denied' | 'file_scope_unavailable' | 'file_scope_unsupported';
+      /** Denial only: the typed failure reason. */
+      reason?: string;
+    }
   | { kind: 'completed'; ts: string; taskId: string; summary: string; sessionRef: string }
   /**
    * Covers BOTH a post-claim `task.fail` and a pre-claim `task.decline` —
@@ -572,6 +597,11 @@ export class DaemonObserver {
 
   noteToolAuthorizationDecision(decision: ToolAuthorizationDecision): void {
     this.emit({ kind: 'tool-authorization', ts: nowIso(), ...decision });
+  }
+
+  /** #1061 slice 2 local file-scope audit (D12); allow is never recorded. */
+  noteFileScopeAudit(event: Omit<Extract<DaemonEvent, { kind: 'file-scope' }>, 'kind' | 'ts'>): void {
+    this.emit({ kind: 'file-scope', ts: nowIso(), ...event });
   }
 
   noteStaleApprovalDecision(taskId: string, decision: 'approve' | 'reject', reason?: string): void {

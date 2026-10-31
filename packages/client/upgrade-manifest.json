@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "40c602407abc428acbde0c6fa7d1a79d1eb723e818545f31ccdefffdb4ec70f4"
+    "snapshotSha256": "e4b3e281abd318f0bf5c22b79cfdba378fda7748ee93e91a77235998db08e0a5"
   },
   "configFields": {
     "status": "tracked",
@@ -126,6 +126,15 @@
         "export:@byok-sdk/client#ToolFileAccess",
         "export:@byok-sdk/client#ToolFileScope",
         "export:@byok-sdk/client#ToolFileScopeRoot"
+      ]
+    },
+    {
+      "id": "tool-file-scope-root-guard",
+      "impact": "additive",
+      "summary": "Validate every configured toolAuthorization.fileScope root after claim and before runtime start (#1061 slice 2): POSIX only, using Node built-ins lstat/realpath.native/stat dev+ino identity and O_NOFOLLOW. A missing root, root symlink, non-directory, changed identity or unsupported platform fails the claimed task non-retryably with a typed file_scope_unavailable/file_scope_unsupported reason instead of starting unscoped. Each denial and each scope adoption is recorded as a local file-scope DaemonEvent and daemon record (D12; allow is never recorded). Pi's native file tools, shell, MCP servers and extensions are still not scoped, so this is root validation, not file isolation; scoped file tools ship in a later slice.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1061",
+      "items": [
+        "union:daemon-event#file-scope"
       ]
     },
     {
@@ -3709,6 +3718,11 @@
       "before": "schema_version=6",
       "after": "schema_version=7",
       "entry": "retired-device-stream-closed"
+    },
+    {
+      "item": "union:daemon-event#file-scope",
+      "change": "added",
+      "entry": "tool-file-scope-root-guard"
     },
     {
       "item": "union:daemon-event#tool-authorization",

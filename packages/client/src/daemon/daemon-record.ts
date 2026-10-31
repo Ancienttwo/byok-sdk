@@ -1,5 +1,5 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { ToolAuthorizationReason, ToolRiskReason } from '../tool-authorization';
+import type { ToolAuthorizationReason, ToolFileAccess, ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { MAX_TRACKED_TASKS, type AssertionLane, type DaemonEvent } from './observer';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentStatus, type ServiceEnvironmentRecord, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
@@ -52,6 +52,24 @@ export type DaemonRecord =
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reasonBytes?: number }
   | { kind: 'tool-reminder'; ts: string; taskId: string; reasons: readonly ToolRiskReason[]; suppressedReasons?: readonly ToolRiskReason[]; authorization: ToolAuthorizationReason; summaryBytes: number }
   | Omit<Extract<DaemonEvent, { kind: 'tool-authorization' }>, 'toolName'>
+  /**
+   * #1061 D12: local deny/adoption audit. Already content-free — closed codes,
+   * root ids and a digest; no path, command or file content.
+   */
+  | {
+      kind: 'file-scope';
+      ts: string;
+      taskId: string;
+      decision: 'deny' | 'policy-adoption';
+      lane: 'rpc' | 'prepared' | 'durable';
+      homeAccess: 'writer' | 'memory-reader';
+      scope: { source: 'host'; mode: 'home' | 'workspaces'; digest: string };
+      rootIds?: readonly string[];
+      rootId?: string;
+      access?: ToolFileAccess;
+      code?: 'file_scope_denied' | 'file_scope_unavailable' | 'file_scope_unsupported';
+      reason?: string;
+    }
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reasonBytes: number }
   /** Already content-free: counts and closed codes (`execution-record.ts`). */
   | Extract<DaemonEvent, { kind: 'execution-record' }>
@@ -101,6 +119,7 @@ const KIND_SET: Record<DaemonRecordKind, true> = {
   'awaiting-approval': true,
   'tool-reminder': true,
   'tool-authorization': true,
+  'file-scope': true,
   completed: true,
   failed: true,
   cancelled: true,
@@ -332,6 +351,21 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
         authorization: { source: event.authorization.source, ruleIds: [...event.authorization.ruleIds] }, reasons: [...event.reasons],
         ...(event.suppressedReasons === undefined ? {} : { suppressedReasons: [...event.suppressedReasons] }),
         ...(event.code === undefined ? {} : { code: event.code }),
+      };
+    case 'file-scope':
+      return {
+        kind: 'file-scope',
+        ts,
+        taskId: event.taskId,
+        decision: event.decision,
+        lane: event.lane,
+        homeAccess: event.homeAccess,
+        scope: { source: event.scope.source, mode: event.scope.mode, digest: event.scope.digest },
+        ...(event.rootIds === undefined ? {} : { rootIds: [...event.rootIds] }),
+        ...(event.rootId === undefined ? {} : { rootId: event.rootId }),
+        ...(event.access === undefined ? {} : { access: event.access }),
+        ...(event.code === undefined ? {} : { code: event.code }),
+        ...(event.reason === undefined ? {} : { reason: event.reason }),
       };
     case 'runtime-disposal-failed':
       return {

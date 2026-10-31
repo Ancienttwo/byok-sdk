@@ -129,8 +129,13 @@ export interface DaemonConfig {
    * `agentHome`, and is never selected by the wire or the model. v1 admits it
    * only on the ordinary Pi RPC lane on darwin/linux; other adapters, the
    * prepared/durable lanes, memory-reader offers and Windows decline before
-   * claim with `file_scope_unsupported`. This is not an OS sandbox: shell,
-   * MCP servers and extensions remain outside it.
+   * claim with `file_scope_unsupported`. On the admitted path every configured
+   * root is revalidated after claim and before the runtime starts; a missing,
+   * symlinked, replaced or otherwise unresolvable root fails the claimed task
+   * with a typed `file_scope_unavailable` reason instead of starting
+   * unscoped. This is not an OS sandbox and slice 2 does not replace Pi's
+   * native file tools: shell, MCP servers and extensions remain outside it,
+   * and scoped file tools/tool-call enforcement ship in a later slice.
    */
   toolAuthorization?: ToolAuthorizationPolicy;
   /**

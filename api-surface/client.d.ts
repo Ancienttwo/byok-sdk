@@ -4823,8 +4823,13 @@ export interface DaemonConfig {
      * `agentHome`, and is never selected by the wire or the model. v1 admits it
      * only on the ordinary Pi RPC lane on darwin/linux; other adapters, the
      * prepared/durable lanes, memory-reader offers and Windows decline before
-     * claim with `file_scope_unsupported`. This is not an OS sandbox: shell,
-     * MCP servers and extensions remain outside it.
+     * claim with `file_scope_unsupported`. On the admitted path every configured
+     * root is revalidated after claim and before the runtime starts; a missing,
+     * symlinked, replaced or otherwise unresolvable root fails the claimed task
+     * with a typed `file_scope_unavailable` reason instead of starting
+     * unscoped. This is not an OS sandbox and slice 2 does not replace Pi's
+     * native file tools: shell, MCP servers and extensions remain outside it,
+     * and scoped file tools/tool-call enforcement ship in a later slice.
      */
     toolAuthorization?: ToolAuthorizationPolicy;
     /**
@@ -5772,7 +5777,7 @@ export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | 
  */
 export declare function daemonLifecycleHealth(lifecycle: DaemonLifecycle): 'up' | 'starting' | 'ended';
 // ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
-import type { ToolAuthorizationReason, ToolRiskReason } from '../tool-authorization';
+import type { ToolAuthorizationReason, ToolFileAccess, ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { type AssertionLane, type DaemonEvent } from './observer';
 import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../login-shell-environment';
@@ -5889,7 +5894,29 @@ export type DaemonRecord = Extract<DaemonEvent, {
     summaryBytes: number;
 } | Omit<Extract<DaemonEvent, {
     kind: 'tool-authorization';
-}>, 'toolName'> | {
+}>, 'toolName'>
+/**
+ * #1061 D12: local deny/adoption audit. Already content-free — closed codes,
+ * root ids and a digest; no path, command or file content.
+ */
+ | {
+    kind: 'file-scope';
+    ts: string;
+    taskId: string;
+    decision: 'deny' | 'policy-adoption';
+    lane: 'rpc' | 'prepared' | 'durable';
+    homeAccess: 'writer' | 'memory-reader';
+    scope: {
+        source: 'host';
+        mode: 'home' | 'workspaces';
+        digest: string;
+    };
+    rootIds?: readonly string[];
+    rootId?: string;
+    access?: ToolFileAccess;
+    code?: 'file_scope_denied' | 'file_scope_unavailable' | 'file_scope_unsupported';
+    reason?: string;
+} | {
     kind: 'runtime-disposal-failed';
     ts: string;
     taskId: string;
@@ -6933,7 +6960,7 @@ export declare function prependAgentReaderResultGuidance(instruction: string): s
 export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
-import type { ToolAuthorizationDecision, ToolReminder } from '../tool-authorization';
+import type { ToolAuthorizationDecision, ToolFileAccess, ToolReminder } from '../tool-authorization';
 import { type AgentEvent, type BlobRef, type Envelope, type OfferAdmissionTimings, type TaskState } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { ExecutionRecord } from './execution-record';
@@ -7050,7 +7077,36 @@ export type DaemonEvent = ({
  | ({
     kind: 'tool-authorization';
     ts: string;
-} & ToolAuthorizationDecision) | {
+} & ToolAuthorizationDecision)
+/**
+ * #1061 slice 2 local file-scope audit (D12): one record per denial and one
+ * per Attempt adopting a configured scope. Allow is never recorded. The
+ * shape carries closed codes and a digest only — no raw or canonical path,
+ * command, file content or rule body.
+ */
+ | {
+    kind: 'file-scope';
+    ts: string;
+    taskId: string;
+    decision: 'deny' | 'policy-adoption';
+    lane: 'rpc' | 'prepared' | 'durable';
+    homeAccess: 'writer' | 'memory-reader';
+    scope: {
+        source: 'host';
+        mode: 'home' | 'workspaces';
+        digest: string;
+    };
+    /** Adoption only: every root id the grant covers, home first. */
+    rootIds?: readonly string[];
+    /** Denial only: the root that failed, when one was identified. */
+    rootId?: string;
+    /** Denial only: the requested access, when one was identified. */
+    access?: ToolFileAccess;
+    /** Denial only: the typed failure code. */
+    code?: 'file_scope_denied' | 'file_scope_unavailable' | 'file_scope_unsupported';
+    /** Denial only: the typed failure reason. */
+    reason?: string;
+} | {
     kind: 'completed';
     ts: string;
     taskId: string;
@@ -7373,6 +7429,10 @@ export declare class DaemonObserver {
     /** M4 Phase 3 hardening: see the `stale-approval-decision` `DaemonEvent` variant's own doc comment. */
     noteToolReminder(reminder: ToolReminder): void;
     noteToolAuthorizationDecision(decision: ToolAuthorizationDecision): void;
+    /** #1061 slice 2 local file-scope audit (D12); allow is never recorded. */
+    noteFileScopeAudit(event: Omit<Extract<DaemonEvent, {
+        kind: 'file-scope';
+    }>, 'kind' | 'ts'>): void;
     noteStaleApprovalDecision(taskId: string, decision: 'approve' | 'reject', reason?: string): void;
     /** WP2I-S2: see the `agent-memory-intent-integrity` `DaemonEvent` variant's own doc comment. */
     noteAgentMemoryIntentIntegrity(event: {
@@ -12936,9 +12996,13 @@ export interface ToolAuthorizationPolicy {
      * Optional explicit file scope (#1061, D15). Absent means `inherit` and
      * preserves the existing behavior exactly. Only legal when the offer's
      * effective mode is `auto`; an `all` runtime with a scope is rejected
-     * before claim. A configured scope is either enforced (once scoped file
-     * tools ship) or the offer is declined as `file_scope_unsupported` before
-     * claim; it is never silently dropped.
+     * before claim. An unsupported lane/adapter/platform is declined as
+     * `file_scope_unsupported` before claim; on the admitted POSIX path every
+     * root is revalidated after claim and before runtime start, and an
+     * unresolvable root fails the claimed task as `file_scope_unavailable`.
+     * A configured scope is never silently dropped. Scoped file tools and
+     * tool-call enforcement ship in a later slice, so this is not yet file
+     * isolation.
      */
     readonly fileScope?: ToolFileScope;
 }
