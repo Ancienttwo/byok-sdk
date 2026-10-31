@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import type { ApprovalsListResult, ApprovalsRequestResult, ControlStatusResult } from '../daemon/control-protocol';
 import type { DaemonEvent } from '../daemon/observer';
 import {

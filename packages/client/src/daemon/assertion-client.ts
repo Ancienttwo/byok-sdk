@@ -4,7 +4,7 @@ import {
   type DeviceAssertionEnvelopeV1,
   type TaskAssertionEnvelopeV1,
 } from '@byok-sdk/core';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from './control-client';
 import {
   ControlError,
   type AssertionIssueErrorCode,
@@ -25,7 +25,7 @@ import { DeviceStore } from './store';
  * of that is reachable from outside this package it is a compatibility surface
  * forever. A host that needs one specific capability gets one specific
  * function; `packages/client/src/__tests__/assertion-client.test.ts` pins that
- * the index exports nothing else. See also `bin/control-client.ts`'s own doc
+ * the index exports nothing else. See also `daemon/control-client.ts`'s own doc
  * comment for why connecting never throws.
  */
 

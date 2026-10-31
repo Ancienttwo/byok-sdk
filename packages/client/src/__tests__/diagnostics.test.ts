@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DaemonConfig } from '../index';
-import type { ConnectControlResult, ControlClient } from '../bin/control-client';
+import type { ConnectControlResult, ControlClient } from '../daemon/control-client';
 import { appendAuditRecord } from '../bin/audit-log';
 import { formatHaltRemedy } from '../bin/format';
 import {

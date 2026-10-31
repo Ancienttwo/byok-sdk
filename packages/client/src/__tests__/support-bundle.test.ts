@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { freezeRuntimeAdapterDescriptor, type DaemonConfig, type RuntimeAdapter } from '../index';
-import type { ConnectControlResult } from '../bin/control-client';
+import type { ConnectControlResult } from '../daemon/control-client';
 import { runSupportBundleCommand } from '../bin/commands/support-bundle';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { appendAuditRecord, auditLogPath } from '../bin/audit-log';

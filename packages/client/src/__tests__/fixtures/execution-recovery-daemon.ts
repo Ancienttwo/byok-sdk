@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../../adapters/process-tree';
-import { connectControlClient } from '../../bin/control-client';
+import { connectControlClient } from '../../daemon/control-client';
 import { runSdkReservedHelperCommand } from '../../sdk-reserved-helper-host';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonOverrides } from '../../daemon/create-daemon';

@@ -1,6 +1,6 @@
 import { APPROVAL_REQUIRES_HOST } from '../../daemon/approvals';
 import { ControlError } from '../../daemon/control-protocol';
-import { connectControlClient } from '../control-client';
+import { connectControlClient } from '../../daemon/control-client';
 
 export interface ApproveRejectDeps {
   log?: (line: string) => void;

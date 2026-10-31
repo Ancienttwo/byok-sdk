@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline';
 import type { DaemonConfig } from '../../daemon/create-daemon';
 import { decodeTeamMemberContext } from '../../daemon/team-workspace';
 import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
-import { connectControlClient } from '../control-client';
+import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
 import { loadPrivateTeamDocument, parseCodexTeamBinding, preflightCodexRelay, queueCodexTeamNotification, type CodexTeamBinding } from '../team-codex-relay';
 import { TeamNotificationRelay, type TeamRelayBinding } from '../team-notification-relay';

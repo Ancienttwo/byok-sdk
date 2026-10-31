@@ -1,6 +1,6 @@
 import { type DaemonConfig, type DaemonEvent } from '../../index';
 import { readAuditRecords } from '../audit-log';
-import { connectControlClient } from '../control-client';
+import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
 import { formatDaemonEventLine, formatTaskListLines } from '../format';
 import { deriveTasksFromRecords } from '../tasks-view';

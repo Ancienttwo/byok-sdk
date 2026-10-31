@@ -15,13 +15,13 @@ import {
   parseServerReady,
   randomNonceHex,
   timingSafeEqualHex,
-} from '../daemon/control-protocol';
+} from './control-protocol';
 import {
   INPUT_PREPARATION_CANCEL_METHOD,
   INPUT_PREPARATION_LOOKUP_METHOD,
   INPUT_PREPARATION_PREPARE_METHOD,
   type InputPreparationResult,
-} from '../daemon/control-protocol';
+} from './control-protocol';
 import type {
   InputPreparationCancelParamsV1,
   InputPreparationLookupParamsV1,
@@ -31,7 +31,7 @@ import type {
 
 /**
  * M4 Phase 2: the CLI-side half of the control socket — connects, performs
- * the mutual HMAC handshake (`../daemon/control-protocol.ts`), and exposes a
+ * the mutual HMAC handshake (./control-protocol.ts), and exposes a
  * small `request()`/`subscribe()` surface every rewired command
  * (`status`/`tasks --follow`/`unpair`/`approve`/`reject`) builds on.
  *

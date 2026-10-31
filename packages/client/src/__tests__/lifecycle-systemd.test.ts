@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createSystemdLifecycle, generateSystemdUnit } from '../lifecycle/systemd';
-import type { RunResult, Runner } from '../lifecycle/exec-runner';
+import type { RunResult, Runner } from '../util/exec-runner';
 import { nodeAgentProgram, sanitizeServiceName, type ServiceDefinition } from '../lifecycle/service-types';
 import { SERVICE_UNIT_MARKER } from '../lifecycle/service-unit';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';

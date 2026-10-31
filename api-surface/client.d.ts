@@ -1641,8 +1641,8 @@ export { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 export type { AgentRef } from '../agent-home';
 // ==== @byok-sdk/client dist/agent-memory/prepared-capability.d.ts ====
 import { type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import { PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation } from '../bin/agent-memory-mcp-server';
-export { PREPARED_AGENT_MEMORY_OPERATION_META_KEY } from '../bin/agent-memory-mcp-server';
+import { PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation } from './tool-manifest';
+export { PREPARED_AGENT_MEMORY_OPERATION_META_KEY } from './tool-manifest';
 export interface PreparedAgentMemoryObservationTool {
     readonly name: string;
     readonly description: string;
@@ -1675,6 +1675,22 @@ export declare function preparedAgentMemoryDescriptorDigest(observation: Prepare
 export declare function preparedAgentMemoryExecutorFingerprints(observation: PreparedAgentMemoryObservation, mode: PreparedAgentMemoryMode, runtimeIdentity: string): readonly string[];
 /** The sole canonical serialization used by descriptor validation and both memory digests. */
 export declare function canonicalPreparedAgentMemoryJson(value: unknown): string;
+// ==== @byok-sdk/client dist/agent-memory/tool-manifest.d.ts ====
+import type { McpServerToolDefinition } from '../mcp-server';
+export declare const AGENT_MEMORY_RECALL_TOOL_NAME = "memory_recall";
+export declare const AGENT_MEMORY_SAVE_TOOL_NAME = "memory_save";
+export declare const PREPARED_AGENT_MEMORY_OPERATION_META_KEY = "byok.agent-memory.operation";
+export type AgentMemoryOperation = 'read' | 'write';
+export interface AgentMemoryToolDefinition extends McpServerToolDefinition {
+    readonly operation: AgentMemoryOperation;
+    readonly _meta: Readonly<Record<typeof PREPARED_AGENT_MEMORY_OPERATION_META_KEY, AgentMemoryOperation>>;
+}
+/** The exact tools this server advertises. This table is the sole schema and operation-classification authority. */
+export declare const AGENT_MEMORY_TOOLS: readonly AgentMemoryToolDefinition[];
+export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
+    name: "byok-agent-memory-mcp";
+    version: "0.0.1";
+}>;
 // ==== @byok-sdk/client dist/assertion-client/index.d.ts ====
 /**
  * `@byok-sdk/client/assertion-client` — the assertion request surface for a
@@ -1699,7 +1715,7 @@ export declare function canonicalPreparedAgentMemoryJson(value: unknown): string
  * So this entry re-exports exactly the two request functions and their public
  * option/result types from `../daemon/assertion-client`, whose own transitive
  * imports are only `@byok-sdk/core`, `@byok-sdk/protocol`,
- * `../bin/control-client`, `../daemon/control-protocol` and `../daemon/store`
+ * `../daemon/control-client`, `../daemon/control-protocol` and `../daemon/store`
  * (plus `zod` through core's protocol types). Nothing else may be added here.
  *
  * Two things are deliberately absent, and this file is the record of why.
@@ -1738,15 +1754,8 @@ export type { RequestDeviceAssertionErrorCode } from '../daemon/assertion-client
 /** Typed result: a parsed `DeviceAssertionEnvelopeV1` with its expiry, or a refusal code and reason. Never throws for an expected outcome. */
 export type { RequestDeviceAssertionResult } from '../daemon/assertion-client';
 // ==== @byok-sdk/client dist/bin/agent-memory-mcp-server.d.ts ====
-import { type McpServerToolCall, type McpServerToolDefinition } from '../mcp-server';
-export declare const AGENT_MEMORY_RECALL_TOOL_NAME = "memory_recall";
-export declare const AGENT_MEMORY_SAVE_TOOL_NAME = "memory_save";
-export declare const PREPARED_AGENT_MEMORY_OPERATION_META_KEY = "byok.agent-memory.operation";
-export type AgentMemoryOperation = 'read' | 'write';
-export interface AgentMemoryToolDefinition extends McpServerToolDefinition {
-    readonly operation: AgentMemoryOperation;
-    readonly _meta: Readonly<Record<typeof PREPARED_AGENT_MEMORY_OPERATION_META_KEY, AgentMemoryOperation>>;
-}
+import { type McpServerToolCall } from '../mcp-server';
+export { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_RECALL_TOOL_NAME, AGENT_MEMORY_SAVE_TOOL_NAME, AGENT_MEMORY_TOOLS, PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation, type AgentMemoryToolDefinition, } from '../agent-memory/tool-manifest';
 export interface AgentMemoryMcpDeps {
     recall(input: {
         path: string;
@@ -1770,12 +1779,6 @@ export interface AgentMemoryMcpDeps {
         deleted: boolean;
     }>;
 }
-/** The exact tools this server advertises. This table is the sole schema and operation-classification authority. */
-export declare const AGENT_MEMORY_TOOLS: readonly AgentMemoryToolDefinition[];
-export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
-    name: "byok-agent-memory-mcp";
-    version: "0.0.1";
-}>;
 /**
  * One `tools/call`, returning the JSON-RPC `result` payload. The path policy,
  * the compare-and-swap contract and the exact accepted argument set stay here;
@@ -2981,7 +2984,7 @@ import { type AssertionIssueErrorCode, type TaskAssertionIssueErrorCode } from '
  * of that is reachable from outside this package it is a compatibility surface
  * forever. A host that needs one specific capability gets one specific
  * function; `packages/client/src/__tests__/assertion-client.test.ts` pins that
- * the index exports nothing else. See also `bin/control-client.ts`'s own doc
+ * the index exports nothing else. See also `daemon/control-client.ts`'s own doc
  * comment for why connecting never throws.
  */
 export interface RequestDeviceAssertionOptions {
@@ -4028,7 +4031,7 @@ import type { AgentHomeExecutionStatus } from '../agent-home';
 import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation';
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
- * (`control-server.ts`) and the CLI's control client (`bin/control-client.ts`)
+ * (`control-server.ts`) and the CLI's control client (`daemon/control-client.ts`)
  * — frame shapes, endpoint path/pipe-name derivation, and the HMAC handshake
  * math. Both sides import from here so the two can never independently drift
  * (e.g. a mismatched HMAC label string, or a socket path computed two
@@ -4037,7 +4040,7 @@ import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, In
  * Transport: NDJSON (one JSON object per line) over a Unix domain socket
  * (darwin/linux) or a Windows named pipe — both addressed by the same
  * path-like string via Node's `net` module, so neither `control-server.ts`
- * nor `bin/control-client.ts` needs to special-case the transport itself,
+ * nor `daemon/control-client.ts` needs to special-case the transport itself,
  * only the path/pipe-name derivation below.
  */
 export declare const CONTROL_PROTOCOL_VERSION = 1;
@@ -4171,7 +4174,7 @@ export interface ControlEventFrame {
     event: unknown;
 }
 export declare function encodeFrame(frame: unknown): string;
-/** Thrown by a method handler to control the wire error `{code, message}` a caller sees — anything else thrown surfaces as a generic `internal_error`. See `control-server.ts`'s dispatch and `bin/control-client.ts`'s `request()` (which re-throws this same class on the client side). */
+/** Thrown by a method handler to control the wire error `{code, message}` a caller sees — anything else thrown surfaces as a generic `internal_error`. See `control-server.ts`'s dispatch and `daemon/control-client.ts`'s `request()` (which re-throws this same class on the client side). */
 export declare class ControlError extends Error {
     readonly code: string;
     constructor(code: string, message: string);
@@ -4183,7 +4186,7 @@ export declare class ControlError extends Error {
  * hostile peer streaming an unterminated line forever to grow `pending`
  * without bound. Exceeding it is a fail-closed condition: {@link
  * NdjsonLineReader.push} throws, and every caller (`control-server.ts`,
- * `bin/control-client.ts`) destroys the connection on that throw.
+ * `daemon/control-client.ts`) destroys the connection on that throw.
  */
 export declare const MAX_LINE_BYTES: number;
 /**
@@ -12223,148 +12226,6 @@ export interface CreateServiceLifecycleOptions {
 export declare function createServiceLifecycle(def: ServiceDefinition, opts?: CreateServiceLifecycleOptions): ServiceLifecycle;
 /** @internal `createServiceLifecycle` with the owner gate a service installation runs its steps behind. */
 export declare function createManagedServiceLifecycle(def: ServiceDefinition, opts?: CreateServiceLifecycleOptions): ManagedServiceLifecycle;
-// ==== @byok-sdk/client dist/lifecycle/exec-runner.d.ts ====
-/**
- * Result of running an external command, regardless of its exit code.
- * `code !== 0` is an ordinary, expected outcome for several callers in this
- * module (e.g. `launchctl bootout` on a service that isn't currently
- * loaded, `systemctl --user is-active` on an inactive unit) — it is NOT
- * treated as a thrown error. See {@link Runner}'s own doc comment for what
- * DOES reject.
- */
-export interface RunResult {
-    code: number;
-    stdout: string;
-    stderr: string;
-}
-/**
- * Runs an external service-manager CLI (`launchctl`, `systemctl`, a
- * WinSW-produced `.exe`, `sc.exe`) and resolves with its exit code +
- * captured stdout/stderr — it deliberately does NOT reject just because the
- * command exited non-zero (see {@link RunResult}'s doc comment: that is
- * everyday signal for several callers here, not failure). It DOES reject
- * for a genuine spawn failure (the executable itself couldn't be found/run
- * at all, e.g. `ENOENT`) — see {@link defaultRunner}'s implementation for
- * how the two are told apart. Callers that need "ran and returned 0 or
- * throw" wrap this with {@link runOrThrow}.
- *
- * The DI seam every one of `launchd.ts`/`systemd.ts`/`winsw.ts` accepts
- * (`LaunchdDeps.run`/`SystemdDeps.run`/`WinswDeps.run`) — this is what lets
- * the install/uninstall/start/stop/status logic for all three platforms be
- * unit-tested from any single host OS with a plain mock, per M3-4's own
- * verification requirement, without ever shelling out for real in tests.
- */
-export type Runner = (command: string, args: string[]) => Promise<RunResult>;
-/**
- * Real implementation: `child_process.execFile`, never a shell
- * (`exec`/`shell: true`) — the same reasoning as the pi adapter's own
- * `detect()` (see `templates/packaging/sea/README.md`'s "Windows note" and
- * `adapters/pi/pi-adapter.ts`): no shell-quoting hazard for a service name,
- * config path, or WinSW install directory containing spaces or special
- * characters. Every command this module ever invokes (`launchctl`,
- * `systemctl`, a WinSW-produced `.exe`, `sc.exe`) is a genuine native
- * executable, never a `.cmd`/`.bat` shell script, so the one real caveat of
- * `execFile`-without-`shell` on Windows (a `.cmd`/`.bat` target can't be
- * `CreateProcess`'d directly) never applies here.
- *
- * Node's `execFile` callback distinguishes two failure shapes on its error
- * argument: when the target process ran and merely exited non-zero, `error.code`
- * is that NUMERIC exit code; when the executable itself couldn't be spawned
- * (e.g. `ENOENT`), `error.code` is an ERRNO STRING and there is no real exit
- * code at all. This implementation resolves the first case as an ordinary
- * {@link RunResult} (letting callers decide whether a given non-zero exit
- * matters) and rejects only the second (a real inability to run the
- * command at all, which every caller should hear about).
- */
-export declare const defaultRunner: Runner;
-/**
- * Runs `command`/`args` via `run` and throws a clear, labeled error if it
- * exits non-zero — for the subset of calls across launchd/systemd/WinSW
- * that must actually succeed for `install()`/`start()` to honestly report
- * "the service is now running" (e.g. `launchctl bootstrap`, `systemctl
- * start`, `winsw install`). Callers that instead want best-effort/tolerant
- * semantics (e.g. "stop if running, no-op if already stopped") call `run`
- * directly and ignore the result — see `launchd.ts`/`systemd.ts`/
- * `winsw.ts`'s own `uninstall()`/`stop()` implementations.
- */
-export declare function runOrThrow(run: Runner, command: string, args: string[], label: string): Promise<RunResult>;
-/**
- * Describes what a "genuinely nothing to do" outcome looks like for a
- * best-effort stop/uninstall step whose target may legitimately already be
- * absent (not currently loaded/enabled/installed) — as opposed to a genuine
- * failure (permission denied, service busy, a manager fault, the manager
- * itself unreachable) that must NOT be treated the same way. See
- * {@link isIdempotentAbsence}.
- */
-export interface IdempotentAbsence {
-    /** Exit codes that ALONE mean "already absent", independent of any stdout/stderr text (e.g. Windows's `ERROR_SERVICE_DOES_NOT_EXIST`, 1060). */
-    codes?: readonly number[];
-    /** Case-insensitive patterns checked against `stdout + "\n" + stderr`; a match means "already absent/not loaded/does not exist" for this platform's tool. */
-    patterns: readonly RegExp[];
-    /**
-     * Case-insensitive patterns checked against the SAME `stdout + "\n" +
-     * stderr` text, and consulted BEFORE `codes`/`patterns`: a match here
-     * means "this is a genuine failure", full stop, even if `codes`/`patterns`
-     * would otherwise call the result idempotent absence. Exists because a
-     * connectivity/permission/manager-unreachable error can be textually
-     * indistinguishable from — or reuse the very same generic OS errno string
-     * as — a genuine "not loaded"/"does not exist" message. Concretely: on a
-     * headless host with no reachable `systemd --user` D-Bus session (common
-     * for exactly the SSH/no-lingering boxes this daemon runs on),
-     * `systemctl --user disable --now` fails with `Failed to connect to bus:
-     * No such file or directory` — the SAME "No such file or directory" text
-     * a genuinely-absent unit can also produce, but here it means "we could
-     * not even ask the manager", not "the manager confirms it's gone".
-     * Conflating the two previously let this REAL failure look identical to
-     * idempotent absence and then delete the still-relevant plist/unit/exe
-     * (cross-model-review P1 #7, round 2 — the same re-orphan shape the
-     * original `codes`/`patterns` split was meant to fix in round 1). Each
-     * platform module supplies its own `neverAbsence` for the same reason it
-     * supplies its own `patterns`/`codes`: the actual wording is tool-specific
-     * — see `launchd.ts`/`systemd.ts`/`winsw.ts`'s own constants.
-     */
-    neverAbsence?: readonly RegExp[];
-}
-/**
- * Distinguishes a KNOWN idempotent "already absent / not loaded / does not
- * exist" outcome (safe to still proceed with cleanup) from a genuine
- * failure. A non-zero exit is ambiguous on its own: `launchctl bootout`,
- * `systemctl disable --now`, and a WinSW `stop`+`uninstall` all use the SAME
- * non-zero exit for both "there was nothing to stop/unregister" (fine, an
- * everyday outcome — see this module's own {@link RunResult} doc comment)
- * and "I refused/failed to do it" (not fine) — conflating the two
- * previously let a real failure look identical to success and then delete
- * the plist/unit/exe out from under a still-running service
- * (cross-model-review P1 #7: an orphaned, uncontrollable process). Each
- * platform module supplies its own `patterns`/`codes` because the actual
- * wording/codes are tool-specific — see `launchd.ts`/`systemd.ts`/
- * `winsw.ts`'s own constants.
- *
- * `absence.neverAbsence` is checked FIRST (right after the unambiguous
- * `code === 0` success case) and, on a match, wins outright over any
- * `codes`/`patterns` match — see {@link IdempotentAbsence.neverAbsence}'s
- * own doc comment for why a connectivity/permission/manager-unreachable
- * signal must never be reclassified as absence no matter what else matches
- * (cross-model-review P1 #7, round 2).
- */
-export declare function isIdempotentAbsence(result: RunResult, absence: IdempotentAbsence): boolean;
-/**
- * Runs `command`/`args` via `run` for a best-effort stop/uninstall step and
- * throws a clear, labeled error UNLESS the result is either a genuine
- * success or a known idempotent "already absent" outcome (see
- * {@link isIdempotentAbsence}). Unlike {@link runOrThrow} (which throws on
- * ANY non-zero exit, for calls that must actually succeed), this is the
- * tolerant-but-not-blind form each platform's `uninstall()` needs: proceed
- * to delete the plist/unit/exe+xml ONLY when this resolves without
- * throwing; a thrown error here means "do NOT delete the control files —
- * surface this to the caller so they can retry" (see each platform's own
- * `uninstall()`). Each platform's standalone `stop()` uses the same
- * function for the same reason: tolerate "already stopped/not loaded", but
- * surface — rather than silently swallow — a genuine failure (permission
- * denied, manager unreachable) instead of misreporting it as "stopped"
- * (cross-model-review P1 #7, round 2, second half).
- */
-export declare function runIdempotent(run: Runner, command: string, args: string[], label: string, absence: IdempotentAbsence): Promise<RunResult>;
 // ==== @byok-sdk/client dist/lifecycle/exit-codes.d.ts ====
 /**
  * The process exit-code contract of `byok-agent` and its helper
@@ -12414,7 +12275,7 @@ export interface DaemonExitOutcome {
  */
 export declare function daemonExitCode(outcome: DaemonExitOutcome, service: boolean): ExitCode;
 // ==== @byok-sdk/client dist/lifecycle/launchd.d.ts ====
-import { type Runner } from './exec-runner';
+import { type Runner } from '../util/exec-runner';
 import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
 import { type ServiceDefinition } from './service-types';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment for why a mocked `run` is enough to unit-test all of this file's install/uninstall/start/stop/status logic on any host OS. */
@@ -13151,7 +13012,7 @@ export declare function releaseServiceLifecycleOwner(input: Omit<ServiceLifecycl
 export declare function releaseHeldServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs: ServiceOwnerFs): Promise<void>;
 export {};
 // ==== @byok-sdk/client dist/lifecycle/systemd.d.ts ====
-import { type Runner } from './exec-runner';
+import { type Runner } from '../util/exec-runner';
 import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
 import { type ServiceDefinition } from './service-types';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
@@ -13198,7 +13059,7 @@ export declare function generateSystemdUnit(def: {
 export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: SystemdDeps): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/winsw.d.ts ====
 import { promises as fsp } from 'node:fs';
-import { type Runner } from './exec-runner';
+import { type Runner } from '../util/exec-runner';
 import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
 import { type ServiceDefinition, type ServiceProgram } from './service-types';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
@@ -15315,8 +15176,150 @@ export declare class SteerUnsupportedError extends Error {
     readonly runtimeId: string;
     constructor(runtimeId: string, message: string);
 }
+// ==== @byok-sdk/client dist/util/exec-runner.d.ts ====
+/**
+ * Result of running an external command, regardless of its exit code.
+ * `code !== 0` is an ordinary, expected outcome for several callers in this
+ * module (e.g. `launchctl bootout` on a service that isn't currently
+ * loaded, `systemctl --user is-active` on an inactive unit) — it is NOT
+ * treated as a thrown error. See {@link Runner}'s own doc comment for what
+ * DOES reject.
+ */
+export interface RunResult {
+    code: number;
+    stdout: string;
+    stderr: string;
+}
+/**
+ * Runs an external service-manager CLI (`launchctl`, `systemctl`, a
+ * WinSW-produced `.exe`, `sc.exe`) and resolves with its exit code +
+ * captured stdout/stderr — it deliberately does NOT reject just because the
+ * command exited non-zero (see {@link RunResult}'s doc comment: that is
+ * everyday signal for several callers here, not failure). It DOES reject
+ * for a genuine spawn failure (the executable itself couldn't be found/run
+ * at all, e.g. `ENOENT`) — see {@link defaultRunner}'s implementation for
+ * how the two are told apart. Callers that need "ran and returned 0 or
+ * throw" wrap this with {@link runOrThrow}.
+ *
+ * The DI seam every one of `launchd.ts`/`systemd.ts`/`winsw.ts` accepts
+ * (`LaunchdDeps.run`/`SystemdDeps.run`/`WinswDeps.run`) — this is what lets
+ * the install/uninstall/start/stop/status logic for all three platforms be
+ * unit-tested from any single host OS with a plain mock, per M3-4's own
+ * verification requirement, without ever shelling out for real in tests.
+ */
+export type Runner = (command: string, args: string[]) => Promise<RunResult>;
+/**
+ * Real implementation: `child_process.execFile`, never a shell
+ * (`exec`/`shell: true`) — the same reasoning as the pi adapter's own
+ * `detect()` (see `templates/packaging/sea/README.md`'s "Windows note" and
+ * `adapters/pi/pi-adapter.ts`): no shell-quoting hazard for a service name,
+ * config path, or WinSW install directory containing spaces or special
+ * characters. Every command this module ever invokes (`launchctl`,
+ * `systemctl`, a WinSW-produced `.exe`, `sc.exe`) is a genuine native
+ * executable, never a `.cmd`/`.bat` shell script, so the one real caveat of
+ * `execFile`-without-`shell` on Windows (a `.cmd`/`.bat` target can't be
+ * `CreateProcess`'d directly) never applies here.
+ *
+ * Node's `execFile` callback distinguishes two failure shapes on its error
+ * argument: when the target process ran and merely exited non-zero, `error.code`
+ * is that NUMERIC exit code; when the executable itself couldn't be spawned
+ * (e.g. `ENOENT`), `error.code` is an ERRNO STRING and there is no real exit
+ * code at all. This implementation resolves the first case as an ordinary
+ * {@link RunResult} (letting callers decide whether a given non-zero exit
+ * matters) and rejects only the second (a real inability to run the
+ * command at all, which every caller should hear about).
+ */
+export declare const defaultRunner: Runner;
+/**
+ * Runs `command`/`args` via `run` and throws a clear, labeled error if it
+ * exits non-zero — for the subset of calls across launchd/systemd/WinSW
+ * that must actually succeed for `install()`/`start()` to honestly report
+ * "the service is now running" (e.g. `launchctl bootstrap`, `systemctl
+ * start`, `winsw install`). Callers that instead want best-effort/tolerant
+ * semantics (e.g. "stop if running, no-op if already stopped") call `run`
+ * directly and ignore the result — see `launchd.ts`/`systemd.ts`/
+ * `winsw.ts`'s own `uninstall()`/`stop()` implementations.
+ */
+export declare function runOrThrow(run: Runner, command: string, args: string[], label: string): Promise<RunResult>;
+/**
+ * Describes what a "genuinely nothing to do" outcome looks like for a
+ * best-effort stop/uninstall step whose target may legitimately already be
+ * absent (not currently loaded/enabled/installed) — as opposed to a genuine
+ * failure (permission denied, service busy, a manager fault, the manager
+ * itself unreachable) that must NOT be treated the same way. See
+ * {@link isIdempotentAbsence}.
+ */
+export interface IdempotentAbsence {
+    /** Exit codes that ALONE mean "already absent", independent of any stdout/stderr text (e.g. Windows's `ERROR_SERVICE_DOES_NOT_EXIST`, 1060). */
+    codes?: readonly number[];
+    /** Case-insensitive patterns checked against `stdout + "\n" + stderr`; a match means "already absent/not loaded/does not exist" for this platform's tool. */
+    patterns: readonly RegExp[];
+    /**
+     * Case-insensitive patterns checked against the SAME `stdout + "\n" +
+     * stderr` text, and consulted BEFORE `codes`/`patterns`: a match here
+     * means "this is a genuine failure", full stop, even if `codes`/`patterns`
+     * would otherwise call the result idempotent absence. Exists because a
+     * connectivity/permission/manager-unreachable error can be textually
+     * indistinguishable from — or reuse the very same generic OS errno string
+     * as — a genuine "not loaded"/"does not exist" message. Concretely: on a
+     * headless host with no reachable `systemd --user` D-Bus session (common
+     * for exactly the SSH/no-lingering boxes this daemon runs on),
+     * `systemctl --user disable --now` fails with `Failed to connect to bus:
+     * No such file or directory` — the SAME "No such file or directory" text
+     * a genuinely-absent unit can also produce, but here it means "we could
+     * not even ask the manager", not "the manager confirms it's gone".
+     * Conflating the two previously let this REAL failure look identical to
+     * idempotent absence and then delete the still-relevant plist/unit/exe
+     * (cross-model-review P1 #7, round 2 — the same re-orphan shape the
+     * original `codes`/`patterns` split was meant to fix in round 1). Each
+     * platform module supplies its own `neverAbsence` for the same reason it
+     * supplies its own `patterns`/`codes`: the actual wording is tool-specific
+     * — see `launchd.ts`/`systemd.ts`/`winsw.ts`'s own constants.
+     */
+    neverAbsence?: readonly RegExp[];
+}
+/**
+ * Distinguishes a KNOWN idempotent "already absent / not loaded / does not
+ * exist" outcome (safe to still proceed with cleanup) from a genuine
+ * failure. A non-zero exit is ambiguous on its own: `launchctl bootout`,
+ * `systemctl disable --now`, and a WinSW `stop`+`uninstall` all use the SAME
+ * non-zero exit for both "there was nothing to stop/unregister" (fine, an
+ * everyday outcome — see this module's own {@link RunResult} doc comment)
+ * and "I refused/failed to do it" (not fine) — conflating the two
+ * previously let a real failure look identical to success and then delete
+ * the plist/unit/exe out from under a still-running service
+ * (cross-model-review P1 #7: an orphaned, uncontrollable process). Each
+ * platform module supplies its own `patterns`/`codes` because the actual
+ * wording/codes are tool-specific — see `launchd.ts`/`systemd.ts`/
+ * `winsw.ts`'s own constants.
+ *
+ * `absence.neverAbsence` is checked FIRST (right after the unambiguous
+ * `code === 0` success case) and, on a match, wins outright over any
+ * `codes`/`patterns` match — see {@link IdempotentAbsence.neverAbsence}'s
+ * own doc comment for why a connectivity/permission/manager-unreachable
+ * signal must never be reclassified as absence no matter what else matches
+ * (cross-model-review P1 #7, round 2).
+ */
+export declare function isIdempotentAbsence(result: RunResult, absence: IdempotentAbsence): boolean;
+/**
+ * Runs `command`/`args` via `run` for a best-effort stop/uninstall step and
+ * throws a clear, labeled error UNLESS the result is either a genuine
+ * success or a known idempotent "already absent" outcome (see
+ * {@link isIdempotentAbsence}). Unlike {@link runOrThrow} (which throws on
+ * ANY non-zero exit, for calls that must actually succeed), this is the
+ * tolerant-but-not-blind form each platform's `uninstall()` needs: proceed
+ * to delete the plist/unit/exe+xml ONLY when this resolves without
+ * throwing; a thrown error here means "do NOT delete the control files —
+ * surface this to the caller so they can retry" (see each platform's own
+ * `uninstall()`). Each platform's standalone `stop()` uses the same
+ * function for the same reason: tolerate "already stopped/not loaded", but
+ * surface — rather than silently swallow — a genuine failure (permission
+ * denied, manager unreachable) instead of misreporting it as "stopped"
+ * (cross-model-review P1 #7, round 2, second half).
+ */
+export declare function runIdempotent(run: Runner, command: string, args: string[], label: string, absence: IdempotentAbsence): Promise<RunResult>;
 // ==== @byok-sdk/client dist/util/secure-dir.d.ts ====
-import { type Runner } from '../lifecycle/exec-runner';
+import { type Runner } from './exec-runner';
 /**
  * Pure command-construction seam (finding F7) — kept separate from the
  * actual `icacls` invocation below so it's unit-testable on ANY host OS,
@@ -15356,7 +15359,7 @@ import { type Runner } from '../lifecycle/exec-runner';
  * Returns a plain ARGV array with NO manually-embedded quote characters —
  * this is meant for `child_process.execFile`'s array form (this codebase's
  * own established convention for every external command it ever runs; see
- * `lifecycle/exec-runner.ts`'s `defaultRunner`), which is never a shell and
+ * `util/exec-runner.ts`'s `defaultRunner`), which is never a shell and
  * so has no shell-quoting hazard for a `dir`/username containing spaces —
  * Node's own Windows argv encoding (used internally by `execFile`/`spawn`
  * when given an array) already quotes/escapes each element correctly
@@ -15371,7 +15374,7 @@ export declare function buildIcaclsArgs(dir: string, username: string): string[]
 /** Restrictive ACL for one already-created file; no inheritance flags because the target cannot contain children. */
 export declare function buildIcaclsFileArgs(filePath: string, username: string): string[];
 export interface EnsureSecureDirOptions {
-    /** DI for tests — see `lifecycle/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
+    /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
     run?: Runner;
     /** DI for tests — lets the win32 branch below be exercised (with a fake `run`) from any host OS, mirroring `control-protocol.ts`'s `controlEndpointPath` platform-override convention. Defaults to `process.platform`. */
     platform?: NodeJS.Platform;

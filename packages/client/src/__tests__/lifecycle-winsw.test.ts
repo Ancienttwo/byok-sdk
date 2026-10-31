@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWinswLifecycle, generateWinswXml } from '../lifecycle/winsw';
-import type { RunResult, Runner } from '../lifecycle/exec-runner';
+import type { RunResult, Runner } from '../util/exec-runner';
 import { nodeAgentProgram, type ServiceDefinition } from '../lifecycle/service-types';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';

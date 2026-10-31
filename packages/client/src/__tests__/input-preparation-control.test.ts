@@ -24,7 +24,7 @@ import {
   lookupInputPreparation,
   requestInputPreparation,
   type ControlClient,
-} from '../bin/control-client';
+} from '../daemon/control-client';
 import {
   INPUT_PREPARATION_REQUEST_FORMAT,
   INPUT_PREPARATION_VERSION,

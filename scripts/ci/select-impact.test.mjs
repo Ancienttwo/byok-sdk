@@ -189,7 +189,7 @@ test('service enrollment handover paths select the WinSW control socket check an
     const { families } = selectImpact([path]);
     assert.ok(families.includes('windows-service-smoke') && families.includes('windows-client'), path);
   }
-  for (const path of ['packages/client/src/bin/control-client.ts', 'packages/client/src/bin/commands/unpair.ts', 'packages/client/scripts/control-socket-check.mjs']) {
+  for (const path of ['packages/client/src/daemon/control-client.ts', 'packages/client/src/bin/commands/unpair.ts', 'packages/client/scripts/control-socket-check.mjs']) {
     assert.ok(selectImpact([path]).families.includes('windows-service-smoke'), path);
   }
   assert.ok(selectImpact(['packages/client/src/__tests__/service-enrollment-handover.test.ts']).families.includes('windows-client'));

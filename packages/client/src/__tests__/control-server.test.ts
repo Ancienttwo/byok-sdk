@@ -4,7 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import {
   AnotherControlServerRunningError,
   startControlServer,

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { DaemonEvent } from '../daemon/observer';
 import type { ControlStatusResult } from '../daemon/control-protocol';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { createAuditAppender, readAuditRecords, readLastEnvironmentRecord } from '../bin/audit-log';
 import { runStatusCommand } from '../bin/commands/status';
 import { collectDiagnostics } from '../diagnostics/diagnostics';

@@ -15,7 +15,7 @@ import { testScratchOwner } from './fixtures/execution-scratch';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { APPROVAL_REQUIRES_HOST, ApprovalRegistry, ApprovalRequiresHostError } from '../daemon/approvals';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { ControlError } from '../daemon/control-protocol';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';

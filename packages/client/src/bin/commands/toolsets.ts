@@ -1,7 +1,7 @@
 import type { DaemonConfig } from '../../daemon/create-daemon';
 import type { ControlStatusResult } from '../../daemon/control-protocol';
 import type { McpToolsetReloadReceipt } from '../../types';
-import { connectControlClient } from '../control-client';
+import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
 import { formatToolsetsReloadReceiptLines } from '../format';
 

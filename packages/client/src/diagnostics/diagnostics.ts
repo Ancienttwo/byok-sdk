@@ -23,7 +23,7 @@ import path from 'node:path';
 import type { DaemonConfig, RuntimeAdapter } from '../index';
 import { readLastLifecycleRecord, readLastEnvironmentRecord, parseEnvironmentRecord } from '../bin/audit-log';
 import { parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../bin/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { defaultRuntimeAdapters, probeRuntimes } from '../bin/runtime-probe';

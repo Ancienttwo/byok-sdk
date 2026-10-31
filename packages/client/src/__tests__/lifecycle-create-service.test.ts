@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createServiceLifecycle, UnsupportedServicePlatformError } from '../lifecycle/create-service-lifecycle';
-import type { Runner } from '../lifecycle/exec-runner';
+import type { Runner } from '../util/exec-runner';
 import type { ServiceDefinition } from '../lifecycle/service-types';
 import { memoryServiceFs } from './support/service-fs';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';

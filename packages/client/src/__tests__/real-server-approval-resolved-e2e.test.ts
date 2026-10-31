@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ByokServerEvent } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import type { ApprovalsListResult, ApprovalsRequestResult } from '../daemon/control-protocol';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealServer, waitForTaskState, type RealServerHandle } from './fixtures/real-server';

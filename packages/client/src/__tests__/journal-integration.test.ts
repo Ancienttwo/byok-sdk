@@ -231,7 +231,7 @@ describe('hosted journal integration (L-002)', () => {
     expect(daemon!.status().operationalHealth).toMatchObject({ availability: 'available', state: 'healthy' });
     expect(daemon!.tasks().find((task) => task.taskId === 'terminal-rejected')).toMatchObject({ state: 'Complete', delivery: 'rejected', summary: 'PAYLOAD_SENTINEL' });
     expect(JSON.stringify(rejected)).not.toContain('PAYLOAD_SENTINEL');
-    const { connectControlClient } = await import('../bin/control-client');
+    const { connectControlClient } = await import('../daemon/control-client');
     const connected = await connectControlClient({ storeDir, productId: 'test-product-journal' });
     if (!connected.ok) throw new Error('control unavailable');
     try { expect((await connected.client.request<import('../daemon/control-protocol').ControlStatusResult>('status')).activeTasks).toEqual([]); } finally { connected.client.close(); }

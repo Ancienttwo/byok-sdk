@@ -51,7 +51,7 @@ import { runVersionCommand } from './version';
  * separate, short-lived
  * invocations. As of M4 Phase 2 there IS a local IPC channel between them —
  * a Unix domain socket / Windows named pipe (`daemon/control-server.ts`,
- * `bin/control-client.ts`), mutually authenticated by an HMAC handshake over
+ * `daemon/control-client.ts`), mutually authenticated by an HMAC handshake over
  * a token that never crosses the wire — but it's only reachable while a
  * `start` (foreground or service) is actually running, so every
  * short-lived command still has an honest, historical/persisted-state

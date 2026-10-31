@@ -8,7 +8,7 @@ import type { AgentMessagePublishPayload } from '@byok-sdk/protocol';
 import { startServer, stopServer } from '../../../server/src/__tests__/test-support';
 import { AgentHomeManager, createDaemonWithAdapters } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialStore } from './fixtures/device-credentials';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';

@@ -9,7 +9,7 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../dae
 import { controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { DAEMON_OWNER_FILENAME } from '../daemon/daemon-owner';
 import { AuthManager } from '../daemon/auth-manager';
-import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
+import { connectControlClient, isControlDaemonGone } from '../daemon/control-client';
 import { runUnpairCommand } from '../bin/commands/unpair';
 import type { RuntimeDetectResult } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';

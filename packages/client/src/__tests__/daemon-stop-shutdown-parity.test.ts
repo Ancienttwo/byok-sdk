@@ -14,7 +14,7 @@ import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '
 import { controlEndpointPath, controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { OperationalHealthTracker } from '../daemon/operational-health';
-import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
+import { connectControlClient, isControlDaemonGone } from '../daemon/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { resolveStorageConfig } from '../daemon/retention/config';

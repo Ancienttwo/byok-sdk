@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeviceStore, type DeviceMetadata } from '../daemon/store';
 import { SecureDirHardeningError } from '../util/secure-dir';
-import type { Runner } from '../lifecycle/exec-runner';
+import type { Runner } from '../util/exec-runner';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));

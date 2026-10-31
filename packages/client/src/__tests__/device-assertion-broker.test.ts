@@ -24,7 +24,7 @@ import {
 } from '@byok-sdk/core';
 import { buildDaemonWithAdapters, createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
 import { ControlError, type AssertionIssueResult } from '../daemon/control-protocol';
-import { connectControlClient, type ControlClient } from '../bin/control-client';
+import { connectControlClient, type ControlClient } from '../daemon/control-client';
 import { createAuditAppender, auditLogPath } from '../bin/audit-log';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { formatDaemonEventLine } from '../bin/format';

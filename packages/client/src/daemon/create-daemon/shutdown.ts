@@ -172,7 +172,7 @@ export async function runShutdownSequence(daemonScope: DaemonScope, reason: stri
   // Plan `shutdown-lease-order`: that teardown is SPLIT around the lease
   // release, and the order below is the invariant, not an implementation
   // detail. The control socket/token files are this daemon's only external
-  // liveness signal — `bin/control-client.ts`'s `isControlDaemonGone`
+  // liveness signal — `daemon/control-client.ts`'s `isControlDaemonGone`
   // (which `bin/commands/unpair.ts` polls, and every contender's own
   // "is it gone yet" check mirrors) reads exactly "token file gone AND a
   // connect refused". Removing them while this daemon still holds the
