@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import { advanceRooms, applySpeech, roomInput, ROOM_GRACE_MS, type RoomsState, type SeatFacts } from './rooms';
+import { advanceRooms, applySpeech, memberMentions, roomInput, ROOM_GRACE_MS, setMemberMentions, updateRoom,
+  type RoomsState, type SeatFacts } from './rooms';
 
 /** A plain team slice. The rules need no ledger and no Host. */
 function team(members = ['a', 'b', 'c']): RoomsState {
@@ -98,4 +99,21 @@ it('replays the same room input and refuses a changed one', () => {
   expect(roomInput(slice, 'key', 'r', 'Hello', 'all')).toBe(id);
   expect(() => roomInput(slice, 'key', 'r', 'Changed', 'all')).toThrow('Room input identity conflict');
   expect(slice.rounds[id]!.seats.map(seat => slice.seats[seat]!.botId)).toEqual(['a', 'b', 'c']);
+});
+
+it('defaults the memberMentions setting to execute, stores an owner change, and leaves an open round alone (#1230)', () => {
+  const slice = team();
+  expect(memberMentions(slice.rooms.r!)).toBe('execute');
+  expect(slice.rooms.r!.memberMentions).toBeUndefined();
+  const opened = roomInput(slice, 'key', 'r', 'First', ['b']);
+  const [seat] = slice.rounds[opened]!.seats;
+  setMemberMentions(slice, 'r', 'ignore');
+  expect(memberMentions(slice.rooms.r!)).toBe('ignore');
+  expect(slice.rounds[opened]!.seats).toEqual([seat]);
+  expect(slice.rooms.r!.messages.map(message => message.text)).toEqual(['First']);
+  // A team command keeps the Host setting on the room row.
+  updateRoom(slice, 'r', { name: 'Renamed' });
+  expect(memberMentions(slice.rooms.r!)).toBe('ignore');
+  expect(() => setMemberMentions(slice, 'missing', 'ignore')).toThrow('Room not found');
+  expect(() => setMemberMentions(slice, 'r', 'ignore-all' as never)).toThrow('memberMentions is execute or ignore');
 });

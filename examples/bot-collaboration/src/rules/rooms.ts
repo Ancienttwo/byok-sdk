@@ -12,12 +12,21 @@ export const ROOM_GRACE_MS = 240_000;
 export const ROOM_CONTEXT_BYTES = HISTORY_MAX_BYTES;
 export const ROOM_CONTEXT_MESSAGES = HISTORY_MAX_ITEMS;
 export type Mentions = readonly string[] | 'all';
+/**
+ * Whether a structured mention from a human who is not the owner opens seats in a room (#1230).
+ * `execute` is the default, from the owner ruling of 2026-10-31 that keeps the 2026-10-19 behavior.
+ * `ignore` keeps the message as background.
+ */
+export type MemberMentions = 'execute' | 'ignore';
+export const DEFAULT_MEMBER_MENTIONS: MemberMentions = 'execute';
 /** One room message, as stored and as an external room history authority gives it (#883). */
 export interface RoomMessage { id: string; from: string; text: string; late: boolean }
 export interface Room {
   id: string; name: string; members: string[]; admin?: string; mode: 'mention'; announcement: string;
   visibleFrom: Record<string, number>;
   messages: RoomMessage[];
+  /** Host setting (#1230). Absent: `execute`, so a ledger written before the setting reads the ruling's default. */
+  memberMentions?: MemberMentions;
 }
 export interface Round {
   id: string; root: string; roomId: string; input: string; seats: string[];
@@ -95,7 +104,22 @@ export function updateRoom(team: Pick<RoomsState, 'bots' | 'rooms'>, roomId: str
   if (!update.admin && !fields.members.includes(fields.admin ?? '')) delete fields.admin;
   const next = roomFields(team, fields);
   next.visibleFrom = roomVisibility(room, next.members);
+  // A team command never changes the Host setting of #1230, so it stays on the room row.
   Object.assign(room, next); if (!next.admin) delete room.admin;
+}
+/** The group's memberMentions setting. A room without the field is at the default, `execute` (#1230). */
+export function memberMentions(room: Pick<Room, 'memberMentions'>): MemberMentions {
+  return room.memberMentions ?? DEFAULT_MEMBER_MENTIONS;
+}
+/**
+ * The owner setting of #1230. It changes no message, root or seat, so it applies only to inbound messages that
+ * arrive after it; a root or seat that is already open keeps its admission.
+ */
+export function setMemberMentions(team: Pick<RoomsState, 'rooms'>, roomId: string, value: MemberMentions): void {
+  if (value !== 'execute' && value !== 'ignore') throw new Error('memberMentions is execute or ignore');
+  const room = team.rooms[roomId];
+  if (!room) throw new Error('Room not found');
+  room.memberMentions = value;
 }
 /** `from` is the sender's principal id (#552). Without it, the message is from `user` and the input identity is the K8b one. */
 export function roomInput(team: RoomsState, key: string, roomId: string, text: string, mentions: Mentions, from?: string): string {

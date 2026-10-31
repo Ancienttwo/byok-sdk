@@ -3,7 +3,7 @@ import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn';
 import { activeBot, archiveBot, profileRevision, refuseExternalTeam, requireMain, teamSnapshot, TeamModeError, type ExternalTeam, type TeamSnapshot,
   type TeamSnapshotBot } from './team';
-import { roomInput, updateRoom, type Mentions } from './rooms';
+import { roomInput, setMemberMentions, updateRoom, type MemberMentions, type Mentions } from './rooms';
 import { sealBatchForCancel, type InputFields } from './coalesce';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
@@ -51,6 +51,8 @@ export interface Conversation { kind: 'direct' | 'group'; id: string }
 export type KeylessCommand =
   | { kind: 'set_main_bot'; botId: string; mainBot: boolean }
   | { kind: 'update_room'; roomId: string; update: Partial<RoomFields> }
+  /** Owner setting (#1230): whether a non-owner structured mention in this group opens seats. */
+  | { kind: 'set_room_member_mentions'; roomId: string; memberMentions: MemberMentions }
   | { kind: 'retry_persona'; botId: string }
   /** Host persona mode (#879): the Host applied this profile revision of the Bot's Agent home. */
   | { kind: 'persona_ready'; botId: string; revision: string }
@@ -172,7 +174,7 @@ export interface CommandStore {
 }
 
 const CALLBACKS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
-const KEYLESS = new Set<Command['kind']>(['set_main_bot', 'update_room', 'retry_persona', 'persona_ready', 'enable_push_route', 'revoke_push_route',
+const KEYLESS = new Set<Command['kind']>(['set_main_bot', 'update_room', 'set_room_member_mentions', 'retry_persona', 'persona_ready', 'enable_push_route', 'revoke_push_route',
   'resend_delivery', 'cancel_delegation', 'abandon_delegation', 'cancel_turn', 'end_routine']);
 export function isKeyless(command: Command): command is KeylessCommand { return KEYLESS.has(command.kind); }
 /** The fields that decide each command's effect: the fields that the existing identity checks compare. */
@@ -282,6 +284,9 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       return accepted();
     case 'update_room':
       updateRoom(state.team, command.roomId, command.update);
+      return accepted();
+    case 'set_room_member_mentions':
+      setMemberMentions(state.team, command.roomId, command.memberMentions);
       return accepted();
     case 'retry_persona': {
       if (state.team.external?.persona) throw new TeamModeError('external_persona', 'external_persona: the Host owns persona projections');

@@ -711,6 +711,16 @@ An admin identity grants a larger budget. It does not create an implicit seat.
 The optional admin mode is refused. `updateRoom` is an authenticated owner API
 for membership, admin, name, and announcement changes.
 
+`setMemberMentions(roomId, value, principal)` is an owner API for the
+`memberMentions` setting of a room (#1230). The value is `execute` or `ignore`;
+the default is `execute`. With `execute`, a structured mention from any verified
+human opens a seat. With `ignore`, a structured mention from a human who is not
+the owner opens no seat: the message stays room background, with no device work
+and no BYOK key. The owner's own mention still opens seats. Only the owner
+changes the setting, and only inbound messages that arrive after it see the new
+value; an open root and an established seat keep their admission
+([R6](../../docs/host-im-adapter.md#r6-structured-mentions)).
+
 A room turn is a fresh member Agent execution. It uses `bot-turn-outcome.v1`
 with required `speech`, plus optional `room_call`. It has no messageEgress.
 `{ speech: { kind: 'post', text: 'Evidence' } }` writes shared history.

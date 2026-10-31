@@ -5,6 +5,7 @@ An IM adapter is Host code. The SDK does not receive external events.
 This guide adds no SDK API, wire field or protocol type.
 It does not change the K4 FIFO or K7 settlement in the [Host execution core guide](host-execution-core.md).
 The rules come from issue #552, its plan in #557 and the owner's rulings of 2026-10-19 on that issue.
+R6 also carries the owner's ruling of 2026-10-31 on issue #1230.
 R1 to R7 are labels of this guide, for use in Host code and tests.
 
 ## 1. Ownership and records
@@ -69,11 +70,14 @@ Only the owner principal can:
 - cancel a Turn or a delegation, or end a delegation;
 - start a 1:1 execution;
 - enable or revoke a push route;
-- resend an `unknown` delivery.
+- resend an `unknown` delivery;
+- change a group's `memberMentions` setting (R6).
 
 In a 1:1 conversation, the Host rejects a non-owner human with `not_owner`.
 In a group, any verified human can post. Only the owner can approve there.
 These two rules are owner rulings of 2026-10-19.
+A group also has a `memberMentions` setting that decides whether a non-owner mention opens a seat (R6).
+Only the owner changes it.
 The Host records each refusal in its audit.
 An approval comes only from a platform button callback with a verified principal.
 A text command such as `/approve` is not an approval.
@@ -154,6 +158,17 @@ The Host never scans text for `@` names: I10 in [platform PRD section 5](researc
 and G1 in [product PRD section 3](plans/2026-10-18-bot-mode-product-prd.md).
 Text such as "@Bot" without a mention entity selects no seat.
 
+Each group has a Host setting `memberMentions` with the value `execute` or `ignore`.
+The default is `execute`, the owner ruling of 2026-10-31 on issue #1230.
+With `execute`, a mention entity from any verified human opens a seat.
+With `ignore`, a mention entity from a human who is not the owner opens no seat.
+The Host stores that message as background, as R5 does for a bot message.
+It starts no seat, no device work and no BYOK key, and room history keeps it for later requests.
+The owner's own mention opens seats as usual.
+Only the owner changes the setting (R2).
+A change never touches an open root or an existing seat.
+It applies only to inbound messages that arrive after it.
+
 ### R7. Channel credentials
 
 A channel secret must not reach a Bot. It must not be in the database as plain text.
@@ -179,7 +194,7 @@ Classify each inbound message in this order. The first match wins.
 | Bot principal in a group. | Room background. No seat. |
 | Owner principal in a 1:1 conversation. | User input for that Bot. |
 | Other human principal in a 1:1 conversation. | Reject. Audit `not_owner`. |
-| Human principal in a group. | Room input. Mention entities select seats. The room message records the principal id as its sender. |
+| Human principal in a group. | Room input. Mention entities select seats, except a non-owner mention when the group setting is `ignore` (R6). The room message records the principal id as its sender. |
 
 Use `H(channel, conversationId, platformMessageId)` as the input key.
 A redelivered platform event then maps to the same input.
@@ -225,6 +240,7 @@ So a timeout gives `unknown`, not a resend.
 - [ ] Derive the input key from channel, conversation and platform message id.
 - [ ] Take mentions only from platform mention entities.
 - [ ] Keep bot messages as background or audit. Use echoes only to reconcile deliveries.
+- [ ] Keep an ignored non-owner group mention as background, and apply a setting change only to later messages.
 - [ ] Bind each reply route to one inbound message, its root and its expiry.
 - [ ] Keep reply tokens out of ContextPack, projections and logs.
 - [ ] Never copy a reply credential into the push route table.

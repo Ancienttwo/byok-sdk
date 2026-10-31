@@ -23,7 +23,7 @@ import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCale
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
 import { botCompactVeto } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
-import { advanceRoomsAndTurns, roomMessageProjection, roomMessages, type Mentions, type RoomMessage } from './rooms';
+import { advanceRoomsAndTurns, memberMentions, roomMessageProjection, roomMessages, type MemberMentions, type Mentions, type RoomMessage } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
@@ -347,7 +347,8 @@ export class BotCollaboration {
       const key = inboundKey(message);
       const command: Command = kind === 'owner_input'
         ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: principal.id }
-        : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from: principal.id };
+        : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text,
+          mentions: this.seatMentions(conversation.id, principal, message.mentions), from: principal.id };
       const result = this.commitOwner(hash(['receive', key]), command,
         (_s, state) => this.options.channel ? { remember: root => rememberInbound(state, message, root) } : {});
       await this.process();
@@ -393,6 +394,18 @@ export class BotCollaboration {
     if (verified(principal)) return principal;
     this.audit(`Action refused unverified_sender: ${action} ${target}`);
     throw new Error(`unverified_sender: ${action} needs a verified principal`);
+  }
+  /**
+   * The mention entities that may open seats (#1230). A bot mentions nothing (R5). In a group whose `memberMentions`
+   * setting is `ignore`, a human who is not the owner mentions nothing either: the message stays room background, with
+   * no seat, no device work and no BYOK key. The owner's mention still selects seats, and an omitted principal is the
+   * Host's own call. The setting is read here, so it applies to this inbound message only, never to an open root or seat.
+   */
+  private seatMentions(roomId: string, principal: Principal | undefined, mentions: Mentions): Mentions {
+    if (!principal || isOwner(principal, this.owner.id)) return mentions;
+    if (principal.kind === 'bot') return [];
+    const room = this.snapshot().team.rooms[roomId];
+    return room && memberMentions(room) === 'ignore' ? [] : mentions;
   }
   /** R2: only the owner principal acts. An omitted principal is the owner. A given `undefined` is unverified. */
   private ownerOnly(by: PrincipalArg, action: string, target: string): Principal {
@@ -638,14 +651,25 @@ export class BotCollaboration {
     let id!: string;
     await this.exclusive(async () => {
       const principal = by.length ? this.verifiedOnly(by[0], 'roomInput', roomId) : undefined;
-      // R5: a bot message is room background. Its mention entities select no seat.
-      const called = principal?.kind === 'bot' ? [] : mentions;
+      // R5 and #1230: a bot message, and an ignored non-owner mention, are room background. They select no seat.
+      const called = this.seatMentions(roomId, principal, mentions);
       const result = this.commitOwner(hash(['room_input', roomId, key]),
         { kind: 'room_input', key, roomId, text, mentions: called, ...(principal ? { from: principal.id } : {}) });
       id = turnOf(result);
       await this.process();
     });
     return id;
+  }
+  /**
+   * Owner API (#1230): whether a structured mention from a non-owner human in this group opens seats. Only the owner
+   * changes it, and only inbound messages that arrive after it see the new value.
+   */
+  async setMemberMentions(roomId: string, value: MemberMentions, ...by: PrincipalArg): Promise<void> {
+    await this.exclusive(async () => {
+      this.ownerOnly(by, 'setMemberMentions', roomId);
+      this.commitKeyless({ kind: 'set_room_member_mentions', roomId, memberMentions: value });
+      await this.process();
+    });
   }
   async updateRoom(roomId: string, update: Partial<RoomFields>): Promise<void> {
     await this.exclusive(async () => {
