@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { appendFileSync, cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parseSources, inspectRepository, compareBaseline, compareBaselineHistory, cycleEdges, checkDependencyDirection, graphSourcePath, sourceOwner, directoryLayer } from './dependency-graph.mjs';
+import { parseSources, inspectRepository, inspectExamplePortability, compareBaseline, compareBaselineHistory, cycleEdges, checkDependencyDirection, graphSourcePath, sourceOwner, directoryLayer } from './dependency-graph.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'byok-direction-'));
@@ -12,6 +12,17 @@ function fixture(t) {
   const write = (file, text) => { const target = path.join(root, file); mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, text); return target; };
   const pkg = (name, dependencies = {}) => write(`packages/${name}/package.json`, JSON.stringify({ name: `@byok-sdk/${name}`, dependencies, exports: { '.': { import: './dist/index.js' }, './leaf': { import: './dist/leaf.js' } } }));
   return { root, write, pkg };
+}
+
+/** A temporary copy of the real workspace sources, so the portability regression exercises the shipped K4/K8 graph, not a mock. */
+function repositorySubset(t) {
+  const repo = path.resolve(import.meta.dirname, '../..');
+  const root = mkdtempSync(path.join(tmpdir(), 'byok-portability-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const skipGenerated = source => !source.split(path.sep).some(part => part === 'node_modules' || part === 'dist');
+  cpSync(path.join(repo, 'packages'), path.join(root, 'packages'), { recursive: true, filter: skipGenerated });
+  cpSync(path.join(repo, 'examples/bot-collaboration'), path.join(root, 'examples/bot-collaboration'), { recursive: true, filter: skipGenerated });
+  return root;
 }
 
 test('installed TypeScript AST distinguishes type syntax from runtime expressions (API drift sentinel)', t => {
@@ -34,11 +45,12 @@ test('installed TypeScript AST distinguishes type syntax from runtime expression
     const templated = import(\`dynamic-template\`);
     const required = require('commonjs');
     import equals = require('equals');
+    const sqlite = process.getBuiltinModule('node:sqlite');
     // import('comment')
     const text = "import('string')";
   `);
-  const edges = parseSources(f.root, [file]).get(file).edges;
-  assert.deepEqual(edges.map(({ specifier, kind }) => [specifier, kind]), [
+  const parsed = parseSources(f.root, [file]).get(file);
+  assert.deepEqual(parsed.edges.map(({ specifier, kind }) => [specifier, kind]), [
     ['type-clause', 'type'], ['type-members', 'type'], ['mixed', 'value'],
     ['default-named-type', 'value'], ['empty', 'value'], ['side-effect', 'value'],
     ['export-type', 'type'], ['export-members', 'type'], ['export-value', 'value'],
@@ -46,6 +58,8 @@ test('installed TypeScript AST distinguishes type syntax from runtime expression
     ['dynamic-array', 'value'], ['dynamic-property', 'value'], ['dynamic-template', 'value'],
     ['commonjs', 'value'], ['equals', 'value'],
   ]);
+  // `process.getBuiltinModule` is a runtime load with no import statement.
+  assert.deepEqual(parsed.builtins.map(({ specifier, form }) => [specifier, form]), [['node:sqlite', 'get-builtin-module']]);
 });
 
 test('workspace values must be declared and lower-layer; type-only imports do not create runtime edges', t => {
@@ -130,6 +144,59 @@ test('CI comparison rejects baseline expansion even when the candidate source ma
   assert.deepEqual(checkDependencyDirection(f.root), actual.map(edge => `baseline must shrink: ${edge}`));
 });
 
+
+test('ui-runtime value imports from cloud are locked to exact files and members', t => {
+  const f = fixture(t);
+  f.pkg('ui-runtime', { '@byok-sdk/cloud': 'workspace:*' }); f.pkg('cloud');
+  f.write('packages/cloud/src/index.ts', 'export const TimelineEventSchema = 1, projectTimelineEvents = 2, ApprovalObservationSchema = 3;');
+  f.write('packages/ui-runtime/src/timeline.ts', "import { TimelineEventSchema, projectTimelineEvents, type TimelineEvent } from '@byok-sdk/cloud';\nexport const x: TimelineEvent | number = TimelineEventSchema + projectTimelineEvents;");
+  f.write('packages/ui-runtime/src/approval-timeline.ts', "import { ApprovalObservationSchema } from '@byok-sdk/cloud';\nexport const y = ApprovalObservationSchema;");
+  assert.deepEqual(inspectRepository(f.root), []);
+  f.write('packages/ui-runtime/src/timeline.ts', "import { TimelineEventSchema, projectTimelineEvents, ConversationScope } from '@byok-sdk/cloud';\nexport const x = TimelineEventSchema + projectTimelineEvents + ConversationScope;");
+  assert.deepEqual(inspectRepository(f.root), [
+    'ui-runtime-value: packages/ui-runtime/src/timeline.ts -> @byok-sdk/cloud {ConversationScope, TimelineEventSchema, projectTimelineEvents} (locked: {TimelineEventSchema, projectTimelineEvents})',
+  ]);
+  f.write('packages/ui-runtime/src/timeline.ts', "import { TimelineEventSchema, projectTimelineEvents } from '@byok-sdk/cloud';\nexport const x = TimelineEventSchema + projectTimelineEvents;");
+  f.write('packages/ui-runtime/src/new-value.ts', "import { TimelineEventSchema } from '@byok-sdk/cloud';\nexport const z = TimelineEventSchema;");
+  assert.deepEqual(inspectRepository(f.root), [
+    'ui-runtime-value: packages/ui-runtime/src/new-value.ts -> @byok-sdk/cloud {TimelineEventSchema} (not in reviewed allowlist)',
+  ]);
+  rmSync(path.join(f.root, 'packages/ui-runtime/src/new-value.ts'));
+  rmSync(path.join(f.root, 'packages/ui-runtime/src/timeline.ts'));
+  assert.deepEqual(inspectRepository(f.root), [
+    'ui-runtime-value: packages/ui-runtime/src/timeline.ts -> @byok-sdk/cloud (locked import missing)',
+  ]);
+});
+
+test('ui-runtime lock stays off for manifest-only synthetic roots', t => {
+  const f = fixture(t);
+  f.pkg('ui-runtime'); f.pkg('cloud');
+  assert.deepEqual(inspectRepository(f.root), []);
+});
+
+test('the checked-in K8 rules stay clear of the K4 Node-only closure', () => {
+  const repo = path.resolve(import.meta.dirname, '../..');
+  assert.deepEqual(inspectExamplePortability(repo), []);
+});
+
+test('K8 rules importing the K4 root entry reach node:sqlite and fail the check', t => {
+  const root = repositorySubset(t);
+  assert.deepEqual(inspectExamplePortability(root), []);
+  appendFileSync(
+    path.join(root, 'examples/bot-collaboration/src/rules/outcome.ts'),
+    "\nimport { HostLedger } from '@byok-sdk/server/execution-core';\nvoid HostLedger;\n",
+  );
+  const violations = inspectExamplePortability(root);
+  assert.ok(violations.includes('portability: examples/bot-collaboration/src/rules/outcome.ts -> node:sqlite'), violations.join('\n'));
+  assert.ok(violations.includes('portability: examples/bot-collaboration/src/rules/outcome.ts -> node:async_hooks'), violations.join('\n'));
+  const baselineFile = path.join(root, 'scripts/architecture/dependency-baseline.json');
+  mkdirSync(path.dirname(baselineFile), { recursive: true });
+  writeFileSync(baselineFile, JSON.stringify(inspectRepository(root)));
+  const previous = process.env.CI_BASE;
+  delete process.env.CI_BASE;
+  t.after(() => { if (previous !== undefined) process.env.CI_BASE = previous; });
+  assert.ok(checkDependencyDirection(root).some(error => error.includes('node:sqlite')), 'the repository check must go RED');
+});
 
 test('native Windows paths enter the rule graph as POSIX repo-relative paths', () => {
   const root = path.win32.join('C:\\', 'repo');

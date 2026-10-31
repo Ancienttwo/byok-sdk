@@ -17,20 +17,33 @@ export function sourceFiles(root) {
 
 /** AST distinctions are deliberately tested against the installed TS API. */
 export function extractModuleEdges(file) {
-  const edges = [];
+  const edges = [], builtins = [];
   const allTypes = clause => clause?.kind === K.NamedImports || clause?.kind === K.NamedExports
     ? clause.elements.length > 0 && clause.elements.every(member => member.isTypeOnly) : false;
-  const add = (node, literal, type, form) => {
+  const valueImportNames = clause => {
+    if (!clause) return [];
+    if (clause.name) return ['default'];
+    if (clause.namedBindings?.kind === K.NamespaceImport) return ['*'];
+    if (clause.namedBindings?.kind !== K.NamedImports) return [];
+    return clause.namedBindings.elements.filter(member => !member.isTypeOnly).map(member => member.propertyName?.text ?? member.name.text);
+  };
+  const valueExportNames = clause => {
+    if (!clause) return ['*'];
+    if (clause.kind === K.NamespaceExport) return [clause.name?.text ?? '*'];
+    if (clause.kind !== K.NamedExports) return [];
+    return clause.elements.filter(member => !member.isTypeOnly).map(member => member.propertyName?.text ?? member.name.text);
+  };
+  const add = (node, literal, type, form, names = []) => {
     if (literal?.kind === K.StringLiteral || literal?.kind === K.NoSubstitutionTemplateLiteral) {
-      edges.push({ specifier: literal.text, kind: type ? 'type' : 'value', form, start: node.pos });
+      edges.push({ specifier: literal.text, kind: type ? 'type' : 'value', form, names, start: node.pos });
     }
   };
   const visit = node => {
     if (node.kind === K.ImportDeclaration) {
       const clause = node.importClause;
-      add(node, node.moduleSpecifier, clause?.isTypeOnly || (!clause?.name && allTypes(clause?.namedBindings)), 'import');
+      add(node, node.moduleSpecifier, clause?.isTypeOnly || (!clause?.name && allTypes(clause?.namedBindings)), 'import', valueImportNames(clause));
     } else if (node.kind === K.ExportDeclaration) {
-      add(node, node.moduleSpecifier, node.isTypeOnly || allTypes(node.exportClause), 'export');
+      add(node, node.moduleSpecifier, node.isTypeOnly || allTypes(node.exportClause), 'export', valueExportNames(node.exportClause));
     } else if (node.kind === K.ImportType) {
       add(node, node.argument?.literal, true, 'import-type');
     } else if (node.kind === K.CallExpression && node.expression.kind === K.ImportKeyword) {
@@ -39,11 +52,18 @@ export function extractModuleEdges(file) {
       add(node, node.arguments[0], false, 'require');
     } else if (node.kind === K.ImportEqualsDeclaration) {
       add(node, node.moduleReference?.expression, node.isTypeOnly, 'import-equals');
+    } else if (node.kind === K.CallExpression && node.expression.kind === K.PropertyAccessExpression
+      && node.expression.expression.kind === K.Identifier && node.expression.expression.text === 'process'
+      && node.expression.name.kind === K.Identifier && node.expression.name.text === 'getBuiltinModule') {
+      // `process.getBuiltinModule('node:sqlite')` loads a built-in without an
+      // import statement, so the module graph records it as a value edge too.
+      const literal = node.arguments[0];
+      if (literal?.kind === K.StringLiteral) builtins.push({ specifier: literal.text, form: 'get-builtin-module', start: node.pos });
     }
     node.forEachChild(visit);
   };
   visit(file);
-  return { edges, barrel: file.statements.length > 0 && file.statements.every(n => n.kind === K.ExportDeclaration) };
+  return { edges, builtins, barrel: file.statements.length > 0 && file.statements.every(n => n.kind === K.ExportDeclaration) };
 }
 
 /** One virtual project avoids changing package tsconfigs or depending on dist output. */
@@ -134,7 +154,7 @@ export function sourceOwner(file, packages) {
 function packageSourcePath(pkg, file) {
   return path.posix.relative(`${pkg.root}/src`, file);
 }
-export function inspectRepository(root) {
+function workspacePackages(root) {
   const packages = new Map();
   for (const dir of readdirSync(path.join(root, 'packages'))) {
     const manifestFile = path.join(root, 'packages', dir, 'package.json');
@@ -142,9 +162,30 @@ export function inspectRepository(root) {
     const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
     packages.set(manifest.name, { dir, manifest, root: graphSourcePath(root, path.dirname(manifestFile)) });
   }
+  return packages;
+}
+
+/**
+ * R-L4 (#1098): the reviewed value imports from ui-runtime into cloud.
+ *
+ * These are not dependency-baseline debt. Moving the schemas and the pure
+ * projection helper into protocol would add public protocol exports and change
+ * the protocol/cloud/ui-runtime declaration surface, so the runtime edges stay
+ * for now. Each entry pins the exact file, specifier and runtime member names:
+ * a new edge, a different specifier, a changed member set, or a missing locked
+ * import all fail. The api-surface golden keeps the matching type-level
+ * imports of the same contract visible.
+ */
+const UI_RUNTIME_CLOUD_VALUE_IMPORTS = [
+  { file: 'packages/ui-runtime/src/timeline.ts', specifier: '@byok-sdk/cloud', names: ['TimelineEventSchema', 'projectTimelineEvents'] },
+  { file: 'packages/ui-runtime/src/approval-timeline.ts', specifier: '@byok-sdk/cloud', names: ['ApprovalObservationSchema'] },
+];
+
+export function inspectRepository(root) {
+  const packages = workspacePackages(root);
   const files = [...packages.values()].flatMap(p => sourceFiles(path.join(root, p.root, 'src')));
   const sources = new Map([...parseSources(root, files)].map(([file, parsed]) => [graphSourcePath(root, file), parsed]));
-  const violations = new Set(), graph = new Map();
+  const violations = new Set(), graph = new Map(), uiRuntimeCloudValues = new Map();
   const publicEntries = new Set();
   for (const pkg of packages.values()) for (const value of Object.values(pkg.manifest.exports ?? {})) {
     const entry = exportTarget(value);
@@ -176,6 +217,12 @@ export function inspectRepository(root) {
         // Local JSON and JS assets are outside the documented TS graph.
         if (!target && !['', '.js', '.mjs', '.cjs', '.json'].some(ext => existsSync(path.resolve(root, path.posix.dirname(file), edge.specifier + ext)))) throw new Error(`${from}: unresolved source ${edge.specifier}`);
       } else if (targetPackage) {
+        if (pkg.dir === 'ui-runtime' && targetPackage.dir === 'cloud') {
+          const key = `${from} -> ${edge.specifier}`;
+          const names = uiRuntimeCloudValues.get(key) ?? new Set();
+          for (const member of edge.names ?? []) names.add(member);
+          uiRuntimeCloudValues.set(key, names);
+        }
         if (pkg !== targetPackage && !pkg.manifest.dependencies?.[name]) report('manifest', from, name);
         if (!packageDirection(pkg.dir, targetPackage.dir)) report('source-package', from, name);
         const subpath = edge.specifier.slice(name.length);
@@ -190,6 +237,27 @@ export function inspectRepository(root) {
       if (targetOwner !== pkg) {
         if (!pkg.manifest.dependencies?.[targetOwner.manifest.name]) report('manifest', from, targetOwner.manifest.name);
         if (!packageDirection(pkg.dir, targetOwner.dir)) report('source-package', from, targetOwner.manifest.name);
+      }
+    }
+  }
+  // Release-pack and other synthetic roots copy manifests without sources.
+  // Enforce the lock only where the ui-runtime source tree really exists, so a
+  // missing file inside the real tree is still a failure (see the regression).
+  if (packages.has('@byok-sdk/ui-runtime') && existsSync(path.join(root, 'packages/ui-runtime/src'))) {
+    const lockedUiRuntimeCloud = new Set();
+    for (const locked of UI_RUNTIME_CLOUD_VALUE_IMPORTS) {
+      const key = `${locked.file} -> ${locked.specifier}`;
+      lockedUiRuntimeCloud.add(key);
+      const actual = uiRuntimeCloudValues.get(key);
+      const expected = [...locked.names].sort();
+      if (!actual) violations.add(`ui-runtime-value: ${key} (locked import missing)`);
+      else if ([...actual].sort().join('\n') !== expected.join('\n')) {
+        violations.add(`ui-runtime-value: ${key} {${[...actual].sort().join(', ')}} (locked: {${expected.join(', ')}})`);
+      }
+    }
+    for (const key of uiRuntimeCloudValues.keys()) {
+      if (!lockedUiRuntimeCloud.has(key)) {
+        violations.add(`ui-runtime-value: ${key} {${[...uiRuntimeCloudValues.get(key)].sort().join(', ')}} (not in reviewed allowlist)`);
       }
     }
   }
@@ -217,6 +285,88 @@ export function inspectRepository(root) {
   return [...violations].sort();
 }
 
+/**
+ * Entries downstream Hosts copy must load where the Host's Node-only modules do
+ * not exist. K8 `rules/` is copied alone (#606 §5.5), so it must keep working
+ * where `node:sqlite` and `node:async_hooks` are unavailable (#884).
+ */
+export const NON_PORTABLE_MODULES = ['node:async_hooks', 'node:sqlite'];
+const PORTABLE_EXAMPLE_ROOTS = [{ root: 'examples/bot-collaboration/src/rules' }];
+
+function resolveExistingSource(file) {
+  const stem = file.replace(/\.(?:js|mjs|cjs)$/, '');
+  return [file, `${stem}.ts`, `${stem}.tsx`, `${file}/index.ts`, `${file}/index.tsx`]
+    .find(candidate => existsSync(candidate));
+}
+
+/** Follow value imports from a real example root through workspace exports and report Node-only modules. */
+export function inspectExamplePortability(root) {
+  const packages = workspacePackages(root), violations = new Set();
+  for (const example of PORTABLE_EXAMPLE_ROOTS) {
+    const start = sourceFiles(path.join(root, example.root));
+    if (start.length === 0) continue;
+    const parsed = new Map(), graph = new Map(), denied = new Map();
+    let frontier = start;
+    while (frontier.length > 0) {
+      const batch = frontier.filter(file => !parsed.has(file));
+      if (batch.length === 0) break;
+      const next = new Set();
+      for (const [file, source] of parseSources(root, batch)) {
+        parsed.set(file, source);
+        const targets = new Set(), modules = new Set();
+        for (const edge of source.edges) {
+          if (edge.kind !== 'value') continue;
+          if (edge.specifier.startsWith('node:')) {
+            if (NON_PORTABLE_MODULES.includes(edge.specifier)) modules.add(edge.specifier);
+            continue;
+          }
+          let target;
+          if (edge.specifier.startsWith('.')) {
+            const base = path.resolve(path.dirname(file), edge.specifier);
+            target = resolveExistingSource(base);
+            // Local JSON and JS assets are outside the documented TS graph.
+            if (!target && !['', '.js', '.mjs', '.cjs', '.json'].some(ext => existsSync(`${base}${ext}`))) {
+              throw new Error(`${graphSourcePath(root, file)}: unresolved source ${edge.specifier}`);
+            }
+          } else {
+            const name = edge.specifier.startsWith('@') ? edge.specifier.split('/').slice(0, 2).join('/') : edge.specifier.split('/')[0];
+            const targetPackage = packages.get(name);
+            if (targetPackage) {
+              const subpath = edge.specifier.slice(name.length);
+              const entry = exportTarget(targetPackage.manifest.exports?.[subpath ? `.${subpath}` : '.']);
+              if (entry?.startsWith('./dist/')) target = resolveExistingSource(path.join(root, targetPackage.root, 'src', entry.slice(7)));
+              else if (entry && !entry.endsWith('.json')) target = resolveExistingSource(path.join(root, targetPackage.root, entry));
+              if (!target && !entry?.endsWith('.json')) throw new Error(`${graphSourcePath(root, file)}: unresolved workspace export ${edge.specifier}`);
+            } else if (name.startsWith('@byok-sdk/')) throw new Error(`${graphSourcePath(root, file)}: unknown workspace package ${name}`);
+          }
+          if (target) {
+            targets.add(target);
+            if (!parsed.has(target)) next.add(target);
+          }
+        }
+        for (const builtin of source.builtins ?? []) {
+          if (NON_PORTABLE_MODULES.includes(builtin.specifier)) modules.add(builtin.specifier);
+        }
+        graph.set(file, targets);
+        denied.set(file, modules);
+      }
+      frontier = [...next];
+    }
+    const relative = file => graphSourcePath(root, file);
+    for (const file of start) {
+      const seen = new Set(), stack = [file];
+      while (stack.length > 0) {
+        const current = stack.pop();
+        if (seen.has(current)) continue;
+        seen.add(current);
+        for (const module of denied.get(current) ?? []) violations.add(`portability: ${relative(file)} -> ${module}`);
+        for (const target of graph.get(current) ?? []) stack.push(target);
+      }
+    }
+  }
+  return [...violations].sort();
+}
+
 export function compareBaseline(actual, baseline) {
   if (!Array.isArray(baseline) || baseline.some(v => typeof v !== 'string') || new Set(baseline).size !== baseline.length) {
     throw new Error('dependency baseline must be an array of unique violation identities');
@@ -237,6 +387,7 @@ export function checkDependencyDirection(root) {
   const file = path.join(root, 'scripts/architecture/dependency-baseline.json');
   const baseline = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
   const errors = compareBaseline(inspectRepository(root), baseline);
+  errors.push(...inspectExamplePortability(root));
   if (process.env.CI_BASE) {
     const base = process.env.CI_BASE;
     if (!/^[a-f0-9]{40}$/.test(base)) throw new Error('CI_BASE must be an exact commit');
