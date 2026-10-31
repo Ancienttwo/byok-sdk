@@ -101,3 +101,24 @@ export function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefine
       return undefined;
   }
 }
+
+/**
+ * What a liveness probe may conclude from a lifecycle, in one place: `up` is
+ * a run that owns its store and answers on its control endpoint — `running`,
+ * or `awaiting-enrollment` for a service-enrollment daemon that has not
+ * paired yet, which is legitimately up rather than broken (#1097); `ended`
+ * is a run that stopped or cannot continue; `starting` is `stopped`, which
+ * a start in progress also reports until it resolves.
+ */
+export function daemonLifecycleHealth(lifecycle: DaemonLifecycle): 'up' | 'starting' | 'ended' {
+  switch (lifecycle.phase) {
+    case 'running':
+    case 'awaiting-enrollment':
+      return 'up';
+    case 'stopped':
+      return 'starting';
+    case 'halted':
+    case 'crashed':
+      return 'ended';
+  }
+}

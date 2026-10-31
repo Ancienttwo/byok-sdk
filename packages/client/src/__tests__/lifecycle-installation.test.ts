@@ -129,19 +129,9 @@ async function expectConsistent(dataOf: Record<string, string>): Promise<void> {
   expect(await fs.readFile(db, 'utf8')).toBe(dataOf[current]);
 }
 
-beforeEach(async () => {
-  root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-install-')));
-  storeDir = path.join(root, 'store');
-  installRoot = path.join(root, 'app');
-  db = path.join(storeDir, 'daemon.db');
-  await fs.mkdir(storeDir, { recursive: true });
-  await fs.writeFile(db, 'v1 data');
-  await fs.writeFile(`${db}-wal`, 'v1 wal');
-  await verdicts('accepted');
-  events = [];
-  unhealthy = new Set();
-  onHealth = async () => undefined;
-  installation = serviceInstallationOver({
+/** The installation over `lifecycle`, with this suite's health seam. */
+function installationOver(lifecycle: ManagedServiceLifecycle): ServiceInstallation {
+  return serviceInstallationOver({
     service: { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app' },
     productId: 'svc',
     installRoot,
@@ -155,7 +145,22 @@ beforeEach(async () => {
     },
     healthTimeoutMs: 5_000,
     stopTimeoutMs: 2_000,
-  }, fakeLifecycle());
+  }, lifecycle);
+}
+
+beforeEach(async () => {
+  root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-install-')));
+  storeDir = path.join(root, 'store');
+  installRoot = path.join(root, 'app');
+  db = path.join(storeDir, 'daemon.db');
+  await fs.mkdir(storeDir, { recursive: true });
+  await fs.writeFile(db, 'v1 data');
+  await fs.writeFile(`${db}-wal`, 'v1 wal');
+  await verdicts('accepted');
+  events = [];
+  unhealthy = new Set();
+  onHealth = async () => undefined;
+  installation = installationOver(fakeLifecycle());
 });
 
 afterEach(async () => {
@@ -297,6 +302,33 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
     // Nothing pending is left: recover is a no-op that returns the receipt.
     expect(await installation.recover()).toEqual(receipt);
+  });
+
+  it('recovers a death between the stop intent and the stop: recover() restarts the known-good version', async () => {
+    await installation.install(await payload('1.0.0'));
+    await installation.upgrade(await payload('2.0.0'));
+    await fs.writeFile(db, 'v2 data');
+    // The process dies at the stop: the intent was already written, the
+    // service was stopped, and the normal failure path's restart died too.
+    const killed = new Error('process killed');
+    const base = fakeLifecycle();
+    const dying: ManagedServiceLifecycle = {
+      ...base,
+      stop: async () => { events.push('stop'); throw killed; },
+      start: async () => { events.push('start'); throw killed; },
+    };
+    const doomed = installationOver(dying);
+    await expect(doomed.upgrade(await payload('3.0.0'))).rejects.toThrow('process killed');
+    expect(await doomed.receipt()).toMatchObject({ state: 'pending', from: '2.0.0', to: '3.0.0' });
+    expect(await pointer('current')).toBe('2.0.0');
+    expect(await fs.readFile(db, 'utf8')).toBe('v2 data');
+
+    events = [];
+    const receipt = await installation.recover();
+    expect(receipt).toMatchObject({ state: 'rolled-back', code: 'upgrade_pending', from: '2.0.0', to: '3.0.0' });
+    expect(events).toEqual(['stop', 'start', 'health 2.0.0']);
+    expect(await pointer('current')).toBe('2.0.0');
+    expect(await fs.readFile(db, 'utf8')).toBe('v2 data');
   });
 
   it('refuses the running version and a different payload under a staged id', async () => {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { StoreCompatibility, StoreCompatibilityVerdict } from '@byok-sdk/core';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
+import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { assertDaemonStoreQuiescent, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { acquirePathMutationGate, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
@@ -58,8 +59,9 @@ export interface ServiceInstallationOptions {
   precheck(versionDir: string): ServiceProgram;
   /**
    * Resolves when the started version is healthy and throws when it is not.
-   * Default: the daemon's control socket reports `lifecycle.phase` `running`
-   * (connecting or open); `halted` or `crashed` fails at once.
+   * Default: the daemon's control socket reports a live `lifecycle` — `running`
+   * (connecting or open), or `awaiting-enrollment` for a service-enrollment
+   * daemon that has not paired yet. `halted` or `crashed` fails at once.
    */
   healthCheck?(signal: AbortSignal): Promise<void>;
   /** How long the health check may take. Default 60000. */
@@ -74,9 +76,11 @@ export interface ServiceInstallationOptions {
  * The upgrade receipt a Host UI reads (`upgrade-receipt.json`):
  *
  * - `pending`: an upgrade or a rollback began and has not been confirmed.
- *   Only `recover()` resolves it, by restoring `from` with the snapshot
- *   taken for `to`. A rollback journals its target as `from`, so recover
- *   completes it.
+ *   It is written before the service is stopped, so it also covers a death
+ *   before the snapshot: `recover()` then starts `from` again without a
+ *   store restore. Only `recover()` resolves a pending receipt, by
+ *   restoring `from` with the snapshot taken for `to` when one exists. A
+ *   rollback journals its target as `from`, so recover completes it.
  * - `switched`: `to` runs and passed the health check.
  * - `rolled-back`: `from` runs again with its store snapshot; `code` says why.
  * - `failed`: nothing was switched (`code` and, for a store refusal,
@@ -107,11 +111,12 @@ export interface ServiceInstallation {
   /** Stages the payload as the first version, points `current` at it, installs and starts the service. */
   install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
   /**
-   * Stages the payload, stops the service, runs the candidate's precheck,
-   * snapshots the listed stores, switches `current` (the old one becomes
-   * `previous`), starts it and checks its health. A store refusal stops
-   * before the switch and restarts the old version; a failed health check
-   * restores the old version and its snapshot together.
+   * Stages the payload, writes the pending receipt, stops the service, runs
+   * the candidate's precheck, snapshots the listed stores, switches
+   * `current` (the old one becomes `previous`), starts it and checks its
+   * health. A store refusal stops before the switch and restarts the old
+   * version; a failed health check restores the old version and its snapshot
+   * together; a death after the receipt leaves `recover()` that work.
    */
   upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
   /**
@@ -234,6 +239,41 @@ export async function readServiceInstallationState(installRoot: string): Promise
 export function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation {
   const program = opts.program(path.join(path.resolve(opts.installRoot), 'current'));
   return serviceInstallationOver(opts, createManagedServiceLifecycle({ ...opts.service, program }, opts.lifecycle));
+}
+
+/** The live daemon's lifecycle, or `undefined` while its control socket does not answer. */
+async function liveDaemonLifecycle(storeDir: string, productId: string): Promise<DaemonLifecycle | undefined> {
+  const connection = await connectControlClient({ storeDir, productId });
+  if (!connection.ok) return undefined;
+  try {
+    return (await connection.client.request<ControlStatusResult>('status')).lifecycle;
+  } catch {
+    return undefined;
+  } finally {
+    connection.client.close();
+  }
+}
+
+/**
+ * The default health check: polls the daemon's control socket until its own
+ * lifecycle reports a live run ({@link daemonLifecycleHealth}). A
+ * service-enrollment daemon that has not paired yet is up, not a failed
+ * upgrade, so `awaiting-enrollment` is healthy; a halted or crashed run fails
+ * at once (#1097).
+ */
+export function defaultServiceHealthCheck(options: { storeDir: string; productId: string }): (signal: AbortSignal) => Promise<void> {
+  return async (signal) => {
+    while (!signal.aborted) {
+      const lifecycle = await liveDaemonLifecycle(options.storeDir, options.productId);
+      if (lifecycle !== undefined) {
+        const health = daemonLifecycleHealth(lifecycle);
+        if (health === 'up') return;
+        if (health === 'ended') throw new Error(`the daemon is ${lifecycle.phase}`);
+      }
+      await delay(250);
+    }
+    throw new Error('the daemon did not report a live lifecycle in time');
+  };
 }
 
 /**
@@ -392,35 +432,12 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     const timeout = setTimeout(() => controller.abort(), opts.healthTimeoutMs ?? 60_000);
     try {
       await lifecycle.start();
-      await (opts.healthCheck ?? defaultHealthCheck)(controller.signal);
+      await (opts.healthCheck ?? defaultServiceHealthCheck({ storeDir, productId: opts.productId }))(controller.signal);
       return true;
     } catch {
       return false;
     } finally {
       clearTimeout(timeout);
-    }
-  }
-
-  async function defaultHealthCheck(signal: AbortSignal): Promise<void> {
-    while (!signal.aborted) {
-      const phase = await daemonPhase();
-      if (phase === 'running') return;
-      if (phase === 'halted' || phase === 'crashed') throw new Error(`the daemon is ${phase}`);
-      await delay(250);
-    }
-    throw new Error('the daemon did not report running in time');
-  }
-
-  /** The live daemon's lifecycle phase, or `undefined` while its control socket does not answer. */
-  async function daemonPhase(): Promise<ControlStatusResult['lifecycle']['phase'] | undefined> {
-    const connection = await connectControlClient({ storeDir, productId: opts.productId });
-    if (!connection.ok) return undefined;
-    try {
-      return (await connection.client.request<ControlStatusResult>('status')).lifecycle.phase;
-    } catch {
-      return undefined;
-    } finally {
-      connection.client.close();
     }
   }
 
@@ -479,7 +496,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   async function restore(from: string, to: string, previous: string | undefined, code?: ServiceInstallationErrorCode): Promise<ServiceUpgradeReceipt> {
     const gate = await stopQuiescent();
     try {
-      await restoreSnapshot(to);
+      // The write-ahead pending receipt may predate the snapshot: nothing was
+      // switched or rewritten then, so `from` only needs to run again.
+      if (await exists(path.join(snapshotsDir, to, 'snapshot.json'))) await restoreSnapshot(to);
       await setPointer('current', from);
       await setPointer('previous', previous);
     } finally {
@@ -513,7 +532,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       const previous = await readPointer('previous');
       const kept = previous === undefined ? {} : { previous };
 
-      // Until the pending receipt is written nothing has changed: any failure restarts `from`.
+      // Write-ahead: the service may be stopped from here on, so the intent
+      // must be on disk before the stop. A death between this write and the
+      // switch leaves recover() a pending receipt to finish or roll back;
+      // before it, nothing has changed and a failure restarts `from`.
+      await writeReceipt({ state: 'pending', from, to, ...kept });
       let stores: StoreCompatibility[];
       try {
         const gate = await stopQuiescent();
@@ -524,7 +547,6 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
             throw new ServiceInstallationError(refused.verdict === 'new-path-repair' ? 'store_repair_required' : 'store_rejected', stores);
           }
           await snapshot(to, stores);
-          await writeReceipt({ state: 'pending', from, to, ...kept, stores });
         } finally {
           await gate.release();
         }
