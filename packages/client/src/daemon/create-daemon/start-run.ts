@@ -15,6 +15,7 @@ import { assertJournalEnvelopeProtocol } from '../daemon-errors';
 import { resultReplyFailureFromState } from '../result-reply-failure';
 import { loginShellSnapshot, serviceEnvironmentStatus } from '../../login-shell-environment';
 import { detectRuntimes } from './support';
+import { recordRuntimeVersionChanges } from '../runtime-versions-store';
 import { BlobClient } from '../blob-client';
 import type { DaemonScope } from './scope';
 
@@ -214,19 +215,32 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   observer.noteEnvironmentResolved({ ...daemonState.resolvedEnvironment }, daemonState.environmentResolvedAt);
 
   daemonState.blobLifecycleAbort = new AbortController();
-  const [{ runtimes, harnesses, observations }, blobClient] = await Promise.all([
+  const [{ runtimes, harnesses, observations, runtimeUnavailable }, blobClient] = await Promise.all([
     detectRuntimes(adapters),
     Promise.resolve(new BlobClient(config.serverUrl, daemonState.auth, { signal: daemonState.blobLifecycleAbort.signal })),
   ]);
+  // #1103 §2.6: compare this run with the stored baseline before replacing
+  // it. The comparison is local-only; the file and the tokens never reach
+  // hello, presence, audit or a record. A write/read failure is a warning, not
+  // a start failure.
+  const versionChanges = await recordRuntimeVersionChanges({ storeDir, observations });
+  for (const [id, change] of versionChanges) {
+    const direction = change.direction === 'downgrade' ? 'DOWNGRADED' : change.direction;
+    console.warn(`[byok/client] runtime ${id} version ${direction}: ${change.fromVersion} -> ${change.toVersion}${change.direction === 'downgrade' ? ' (the installed CLI may have been replaced)' : ''}`);
+  }
   // Startup owns detection: local status keeps every outcome, while
   // conn.hello advertises only available runtimes. Neither re-probes.
-  daemonState.runtimeObservations = observations.map(observation => Object.freeze({ ...observation }));
+  daemonState.runtimeObservations = observations.map(observation => Object.freeze({
+    ...observation,
+    ...(versionChanges.get(observation.id) === undefined ? {} : { versionChange: versionChanges.get(observation.id)! }),
+  }));
   observer.noteRuntimesDetected(daemonState.runtimeObservations.map(observation => ({ ...observation })));
   daemonState.detectedRuntimeFacts = runtimes;
+  daemonState.detectedRuntimeUnavailable = runtimeUnavailable;
   const agentMemoryIntentBackend = await provenAgentMemoryIntentBackend();
   return {
     record, activeJournal, activePressureEngine, journalIdentity, resultReplyRecoveryTasks,
-    sealedRun, recordRecoveryFailure, runtimes, harnesses, blobClient, agentMemoryIntentBackend,
+    sealedRun, recordRecoveryFailure, runtimes, harnesses, runtimeUnavailable, blobClient, agentMemoryIntentBackend,
   };
 }
 

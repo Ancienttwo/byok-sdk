@@ -237,6 +237,9 @@ export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): str
       verdict?.state === 'block'
         ? `blockedBy=device-version-policy(matched=${verdict.matched},qualified=${verdict.qualifiedVersion})`
         : undefined,
+      r.versionChange !== undefined
+        ? `versionChange=${r.versionChange.direction}(${r.versionChange.fromVersion}->${r.versionChange.toVersion})`
+        : undefined,
       r.authPresent !== undefined ? `authPresent=${r.authPresent}` : undefined,
       `capabilities=${caps.length ? caps.join(',') : '(none)'}`,
     ].filter((part): part is string => Boolean(part));
@@ -345,7 +348,10 @@ function formatRuntimeObservations(runtimes: readonly RuntimeObservation[]): str
     // #1103: a blocked runtime is still "present", so the compact status line
     // must badge the one verdict that changes admission. allow/warn keep the
     // existing shape (the detailed `runtimes` lines carry every state).
-    return `${runtime.id}=${outcome}${runtime.versionVerdict?.state === 'block' ? ':blocked' : ''}`;
+    const change = runtime.versionChange === undefined
+      ? ''
+      : `:versionChange=${runtime.versionChange.direction}(${runtime.versionChange.fromVersion}->${runtime.versionChange.toVersion})`;
+    return `${runtime.id}=${outcome}${runtime.versionVerdict?.state === 'block' ? ':blocked' : ''}${change}`;
   }).join(' ') || '(none)';
 }
 

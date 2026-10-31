@@ -46,6 +46,11 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
   const runtimeVersionVerdicts = daemonState.runtimeObservations.flatMap((observation) => observation.versionVerdict === undefined
     ? []
     : [{ id: observation.id, versionVerdict: { ...observation.versionVerdict } }]);
+  // #1103 §2.6: the restart comparison travels the same way, so a pre-#1103
+  // client's strict observation parser keeps accepting `runtimes`.
+  const runtimeVersionChanges = daemonState.runtimeObservations.flatMap((observation) => observation.versionChange === undefined
+    ? []
+    : [{ id: observation.id, versionChange: { ...observation.versionChange } }]);
   return {
     localAgentRelease,
     pid: process.pid,
@@ -56,8 +61,9 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
     activeTasks,
     environment: { ...daemonState.resolvedEnvironment },
     ...(daemonState.environmentResolvedAt === undefined ? {} : { environmentResolvedAt: daemonState.environmentResolvedAt }),
-    runtimes: daemonState.runtimeObservations.map(({ versionVerdict: _versionVerdict, ...observation }) => ({ ...observation })),
+    runtimes: daemonState.runtimeObservations.map(({ versionVerdict: _versionVerdict, versionChange: _versionChange, ...observation }) => ({ ...observation })),
     ...(runtimeVersionVerdicts.length === 0 ? {} : { runtimeVersionVerdicts }),
+    ...(runtimeVersionChanges.length === 0 ? {} : { runtimeVersionChanges }),
     // M4 Phase 4 (part B.3): queue watermarks come from TaskRunner's own
     // active-task map (distinct from `observer.tasks()` above, which is
     // derived from the envelope feed) — see `TaskRunner.getQueueWatermarks`'s

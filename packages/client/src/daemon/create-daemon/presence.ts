@@ -158,6 +158,7 @@ export function runPresenceDiscovery(daemonScope: DaemonScope): void {
           clientVersion: localAgentRelease.version,
           protocolVersions: [PROTOCOL_VERSION],
           runtimes: daemonState.detectedRuntimeFacts,
+          runtimeUnavailable: daemonState.detectedRuntimeUnavailable,
           ...presenceCadence,
           onDegraded: (reason) => console.warn(`[byok/client] ${reason}`),
         });

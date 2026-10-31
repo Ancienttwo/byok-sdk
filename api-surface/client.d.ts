@@ -3661,7 +3661,7 @@ export declare function validateDaemonConfig(input: unknown, options: {
 }): DaemonConfigValidation;
 // ==== @byok-sdk/client dist/daemon/connection-manager.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import { type OutboundRefusalReason, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
+import { type OutboundRefusalReason, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type RuntimeUnavailableEntry, type ToolsetId } from '@byok-sdk/protocol';
 import { AuthManager } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import type { DaemonHaltReason } from './daemon-lifecycle';
@@ -3689,6 +3689,8 @@ export interface ConnectionManagerOptions {
     clientVersion?: string;
     runtimes: RuntimeInfo[];
     harnesses?: HarnessInfo[];
+    /** Strip-safe non-available projection from the same start snapshot (#1103 B2b). */
+    runtimeUnavailable?: readonly RuntimeUnavailableEntry[];
     /** Reads current sorted logical IDs from the validated local registry for every `conn.hello`. */
     getConfiguredToolsets?: () => readonly ToolsetId[];
     auth: AuthManager;
@@ -4072,7 +4074,7 @@ import type { StoragePressureState } from './retention/pressure';
 import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
-import type { RuntimeObservation } from '../runtime-detection';
+import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detection';
 import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentReport } from '../runtime/environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
@@ -4340,6 +4342,11 @@ export interface ControlStatusResult {
     runtimeVersionVerdicts?: Array<{
         readonly id: string;
         readonly versionVerdict: RuntimeVersionVerdict;
+    }>;
+    /** #1103 §2.6: this run's restart comparison, same side-channel rule; absent from a pre-#1103 daemon. */
+    runtimeVersionChanges?: Array<{
+        readonly id: string;
+        readonly versionChange: RuntimeVersionChange;
     }>;
     /** Absent for a pre-#392 control peer. */
     environment?: ServiceEnvironmentStatus;
@@ -5856,7 +5863,7 @@ export type DaemonRecord = Extract<DaemonEvent, {
 } | {
     kind: 'runtimes-detected';
     ts: string;
-    runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict'>>;
+    runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict' | 'versionChange'>>;
 } | {
     kind: 'shutdown-requested';
     ts: string;
@@ -9188,6 +9195,7 @@ export interface InspectDaemonStoresInput {
 export declare function inspectDaemonStores(input: InspectDaemonStoresInput): Promise<readonly StoreCompatibility[]>;
 // ==== @byok-sdk/client dist/diagnostics/types.d.ts ====
 import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeVersionVerdict } from '../types';
+import type { RuntimeVersionChange } from '../runtime-detection';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
@@ -9228,6 +9236,8 @@ export interface DiagnosticsSnapshot {
         versionPresent: boolean;
         /** #1103: the effective version policy's verdict. Absent from an older daemon, or a custom adapter with no policy. */
         versionVerdict?: RuntimeVersionVerdict;
+        /** #1103 §2.6: the local restart comparison. Absent on a first run, an unchanged version or an older daemon. */
+        versionChange?: RuntimeVersionChange;
         authPresent?: boolean;
         steer: boolean;
         resume: boolean;
@@ -9490,7 +9500,7 @@ export { applyLoginShellEnvironment } from './lifecycle/service-environment';
 export { serviceEnvironmentStatus } from './login-shell-environment';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
 export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from './runtime/environment';
-export type { RuntimeObservation } from './runtime-detection';
+export type { RuntimeObservation, RuntimeVersionChange, RuntimeVersionChangeDirection } from './runtime-detection';
 export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
@@ -12325,6 +12335,15 @@ export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleas
 import type { RuntimeId } from '@byok-sdk/protocol';
 import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeVersionVerdict } from './types';
+/** How one restart changed an installed runtime's version token (#1103 §2.6). */
+export type RuntimeVersionChangeDirection = 'upgrade' | 'downgrade' | 'changed' | 'unknown';
+/** The local, restart-only version comparison; never sent on the wire or into audit. */
+export interface RuntimeVersionChange {
+    readonly fromVersion: string;
+    readonly toVersion: string;
+    readonly direction: RuntimeVersionChangeDirection;
+    readonly observedAt: string;
+}
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
 export interface RuntimeObservation {
     id: string;
@@ -12345,6 +12364,13 @@ export interface RuntimeObservation {
      * must not infer `allow` from its absence.
      */
     versionVerdict?: RuntimeVersionVerdict;
+    /**
+     * #1103 §2.6: this run's comparison with the last stored token. Local-only
+     * (status, doctor, startup stderr); never on the wire, in audit or in a
+     * support bundle. Absent on a first run, an unchanged version, an
+     * unavailable runtime, or an older daemon.
+     */
+    versionChange?: RuntimeVersionChange;
     authPresent?: boolean;
     steer: boolean;
     resume: boolean;
@@ -12362,6 +12388,15 @@ export declare function parseRuntimeObservations(value: unknown): RuntimeObserva
  * @internal
  */
 export declare function attachRuntimeVersionVerdicts(observations: RuntimeObservation[], value: unknown): RuntimeObservation[];
+/**
+ * Merge the control status's additive {@link RuntimeVersionChange} channel
+ * (#1103 §2.6) into observations. The change travels outside `runtimes` so a
+ * pre-#1103 client's strict observation parser still accepts that array; a
+ * missing or malformed side channel means "unknown", never "unchanged".
+ *
+ * @internal
+ */
+export declare function attachRuntimeVersionChanges(observations: RuntimeObservation[], value: unknown): RuntimeObservation[];
 /** Reject legacy/mixed authoring shapes; copy only validated, known facts. */
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
 /**

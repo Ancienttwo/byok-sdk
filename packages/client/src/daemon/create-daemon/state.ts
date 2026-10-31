@@ -1,5 +1,5 @@
 import type { CapabilityDeclaration } from '@byok-sdk/core';
-import type { CapabilityFlag, RuntimeInfo } from '@byok-sdk/protocol';
+import type { CapabilityFlag, RuntimeInfo, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
 import type { ServiceEnvironmentStatus } from '../../login-shell-environment';
 import type { RuntimeObservation } from '../../runtime-detection';
 import type { AgentEgressController } from '../agent-egress-controller';
@@ -126,6 +126,8 @@ export interface DaemonState {
   // asynchronous to start(); only Agent offers with host toolsets wait for it.
   presencePublisher: PresencePublisher | undefined;
   detectedRuntimeFacts: readonly RuntimeInfo[];
+  /** #1103 B2b: the strip-safe `runtimeUnavailable` projection of this run's detection. */
+  detectedRuntimeUnavailable: readonly RuntimeUnavailableEntry[];
   runtimeObservations: RuntimeObservation[];
   resolvedEnvironment: ServiceEnvironmentStatus;
   environmentResolvedAt: string | undefined;

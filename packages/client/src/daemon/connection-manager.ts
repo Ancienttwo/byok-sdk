@@ -10,6 +10,7 @@ import {
   type CapabilityFlag,
   type Envelope,
   type RuntimeInfo,
+  type RuntimeUnavailableEntry,
   type ToolsetId,
 } from '@byok-sdk/protocol';
 import { AuthManager } from './auth-manager';
@@ -49,7 +50,7 @@ function isCursorEnvelopeType(type: Envelope['type']): boolean {
 function createConnectionHelloEnvelope(
   opts: Pick<
     ConnectionManagerOptions,
-    'deviceId' | 'productId' | 'capabilities' | 'clientVersion' | 'runtimes' | 'harnesses' | 'getConfiguredToolsets'
+    'deviceId' | 'productId' | 'capabilities' | 'clientVersion' | 'runtimes' | 'harnesses' | 'runtimeUnavailable' | 'getConfiguredToolsets'
   >,
   getCursor: () => number | undefined,
 ): Envelope {
@@ -62,6 +63,7 @@ function createConnectionHelloEnvelope(
     clientVersion: opts.clientVersion,
     runtimes: opts.runtimes,
     harnesses: opts.harnesses,
+    runtimeUnavailable: opts.runtimeUnavailable === undefined ? undefined : [...opts.runtimeUnavailable],
     configuredToolsets: configuredToolsets === undefined ? undefined : [...configuredToolsets],
     cursor: getCursor(),
   });
@@ -76,6 +78,8 @@ export interface ConnectionManagerOptions {
   clientVersion?: string;
   runtimes: RuntimeInfo[];
   harnesses?: HarnessInfo[];
+  /** Strip-safe non-available projection from the same start snapshot (#1103 B2b). */
+  runtimeUnavailable?: readonly RuntimeUnavailableEntry[];
   /** Reads current sorted logical IDs from the validated local registry for every `conn.hello`. */
   getConfiguredToolsets?: () => readonly ToolsetId[];
   auth: AuthManager;

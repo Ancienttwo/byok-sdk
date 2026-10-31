@@ -1017,7 +1017,9 @@ no names.
 
 `RuntimeDetectResult` has one required `kind`: `available`, `not-found`,
 `not-executable`, `timeout`, `probe-failed`, or `refused`. Only `available` may carry the
-existing optional `version` and `authPresent` facts. Custom adapters must author
+existing optional `version` and `authPresent` facts, plus an optional
+`versionVerdict: { state: 'allow' | 'warn' | 'block', qualifiedVersion, matched? }`
+from the effective version policy. Custom adapters must author
 this shape; old `present` shapes, mixed authorities, unknown kinds, and malformed
 metadata are rejected. There is no compatibility translation.
 
@@ -1044,6 +1046,21 @@ and closes its read pipes at that deadline, resolving at execFile completion.
 Other resolver/process failures are `probe-failed`. Failure results contain no
 paths, raw error messages, stdout or stderr. Existing authentication observation
 semantics and credential custody remain unchanged.
+
+Runtime version policy is one pure data object on an adapter descriptor
+(`versionPolicy`: a `qualifiedVersion`, an `unqualified` behavior, and optional
+`exact`/`prefix` allow/warn/block lists). A descriptor default, an adapter
+constructor option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
+objects that replace one another wholesale through one resolver; fields are
+never merged. The default policy preserves today's behavior exactly: Codex,
+Grok and Hermes warn on an unqualified version, Claude and Pi do not warn, and
+no default policy blocks. Only a Host layer may configure a block; a descriptor
+default that carries one is rejected as `invalid_version_policy`
+(`block_requires_host`). A block is enforced locally before claim and produces
+`task.decline.code: runtime_unavailable`, `runtimeUnavailable.cause:
+version_blocked` and `retryable: false`. This is not a minimum-version check:
+the SDK does not install, repair or self-update a runtime, and an unqualified
+version is still admitted unless the Host configured a block.
 
 Pi `authPresent` is pi's own login state, on the installed and `sdkHelperHost`
 paths alike. It is `true` when any provider credential env-var name the pinned pi reads
@@ -1074,16 +1091,47 @@ claim to cancel arbitrary custom work because `detect()` has no cancellation
 contract.
 
 Daemon runtime registration and task selection validate the same shape and use
-only `available` where they previously consumed presence. No failure-kind field
-is added to wire presence or task envelopes, and no decline/retry/permission
-policy is derived from these diagnostic categories. Startup detection is cached per daemon run; task admission still observes the
+only `available` where they previously consumed presence. By default no
+failure-kind field is added to wire presence or task envelopes, and no
+decline/retry/permission policy is derived from these diagnostic categories.
+The one exception is a **Host-configured version block**: before claim, the
+daemon declines the offer with `task.decline.code: runtime_unavailable`,
+`runtimeUnavailable.cause: version_blocked` and `retryable: false`. No other
+diagnostic category maps to a decline, retry or permission policy, and a
+device without a Host-configured policy behaves exactly as before.
+
+Discovery carries strip-safe additions: `conn.hello.runtimes[].versionPolicy`,
+`conn.hello.harnesses[].versionPolicy`, `conn.hello.runtimeUnavailable[]`,
+and the same projections on `PUT /byok/presence`. Presence keeps the frozen
+`RuntimeId` identity domain; a custom harness's policy and cause travel only
+on `conn.hello.harnesses[]` / `conn.hello.runtimeUnavailable[]`. An older
+receiver drops every new field. Absence means unknown, never `allow` or
+`available`; a Host must not infer a verdict or availability from a missing
+field and must not infer a block from a missing `runtimes[]` entry.
+
+Startup detection is cached per daemon run; task admission still observes the
 adapter independently. No periodic probing, minimum versions, repair commands
 or self-update are added.
 
 `DaemonStatus` and control `status` carry `runtimes: RuntimeObservation[]`,
 including unavailable outcomes, plus the closed `environment` projection.
+An observation carries the optional local `versionVerdict` and
+`versionChange` (#1103); the control-socket shape keeps both outside the
+strict observation array (additive `runtimeVersionVerdicts` /
+`runtimeVersionChanges` channels) so a pre-#1103 client still parses it.
 `environment-resolved` is emitted once after ownership is acquired and before
 runtime detection; audit uses the same content-free flat shape as #409.
+
+Restart version changes are local-only evidence: the daemon compares each
+present runtime's normalized token with `<storeDir>/runtime-versions.json`,
+warns once on startup stderr, and reports `versionChange` in local
+`status`/`doctor`. Upgrades and downgrades both notify; a downgrade uses the
+stronger wording because the installed CLI may have been replaced. A first run
+records a baseline without notifying; a corrupt or unreadable file warns once
+and never blocks startup. Version text and the change never enter
+`conn.hello`, presence, `audit.jsonl` or `DaemonRecord`, and offline
+`doctor` reports unknown instead of reconstructing a previous version.
+
 For the next minor, a newer CLI reports unknown when an older daemon omits
 these fields. It never translates `runtimeIds` into availability or executes
 a local probe to fill the missing daemon facts.
@@ -2108,7 +2156,9 @@ Unix endpoint, and starting notification sequence. The operator must configure
 each native session with that same member's Team MCP grant; the relay does not
 infer or establish that mapping. The relay reads the Codex version and warns
 when it is not the qualified `codex-cli 0.160.0`; it does not refuse, and the
-receipt parser still fails closed on a changed receipt shape. This is a client CLI binding,
+receipt parser still fails closed on a changed receipt shape. This remains
+warn-only and is not affected by a Host-configured version block, because the
+relay is not TaskRunner admission. This is a client CLI binding,
 not a TaskRunner, native-session lifecycle owner, or new package boundary.
 
 Authenticated `team_notifications.snapshot` accepts the existing member-context
@@ -3764,10 +3814,14 @@ native identity drift dispose the process. Opt-in launches Claude with
 `--dangerously-skip-permissions`; the pass-through above keeps that mode from
 becoming a second permission system.
 
-Codex is qualified against CLI 0.160.0. As in OAR, the version is read, never
-gated: Codex updates itself, so any other version is admitted with a
-`runtime_version_unqualified` advisory. Native contracts are probed instead
-(app-server presence). Every session, native opt-in included, opens/resumes
+Codex is qualified against CLI 0.160.0. As in OAR, the version is read and by
+default does not gate: Codex updates itself, so any other version is admitted
+with a `runtime_version_unqualified` advisory. Native contracts are probed
+instead (app-server presence). The only exception is a Host-configured version
+policy whose block matches the installed version: that version is declined
+before claim with `runtime_unavailable` / `version_blocked`, non-retryably.
+This is not a minimum-version check, and the SDK never installs, repairs or
+self-updates the runtime. Every session, native opt-in included, opens/resumes
 with `approvalPolicy: never`, so Codex never asks for tool permission. The sandbox is `danger-full-access` by default, as in
 OAR. `DaemonConfig.codexSandbox` selects `read-only` or `workspace-write`, or
 `inherit` to pass no sandbox override so the user's own `config.toml` applies.
@@ -4127,6 +4181,28 @@ on the lexical path; `config check` reports the value a daemon resolves.
 `HostLayoutInputError` (`code: 'host_layout_input_invalid'`, `field`).
 Existing stores are not moved. `DeviceStore.defaultDir` is removed; a Host
 that called it uses `resolveHostLayout(...).storeDir`.
+
+### Runtime version policy
+
+`DaemonConfig.runtimes.<id>.versionPolicy` (pi/claude/codex; other adapters
+after #1094 extends the block) is a complete `RuntimeVersionPolicy` object:
+`qualifiedVersion`, `unqualified` (`allow`/`warn`/`block`), and optional
+`allow`/`warn`/`block` lists of `exact` or component-boundary `prefix` specs.
+It **replaces** the adapter's descriptor default and any constructor option
+wholesale through `resolveRuntimeVersionPolicy`; fields are never merged.
+`block` and `unqualified: 'block'` are Host-only: a descriptor default carrying
+either is rejected with `invalid_version_policy` (`block_requires_host`), as
+are an empty spec, a prefix that does not end in `.`, a duplicate spec, or a
+missing `qualifiedVersion`/`unqualified`. `config check` reports the issue;
+adapter construction fails rather than silently dropping the policy.
+`DaemonEffectiveConfig.runtimes[].versionPolicy` reports the effective policy
+only — the installed version and verdict belong to `status`/`doctor`, because
+`config check` starts no runtime. Unknown fields remain warnings (Q4'). The
+generated field table and error catalog are in
+[device setup](device-setup.md#configuration).
+
+The default policy changes no behavior, so migration needs no action; only a
+Host that deliberately configures a block changes admission.
 
 ### Removed DaemonConfig fields
 

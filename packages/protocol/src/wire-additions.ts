@@ -129,6 +129,15 @@ const PLAIN_ROWS: readonly WireAddition[] = [
     { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: `harnesses[].capabilities.${field}` },
     { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: `capabilities.${field}` },
   ]),
+  // Version policy and runtime-unavailable discovery (#1103 B2b). All are
+  // strip-safe: an older receiver drops them, and absence means unknown — it
+  // must never be read as `allow` or `available`. Presence keeps the built-in
+  // runtime identity domain; harness policy travels only on conn.hello.
+  { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].versionPolicy' },
+  { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].versionPolicy' },
+  { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimeUnavailable' },
+  { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimes[].versionPolicy' },
+  { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimeUnavailable' },
   // Presence carries the conn.hello capability matrix (#1103); a published cloud drops it.
   { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimes[].capabilities' },
   // Optional MCP event identity is observability only; older receivers may omit it.

@@ -61,6 +61,21 @@ function formatDoctorLines(diagnostics: DoctorDiagnostics, logDir: string, envir
       if (verdict.state === 'block') details.push('blocked by the device version policy');
       return [details.join(' ')];
     }),
+    // #1103 §2.6: a restart comparison is local-only evidence. Both upgrade
+    // and downgrade are reported; a downgrade says why it matters.
+    ...snapshot.runtimes.flatMap((runtime) => {
+      const change = runtime.versionChange;
+      if (change === undefined) return [];
+      const details = [
+        `runtime-version-change: ${runtime.idHash}`,
+        `direction=${change.direction}`,
+        `from=${change.fromVersion}`,
+        `to=${change.toVersion}`,
+        `observedAt=${change.observedAt}`,
+      ];
+      if (change.direction === 'downgrade') details.push('the installed CLI may have been replaced');
+      return [details.join(' ')];
+    }),
   ];
   for (const check of snapshot.checks) lines.push(`check ${check.id}: ${check.status} (${check.summary})`);
   // #1097: where the daemon log and the service manager's redirect files are, and how large.

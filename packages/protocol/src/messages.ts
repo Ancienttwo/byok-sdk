@@ -63,6 +63,28 @@ function isWithinInlineByteLimit(value: string): boolean {
 export const RuntimeIdSchema = z.enum(RUNTIME_IDS);
 export type RuntimeId = z.infer<typeof RuntimeIdSchema>;
 
+/**
+ * The append-only pre-claim runtime-unavailable cause (#1103 D6). An unknown
+ * well-formed token is accepted and kept verbatim, so a newer device can add
+ * one without a protocol bump; {@link readRuntimeUnavailableCause} is the
+ * typed reading.
+ */
+const RuntimeUnavailableCauseSchema = z.union([
+  z.enum(RUNTIME_UNAVAILABLE_CAUSES),
+  unrecognizedToken(RUNTIME_UNAVAILABLE_CAUSES),
+]);
+
+/** A runtime-unavailable cause as this version understands it; unknown reads as `unknown` with the raw token kept. */
+export type RuntimeUnavailableCauseReading =
+  | { readonly cause: RuntimeUnavailableCause }
+  | { readonly cause: 'unknown'; readonly reportedCause: string };
+
+export function readRuntimeUnavailableCause(cause: string): RuntimeUnavailableCauseReading {
+  return (RUNTIME_UNAVAILABLE_CAUSES as readonly string[]).includes(cause)
+    ? { cause: cause as RuntimeUnavailableCause }
+    : { cause: 'unknown', reportedCause: cause };
+}
+
 /** Wire-safe protocol version number: bounded before JSON reaches a store or comparison. */
 export const ProtocolVersionNumberSchema = z
   .number()
@@ -105,6 +127,18 @@ export const RuntimeCapabilitiesSchema = z.object({
 export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
 
 /**
+ * The effective version policy's verdict, projected for discovery (#1103 D8).
+ * Only `state` and the policy's qualified token travel: `matched` and the
+ * allow/warn/block spec lists stay local. Absence means **unknown**, never
+ * `allow`: an older daemon or an adapter without a policy omits the field.
+ */
+export const RuntimeVersionPolicyProjectionSchema = z.object({
+  state: z.enum(['allow', 'warn', 'block']),
+  qualifiedVersion: z.string().min(1).max(256).optional(),
+});
+export type RuntimeVersionPolicyProjection = z.infer<typeof RuntimeVersionPolicyProjectionSchema>;
+
+/**
  * Runtime detection info reported in `conn.hello`. Supersedes the M0
  * `agents: unknown` field (M1 gap #4): typed, so the server no longer has to
  * best-effort-normalize an untyped blob.
@@ -115,6 +149,8 @@ export const RuntimeInfoSchema = z.object({
   authPresent: z.boolean().optional(),
   /** Optional: older daemons omit this entirely (pre-freeze addition). */
   capabilities: RuntimeCapabilitiesSchema.optional(),
+  /** #1103 D8: strip-safe discovery projection; absent means unknown. */
+  versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
@@ -126,10 +162,31 @@ export const HarnessInfoSchema = z.object({
   id: HarnessIdSchema,
   version: z.string().min(1).max(128).optional(),
   capabilities: RuntimeCapabilitiesSchema,
+  /** #1103 D8: the same version-policy projection a built-in runtime carries. */
+  versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
 });
 export type HarnessInfo = z.infer<typeof HarnessInfoSchema>;
 export const HarnessInventorySchema = z.array(HarnessInfoSchema).max(64)
   .refine(values => new Set(values.map(value => value.id)).size === values.length, 'duplicate harness identity');
+
+/**
+ * One non-available runtime or harness in `conn.hello.runtimeUnavailable`
+ * (#1103 D8). The id stays in the existing identity domain: a built-in
+ * runtime id or a custom harness id. The cause is the append-only
+ * vocabulary, and `retryable` carries the same per-cause default a
+ * `task.decline` reports. Absence of the whole array means unknown, never
+ * "everything is available".
+ */
+export const RuntimeUnavailableEntrySchema = z.object({
+  id: z.union([RuntimeIdSchema, HarnessIdSchema]),
+  cause: RuntimeUnavailableCauseSchema,
+  retryable: z.boolean(),
+});
+export type RuntimeUnavailableEntry = z.infer<typeof RuntimeUnavailableEntrySchema>;
+
+/** Bounded, unique by id: 16 entries are more runtimes than one daemon hosts. */
+const RuntimeUnavailableListSchema = z.array(RuntimeUnavailableEntrySchema).max(16)
+  .refine(values => new Set(values.map(value => value.id)).size === values.length, 'duplicate runtime-unavailable identity');
 
 /** Maximum logical toolsets one daemon may advertise as locally configured. */
 export const CONFIGURED_TOOLSETS_MAX_ITEMS = 64;
@@ -218,6 +275,8 @@ export const ConnHelloPayloadSchema = z.object({
   /** Runtimes detected on this device (M1 gap #4; replaces `agents`). */
   runtimes: z.array(RuntimeInfoSchema).optional(),
   harnesses: HarnessInventorySchema.optional(),
+  /** #1103 D8: non-available runtimes and harnesses; strip-safe and absent means unknown. */
+  runtimeUnavailable: RuntimeUnavailableListSchema.optional(),
   /** Validated logical IDs configured on this device; definitions and secrets stay local. */
   configuredToolsets: ConfiguredToolsetsSchema.optional(),
   /**
@@ -956,11 +1015,6 @@ export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
  * know is accepted and kept verbatim, so the decline is still recorded.
  * {@link readDeclineCode} is the typed reading.
  */
-const RuntimeUnavailableCauseSchema = z.union([
-  z.enum(RUNTIME_UNAVAILABLE_CAUSES),
-  unrecognizedToken(RUNTIME_UNAVAILABLE_CAUSES),
-]);
-
 /**
  * The typed reason a runtime was unavailable before claim (#1103 D6).
  * Append-only: an unknown well-formed cause is accepted and kept verbatim
@@ -975,17 +1029,6 @@ const RuntimeUnavailableSchema = z.object({
 }).refine((value) => value.code === undefined || value.cause === 'environment_unavailable', {
   message: 'only environment_unavailable carries an environment code',
 });
-
-/** A runtime-unavailable cause as this version understands it; unknown reads as `unknown` with the raw token kept. */
-export type RuntimeUnavailableCauseReading =
-  | { readonly cause: RuntimeUnavailableCause }
-  | { readonly cause: 'unknown'; readonly reportedCause: string };
-
-export function readRuntimeUnavailableCause(cause: string): RuntimeUnavailableCauseReading {
-  return (RUNTIME_UNAVAILABLE_CAUSES as readonly string[]).includes(cause)
-    ? { cause: cause as RuntimeUnavailableCause }
-    : { cause: 'unknown', reportedCause: cause };
-}
 
 const DeclineFields = z.object({
   ...NO_SEALED_MEMBER,

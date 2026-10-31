@@ -26,7 +26,9 @@
  */
 import {
   BYOK_PRESENCE_PATH,
+  RUNTIME_IDS,
   type RuntimeInfo,
+  type RuntimeUnavailableEntry,
   type ToolsetId,
 } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
@@ -80,6 +82,13 @@ export interface PresencePublisherOptions {
   clientVersion?: string;
   /** The same runtime/auth snapshot sent in `conn.hello`. */
   runtimes?: readonly RuntimeInfo[];
+  /**
+   * The same non-available snapshot sent in `conn.hello`, filtered to built-in
+   * runtime ids (#1103 D8). Presence's id domain is frozen to `RuntimeId`: a
+   * harness id would fail an older server's whole-body decode, so harness
+   * policy travels only on `conn.hello.harnesses[]`.
+   */
+  runtimeUnavailable?: readonly RuntimeUnavailableEntry[];
   /** The same protocol-version snapshot sent in `conn.hello`. */
   protocolVersions?: readonly number[];
   /** Heartbeat cadence. Must sit strictly between {@link PresencePublisherOptions.minimumIntervalMs} and {@link PresencePublisherOptions.ttlMs}. */
@@ -172,12 +181,20 @@ export class PresencePublisher {
             ...(this.opts.runtimes === undefined
               ? {}
               : {
-                  runtimes: this.opts.runtimes.map(({ id, version, authPresent, capabilities }) => ({
+                  runtimes: this.opts.runtimes.map(({ id, version, authPresent, capabilities, versionPolicy }) => ({
                     id,
                     ...(version === undefined ? {} : { version }),
                     ...(authPresent === undefined ? {} : { authPresent }),
                     ...(capabilities === undefined ? {} : { capabilities }),
+                    ...(versionPolicy === undefined ? {} : { versionPolicy }),
                   })),
+                }),
+            ...(this.opts.runtimeUnavailable === undefined
+              ? {}
+              : {
+                  runtimeUnavailable: this.opts.runtimeUnavailable
+                    .filter(({ id }) => (RUNTIME_IDS as readonly string[]).includes(id))
+                    .map(({ id, cause, retryable }) => ({ id, cause, retryable })),
                 }),
           }),
         },

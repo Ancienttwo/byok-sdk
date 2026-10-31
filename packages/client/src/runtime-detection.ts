@@ -3,6 +3,17 @@ import type { RuntimeId } from '@byok-sdk/protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeVersionVerdict } from './types';
 
+/** How one restart changed an installed runtime's version token (#1103 §2.6). */
+export type RuntimeVersionChangeDirection = 'upgrade' | 'downgrade' | 'changed' | 'unknown';
+
+/** The local, restart-only version comparison; never sent on the wire or into audit. */
+export interface RuntimeVersionChange {
+  readonly fromVersion: string;
+  readonly toVersion: string;
+  readonly direction: RuntimeVersionChangeDirection;
+  readonly observedAt: string;
+}
+
 /** Content-free observation of one configured adapter, including unavailable outcomes. */
 export interface RuntimeObservation {
   id: string;
@@ -23,6 +34,13 @@ export interface RuntimeObservation {
    * must not infer `allow` from its absence.
    */
   versionVerdict?: RuntimeVersionVerdict;
+  /**
+   * #1103 §2.6: this run's comparison with the last stored token. Local-only
+   * (status, doctor, startup stderr); never on the wire, in audit or in a
+   * support bundle. Absent on a first run, an unchanged version, an
+   * unavailable runtime, or an older daemon.
+   */
+  versionChange?: RuntimeVersionChange;
   authPresent?: boolean;
   steer: boolean;
   resume: boolean;
@@ -60,13 +78,14 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
   for (const raw of value) {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
     const r = raw as Record<string, unknown>;
-    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'versionVerdict', 'authPresent', 'steer', 'resume'].includes(key))
+    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'versionVerdict', 'versionChange', 'authPresent', 'steer', 'resume'].includes(key))
       || typeof r.id !== 'string' || r.id.length === 0 || r.id.length > 128 || /[\r\n\t]/.test(r.id)
       || typeof r.steer !== 'boolean' || typeof r.resume !== 'boolean'
       || r.present !== (r.outcome === 'available')
       || (r.version !== undefined && (typeof r.version !== 'string' || r.version.length > 256 || /[\r\n\t]/.test(r.version)))
       || (r.qualifiedVersion !== undefined && (typeof r.qualifiedVersion !== 'string' || r.qualifiedVersion.length > 256 || /[\r\n\t]/.test(r.qualifiedVersion)))
-      || (r.versionVerdict !== undefined && !isVersionVerdict(r.versionVerdict))) return undefined;
+      || (r.versionVerdict !== undefined && !isVersionVerdict(r.versionVerdict))
+      || (r.versionChange !== undefined && !isVersionChange(r.versionChange))) return undefined;
     try {
       validateRuntimeDetectResult({
         kind: r.outcome,
@@ -79,6 +98,7 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
       });
     } catch { return undefined; }
     const verdict = r.versionVerdict as RuntimeVersionVerdict | undefined;
+    const change = r.versionChange as RuntimeVersionChange | undefined;
     observations.push({
       ...r,
       ...(verdict === undefined ? {} : {
@@ -87,6 +107,14 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
           qualifiedVersion: verdict.qualifiedVersion,
           ...(verdict.matched === undefined ? {} : { matched: verdict.matched }),
         }) as RuntimeVersionVerdict,
+      }),
+      ...(change === undefined ? {} : {
+        versionChange: Object.freeze({
+          fromVersion: change.fromVersion,
+          toVersion: change.toVersion,
+          direction: change.direction,
+          observedAt: change.observedAt,
+        }),
       }),
     } as unknown as RuntimeObservation);
   }
@@ -129,6 +157,37 @@ export function attachRuntimeVersionVerdicts(observations: RuntimeObservation[],
   });
 }
 
+/**
+ * Merge the control status's additive {@link RuntimeVersionChange} channel
+ * (#1103 §2.6) into observations. The change travels outside `runtimes` so a
+ * pre-#1103 client's strict observation parser still accepts that array; a
+ * missing or malformed side channel means "unknown", never "unchanged".
+ *
+ * @internal
+ */
+export function attachRuntimeVersionChanges(observations: RuntimeObservation[], value: unknown): RuntimeObservation[] {
+  if (!Array.isArray(value)) return observations;
+  const changes = new Map<string, RuntimeVersionChange>();
+  for (const raw of value) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const entry = raw as Record<string, unknown>;
+    if (Object.keys(entry).some((key) => !['id', 'versionChange'].includes(key))) continue;
+    if (typeof entry.id !== 'string' || entry.id.length === 0 || entry.id.length > 128 || /[\r\n\t]/.test(entry.id)) continue;
+    if (!isVersionChange(entry.versionChange)) continue;
+    changes.set(entry.id, Object.freeze({
+      fromVersion: entry.versionChange.fromVersion,
+      toVersion: entry.versionChange.toVersion,
+      direction: entry.versionChange.direction,
+      observedAt: entry.versionChange.observedAt,
+    }));
+  }
+  if (changes.size === 0) return observations;
+  return observations.map((observation) => {
+    const change = changes.get(observation.id);
+    return change === undefined ? observation : { ...observation, versionChange: change };
+  });
+}
+
 const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable', 'platform_unsupported']);
 const ENVIRONMENT_CODES: readonly string[] = SERVICE_ENVIRONMENT_UNAVAILABLE_CODES;
 const MAX_VERSION_CHARS = 256;
@@ -142,6 +201,17 @@ function isAdvisory(value: unknown): value is RuntimeDetectionAdvisory {
   const advisory = value as Record<string, unknown>;
   return Object.keys(advisory).length === 2 && advisory.reason === 'runtime_version_unqualified'
     && isVersionText(advisory.qualifiedVersion);
+}
+
+function isVersionChange(value: unknown): value is RuntimeVersionChange {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const change = value as Record<string, unknown>;
+  if (Object.keys(change).some((key) => !['fromVersion', 'toVersion', 'direction', 'observedAt'].includes(key))) return false;
+  if (!isVersionText(change.fromVersion) || !isVersionText(change.toVersion)) return false;
+  if (change.direction !== 'upgrade' && change.direction !== 'downgrade'
+    && change.direction !== 'changed' && change.direction !== 'unknown') return false;
+  return typeof change.observedAt === 'string' && change.observedAt.length > 0
+    && change.observedAt.length <= 64 && !Number.isNaN(Date.parse(change.observedAt));
 }
 
 function isVersionVerdict(value: unknown): value is RuntimeVersionVerdict {

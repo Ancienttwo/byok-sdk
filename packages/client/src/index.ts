@@ -545,7 +545,7 @@ export { applyLoginShellEnvironment } from './lifecycle/service-environment';
 export { serviceEnvironmentStatus } from './login-shell-environment';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from './runtime/environment';
 export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnvironmentPolicy, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentReport, RuntimeEnvironmentSource } from './runtime/environment';
-export type { RuntimeObservation } from './runtime-detection';
+export type { RuntimeObservation, RuntimeVersionChange, RuntimeVersionChangeDirection } from './runtime-detection';
 export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 
 // Finding F7: the storeDir-hardening chokepoint (`DeviceStore.save()`/

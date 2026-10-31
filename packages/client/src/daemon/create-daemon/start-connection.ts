@@ -13,14 +13,14 @@ import type { StartEnvelopes } from './start-envelopes';
  * The last stage of `runStartUnderLease` (#926), synchronous: builds this
  * start's connection manager — its transport, settlement and inbound routing.
  */
-export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals & StartEnvelopes, 'record' | 'capabilities' | 'runtimes' | 'harnesses' | 'handleAgentHomeProjectionEnvelope' | 'handleAgentInputPreparationEnvelope' | 'handleProviderProvisioningEnvelope' | 'handleAgentMemoryIntentEnvelope' | 'handleE2eeKeyPackageEnvelope' | 'handleAgentEgressEnvelope' | 'handleAgentContentReadEnvelope' | 'activePressureEngine' | 'journalIdentity' | 'activeJournal' | 'refuseOverBoundEnvelope' | 'resultReplyRecoveryTasks' | 'sendEnvelope' | 'opened' | 'replayRecoveryTerminals' | 'replaceRefusedTerminal' | 'sealedRun'>) {
+export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals & StartEnvelopes, 'record' | 'capabilities' | 'runtimes' | 'harnesses' | 'runtimeUnavailable' | 'handleAgentHomeProjectionEnvelope' | 'handleAgentInputPreparationEnvelope' | 'handleProviderProvisioningEnvelope' | 'handleAgentMemoryIntentEnvelope' | 'handleE2eeKeyPackageEnvelope' | 'handleAgentEgressEnvelope' | 'handleAgentContentReadEnvelope' | 'activePressureEngine' | 'journalIdentity' | 'activeJournal' | 'refuseOverBoundEnvelope' | 'resultReplyRecoveryTasks' | 'sendEnvelope' | 'opened' | 'replayRecoveryTerminals' | 'replaceRefusedTerminal' | 'sealedRun'>) {
   const {
     daemonState, config, localAgentRelease, toolsetRegistry, cursorStore, observer, terminalCommits,
     overrides, outbound, setLifecycle, runPresenceDiscovery, halted, crashed, dispatchReliableRecord,
     operationalHealth,
   } = daemonScope;
   const {
-    record, capabilities, runtimes, harnesses, handleAgentHomeProjectionEnvelope,
+    record, capabilities, runtimes, harnesses, runtimeUnavailable, handleAgentHomeProjectionEnvelope,
     handleAgentInputPreparationEnvelope, handleProviderProvisioningEnvelope,
     handleAgentMemoryIntentEnvelope, handleE2eeKeyPackageEnvelope, handleAgentEgressEnvelope,
     handleAgentContentReadEnvelope, activePressureEngine, journalIdentity, activeJournal,
@@ -35,6 +35,7 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
     clientVersion: localAgentRelease.version,
     runtimes,
     harnesses,
+    runtimeUnavailable,
     getConfiguredToolsets: () => toolsetRegistry.snapshot().configuredToolsets,
     auth: daemonState.auth,
     cursorStore,
