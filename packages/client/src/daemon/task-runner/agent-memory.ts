@@ -3,7 +3,7 @@
 import { isAgentMemorySecureFilesystemAvailable, snapshotAndProjectAgentMemory, type AgentMemoryTaskContext } from '../agent-memory';
 import { openAgentMemoryFilesystemHelper } from '../agent-memory-fs-helper';
 import type { ActiveTask } from './support';
-import { errorMessage } from './support';
+import { errorMessage, taskFinalizing } from './support';
 import type { TaskRunner } from '../task-runner';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 
@@ -15,7 +15,7 @@ export function activeMemoryContext(this: TaskRunner, contextToken: string): Age
   const active = this['tasks'].get(registered.taskId);
   if (
     active === undefined ||
-    active.finalizationStarted ||
+    taskFinalizing(this, active.taskId) ||
     this['deps'].tenantId === undefined ||
     active.agentRef.agentId !== registered.agentRef.agentId ||
     active.agentRef.profileRevision !== registered.agentRef.profileRevision ||

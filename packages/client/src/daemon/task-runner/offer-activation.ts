@@ -11,6 +11,7 @@ import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferHeld, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
 import { hostFor } from './host';
+import { beginTerminal, drainApprovals } from './finish';
 
 export interface OfferActivationInput
   extends Pick<OfferRequest, 'readerAttempt'>,
@@ -182,18 +183,28 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     }
     const reason = host.current(taskId)?.cancel.reason ?? markerReason;
     this['pendingCancelled'].delete(taskId);
-    host.dispatchSync({ type: 'runtime.started', taskId, atMs: Date.now() });
+    // Register the task first: the plan (and C6's effects) must find it.
     this['startupOwnership'].transferToActive(taskId);
     this['tasks'].set(taskId, active);
     held.owner = 'active';
-    await this['settleSemanticTerminal'](active, async () => {
-      active.eventPump ??= this['pump'](active);
-      await this['interruptBounded'](active);
-      await this['persistAgentTerminalEvidence'](active, 'cancelled', reason);
-      return createEnvelope('task.cancelled', {
-        reason, ...this['terminalInferenceUsagePayload'](active), ...this['agentTerminalPayload'](active),
-      }, { taskId });
+    const receipt = beginTerminal.call(this, active, {
+      kind: 'cancelled',
+      cause: 'cancelled',
+      reason,
+      retryable: false,
+      prepare: async () => {
+        active.eventPump ??= this['pump'](active);
+        await this['interruptBounded'](active);
+        await this['persistAgentTerminalEvidence'](active, 'cancelled', reason);
+        return createEnvelope('task.cancelled', {
+          reason, ...this['terminalInferenceUsagePayload'](active), ...this['agentTerminalPayload'](active),
+        }, { taskId });
+      },
     });
+    void host.dispatch({ type: 'runtime.started', taskId, atMs: Date.now() })
+      .catch((error: unknown) => host.rejectTerminal(taskId, error));
+    void drainApprovals.call(this, taskId);
+    await receipt;
     return;
   }
 

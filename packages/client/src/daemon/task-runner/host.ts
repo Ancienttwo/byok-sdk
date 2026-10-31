@@ -7,6 +7,7 @@
 // the approval path. Effects whose IO still lives in the staged offer
 // pipeline (and every S6 effect) are recorded as `legacy` and not executed
 // here; the phase adapter performs them exactly as before.
+import type { Envelope } from '@byok-sdk/protocol';
 import {
   createRunnerState,
   reduce,
@@ -18,6 +19,8 @@ import {
   type ReduceResult,
   type RunnerStateV1,
   type TaskStateV1,
+  type TerminalCause,
+  type TerminalKind,
 } from './state';
 import type { TaskRunner } from '../task-runner';
 
@@ -58,6 +61,40 @@ export interface HostApprovalRequest {
   timer?: ReturnType<typeof setTimeout>;
   /** Removes this request's abort listener once it settles. */
   detach?: () => void;
+}
+
+/**
+ * One task's first terminal decision. The reducer picks kind/reason/retryable
+ * synchronously at `terminal.requested` (first-terminal-wins); this side table
+ * holds the IO half the reducer must not serialize — the envelope-building
+ * closure and its cached bytes — plus the receipt every legacy caller awaits.
+ */
+export interface HostTerminalPlan {
+  readonly kind: TerminalKind;
+  readonly cause: TerminalCause;
+  readonly reason?: string;
+  readonly retryable?: boolean;
+  /** Interrupt + evidence + exact envelope construction, as the legacy adapter ran it. */
+  readonly prepare: () => Promise<Envelope>;
+}
+
+export interface HostTerminalIntent {
+  readonly taskId: string;
+  readonly plan: HostTerminalPlan;
+  envelope?: Envelope;
+  receipt?: Promise<boolean>;
+  settle?: (ok: boolean) => void;
+  reject?: (error: unknown) => void;
+  settled: boolean;
+  /** Result of the cleanup barrier, read by the T15 completion. */
+  finishOk?: boolean;
+}
+
+/** The daemon-authored required-message body awaiting its disposition (S6). */
+export interface HostMessageCompletion {
+  readonly finalOutput: string;
+  readonly document?: unknown;
+  readonly failureReason?: string;
 }
 
 export interface HostEffectContext {
@@ -143,6 +180,8 @@ export class TaskRunnerHost {
   private readonly mailboxes = new Map<string, Mailbox>();
   private readonly offers = new Map<string, HostOfferContext>();
   private readonly approvalRequests = new Map<string, HostApprovalRequest>();
+  private readonly terminalIntents = new Map<string, HostTerminalIntent>();
+  private readonly messageCompletions = new Map<string, HostMessageCompletion>();
   private readonly handlers = new Map<EffectKind, HostEffectHandler>();
   private readonly audit: HostAuditEntry[] = [];
   private generation = 0;
@@ -286,6 +325,101 @@ export class TaskRunnerHost {
     return true;
   }
 
+  /* ------------------------- S6 terminal side table ----------------------- */
+
+  /**
+   * Registers the FIRST terminal plan for a task. The receipt is shared by every
+   * competing caller; `winner` is true only for the caller that registered the
+   * plan and therefore owns dispatching the selecting event. A retry after a
+   * failed close/commit reuses the same plan and cached bytes but gets a fresh
+   * receipt and settles the old one.
+   */
+  beginTerminalIntent(
+    taskId: string,
+    plan: HostTerminalPlan,
+  ): { readonly intent: HostTerminalIntent; readonly receipt: Promise<boolean>; readonly winner: boolean } {
+    const existing = this.terminalIntents.get(taskId);
+    if (existing !== undefined) {
+      if (!existing.settled && existing.receipt !== undefined) {
+        return { intent: existing, receipt: existing.receipt, winner: false };
+      }
+      existing.receipt = this.newTerminalReceipt(existing);
+      return { intent: existing, receipt: existing.receipt, winner: false };
+    }
+    const intent: HostTerminalIntent = { taskId, plan, settled: false };
+    this.terminalIntents.set(taskId, intent);
+    intent.receipt = this.newTerminalReceipt(intent);
+    return { intent, receipt: intent.receipt, winner: true };
+  }
+
+  terminalIntent(taskId: string): HostTerminalIntent | undefined {
+    return this.terminalIntents.get(taskId);
+  }
+
+  terminalReceipt(taskId: string): Promise<boolean> | undefined {
+    return this.terminalIntents.get(taskId)?.receipt;
+  }
+
+  /** True once the current attempt settled (failed/complete); false while in flight. */
+  terminalSettled(taskId: string): boolean | undefined {
+    return this.terminalIntents.get(taskId)?.settled;
+  }
+
+  /** Fresh receipt for a close/commit retry; the plan and envelope bytes stay. */
+  retryTerminal(taskId: string): Promise<boolean> | undefined {
+    const intent = this.terminalIntents.get(taskId);
+    if (intent === undefined) return undefined;
+    if (!intent.settled && intent.receipt !== undefined) return intent.receipt;
+    intent.receipt = this.newTerminalReceipt(intent);
+    return intent.receipt;
+  }
+
+  /** Settles the current receipt exactly once; a stale second call is a no-op. */
+  settleTerminal(taskId: string, ok: boolean): void {
+    const intent = this.terminalIntents.get(taskId);
+    if (intent === undefined || intent.settled) return;
+    intent.settled = true;
+    const settle = intent.settle;
+    intent.settle = undefined;
+    intent.reject = undefined;
+    settle?.(ok);
+  }
+
+  rejectTerminal(taskId: string, error: unknown): void {
+    const intent = this.terminalIntents.get(taskId);
+    if (intent === undefined || intent.settled) return;
+    intent.settled = true;
+    const reject = intent.reject;
+    intent.settle = undefined;
+    intent.reject = undefined;
+    reject?.(error);
+  }
+
+  private newTerminalReceipt(intent: HostTerminalIntent): Promise<boolean> {
+    intent.settled = false;
+    intent.finishOk = undefined;
+    return new Promise<boolean>((resolve, reject) => {
+      intent.settle = resolve;
+      intent.reject = reject;
+    });
+  }
+
+  /* ----------------------- S6 message completion gate --------------------- */
+
+  setMessageCompletion(taskId: string, completion: HostMessageCompletion): void {
+    this.messageCompletions.set(taskId, completion);
+  }
+
+  messageCompletion(taskId: string): HostMessageCompletion | undefined {
+    return this.messageCompletions.get(taskId);
+  }
+
+  clearMessageCompletion(taskId: string): HostMessageCompletion | undefined {
+    const completion = this.messageCompletions.get(taskId);
+    this.messageCompletions.delete(taskId);
+    return completion;
+  }
+
   /** Ends an offer that never reached `active`; a retained state is archived. */
   endOffer(taskId: string): void {
     const task = this.tasks.get(taskId);
@@ -294,6 +428,8 @@ export class TaskRunnerHost {
     this.offers.delete(taskId);
     this.mailboxes.delete(taskId);
     this.dropApprovals(taskId, 'task is not currently active on this device');
+    this.terminalIntents.delete(taskId);
+    this.messageCompletions.delete(taskId);
   }
 
   /** Terminal cleanup: the per-task map is bounded even after a claimed task ends. */
@@ -304,6 +440,8 @@ export class TaskRunnerHost {
     this.offers.delete(taskId);
     this.mailboxes.delete(taskId);
     this.dropApprovals(taskId, 'task is not currently active on this device');
+    this.terminalIntents.delete(taskId);
+    this.messageCompletions.delete(taskId);
   }
 
   /** Whether a barrier (or an atomic group) currently owns this task's mailbox. */
@@ -435,12 +573,40 @@ export class TaskRunnerHost {
     const taskId = event.taskId;
     if (result.task !== undefined) this.tasks.set(result.task.taskId, result.task);
     else if (taskId !== undefined && event.type === 'offer.sealed_declined') this.tasks.delete(taskId);
+    if (taskId !== undefined) this.settleTerminalFromEvent(taskId, event, result);
     const pending = this.executeEffects(
       result.effects,
       event,
       { runner: result.runner, ...(result.task === undefined ? {} : { task: result.task }) },
     );
     return { result, ...(pending === undefined ? {} : { pending }) };
+  }
+
+  /**
+   * Terminal receipts settle on the reducer's own completion events, never on
+   * an adapter callback: T15 is the single finish authority, and a failed
+   * close/commit settles false so `retry.finalization` can retry that barrier
+   * with the same token and bytes.
+   */
+  private settleTerminalFromEvent(taskId: string, event: ReducerEvent, result: ReduceResult): void {
+    if (event.type === 'finish.completed') {
+      const intent = this.terminalIntents.get(taskId);
+      this.settleTerminal(taskId, intent?.finishOk !== false);
+      this.terminalIntents.delete(taskId);
+      this.endTask(taskId);
+      return;
+    }
+    if ((event.type === 'terminal.close' || event.type === 'terminal.commit') && event.ok === false) {
+      this.settleTerminal(taskId, false);
+    }
+    if (result.task === undefined && (event.type === 'terminal.requested' || event.type === 'cancel.received')) {
+      // A selecting event that never reached a terminal row must not strand
+      // the caller's receipt.
+      const intent = this.terminalIntents.get(taskId);
+      if (intent !== undefined && intent.settled === false && result.disposition === 'dropped') {
+        this.settleTerminal(taskId, true);
+      }
+    }
   }
 
   private executeEffects(
@@ -481,8 +647,7 @@ export class TaskRunnerHost {
       if (offer?.sendDecline !== undefined) {
         offer.sendDecline(envelope, offer);
         this.record(envelope, 'executed');
-        this.completeAtomically(envelope, taskId);
-        return undefined;
+        return this.completeAtomically(envelope, taskId);
       }
     }
     if (envelope.effect.kind === 'send.claim') {
@@ -493,14 +658,12 @@ export class TaskRunnerHost {
         // state journaled-but-unsent exactly like the legacy path did.
         offer.sendClaim(envelope, offer);
         this.record(envelope, 'executed');
-        this.completeAtomically(envelope, taskId);
-        return undefined;
+        return this.completeAtomically(envelope, taskId);
       }
     }
     if (envelope.effect.kind === 'audit' || envelope.effect.kind === 'log') {
       this.record(envelope, 'executed');
-      this.completeAtomically(envelope, taskId);
-      return undefined;
+      return this.completeAtomically(envelope, taskId);
     }
     const handler = this.handlers.get(envelope.effect.kind);
     if (handler === undefined) {
@@ -520,13 +683,18 @@ export class TaskRunnerHost {
     if (!isPromise(outcome)) {
       // A synchronous handler may supply its own completion (S5 mints the
       // next approvalId for `dispatch.next_approval` this way); the atomic
-      // group still reduces it inside this same turn.
-      this.completeAtomically(envelope, taskId, outcome?.completion);
-      return undefined;
+      // group still reduces it inside this same turn. A completion that itself
+      // opens a barrier (T7 -> T9 -> await.close) hands that barrier back to
+      // the mailbox instead of re-entering the drain recursively.
+      return this.completeAtomically(envelope, taskId, outcome?.completion);
     }
     // A barrier completion goes to the mailbox tail; an envelope completion
     // is the same contract for a barrier that declares one.
-    const declared = envelope.completion;
+    const declared = envelope.completion === undefined
+      ? undefined
+      : envelope.effect.token !== undefined && envelope.completion.token === undefined
+        ? { ...envelope.completion, token: envelope.effect.token }
+        : envelope.completion;
     return outcome.then((result) => {
       if (result?.completion !== undefined) return result;
       return declared === undefined ? result : { completion: declared };
@@ -542,18 +710,18 @@ export class TaskRunnerHost {
     envelope: EffectEnvelope,
     taskId: string | undefined,
     override?: ReducerEventTemplate,
-  ): void {
-    const template = override ?? envelope.completion;
-    if (template === undefined) return;
+  ): Promise<void | HostEffectResult> | undefined {
+    const declared = override ?? envelope.completion;
+    if (declared === undefined) return undefined;
+    const template = envelope.effect.token !== undefined && declared.token === undefined
+      ? { ...declared, token: envelope.effect.token }
+      : declared;
     const event = this.normalize({
       ...template,
       ...(taskId === undefined ? {} : { taskId }),
       atMs: Date.now(),
     } as ReducerEvent);
     const applied = this.applyEvent(event);
-    if (applied.pending !== undefined) {
-      throw new Error('TaskRunnerHost: an atomic completion produced a barrier effect');
-    }
     this.audit.push({
       taskId: envelope.effect.taskId,
       effectId: envelope.id,
@@ -561,6 +729,7 @@ export class TaskRunnerHost {
       mode: envelope.mode,
       outcome: 'completion',
     });
+    return applied.pending;
   }
 
   /**
