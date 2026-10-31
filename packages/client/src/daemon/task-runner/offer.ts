@@ -4,6 +4,7 @@ import type { ExecutionScratch } from '../retention/scratch';
 import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home';
 import type { OfferPhaseContext } from './support';
+import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
 import { offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
@@ -262,8 +263,8 @@ function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOff
   }
   // Every offer past this point is bound to exactly one Agent.
   const agentRef: AgentRef = offeredRef;
-  const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']): void => {
-    this['decline'](taskId, admission, reason, retryable, agentRef, code);
+  const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code'], runtimeUnavailable?: RuntimeUnavailableAdmission): void => {
+    this['decline'](taskId, admission, reason, retryable, agentRef, code, runtimeUnavailable);
   };
   const sessionRef = offeredSessionRef(payload);
   const homeAccess = offeredHomeAccess(payload);

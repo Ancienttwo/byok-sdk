@@ -3,6 +3,7 @@
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 import { awaitAdmission } from '../admission-wait';
 import { observeRuntimeDetection } from '../../runtime-detection';
+import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../../types';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment';
 import type { ExecutionScratch } from '../retention/scratch';
@@ -39,7 +40,10 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   }
   if (admissionWithdrawn()) return undefined;
   if (!pick.ok) {
-    decline(pick.reason, pick.retryable, pick.versionBlock === undefined ? undefined : 'runtime_version_blocked');
+    // The open code names the family; the nested cause is the machine-readable
+    // classification (#1103 D6). An older server strips the nested field and
+    // still records the code.
+    decline(pick.reason, pick.retryable, pick.runtimeUnavailable === undefined ? undefined : 'runtime_unavailable', pick.runtimeUnavailable);
     return undefined;
   }
   if (readerAttempt && pick.descriptor.capabilities.durablePi === true) {
@@ -61,7 +65,10 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     ({ env: runtimeEnv } = await pick.adapter.runtimeEnvironment());
   } catch (error) {
     if (!(error instanceof RuntimeEnvironmentUnavailableError)) throw error;
-    decline(`runtime environment unavailable: ${error.reason}`, false);
+    decline(`runtime environment unavailable: ${error.reason}`, false, 'runtime_unavailable', {
+      cause: 'environment_unavailable',
+      code: error.reason,
+    });
     return undefined;
   }
   if (admissionWithdrawn()) return undefined;
@@ -226,12 +233,18 @@ export async function pickAdapter(
       return {
         ok: false,
         reason: `runtime "${requestedRuntime}" is not in this device's runtime allowlist`,
-        retryable: false,
+        retryable: runtimeUnavailableRetryable('runtime_not_allowed'),
+        runtimeUnavailable: { cause: 'runtime_not_allowed' },
       };
     }
     const adapter = this['deps'].adapters.find((a) => a.descriptor.id === requestedRuntime);
     if (!adapter) {
-      return { ok: false, reason: `unknown runtime "${requestedRuntime}"`, retryable: false };
+      return {
+        ok: false,
+        reason: `unknown runtime "${requestedRuntime}"`,
+        retryable: runtimeUnavailableRetryable('runtime_not_configured'),
+        runtimeUnavailable: { cause: 'runtime_not_configured' },
+      };
     }
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
     if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) {
@@ -252,19 +265,22 @@ export async function pickAdapter(
       return {
         ok: false,
         reason: `runtime "${requestedRuntime}" version ${token} is blocked by the device version policy`,
-        retryable: false,
-        versionBlock: { cause: 'version_blocked' },
+        retryable: runtimeUnavailableRetryable('version_blocked'),
+        runtimeUnavailable: { cause: 'version_blocked' },
       };
     }
-    // Another device may support this platform, as it may have the runtime installed.
-    if (detected.kind === 'refused' && detected.reason === 'platform_unsupported') {
-      return { ok: false, reason: `platform_unsupported: runtime "${requestedRuntime}" does not support ${process.platform}`, retryable: true };
-    }
+    // Another device may support this platform, as it may have the runtime
+    // installed. The display text stays as it was; the cause is the typed
+    // classification, never parsed back out of the text.
     if (detected.kind !== 'available') {
+      const runtimeUnavailable = runtimeUnavailableForDetection(detected);
       return {
         ok: false,
-        reason: `runtime "${requestedRuntime}" is not installed/available on this device`,
-        retryable: true,
+        reason: detected.kind === 'refused' && detected.reason === 'platform_unsupported'
+          ? `platform_unsupported: runtime "${requestedRuntime}" does not support ${process.platform}`
+          : `runtime "${requestedRuntime}" is not installed/available on this device`,
+        retryable: runtimeUnavailableRetryable(runtimeUnavailable.cause),
+        runtimeUnavailable,
       };
     }
     return { ok: true, adapter, descriptor };
@@ -276,14 +292,20 @@ export async function pickAdapter(
   // order (which stays whatever `buildDefaultAdapters`/the embedder built
   // it as — see `ALL_RUNTIME_IDS`'s doc comment, `create-daemon.ts`).
   const candidates = orderByPreference(eligible, this['deps'].runtimePreference ?? DEFAULT_RUNTIME_PREFERENCE);
+  // Count candidates that pass the capability filters. A requirement no
+  // candidate can meet is a capability mismatch, not runtime unavailability
+  // (#1103 §3.2), so it keeps the free-text decline without a typed cause.
+  let capabilityEligible = 0;
   for (const adapter of candidates) {
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
     if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
     if (requiresMcpToolApprovals && descriptor.mcpToolApprovals !== true) continue;
+    capabilityEligible += 1;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // Auto selection skips a blocked candidate and keeps the candidate order.
     if (detected.kind === 'available' && detected.versionVerdict?.state !== 'block') return { ok: true, adapter, descriptor };
   }
+  const capabilityMismatch = (requiresMcpToolsets || requiresMcpToolApprovals) && eligible.length > 0 && capabilityEligible === 0;
   return {
     ok: false,
     reason: requiresMcpToolApprovals
@@ -291,6 +313,7 @@ export async function pickAdapter(
       : requiresMcpToolsets
       ? 'no available runtime on this device can project required MCP toolsets'
       : 'no available runtime on this device',
-    retryable: true,
+    retryable: runtimeUnavailableRetryable('none_available'),
+    ...(capabilityMismatch ? {} : { runtimeUnavailable: { cause: 'none_available' as const } }),
   };
 }

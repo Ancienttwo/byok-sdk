@@ -302,15 +302,16 @@ observability data, but FAIL-CLOSED for control/security data:
   log line — silently ignoring what you don't understand yet is safe.
 - **Tolerated (open device vocabularies, #1121):** a device -> Host
   vocabulary a newer device may extend — `task.fail.failure.class`,
-  `task.decline.code` and a denied `agent.content.receipt` `reason` — accepts
-  any well-formed token (`[a-z][a-z0-9_-]{0,63}`) it does not know and keeps
-  it verbatim, so the report is still recorded. Hosts read it as `unknown`
-  with the raw token beside it (`readTaskFailure` → `reportedClass`,
-  `readDeclineCode` → `reportedCode`); cloud `readTaskResult` and embedded
-  task results carry those readings. A failure class it does not know may
-  carry fields this version does not know either; they are kept too.
-  Message types, decisions and outcomes that select a payload shape stay
-  closed.
+  `task.decline.code`, `task.decline.runtimeUnavailable.cause` and a denied
+  `agent.content.receipt` `reason` — accepts any well-formed token
+  (`[a-z][a-z0-9_-]{0,63}`) it does not know and keeps it verbatim, so the
+  report is still recorded. Hosts read it as `unknown` with the raw token
+  beside it (`readTaskFailure` → `reportedClass`, `readDeclineCode` →
+  `reportedCode`, `readRuntimeUnavailableCause` → `reportedCause`); cloud
+  `readTaskResult` and embedded task results carry those readings. A failure
+  class it does not know may carry fields this version does not know either;
+  they are kept too. Message types, decisions and outcomes that select a
+  payload shape stay closed.
 - **Fail-closed (control/security):** `instruction` rejects any shape it
   doesn't recognize outright — there is no passthrough-unknown fallback,
   unlike `AgentEventSchema`. A payload that would change what a runtime is
@@ -589,7 +590,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.steer` | S→D | **required** | **required** | `text` | `TaskHandle.steer()` while `Running` |
 | `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `agentRef?`, `runtime?` (M5, additive — §3.1), `capabilities?` (S0, additive — §11.5) | Daemon accepts an offer (idempotent CAS) |
 | `task.started` | D→S | **required** | optional | `{}` | Daemon actually starts the runtime session — `Claimed → Running` |
-| `task.decline` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `code?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
+| `task.decline` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `code?`, `runtimeUnavailable?` (additive — §3.2) | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId` (required — §5.3) | A session or the control socket requested approval (§5) |
@@ -2034,6 +2035,21 @@ preserve it verbatim in the canonical envelope.
 
 Landed additive minor: `task.decline.code` (#471) was an optional v2 field,
 registered as strip-safe in `WIRE_ADDITIONS`. It is part of the v3 baseline.
+
+A runtime that is unavailable before claim uses the open code
+`runtime_unavailable` and, when this version knows why, an optional
+`runtimeUnavailable: { cause, code? }` (#1103 D6). `cause` is the
+machine-readable classification from the append-only
+`RUNTIME_UNAVAILABLE_CAUSES` vocabulary; `reason` stays display text and is
+never parsed back into a cause. `code` is present only with
+`environment_unavailable` and carries the login-shell capture code (#1095).
+The nested field is strip-safe: an older server drops it and still records the
+open `runtime_unavailable` code, reading the code as `unknown` with
+`reportedCode` when it does not know it. A receiver that does not know a cause
+reads it as `unknown` with `reportedCause`. The default retryable value is
+per cause (for example `version_blocked` and `environment_unavailable` are
+non-retryable; `none_available` is retryable); `retryable` remains one
+boolean and never a device self-healing promise.
 
 Both decline branches accept `admission` (§3.1, which says which declines
 carry it). It is plaintext on a sealed decline: only `reason` moves into the

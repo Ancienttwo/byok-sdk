@@ -136,6 +136,10 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   // Daemon to server.
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure', capability: 'runtime-failure-class', advertisedBy: 'server' },
+  // Typed pre-claim runtime-unavailable cause (#1103 B2a). An older server
+  // drops the nested field and still records the open `runtime_unavailable`
+  // code; the cause never changes what the receiver executes.
+  { kind: 'envelope', rule: 'strip-safe', surface: 'task.decline', field: 'runtimeUnavailable' },
   // Relative token lifetime (#1114). A published device drops it and keeps
   // reading `expiresAt`, which the Host still sends.
   { kind: 'http', rule: 'strip-safe', surface: 'TokenResponse', field: 'expiresIn' },

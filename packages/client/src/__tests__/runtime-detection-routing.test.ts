@@ -79,10 +79,73 @@ it.each(['explicit', 'automatic'] as const)('real TaskRunner %s selection declin
   server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', ...(mode === 'explicit' ? { runtime: 'codex' as const } : {}) },
     { taskId: `refuse-${mode}`, seq: server.nextSeq() }));
   const declined = await server.waitFor(e => e.type === 'task.decline');
-  expect(declined.payload).toMatchObject({ retryable: true }); // diagnostic reason does not rewrite task policy
+  expect(declined.payload).toMatchObject({
+    retryable: true, // diagnostic reason does not rewrite task policy
+    code: 'runtime_unavailable',
+    runtimeUnavailable: { cause: mode === 'explicit' ? 'app_server_unavailable' : 'none_available' },
+  });
   expect(vi.mocked(adapter.detect).mock.calls.length).toBe(before + 1);
   expect(adapter.startCalls).toHaveLength(0);
 });
+it('maps every explicit detection failure to its typed cause and retryable default', async () => {
+  const cfg = await config(); const server = await TestServer.start(); servers.push(server); cfg.serverUrl = server.url;
+  const adapter = new StubRuntimeAdapter('codex');
+  const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); daemons.push(daemon);
+  await daemon.pair('pairing-code'); await daemon.start();
+  const cases = [
+    [{ kind: 'not-found' } as const, 'not_installed', true],
+    [{ kind: 'not-executable' } as const, 'not_executable', true],
+    [{ kind: 'timeout' } as const, 'probe_timeout', true],
+    [{ kind: 'probe-failed' } as const, 'probe_failed', true],
+    [{ kind: 'refused', reason: 'app_server_unavailable' } as const, 'app_server_unavailable', true],
+    [{ kind: 'refused', reason: 'acp_unavailable' } as const, 'acp_unavailable', true],
+    [{ kind: 'refused', reason: 'platform_unsupported' } as const, 'platform_unsupported', true],
+    [{ kind: 'refused', reason: 'runtime_environment_unavailable', code: 'timeout' } as const, 'environment_unavailable', false],
+  ] as const;
+  for (const [detection, cause, retryable] of cases) {
+    adapter.detect = async () => detection;
+    const taskId = `cause-${cause}`;
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', runtime: 'codex' }, { taskId, seq: server.nextSeq() }));
+    const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === taskId);
+    expect(declined.payload).toMatchObject({ code: 'runtime_unavailable', retryable, runtimeUnavailable: { cause } });
+    if (cause === 'environment_unavailable') {
+      expect((declined.payload as { runtimeUnavailable?: { code?: string } }).runtimeUnavailable?.code).toBe('timeout');
+    }
+  }
+  expect(adapter.startCalls).toHaveLength(0);
+});
+
+it('types allowlist and unknown-runtime declines without changing their text or retryability', async () => {
+  const cfg = await config(); cfg.runtimeAllowlist = ['codex', 'claude'];
+  const server = await TestServer.start(); servers.push(server); cfg.serverUrl = server.url;
+  const adapter = new StubRuntimeAdapter('codex');
+  const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); daemons.push(daemon);
+  await daemon.pair('pairing-code'); await daemon.start();
+  const cases = [
+    ['pi', 'runtime_not_allowed', 'is not in this device\'s runtime allowlist'],
+    ['claude', 'runtime_not_configured', 'unknown runtime'],
+  ] as const;
+  for (const [requested, cause, text] of cases) {
+    const taskId = `policy-${cause}`;
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', runtime: requested }, { taskId, seq: server.nextSeq() }));
+    const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === taskId);
+    expect(declined.payload).toMatchObject({ code: 'runtime_unavailable', retryable: false, runtimeUnavailable: { cause } });
+    expect((declined.payload as { reason?: string }).reason).toContain(text);
+  }
+  expect(adapter.startCalls).toHaveLength(0);
+});
+
+it('reports none_available when automatic selection exhausts every candidate', async () => {
+  const cfg = await config(); const server = await TestServer.start(); servers.push(server); cfg.serverUrl = server.url;
+  const adapter = new StubRuntimeAdapter('codex', { kind: 'not-found' });
+  const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); daemons.push(daemon);
+  await daemon.pair('pairing-code'); await daemon.start();
+  server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start' }, { taskId: 'auto-none', seq: server.nextSeq() }));
+  const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === 'auto-none');
+  expect(declined.payload).toMatchObject({ code: 'runtime_unavailable', retryable: true, runtimeUnavailable: { cause: 'none_available' } });
+  expect(adapter.startCalls).toHaveLength(0);
+});
+
 it('projects finite refusal through status and public doctor without private information', async () => {
   const cfg = await config(); const adapter = refusingAdapter();
   const lines: string[] = []; const connectControl = async () => ({ ok: false as const, reason: 'offline' });

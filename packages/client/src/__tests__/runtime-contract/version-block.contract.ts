@@ -103,7 +103,9 @@ describe('runtime contract: synthetic Host version block (#1103)', () => {
     );
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === taskId);
-    expect(decline.payload).toMatchObject({ code: 'runtime_version_blocked', retryable: false });
+    expect(decline.payload).toMatchObject({
+      code: 'runtime_unavailable', retryable: false, runtimeUnavailable: { cause: 'version_blocked' },
+    });
     expect((decline.payload as { reason?: string }).reason).toContain('blocked by the device version policy');
     expect(server.received.some((envelope) => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
     expect(prepareCalls).toBe(0);

@@ -1,5 +1,6 @@
 import { type ResultReplyFailure } from './result-reply-failure';
 import type { RuntimeTaskInput } from '../types';
+import type { RuntimeUnavailableAdmission } from '../runtime-unavailable';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot } from './retention/scratch';
 import { StartupOwnership } from './startup-ownership';
@@ -1508,12 +1509,13 @@ export class TaskRunner {
   }
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
-  private decline(taskId: string, admission: OfferAdmissionTiming, reason: string, retryable: boolean, agentRef?: AgentRef, code?: TaskDeclinePayload['code']): void {
+  private decline(taskId: string, admission: OfferAdmissionTiming, reason: string, retryable: boolean, agentRef?: AgentRef, code?: TaskDeclinePayload['code'], runtimeUnavailable?: RuntimeUnavailableAdmission): void {
     const timings = admission.snapshot();
     this.deps.send(createEnvelope(
       'task.decline',
       {
         reason, retryable, ...(agentRef === undefined ? {} : { agentRef }), ...(code === undefined ? {} : { code }),
+        ...(runtimeUnavailable === undefined ? {} : { runtimeUnavailable }),
         ...(timings === undefined ? {} : { admission: timings }),
       },
       { taskId },

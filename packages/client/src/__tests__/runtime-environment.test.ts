@@ -172,7 +172,12 @@ describe('daemon wiring', () => {
     adapter.runtimeEnvironment = async () => { throw new RuntimeEnvironmentUnavailableError('timeout'); };
     server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'go' }, { taskId: 'env-declined', seq: server.nextSeq() }));
     const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'env-declined');
-    expect(decline.payload).toMatchObject({ reason: 'runtime environment unavailable: timeout' });
+    expect(decline.payload).toMatchObject({
+      reason: 'runtime environment unavailable: timeout',
+      code: 'runtime_unavailable',
+      retryable: false,
+      runtimeUnavailable: { cause: 'environment_unavailable', code: 'timeout' },
+    });
     expect(adapter.startCalls).toHaveLength(1);
   });
 

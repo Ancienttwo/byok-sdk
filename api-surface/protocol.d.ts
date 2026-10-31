@@ -1929,6 +1929,17 @@ export declare const AGENT_MEMORY_MAX_SNAPSHOT_BYTES: number;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 /** The frozen wire runtime ids. Any other adapter id is a custom harness (`harnessId`). */
 export declare const RUNTIME_IDS: readonly ["pi", "claude", "codex"];
+/**
+ * Why a runtime is unavailable before claim (#1103 D6). Append-only: a cause is
+ * never renamed, removed or given a new meaning. The wire reads an unknown
+ * well-formed token as `unknown` and keeps it verbatim (#1121), so a newer
+ * device can add one without a protocol bump. Names are snake_case, unlike the
+ * kebab-case detection kinds, because the mapping is explicit and never a
+ * string transformation.
+ */
+export declare const RUNTIME_UNAVAILABLE_CAUSES: readonly ["not_installed", "not_executable", "probe_timeout", "probe_failed", "app_server_unavailable", "acp_unavailable", "platform_unsupported", "environment_unavailable", "version_blocked", "runtime_not_configured", "runtime_not_allowed", "none_available"];
+/** One append-only `runtime_unavailable` cause. */
+export type RuntimeUnavailableCause = (typeof RUNTIME_UNAVAILABLE_CAUSES)[number];
 /** Maximum length of a served model name. */
 export declare const TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH = 160;
 // ==== @byok-sdk/protocol dist/e2ee-member.d.ts ====
@@ -3035,8 +3046,8 @@ export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_DE
 export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, ResultIssue, ResultDocumentFailureReason, ResultSchemaCheck, ResultOutcomeCheck, } from './result-schema';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
+export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, readRuntimeUnavailableCause, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, RuntimeUnavailableCauseReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -3867,6 +3878,7 @@ export declare const InputPreparationRejectionReasonSchema: z.ZodEnum<{
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;
 // ==== @byok-sdk/protocol dist/messages.d.ts ====
 import { z } from 'zod';
+import { type RuntimeUnavailableCause } from './constants';
 import { ProviderProvisioningAvailablePayloadSchema } from './provider-provisioning';
 import { E2eeKeyPackageAvailablePayloadSchema } from './e2ee-member';
 import { type PlainJsonCheck } from './plain-json';
@@ -5239,6 +5251,14 @@ export declare const TaskStartedPayloadSchema: z.ZodObject<{}, z.core.$strip>;
 export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
 declare const DECLINE_CODES: readonly ["agent_home_writer_busy", "agent_home_reader_busy", "sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch"];
 export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
+/** A runtime-unavailable cause as this version understands it; unknown reads as `unknown` with the raw token kept. */
+export type RuntimeUnavailableCauseReading = {
+    readonly cause: RuntimeUnavailableCause;
+} | {
+    readonly cause: 'unknown';
+    readonly reportedCause: string;
+};
+export declare function readRuntimeUnavailableCause(cause: string): RuntimeUnavailableCauseReading;
 /** A decline code as this version understands it: one it does not know reads as `unknown`, its raw token kept. */
 export type TaskDeclineCodeReading = {
     readonly code: TaskDeclineCode;
@@ -5734,6 +5754,23 @@ export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>>;
+    runtimeUnavailable: z.ZodOptional<z.ZodObject<{
+        cause: z.ZodUnion<readonly [z.ZodEnum<{
+            acp_unavailable: "acp_unavailable";
+            app_server_unavailable: "app_server_unavailable";
+            environment_unavailable: "environment_unavailable";
+            none_available: "none_available";
+            not_executable: "not_executable";
+            not_installed: "not_installed";
+            platform_unsupported: "platform_unsupported";
+            probe_failed: "probe_failed";
+            probe_timeout: "probe_timeout";
+            runtime_not_allowed: "runtime_not_allowed";
+            runtime_not_configured: "runtime_not_configured";
+            version_blocked: "version_blocked";
+        }>, z.ZodString]>;
+        code: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
     admission: z.ZodOptional<z.ZodObject<{
         totalMs: z.ZodNumber;
         agentHomeWaitMs: z.ZodOptional<z.ZodNumber>;
@@ -5992,6 +6029,23 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
         sealed_open_failed: "sealed_open_failed";
         sealing_policy_mismatch: "sealing_policy_mismatch";
     }>, z.ZodString]>>;
+    runtimeUnavailable: z.ZodOptional<z.ZodObject<{
+        cause: z.ZodUnion<readonly [z.ZodEnum<{
+            acp_unavailable: "acp_unavailable";
+            app_server_unavailable: "app_server_unavailable";
+            environment_unavailable: "environment_unavailable";
+            none_available: "none_available";
+            not_executable: "not_executable";
+            not_installed: "not_installed";
+            platform_unsupported: "platform_unsupported";
+            probe_failed: "probe_failed";
+            probe_timeout: "probe_timeout";
+            runtime_not_allowed: "runtime_not_allowed";
+            runtime_not_configured: "runtime_not_configured";
+            version_blocked: "version_blocked";
+        }>, z.ZodString]>;
+        code: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
     admission: z.ZodOptional<z.ZodObject<{
         totalMs: z.ZodNumber;
         agentHomeWaitMs: z.ZodOptional<z.ZodNumber>;
@@ -6007,6 +6061,23 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>>;
+    runtimeUnavailable: z.ZodOptional<z.ZodObject<{
+        cause: z.ZodUnion<readonly [z.ZodEnum<{
+            acp_unavailable: "acp_unavailable";
+            app_server_unavailable: "app_server_unavailable";
+            environment_unavailable: "environment_unavailable";
+            none_available: "none_available";
+            not_executable: "not_executable";
+            not_installed: "not_installed";
+            platform_unsupported: "platform_unsupported";
+            probe_failed: "probe_failed";
+            probe_timeout: "probe_timeout";
+            runtime_not_allowed: "runtime_not_allowed";
+            runtime_not_configured: "runtime_not_configured";
+            version_blocked: "version_blocked";
+        }>, z.ZodString]>;
+        code: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
     admission: z.ZodOptional<z.ZodObject<{
         totalMs: z.ZodNumber;
         agentHomeWaitMs: z.ZodOptional<z.ZodNumber>;

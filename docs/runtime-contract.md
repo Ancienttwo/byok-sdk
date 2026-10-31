@@ -29,11 +29,12 @@ its descriptor advertises: `mcpToolsets`, `messageDraft`,
 One case is synthetic and needs no installed CLI:
 `version-block.contract.ts` builds a Host-configured `versionPolicy` block,
 runs it through the same local admission as a real offer, and asserts that
-`pickAdapter` declines before claim (`runtime_version_blocked`, retryable
-false) without calling `prepare()` or `start()`. Real runtimes are never
-deliberately blocked; the fixture is the only exercise of that path. A policy
-block is admission-only: a nightly `latest` verdict of `warn` or `block`
-changes the reported verdict, not the suite's pass/fail rule.
+`pickAdapter` declines before claim with the open `runtime_unavailable` code
+and `runtimeUnavailable.cause: 'version_blocked'`, retryable false, without
+calling `prepare()` or `start()`. Real runtimes are never deliberately
+blocked; the fixture is the only exercise of that path. A policy block is
+admission-only: a nightly `latest` verdict of `warn` or `block` changes the
+reported verdict, not the suite's pass/fail rule.
 
 Declared hosts carry their reason in the adapter file. Currently there are
 two:
