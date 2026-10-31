@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fake ACP agent over stdio for offline adapter tests. It calls no model and
-// reads no login. Frame shapes follow OAR 51b83c9 tests/fixtures
+// reads no login. Frame shapes follow OAR 044633e tests/fixtures
 // (fake-acp-agent.mjs, fake-acp-grok.mjs: Grok 1.0.25 wire, Apache-2.0).
 //
 // argv: `--version` prints a version; `agent stdio --help` prints help;

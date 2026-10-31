@@ -16,6 +16,14 @@
   gap is unchanged, so the scheduled workflow still exits non-zero on that
   gap by design until an owner decides otherwise.
 
+- **Internal (client)** — the SDK-owned OAR source moves from 0.75.0 to
+  0.80.1 (`vendor/oar/044633e/`, upstream commit `044633e9`). The ACP
+  connection opening/input split, placement and goal contracts, exit reasons
+  and process-table observation are adopted; the SDK still exposes no shared
+  ACP session, placement selection or goal control, and new runtimes are not
+  vendored. All sixteen BYOK deltas are preserved. API surface is unchanged;
+  seven entry-closure budgets are re-pinned to the measured bytes.
+
 - **Security (build and test toolchain)** — `bun.lock` moves to lockfile
   format v2 and clears the four dev advisories that format-v1 records pinned in
   place: `esbuild` 0.27.7 → 0.28.1 (GHSA-g7r4-m6w7-qqqr), `postcss` 8.5.19 →
