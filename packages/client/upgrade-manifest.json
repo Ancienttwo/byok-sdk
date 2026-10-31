@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "557a90da645b522219f374861d7572624344f0b90aa5f3425ed376d37d3ebe79"
+    "snapshotSha256": "738cd3e8e5df7fe1ed8e7e2800aa69cc3d97e90910717fd6a257da448979c200"
   },
   "configFields": {
     "status": "tracked",
@@ -823,6 +823,28 @@
         "export:@byok-sdk/protocol#RuntimeInfoSchema",
         "export:@byok-sdk/protocol#TaskClaimPayloadSchema"
       ]
+    },
+    {
+      "id": "service-installation-upgrade",
+      "impact": "additive",
+      "summary": "Versioned service installs and upgrades (#1097). createServiceInstallation installs a Host-verified payload (a directory plus byok-payload.json listing each file's SHA-256) under a Host-owned install root as versions/<id> with current and previous pointers, so the unit and launcher never change. upgrade() stops the service, runs the candidate's store precheck and stops before the switch on new-path-repair or rejected (ServiceInstallationError store_repair_required / store_rejected, with the verdicts), snapshots every listed store, switches, and restores the old version and its snapshot together when the new one fails its health check (health_check_failed). rollback(), recover() for an interrupted switch, uninstall() and upgrade-receipt.json complete it; agentServiceInstallation is the byok-agent payload's installation. The CLI adds install --payload <dir> --install-root <dir> and upgrade apply <dir> | rollback | recover | status. A service installed without a payload is unchanged.",
+      "migration": "docs/device-setup.md#versioned-installs",
+      "items": [
+        "export:@byok-sdk/client#AGENT_PAYLOAD_ENTRY",
+        "export:@byok-sdk/client#AgentServiceInstallationInput",
+        "export:@byok-sdk/client#SERVICE_PAYLOAD_MANIFEST",
+        "export:@byok-sdk/client#ServiceInstallation",
+        "export:@byok-sdk/client#ServiceInstallationError",
+        "export:@byok-sdk/client#ServiceInstallationErrorCode",
+        "export:@byok-sdk/client#ServiceInstallationOptions",
+        "export:@byok-sdk/client#ServiceInstallationRecord",
+        "export:@byok-sdk/client#ServicePayloadManifest",
+        "export:@byok-sdk/client#ServiceUpgradeReceipt",
+        "export:@byok-sdk/client#agentServiceInstallation",
+        "export:@byok-sdk/client#createServiceInstallation",
+        "export:@byok-sdk/client#readPayloadManifest",
+        "export:@byok-sdk/client#readServiceInstallationRecord"
+      ]
     }
   ],
   "changes": [
@@ -1131,6 +1153,11 @@
       "entry": "execution-core-published"
     },
     {
+      "item": "export:@byok-sdk/client#AGENT_PAYLOAD_ENTRY",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
       "item": "export:@byok-sdk/client#APPROVAL_REQUIRES_HOST",
       "change": "added",
       "entry": "local-tool-approval-host-only"
@@ -1184,6 +1211,11 @@
       "item": "export:@byok-sdk/client#AgentServiceDefinitionInput",
       "change": "added",
       "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentServiceInstallationInput",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#ApprovalKind",
@@ -1561,6 +1593,11 @@
       "entry": "pi-session-retention-lifecycle"
     },
     {
+      "item": "export:@byok-sdk/client#SERVICE_PAYLOAD_MANIFEST",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
       "item": "export:@byok-sdk/client#SERVICE_REDIRECT_LIMITS",
       "change": "added",
       "entry": "service-units-library-api"
@@ -1606,6 +1643,31 @@
       "entry": "service-units-library-api"
     },
     {
+      "item": "export:@byok-sdk/client#ServiceInstallation",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationError",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationRecord",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
       "item": "export:@byok-sdk/client#ServiceLifecycle",
       "change": "changed",
       "entry": "service-units-library-api"
@@ -1619,6 +1681,11 @@
       "item": "export:@byok-sdk/client#ServiceLogReport",
       "change": "added",
       "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServicePayloadManifest",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#ServiceRepairResult",
@@ -1649,6 +1716,11 @@
       "item": "export:@byok-sdk/client#ServiceUnitState",
       "change": "added",
       "entry": "service-units-library-api"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#ToolAuthorizationDecision",
@@ -1716,6 +1788,11 @@
       "entry": "service-units-library-api"
     },
     {
+      "item": "export:@byok-sdk/client#agentServiceInstallation",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
       "item": "export:@byok-sdk/client#buildRuntimeEnvironment",
       "change": "added",
       "entry": "runtime-environment-policy"
@@ -1744,6 +1821,11 @@
       "item": "export:@byok-sdk/client#createAutoToolAuthorizationGate",
       "change": "changed",
       "entry": "tool-authorization-rules"
+    },
+    {
+      "item": "export:@byok-sdk/client#createServiceInstallation",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#generateLaunchdPlist",
@@ -1779,6 +1861,16 @@
       "item": "export:@byok-sdk/client#parseToolAuthorizationPolicy",
       "change": "added",
       "entry": "tool-authorization-rules"
+    },
+    {
+      "item": "export:@byok-sdk/client#readPayloadManifest",
+      "change": "added",
+      "entry": "service-installation-upgrade"
+    },
+    {
+      "item": "export:@byok-sdk/client#readServiceInstallationRecord",
+      "change": "added",
+      "entry": "service-installation-upgrade"
     },
     {
       "item": "export:@byok-sdk/client#readServiceLifecycleOwner",

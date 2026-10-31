@@ -249,6 +249,8 @@ the App first. While another `install`, `repair`, `uninstall` or owner claim or
 release is in progress for this user (on Windows, on this machine), in any
 process and for any store, or a store is being relocated, the command fails at
 once with `lifecycle_owner_busy`; run it again when that one has finished.
+On macOS a stop returns only once launchd has unloaded the job; if it is still
+loaded after 10 seconds, the command fails with `service_unload_timeout`.
 
 Exit codes: a service exits 0 to stay stopped (a normal stop, or a halt such as
 revocation) and 1 to be restarted (a crash). The units encode this as launchd
@@ -286,21 +288,102 @@ so the CLI's `install` refuses instead of adding a second autostart.
 
 Before replacing a distribution, read its shipped
 [upgrade manifest](../packages/client/upgrade-manifest.json) and
-[manifest instructions](upgrade-manifest.md). Apply each relevant migration,
-drain old protocol journals with the writing release when required, and stop
-the running service with `byok-agent service-stop --config device.json` (or
-stop the foreground process). With all writers stopped, run the candidate
-build's `byok-agent upgrade check --store --json --config device.json` before
-switching distributions. It inspects private copies of the daemon journal and
-pi-durable replicas; exit 2 means at least one store needs a new path and pairing
-or is rejected. Follow the reported migration instead of switching on that
-result. See [store compatibility](upgrade-manifest.md#store-compatibility-precheck)
-for the separate embedded-server and provider-key inspectors.
+[manifest instructions](upgrade-manifest.md). Apply each relevant migration and
+drain old protocol journals with the writing release when required.
 
-Install the chosen distribution through your Host's installer/package manager,
-run `config check --strict`, and start it again. Confirm the authenticated
-connection and first task before declaring adoption complete. `upgrade check`
-only inspects compatibility; it does not install or switch a distribution.
+### Versioned installs
+
+A service installed from a payload upgrades and rolls back through the SDK. A
+payload is a directory plus `byok-payload.json`:
+
+```
+{ "format": "byok-service-payload", "version": 1, "id": "0.32.0",
+  "files": { "byok-agent.mjs": "<sha256 hex>" } }
+```
+
+Verify the payload's signature before handing it to the SDK; the SDK only
+checks every file against `files` and refuses a file the manifest does not
+list. A `byok-agent` payload ships the single-file bundle `byok-agent.mjs`
+(built with `@byok-sdk/client/packaging`).
+
+```sh
+byok-agent install --payload ./payload-0.31.0 --install-root ~/Applications/Acme/agent --config device.json
+byok-agent upgrade apply ./payload-0.32.0 --config device.json
+byok-agent upgrade rollback --config device.json
+byok-agent upgrade status --json --config device.json
+```
+
+The install root is yours and lies outside the store. The SDK owns
+`versions/<id>`, the `current` and `previous` pointers (symlinks; directory
+junctions on Windows), `snapshots/` and `upgrade-receipt.json` in it, and
+records the root in `<storeDir>/service/installation.json`. The unit runs
+`current`, so it never changes across upgrades. `upgrade apply`:
+
+1. stages and checks the payload in `versions/<id>`;
+2. stops the service, waits until no daemon owns the store, and ends what the
+   stopped run left in the owned-process ledger;
+3. runs the candidate's `upgrade check --store --json`. If a store needs a new
+   path and pairing (`store_repair_required`) or is refused (`store_rejected`),
+   nothing is switched, the old version starts again, and the error carries
+   each store's verdict;
+4. copies every store the precheck listed to `snapshots/<id>`;
+5. points `previous` at the old version and `current` at the new one, starts
+   it and waits until the daemon reports `running` on its control socket
+   (the cloud connection is not required);
+6. if that health check fails, restores the old version and its store
+   snapshot together and fails with `health_check_failed`.
+
+`upgrade rollback` writes a `pending` receipt, then restores `previous` and the
+snapshot taken when `current` was switched to; store writes since then are
+discarded. A failed upgrade keeps
+the earlier one rollbackable. Only the latest switch keeps a snapshot, so one
+rollback is possible after it.
+
+`upgrade-receipt.json` is what a Host UI reads: `switched`, `rolled-back`,
+`failed` (with `code`, and `stores` for a store refusal) or `pending`. A
+`pending` receipt means an upgrade or a rollback stopped part way; every other
+operation, `install` and `uninstall` included, refuses with `upgrade_pending`
+until `byok-agent upgrade recover` finishes it: it restores the receipt's
+`from` version and snapshot (for a rollback, the version it was going back
+to). A snapshot is removed only after the receipt that ends the operation is
+written.
+
+Upgrade, rollback, recover, install and uninstall run only for the store's
+recorded lifecycle owner: another owner gets `lifecycle_owner_conflict`, and
+nothing changes.
+
+An embedded Host uses the same implementation, with its own lifecycle owner:
+
+```ts
+import { agentServiceInstallation, createServiceInstallation, ServiceInstallationError } from '@byok-sdk/client';
+
+const installation = createServiceInstallation(agentServiceInstallation({
+  config, configPath, installRoot, owner: 'app',
+}));
+await installation.upgrade(verifiedPayloadDir); // throws ServiceInstallationError; the receipt says what happened
+```
+
+A Host whose service is not `byok-agent` calls `createServiceInstallation`
+with its own `program(versionDir)` and `precheck(versionDir)`; the precheck
+prints `{ "stores": [...] }` as `upgrade check --store --json` does and lists
+every store the candidate rewrites, including any server or provider-key
+store (`inspectSqliteStore`, `inspectProviderProfileStore`).
+[`examples/service-upgrade`](../examples/service-upgrade/) is such an App.
+
+### Other installs
+
+For a service installed without `--payload`, stop it with
+`byok-agent service-stop --config device.json` (or stop the foreground process).
+With all writers stopped, run the candidate build's
+`byok-agent upgrade check --store --json --config device.json` before switching
+distributions. It inspects private copies of the daemon journal and pi-durable
+replicas; exit 2 means at least one store needs a new path and pairing or is
+rejected. Follow the reported migration instead of switching on that result.
+See [store compatibility](upgrade-manifest.md#store-compatibility-precheck) for
+the separate embedded-server and provider-key inspectors. Install the chosen
+distribution through your Host's installer or package manager, run
+`config check --strict`, and start it again. Confirm the authenticated
+connection and first task before declaring adoption complete.
 
 ## Unpair
 
@@ -318,7 +401,9 @@ routine reset step. Resolve unknown state before retrying.
 ## Uninstall
 
 `byok-agent uninstall --config device.json` removes the OS service registration,
-the unit, the launcher and the lifecycle owner record. It refuses a foreign
+the unit, the launcher and the lifecycle owner record, and for a payload install
+also `versions/`, the pointers, `snapshots/`, the receipt and the installation
+record. It refuses a foreign
 unit. Unpair first if enrollment must be removed. Remove the installed application
 through the Host's installer/package manager. Service uninstall is not a promise
 to erase the SDK store, Agent files, provider keys or runtime login directories.

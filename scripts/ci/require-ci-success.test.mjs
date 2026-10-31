@@ -8,7 +8,7 @@ import { requireCiSuccess } from './require-ci-success.mjs';
 const families = ['build-test', 'macos-client', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
-  'release-pack-migrate', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit', 'hermes-real-windows', 'runtime-contract'];
+  'release-pack-migrate', 'service-upgrade-smoke', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit', 'hermes-real-windows', 'runtime-contract'];
 const successful = () => Object.fromEntries(families.map(id => [id, { result: 'success' }]));
 
 test('aggregate accepts exactly the complete successful matrix', () => {

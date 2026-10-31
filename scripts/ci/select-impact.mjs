@@ -99,6 +99,10 @@ export const workspaceGraph = {
       "@byok-sdk/keys"
     ]
   },
+  "examples/service-upgrade": {
+    "name": "@byok-sdk/example-service-upgrade",
+    "dependencies": ["@byok-sdk/client", "@byok-sdk/server"]
+  },
   "packages/client": {
     "name": "@byok-sdk/client",
     "dependencies": [
@@ -182,7 +186,7 @@ export const knownFamilies = Object.freeze([
   'build-test', 'macos-client', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-client', 'packageability-smoke', 'packaging-consistency', 'npm-release-pack',
-  'release-pack-migrate', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
+  'release-pack-migrate', 'service-upgrade-smoke', 'linux-systemd-smoke', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
   'hermes-real-windows', 'runtime-contract',
 ]);
 // A routine PR selects a platform family only when it changes a path that the
@@ -265,6 +269,14 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/(?:adapters\/packaging|sdk-native-assets|sdk-reserved-helper-host|sdk-distribution-bins)\b/,
     /^packages\/client\/src\/adapters\/pi\/(?:runtime-assets|todo-locale-assets|client-manifest)\.ts$/,
     /^packages\/keys\/src\/pi-provider-launcher-core\.ts$/,
+  ],
+  'service-upgrade-smoke': [
+    /^examples\/service-upgrade\//,
+    /^templates\/service\//,
+    /^packages\/client\/src\/lifecycle\//,
+    /^packages\/client\/src\/bin\/(?:byok-agent|control-client|commands\/(?:service|upgrade))\.ts$/,
+    /^packages\/client\/src\/daemon\/(?:daemon-owner|owned-process-ledger)\.ts$/,
+    /^packages\/client\/src\/(?:diagnostics\/store-compatibility|adapters\/packaging)\.ts$/,
   ],
   'linux-systemd-smoke': [
     /^templates\/service\/systemd\//,
@@ -393,7 +405,7 @@ function todoSnapshotListed(path, context) {
 export const vitestTmpRootConsumers = Object.freeze([
   'examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/codex-interaction-host',
   'examples/host-execution-core', 'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker',
-  'examples/packaging', 'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
+  'examples/packaging', 'examples/service-upgrade', 'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
 ]);
 // Reviewed M build inputs: exact paths retain workspace consumers and packed-artifact checks.
 const reviewedBuildConfigOwners = Object.freeze({
@@ -421,6 +433,7 @@ function requireMapping(path) {
 
 /** Deleted paths remain inputs. Never silently convert unknown impact to a full run. */
 export function selectImpact(paths, context = {}) {
+  context = { ...context, workspaceGraph };
   if (!Array.isArray(paths) || paths.length === 0) throw new Error('Changed paths must be a nonempty JSON array; reviewed CI mapping required');
   const files = new Set();
   const dirs = new Set();
@@ -686,6 +699,7 @@ export function selectImpact(paths, context = {}) {
       if (dir === 'examples/packaging') families.add('npm-release-pack');
       continue;
     }
+    if (/^examples\/service-upgrade\/(?:app-installer(?:\.test)?\.ts|upgrade-smoke\.mjs)$/.test(path)) { dirs.add(dir); continue; }
     if (!/^(?:src|test|tests|migrations)\//.test(relative)
       || !/\.(?:[cm]?[jt]sx?|json|ndjson|sql|sh|go|txt|md)$/.test(relative)) requireMapping(path);
     dirs.add(dir);

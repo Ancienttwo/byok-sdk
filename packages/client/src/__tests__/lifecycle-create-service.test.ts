@@ -22,7 +22,9 @@ useInProcessServiceLifecycleGate();
 
 describe('lifecycle/create-service-lifecycle: createServiceLifecycle', () => {
   it('dispatches darwin -> launchd (invokes launchctl)', async () => {
-    const run = vi.fn<Runner>().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    const run = vi.fn<Runner>().mockImplementation(async (_command, args) => (args[0] === 'print'
+      ? { code: 113, stdout: '', stderr: 'Could not find service' }
+      : { code: 0, stdout: '', stderr: '' }));
     const lifecycle = createServiceLifecycle(def(), { platform: 'darwin', deps: { run, fs: fakeFs, homedir: () => '/h', getuid: () => 501 } });
     await lifecycle.install();
     expect(run).toHaveBeenCalledWith('launchctl', expect.any(Array));

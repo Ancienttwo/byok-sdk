@@ -23,6 +23,15 @@ install` is run again. Signing, notarization, and distribution of any
 bundled binary (e.g. `WinSW.exe`) are the product's responsibility, not the
 SDK's.
 
+## Versioned installs and upgrades
+
+A service installed from a payload (`byok-agent install --payload`, or
+`createServiceInstallation` in a Host) runs `<installRoot>/current` and is
+upgraded, health-checked and rolled back by the SDK together with a snapshot
+of its stores. See [device setup](../../docs/device-setup.md#versioned-installs).
+[`examples/service-upgrade/upgrade-smoke.mjs`](../../examples/service-upgrade/upgrade-smoke.mjs)
+proves it on each platform's real manager.
+
 ## Environment and runtime observations
 
 The generated `start --service` argument is shared by launchd, systemd and

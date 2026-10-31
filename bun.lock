@@ -191,6 +191,20 @@
         "vitest": "^4.1.10",
       },
     },
+    "examples/service-upgrade": {
+      "name": "@byok-sdk/example-service-upgrade",
+      "version": "0.0.1",
+      "dependencies": {
+        "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/server": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^24",
+        "esbuild": "0.28.1",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
+      },
+    },
     "packages/client": {
       "name": "@byok-sdk/client",
       "version": "0.31.0",
@@ -441,6 +455,8 @@
     "@byok-sdk/example-packaging": ["@byok-sdk/example-packaging@workspace:examples/packaging"],
 
     "@byok-sdk/example-salesko-connector-broker": ["@byok-sdk/example-salesko-connector-broker@workspace:examples/salesko-connector-broker"],
+
+    "@byok-sdk/example-service-upgrade": ["@byok-sdk/example-service-upgrade@workspace:examples/service-upgrade"],
 
     "@byok-sdk/keys": ["@byok-sdk/keys@workspace:packages/keys"],
 

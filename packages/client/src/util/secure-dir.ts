@@ -1,5 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { defaultRunner, type Runner } from '../lifecycle/exec-runner';
 
 /**
@@ -219,4 +221,42 @@ export async function ensureSecureFile(filePath: string, opts: EnsureSecureDirOp
   if (result.code !== 0) {
     throw new SecureFileHardeningError(filePath, `icacls exited ${result.code}: ${(result.stderr || result.stdout).trim()}`);
   }
+}
+
+const TEMP_NAME_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+/**
+ * Creates `<parent>/<prefix>` plus six random letters and digits (the name
+ * mkdtemp would give, which the retention sweep matches) with one exclusive
+ * mkdir, mode 0700; on Windows it inherits the parent's ACL. It replaces
+ * fs.mkdtemp, which on Windows fails with ENOENT once the path passes
+ * MAX_PATH while mkdir does not (#1097). An existing name throws EEXIST.
+ */
+export async function createPrivateTempDir(parent: string, prefix: string): Promise<string> {
+  const suffix = Array.from(randomBytes(6), (byte) => TEMP_NAME_ALPHABET[byte % TEMP_NAME_ALPHABET.length]).join('');
+  const directory = path.join(parent, `${prefix}${suffix}`);
+  await fs.mkdir(directory, { mode: 0o700 });
+  return directory;
+}
+
+/**
+ * A private scratch directory directly under the canonical OS temp root, for
+ * a tool whose own path limit is shorter than the store's: the Windows
+ * credential bridge is compiled with `Add-Type`/csc, which fails with CS2021
+ * once the output name is too long, and the CS2021 limit is on the directory
+ * it is handed (#1097). Its length therefore cannot depend on where the store
+ * lives. The leaf is created by an exclusive mkdir under the real path of the
+ * temp root, so a pre-planted symlink or junction is never followed, and
+ * {@link ensureSecureDir} applies the same owner-only restriction every other
+ * scratch root gets. The caller removes it.
+ */
+export async function createPrivateSystemTempDir(prefix: string): Promise<string> {
+  const directory = await createPrivateTempDir(await fs.realpath(os.tmpdir()), prefix);
+  try {
+    await ensureSecureDir(directory);
+  } catch (error) {
+    await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+  return directory;
 }

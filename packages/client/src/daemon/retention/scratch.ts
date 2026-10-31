@@ -4,7 +4,7 @@ import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { RuntimeDisposalFailure } from '../../runtime-failure';
 import { atomicWriteFile } from '../../util/atomic-write';
-import { ensureSecureDir } from '../../util/secure-dir';
+import { createPrivateTempDir, ensureSecureDir } from '../../util/secure-dir';
 
 export class ScratchRootPathError extends Error {
   constructor(reason: string) {
@@ -222,5 +222,5 @@ export function createExecutionScratch(options: { root: string; clock?: () => Da
 export async function createDaemonScratch(storeDir: string, kind: 'diag' | 'credential' | 'prepare'): Promise<string> {
   const root = path.join(storeDir, 'tmp', 'daemon');
   await privateDirectory(root);
-  return fs.mkdtemp(path.join(root, `${kind}-`));
+  return createPrivateTempDir(root, `${kind}-`);
 }

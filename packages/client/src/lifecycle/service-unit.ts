@@ -44,6 +44,7 @@ const ERROR_MESSAGES = {
   lifecycle_owner_unreadable: 'The lifecycle owner record in the store cannot be read; preserve it for inspection.',
   lifecycle_owner_busy: 'Another service lifecycle operation or local-state relocation is in progress. Run it again when that one has finished.',
   invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.',
+  service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.',
 } as const;
 
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;

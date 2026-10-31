@@ -5675,6 +5675,15 @@ export declare class DaemonHaltError extends Error {
  * guessed.
  */
 export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefined;
+/**
+ * What a liveness probe may conclude from a lifecycle, in one place: `up` is
+ * a run that owns its store and answers on its control endpoint — `running`,
+ * or `awaiting-enrollment` for a service-enrollment daemon that has not
+ * paired yet, which is legitimately up rather than broken (#1097); `ended`
+ * is a run that stopped or cannot continue; `starting` is `stopped`, which
+ * a start in progress also reports until it resolves.
+ */
+export declare function daemonLifecycleHealth(lifecycle: DaemonLifecycle): 'up' | 'starting' | 'ended';
 // ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
 import type { ToolAuthorizationReason, ToolRiskReason } from '../tool-authorization';
 import type { DaemonLifecycle } from './daemon-lifecycle';
@@ -7289,6 +7298,16 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
 }
 // ==== @byok-sdk/client dist/daemon/journal/sqlite-support.d.ts ====
 import type { DatabaseSync } from 'node:sqlite';
+/**
+ * The path handed to SQLite, which is not always the path the rest of the code
+ * uses. On Windows the SQLite VFS does not apply the extended-length prefix
+ * itself: past the legacy MAX_PATH the open fails, and a failed open is
+ * indistinguishable from a damaged file at the call site (the journal would
+ * quarantine a healthy database and refuse to start). The prefix is applied
+ * only when the path is long enough to need it, so ordinary installs keep the
+ * plain path.
+ */
+export declare function sqliteOpenPath(path: string, platform?: NodeJS.Platform): string;
 /** Every post-construction boundary crossed before a journal handle is returned to its owner. */
 export type JournalOpenStep = 'after-open' | 'after-auto-vacuum' | 'after-wal' | 'after-foreign-keys' | 'after-synchronous' | 'after-header-read';
 /**
@@ -11069,8 +11088,10 @@ export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions,
 export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
-export { agentServiceDefinition } from './lifecycle/agent-service';
-export type { AgentServiceDefinitionInput } from './lifecycle/agent-service';
+export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service';
+export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service';
+export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError, } from './lifecycle/service-installation';
+export type { ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceUpgradeReceipt, } from './lifecycle/service-installation';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit';
 export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit';
 export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
@@ -12098,6 +12119,7 @@ export interface PreparedToolSurfaceDigestInputV1 {
 export declare function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string;
 // ==== @byok-sdk/client dist/lifecycle/agent-service.d.ts ====
 import type { DaemonConfig } from '../daemon/create-daemon';
+import type { ServiceInstallationOptions } from './service-installation';
 import { type ServiceDefinition } from './service-types';
 export interface AgentServiceDefinitionInput {
     config: Pick<DaemonConfig, 'productId' | 'productName' | 'storeDir' | 'branding'>;
@@ -12124,10 +12146,25 @@ export interface AgentServiceDefinitionInput {
  * `resolveHostLayout`'s `logDir` for this store.
  */
 export declare function agentServiceDefinition(input: AgentServiceDefinitionInput): ServiceDefinition;
+/** The entry a `byok-agent` payload ships at its root: a single-file bundle (`@byok-sdk/client/packaging`). */
+export declare const AGENT_PAYLOAD_ENTRY = "byok-agent.mjs";
+export interface AgentServiceInstallationInput extends Omit<AgentServiceDefinitionInput, 'agentBin'> {
+    /** See {@link ServiceInstallationOptions.installRoot}. */
+    installRoot: string;
+}
+/**
+ * The installation of a `byok-agent` payload (#1097): `byok-agent install
+ * --payload` and an embedded Host that ships the agent bundle share it. The
+ * service runs `node <installRoot>/current/byok-agent.mjs start --config
+ * <configPath> --service`; the precheck runs the candidate's own `upgrade
+ * check --store --json` against the same config.
+ */
+export declare function agentServiceInstallation(input: AgentServiceInstallationInput): ServiceInstallationOptions;
 // ==== @byok-sdk/client dist/lifecycle/create-service-lifecycle.d.ts ====
 import { type LaunchdDeps } from './launchd';
 import { type SystemdDeps } from './systemd';
 import { type WinswDeps } from './winsw';
+import type { ManagedServiceLifecycle } from './managed-lifecycle';
 import type { ServiceDefinition, ServiceLifecycle } from './service-types';
 export declare class UnsupportedServicePlatformError extends Error {
     constructor(platform: string);
@@ -12184,6 +12221,8 @@ export interface CreateServiceLifecycleOptions {
  * how it was invoked, bundled or not.
  */
 export declare function createServiceLifecycle(def: ServiceDefinition, opts?: CreateServiceLifecycleOptions): ServiceLifecycle;
+/** @internal `createServiceLifecycle` with the owner gate a service installation runs its steps behind. */
+export declare function createManagedServiceLifecycle(def: ServiceDefinition, opts?: CreateServiceLifecycleOptions): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/exec-runner.d.ts ====
 /**
  * Result of running an external command, regardless of its exit code.
@@ -12376,8 +12415,8 @@ export interface DaemonExitOutcome {
 export declare function daemonExitCode(outcome: DaemonExitOutcome, service: boolean): ExitCode;
 // ==== @byok-sdk/client dist/lifecycle/launchd.d.ts ====
 import { type Runner } from './exec-runner';
-import { type ManagedLifecycleFs } from './managed-lifecycle';
-import { type ServiceDefinition, type ServiceLifecycle } from './service-types';
+import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
+import { type ServiceDefinition } from './service-types';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment for why a mocked `run` is enough to unit-test all of this file's install/uninstall/start/stop/status logic on any host OS. */
 export interface LaunchdDeps {
     run?: Runner;
@@ -12385,7 +12424,12 @@ export interface LaunchdDeps {
     homedir?: () => string;
     /** Defaults to `process.getuid` — macOS/Linux only; this module is never constructed on `win32` (see `create-service-lifecycle.ts`). */
     getuid?: () => number;
+    /** Clock and wait for the unload deadline; tests drive them. */
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
 }
+/** How long a booted-out job may stay in the domain before `stop()` gives up with `service_unload_timeout`. */
+export declare const LAUNCHD_UNLOAD_TIMEOUT_MS = 10000;
 /**
  * Generates a launchd LaunchAgent plist for `label` that runs only the
  * stable `launcherPath` (#1097), logging to `logDir`. Pure/no I/O.
@@ -12422,11 +12466,11 @@ export declare function generateLaunchdPlist(def: {
  * from the still-on-disk plist) — not `kickstart`, which only force-restarts
  * an ALREADY-loaded job.
  */
-export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: LaunchdDeps): ServiceLifecycle;
+export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: LaunchdDeps): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/managed-lifecycle.d.ts ====
 import { promises as fsp } from 'node:fs';
 import { type ServiceUnitFile } from './service-unit';
-import type { ServiceDefinition, ServiceLifecycle, ServiceStatusResult } from './service-types';
+import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceStatusResult } from './service-types';
 export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
 /** The platform half of a lifecycle: where its files go and how its manager loads them. */
 export interface PlatformUnit {
@@ -12449,6 +12493,20 @@ export interface PlatformUnit {
     /** Whether what `prepare()` puts in place is already exact; asked only once `files()` classify exact. */
     preparedArtifactsExact?(): Promise<boolean>;
 }
+/** install and uninstall for an operation already inside `owned()`, which holds the owner gate they would take. */
+export interface HeldServiceLifecycle {
+    install(opts?: ServiceInstallOptions): Promise<void>;
+    uninstall(): Promise<void>;
+}
+/** A lifecycle whose owner check other installation steps run behind (#1097). */
+export interface ManagedServiceLifecycle extends ServiceLifecycle {
+    /**
+     * Runs `operation` inside the store's owner gate, after the same owner
+     * check install, repair and uninstall make: another recorded owner throws
+     * `lifecycle_owner_conflict` before `operation` writes anything.
+     */
+    owned<T>(operation: (held: HeldServiceLifecycle) => Promise<T>): Promise<T>;
+}
 /**
  * The install, repair, uninstall and status rules all three platforms share
  * (#1097): a `foreign` unit is never changed (`install` replaces it only
@@ -12457,7 +12515,7 @@ export interface PlatformUnit {
  * repair and uninstall run whole inside the store's owner gate, so the owner
  * they checked is still the owner when they write, deactivate or release.
  */
-export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs): ServiceLifecycle;
+export declare function createManagedLifecycle(def: ServiceDefinition, unit: PlatformUnit, fs?: ManagedLifecycleFs): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/service-environment.d.ts ====
 import { type ApplyLoginShellEnvironmentOptions, type ServiceEnvironmentStatus } from '../login-shell-environment';
 /**
@@ -12484,6 +12542,188 @@ export declare function applyLoginShellEnvironment(): Promise<ServiceEnvironment
  * @internal
  */
 export declare function captureAndApply(options: ApplyLoginShellEnvironmentOptions): Promise<ServiceEnvironmentStatus>;
+// ==== @byok-sdk/client dist/lifecycle/service-installation.d.ts ====
+import type { StoreCompatibility } from '@byok-sdk/core';
+import { type CreateServiceLifecycleOptions } from './create-service-lifecycle';
+import type { ManagedServiceLifecycle } from './managed-lifecycle';
+import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types';
+/** The manifest every payload directory carries at its root. */
+export declare const SERVICE_PAYLOAD_MANIFEST = "byok-payload.json";
+/**
+ * A payload's manifest (#1097). The Host verifies the payload's signature
+ * before handing it to the SDK; the SDK checks every file against `files`
+ * and accepts no file the manifest does not list.
+ */
+export interface ServicePayloadManifest {
+    format: 'byok-service-payload';
+    version: 1;
+    /** The version id: 1-64 of `A-Z a-z 0-9 . _ -`, starting with a letter or digit. Becomes `versions/<id>`. */
+    id: string;
+    /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
+    files: Record<string, string>;
+}
+/**
+ * What an installation is told to do (#1097). `program` and `precheck`
+ * receive a version directory: `program` gets `<installRoot>/current`, so the
+ * unit and launcher never change across upgrades; `precheck` gets the staged
+ * candidate's own directory.
+ */
+export interface ServiceInstallationOptions {
+    /** The service, without `program`: {@link ServiceInstallationOptions.program} supplies it. */
+    service: Omit<ServiceDefinition, 'program'>;
+    /** The daemon's product id; the default health check reaches its control socket with it. */
+    productId: string;
+    /**
+     * A Host-owned directory outside the store. The SDK owns `versions/`,
+     * `current`, `previous`, `snapshots/` and `upgrade-receipt.json` in it.
+     */
+    installRoot: string;
+    /** The service program, run from `versionDir`. */
+    program(versionDir: string): ServiceProgram;
+    /**
+     * The candidate's store precheck, run from its staged `versionDir` while
+     * every writer is stopped. It prints `{ "stores": StoreCompatibility[] }`
+     * (what `byok-agent upgrade check --store --json` prints) and exits 0 or 2.
+     * Every store the candidate rewrites must be listed: the snapshot covers
+     * exactly the listed stores.
+     */
+    precheck(versionDir: string): ServiceProgram;
+    /**
+     * Resolves when the started version is healthy and throws when it is not.
+     * Default: the daemon's control socket reports a live `lifecycle` — `running`
+     * (connecting or open), or `awaiting-enrollment` for a service-enrollment
+     * daemon that has not paired yet. `halted` or `crashed` fails at once.
+     */
+    healthCheck?(signal: AbortSignal): Promise<void>;
+    /** How long the health check may take. Default 60000. */
+    healthTimeoutMs?: number;
+    /** How long a stop may take to leave the store quiescent. Default 30000. */
+    stopTimeoutMs?: number;
+    /** Test seams for the underlying lifecycle. */
+    lifecycle?: CreateServiceLifecycleOptions;
+}
+/**
+ * The upgrade receipt a Host UI reads (`upgrade-receipt.json`):
+ *
+ * - `pending`: an upgrade or a rollback began and has not been confirmed.
+ *   It is written before the service is stopped, so it also covers a death
+ *   before the snapshot: `recover()` then starts `from` again without a
+ *   store restore. Only `recover()` resolves a pending receipt, by
+ *   restoring `from` with the snapshot taken for `to` when one exists. A
+ *   rollback journals its target as `from`, so recover completes it.
+ * - `switched`: `to` runs and passed the health check.
+ * - `rolled-back`: `from` runs again with its store snapshot; `code` says why.
+ * - `failed`: nothing was switched (`code` and, for a store refusal,
+ *   `stores` say why), or a rollback could not bring `from` back to health.
+ */
+export interface ServiceUpgradeReceipt {
+    format: 'byok-service-upgrade-receipt';
+    version: 1;
+    state: 'pending' | 'switched' | 'rolled-back' | 'failed';
+    from: string;
+    to: string;
+    /** Where `previous` pointed before this upgrade; a restore of `from` puts it back, so an earlier upgrade can still be rolled back. */
+    previous?: string;
+    at: string;
+    code?: ServiceInstallationErrorCode;
+    stores?: StoreCompatibility[];
+}
+/**
+ * Every mutation (install, upgrade, rollback, recover, uninstall) first
+ * passes the lifecycle's owner check: when another owner is recorded for the
+ * store it throws `ServiceUnitError` `lifecycle_owner_conflict` and changes
+ * nothing.
+ */
+export interface ServiceInstallation {
+    /** The service lifecycle whose program runs `<installRoot>/current`. */
+    readonly lifecycle: ServiceLifecycle;
+    /** Stages the payload as the first version, points `current` at it, installs and starts the service. */
+    install(payloadDir: string, opts?: ServiceInstallOptions): Promise<void>;
+    /**
+     * Stages the payload, writes the pending receipt, stops the service, runs
+     * the candidate's precheck, snapshots the listed stores, switches
+     * `current` (the old one becomes `previous`), starts it and checks its
+     * health. A store refusal stops before the switch and restarts the old
+     * version; a failed health check restores the old version and its snapshot
+     * together; a death after the receipt leaves `recover()` that work.
+     */
+    upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
+    /**
+     * Restores `previous` and the store snapshot taken when `current` was
+     * switched to, under a `pending` receipt written first. Store writes since
+     * that switch are discarded.
+     */
+    rollback(): Promise<ServiceUpgradeReceipt>;
+    /** Resolves a `pending` receipt by restoring its `from` version and snapshot. Returns the receipt, or `undefined` when there is none. */
+    recover(): Promise<ServiceUpgradeReceipt | undefined>;
+    /** Uninstalls the service and removes `versions/`, the pointers, `snapshots/` and the receipt. The store is not touched. */
+    uninstall(): Promise<void>;
+    /** The last receipt, or `undefined`. */
+    receipt(): Promise<ServiceUpgradeReceipt | undefined>;
+    /** The version `current` points at, or `undefined` before install. */
+    currentVersion(): Promise<string | undefined>;
+}
+declare const ERROR_MESSAGES: {
+    readonly installation_absent: 'No version is installed under this install root. Install a payload first.';
+    readonly installation_exists: 'A version is already installed under this install root. Upgrade it instead.';
+    readonly payload_invalid: 'The payload manifest is missing, malformed, or does not match the payload files.';
+    readonly version_current: 'The payload is the version already running.';
+    readonly version_conflict: 'A different payload with the same version id is already staged.';
+    readonly upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.';
+    readonly store_busy: 'The store still has a running owner after the stop. Stop every process that uses this store and retry.';
+    readonly owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.';
+    readonly precheck_failed: 'The candidate\'s store precheck did not produce a verdict.';
+    readonly store_repair_required: 'The candidate needs a new store path and a new pairing. Nothing was switched; decide before upgrading.';
+    readonly store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.';
+    readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
+    readonly rollback_unhealthy: 'The previous version was restored but failed its health check too.';
+    readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
+};
+export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
+/** Closed codes; a store refusal carries the precheck verdicts. */
+export declare class ServiceInstallationError extends Error {
+    readonly code: ServiceInstallationErrorCode;
+    readonly stores?: readonly StoreCompatibility[] | undefined;
+    constructor(code: ServiceInstallationErrorCode, stores?: readonly StoreCompatibility[] | undefined);
+}
+/** `<storeDir>/service/installation.json`: where this store's installation lives. */
+export interface ServiceInstallationRecord {
+    format: 'byok-service-installation';
+    version: 1;
+    installRoot: string;
+}
+export declare function serviceInstallationRecordPath(storeDir: string): string;
+/** The installation record of a store, or `undefined` when the service is not installed from payloads. */
+export declare function readServiceInstallationRecord(storeDir: string): Promise<ServiceInstallationRecord | undefined>;
+/**
+ * @internal The running version and the last receipt of an install root,
+ * read from disk only: no service definition, unit or service manager is
+ * involved, so a status read needs none of their inputs (WinSW paths).
+ */
+export declare function readServiceInstallationState(installRoot: string): Promise<{
+    current: string | undefined;
+    receipt: ServiceUpgradeReceipt | undefined;
+}>;
+export declare function createServiceInstallation(opts: ServiceInstallationOptions): ServiceInstallation;
+/**
+ * The default health check: polls the daemon's control socket until its own
+ * lifecycle reports a live run ({@link daemonLifecycleHealth}). A
+ * service-enrollment daemon that has not paired yet is up, not a failed
+ * upgrade, so `awaiting-enrollment` is healthy; a halted or crashed run fails
+ * at once (#1097).
+ */
+export declare function defaultServiceHealthCheck(options: {
+    storeDir: string;
+    productId: string;
+}): (signal: AbortSignal) => Promise<void>;
+/**
+ * @internal The installation over a given lifecycle; tests drive it with a
+ * fake service manager. Every mutation runs inside `lifecycle.owned()`, so
+ * another recorded lifecycle owner is refused before anything is written.
+ */
+export declare function serviceInstallationOver(opts: ServiceInstallationOptions, lifecycle: ManagedServiceLifecycle): ServiceInstallation;
+export declare function readPayloadManifest(payloadDir: string): Promise<ServicePayloadManifest>;
+export {};
 // ==== @byok-sdk/client dist/lifecycle/service-log.d.ts ====
 /**
  * The daemon log `byok-agent start --service` writes itself (#1097): its
@@ -12818,6 +13058,7 @@ declare const ERROR_MESSAGES: {
     readonly lifecycle_owner_unreadable: 'The lifecycle owner record in the store cannot be read; preserve it for inspection.';
     readonly lifecycle_owner_busy: 'Another service lifecycle operation or local-state relocation is in progress. Run it again when that one has finished.';
     readonly invalid_owner: 'The lifecycle owner must be 1-32 characters: lowercase letters, digits and "-", starting with a letter or digit.';
+    readonly service_unload_timeout: 'The service manager did not finish unloading the stopped service in time. Check the service manager, then run the operation again.';
 };
 export type ServiceUnitErrorCode = keyof typeof ERROR_MESSAGES;
 /** Closed codes only; the message never carries a path or OS text. */
@@ -12911,8 +13152,8 @@ export declare function releaseHeldServiceLifecycleOwner(input: Omit<ServiceLife
 export {};
 // ==== @byok-sdk/client dist/lifecycle/systemd.d.ts ====
 import { type Runner } from './exec-runner';
-import { type ManagedLifecycleFs } from './managed-lifecycle';
-import { type ServiceDefinition, type ServiceLifecycle } from './service-types';
+import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
+import { type ServiceDefinition } from './service-types';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface SystemdDeps {
     run?: Runner;
@@ -12954,12 +13195,12 @@ export declare function generateSystemdUnit(def: {
  * systemd user session at all will fail every `systemctl --user` call here
  * with a clear error surfaced from `runOrThrow`, not a silent no-op.
  */
-export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: SystemdDeps): ServiceLifecycle;
+export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: SystemdDeps): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/lifecycle/winsw.d.ts ====
 import { promises as fsp } from 'node:fs';
 import { type Runner } from './exec-runner';
-import { type ManagedLifecycleFs } from './managed-lifecycle';
-import { type ServiceDefinition, type ServiceLifecycle, type ServiceProgram } from './service-types';
+import { type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
+import { type ServiceDefinition, type ServiceProgram } from './service-types';
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface WinswDeps {
     run?: Runner;
@@ -13015,7 +13256,7 @@ export declare function generateWinswXml(def: {
  * `status()` queries `sc.exe` (the real Windows SCM query tool, always
  * present) rather than parsing WinSW's own `status` subcommand text.
  */
-export declare function createWinswLifecycle(def: ServiceDefinition, deps?: WinswDeps): ServiceLifecycle;
+export declare function createWinswLifecycle(def: ServiceDefinition, deps?: WinswDeps): ManagedServiceLifecycle;
 // ==== @byok-sdk/client dist/local-state-relocation.d.ts ====
 export declare class LocalStateRelocationError extends Error {
     constructor(message: string);
@@ -15199,3 +15440,23 @@ export declare class SecureFileHardeningError extends Error {
 export declare function ensureSecureDir(dir: string, opts?: EnsureSecureDirOptions): Promise<void>;
 /** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */
 export declare function ensureSecureFile(filePath: string, opts?: EnsureSecureDirOptions): Promise<void>;
+/**
+ * Creates `<parent>/<prefix>` plus six random letters and digits (the name
+ * mkdtemp would give, which the retention sweep matches) with one exclusive
+ * mkdir, mode 0700; on Windows it inherits the parent's ACL. It replaces
+ * fs.mkdtemp, which on Windows fails with ENOENT once the path passes
+ * MAX_PATH while mkdir does not (#1097). An existing name throws EEXIST.
+ */
+export declare function createPrivateTempDir(parent: string, prefix: string): Promise<string>;
+/**
+ * A private scratch directory directly under the canonical OS temp root, for
+ * a tool whose own path limit is shorter than the store's: the Windows
+ * credential bridge is compiled with `Add-Type`/csc, which fails with CS2021
+ * once the output name is too long, and the CS2021 limit is on the directory
+ * it is handed (#1097). Its length therefore cannot depend on where the store
+ * lives. The leaf is created by an exclusive mkdir under the real path of the
+ * temp root, so a pre-planted symlink or junction is never followed, and
+ * {@link ensureSecureDir} applies the same owner-only restriction every other
+ * scratch root gets. The caller removes it.
+ */
+export declare function createPrivateSystemTempDir(prefix: string): Promise<string>;

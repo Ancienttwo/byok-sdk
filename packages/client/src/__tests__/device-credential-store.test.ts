@@ -146,6 +146,28 @@ describe('DeviceCredentialStore', () => {
     expect(script).not.toContain('[Console]::In');
   });
 
+  it('compiles the Windows credential bridge outside a long store path', async () => {
+    // 309 characters: Add-Type/csc fail with CS2021 before the bridge can run
+    // when the compiler output sits under this store (#1097).
+    const longStore = path.join(suiteTemporaryRoot, ...Array.from({ length: 4 }, () => 'a'.repeat(60)), 'store');
+    expect(longStore.length).toBeGreaterThan(300);
+    let compiledExecutable = '';
+    const run: DeviceCommandRunner = async (executable, _args, stdin) => {
+      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') {
+        compiledExecutable = stdin ?? '';
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      expect(executable).toBe(compiledExecutable);
+      return { exitCode: 44, stdout: '', stderr: '' };
+    };
+    const store = new DeviceCredentialStore({ storeDir: longStore, productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+
+    await expect(store.read()).resolves.toBeUndefined();
+    expect(compiledExecutable.endsWith(`credential-bridge.exe`)).toBe(true);
+    expect(compiledExecutable.length).toBeLessThan(200);
+    expect(compiledExecutable.startsWith(longStore)).toBe(false);
+  });
+
   it('leaves legacy OS temp cleanup to the explicit doctor migration', async () => {
     const staleDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-device-credential-'));
     const symlinkTarget = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-device-credential-symlink-target-'));

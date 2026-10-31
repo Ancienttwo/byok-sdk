@@ -2,9 +2,9 @@ import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
-import { createManagedLifecycle, type ManagedLifecycleFs } from './managed-lifecycle';
+import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle';
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceLifecycle } from './service-types';
+import { sanitizeServiceName, type ServiceDefinition } from './service-types';
 import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit';
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
@@ -198,7 +198,7 @@ WantedBy=default.target
  * systemd user session at all will fail every `systemctl --user` call here
  * with a clear error surfaced from `runOrThrow`, not a silent no-op.
  */
-export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps = {}): ServiceLifecycle {
+export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps = {}): ManagedServiceLifecycle {
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
   const homedir = deps.homedir ?? (() => os.homedir());

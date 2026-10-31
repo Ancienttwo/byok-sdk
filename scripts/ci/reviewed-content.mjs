@@ -148,8 +148,54 @@ function admitHostedLock(before, after, cwd, example) {
   delete after.packages[example.name];
 }
 
+/** A new private workspace is admitted only by the reviewed graph, with
+ * executable checks and dependencies already declared by a base workspace.
+ */
+function verifyRegisteredPrivateManifest(manifest, dir, { base, cwd, workspaceGraph }) {
+  const registration = workspaceGraph?.[dir];
+  const allowed = new Set([...HOSTED_FIELDS, 'license', 'engines']);
+  if (!dir.startsWith('examples/') || !registration || !plain(manifest)
+    || Object.keys(manifest).some(key => !allowed.has(key))
+    || manifest.name !== registration.name || manifest.private !== true
+    || manifest.type !== 'module' || !version(manifest.version)
+    || !isDeepStrictEqual(manifest.scripts, { typecheck: 'tsc --noEmit', test: 'vitest run' })) {
+    throw new Error('Reviewed CI mapping required: new private workspace must be graph-registered with checked manifest shape');
+  }
+  const localEdges = [...new Set(DEPENDENCY_FIELDS.flatMap(field => Object.keys(manifest[field] ?? {}).filter(name => name.startsWith('@byok-sdk/'))))].sort();
+  if (!isDeepStrictEqual(localEdges, [...registration.dependencies].sort())) throw new Error('New workspace edges differ from reviewed graph');
+  const basePaths = execFileSync('git', ['ls-tree', '-r', '--name-only', base, '--', 'packages', 'examples'], { cwd, encoding: 'utf8' })
+    .split('\n').filter(path => /^(packages|examples)\/[^/]+\/package\.json$/.test(path));
+  const declarations = basePaths.map(path => JSON.parse(execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8' })));
+  for (const field of DEPENDENCY_FIELDS) {
+    if (manifest[field] !== undefined && !plain(manifest[field])) throw new Error('Invalid new workspace dependencies');
+    for (const [name, spec] of Object.entries(manifest[field] ?? {})) {
+      const valid = name.startsWith('@byok-sdk/')
+        ? spec === 'workspace:*' && declarations.some(other => other.name === name)
+        : declarations.some(other => DEPENDENCY_FIELDS.some(key => other[key]?.[name] === spec));
+      if (!valid) throw new Error(`New workspace must reuse a base dependency spec (${name})`);
+    }
+  }
+  return manifest;
+}
+
+function admitRegisteredPrivateLock(before, after, context) {
+  const added = [];
+  for (const dir of Object.keys(after.workspaces ?? {})) {
+    if (Object.hasOwn(before.workspaces ?? {}, dir)) continue;
+    const manifest = verifyRegisteredPrivateManifest(JSON.parse(readFileSync(resolve(context.cwd, dir, 'package.json'), 'utf8')), dir, context);
+    const expected = { name: manifest.name, version: manifest.version };
+    for (const field of DEPENDENCY_FIELDS) if (manifest[field] !== undefined) expected[field] = manifest[field];
+    if (!isDeepStrictEqual(after.workspaces[dir], expected)
+      || !isDeepStrictEqual(after.packages?.[manifest.name], [`${manifest.name}@workspace:${dir}`])
+      || before.packages?.[manifest.name] !== undefined) throw new Error('New workspace lock rows differ from its manifest');
+    delete after.workspaces[dir]; delete after.packages[manifest.name];
+    added.push(dir);
+  }
+  return added;
+}
+
 /** Returns qualifying workspaces and any verified lock-format full-matrix reason. */
-export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) {
+export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspaceGraph } = {}) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Content-sensitive impact requires exact CI_BASE');
   const hosted = PRIVATE_HOSTED.find(example => path === `${example.dir}/package.json`);
   const existed = execFileSync('git', ['ls-tree', '--name-only', base, '--', path], { cwd, encoding: 'utf8' }).trim() !== '';
@@ -157,6 +203,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     // A new file has no base content, so the reviewed shape is the whole check.
     verifyHostedManifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), cwd, hosted);
     return { dirs: [] };
+  }
+  if (!existed && /^examples\/[^/]+\/package\.json$/.test(path)) {
+    const dir = path.slice(0, -'/package.json'.length);
+    verifyRegisteredPrivateManifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), dir, { base, cwd, workspaceGraph });
+    return { dirs: [dir] };
   }
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const afterText = readFileSync(resolve(cwd, path), 'utf8');
@@ -193,7 +244,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     for (const example of PRIVATE_HOSTED) {
       if (!before.workspaces?.[example.dir] && after.workspaces?.[example.dir]) admitHostedLock(before, after, cwd, example);
     }
-    return dependencyLockImpact(before, after, { cwd });
+    const added = admitRegisteredPrivateLock(before, after, { base, cwd, workspaceGraph });
+    const impact = dependencyLockImpact(before, after, { cwd });
+    return { ...impact, dirs: [...new Set([...added, ...impact.dirs])] };
   } else if (path === 'examples/bot-collaboration/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The bot collaboration fixture must stay private');
     // #658: the private fixture cloud edge.

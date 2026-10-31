@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { scriptChecksForPaths, selectImpact } from './select-impact.mjs';
 import { needsBuild, planCi } from './plan-ci.mjs';
@@ -61,7 +61,7 @@ test('every declared reader is a tracked root script test with real repository i
 // Run the actual historical and current runners, recording their subprocess
 // selection. Workspace execution is stubbed so this regression proves routing
 // independently of the schema's contents or installed product artifacts.
-test('#1168: pre-fix schema-only routing omits the gate test; fixed routing executes it', t => {
+test('#1168: pre-fix schema-only routing omits the gate test; fixed routing executes it', async t => {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-schema-reader-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const historical = join(cwd, 'historical'); mkdirSync(historical);
@@ -73,8 +73,13 @@ test('#1168: pre-fix schema-only routing omits the gate test; fixed routing exec
     writeFileSync(join(historical, name), source);
   }
   const plan = planCi({ event: 'push', sha: 'a'.repeat(40), base: preFix, paths: [schema] });
+  // Each selector is fed the plan its own graph produces: adding a workspace to
+  // the current graph legitimately changes the plan for the same paths, and the
+  // regression is about routing (which tests run), not about freezing the graph.
+  const { planCi: historicalPlanCi } = await import(pathToFileURL(join(historical, 'plan-ci.mjs')).href);
+  const historicalPlan = historicalPlanCi({ event: 'push', sha: 'a'.repeat(40), base: preFix, paths: [schema] });
   writeFileSync(join(cwd, 'package.json'), '{}');
-  for (const dir of plan.dirs) {
+  for (const dir of new Set([...plan.dirs, ...historicalPlan.dirs])) {
     mkdirSync(join(cwd, dir), { recursive: true });
     writeFileSync(join(cwd, dir, 'package.json'), JSON.stringify({ scripts: { typecheck: 'check', test: 'check' } }));
   }
@@ -82,14 +87,14 @@ test('#1168: pre-fix schema-only routing omits the gate test; fixed routing exec
   const preload = join(cwd, 'record.mjs');
   writeFileSync(preload, `import cp from 'node:child_process'; import {appendFileSync} from 'node:fs'; import {syncBuiltinESMExports} from 'node:module';
     cp.spawnSync = (command, args) => { appendFileSync(process.env.RECORD, JSON.stringify({command,args})+'\\n'); return {status:0}; }; syncBuiltinESMExports();`);
-  const run = runner => {
+  const run = (runner, runPlan) => {
     writeFileSync(record, '');
-    const env = { ...process.env, CI_EVENT: 'push', CI_BASE: preFix, CI_PLAN: JSON.stringify(plan), RECORD: record };
+    const env = { ...process.env, CI_EVENT: 'push', CI_BASE: preFix, CI_PLAN: JSON.stringify(runPlan), RECORD: record };
     delete env.NODE_TEST_CONTEXT;
     const result = spawnSync(process.execPath, ['--import', preload, runner], { cwd, env, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     return readFileSync(record, 'utf8').trim().split('\n').filter(Boolean).flatMap(line => JSON.parse(line).args);
   };
-  assert.ok(!run(join(historical, 'run-targeted.mjs')).includes(upgrade));
-  assert.ok(run(fileURLToPath(new URL('./run-targeted.mjs', import.meta.url))).includes(upgrade));
+  assert.ok(!run(join(historical, 'run-targeted.mjs'), historicalPlan).includes(upgrade));
+  assert.ok(run(fileURLToPath(new URL('./run-targeted.mjs', import.meta.url)), plan).includes(upgrade));
 });

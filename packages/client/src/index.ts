@@ -516,8 +516,17 @@ export { generateWinswXml } from './lifecycle/winsw';
 // #1097: one service implementation for the CLI and embedded Hosts — the stable
 // launcher, unit classification and repair, the lifecycle owner, the exit-code
 // contract and the daemon-owned rotated log.
-export { agentServiceDefinition } from './lifecycle/agent-service';
-export type { AgentServiceDefinitionInput } from './lifecycle/agent-service';
+export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service';
+export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service';
+// #1097 slice 2: versioned installs from a Host-verified payload, upgrade with
+// the candidate's store precheck and snapshot, health-checked switch, rollback.
+export {
+  createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError,
+} from './lifecycle/service-installation';
+export type {
+  ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest,
+  ServiceUpgradeReceipt,
+} from './lifecycle/service-installation';
 export {
   claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError,
 } from './lifecycle/service-unit';

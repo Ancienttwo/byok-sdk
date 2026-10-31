@@ -34,6 +34,9 @@ export default defineConfig({
   format: ['esm'],
   target: 'es2022',
   platform: 'node',
+  // Keep `node:` on builtins: a bundler that packs this output (a byok-agent payload, #1097) resolves
+  // `node:readline/promises`, while esbuild does not list the bare `readline/promises` as a builtin.
+  removeNodeProtocol: false,
   dts: false,
   sourcemap: true,
   clean: true,
