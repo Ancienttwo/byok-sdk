@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "288c92740e479df924180b9db611097c65a49cb7ae439be1e96ed48b0399629c"
+    "snapshotSha256": "0cd747577dd3403e708f08221676aaa75421d51e470ce11a0ceabaa135bea605"
   },
   "configFields": {
     "status": "tracked",
@@ -131,7 +131,7 @@
     {
       "id": "runtime-version-policy",
       "impact": "additive",
-      "summary": "Runtime version policies are pure data (#1103): an exact token or a component-boundary prefix, never a range, minimum, regular expression or semver dependency. A descriptor default, an adapter option and DaemonConfig.runtimes.<id>.versionPolicy are complete objects that replace one another wholesale through one resolver; default behavior is unchanged (Codex/Grok/Hermes still warn on an unqualified version, Claude/Pi still do not), and only a Host-configured block declines a runtime locally before claim with task.decline.code runtime_version_blocked and retryable false. A descriptor default may not configure a block (invalid_version_policy / block_requires_host). Nothing to change unless a Host opts into a block.",
+      "summary": "Runtime version policies are pure data (#1103): an exact token or a component-boundary prefix, never a range, minimum, regular expression or semver dependency. A descriptor default, an adapter option and DaemonConfig.runtimes.<id>.versionPolicy are complete objects that replace one another wholesale through one resolver; default behavior is unchanged (Codex/Grok/Hermes still warn on an unqualified version, Claude/Pi still do not), and only a Host-configured block declines a runtime locally before claim with task.decline.code runtime_unavailable, runtimeUnavailable.cause version_blocked and retryable false. A descriptor default may not configure a block (invalid_version_policy / block_requires_host). Nothing to change unless a Host opts into a block.",
       "migration": "docs/device-setup.md#configuration",
       "items": [
         "export:@byok-sdk/client#RuntimeAdapterDescriptor",
@@ -139,6 +139,20 @@
         "export:@byok-sdk/client#RuntimeVersionSpec",
         "export:@byok-sdk/client#RuntimeVersionVerdict",
         "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor"
+      ]
+    },
+    {
+      "id": "runtime-unavailable-cause",
+      "impact": "additive",
+      "summary": "task.decline carries a typed runtime_unavailable cause (#1103 B2a): the open code runtime_unavailable plus an optional runtimeUnavailable { cause, code? } nested field, an append-only cause vocabulary and one retryable default per cause. An older server strips the nested field and still records the open code; an unknown cause reads as unknown with the raw token. Existing decline reasons and retryable values are unchanged, and a runtime that a Host-configured version policy blocks now reports runtime_unavailable / version_blocked instead of the earlier runtime_version_blocked code.",
+      "migration": "docs/protocol.md#32-declined-vs-failed-m1-gap-5",
+      "items": [
+        "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSES",
+        "export:@byok-sdk/protocol#RuntimeUnavailableCause",
+        "export:@byok-sdk/protocol#RuntimeUnavailableCauseReading",
+        "export:@byok-sdk/protocol#readRuntimeUnavailableCause",
+        "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES",
+        "export:@byok-sdk/protocol/constants#RuntimeUnavailableCause"
       ]
     },
     {
@@ -2762,6 +2776,11 @@
       "entry": "runtime-capability-matrix"
     },
     {
+      "item": "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSES",
+      "change": "added",
+      "entry": "runtime-unavailable-cause"
+    },
+    {
       "item": "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
       "change": "changed",
       "entry": "runtime-capability-matrix"
@@ -2770,6 +2789,16 @@
       "item": "export:@byok-sdk/protocol#RuntimeInfoSchema",
       "change": "changed",
       "entry": "runtime-capability-matrix"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeUnavailableCause",
+      "change": "added",
+      "entry": "runtime-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeUnavailableCauseReading",
+      "change": "added",
+      "entry": "runtime-unavailable-cause"
     },
     {
       "item": "export:@byok-sdk/protocol#TASK_FAIL_REASON_MAX_BYTES",
@@ -2842,6 +2871,11 @@
       "entry": "open-device-vocabularies"
     },
     {
+      "item": "export:@byok-sdk/protocol#readRuntimeUnavailableCause",
+      "change": "added",
+      "entry": "runtime-unavailable-cause"
+    },
+    {
       "item": "export:@byok-sdk/protocol#readTaskFailure",
       "change": "added",
       "entry": "open-device-vocabularies"
@@ -2890,6 +2924,16 @@
       "item": "export:@byok-sdk/protocol/agent-memory#validateAgentMemoryPath",
       "change": "added",
       "entry": "agent-memory-contract-in-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES",
+      "change": "added",
+      "entry": "runtime-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RuntimeUnavailableCause",
+      "change": "added",
+      "entry": "runtime-unavailable-cause"
     },
     {
       "item": "export:@byok-sdk/protocol/constants#TASK_FAIL_REASON_MAX_BYTES",

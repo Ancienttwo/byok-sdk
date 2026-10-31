@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
-import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason } from './constants';
+import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type RuntimeUnavailableCause } from './constants';
 import { BlobRefSchema } from './blob';
 import {
   SEALED_DECLINE_CODES,
@@ -44,7 +44,7 @@ import {
   InputPreparationSelectionSchema,
   InputPreparationSourceSchema,
 } from './input-preparation';
-import { unrecognizedToken } from './open-vocabulary';
+import { openVocabularyToken, unrecognizedToken } from './open-vocabulary';
 import { ProviderProfileBindingSchema } from './provider-profile-binding';
 import { TerminalProjectionSelectionSchema } from './terminal-projection';
 import { canonicalizePlainJson, type PlainJsonCheck } from './plain-json';
@@ -956,12 +956,44 @@ export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
  * know is accepted and kept verbatim, so the decline is still recorded.
  * {@link readDeclineCode} is the typed reading.
  */
+const RuntimeUnavailableCauseSchema = z.union([
+  z.enum(RUNTIME_UNAVAILABLE_CAUSES),
+  unrecognizedToken(RUNTIME_UNAVAILABLE_CAUSES),
+]);
+
+/**
+ * The typed reason a runtime was unavailable before claim (#1103 D6).
+ * Append-only: an unknown well-formed cause is accepted and kept verbatim
+ * (#1121), and {@link readRuntimeUnavailableCause} is the typed reading. The
+ * login-shell capture code travels only with `environment_unavailable`
+ * (#1095); it is an open well-formed token so the protocol never owns the
+ * client's closed environment-code list.
+ */
+const RuntimeUnavailableSchema = z.object({
+  cause: RuntimeUnavailableCauseSchema,
+  code: openVocabularyToken().optional(),
+}).refine((value) => value.code === undefined || value.cause === 'environment_unavailable', {
+  message: 'only environment_unavailable carries an environment code',
+});
+
+/** A runtime-unavailable cause as this version understands it; unknown reads as `unknown` with the raw token kept. */
+export type RuntimeUnavailableCauseReading =
+  | { readonly cause: RuntimeUnavailableCause }
+  | { readonly cause: 'unknown'; readonly reportedCause: string };
+
+export function readRuntimeUnavailableCause(cause: string): RuntimeUnavailableCauseReading {
+  return (RUNTIME_UNAVAILABLE_CAUSES as readonly string[]).includes(cause)
+    ? { cause: cause as RuntimeUnavailableCause }
+    : { cause: 'unknown', reportedCause: cause };
+}
+
 const DeclineFields = z.object({
   ...NO_SEALED_MEMBER,
   reason: z.string(),
   retryable: z.boolean().optional(),
   agentRef: AgentRefSchema.optional(),
   code: z.union([z.enum(DECLINE_CODES), unrecognizedToken(DECLINE_CODES)]).optional(),
+  runtimeUnavailable: RuntimeUnavailableSchema.optional(),
   admission: OfferAdmissionTimingsSchema.optional(),
 });
 

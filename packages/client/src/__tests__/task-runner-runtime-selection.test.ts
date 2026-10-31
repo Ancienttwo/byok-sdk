@@ -143,7 +143,9 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         ),
       );
       const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
-      expect(decline.payload).toMatchObject({ retryable: false, code: 'runtime_version_blocked' });
+      expect(decline.payload).toMatchObject({
+        retryable: false, code: 'runtime_unavailable', runtimeUnavailable: { cause: 'version_blocked' },
+      });
       expect(decline.type === 'task.decline' ? (decline.payload as { reason?: string }).reason : '').toContain('blocked by the device version policy');
       expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
       expect(blocked.startCalls).toHaveLength(0);

@@ -65,7 +65,8 @@ const fields = {
     agentRef: false, agentHomeProjection: false, agentHomeMemoryChange: false,
   },
   'task.decline': {
-    sealed: false, sealing: false, reason: true, retryable: false, agentRef: false, code: false, admission: false,
+    sealed: false, sealing: false, reason: true, retryable: false, agentRef: false, code: false,
+    runtimeUnavailable: false, admission: false,
   },
   'task.cancelled': {
     sealed: false, sealing: false, harnessId: false, reason: false, usage: false,
@@ -123,7 +124,7 @@ function resultFields(payload: object): object {
   const evidenceOnly = {
     agentRef: true, harnessId: true, recovery: true, agentHomeProjection: true,
     agentHomeMemoryChange: true, usage: true, preparedObservation: true,
-    sealed: true, sealing: true, admission: true,
+    sealed: true, sealing: true, runtimeUnavailable: true, admission: true,
   } satisfies Record<Exclude<Keys<Terminal['envelope']['payload']>, keyof NonNullable<Snapshot['result']>>, true>;
   return Object.fromEntries(Object.entries(payload).filter(([key]) => !Object.hasOwn(evidenceOnly, key)));
 }

@@ -19,6 +19,7 @@ import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalProjectionSelection, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types';
+import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home';
 import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers';
 import type { AgentTerminalCause } from '../agent-session-handoff-store';
@@ -275,25 +276,14 @@ export interface QueuedApprovalRequest {
   readonly signal?: AbortSignal;
 }
 
-/**
- * A typed pre-claim admission cause that is not a human-readable reason
- * (#1103). Today only a Host-configured version block: the nested wire field and
- * the shared cause vocabulary are later slices, so `offer-runtime` projects the
- * open `task.decline.code` token `runtime_version_blocked` and never parses the
- * reason.
- */
-export interface RuntimeVersionBlockedAdmission {
-  readonly cause: 'version_blocked';
-}
-
 export type PickResult =
   | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor }
-  | { ok: false; reason: string; retryable: boolean; versionBlock?: RuntimeVersionBlockedAdmission };
+  | { ok: false; reason: string; retryable: boolean; runtimeUnavailable?: RuntimeUnavailableAdmission };
 
 /** The closures that handleOffer builds once and gives to its phase methods. */
 export interface OfferPhaseContext {
   readonly taskId: string;
-  readonly decline: (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']) => void;
+  readonly decline: (reason: string, retryable: boolean, code?: TaskDeclinePayload['code'], runtimeUnavailable?: RuntimeUnavailableAdmission) => void;
   readonly admissionWithdrawn: () => boolean;
   /** Aborted exactly when `admissionWithdrawn()` would decline: cancel, shutdown, or the startup deadline. */
   readonly admissionSignal: AbortSignal;

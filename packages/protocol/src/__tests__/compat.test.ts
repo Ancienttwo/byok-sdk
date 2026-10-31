@@ -518,6 +518,7 @@ describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.claim', field: 'capabilities.isolation' },
       { kind: 'http', rule: 'strip-safe', surface: 'PresencePublishRequest', field: 'runtimes[].capabilities' },
       { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
+      { kind: 'envelope', rule: 'strip-safe', surface: 'task.decline', field: 'runtimeUnavailable' },
       { kind: 'http', rule: 'strip-safe', surface: 'TokenResponse', field: 'expiresIn' },
       { kind: 'http', rule: 'strip-safe', surface: 'PairResponse', field: 'expiresIn' },
     ]);

@@ -11,9 +11,14 @@ import { z } from 'zod';
  */
 const OPEN_VOCABULARY_TOKEN = /^[a-z][a-z0-9_-]{0,63}$/;
 
+/** Any well-formed open-vocabulary token, without a membership rule. */
+export function openVocabularyToken(): z.ZodString {
+  return z.string().regex(OPEN_VOCABULARY_TOKEN);
+}
+
 /** A well-formed token that is none of `known`: the raw value a receiver keeps as `reported<Field>`. */
 export function unrecognizedToken(known: readonly string[]): z.ZodString {
-  return z.string().regex(OPEN_VOCABULARY_TOKEN).refine((value) => !known.includes(value), {
+  return openVocabularyToken().refine((value) => !known.includes(value), {
     message: 'a recognized value is not reported as unrecognized',
   });
 }
