@@ -240,7 +240,10 @@ export function inspectRepository(root) {
       }
     }
   }
-  if (packages.has('@byok-sdk/ui-runtime')) {
+  // Release-pack and other synthetic roots copy manifests without sources.
+  // Enforce the lock only where the ui-runtime source tree really exists, so a
+  // missing file inside the real tree is still a failure (see the regression).
+  if (packages.has('@byok-sdk/ui-runtime') && existsSync(path.join(root, 'packages/ui-runtime/src'))) {
     const lockedUiRuntimeCloud = new Set();
     for (const locked of UI_RUNTIME_CLOUD_VALUE_IMPORTS) {
       const key = `${locked.file} -> ${locked.specifier}`;

@@ -168,6 +168,12 @@ test('ui-runtime value imports from cloud are locked to exact files and members'
   ]);
 });
 
+test('ui-runtime lock stays off for manifest-only synthetic roots', t => {
+  const f = fixture(t);
+  f.pkg('ui-runtime'); f.pkg('cloud');
+  assert.deepEqual(inspectRepository(f.root), []);
+});
+
 test('the checked-in K8 rules stay clear of the K4 Node-only closure', () => {
   const repo = path.resolve(import.meta.dirname, '../..');
   assert.deepEqual(inspectExamplePortability(repo), []);
