@@ -17,6 +17,9 @@ async function setup(rest: Partial<BotOptions> = {}) {
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
     } }, connector: async id => ({ externalId: id }), ...rest };
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
+  // Test fixture: these cases exercise the actions the Main Bot applies. The product default is observe (#1229);
+  // autonomy.test.ts owns that default.
+  fixture.ledger.transaction(s => { stateOf(s.application).team.bots.main!.autonomy = 'auto'; });
   return options;
 }
 async function finish(id: string, outcome: unknown = {}) {

@@ -98,7 +98,8 @@ function members(state: CollaborationState, root: string): Members {
     cards: values(state.cards).filter(card => ids.has(card.turnId)).map(card => card.id),
     questions: values(state.questions).filter(question => ids.has(question.turnId)).map(question => question.id),
     ...(batch ? { batch: batch.id } : {}), inputs: batch ? [...batch.inputIds] : [],
-    inbounds: values(state.channel?.inbounds).filter(row => roots.has(row.root)).map(row => row.id),
+    // A filtered inbound has no root (#1229), so a root acknowledgement does not move it; it stays with its audit row.
+    inbounds: values(state.channel?.inbounds).filter(row => row.root !== undefined && roots.has(row.root)).map(row => row.id),
     deliveries: values(state.channel?.deliveries).filter(row => ids.has(row.turnId)).map(row => row.id),
   };
 }

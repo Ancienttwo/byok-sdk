@@ -427,7 +427,7 @@ function checkReferences(content: SwitchContent): void {
  */
 const COLLABORATION_KEYS = ['version', 'team', 'turns', 'budgets', 'delegations', 'batches', 'units', 'replies', 'schemas', 'questions', 'cards',
   'rejected', 'audit', 'sequence'];
-const COLLABORATION_OPTIONAL = ['inputs', 'inputBatches', 'channel', 'revision', 'commands', 'cardCalls'];
+const COLLABORATION_OPTIONAL = ['inputs', 'inputBatches', 'channel', 'revision', 'commands', 'cardCalls', 'wouldDo'];
 
 /**
  * The live state of a drained domain: no owner record of the source, each routine Turn keyed by its occurrence's intent

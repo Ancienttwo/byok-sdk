@@ -82,6 +82,16 @@ The Host records each refusal in its audit.
 An approval comes only from a platform button callback with a verified principal.
 A text command such as `/approve` is not an approval.
 
+### R2a. Every inbound human message has a destination
+
+The Host UI shows one destination for every inbound human message:
+`filtered(code)`, `coalesced(turnId)`, `answered(turnId)`, `failed(turnId)` or
+`cancelled(turnId)`.
+The disposition is a projection of the inbound row, the input batch and the Turn.
+The Host writes no second destination table.
+A filtered message keeps its audit row; a merged message names the batch Turn that answers it.
+A recorded message with no live Turn and no open batch reads `failed`, never silence.
+
 ### R3. Three delivery results
 
 A timeout must not cause a blind resend.

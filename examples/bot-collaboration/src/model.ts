@@ -8,6 +8,7 @@ import type { AcceptedReply, Batch, Delegation, Unit } from './rules/delegation'
 import type { CommandRecord } from './rules/commit';
 import type { DeviceTopology } from './topology';
 import type { SwitchExportMark, SwitchImport } from './switch';
+import type { AutonomyState, WouldDo } from './rules/autonomy';
 
 export type { Authority, InputBatch, SealReason, UserInput } from './rules/coalesce';
 export { addBatchTurns, addTurn, json } from './rules/turn';
@@ -18,7 +19,7 @@ export type { AcceptedReply, Batch, Delegation, DelegationCancel, Unit } from '.
  * Version 3 (#798): retention moves settled rows out of this state into K4 application rows, so a version 2 writer
  * would read archived evidence as absent. Bot routines are K4 routines with the `bot-routine` occurrence hook.
  */
-export interface CollaborationState {
+export interface CollaborationState extends AutonomyState {
   version: 3; team: TeamState; turns: Record<string, Turn>; budgets: Record<string, Budget>;
   delegations: Record<string, Delegation>; batches: Record<string, Batch>; units: Record<string, Unit>;
   replies: Record<string, AcceptedReply>;
@@ -54,6 +55,11 @@ export interface CollaborationState {
    * moves in an export, and neither is in ContextPack or projections.
    */
   switchExport?: SwitchExportMark; switchImport?: SwitchImport;
+  /**
+   * Would-do rows of observing Bots (#1229), keyed by `wouldDoId(taskId, action, index)`. They appear at the first
+   * observed action, so an older ledger reads none. They are Host UI history, never part of the Bot's ContextPack or wire.
+   */
+  wouldDo?: Record<string, WouldDo>;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({

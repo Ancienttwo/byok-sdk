@@ -2,6 +2,7 @@ import type { BotTurnOutcome } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addTurn, json, type Json, type Rejection, type ReplyEntry, type Turn, type TurnsState, type Verdict } from './turn';
 import { frame, REPLY_META_MAX_BYTES } from './frame';
+import { observes, type AutonomyGate } from './autonomy';
 
 /**
  * Cross-Bot delegation as pure rules (#739 D1): budget units, the batch join, verdicts, cancel arbitration and
@@ -220,9 +221,10 @@ export function reserveUnits(n: number): number { return n + Math.max(n, 1); }
 /**
  * Apply every delegate item of one outcome (§3.1). Self items keep the K8a
  * continuation path. The accepted cross-Bot items form one batch (§3.5).
+ * #1229: an observing Bot records a cross-Bot item as would-do: no delegation row, no bot_request Turn, no budget unit.
  */
 export function applyDelegate(state: DelegationState, turn: Turn, taskId: string, outcome: BotTurnOutcome, seat: boolean,
-  now: number, emit: Publish, accept: (action: string, work: () => void) => void): { successor: boolean } {
+  now: number, emit: Publish, accept: (action: string, work: () => void) => void, gate?: AutonomyGate): { successor: boolean } {
   let successor = false;
   let self = false;
   const targets = new Set<string>();
@@ -247,6 +249,7 @@ export function applyDelegate(state: DelegationState, turn: Turn, taskId: string
       return;
     }
     if (state.delegations[id]) return;
+    if (observes(gate)) { gate.record('delegate', index, json(action)); return; }
     const target = state.team.bots[action.to];
     const row: Delegation = { id, root: turn.root, fromBotId: turn.botId, fromTurnId: turn.id, fromTaskId: taskId, index,
       toBotId: action.to, request: action.request, hop: turn.hop + 1, chainTurnIds: [], batch: taskId, status: 'queued', revision: 0 };

@@ -8,7 +8,7 @@ import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOpti
 import type { HostJobHandler, Routine } from '@byok-sdk/server/execution-core';
 import { HostLedger } from '@byok-sdk/server/execution-core';
 import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
-import { stateOf, type CollaborationState, type Turn } from './model';
+import { json, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
@@ -19,6 +19,8 @@ import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, sync
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
   updateDefinition, type BotRoutineInput } from './routines';
+import { DEFAULT_AUTONOMY, autonomyOf, recordWouldDo, wouldDoRows, type Autonomy, type AutonomyGate, type WouldDo } from './rules/autonomy';
+import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority';
 
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
 import { botCompactVeto } from './compaction';
@@ -36,7 +38,10 @@ import { sealSwitchExport, SwitchExportError, type SwitchExport } from './migrat
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery';
-import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, queueDelivery, refuseRoute, rememberInbound, resendUnknown, revokePush } from './delivery-routing';
+import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, queueDelivery, refuseRoute, rememberFilteredInbound, rememberInbound,
+  resendUnknown, revokePush } from './delivery-routing';
+import { inboundDispositionsOf, projectInboundDispositions } from './inbound';
+import type { InboundDisposition } from './rules/inbound';
 export interface BotOptions {
   botId: string; execution: ExecutionTemplate; now?: () => number;
   /** Owner principal id (#552 R2). Default `owner`. Only the human principal with this id passes the owner checks. */
@@ -121,6 +126,11 @@ export interface BotOptions {
    * `confirmable_action` branches. Each field only narrows the default. It applies to Turns frozen after construction.
    */
   outcome?: OutcomeOffer;
+  /**
+   * The concurrent task limit of each device (#1229 item 1), as the daemon's `maxConcurrentTasks`. Default 8.
+   * The Host leaves one slot free for user-source work; submitted work is never cancelled to make room.
+   */
+  deviceConcurrency?: number;
 }
 /** Synchronous. A throw or a thenable leaves the intent open, and `drain()` rejects. */
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
@@ -164,6 +174,13 @@ function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn)
   const bot = state.team.bots[turn.botId];
   return !turn.conclusion && !turn.held && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
 }
+/** The slot row of one K4 intent (#1229). An intent holds a slot once it is submitted or has attempt evidence. */
+function dispatchRow(state: LedgerState, row: Intent): DispatchIntent {
+  const execution = state.executions[row.taskId];
+  return { id: row.id, agent: row.agent, sequence: row.sequence, phase: row.phase, attempts: row.attempts, source: row.source,
+    deviceId: row.execution.deviceId,
+    occupies: row.phase === 'inflight' && (execution?.submission === 'delivered' || execution?.attempt !== undefined || execution?.started === true) };
+}
 /** #957: a new owner command refuses while a device it would create work on is frozen or owned by H (`commandBots`). */
 function admitCommand(state: CollaborationState, command: Command): void {
   for (const botId of commandBots(state, command)) admitBot(state, botId);
@@ -191,6 +208,7 @@ export class BotCollaboration {
   private readonly contextMaxBytes: number;
   private readonly contextTurnLimit: number;
   private readonly instructionMaxBytes: number;
+  private readonly deviceConcurrency: number;
   private readonly timers: DelegationTimers;
   private readonly coalesce?: CoalescePolicy;
   private readonly offer: CheckedOffer;
@@ -267,6 +285,8 @@ export class BotCollaboration {
     if (this.instructionMaxBytes < minimum) throw new Error(`instructionMaxBytes must be at least ${minimum}`);
     this.timers = { cancelGraceMs: time(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS), uncertainAfterMs: time(options.uncertainAfterMs ?? REPLY_UNCERTAIN_AFTER_MS) };
     if (this.timers.cancelGraceMs < 1 || this.timers.uncertainAfterMs < 1) throw new Error('Invalid delegation timers');
+    this.deviceConcurrency = time(options.deviceConcurrency ?? DEVICE_CONCURRENCY);
+    if (this.deviceConcurrency < 1) throw new Error('Invalid device concurrency');
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: options.reconcileMs ?? 100, nextOccurrence: routineCalendar,
       // K8 owns only Turn and Host intents, so no K8 owner could settle an occurrence intent: L concludes a Host job result
       // with `execution` `failed` (#793 K5) and refuses `execution` routines (#954), as H does.
@@ -285,7 +305,9 @@ export class BotCollaboration {
       applyMessage: (input, tx) => this.applyMessage(input, tx),
       applyOutcome: (document, tx) => this.applyOutcome(document, tx),
       // #957: K4 sends nothing to a device that is frozen or owned by H: not the timer drain, not a `bot.core` call.
-      admitSubmit: (intent, state) => !deviceRefusal(stateOf(state.application as LedgerState['application']), intent.execution.deviceId) });
+      // #1229: the Host also reserves one slot of each device for user-source work.
+      admitSubmit: (intent, state) => !deviceRefusal(stateOf(state.application as LedgerState['application']), intent.execution.deviceId)
+        && this.admitsDeviceSlot(intent, state) });
     // An exported domain stays as it was exported (#975), also across a restart.
     if (!stateOf(persisted.application).switchExport) ledger.transaction(s => {
       const state = stateOf(s.application);
@@ -294,7 +316,7 @@ export class BotCollaboration {
         return;
       }
       state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
-        model: Object.keys(this.models())[0]!, mainBot: true, archived: false,
+        model: Object.keys(this.models())[0]!, mainBot: true, archived: false, autonomy: DEFAULT_AUTONOMY,
         revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
         execution: structuredClone(options.execution) };
     });
@@ -349,8 +371,10 @@ export class BotCollaboration {
         ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: principal.id }
         : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text,
           mentions: this.seatMentions(conversation.id, principal, message.mentions), from: principal.id };
+      // #1229 item 3: remember every inbound human message, with or without a channel, so the Host UI can project its
+      // destination. A room input's root is its round id; the seat Turns carry their own roots.
       const result = this.commitOwner(hash(['receive', key]), command,
-        (_s, state) => this.options.channel ? { remember: root => rememberInbound(state, message, root) } : {});
+        (_s, state) => ({ remember: root => rememberInbound(state, message, root) }));
       await this.process();
       return { kind, id: turnOf(result) };
     });
@@ -358,7 +382,13 @@ export class BotCollaboration {
       return { kind, id: await this.roomInput(inboundKey(message), conversation.id, message.text, message.mentions, sender) };
     }
     const who = verified(sender) ? ` ${sender.kind}:${sender.id}` : '';
-    await this.exclusive(async () => this.audit(`Inbound ${kind}: ${channel} ${conversation.kind}:${conversation.id} ${platformMessageId}${who}`));
+    // #1229 item 3: a refused human message gets a durable inbound row too, so it never lacks a destination.
+    const filtered = kind === 'unverified_sender' || kind === 'not_owner' ? kind : undefined;
+    await this.exclusive(async () => this.write(s => {
+      const state = stateOf(s.application);
+      if (filtered) rememberFilteredInbound(state, message, filtered);
+      state.audit.push(`Inbound ${kind}: ${channel} ${conversation.kind}:${conversation.id} ${platformMessageId}${who}`.slice(0, 1024));
+    }));
     return { kind };
   }
   /** Owner opt-in for one canonical conversation. Enabling a replacement revokes its old route. */
@@ -432,6 +462,7 @@ export class BotCollaboration {
       outcome: {
         // The terminal transaction has not written yet, so a ledger snapshot is the committed state.
         committed: { intent: key => intentRows(this.ledger.snapshot()).intent(key) },
+        autonomy: this.autonomyGate(state, key, taskId, tx.publish),
         manage: (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, this.models(), managed, this.options.readOnlyToolsets),
         createRoutine: (turn, action, index) => tx.routines.create(createDefinition(tx.routines.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
         updateRoutine: (turn, action) => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action)),
@@ -597,6 +628,19 @@ export class BotCollaboration {
     if (valueOf<{ deliver: boolean }>(result).deliver) await this.deliverCancels();
     await this.process();
   }
+  /** The slot admission of one device (#1229 item 1): user-source work may take the last slot, other work may not. */
+  private admitsDeviceSlot(intent: Intent, state: LedgerState): boolean {
+    const rows = Object.values(state.intents).map(row => dispatchRow(state, row));
+    return admitDeviceSlot(rows.find(row => row.id === intent.id) ?? dispatchRow(state, intent), rows, this.deviceConcurrency);
+  }
+  /** The autonomy gate of one outcome (#1229): an observing Bot records its autonomous actions instead of applying them. */
+  private autonomyGate(state: CollaborationState, turnId: string, taskId: string, publish: (id: string, value: Json) => void): AutonomyGate {
+    const turn = state.turns[turnId]!;
+    return { autonomy: autonomyOf(state.team.bots[turn.botId]), record: (action, index, detail) => {
+      const row = recordWouldDo(state, { botId: turn.botId, taskId, action, index, at: this.now(), detail });
+      if (row) publish(`would-do:${row.id}`, json(row));
+    } };
+  }
   /**
    * Deliver each committed cancel to its frozen target (§8.8). A crash before
    * `delivered` leaves the fact for the next pass. It never picks a new Turn.
@@ -643,6 +687,31 @@ export class BotCollaboration {
   async setMainBot(botId: string, mainBot: boolean): Promise<void> {
     await this.exclusive(async () => {
       this.commitKeyless({ kind: 'set_main_bot', botId, mainBot });
+      await this.process();
+    });
+  }
+  /** The resolved autonomy of one Bot (#1229). A Bot without the field is in observe, the default of a new Bot. */
+  autonomy(botId: string): Autonomy {
+    const bots = this.snapshot().team.bots, bot = Object.hasOwn(bots, botId) ? bots[botId] : undefined;
+    if (!bot) throw new Error('Bot not found');
+    return autonomyOf(bot);
+  }
+  /** The would-do rows of one Bot, or of every Bot, oldest first (#1229). The Host UI lists these for the owner. */
+  wouldDoRecords(botId?: string): WouldDo[] { return wouldDoRows(this.snapshot(), botId); }
+  /**
+   * The destination of every recorded inbound human message (#1229 item 3), oldest first. It is a projection of the
+   * inbound, batch and Turn rows: the ledger holds no second disposition.
+   */
+  inboundDispositions(): InboundDisposition[] { return inboundDispositionsOf(this.snapshot()); }
+  /**
+   * Owner API (#1229): switch one Bot between observe and auto. Only the owner principal may switch. It applies to
+   * outcomes recorded after the switch; a record made in observe is never replayed.
+   */
+  setBotAutonomy(botId: string, autonomy: Autonomy, ...by: PrincipalArg): Promise<void> {
+    return this.exclusive(async () => {
+      this.ownerOnly(by, 'setBotAutonomy', botId);
+      if (autonomy !== 'observe' && autonomy !== 'auto') throw new Error('Invalid autonomy');
+      this.commitKeyless({ kind: 'set_autonomy', botId, autonomy });
       await this.process();
     });
   }
@@ -886,6 +955,8 @@ export class BotCollaboration {
     reportCardDecisions(state, (key, value) => project(s, key, value));
     cleanReplyTokens(s, state, this.now());
     projectInputBatches(state, (key, value) => project(s, key, value));
+    // #1229 item 3: one projection per destination. An unchanged destination is the same projection id and value.
+    projectInboundDispositions(state, (key, value) => project(s, key, value));
     return materialized;
   }
   /** Example reconcile loop (§3.10). K4 arms no scan after a settled intent, so the Host checks replies itself. */

@@ -1,9 +1,10 @@
-import { enqueue, hash, project, promoteOccurrence, type ApplicationRows, type HostLedger, type LedgerState } from '@byok-sdk/server/execution-core';
+import { enqueue, hash, project, promoteOccurrence, type ApplicationRows, type HostLedger, type Intent, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type Card, type Turn } from './model';
 import { intentFacts } from './delegation';
 import { turnIntentRetired } from './compaction';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines';
 import { syncTurn, type SyncFacts, type SyncOptions } from './rules/sync';
+import { userFirst } from './rules/priority';
 import { cardCallDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, refuseRetired, retiredIdentity, settleCardCall, type AdmittedIds, type Command,
   type CommandPorts } from './rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from './rules/commit';
@@ -53,6 +54,19 @@ export function retainInLedger(ledger: HostLedger, input: RetentionInput, limits
   }, rows));
 }
 /**
+ * The intents that user input goes ahead of (#1229): a Bot Turn whose source is a routine occurrence or another Bot's
+ * request. A self continuation, an answer result or a Bot reply keeps its FIFO position.
+ */
+function prioritiseUser(s: LedgerState, state: ReturnType<typeof stateOf>, user: Intent): void {
+  // K4 keys an intent by `hash(turn.id)`, so the priority rule compares intent ids, not Turn ids.
+  const autonomous = new Set(Object.values(state.turns)
+    .filter(turn => turn.source === 'routine' || turn.source === 'bot_request').map(turn => hash(turn.id)));
+  const plan = userFirst(Object.values(s.intents), user.id, autonomous, s.sequence);
+  if (!plan) return;
+  for (const { id, sequence } of plan.assignments) s.intents[id]!.sequence = sequence;
+  s.sequence = plan.sequence;
+}
+/**
  * One sync step of one Turn in the L ledger, inside the caller's transaction. The Host sync loop calls it for each Turn.
  * The K4 writes stay here: `enqueue`, `promoteOccurrence`, the intent cancel and the occurrence conclusion.
  * Returns true when the step queued work or concluded an occurrence, so that K4 drains again.
@@ -73,7 +87,13 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
   return more;
   function applyStep(): boolean {
     switch (step?.kind) {
-      case 'freeze': enqueue(s, ledger.tenant, step.input); return true;
+      case 'freeze': {
+        const intent = enqueue(s, ledger.tenant, step.input);
+        // #1229 item 1: a user-source intent goes ahead of the queued, never-submitted routine and bot_request intents
+        // of the same Agent FIFO. Submitted work keeps its order and its taskId generation; the order lives in the ledger.
+        if (step.input.source === 'user') prioritiseUser(s, stateOf(s.application), intent);
+        return true;
+      }
       case 'routine': promoteOccurrence(s, ledger.tenant, routineOccurrence(turn), step.execution); return true;
       case 'cancel': s.intents[hash(turn.id)]!.cancelReason = 'cancelled'; return false;
       // A concluded occurrence can make a staged version due, so the next pass drains K4 again.

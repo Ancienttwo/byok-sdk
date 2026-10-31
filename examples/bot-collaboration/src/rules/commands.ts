@@ -9,7 +9,8 @@ import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } fr
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
 import { acceptMessage, type MessageFields } from './message';
 import { expireCard } from './cards';
-import { commit, type CommandRecord, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
+import type { Autonomy } from './autonomy';
+import { commit, revisionOf, type CommandRecord, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
 
 // The collaboration commands and their decisions as pure rules (#739 D1). `commitCommand` runs one command
 // through the commit contract. Owner commands and the K4 callbacks use the same function.
@@ -64,13 +65,16 @@ export type KeylessCommand =
   /** A Turn of an open delegation chain cancels the whole delegation (§8.8). */
   | { kind: 'cancel_turn'; turnId: string }
   /** Main Bot `botId` completes any open Bot routine, an archived owner's too (§55c). */
-  | { kind: 'end_routine'; botId: string; routineId: string };
+  | { kind: 'end_routine'; botId: string; routineId: string }
+  /** Owner switch of one Bot's autonomy (#1229). It applies to outcomes recorded after it; nothing replays. */
+  | { kind: 'set_autonomy'; botId: string; autonomy: Autonomy };
 export type Command = KeyedCommand | KeylessCommand;
 /** The Bot and home rows that the team commands read and change. */
 interface TeamRows {
   team: {
     external?: ExternalTeam;
-    bots: Readonly<Record<string, { mainBot: boolean; archived: boolean; readonly revision: string; readyRevision: string | null; readonly persona: string }>>;
+    bots: Readonly<Record<string, { mainBot: boolean; archived: boolean; readonly revision: string; readyRevision: string | null;
+      readonly persona: string; autonomy?: Autonomy }>>;
     homeOperations: ReadonlyArray<{ readonly botId: string; readonly status: string;
       readonly request: { readonly payload: { readonly agentRef: { readonly profileRevision: string } } } }>;
   };
@@ -175,7 +179,7 @@ export interface CommandStore {
 
 const CALLBACKS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
 const KEYLESS = new Set<Command['kind']>(['set_main_bot', 'update_room', 'set_room_member_mentions', 'retry_persona', 'persona_ready', 'enable_push_route', 'revoke_push_route',
-  'resend_delivery', 'cancel_delegation', 'abandon_delegation', 'cancel_turn', 'end_routine']);
+  'resend_delivery', 'cancel_delegation', 'abandon_delegation', 'cancel_turn', 'end_routine', 'set_autonomy']);
 export function isKeyless(command: Command): command is KeylessCommand { return KEYLESS.has(command.kind); }
 /** The fields that decide each command's effect: the fields that the existing identity checks compare. */
 export function commandEvidence(command: KeyedCommand): Json {
@@ -339,6 +343,16 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       requireMain(state.team, command.botId);
       need(ports.routines, command.kind).end(command.routineId);
       return accepted();
+    case 'set_autonomy': {
+      if (command.autonomy !== 'observe' && command.autonomy !== 'auto') throw new Error('Invalid autonomy');
+      const bot = activeBot(state.team, command.botId);
+      // The owner switch is Host policy, so the team authority's profile does not own it.
+      bot.autonomy = command.autonomy;
+      // One revision per switch: a later switch to the same value is still a new UI event, never a projection identity conflict.
+      const revision = revisionOf(state) + 1;
+      publish(`bot-autonomy:${bot.id}:${revision}`, json({ owner: bot.id, autonomy: command.autonomy, revision }));
+      return accepted();
+    }
   }
 }
 /**

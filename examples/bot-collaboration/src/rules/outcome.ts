@@ -4,6 +4,7 @@ import { json, type Card, type Question, type Turn } from './turn';
 import { applyDelegate, arbitrateCancel, endChain, observeStart, type DelegationBot, type DelegationState, type IntentFacts, type Publish } from './delegation';
 import { applySpeech, memberPresent, roomMessageProjection, type RoomsState } from './rooms';
 import { requireMain } from './team';
+import { observes, type AutonomyGate, type AutonomyState } from './autonomy';
 
 /**
  * The outcome of one Bot Turn as pure rules (#739 D1): the frozen-schema check, the audit-only cases,
@@ -12,7 +13,7 @@ import { requireMain } from './team';
  */
 export type Accept = (action: string, work: () => void) => void;
 type Action<K extends 'create_routine' | 'update_routine' | 'cancel_routine'> = NonNullable<BotTurnOutcome[K]>[number];
-export interface OutcomeState extends DelegationState {
+export interface OutcomeState extends DelegationState, AutonomyState {
   team: { bots: Readonly<Record<string, DelegationBot & { readonly mainBot: boolean }>> } & RoomsState;
   schemas: Record<string, ResultSchema>; cards: Record<string, Card>; questions: Record<string, Question>;
 }
@@ -29,6 +30,11 @@ export interface OutcomePorts {
   cancelRoutine(turn: Turn, action: Action<'cancel_routine'>): void;
   /** Queue one channel message. Absent: the Host has no channel. */
   deliver?(turn: Turn, key: string, text: string): void;
+  /**
+   * Bot autonomy (#1229). `observe` records each `create_routine`, cross-Bot `delegate` and `room_call` as a would-do row
+   * instead of applying it. Absent: every action applies, as before #1229.
+   */
+  autonomy?: AutonomyGate;
   /**
    * Room history mode (#883): an accepted seat post also publishes `room-message:<roomId>:<messageId>` with the stored
    * message, so the Host can write it to its room authority. Absent: no such projection.
@@ -57,7 +63,7 @@ export function applyTurnOutcome(state: OutcomeState, turnId: string, taskId: st
     state.audit.push(`Outcome audit only: ${taskId}`); return;
   }
   if (seat) {
-    applySpeech(state.team, turn.id, outcome, taskId, ports.now(), accept);
+    applySpeech(state.team, turn.id, outcome, taskId, ports.now(), accept, ports.autonomy);
     if (state.team.seats[turn.id]?.status === 'post' && outcome.speech?.kind === 'post') {
       ports.deliver?.(turn, `speech:${turn.id}`, outcome.speech.text);
       if (ports.roomPosts) {
@@ -84,7 +90,11 @@ export function applyTurnOutcome(state: OutcomeState, turnId: string, taskId: st
     arbitrateCancel(state, ports.committed, d, ports.now(), ports.publish, 'main_bot_cancelled');
   }));
   // K4 routine commands refuse before any write, so a rejected action changes no routine.
-  outcome.create_routine?.forEach((action, index) => accept('create_routine', () => ports.createRoutine(turn, action, index)));
+  // #1229: an observing Bot records the routine it would have created. No routine row, wake or occurrence is written.
+  outcome.create_routine?.forEach((action, index) => {
+    if (observes(ports.autonomy)) { ports.autonomy.record('create_routine', index, json(action)); return; }
+    accept('create_routine', () => ports.createRoutine(turn, action, index));
+  });
   outcome.update_routine?.forEach(action => accept('update_routine', () => ports.updateRoutine(turn, action)));
   outcome.cancel_routine?.forEach(action => accept('cancel_routine', () => ports.cancelRoutine(turn, action)));
   outcome.confirmable_action?.forEach((action, index) => {
@@ -102,7 +112,7 @@ export function applyTurnOutcome(state: OutcomeState, turnId: string, taskId: st
     ports.publish(`question:${id}`, json(state.questions[id]));
     ports.deliver?.(turn, `question:${id}`, question.question);
   });
-  const { successor } = applyDelegate(state, turn, taskId, outcome, !!seat, ports.now(), ports.publish, accept);
+  const { successor } = applyDelegate(state, turn, taskId, outcome, !!seat, ports.now(), ports.publish, accept, ports.autonomy);
   if (turn.delegationId) {
     // A device terminal proves that this chain Turn ran.
     observeStart(state, turn, ports.now(), ports.publish);

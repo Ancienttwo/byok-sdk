@@ -24,6 +24,8 @@ async function setup(rest: Partial<BotOptions> = {}, wrap?: (server: ExecutionSe
     ...base.payload, messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
   } }, connector: async id => ({ ok: true, externalId: id }), ...rest };
   bot = new BotCollaboration(wrap?.(fixture.server) ?? fixture.server, fixture.ledger, options);
+  // Test fixture: the Main Bot applies its autonomous actions; the product default is observe (#1229).
+  fixture.ledger.transaction(s => { stateOf(s.application).team.bots.main!.autonomy = 'auto'; });
   return options;
 }
 async function running(id: string) {

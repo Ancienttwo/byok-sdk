@@ -7,6 +7,8 @@ import { createDaemonWithAdapters } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
 import { HostLedger } from '@byok-sdk/server/execution-core';
+import { stateOf } from './model';
+import type { Autonomy } from './rules/autonomy';
 import { policy, template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
 import { createBotPersonaProjection } from './persona';
@@ -21,10 +23,15 @@ import { botCompactVeto } from './compaction';
  * `offline` closes the HTTP listener, so the daemon loses the server without a terminal.
  * The Host keeps its in-process server port. `online` listens again on the same port.
  * `bot` sets the external team and history options of the Host.
+ * A new Bot starts in `observe` (#1229). Unless `mainAutonomy: 'observe'`, the fixture switches the Main Bot to
+ * `auto`, because these suites test the autonomous actions themselves; `autonomy.test.ts` owns the product default.
  */
 export async function openTeam(options: { now?: () => number; holdProjection?: () => Promise<void>; routeMessages?: boolean; secondDevice?: boolean;
   wrapServer?: (server: ByokServer) => ConstructorParameters<typeof BotCollaboration>[0]; instructionMaxBytes?: number;
-  holdMessage?: (input: AgentMessageInput, stage: 'before' | 'after') => Promise<void>; bot?: Pick<BotOptions, 'team' | 'history'> } = {}) {
+  holdMessage?: (input: AgentMessageInput, stage: 'before' | 'after') => Promise<void>;
+  /** `observe` keeps the product default of the Main Bot. Default: the fixture switches it to `auto`. */
+  mainAutonomy?: Autonomy;
+  bot?: Pick<BotOptions, 'team' | 'history' | 'coalesce' | 'deviceConcurrency'> } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'k8b-'));
   const productId = 'k8b-test';
   let ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`, { compactVeto: botCompactVeto });
@@ -74,6 +81,10 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   if (secondDevice) botOptions.models = { local: botOptions.execution, remote: { ...botOptions.execution, deviceId: secondDevice.deviceId } };
   const port = options.wrapServer?.(server) ?? server;
   host = new BotCollaboration(port, ledger, botOptions);
+  // Test fixture: the owner has switched the Main Bot to auto unless the caller tests the observe default.
+  const mainAutonomy = options.mainAutonomy ?? 'auto';
+  const setMain = (id: string) => autoBots(ledger, [id]);
+  if (mainAutonomy === 'auto' && stateOf(ledger.snapshot().application).team.bots.main) setMain('main');
   await daemon.start(); await waitForReady(daemon);
   return { root, server, received, get ledger() { return ledger; }, daemon, adapter, deviceId, botOptions, secondDevice,
     get host() { return host; },
@@ -82,7 +93,9 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
     async reopen() {
       await host.close(); ledger.close();
       ledger = new HostLedger(join(root, 'host.sqlite'), `product:${productId}`, { compactVeto: botCompactVeto });
-      host = new BotCollaboration(port, ledger, botOptions); await host.recover();
+      host = new BotCollaboration(port, ledger, botOptions);
+      if (mainAutonomy === 'auto' && stateOf(ledger.snapshot().application).team.bots.main) setMain('main');
+      await host.recover();
     },
     async close() {
       await host.close(); await daemon.stop(); await secondDevice?.close(); await server.close(); ledger.close();
@@ -92,3 +105,10 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   };
 }
 export type TestTeam = Awaited<ReturnType<typeof openTeam>>;
+/** Test fixture: the owner already switched these Bots to auto, so their autonomous actions apply (#1229). */
+export function autoBots(ledger: HostLedger, botIds: readonly string[]): void {
+  ledger.transaction(s => {
+    const bots = stateOf(s.application).team.bots;
+    for (const id of botIds) { const bot = Object.hasOwn(bots, id) ? bots[id] : undefined; if (bot) bot.autonomy = 'auto'; }
+  });
+}

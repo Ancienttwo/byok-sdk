@@ -6,6 +6,7 @@ import type { Publish } from './rules/delegation';
 import { roomFields, roomVisibility } from './rules/rooms';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
+import { DEFAULT_AUTONOMY } from './rules/autonomy';
 import { activeBot, admitBotToolsets, archiveBot, profileProjection, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
 
 export { activeBot, admitBotToolsets, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
@@ -92,8 +93,9 @@ export function createBot(state: CollaborationState, taskId: string, action: Cre
   if (state.team.bots[id]) throw new Error('Duplicate local Bot slot');
   const execution = structuredClone(base);
   execution.payload.agentRef = { agentId: id, profileRevision: '1' };
+  // A new Bot starts in observe (#1229, owner ruling): the owner sees what it would do before it does it.
   const bot: BotProfile = { id, name: action.name, role: action.role, persona: action.persona, model: action.model,
-    mainBot: false, archived: false, revision: '1', readyRevision: null, execution };
+    mainBot: false, archived: false, revision: '1', readyRevision: null, autonomy: DEFAULT_AUTONOMY, execution };
   state.team.bots[id] = bot;
   projection(state, bot);
   return bot;
@@ -134,7 +136,7 @@ export function writeSnapshotBot(state: CollaborationState, row: TeamSnapshotBot
   const execution = structuredClone(base);
   execution.payload.agentRef = { agentId: row.id, profileRevision: '1' };
   const created: BotProfile = { id: row.id, name: row.name, role: row.role, persona: row.persona, model: row.model,
-    mainBot: false, archived: false, revision: '1', readyRevision: null, execution };
+    mainBot: false, archived: false, revision: '1', readyRevision: null, autonomy: DEFAULT_AUTONOMY, execution };
   state.team.bots[row.id] = created;
   projection(state, created);
 }
@@ -163,7 +165,7 @@ function writeHostProfile(state: CollaborationState, bot: BotProfile | undefined
   execution.payload.agentRef = { agentId: row.id, profileRevision: revision };
   const fields = { name: row.name, role: row.role, persona: row.persona, model: row.model, revision, execution };
   if (bot) Object.assign(bot, fields);
-  else state.team.bots[row.id] = { id: row.id, ...fields, mainBot: false, archived: false, readyRevision: null };
+  else state.team.bots[row.id] = { id: row.id, ...fields, mainBot: false, archived: false, readyRevision: null, autonomy: DEFAULT_AUTONOMY };
 }
 export function applyManagement(state: CollaborationState, actor: string, taskId: string, outcome: BotTurnOutcome,
   models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets: readonly string[] = []): void {
