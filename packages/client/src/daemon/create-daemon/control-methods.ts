@@ -156,7 +156,11 @@ function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unar
             if (err instanceof AuthRequestAbortedError) return;
             // Do not project provider/server exception text into service logs;
             // the stopped/non-ready daemon is the fail-closed observable fact.
-            console.error('[byok/client] service enrollment persisted but normal daemon startup failed');
+            // The error's class and errno are safe observables and are the only
+            // way a service host can tell a path failure from a credential one.
+            const name = err instanceof Error ? err.name : typeof err;
+            const code = (err as { code?: unknown }).code;
+            console.error('[byok/client] service enrollment persisted but normal daemon startup failed', name, typeof code === 'string' ? code : '');
           });
         });
       };
