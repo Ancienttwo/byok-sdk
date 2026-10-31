@@ -28,7 +28,6 @@ import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-r
 import { ProgressBatcher } from '../progress-batcher';
 import { AgentMessageOutbox } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
-import type { ApprovalKind } from '../approvals';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
 import type { OfferAdmissionTiming } from './offer-admission-timing';
@@ -161,24 +160,6 @@ export interface ActiveTask {
    */
   finalTextParts: string[];
   /**
-   * The `ApprovalRegistry` id and rejection semantics of the single approval
-   * currently DISPATCHED (registered + `task.await_approval` sent) for this
-   * task, if any — set by `requestApproval`/`dispatchApproval`, cleared once
-   * resolved (by a real decision or by the timeout). `undefined` whenever
-   * nothing is dispatched right now — including while `approvalQueue` below
-   * is non-empty but hasn't been dispatched yet. See `requestApproval`.
-   */
-  pendingApproval?: { readonly approvalId: string; readonly kind: ApprovalKind };
-  /**
-   * M4 Phase 4 (fold-in from the P3 gate): FIFO queue of `requestApproval`
-   * calls for this SAME task that arrived while another one was already
-   * dispatched (`pendingApproval` set) — see `requestApproval`'s own doc
-   * comment for the full concurrency bug this fixes (claude's parallel tool
-   * use can call it more than once for one task before the first resolves).
-   * Bounded by {@link MAX_PENDING_APPROVALS_PER_TASK}.
-   */
-  approvalQueue: QueuedApprovalRequest[];
-  /**
    * M5 batch-3 (workstream 2): the wall-clock timer enforcing
    * `payload.limits.maxDurationMs` for this task, if the offer set one — see
    * `armMaxDurationTimer`. `undefined` when no `maxDurationMs` was set.
@@ -266,14 +247,6 @@ export interface ClaimedAgentFailureContext {
   readonly binding: AgentHomeExecutionBinding;
   readonly runtimeId: string;
   readonly sessionRef?: string;
-}
-
-/** One not-yet-dispatched `requestApproval` call waiting its turn — see `ActiveTask.approvalQueue`. */
-export interface QueuedApprovalRequest {
-  readonly kind: ApprovalKind;
-  summary: string;
-  resolve: (result: { approved: boolean; reason?: string }) => void;
-  readonly signal?: AbortSignal;
 }
 
 export type PickResult =

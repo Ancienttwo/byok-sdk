@@ -918,28 +918,32 @@ function terminalCompleteEffects(token: string, aborted: boolean): readonly Effe
   ];
 }
 
-function dispatchApprovalEffects(): readonly EffectSpec[] {
+function dispatchApprovalEffects(pending: {
+  readonly approvalId: string;
+  readonly requestId: string;
+}): readonly EffectSpec[] {
   return [
     atom('audit', { detail: { step: 'approval.dispatch' } }),
     atom('flush.batcher'),
-    atom('send.approval_request'),
-    atom('register.approval'),
-    atom('arm.approval_timeout'),
+    atom('send.approval_request', pending),
+    atom('register.approval', pending),
+    atom('arm.approval_timeout', pending),
   ];
 }
 
 function approvalResolvedEffects(event: ReducerEvent, approved: boolean): readonly EffectSpec[] {
   const effects: EffectSpec[] = [
-    atom('clear.timeout'),
+    atom('clear.timeout', { ...(event.approvalId === undefined ? {} : { approvalId: event.approvalId }) }),
     ...(event.origin === 'wire'
       ? []
       : [atom('send.approval_resolved', {
-          approvalId: event.approvalId,
+          ...(event.approvalId === undefined ? {} : { approvalId: event.approvalId }),
           decision: approved ? 'approve' : 'reject',
           ...(event.reason === undefined ? {} : { reason: event.reason }),
         })]),
     atom('resolve.approval_promise', {
       approved,
+      ...(event.approvalId === undefined ? {} : { approvalId: event.approvalId }),
       ...(event.reason === undefined ? {} : { reason: event.reason }),
     }),
     atom('dispatch.next_approval', {}, {
@@ -1512,7 +1516,10 @@ const APPROVAL_ROWS: readonly TransitionRow[] = [
             queue: [],
           },
         }),
-        effects: dispatchApprovalEffects(),
+        effects: dispatchApprovalEffects({
+          approvalId: event.approvalId ?? '',
+          requestId: event.requestId ?? '',
+        }),
       };
     },
     rejection:
@@ -1590,20 +1597,21 @@ const APPROVAL_ROWS: readonly TransitionRow[] = [
       const task = taskOf(snapshot);
       const head = task.approval.queue[0];
       if (head === undefined) throw new Error('approval queue head missing');
+      const approvalId = event.approvalId ?? terminalTokenFor(task.taskId, task.revision + 1);
       return {
         runner: snapshot.runner,
         task: taskWith(task, {
           phase: 'awaiting_approval',
           approval: {
             pending: {
-              approvalId: event.approvalId ?? terminalTokenFor(task.taskId, task.revision + 1),
+              approvalId,
               requestId: head.requestId,
               kind: head.kind,
             },
             queue: task.approval.queue.slice(1),
           },
         }),
-        effects: dispatchApprovalEffects(),
+        effects: dispatchApprovalEffects({ approvalId, requestId: head.requestId }),
       };
     },
     rejection: 'Only the FIFO head dispatches; an empty queue drops on the fallback row.',
@@ -1708,7 +1716,7 @@ const APPROVAL_ROWS: readonly TransitionRow[] = [
           atom('resolve.approval_promise', {
             requestId: event.requestId,
             approved: false,
-            reason: WITHDRAWN_REASON,
+            reason: event.reason ?? WITHDRAWN_REASON,
           }),
         ],
       };
@@ -1722,20 +1730,49 @@ const APPROVAL_ROWS: readonly TransitionRow[] = [
     when: (snapshot, event) =>
       snapshot.task?.approval.pending !== undefined
       && event.requestId === snapshot.task.approval.pending.requestId,
-    apply: (snapshot) => ({
-      runner: snapshot.runner,
-      task: snapshot.task,
-      effects: [
-        atom('resolve.approval', {
-          decision: 'reject',
-          origin: 'fail-closed',
-          approved: false,
-          reason: WITHDRAWN_REASON,
+    apply: (snapshot, event) => {
+      const task = taskOf(snapshot);
+      const pending = task.approval.pending;
+      if (pending === undefined) throw new Error('approval pending missing');
+      const reason = event.reason ?? WITHDRAWN_REASON;
+      return {
+        runner: snapshot.runner,
+        task: taskWith(task, {
+          phase: task.terminal === undefined ? 'running' : task.phase,
+          approval: { queue: task.approval.queue },
         }),
-      ],
-    }),
+        // A dispatched withdrawal settles the caller and the registry here.
+        // The registry's own onResolve still dispatches `approval.decided`,
+        // which now drops as stale: a withdrawal never selects a terminal (the
+        // requesting runtime alone decides whether the turn ends), and a
+        // finish() drain never re-selects one either.
+        effects: [
+          atom('resolve.approval', {
+            approvalId: pending.approvalId,
+            decision: 'reject',
+            origin: 'fail-closed',
+            approved: false,
+            reason,
+          }),
+          atom('clear.timeout', { approvalId: pending.approvalId }),
+          atom('send.approval_resolved', {
+            approvalId: pending.approvalId,
+            decision: 'reject',
+            reason,
+          }),
+          atom('resolve.approval_promise', {
+            approvalId: pending.approvalId,
+            approved: false,
+            reason,
+          }),
+          atom('dispatch.next_approval', {}, {
+            completion: { type: 'approval.dispatch_next' },
+          }),
+        ],
+      };
+    },
     rejection:
-      'Dispatched withdrawal resolves through the registry; the resulting A6/A7 updates the state. A late decision after resolution is no-op.',
+      'Dispatched withdrawal settles the registry, the timeout and the caller fail-closed, then lets the FIFO head dispatch. It never revives the request or selects a terminal.',
   },
   {
     id: 'A11',
