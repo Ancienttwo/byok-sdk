@@ -87,6 +87,15 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun ci
       - run: bun run build
+      - name: Start the retained evidence log
+        run: |
+          log="${RUNNER_TEMP}/runtime-contract-${{ matrix.runtime }}.log"
+          {
+            echo "mode=latest"
+            echo "runtime=${{ matrix.runtime }}"
+            echo "commit=${GITHUB_SHA}"
+            echo "run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > "$log"
       - name: Install the latest runtime CLI
         run: >-
           node scripts/ci/runtime-contract-install.mjs
@@ -94,9 +103,21 @@ jobs:
       - name: Run the runtime contract suite
         env:
           SUITE: src/__tests__/runtime-contract
-        run: >-
-          bun run --filter @byok-sdk/client test:runtime-contract --
-          "$SUITE/${{ matrix.runtime }}.contract.ts"
+        run: |
+          set -o pipefail
+          log="${RUNNER_TEMP}/runtime-contract-${{ matrix.runtime }}.log"
+          key="BYOK_CONTRACT_$(echo '${{ matrix.runtime }}' | tr '[:lower:]' '[:upper:]')_VERSION"
+          echo "expectedVersion=${!key:-bundled}" >> "$log"
+          bun run --filter @byok-sdk/client test:runtime-contract -- \
+            "$SUITE/${{ matrix.runtime }}.contract.ts" 2>&1 | tee -a "$log"
+      - name: Retain the contract evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runtime-contract-${{ matrix.runtime }}-latest
+          path: ${{ runner.temp }}/runtime-contract-${{ matrix.runtime }}.log
+          if-no-files-found: error
+          retention-days: 7
 
   report:
     name: Update the runtime contract tracking issue
@@ -124,6 +145,8 @@ jobs:
           - Run: $RUN_URL
           - Failed legs: $failed
           - Commit: $GITHUB_SHA
+          - Retained evidence: $RUN_URL#artifacts
+            (`runtime-contract-<runtime>-latest`, 7 days)
 
           See docs/runtime-contract.md. Refs #1103."
           number=$(gh issue list --state open --json number,title \

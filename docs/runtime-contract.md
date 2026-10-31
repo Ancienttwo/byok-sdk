@@ -57,6 +57,22 @@ two:
   same suite against each CLI's latest release. A failure comments on one open
   tracking issue, or creates it. Pi's leg reports every case as skipped,
   because the SDK runs only the pinned Pi.
+- **Nightly evidence.** Each leg writes `runtime-contract-<runtime>.log` (the
+  mode, resolved version, commit, run URL and the complete suite output) and
+  uploads it as the `runtime-contract-<runtime>-latest` artifact through
+  `if: always()`, retained for 7 days. A failed install still uploads the run
+  header, so a leg cannot fail without leaving evidence; the tracking issue
+  links the run's artifact page.
+- **Workflow contract.** `scripts/ci/runtime-contract-nightly.test.mjs` (run by
+  `bun run test:scripts:ci`) fails if a runtime leaves the matrix, the mode
+  flips off `latest`, an install or suite step becomes conditional or allows
+  failure, the evidence upload is removed, or a whole-runtime skip besides Pi's
+  appears. The suite's own admission rules — every case present, a skip with a
+  reason, no skip of an advertised capability, a latest run needing its
+  installed version, and a broken detector parser failing `detect.version` —
+  are covered without a CLI by
+  `packages/client/src/__tests__/runtime-contract-harness.test.ts` in
+  `bun run test`.
 
 `scripts/ci/runtime-contract-install.mjs <runtime> <qualified|latest>` installs
 a CLI and passes its path to the suite.
