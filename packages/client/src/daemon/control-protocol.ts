@@ -38,7 +38,7 @@ import {
 
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
- * (`control-server.ts`) and the CLI's control client (`bin/control-client.ts`)
+ * (`control-server.ts`) and the CLI's control client (`daemon/control-client.ts`)
  * — frame shapes, endpoint path/pipe-name derivation, and the HMAC handshake
  * math. Both sides import from here so the two can never independently drift
  * (e.g. a mismatched HMAC label string, or a socket path computed two
@@ -47,7 +47,7 @@ import {
  * Transport: NDJSON (one JSON object per line) over a Unix domain socket
  * (darwin/linux) or a Windows named pipe — both addressed by the same
  * path-like string via Node's `net` module, so neither `control-server.ts`
- * nor `bin/control-client.ts` needs to special-case the transport itself,
+ * nor `daemon/control-client.ts` needs to special-case the transport itself,
  * only the path/pipe-name derivation below.
  */
 
@@ -311,7 +311,7 @@ export function encodeFrame(frame: unknown): string {
   return `${JSON.stringify(frame)}\n`;
 }
 
-/** Thrown by a method handler to control the wire error `{code, message}` a caller sees — anything else thrown surfaces as a generic `internal_error`. See `control-server.ts`'s dispatch and `bin/control-client.ts`'s `request()` (which re-throws this same class on the client side). */
+/** Thrown by a method handler to control the wire error `{code, message}` a caller sees — anything else thrown surfaces as a generic `internal_error`. See `control-server.ts`'s dispatch and `daemon/control-client.ts`'s `request()` (which re-throws this same class on the client side). */
 export class ControlError extends Error {
   constructor(
     public readonly code: string,
@@ -333,7 +333,7 @@ export class ControlError extends Error {
  * hostile peer streaming an unterminated line forever to grow `pending`
  * without bound. Exceeding it is a fail-closed condition: {@link
  * NdjsonLineReader.push} throws, and every caller (`control-server.ts`,
- * `bin/control-client.ts`) destroys the connection on that throw.
+ * `daemon/control-client.ts`) destroys the connection on that throw.
  */
 export const MAX_LINE_BYTES = 64 * 1024;
 

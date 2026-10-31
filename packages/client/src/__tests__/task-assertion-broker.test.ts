@@ -23,7 +23,7 @@ import {
   type AssertionIssueResult,
   type TaskAssertionIssueResult,
 } from '../daemon/control-protocol';
-import { connectControlClient, type ControlClient } from '../bin/control-client';
+import { connectControlClient, type ControlClient } from '../daemon/control-client';
 import { createAuditAppender, auditLogPath } from '../bin/audit-log';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { formatDaemonEventLine } from '../bin/format';

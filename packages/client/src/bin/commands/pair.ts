@@ -1,6 +1,6 @@
 import { encodePairingVerificationSecret, parsePairingInput } from '@byok-sdk/core/sealed-payload';
 import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
-import { connectControlClient } from '../control-client';
+import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
 
 export interface PairDeps {

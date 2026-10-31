@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { DaemonEvent } from '../daemon/observer';
 import { TaskRunner } from '../daemon/task-runner';

@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { Daemon, DaemonConfig, DeviceEnrollment, ServiceLifecycle } from '../index';
 import { ControlError } from '../daemon/control-protocol';
-import type { ConnectControlResult, ControlClient } from '../bin/control-client';
+import type { ConnectControlResult, ControlClient } from '../daemon/control-client';
 import { runApprovalsCommand } from '../bin/commands/approvals';
 import { runApproveCommand, runRejectCommand } from '../bin/commands/approve-reject';
 import { readPairInput, runPairCommand } from '../bin/commands/pair';

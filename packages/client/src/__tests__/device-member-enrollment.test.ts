@@ -10,7 +10,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { parseEnrollmentPairParams, type ControlStatusResult } from '../daemon/control-protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { InMemoryDeviceCredentialStore, testDeviceMemberCustody } from './fixtures/credential-backend';

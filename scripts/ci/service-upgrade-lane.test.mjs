@@ -7,7 +7,7 @@ import { planCi } from './plan-ci.mjs';
 test('service upgrade inputs select the required three-platform smoke in routine and full modes', () => {
   for (const path of ['examples/service-upgrade/upgrade-smoke.mjs', 'examples/service-upgrade/app-installer.ts',
     'examples/service-upgrade/app-installer.test.ts', 'packages/client/src/lifecycle/service-installation.ts',
-    'packages/client/src/bin/byok-agent.ts', 'packages/client/src/bin/control-client.ts',
+    'packages/client/src/bin/byok-agent.ts', 'packages/client/src/daemon/control-client.ts',
     'packages/client/src/bin/commands/service.ts', 'packages/client/src/bin/commands/upgrade.ts',
     'packages/client/src/daemon/daemon-owner.ts', 'packages/client/src/daemon/owned-process-ledger.ts',
     'packages/client/src/diagnostics/store-compatibility.ts', 'packages/client/src/adapters/packaging.ts',

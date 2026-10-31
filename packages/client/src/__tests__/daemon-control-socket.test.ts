@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
 import { controlSocketPath, controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import type { DaemonEvent } from '../daemon/observer';
 import { runStartCommand } from '../bin/commands/start';

@@ -2,8 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type Runner } from '../lifecycle/exec-runner';
-import { defaultRunner } from './exec-runner';
+import { defaultRunner, type Runner } from './exec-runner';
 
 /**
  * Finding F7 (cross-model adversarial review): POSIX file MODES
@@ -74,7 +73,7 @@ const ADMINISTRATORS_SID = '*S-1-5-32-544';
  * Returns a plain ARGV array with NO manually-embedded quote characters —
  * this is meant for `child_process.execFile`'s array form (this codebase's
  * own established convention for every external command it ever runs; see
- * `lifecycle/exec-runner.ts`'s `defaultRunner`), which is never a shell and
+ * `util/exec-runner.ts`'s `defaultRunner`), which is never a shell and
  * so has no shell-quoting hazard for a `dir`/username containing spaces —
  * Node's own Windows argv encoding (used internally by `execFile`/`spawn`
  * when given an array) already quotes/escapes each element correctly
@@ -104,7 +103,7 @@ export function buildIcaclsFileArgs(filePath: string, username: string): string[
 }
 
 export interface EnsureSecureDirOptions {
-  /** DI for tests — see `lifecycle/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
+  /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
   run?: Runner;
   /** DI for tests — lets the win32 branch below be exercised (with a fake `run`) from any host OS, mirroring `control-protocol.ts`'s `controlEndpointPath` platform-override convention. Defaults to `process.platform`. */
   platform?: NodeJS.Platform;

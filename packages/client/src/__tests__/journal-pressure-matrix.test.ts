@@ -30,7 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { formatLiveStatusLines } from '../bin/format';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { ControlStatusResult } from '../daemon/control-protocol';

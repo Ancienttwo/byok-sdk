@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import type { DaemonConfig } from '../../daemon/create-daemon';
 import { ensureSecureDir } from '../../util/secure-dir';
-import { connectControlClient } from '../control-client';
+import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
 import { loadCodexTeamBindings, preflightCodexRelay, queueCodexTeamNotification } from '../team-codex-relay';
 

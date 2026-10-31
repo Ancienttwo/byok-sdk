@@ -17,7 +17,7 @@ import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-fail
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { readyGate } from './fixtures/start-ready';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 

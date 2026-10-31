@@ -4,7 +4,7 @@ import { createDeviceCredentialStore } from '../../daemon/device-credential-prov
 import type { ControlStatusResult } from '../../daemon/control-protocol';
 import { auditLogPath, readAuditRecords, readLastEnvironmentRecord, parseEnvironmentRecord } from '../audit-log';
 import { parseRuntimeObservations } from '../../runtime-detection';
-import { connectControlClient } from '../control-client';
+import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
 import { serviceLogDir } from '../../daemon/host-layout';
 import { inspectServiceLogs } from '../../lifecycle/service-log';

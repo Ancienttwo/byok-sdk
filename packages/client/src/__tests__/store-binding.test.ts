@@ -9,12 +9,12 @@ import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { readDeviceEnrollmentIdentity, readDeviceEnrollmentStatus } from '../daemon/store';
 import { DeviceStoreBindingMismatchError } from '../daemon/daemon-errors';
 import { repairDeviceEnrollmentMetadata } from '../diagnostics/device-doctor';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
-vi.mock('../bin/control-client', () => ({ connectControlClient: vi.fn() }));
+vi.mock('../daemon/control-client', () => ({ connectControlClient: vi.fn() }));
 
 /**
  * #1094 pairing binding. The unit-suite credential backend is keyed by

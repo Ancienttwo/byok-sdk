@@ -8,7 +8,7 @@ import {
   archiveAgentTerminalMessages, exportDeviceSupportBundle, quarantineDeviceOperationalHealth,
   DeviceOperatorError, AgentHomeManager, type DaemonConfig,
 } from '../index';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { acquireDaemonOwner } from '../daemon/daemon-owner';
 import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { OPERATIONAL_HEALTH_FILENAME } from '../daemon/operational-health';
@@ -17,7 +17,7 @@ import { currentBootId } from '../adapters/process-tree';
 import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { readProcessTable } from '../runtime/oar-process-tree.js';
 
-vi.mock('../bin/control-client', () => ({ connectControlClient: vi.fn() }));
+vi.mock('../daemon/control-client', () => ({ connectControlClient: vi.fn() }));
 let root: string;
 let config: DaemonConfig;
 const agentRef = { agentId: '11111111-1111-4111-8111-111111111111', profileRevision: '2' };

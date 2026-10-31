@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createServiceLifecycle } from '../lifecycle/create-service-lifecycle';
-import type { Runner } from '../lifecycle/exec-runner';
+import type { Runner } from '../util/exec-runner';
 import type { ServiceDefinition, ServiceLifecycle } from '../lifecycle/service-types';
 import {
   claimServiceLifecycleOwner,

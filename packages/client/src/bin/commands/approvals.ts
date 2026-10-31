@@ -1,5 +1,5 @@
 import { ControlError, type ApprovalsListResult } from '../../daemon/control-protocol';
-import { connectControlClient } from '../control-client';
+import { connectControlClient } from '../../daemon/control-client';
 import { formatApprovalsListLines } from '../format';
 
 export interface ApprovalsListDeps {

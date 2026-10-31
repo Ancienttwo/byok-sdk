@@ -1715,7 +1715,7 @@ export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
  * So this entry re-exports exactly the two request functions and their public
  * option/result types from `../daemon/assertion-client`, whose own transitive
  * imports are only `@byok-sdk/core`, `@byok-sdk/protocol`,
- * `../bin/control-client`, `../daemon/control-protocol` and `../daemon/store`
+ * `../daemon/control-client`, `../daemon/control-protocol` and `../daemon/store`
  * (plus `zod` through core's protocol types). Nothing else may be added here.
  *
  * Two things are deliberately absent, and this file is the record of why.
@@ -2984,7 +2984,7 @@ import { type AssertionIssueErrorCode, type TaskAssertionIssueErrorCode } from '
  * of that is reachable from outside this package it is a compatibility surface
  * forever. A host that needs one specific capability gets one specific
  * function; `packages/client/src/__tests__/assertion-client.test.ts` pins that
- * the index exports nothing else. See also `bin/control-client.ts`'s own doc
+ * the index exports nothing else. See also `daemon/control-client.ts`'s own doc
  * comment for why connecting never throws.
  */
 export interface RequestDeviceAssertionOptions {
@@ -4031,7 +4031,7 @@ import type { AgentHomeExecutionStatus } from '../agent-home';
 import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation';
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
- * (`control-server.ts`) and the CLI's control client (`bin/control-client.ts`)
+ * (`control-server.ts`) and the CLI's control client (`daemon/control-client.ts`)
  * — frame shapes, endpoint path/pipe-name derivation, and the HMAC handshake
  * math. Both sides import from here so the two can never independently drift
  * (e.g. a mismatched HMAC label string, or a socket path computed two
@@ -4040,7 +4040,7 @@ import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, In
  * Transport: NDJSON (one JSON object per line) over a Unix domain socket
  * (darwin/linux) or a Windows named pipe — both addressed by the same
  * path-like string via Node's `net` module, so neither `control-server.ts`
- * nor `bin/control-client.ts` needs to special-case the transport itself,
+ * nor `daemon/control-client.ts` needs to special-case the transport itself,
  * only the path/pipe-name derivation below.
  */
 export declare const CONTROL_PROTOCOL_VERSION = 1;
@@ -4174,7 +4174,7 @@ export interface ControlEventFrame {
     event: unknown;
 }
 export declare function encodeFrame(frame: unknown): string;
-/** Thrown by a method handler to control the wire error `{code, message}` a caller sees — anything else thrown surfaces as a generic `internal_error`. See `control-server.ts`'s dispatch and `bin/control-client.ts`'s `request()` (which re-throws this same class on the client side). */
+/** Thrown by a method handler to control the wire error `{code, message}` a caller sees — anything else thrown surfaces as a generic `internal_error`. See `control-server.ts`'s dispatch and `daemon/control-client.ts`'s `request()` (which re-throws this same class on the client side). */
 export declare class ControlError extends Error {
     readonly code: string;
     constructor(code: string, message: string);
@@ -4186,7 +4186,7 @@ export declare class ControlError extends Error {
  * hostile peer streaming an unterminated line forever to grow `pending`
  * without bound. Exceeding it is a fail-closed condition: {@link
  * NdjsonLineReader.push} throws, and every caller (`control-server.ts`,
- * `bin/control-client.ts`) destroys the connection on that throw.
+ * `daemon/control-client.ts`) destroys the connection on that throw.
  */
 export declare const MAX_LINE_BYTES: number;
 /**
@@ -12226,8 +12226,6 @@ export interface CreateServiceLifecycleOptions {
 export declare function createServiceLifecycle(def: ServiceDefinition, opts?: CreateServiceLifecycleOptions): ServiceLifecycle;
 /** @internal `createServiceLifecycle` with the owner gate a service installation runs its steps behind. */
 export declare function createManagedServiceLifecycle(def: ServiceDefinition, opts?: CreateServiceLifecycleOptions): ManagedServiceLifecycle;
-// ==== @byok-sdk/client dist/lifecycle/exec-runner.d.ts ====
-export * from '../util/exec-runner';
 // ==== @byok-sdk/client dist/lifecycle/exit-codes.d.ts ====
 /**
  * The process exit-code contract of `byok-agent` and its helper
@@ -15321,7 +15319,7 @@ export declare function isIdempotentAbsence(result: RunResult, absence: Idempote
  */
 export declare function runIdempotent(run: Runner, command: string, args: string[], label: string, absence: IdempotentAbsence): Promise<RunResult>;
 // ==== @byok-sdk/client dist/util/secure-dir.d.ts ====
-import { type Runner } from '../lifecycle/exec-runner';
+import { type Runner } from './exec-runner';
 /**
  * Pure command-construction seam (finding F7) — kept separate from the
  * actual `icacls` invocation below so it's unit-testable on ANY host OS,
@@ -15361,7 +15359,7 @@ import { type Runner } from '../lifecycle/exec-runner';
  * Returns a plain ARGV array with NO manually-embedded quote characters —
  * this is meant for `child_process.execFile`'s array form (this codebase's
  * own established convention for every external command it ever runs; see
- * `lifecycle/exec-runner.ts`'s `defaultRunner`), which is never a shell and
+ * `util/exec-runner.ts`'s `defaultRunner`), which is never a shell and
  * so has no shell-quoting hazard for a `dir`/username containing spaces —
  * Node's own Windows argv encoding (used internally by `execFile`/`spawn`
  * when given an array) already quotes/escapes each element correctly
@@ -15376,7 +15374,7 @@ export declare function buildIcaclsArgs(dir: string, username: string): string[]
 /** Restrictive ACL for one already-created file; no inheritance flags because the target cannot contain children. */
 export declare function buildIcaclsFileArgs(filePath: string, username: string): string[];
 export interface EnsureSecureDirOptions {
-    /** DI for tests — see `lifecycle/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
+    /** DI for tests — see `util/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
     run?: Runner;
     /** DI for tests — lets the win32 branch below be exercised (with a fake `run`) from any host OS, mirroring `control-protocol.ts`'s `controlEndpointPath` platform-override convention. Defaults to `process.platform`. */
     platform?: NodeJS.Platform;

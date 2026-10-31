@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream';
-import { connectControlClient, type ControlClient } from './control-client';
+import { connectControlClient, type ControlClient } from '../daemon/control-client';
 import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent-message-mcp-server';
 import { serveAgentResultMcpOverStdio, type AgentResultMcpDeps } from './agent-result-mcp-server';
 import { serveAgentMemoryDescriptorOverStdio, serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio, type AgentMemoryMcpDeps } from './agent-memory-mcp-server';

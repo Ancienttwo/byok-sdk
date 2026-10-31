@@ -14,7 +14,7 @@ import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { type ControlStatusResult } from '../daemon/control-protocol';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';

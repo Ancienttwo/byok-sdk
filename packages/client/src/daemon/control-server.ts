@@ -82,7 +82,7 @@ export interface ControlServerHandle {
    * Split out from `close()` for `create-daemon.ts`'s shutdown sequence
    * (plan `shutdown-lease-order`): the socket/token files ARE this daemon's
    * only external liveness signal (`isControlDaemonGone` in
-   * `bin/control-client.ts` reads "token file gone AND a connect refused"),
+   * `daemon/control-client.ts` reads "token file gone AND a connect refused"),
    * so a shutdown must be able to stop serving RPCs, release its
    * store-mutation lease, and only THEN publish "gone" by removing the
    * files. Between the two stages a connect is already refused while the

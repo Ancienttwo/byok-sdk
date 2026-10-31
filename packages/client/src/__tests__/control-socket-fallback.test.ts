@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { controlSocketPath } from '../daemon/control-protocol';
 import { startControlServer, type ControlMethods, type ControlServerHandle } from '../daemon/control-server';
 

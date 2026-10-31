@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Runner } from '../lifecycle/exec-runner';
+import type { Runner } from '../util/exec-runner';
 import { buildIcaclsArgs, ensureSecureDir, SecureDirHardeningError } from '../util/secure-dir';
 
 async function tmpDir(prefix: string): Promise<string> {

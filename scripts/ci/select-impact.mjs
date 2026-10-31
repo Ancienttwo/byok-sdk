@@ -274,26 +274,28 @@ export const familyOwners = Object.freeze({
     /^examples\/service-upgrade\//,
     /^templates\/service\//,
     /^packages\/client\/src\/lifecycle\//,
-    /^packages\/client\/src\/bin\/(?:byok-agent|control-client|commands\/(?:service|upgrade))\.ts$/,
+    /^packages\/client\/src\/bin\/(?:byok-agent|commands\/(?:service|upgrade))\.ts$/,
+    /^packages\/client\/src\/daemon\/control-client\.ts$/,
     /^packages\/client\/src\/daemon\/(?:daemon-owner|owned-process-ledger)\.ts$/,
     /^packages\/client\/src\/(?:diagnostics\/store-compatibility|adapters\/packaging)\.ts$/,
   ],
   'linux-systemd-smoke': [
     /^templates\/service\/systemd\//,
-    /^packages\/client\/src\/(?:lifecycle\/|util\/(?:secure-dir|path-mutation-gate)\.ts$)/,
+    /^packages\/client\/src\/(?:lifecycle\/|util\/(?:secure-dir|exec-runner|path-mutation-gate)\.ts$)/,
   ],
   'windows-service-smoke': [
     /^templates\/service\/winsw\//,
-    /^packages\/client\/src\/(?:lifecycle\/|util\/secure-dir\.ts$)/,
+    /^packages\/client\/src\/(?:lifecycle\/|util\/(?:secure-dir|exec-runner)\.ts$)/,
     // #1165: the control socket check pairs, queries and unpairs a WinSW
     // service daemon through service enrollment's handover to normal startup.
     /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
-    /^packages\/client\/src\/bin\/(?:control-client|commands\/unpair)\.ts$/,
+    /^packages\/client\/src\/bin\/commands\/unpair\.ts$/,
+    /^packages\/client\/src\/daemon\/control-client\.ts$/,
     /^packages\/client\/scripts\/control-socket-check\.mjs$/,
   ],
   'ipc-smoke': [
     /^packages\/client\/src\/daemon\/(?:control-protocol|control-server|device-credential-provider|device-credential-store)\.ts$/,
-    /^packages\/client\/src\/(?:bin\/control-client|util\/atomic-write)\.ts$/,
+    /^packages\/client\/src\/(?:daemon\/control-client|util\/atomic-write)\.ts$/,
     /^packages\/client\/src\/__tests__\/device-credential-store[^/]*$/,
     /^packages\/client\/scripts\/(?:ipc-smoke|control-socket-check)\.mjs$/,
   ],

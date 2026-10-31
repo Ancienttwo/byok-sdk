@@ -21,7 +21,7 @@ import {
 import { runStartCommand } from '../bin/commands/start';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { runStatusCommand } from '../bin/commands/status';
-import type { ConnectControlResult } from '../bin/control-client';
+import type { ConnectControlResult } from '../daemon/control-client';
 import { createSupportBundle } from '../diagnostics/support-bundle';
 
 const dirs: string[] = [];

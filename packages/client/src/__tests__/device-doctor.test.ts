@@ -8,11 +8,11 @@ import { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairErr
 import { DeviceStore, type DeviceRecord } from '../daemon/store';
 import { AuthManager } from '../daemon/auth-manager';
 import { acquireDaemonOwner } from '../daemon/daemon-owner';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
-vi.mock('../bin/control-client', () => ({ connectControlClient: vi.fn() }));
+vi.mock('../daemon/control-client', () => ({ connectControlClient: vi.fn() }));
 
 let root: string;
 let config: DaemonConfig;

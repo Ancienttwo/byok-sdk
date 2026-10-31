@@ -6,7 +6,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { connectControlClient } from '../bin/control-client';
+import { connectControlClient } from '../daemon/control-client';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { defaultServiceHealthCheck } from '../lifecycle/service-installation';

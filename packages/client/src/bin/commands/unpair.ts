@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import type { Daemon, ServiceLifecycle } from '../../index';
-import { connectControlClient, isControlDaemonGone } from '../control-client';
+import { connectControlClient, isControlDaemonGone } from '../../daemon/control-client';
 
 /** Thrown when `unpair` didn't get a `--yes`/confirmed and either declined interactively or has no TTY to prompt on. Caught by `byok-agent.ts`'s top-level handler like any other error (clean message, exit 1) — never left to hang. */
 export class UnpairNotConfirmedError extends Error {

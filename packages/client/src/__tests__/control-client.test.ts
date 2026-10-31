@@ -9,7 +9,7 @@ import {
   connectControlClient,
   lookupInputPreparation,
   requestInputPreparation,
-} from '../bin/control-client';
+} from '../daemon/control-client';
 import {
   computeServerProof,
   CONTROL_PROTOCOL_VERSION,
@@ -22,7 +22,7 @@ import {
 } from '../daemon/control-protocol';
 
 /**
- * P2 re-gate hardening finding: `bin/control-client.ts`'s two `reader.push
+ * P2 re-gate hardening finding: `daemon/control-client.ts`'s two `reader.push
  * (chunk)` calls (one inside `connectAndHandshake`'s own handshake-phase
  * `onData`, one inside `createControlClient`'s post-handshake `data`
  * listener) both used to sit OUTSIDE any try/catch. `NdjsonLineReader.push`
