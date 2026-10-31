@@ -2,9 +2,9 @@ import path from 'node:path';
 import { createServiceLifecycle, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index';
 import { agentServiceDefinition, agentServiceInstallation } from '../../lifecycle/agent-service';
 import { createServiceInstallation, readServiceInstallationRecord, type ServiceInstallation } from '../../lifecycle/service-installation';
-import { readLastLifecycleRecord } from '../audit-log';
+import { readLastLifecycleRecord } from '../../daemon/audit-log';
 import { argValue, hasFlag, resolveStoreDir } from '../config';
-import { formatLifecycle, formatLifecycleRemedy } from '../format';
+import { formatLifecycle, formatLifecycleRemedy } from '../../diagnostics/format';
 
 export interface ServiceCommandDeps {
   log?: (line: string) => void;

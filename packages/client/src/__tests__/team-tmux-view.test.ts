@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { openTeamTmuxView } from '../bin/team-tmux-view';
+import { openTeamTmuxView } from '../util/team-tmux-view';
 
 describe('team tmux view', () => {
   it('requires an explicit absolute tmux binary and rejects native Windows', async () => {

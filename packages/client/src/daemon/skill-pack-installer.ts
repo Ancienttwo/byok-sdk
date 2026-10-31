@@ -357,7 +357,7 @@ async function appendAuditLine(dataDir: string, record: Record<string, unknown>)
   await fs.chmod(root, DIR_MODE).catch(() => {});
   const handle = await fs.open(filePath, 'a', FILE_MODE);
   try {
-    // chmod BEFORE the append, for the same reason `bin/audit-log.ts` does it:
+    // chmod BEFORE the append, for the same reason `daemon/audit-log.ts` does it:
     // `open`'s mode governs creation only, so a pre-existing permissive file
     // would otherwise take the new line while still world-readable.
     await handle.chmod(FILE_MODE);

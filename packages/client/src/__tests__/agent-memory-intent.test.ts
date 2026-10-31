@@ -53,7 +53,7 @@ import {
 } from '../daemon/agent-memory-intent';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
-import { formatDaemonEventLine } from '../bin/format';
+import { formatDaemonEventLine } from '../diagnostics/format';
 import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';

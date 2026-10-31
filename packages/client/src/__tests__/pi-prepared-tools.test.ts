@@ -21,7 +21,7 @@ import {
 import type { McpToolCallHost } from '../adapters/pi/mcp-tools';
 import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
-import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
+import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../agent-memory/mcp-server';
 
 /**
  * The launch half of a prepared tool surface

@@ -14,9 +14,9 @@ import {
   readAuditRecords,
   readLastEnvironmentRecord,
   readLastLifecycleRecord,
-} from '../bin/audit-log';
+} from '../daemon/audit-log';
 import { atomicWriteFile } from '../util/atomic-write';
-import { deriveTasksFromRecords } from '../bin/tasks-view';
+import { deriveTasksFromRecords } from '../diagnostics/tasks-view';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -26,7 +26,7 @@ function lifecycleRecord(connection: 'open' | 'connecting', ts: string): DaemonR
   return { kind: 'lifecycle', ts, lifecycle: { phase: 'running', connection } };
 }
 
-describe('bin/audit-log: appendAuditRecord / readAuditRecords', () => {
+describe('daemon/audit-log: appendAuditRecord / readAuditRecords', () => {
   it('reads back a retention failure for the agent-result class', async () => {
     const storeDir = await tmpDir('byok-audit-retention-');
     const record: DaemonRecord = { kind: 'retention-failure', ts: '2026-10-14T00:00:00.000Z', trigger: 'periodic', classId: 'agent-result', code: 'sweep_failed', count: 1 };
@@ -229,7 +229,7 @@ describe('bin/audit-log: appendAuditRecord / readAuditRecords', () => {
   });
 });
 
-describe('bin/audit-log: 0600 file, 0700 storeDir', () => {
+describe('daemon/audit-log: 0600 file, 0700 storeDir', () => {
   it('a pre-existing storeDir with a permissive mode gets locked down to 0700 on append', async () => {
     const parent = await tmpDir('byok-audit-storedir-mode-parent-');
     const storeDir = path.join(parent, 'permissive-store');
@@ -255,7 +255,7 @@ describe('bin/audit-log: 0600 file, 0700 storeDir', () => {
   });
 });
 
-describe('bin/audit-log: finding P1 #3b (STILL-OPEN, now fixed) — chmod happens BEFORE the write, not after', () => {
+describe('daemon/audit-log: finding P1 #3b (STILL-OPEN, now fixed) — chmod happens BEFORE the write, not after', () => {
   it('reasserts 0600 before appendFile is called — no window where the appended line lands in a still-permissive file', async () => {
     const storeDir = await tmpDir('byok-audit-chmod-order-');
     await fs.mkdir(storeDir, { recursive: true });
@@ -333,7 +333,7 @@ describe('bin/audit-log: finding P1 #3b (STILL-OPEN, now fixed) — chmod happen
   });
 });
 
-describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () => {
+describe('daemon/audit-log: finding P2/#11 (audit half) — size-cap rotation', () => {
   it('rotates (atomically trims to the most recent lines) once the file exceeds the size cap', async () => {
     const storeDir = await tmpDir('byok-audit-rotate-');
     await fs.mkdir(storeDir, { recursive: true });
@@ -521,7 +521,7 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
   });
 });
 
-describe('bin/audit-log: createAuditAppender', () => {
+describe('daemon/audit-log: createAuditAppender', () => {
   it('serializes concurrent appends so they land in call order even though each write is async', async () => {
     const storeDir = await tmpDir('byok-audit-appender-');
     const appender = createAuditAppender(storeDir);

@@ -11,14 +11,14 @@ import {
   formatTaskListLines,
   formatToolsetsReloadReceiptLines,
   type StatusView,
-} from '../bin/format';
+} from '../diagnostics/format';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { RuntimeObservation } from '../runtime-detection';
 
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_RE = /\x1b\[/;
 
-describe('bin/format: formatAgentEvent', () => {
+describe('diagnostics/format: formatAgentEvent', () => {
   it('renders every known AgentEvent type as plain, single-line text', () => {
     expect(formatAgentEvent({ type: 'progress', text: 'doing the thing' })).toBe('progress: "doing the thing"');
     expect(formatAgentEvent({ type: 'tool_use', tool: 'bash' })).toBe('tool_use: bash');
@@ -41,7 +41,7 @@ describe('bin/format: formatAgentEvent', () => {
   });
 });
 
-describe('bin/format: formatDaemonEventLine', () => {
+describe('diagnostics/format: formatDaemonEventLine', () => {
   it('F6 renders suppressed built-in risk codes on local decision and reminder lines', () => {
     expect(formatDaemonEventLine({ kind: 'tool-authorization', ts: 'T', taskId: 't', toolName: 'bash',
       decision: 'allow', authorization: { source: 'rule', ruleIds: ['push-origin'] }, reasons: [], suppressedReasons: ['destructive-git'] }))
@@ -129,7 +129,7 @@ describe('bin/format: formatDaemonEventLine', () => {
   });
 });
 
-describe('bin/format: formatTaskLine / formatTaskListLines', () => {
+describe('diagnostics/format: formatTaskLine / formatTaskListLines', () => {
   it('renders a full task with every optional field present', () => {
     const task: DaemonTaskInfo = {
       taskId: 't1',
@@ -169,7 +169,7 @@ describe('bin/format: formatTaskLine / formatTaskListLines', () => {
 
 });
 
-describe('bin/format: formatRuntimeLines', () => {
+describe('diagnostics/format: formatRuntimeLines', () => {
   it('shows a placeholder for an empty runtime list', () => {
     expect(formatRuntimeLines([])).toEqual(['(no runtimes configured — check runtimeAllowlist)']);
   });
@@ -203,7 +203,7 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 });
 
-describe('bin/format: formatStatusLines', () => {
+describe('diagnostics/format: formatStatusLines', () => {
   function baseView(overrides: Partial<StatusView> = {}): StatusView {
     return {
       productName: 'Acme',
@@ -302,7 +302,7 @@ describe('bin/format: formatStatusLines', () => {
   });
 });
 
-describe('bin/format: formatLiveStatusLines', () => {
+describe('diagnostics/format: formatLiveStatusLines', () => {
   function baseLive(overrides: Partial<ControlStatusResult> = {}): ControlStatusResult {
     return {
       storage: { measuredAt: null, usedBytes: 0, freeBytes: null, classes: [], lastSweep: null },
@@ -491,7 +491,7 @@ describe('bin/format: formatLiveStatusLines', () => {
   });
 });
 
-describe('bin/format: formatToolsetsReloadReceiptLines', () => {
+describe('diagnostics/format: formatToolsetsReloadReceiptLines', () => {
   it('renders only redacted registry metadata', () => {
     const previousRevision = `sha256:${'1'.repeat(64)}`;
     const revision = `sha256:${'2'.repeat(64)}`;
@@ -508,7 +508,7 @@ describe('bin/format: formatToolsetsReloadReceiptLines', () => {
   });
 });
 
-describe('bin/format: formatApprovalsListLines (finding F4)', () => {
+describe('diagnostics/format: formatApprovalsListLines (finding F4)', () => {
   function approval(overrides: Partial<PendingApproval> = {}): PendingApproval {
     return { approvalId: 'appr-1', taskId: 't1', kind: 'task-terminal', summary: 'Bash: rm -rf /tmp/x', createdAt: '2026-01-01T00:00:00.000Z', ...overrides };
   }
@@ -561,7 +561,7 @@ describe('bin/format: formatApprovalsListLines (finding F4)', () => {
   });
 });
 
-describe('bin/format: live view and environment', () => {
+describe('diagnostics/format: live view and environment', () => {
   it('tasks --follow (the authenticated live view) renders full fidelity', () => {
     expect(formatDaemonEventLine({ kind: 'progress', ts: 'T', taskId: 't1', event: { type: 'progress', text: 'doing the thing' } })).toBe(
       '[T] progress taskId=t1 progress: "doing the thing"',

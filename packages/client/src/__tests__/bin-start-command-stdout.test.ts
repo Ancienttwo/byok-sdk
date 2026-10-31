@@ -17,7 +17,7 @@ import {
   createAuditAppender,
   readAuditRecords,
   readLastEnvironmentRecord,
-} from '../bin/audit-log';
+} from '../daemon/audit-log';
 import { runStartCommand } from '../bin/commands/start';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { runStatusCommand } from '../bin/commands/status';
@@ -130,7 +130,7 @@ describe('bin/commands/start: stdout is the audit log (issue #395)', () => {
   });
 });
 
-describe('bin/audit-log: environment-resolved record (issue #392)', () => {
+describe('daemon/audit-log: environment-resolved record (issue #392)', () => {
   it('start persists the daemon environment event; status/doctor/bundle read it back without paths', async () => {
     const storeDir = await tmpDir('byok-envrec-');
     const { daemon, emit } = fakeDaemon();

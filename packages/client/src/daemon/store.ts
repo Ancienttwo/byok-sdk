@@ -304,7 +304,7 @@ export class DeviceStore {
     // storeDir (predating this fix, or created by something else with a
     // more permissive mode) keeps whatever it already had until explicitly
     // chmod'd. Re-asserted on every save, best-effort — mirrors
-    // `bin/audit-log.ts`'s `appendAuditRecord`, which has the identical gap
+    // `daemon/audit-log.ts`'s `appendAuditRecord`, which has the identical gap
     // (and the identical fix) for the same reason: a failure here (e.g. a
     // storeDir owned by a different user) must never block the save itself.
     // Finding F7: on win32, `ensureSecureDir` ALSO applies a restrictive

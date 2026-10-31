@@ -8,7 +8,7 @@ import type { ControlStatusResult } from '../daemon/control-protocol';
 import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { createSupportBundle } from '../diagnostics/support-bundle';
-import { createAuditAppender, readAuditRecords } from '../bin/audit-log';
+import { createAuditAppender, readAuditRecords } from '../daemon/audit-log';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import type { DaemonEvent } from '../daemon/observer';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';

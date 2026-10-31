@@ -40,7 +40,7 @@ import type {
 import * as preparedAgentMemory from '../agent-memory/prepared-agent-memory';
 import type { PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
-import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
+import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../agent-memory/mcp-server';
 
 /**
  * The environment this assembler hands to every server it spawns — the stand-in

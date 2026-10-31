@@ -5,7 +5,7 @@ import { runTeamPiRelayCommand } from './commands/team-pi-relay';
 import { runTeamRelayCommand } from './commands/team-relay';
 import { createDaemon, createServiceLifecycle, readServiceInstallationRecord, type ServiceLifecycle } from '../index';
 import { argValue, ConfigError, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
-import { formatHaltRemedy } from './format';
+import { formatHaltRemedy } from '../diagnostics/format';
 import { applyLoginShellEnvironment, SERVICE_FLAG } from '../lifecycle/service-environment';
 import { runApprovalsCommand } from './commands/approvals';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
@@ -40,7 +40,7 @@ import { runVersionCommand } from './version';
  * a tail-able JSONL log) — deliberately NOT a TUI. No ink/blessed/React
  * reconciler, no full-screen TTY control codes. Every subcommand must work
  * headless (piped stdout, no TTY, running as a background service) and
- * cross-platform; see `bin/format.ts` for the plain-text-only rendering
+ * cross-platform; see `diagnostics/format.ts` for the plain-text-only rendering
  * this relies on.
  *
  * ## The read model — persisted state, a live probe, and (M4 Phase 2) a live control socket
@@ -64,8 +64,8 @@ import { runVersionCommand } from './version';
  *   be actively wrong for an already-paired device) and
  *   `<storeDir>/audit.jsonl` (the content-free `DaemonRecord`s `start`
  *   appends — and prints to stdout as the same JSON lines — see
- *   `bin/audit-log.ts`, reduced into a task list / last-known lifecycle via
- *   `bin/tasks-view.ts`). `status`
+ *   `daemon/audit-log.ts`, reduced into a task list / last-known lifecycle via
+ *   `diagnostics/tasks-view.ts`). `status`
  *   additionally tries the control socket afterward: if reachable, a
  *   clearly-marked `live-*` section (pid/uptime/transport/active tasks) is
  *   appended; if not, one line says so and the persisted view above stands

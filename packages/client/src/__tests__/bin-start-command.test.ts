@@ -8,7 +8,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { DaemonEventListener } from '../daemon/observer';
 import type { DaemonRecord } from '../daemon/daemon-record';
-import { auditLogPath, readAuditRecords } from '../bin/audit-log';
+import { auditLogPath, readAuditRecords } from '../daemon/audit-log';
 import { DaemonCrashedError, formatStartErrorReason, runStartCommand } from '../bin/commands/start';
 import { daemonExitCode } from '../lifecycle/exit-codes';
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';

@@ -258,7 +258,7 @@ export const familyOwners = Object.freeze({
     /^examples\/packaging\//,
     /^templates\/packaging\//,
     /^packages\/client\/native\/agent-memory-fs\//,
-    /^packages\/client\/src\/(?:sdk-native-assets|sdk-reserved-helper-host|bin\/sdk-reserved-helper-command)/,
+    /^packages\/client\/src\/(?:sdk-native-assets|sdk-reserved-helper-host|lifecycle\/sdk-reserved-helper-command)/,
     /^packages\/client\/scripts\/single-file-sdk-helper-smoke\.mjs$/,
     /^packages\/server\/src\/(?:__tests__\/)?loopback[^/]*$/,
     /^examples\/byok-mcp-server\/src\/loopback[^/]*$/,
@@ -266,7 +266,7 @@ export const familyOwners = Object.freeze({
   // #1104: the embedded Host bundled as ESM, CJS and SEA on each OS, and the SDK bundle and asset code it qualifies.
   'packaging-consistency': [
     /^examples\/packaging\/(?:embedded-host-(?:fixture\.ts|smoke\.mjs)|bundle-import-meta\.test\.ts)$/,
-    /^packages\/client\/src\/(?:adapters\/packaging|sdk-native-assets|sdk-reserved-helper-host|sdk-distribution-bins|bin\/sdk-reserved-helper-command)\b/,
+    /^packages\/client\/src\/(?:adapters\/packaging|sdk-native-assets|sdk-reserved-helper-host|sdk-distribution-bins|lifecycle\/sdk-reserved-helper-command)\b/,
     /^packages\/client\/src\/adapters\/pi\/(?:runtime-assets|todo-locale-assets|client-manifest)\.ts$/,
     /^packages\/keys\/src\/pi-provider-launcher-core\.ts$/,
   ],

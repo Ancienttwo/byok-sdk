@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin } from '../sdk-reserved-helper-host';
-import { runSdkReservedHelperCommand } from '../bin/sdk-reserved-helper-command';
+import { runSdkReservedHelperCommand } from '../lifecycle/sdk-reserved-helper-command';
 import { preflightAgentMessageMcp } from '../daemon/agent-message-mcp-preflight';
 
 const roots: string[] = [];

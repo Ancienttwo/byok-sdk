@@ -1,12 +1,12 @@
-import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type RetentionClassId, type RetentionTrigger } from '../daemon/retention/registry';
+import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type RetentionClassId, type RetentionTrigger } from './retention/registry';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { TASK_STATES, type TaskState, OUTBOUND_REFUSAL_REASONS, type OutboundRefusalReason } from '@byok-sdk/protocol';
-import { parseDaemonLifecycle, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { isDaemonRecordKind, type DaemonRecord } from '../daemon/daemon-record';
+import { parseDaemonLifecycle, type DaemonLifecycle } from './daemon-lifecycle';
+import { isDaemonRecordKind, type DaemonRecord } from './daemon-record';
 import type { ServiceEnvironmentStatus, ServiceEnvironmentRecord } from '../login-shell-environment';
-import { parseEnvironmentRecord } from '../daemon/daemon-record';
-export { parseEnvironmentRecord } from '../daemon/daemon-record';
+import { parseEnvironmentRecord } from './daemon-record';
+export { parseEnvironmentRecord } from './daemon-record';
 import { atomicWriteFile } from '../util/atomic-write';
 import { parseRuntimeObservations } from '../runtime-detection';
 

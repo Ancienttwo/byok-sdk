@@ -152,13 +152,13 @@ API-key escape hatch on this branch. **This is a design concept, not existing co
 products never share state, sockets, or credentials.
 
 **8. Audit log (append-only, secret-redacted).**
-`packages/client/src/bin/audit-log.ts:7-31` writes one JSON line per `DaemonEvent` to
+`packages/client/src/daemon/audit-log.ts:7-31` writes one JSON line per `DaemonEvent` to
 `<storeDir>/audit.jsonl` (0600, size-bounded). Redaction discipline: "only event type,
 taskId, timestamps, tool/runtime NAMES, sizes/counts, and closed-enum state fields are ever
 written to disk — every free-form text/bytes field is replaced with its byte SIZE." Recorded
 events (`daemon/observer.ts:46-94`) include task offered/claimed/started, awaiting-approval,
 completed/failed/cancelled, paired/unpaired. A test
-(`packages/client/src/__tests__/bin-audit-log.test.ts:72-119`) asserts a planted secret API
+(`packages/client/src/__tests__/daemon-audit-log.test.ts:72-119`) asserts a planted secret API
 key never appears in the log.
 
 ---

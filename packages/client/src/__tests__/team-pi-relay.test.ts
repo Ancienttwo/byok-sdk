@@ -8,7 +8,7 @@ import { resolvePiBin } from '../adapters/pi/resolve-bin';
 import { PiTeamSession } from '../bin/team-pi-session';
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { PI_TEAM_OPERATOR_TOKEN } from '../bin/team-pi-operator-entry';
-import { runSdkReservedHelperCommand } from '../bin/sdk-reserved-helper-command';
+import { runSdkReservedHelperCommand } from '../lifecycle/sdk-reserved-helper-command';
 import { runTeamPiRelayCommand } from '../bin/commands/team-pi-relay';
 
 const microtasks = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };

@@ -2,7 +2,7 @@ import type { Readable } from 'node:stream';
 import { connectControlClient, type ControlClient } from '../daemon/control-client';
 import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent-message-mcp-server';
 import { serveAgentResultMcpOverStdio, type AgentResultMcpDeps } from './agent-result-mcp-server';
-import { serveAgentMemoryDescriptorOverStdio, serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio, type AgentMemoryMcpDeps } from './agent-memory-mcp-server';
+import { serveAgentMemoryDescriptorOverStdio, serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio, type AgentMemoryMcpDeps } from '../agent-memory/mcp-server';
 import { parsePreparedAgentMemoryMode } from '../agent-memory/prepared-capability';
 import { serveTeamMcpOverStdio, type TeamMcpDeps } from './team-mcp-server';
 import type { SdkReservedHelperKind } from '../sdk-reserved-helper-host';

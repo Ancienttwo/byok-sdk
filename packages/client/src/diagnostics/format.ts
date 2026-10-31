@@ -2,7 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
 import { parseDaemonLifecycle, type DaemonHaltReason, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
-import type { DoctorRuntimeEnvironment } from '../diagnostics/diagnostics';
+import type { DoctorRuntimeEnvironment } from './diagnostics';
 import type { ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types';
 import type { RuntimeObservation } from '../runtime-detection';

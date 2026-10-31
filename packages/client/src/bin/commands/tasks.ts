@@ -1,9 +1,9 @@
 import { type DaemonConfig, type DaemonEvent } from '../../index';
-import { readAuditRecords } from '../audit-log';
+import { readAuditRecords } from '../../daemon/audit-log';
 import { connectControlClient } from '../../daemon/control-client';
 import { resolveStoreDir } from '../config';
-import { formatDaemonEventLine, formatTaskListLines } from '../format';
-import { deriveTasksFromRecords } from '../tasks-view';
+import { formatDaemonEventLine, formatTaskListLines } from '../../diagnostics/format';
+import { deriveTasksFromRecords } from '../../diagnostics/tasks-view';
 
 export interface TasksListDeps {
   log?: (line: string) => void;

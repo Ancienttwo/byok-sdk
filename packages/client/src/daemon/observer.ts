@@ -190,7 +190,7 @@ export type DaemonEvent =
    * having to correlate two.
    *
    * The signature and the envelope bytes are NOT fields of this event and
-   * never can be. That is structural, not a redaction rule: `bin/audit-log.ts`
+   * never can be. That is structural, not a redaction rule: `daemon/audit-log.ts`
    * can only drop what it is handed, and an event type that cannot carry a
    * signature cannot leak one into a durable file no matter how the audit
    * projection is later edited. What IS carried is the metadata an incident

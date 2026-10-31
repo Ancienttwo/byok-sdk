@@ -5,6 +5,6 @@ export { runPiTeamOperatorHost } from './pi-team-operator-host';
 // The reserved-helper dispatcher rides this seam too: the thin byok-pi-rpc /
 // byok-pi-prepared bins re-enter it for the `__byok_sdk_helper <kind>` argv,
 // keeping the helper host graph out of the thin bins' own bundles.
-export { runSdkReservedHelperCommand } from './sdk-reserved-helper-command';
+export { runSdkReservedHelperCommand } from '../lifecycle/sdk-reserved-helper-command';
 
 export { runPiDurableHost } from './pi-durable-host';

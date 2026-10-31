@@ -2,11 +2,11 @@ import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
 import { DaemonHaltError, type DaemonHaltReason } from '../../daemon/daemon-lifecycle';
 import { createDaemonRecordProjector, type DaemonRecord } from '../../daemon/daemon-record';
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../login-shell-environment';
-import { createAuditAppender } from '../audit-log';
+import { createAuditAppender } from '../../daemon/audit-log';
 import { ConfigError, resolveStoreDir } from '../config';
 import { DaemonOwnerActiveError } from '../../util/daemon-owner';
 import { isRuntimeDisposalFailure } from '../../runtime-failure';
-import { formatHaltRemedy, formatServiceEnvironment } from '../format';
+import { formatHaltRemedy, formatServiceEnvironment } from '../../diagnostics/format';
 
 export interface StartDeps {
   log?: (line: string) => void;

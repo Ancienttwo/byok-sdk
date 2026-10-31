@@ -15,7 +15,7 @@ import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
-import { appendAuditRecord } from '../bin/audit-log';
+import { appendAuditRecord } from '../daemon/audit-log';
 import { projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
 import type { RuntimeDetectResult } from '../types';
 import type { DaemonConfig } from '../daemon/create-daemon';

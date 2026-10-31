@@ -9,7 +9,7 @@ import {
 import { resolveStoreDir } from '../config';
 import { serviceLogDir } from '../../daemon/host-layout';
 import type { ServiceEnvironmentRecord } from '../../login-shell-environment';
-import { formatRuntimeEnvironmentLines, formatServiceEnvironment } from '../format';
+import { formatRuntimeEnvironmentLines, formatServiceEnvironment } from '../../diagnostics/format';
 import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from '../../diagnostics/device-doctor';
 
 export interface DoctorOptions extends CollectDiagnosticsOptions {

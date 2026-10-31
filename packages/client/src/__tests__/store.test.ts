@@ -61,7 +61,7 @@ describe('DeviceStore (atomic write path)', () => {
     expect(await store.load()).toEqual(record);
   });
 
-  it('M4 Fix 3: a pre-existing storeDir with a permissive mode gets tightened to 0700 on save() (mirrors bin/audit-log.ts\'s identical fix for its own storeDir)', async () => {
+  it('M4 Fix 3: a pre-existing storeDir with a permissive mode gets tightened to 0700 on save() (mirrors daemon/audit-log.ts\'s identical fix for its own storeDir)', async () => {
     const parent = await tmpDir('byok-device-store-mode-parent-');
     storeDir = path.join(parent, 'permissive-store');
     // Simulate a pre-existing, permissively-moded storeDir (predates this

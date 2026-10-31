@@ -33,7 +33,7 @@ import { serveAgentMessageMcpOverStdio } from '../bin/agent-message-mcp-server';
 import {
   serveAgentMemoryMcpOverStdio,
   AGENT_MEMORY_RECALL_TOOL_NAME,
-} from '../bin/agent-memory-mcp-server';
+} from '../agent-memory/mcp-server';
 import { serveTeamMcpOverStdio, TEAM_POST_TOOL_NAME } from '../bin/team-mcp-server';
 import { serveAgentResultMcpOverStdio } from '../bin/agent-result-mcp-server';
 import { AGENT_MESSAGE_TOOL_NAME, AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';

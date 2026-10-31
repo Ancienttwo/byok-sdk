@@ -24,9 +24,9 @@ import {
   type TaskAssertionIssueResult,
 } from '../daemon/control-protocol';
 import { connectControlClient, type ControlClient } from '../daemon/control-client';
-import { createAuditAppender, auditLogPath } from '../bin/audit-log';
+import { createAuditAppender, auditLogPath } from '../daemon/audit-log';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
-import { formatDaemonEventLine } from '../bin/format';
+import { formatDaemonEventLine } from '../diagnostics/format';
 import type { DaemonEvent } from '../daemon/observer';
 import type { RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';

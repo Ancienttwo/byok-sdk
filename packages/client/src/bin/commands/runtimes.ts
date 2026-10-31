@@ -1,5 +1,5 @@
 import { type DaemonConfig, type RuntimeAdapter } from '../../index';
-import { formatRuntimeLines } from '../format';
+import { formatRuntimeLines } from '../../diagnostics/format';
 import { defaultRuntimeAdapters, probeRuntimes } from '../../diagnostics/runtime-probe';
 
 export interface RuntimesDeps {
