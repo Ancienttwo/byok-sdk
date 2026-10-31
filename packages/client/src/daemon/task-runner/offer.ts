@@ -11,6 +11,8 @@ import type { AcceptedOfferPayload } from './support';
 import { bindOfferWorkspace } from './offer-workspace';
 import { sealOfferManifest, claimOffer, startOfferRuntime } from './offer-launch';
 import type { OfferAdmissionTiming } from './offer-admission-timing';
+import { hostFor, type HostOfferContext } from './host';
+import type { OfferFactsV1 } from './state';
 
 /** What the offer's `finally` releases. The stage that acquires a lease records it here at once, so a throw still releases it. */
 export interface OfferHeld {
@@ -23,6 +25,49 @@ export type OfferRuntime = NonNullable<Awaited<ReturnType<TaskRunner['prepareOff
 export type OfferWorkspace = NonNullable<Awaited<ReturnType<typeof bindOfferWorkspace>>>;
 export type OfferManifest = NonNullable<Awaited<ReturnType<typeof sealOfferManifest>>>;
 export type OfferClaim = NonNullable<Awaited<ReturnType<typeof claimOffer>>>;
+
+/** The decision-relevant slice of the wire offer; no instruction or schema bytes. */
+function offerFactsFor(taskId: string, payload: AcceptedOfferPayload): OfferFactsV1 {
+  const homeAccess = offeredHomeAccess(payload);
+  const preparation = offeredPreparation(payload);
+  const message = payload.messageEgress;
+  const terminalProjection = payload.terminalProjection;
+  const sessionRef = offeredSessionRef(payload);
+  return {
+    // The wire offer carries no digest; taskId is the runner's local idempotency key.
+    digest: taskId,
+    readerAttempt: homeAccess === 'memory-reader',
+    homeAccess: homeAccess === 'memory-reader' ? 'memory-reader' : 'writer',
+    egressEnabled: payload.egressPolicy !== undefined,
+    requiredToolsets: [...(payload.requiredToolsets ?? [])],
+    strict: false,
+    sealed: payload.sealing !== undefined,
+    ...(payload.runtime === undefined ? {} : { requestedRuntime: payload.runtime }),
+    ...(payload.dispatchSelection === undefined ? {} : { dispatchRuntime: payload.dispatchSelection.runtimeId }),
+    ...(payload.harnessId === undefined ? {} : { harnessId: payload.harnessId }),
+    ...(sessionRef === undefined ? {} : { sessionRef }),
+    ...(payload.limits?.maxDurationMs === undefined ? {} : { maxDurationMs: payload.limits.maxDurationMs }),
+    ...(message === undefined ? {} : {
+      message: {
+        required: true,
+        contentType: message.contentType,
+        maxBytes: message.maxBytes,
+      },
+    }),
+    ...(terminalProjection === undefined ? {} : {
+      terminalProjection: {
+        mode: terminalProjection.mode,
+        ...(terminalProjection.mode === 'result-document' ? { contract: terminalProjection.contract } : {}),
+      },
+    }),
+    ...(preparation === undefined ? {} : {
+      preparation: {
+        reference: preparation.reference,
+        memoryMode: payload.agentMemory ?? 'none',
+      },
+    }),
+  };
+}
 
 export async function handleOffer(
   this: TaskRunner,
@@ -43,10 +88,81 @@ export async function handleOffer(
     return;
   }
 
-  const request = readOfferRequest.call(this, taskId, payload, admission);
+  // #1099 S3: the reducer owns the offer/admission phase, the decline
+  // decision and the per-task lifecycle from here through `admission.claimable`.
+  // The IO stages below stay exactly where they were; each success/failure is
+  // dispatched at the same boundary. The host keeps the state off TaskRunner's
+  // private member surface (WeakMap) and serializes same-task events FIFO.
+  const host = hostFor(this);
+  const offerContext: HostOfferContext = host.beginOffer(taskId, {
+    stage: 'receive',
+    sendDecline: (effect, context) => {
+      const code = effect.effect.detail?.code;
+      this['decline'](
+        taskId,
+        admission,
+        effect.effect.reason ?? 'declined',
+        effect.effect.retryable ?? false,
+        context.agentRef as AgentRef | undefined,
+        code === undefined ? undefined : code as TaskDeclinePayload['code'],
+        context.runtimeUnavailable as RuntimeUnavailableAdmission | undefined,
+      );
+    },
+  });
+  const decline = (
+    reason: string,
+    retryable: boolean,
+    code?: TaskDeclinePayload['code'],
+    runtimeUnavailable?: RuntimeUnavailableAdmission,
+  ): void => {
+    host.setRuntimeUnavailable(taskId, runtimeUnavailable);
+    try {
+      const result = host.dispatchSync({
+        type: 'admission.declined',
+        taskId,
+        atMs: Date.now(),
+        stage: offerContext.stage,
+        reason,
+        retryable,
+        ...(code === undefined ? {} : { code }),
+      });
+      // The legacy paths below send the decline themselves; the host only
+      // sends when the reducer accepted the transition. Falling back keeps a
+      // row that is stale in a later slice's phase a legacy send, not a drop.
+      if (result.disposition !== 'applied') {
+        this['decline'](
+          taskId,
+          admission,
+          reason,
+          retryable,
+          offerContext.agentRef as AgentRef | undefined,
+          code,
+          runtimeUnavailable,
+        );
+      }
+    } finally {
+      host.setRuntimeUnavailable(taskId, undefined);
+    }
+  };
+  const received = host.dispatchSync({
+    type: 'offer.received',
+    taskId,
+    atMs: Date.now(),
+    generation: offerContext.generation,
+    offer: offerFactsFor(taskId, payload),
+  });
+  // The legacy redelivery guard above is the effective dedup authority in S3;
+  // O1 only records the new per-task lifecycle. If it still dropped, let the
+  // existing path decide exactly as before.
+  if (received.disposition !== 'applied' && received.task === undefined) {
+    host.endOffer(taskId);
+    return;
+  }
+
+  const request = readOfferRequest.call(this, taskId, payload, admission, decline);
   if (request === undefined) return;
   const {
-    agentRef, decline, sessionRef, homeAccess, readerAttempt, homeBusyCode, preparation, agentMemory,
+    agentRef, sessionRef, homeAccess, readerAttempt, homeBusyCode, preparation, agentMemory,
     preparedMemorySelected, ordinaryMemoryMode, ordinaryMemoryMcp,
   } = request;
   const preparationLane = this['deps'].inputPreparationLane;
@@ -55,7 +171,7 @@ export async function handleOffer(
       // By name, not by reinterpretation. A daemon with no input-preparation
       // section holds no record this reference could mean, and running the
       // offer some other way would be running an Execution nobody counted.
-      this['decline'](taskId, admission, 'preparation_lane_unconfigured: this daemon is not configured for input preparation', false, agentRef);
+      decline('preparation_lane_unconfigured: this daemon is not configured for input preparation', false);
       return;
     }
     // BEFORE the first read. A restarted daemon reaches this line with a
@@ -72,19 +188,16 @@ export async function handleOffer(
     try {
       await preparationLane.open();
     } catch (error) {
-      this['decline'](
-        taskId,
-        admission,
+      decline(
         `preparation_store_unavailable: the preparation store could not be opened: ${outboundErrorMessage(error)}`,
         false,
-        agentRef,
       );
       return;
     } finally {
       this['inFlightOffers'].delete(taskId);
     }
     if (preparationLane.store.get(preparation.reference) === undefined) {
-      this['decline'](taskId, admission, 'preparation_not_found: no preparation record under this reference on this device', false, agentRef);
+      decline('preparation_not_found: no preparation record under this reference on this device', false);
       return;
     }
   }
@@ -147,14 +260,35 @@ export async function handleOffer(
   const phase: OfferPhaseContext = {
     taskId, decline, admissionWithdrawn, admissionSignal: blobAbort.signal, releaseReservation, reserveHome, admission,
   };
+  const stage = (name: string): void => {
+    host.setStage(taskId, name);
+  };
+  const stageSucceeded = (name: string): void => {
+    host.dispatchSync({
+      type: 'admission.stage',
+      taskId,
+      atMs: Date.now(),
+      stage: name,
+    });
+  };
   try {
     if (this['admitOffer'](phase) === undefined) return;
+    // Checkpoint 1 passed. O3 moves received -> admitting; the legacy
+    // pendingCancelled check above remains the effective checkpoint until S4.
+    host.dispatchSync({ type: 'admission.begin', taskId, atMs: Date.now() });
+    if (preparation !== undefined) stageSucceeded('preparation');
 
+    stage('home');
     if (await this['reserveOfferHome'](phase, agentRef, readerAttempt, sessionRef, homeAccess) === undefined) return;
+    stageSucceeded('home');
 
+    stage('limits');
     const offerLimits = this['admitOfferLimits'](phase, payload);
     if (offerLimits === undefined) return;
+    stageSucceeded('limits');
     const { requiredToolsets, resolvedMcp } = offerLimits;
+
+    stage('runtime');
     const runtime = await this['prepareOfferRuntime'](phase, {
       acquireScratch: async () => {
         const scratch = await this['deps'].scratchRoot.create();
@@ -165,23 +299,34 @@ export async function handleOffer(
       readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
     });
     if (runtime === undefined) return;
+    stageSucceeded('runtime');
     const { scratch, offered, pick, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, prepared } = runtime;
     let taskMcpServers = runtime.taskMcpServers;
 
+    stage('workspace');
     const workspace = await bindOfferWorkspace.call(this, phase, held, {
       agentRef, readerAttempt, sessionRef, homeAccess, homeBusyCode, pick, prepared, messageRequirement, terminalProjection,
     });
     if (workspace === undefined) return;
+    stageSucceeded('workspace');
     const { agentBinding, sessionLease, workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline } = workspace;
 
+    stage('manifest');
     const sealed = await sealOfferManifest.call(this, phase, {
       agentBinding, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
       mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, workspaceDir, blobAbort,
       preparationLane, terminalProjection,
     });
     if (sealed === undefined) return;
+    stageSucceeded('manifest');
     const { runtimeLaunch, manifest, preparedLaunch, preparedObservation, toolAuthorization } = sealed;
 
+    // S3's last wired transition: the manifest/pin are done, so the reducer
+    // records the claim precondition. `claimOffer` (journal + claim) is S4 and
+    // keeps its own IO and ordering here.
+    host.dispatchSync({ type: 'admission.claimable', taskId, atMs: Date.now() });
+
+    stage('claim');
     const claimed = await claimOffer.call(this, phase, {
       agentBinding, agentRef, pick, manifest, preparedLaunch, blobAbort, payload, taskMcpServers,
     });
@@ -189,6 +334,7 @@ export async function handleOffer(
     const { resolvedInstruction } = claimed;
     ({ taskMcpServers } = claimed);
 
+    stage('start');
     await startOfferRuntime.call(this, phase, held, {
       agentBinding, sessionLease, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
       preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
@@ -243,29 +389,32 @@ export async function handleOffer(
   }
 }
 
-function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOfferPayload, admission: OfferAdmissionTiming) {
+function readOfferRequest(
+  this: TaskRunner,
+  taskId: string,
+  payload: AcceptedOfferPayload,
+  admission: OfferAdmissionTiming,
+  decline: (reason: string, retryable: boolean, code?: TaskDeclinePayload['code'], runtimeUnavailable?: RuntimeUnavailableAdmission) => void,
+) {
   let offeredRef: AgentRef | undefined;
   try {
     offeredRef = offeredAgentRef(payload);
   } catch (error) {
-    this['decline'](taskId, admission, `invalid AgentRef: ${errorMessage(error)}`, false);
+    decline(`invalid AgentRef: ${errorMessage(error)}`, false);
     return;
   }
-  if (offeredRef === undefined || this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
-    this['decline'](
-      taskId,
-      admission,
-      'Agent offer requires the SDK-owned agent-home-contract layout and handoff store',
-      false,
-      offeredRef,
-    );
+  if (offeredRef === undefined) {
+    decline('Agent offer requires the SDK-owned agent-home-contract layout and handoff store', false);
     return;
   }
-  // Every offer past this point is bound to exactly one Agent.
+  // Every offer past this point is bound to exactly one Agent, so a decline
+  // from here carries it on the wire.
   const agentRef: AgentRef = offeredRef;
-  const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code'], runtimeUnavailable?: RuntimeUnavailableAdmission): void => {
-    this['decline'](taskId, admission, reason, retryable, agentRef, code, runtimeUnavailable);
-  };
+  hostFor(this).setAgentRef(taskId, agentRef);
+  if (this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
+    decline('Agent offer requires the SDK-owned agent-home-contract layout and handoff store', false);
+    return;
+  }
   const sessionRef = offeredSessionRef(payload);
   const homeAccess = offeredHomeAccess(payload);
   const readerAttempt = homeAccess === 'memory-reader';
@@ -307,17 +456,7 @@ function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOff
       : ordinaryMemory ?? (this['deps'].agentMemoryMcp === 'off' ? 'none' : readerAttempt ? 'read' : 'read-write');
   const ordinaryMemoryMcp = ordinaryMemoryMode !== 'none' && memoryAdmitted;
   return {
-    agentRef, decline, sessionRef, homeAccess, readerAttempt, homeBusyCode, preparation, agentMemory,
+    agentRef, sessionRef, homeAccess, readerAttempt, homeBusyCode, preparation, agentMemory,
     preparedMemorySelected, ordinaryMemoryMode, ordinaryMemoryMcp,
   } as const;
 }
-
-
-
-
-
-
-
-
-
-

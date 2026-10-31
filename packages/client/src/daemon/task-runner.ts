@@ -97,6 +97,7 @@ import { terminalInferenceUsagePayload, preparedObservationPayload, agentTermina
 import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin } from './task-runner/finish';
 import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump';
 import { handleOffer } from './task-runner/offer';
+import { hostFor } from './task-runner/host';
 import { OfferAdmissionTiming } from './task-runner/offer-admission-timing';
 import type { ToolAuthorizationDecision, ToolAuthorizationResolver, ToolReminder } from '../tool-authorization';
 
@@ -1035,7 +1036,17 @@ export class TaskRunner {
   }
 
   private handleOffer(taskId: string, payload: AcceptedOfferPayload, admission: OfferAdmissionTiming): Promise<void> {
-    return handleOffer.call(this, taskId, payload, admission);
+    const outcome = handleOffer.call(this, taskId, payload, admission);
+    // S3 consumes the reducer host only once the offer settles. A claimed
+    // task that became active keeps its state for the S4 claim/start/cancel
+    // slice; everything else (decline, throw, a claimed start that never
+    // registered) is archived here so a redelivery starts clean.
+    void outcome
+      .finally(() => {
+        if (!this.tasks.has(taskId) && !this.startupOwnership.has(taskId)) hostFor(this).endOffer(taskId);
+      })
+      .catch(() => undefined);
+    return outcome;
   }
 
   private admitOffer(phase: OfferPhaseContext): true | undefined {
@@ -1703,6 +1714,9 @@ export class TaskRunner {
   /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap. */
   private addFinishedTaskId(taskId: string): void {
     this.finishedTaskIds.add(taskId);
+    // The reducer host is bounded too: a finished task's per-task state is
+    // archived, not retained for the daemon's lifetime.
+    hostFor(this).endTask(taskId);
     if (this.finishedTaskIds.size > MAX_TRACKED_TASK_IDS) {
       const oldest = this.finishedTaskIds.values().next().value;
       if (oldest !== undefined) this.finishedTaskIds.delete(oldest);
