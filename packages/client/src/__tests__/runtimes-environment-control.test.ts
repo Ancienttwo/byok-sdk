@@ -34,8 +34,14 @@ afterEach(async () => {
 });
 
 it('answers each adapter build as names and sources, a capture failure as its code, anything else as failed', async () => {
-  const live = { PATH: '/usr/bin', HOST_PASSED_SENTINEL: 'passed-value-sentinel', HOST_ONLY_SENTINEL: 'host-value-sentinel' };
-  const shell = { PATH: '/opt/homebrew/bin:/usr/bin', SHELL_ONLY_SENTINEL: 'shell-value-sentinel', CLAUDECODE: '1' };
+  const live = {
+    PATH: '/usr/bin', HOST_PASSED_SENTINEL: 'passed-value-sentinel', HOST_ONLY_SENTINEL: 'host-value-sentinel',
+    BYOK_TOOL_AUTHORIZATION_GATE: 'live-gate-token-value-sentinel',
+  };
+  const shell = {
+    PATH: '/opt/homebrew/bin:/usr/bin', SHELL_ONLY_SENTINEL: 'shell-value-sentinel', CLAUDECODE: '1',
+    BYOK_TOOL_AUTHORIZATION_GATE: 'shell-gate-token-value-sentinel', BYOK_HOST_TOOLSET_CONTEXT: 'host-toolset-value-sentinel',
+  };
   const built = new StubRuntimeAdapter('claude');
   built.runtimeEnvironment = async () => composeRuntimeEnvironment({
     policy: { pass: ['HOST_PASSED_SENTINEL'] },
@@ -71,14 +77,21 @@ it('answers each adapter build as names and sources, a capture failure as its co
             { name: 'SHELL_ONLY_SENTINEL', source: 'login-shell' },
             { name: 'no_proxy', source: 'sdk' },
           ],
-          removed: [{ name: 'CLAUDECODE', rule: 'deny' }],
+          removed: [
+            { name: 'BYOK_HOST_TOOLSET_CONTEXT', rule: 'deny' },
+            { name: 'BYOK_TOOL_AUTHORIZATION_GATE', rule: 'deny' },
+            { name: 'CLAUDECODE', rule: 'deny' },
+          ],
         },
         { runtimeId: 'codex', status: 'unavailable', code: 'timeout' },
         { runtimeId: 'pi', status: 'failed' },
       ],
     });
     const serialized = JSON.stringify(result);
-    for (const value of ['passed-value-sentinel', 'host-value-sentinel', 'shell-value-sentinel', '/opt/homebrew/bin', 'failed-message-sentinel', 'HOST_ONLY_SENTINEL']) {
+    for (const value of [
+      'passed-value-sentinel', 'host-value-sentinel', 'shell-value-sentinel', '/opt/homebrew/bin', 'failed-message-sentinel', 'HOST_ONLY_SENTINEL',
+      'live-gate-token-value-sentinel', 'shell-gate-token-value-sentinel', 'host-toolset-value-sentinel',
+    ]) {
       expect(serialized).not.toContain(value);
     }
   } finally {

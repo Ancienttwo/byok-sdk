@@ -3,9 +3,17 @@
   "productName": "Salesko",
   "serverUrl": "https://salesko.example",
   "storeDir": "/Users/x/.salesko/computer",
+  "agentHome": { "hostStorageRoot": "/Users/x/Library/Application Support/Salesko" },
+  "runtimeAllowlist": ["pi", "claude"],
   "runtimes": {
-    "claude": { "agentUserContext": "excluded", "agentSessionPersistence": "disabled" },
-    "codex": { "agentUserMcpServers": "excluded" }
+    "pi": { "agentUserContext": "excluded" },
+    "claude": { "agentUserContext": "excluded", "agentSessionPersistence": "disabled" }
   },
-  "toolAuthorization": { "default": "auto", "byRuntime": { "codex": "all" } }
+  "toolAuthorization": {
+    "default": "auto",
+    "fileScope": {
+      "mode": "workspaces",
+      "roots": [{ "id": "workspace", "path": "/Users/x/Projects/salesko", "access": "read" }]
+    }
+  }
 }

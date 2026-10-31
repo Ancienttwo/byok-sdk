@@ -231,7 +231,10 @@ describe('diagnostics collector', () => {
         {
           runtimeId: 'claude', status: 'built',
           names: [{ name: 'HOME', source: 'login-shell' }, { name: 'HOST_PASSED_SENTINEL', source: 'pass' }, { name: 'NO_PROXY', source: 'sdk' }],
-          removed: [{ name: 'CLAUDECODE', rule: 'deny' }],
+          removed: [
+            { name: 'BYOK_TOOL_AUTHORIZATION_GATE', rule: 'deny' },
+            { name: 'CLAUDECODE', rule: 'deny' },
+          ],
         },
         { runtimeId: 'codex', status: 'unavailable', code: 'timeout' },
         { runtimeId: 'pi', status: 'failed' },
@@ -244,7 +247,7 @@ describe('diagnostics collector', () => {
       expect(snapshot.runtimeEnvironment).toEqual({
         status: 'known',
         runtimes: [
-          { idHash: expect.any(String), status: 'built', names: 3, removed: 1 },
+          { idHash: expect.any(String), status: 'built', names: 3, removed: 2 },
           { idHash: expect.any(String), status: 'unavailable', code: 'timeout' },
           { idHash: expect.any(String), status: 'failed' },
         ],
@@ -258,14 +261,18 @@ describe('diagnostics collector', () => {
       const text: string[] = [];
       await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({}, async () => report), log: (line) => text.push(line) });
       expect(text).toEqual(expect.arrayContaining([
-        'runtime-environment claude: 3 names, 1 removed',
+        'runtime-environment claude: 3 names, 2 removed',
         '  HOME (login-shell)',
         '  HOST_PASSED_SENTINEL (pass)',
         '  NO_PROXY (sdk)',
+        '  removed BYOK_TOOL_AUTHORIZATION_GATE (deny)',
         '  removed CLAUDECODE (deny)',
         'runtime-environment codex: unavailable (timeout)',
         'runtime-environment pi: failed',
       ]));
+      // #1095: the gate is printed only as a denied name; its token value is
+      // not part of the report doctor receives or prints.
+      expect(text.join('\n')).not.toContain('gate-token-value-sentinel');
 
       const json: string[] = [];
       await runDoctorCommand(config(dir), { adapters: [], connectControl: () => connected({}, async () => report), json: true, log: (line) => json.push(line) });
