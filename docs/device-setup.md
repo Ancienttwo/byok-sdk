@@ -22,6 +22,27 @@ with `bun run --filter @byok-sdk/example-basic dev`, then open
 `http://localhost:8787`. Its default product ID matches the examples below.
 For a deployed Host, use its server URL, product ID and pairing UI instead.
 
+### Clean-machine checklist
+
+A machine that has never run this product has no store, daemon, device record
+or Agent home; pairing creates the identity and the store. Both paths use the
+same sequence:
+
+1. Install the client distribution and at least one supported runtime.
+2. Authenticate that runtime as the OS user who will run the daemon. Do not
+   install or run a user-scoped daemon as `root` or `SYSTEM`.
+3. Choose one configuration path below: the CLI path owns a JSON file, the
+   embedded path owns a `DaemonConfig` assembled in code.
+4. Validate before starting: `byok-agent config check --strict` for the CLI
+   path, `checkDaemonConfig(config, { source: 'embedded' })` for the embedded
+   path. A Host-owned config file carries the required `productName`,
+   `productId` and `serverUrl` (and normally a `storeDir`); runtime isolation,
+   a static tool-authorization mode and an optional `fileScope` are config-file
+   values too.
+5. Pair once, start, then wait for `status` to report
+   `phase=running connection=open`. Local startup alone does not prove server
+   acceptance or runtime credentials.
+
 ## CLI path
 
 Save this as `device.json`. Replace the absolute directories with private paths
@@ -174,11 +195,19 @@ and a static tool-authorization policy in `toolAuthorization`:
   "productId": "byok-example-basic",
   "serverUrl": "http://localhost:8787",
   "storeDir": "/tmp/byok-example-store",
+  "agentHome": { "hostStorageRoot": "/tmp/byok-example-home" },
+  "runtimeAllowlist": ["pi", "claude"],
   "runtimes": {
-    "claude": { "agentUserContext": "excluded", "agentSessionPersistence": "disabled" },
-    "codex": { "agentUserMcpServers": "excluded" }
+    "pi": { "agentUserContext": "excluded" },
+    "claude": { "agentUserContext": "excluded", "agentSessionPersistence": "disabled" }
   },
-  "toolAuthorization": { "default": "auto", "byRuntime": { "codex": "all" } }
+  "toolAuthorization": {
+    "default": "auto",
+    "fileScope": {
+      "mode": "workspaces",
+      "roots": [{ "id": "workspace", "path": "/tmp/byok-example-workspace", "access": "read" }]
+    }
+  }
 }
 ```
 
@@ -189,6 +218,12 @@ and a static tool-authorization policy in `toolAuthorization`:
   stays `runtimeAllowlist`; the Codex sandbox stays `codexSandbox`.
   `createDaemonWithAdapters` rejects `runtimes`: configure injected adapters
   directly.
+- A `fileScope` is only legal when every runtime of the daemon resolves to
+  `auto`, because it never applies to an `all` task. The example therefore
+  lists Pi and Claude but not Codex, which has no `toolAuthorizationAuto`
+  capability. To run Codex instead, remove `fileScope`, keep Codex in
+  `runtimeAllowlist`, and set `toolAuthorization.byRuntime.codex` to `"all"`.
+  Codex isolation still comes from `runtimes.codex.agentUserMcpServers`.
 - `toolAuthorization.byRuntime` gives a runtime its own mode; `default` covers
   the rest. A `byRuntime` key that is not a runtime of the daemon is an error.
 - Static `auto` requires the runtime's `toolAuthorizationAuto` capability.

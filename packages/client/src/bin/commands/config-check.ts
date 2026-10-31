@@ -75,6 +75,11 @@ function formatEffectiveConfig(effective: DaemonEffectiveConfig): string[] {
     : `${scratch.socketPathBytes} of at most ${scratch.socketPathMaximumBytes} bytes for runtime sockets`;
   const helper = memory.helper.state === 'resolved' ? `resolved ${memory.helper.path}`
     : memory.helper.state === 'missing' ? `missing: ${memory.helper.reason}` : memory.helper.state;
+  const fileScope = toolAuthorization.fileScope;
+  const fileScopeRoots = fileScope?.roots ?? [];
+  const fileScopeLines = fileScope === undefined ? [] : [
+    `  file scope:        mode=${fileScope.mode}${fileScopeRoots.length === 0 ? '' : ` roots=${fileScopeRoots.map((root) => `${root.id}=${root.path}:${root.access}`).join(',')}`}`,
+  ];
   const lines = [
     `effective values (schema v${effective.schemaVersion}):`,
     `  storeDir:          ${directories.storeDir.path} (${directories.storeDir.source})`,
@@ -90,6 +95,7 @@ function formatEffectiveConfig(effective: DaemonEffectiveConfig): string[] {
       return `    ${runtime.id} [${runtime.source}] auto ${runtime.toolAuthorizationAuto ? 'supported' : 'unsupported'}${isolation}`;
     }),
     `  tool authorization: ${toolAuthorization.mode} (local tool approval: ${toolAuthorization.localToolApproval})`,
+    ...fileScopeLines,
   ];
   return lines;
 }

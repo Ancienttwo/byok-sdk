@@ -1003,15 +1003,21 @@ shell's `ANTHROPIC_*`, Bedrock/Vertex switches and OAuth token).
 The running daemon is the only authority for the names. The authenticated
 control method `runtimes.environment` builds every adapter's environment on
 demand and answers with each report (`built`), the capture's failure code
-(`unavailable`) or `failed`, never a value. `byok-agent doctor` prints the
-names and sources in text and as the top-level `runtimeEnvironment` of its
-JSON. It does not rebuild them itself: its own process has another live
-environment and cannot see a Host's own adapters. Offline, or when the daemon
-does not answer with the exact shape, it reports `unknown`. Names an adapter
-adds to one task's environment when it starts that task are not listed. The diagnostics snapshot and the support bundle keep only counts per
-hashed runtime id, and `audit.jsonl` keeps no names. `byok-agent config check`
-starts no login shell, so it prints the file's `runtimeEnvironment` policy and
-no names.
+(`unavailable`) or `failed`, never a value. If a denied control variable —
+including `BYOK_TOOL_AUTHORIZATION_GATE` — reaches a build, only its name can
+appear, under the `deny` rule; its token, file path or any other value never
+does. `byok-agent doctor` prints the names and sources in text and as the
+top-level `runtimeEnvironment` of its JSON. It does not rebuild them itself:
+its own process has another live environment and cannot see a Host's own
+adapters. Offline, or when the daemon does not answer with the exact shape, it
+reports `unknown`. Names an adapter adds to one task's environment when it
+starts that task are not listed. The diagnostics snapshot and the support
+bundle keep only counts per hashed runtime id, and `audit.jsonl` keeps no
+names. `byok-agent config check` starts no login shell, so it prints the
+file's `runtimeEnvironment` policy and no names; the same file's static
+`toolAuthorization` (including `fileScope`) and bundled `runtimes` isolation
+are validated and reported as effective values, so a CLI task selects its
+runtime and `auto`/`all` mode from that file without embedded adapters.
 
 ### Local runtime probe observation
 
@@ -4175,7 +4181,11 @@ sessions and does not isolate against same-user code.
 The [device setup guide](device-setup.md#configuration) owns configuration
 validation, effective-value readback, field tiers and operator workflows.
 `DaemonConfig` remains the field authority; its generated JSON schema and
-upgrade manifest track the public contract.
+upgrade manifest track the public contract. A CLI config file and an embedded
+Host supply the same static `toolAuthorization` policy (including
+`fileScope`) and the same bundled-runtime isolation options; the embedded path
+may pass a `toolAuthorization` function instead, and
+`createDaemonWithAdapters` configures injected adapters directly.
 
 ### Recommended host layout
 

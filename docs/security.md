@@ -632,7 +632,9 @@ the source, a closed failure code and the shell's basename are recorded
 support bundle) — never variable values or paths. Variable names leave the
 daemon only through the authenticated control method `runtimes.environment`,
 which `doctor` prints (each runtime's names with their source and the names
-the deny or a conflict rule removed); they are never persisted. The support
+the deny or a conflict rule removed); they are never persisted. A gate token
+or any other `BYOK_*` value that reaches a build is reported only as a removed
+name under the `deny` rule — never as a value or a path. The support
 bundle and the diagnostics snapshot carry per-runtime counts only. No value is
 reported anywhere. Windows spawns no login
 shell (`windows-session`).
