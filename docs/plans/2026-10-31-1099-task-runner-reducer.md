@@ -473,8 +473,8 @@ export interface EffectRequires {
 
 | Effect | Mode | 完成事件 | 失败映射 |
 | --- | --- | --- | --- |
-| `decline` | atomic | 无（send 同步） | send throw：保持当前抛出、不 decline；按当前 `handleOffer` finally 清理；见 follow-up #1217 |
-| `journal.admission` | barrier | `claim.journaled` | `claim.journal_failed`；保持当前抛出、不 decline；见 follow-up #1217 |
+| `decline` | atomic | 无（send 同步） | send throw：保持当前抛出、不 decline；按当前 `handleOffer` finally 清理（send throw 不在 #1217 范围） |
+| `journal.admission` | barrier | `claim.journaled` | `claim.journal_failed`：claim 未发送，按 C9 发 retryable `task.decline`（#1217） |
 | `open.preparation` | barrier | `admission.stage(preparation)` | `admission.declined`: `preparation_store_unavailable` false |
 | `reserve.home` | barrier | `admission.stage(home)` | `admission.declined`: busy/resolution，按现有 code/retryable |
 | `acquire.lease` | barrier | `admission.stage(workspace)` | `admission.declined`: lease/handoff/reader/outbox/store |
@@ -488,7 +488,7 @@ export interface EffectRequires {
 | `transfer.startup` | atomic | `startup.transferred` | 不适用 |
 | `release.deviceSlot` | atomic | 无 | 不适用 |
 | `send.claim` | atomic | `claim.sent` | 同 `decline` 的 send throw |
-| `send.terminal` | atomic | `terminal.sent` | send throw：记录并保留 envelope；保持当前抛出、不 decline；见 follow-up #1217 |
+| `send.terminal` | atomic | `terminal.sent` | send throw：记录并保留 envelope；保持当前抛出、不 decline（send throw 不在 #1217 范围） |
 | `mark.finished` | atomic | 无 | 加入 bounded `RunnerState.finished` |
 | `flush.batcher` | atomic | 无 | batcher 超限 → `resource.exceeded` |
 | `stop.batcher` | atomic | 无 | 不适用 |
@@ -608,10 +608,10 @@ stage 失败映射（O5 的 reason/retryable/code 来源）：
 | preparation | `preparation_store_unavailable` false；`preparation_not_found` false |
 | home | `agent home busy` true，带 `agent_home_writer_busy`/`agent_home_reader_busy`；resolution false |
 | limits | admissionGuard 按其返回；shutting down true；device busy true；maxTokens true；dispatch 不一致/harness 不支持/toolsets 不满足 false |
-| runtime | detection/platform unsupported true；environment unavailable false；capability/custom-harness false；probe spawn/早退/超时 true；McpAuthority false；prepare reject 按 adapter 返回值 |
+| runtime | detection/platform unsupported true；environment unavailable false；capability/custom-harness false；scratch create 失败 true（#1217）；probe spawn/早退/超时 true；McpAuthority false；prepare reject 按 adapter 返回值 |
 | workspace | lease/handoff busy true（带 home code）；resolution false；reader run missing/busy 按现有值；outbox/result store 初始化 true |
 | manifest | tool auth 未解析 false；runtime launch false；prepared compare 逐项 false；pin not_ready/occupied false |
-| claim | 仅 claim 发送前；`claim.journal_failed` 见 C9/OD6，claim 发送后不再 decline |
+| claim | 仅 claim 发送前；`claim.journal_failed` → retryable `task.decline`（C9/#1217），claim 发送后不再 decline |
 
 ### 7.3 Claim / started / activation
 
@@ -619,7 +619,7 @@ stage 失败映射（O5 的 reason/retryable/code 来源）：
 | --- | --- | --- | --- | --- | --- |
 | C0 | `startup.registered` | `ph=claimed` 或 `terminalizing` | `startup.owner='startup'` | 无 | start 失败/取消后保留所有权；settle/release 由 `StartupOwnership` 执行。 |
 | C0b | `startup.transferred` | `startup.owner='startup'` | `startup.owner='active'` | 无 | 注册 active 后转移；之后由 finish 释放 lease/pin。 |
-| C1 | `admission.claimable` | `ph=admitting`，manifest 已封、pin 已持；`!admissionWithdrawn` | `ph=claiming`；`cl.journaled=false` | `barrier`[journal.admission] | 若 journal 前 cancel/shutdown 已置位 → O5 decline；journal 失败 → `claim.journal_failed`（OD6：当前抛出）。 |
+| C1 | `admission.claimable` | `ph=admitting`，manifest 已封、pin 已持；`!admissionWithdrawn` | `ph=claiming`；`cl.journaled=false` | `barrier`[journal.admission] | 若 journal 前 cancel/shutdown 已置位 → O5 decline；journal 失败 → `claim.journal_failed`（C9：retryable decline）。 |
 | C2 | `claim.journaled` | `ph=claiming`，`!cl.sent` | `cl.journaled=true` | `!`[send.claim]；执行器同 turn 入队 `claim.sent` | 此事件后 cancel 不再 decline；若 state 已 terminal（并发 cancel）→ drop:stale，不 send claim。 |
 | C3 | `claim.sent` | `ph=claiming`，`cl.journaled` | `cl.sent=true`；`ph=claimed`；`admission.deviceSlot=false` | `barrier`[start.runtime] | 重复 `claim.sent` → drop；cancel 在 start 期间 → 记录 cx，start 结果走 C5/C7。 |
 | C4 | `runtime.session_bound` | `ph=claimed`；无 terminal | `execution={sessionRef,…,startedAtMs}` | `!`[bind.session]；`barrier`[persist.handoff, activate.message] | bind/handoff/message 失败 → C8 `activation_failed`；cancel 在飞 → 继续完成激活，C6 负责取消。 |
@@ -627,7 +627,7 @@ stage 失败映射（O5 的 reason/retryable/code 来源）：
 | C6 | `runtime.started`（带 cancel） | `ph=claimed`；`cx.requested` | `ph=terminalizing`；`tm={cancelled, reason:cx.reason}`；`td.batcher=stopped` | `!`[transfer.startup, register.active, start.pump]；`barrier`[revoke.contexts, stop.batcher, abort.blob, interrupt, persist.evidence, prepare.envelope] | 不发 `task.started`；这是 checkpoint 2（`offer-activation.ts:162-177`）。 |
 | C7 | `runtime.start_failed` | `ph=claimed` 或 `claiming` | 有 cx：`ph=terminalizing`，`tm=cancelled`；无 cx：`tm=failed` | `barrier`[register.startup_owner, dispose.startup, send.cancelled 或 failClaimedAgent]；`bestEffort`[release…] | 有 cx 时发送 `task.cancelled`（`offer-launch.ts:456-502`）；否则 `failClaimedAgent` retryable 取 failure/stoppingOffers。 |
 | C8 | `runtime.activation_failed` | `ph=claimed` | `ph=terminalizing`；`tm={failed, reason, retryable:false}` | `barrier`[failClaimedAgent, persist.handoff evidence]；`bestEffort`[release…] | bind/handoff/message 失败一律 false；startup owner 保留到 cleanup。 |
-| C9 | `claim.journal_failed` | `ph=claiming`；`!cl.sent` | 保持当前抛出，不改 phase（不 decline） | 无（异常继续逃出 `handleOffer`） | **OD6**：保持当前抛出、不 decline；归一为 retryable decline 见 follow-up [#1217](https://github.com/Ancienttwo/byok-sdk/issues/1217)。 |
+| C9 | `claim.journal_failed` | `ph=claiming`；`!cl.sent` | `ph=declined`；`tm={declined, reason:'claim journal unavailable: …', retryable:true}`；不改 `cl` | `!`[send.decline]；`bestEffort`[release.home, release.deviceSlot, release.scratch, release.lease, release.pin, revoke.contexts, finish.declined] | **#1217**：beforeClaim 失败归一为 retryable decline；claim 未发送，绝不发 `task.started`。cancel/shutdown 竞态仍由 `admissionWithdrawn` 改写 reason。 |
 
 ### 7.4 Approval
 
@@ -657,7 +657,7 @@ A6/A7 同时覆盖 timeout 与 registry eviction：定时器/eviction 调 `appro
 | T5 | `terminal.requested`（重复） | `tm !== undefined` | 无 | `!`[audit.stale-terminal] | first-terminal-wins；不重算 reason、不重发。 |
 | T6 | `terminal.evidence` | `ph=terminalizing`；token 匹配 | `tm.evidence='ok'/'degraded'` | `barrier`[prepare.envelope] | degraded 仍继续（`terminal-evidence.ts:143-147`）；重试由 evidence effect 内部 3 次。 |
 | T7 | `terminal.envelope_ready` | token 匹配；`tm.evidence !== 'none'` | `tm.envelope='ready'`；`tm.stage='envelope'` | `!`[send.terminal]；执行器同 turn 入队 `terminal.sent` | materializer 只构建一次；失败 → T8。 |
-| T8 | `terminal.envelope_failed` | token 匹配 | `tm.envelope='none'`；保持 terminalizing | `!`[log]；保持当前抛出、不 decline（build 失败会抛）；见 follow-up #1217 | 不重新选择终态；不得换 reason。 |
+| T8 | `terminal.envelope_failed` | token 匹配 | `tm.envelope='none'`；保持 terminalizing | `!`[log]；保持当前抛出、不 decline（build 失败会抛；terminal 路径不在 #1217 范围） | 不重新选择终态；不得换 reason。 |
 | T9 | `terminal.sent` | token 匹配；envelope='ready' | `tm.stage='sent'`；`ph=retiring` | `!`[mark.finished]；`barrier`[await.close（close receipt）] | 发完才 close；重复 sent → drop；`mark.finished` 对应 `finishOnce` 顶部的 `addFinishedTaskId`。 |
 | T10 | `terminal.close`（ok） | token 匹配；stage='sent' | `td.close='settled'` | `barrier`[await.terminal_commit] | close 失败 → T11。 |
 | T11 | `terminal.close`（fail） | token 匹配 | `td.close='failed'`；保持 retiring | `!`[report.disposalFailure, audit]；不产生新终态 | 保留 active/lease 所有权；`retry.finalization` 只重试 close，不重发 terminal（`finish.ts:145-146`）。 |
@@ -945,7 +945,7 @@ shutdown 期间的 offer 不单列：仍走 O1，最后在 limits 阶段由 O5 d
 | OD3 | state host 用 WeakMap 还是 TaskRunner 私有字段 | WeakMap。保持 TaskRunner 成员段逐字不变 | 调试可见性；GC/清理测试 |
 | OD4 | `state.ts` 单文件还是目录 | 单文件，超过 ~1200 行再拆；每拆一个新增一个 golden section | review 粒度；api-surface section 数 |
 | OD5 | claim 前 cancel 保持 `task.decline`（`Offered → Failed`）而非 `task.cancelled` | 保持。协议两者都允许，但现有测试/oracle 钉住 decline | cancel 语义 |
-| OD6 | 当前会抛出的基础设施失败（scratch create、`beforeClaim` journal 失败）是否归一为 retryable decline | S3/S4 先保持现状（抛出/不 decline），另开 follow-up；归一化是行为变化 | 失败路径、cursor stall |
+| OD6 | 当前会抛出的基础设施失败（scratch create、`beforeClaim` journal 失败）是否归一为 retryable decline | S3/S4 先保持现状（抛出/不 decline），另开 follow-up；归一化是行为变化。**#1217 已落地**：这两类失败改为 retryable decline；send throw/terminal 路径不变。 | 失败路径、cursor stall |
 | OD7 | 终态 evidence（usage/prepared/summary/document）放 side table 还是 State | side table。State 只放 token/标量；避免正文进 state | 序列化大小、隐私 |
 | OD8 | 是否把 required-message completion gate 纳入 S6 | 是。否则 `turn_end` 终态路径不完整 | S6 范围 |
 | OD9 | `pendingCancelled`/`finished` 用数组 FIFO 还是 ring buffer | 数组 + 2000 上限；淘汰 rare，复杂度可接受 | 性能/实现简单度 |
