@@ -14,11 +14,52 @@ import type { AgentRef } from './agent-home';
 export type ToolAuthorizationMode = 'auto' | 'all';
 export const TOOL_AUTHORIZATION_MODES: readonly ToolAuthorizationMode[] = Object.freeze(['auto', 'all']);
 
+/** The access one file-scope root grants. `write` implies `read`. */
+export type ToolFileAccess = 'read' | 'write';
+export const TOOL_FILE_ACCESS: readonly ToolFileAccess[] = Object.freeze(['read', 'write']);
+
+/**
+ * One explicit additional workspace root of a file-scope policy. `id` is for
+ * local audit/display only; `path` is a local, already-existing directory the
+ * Host configures, never a model or wire value.
+ */
+export interface ToolFileScopeRoot {
+  /** Unique, nonempty local label; never emitted on the wire. */
+  readonly id: string;
+  /** Absolute local path; canonicalized and identity-checked at admission, not here. */
+  readonly path: string;
+  /** `write` implies `read`. */
+  readonly access: ToolFileAccess;
+}
+
+/**
+ * The optional explicit file scope of a tool-authorization policy (#1061
+ * slice 1, D15). Absent means `inherit`: the current behavior is unchanged.
+ * `home` authorizes read+write of the canonical Agent home; `workspaces`
+ * additionally authorizes the listed roots. Only legal when the offer's
+ * effective mode is `auto`.
+ */
+export interface ToolFileScope {
+  /** `home` always grants read+write of the canonical Agent home. */
+  readonly mode: 'home' | 'workspaces';
+  /** Only for `workspaces`; at least one unique-id, existing absolute root. */
+  readonly roots?: readonly ToolFileScopeRoot[];
+}
+
+/** The lane an offer runs in; file-scope support is per lane, not per runtime. */
+export type ToolAuthorizationLane = 'rpc' | 'prepared' | 'durable';
+/** A writer owns the canonical Agent home; memory-reader offers have a different cwd authority. */
+export type ToolAuthorizationHomeAccess = 'writer' | 'memory-reader';
+
 /** Local facts the Host decides on; never sourced from the wire offer or the model. */
 export interface ToolAuthorizationTask {
   readonly taskId: string;
   readonly runtimeId: string;
   readonly agentRef?: AgentRef;
+  /** Additive: the resolved lane, so a Host resolver can select a per-lane file scope. */
+  readonly lane?: ToolAuthorizationLane;
+  /** Additive: the resolved home access of this offer. */
+  readonly homeAccess?: ToolAuthorizationHomeAccess;
 }
 export interface ToolRule {
   readonly id: string;
@@ -51,6 +92,15 @@ export interface ToolAuthorizationPolicy {
   readonly byRuntime?: Readonly<Record<string, ToolAuthorizationMode>>;
   /** User-defined rules that move single calls across the ask boundary. */
   readonly rules?: ToolAuthorizationRules;
+  /**
+   * Optional explicit file scope (#1061, D15). Absent means `inherit` and
+   * preserves the existing behavior exactly. Only legal when the offer's
+   * effective mode is `auto`; an `all` runtime with a scope is rejected
+   * before claim. A configured scope is either enforced (once scoped file
+   * tools ship) or the offer is declined as `file_scope_unsupported` before
+   * claim; it is never silently dropped.
+   */
+  readonly fileScope?: ToolFileScope;
 }
 
 /** Internal per-offer derivation; never part of the public config surface. */
@@ -74,10 +124,12 @@ export function toolAuthorizationResolver(policy: ToolAuthorizationPolicy): Tool
     default: policy.default,
     ...(policy.byRuntime === undefined ? {} : { byRuntime: Object.freeze({ ...policy.byRuntime }) }),
     ...(policy.rules === undefined ? {} : { rules: policy.rules }),
+    ...(policy.fileScope === undefined ? {} : { fileScope: policy.fileScope }),
   });
   return (task) => Object.freeze({
     default: toolAuthorizationMode(snapshot, task.runtimeId),
     ...(snapshot.rules === undefined ? {} : { rules: snapshot.rules }),
+    ...(snapshot.fileScope === undefined ? {} : { fileScope: snapshot.fileScope }),
   });
 }
 
@@ -189,12 +241,113 @@ function parseByRuntime(value: unknown): Readonly<Record<string, ToolAuthorizati
   return Object.freeze(Object.fromEntries(modes));
 }
 
+const MAX_FILE_SCOPE_ROOTS = 32;
+const MAX_FILE_SCOPE_ID_CHARS = 128;
+const MAX_FILE_SCOPE_PATH_CHARS = 4_096;
+
+/**
+ * A syntactically invalid file-scope policy. It is a `TypeError` like the
+ * rest of admission, and its `code` lets `checkDaemonConfig` report the
+ * typed `invalid_file_scope` issue instead of a generic value error.
+ */
+export class FileScopePolicyError extends TypeError {
+  readonly code = 'invalid_file_scope' as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'FileScopePolicyError';
+  }
+}
+
+function fileScopeRecord(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
+  try {
+    return policyRecord(value, keys, label);
+  } catch (error) {
+    throw new FileScopePolicyError(error instanceof Error ? error.message : `invalid tool authorization ${label}`);
+  }
+}
+
+function fileScopeRootPath(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_FILE_SCOPE_PATH_CHARS
+    || value.includes('\0') || value.includes('\n') || value.includes('\r')) {
+    throw new FileScopePolicyError(
+      `tool authorization fileScope root path must be a nonempty single-line string of at most ${MAX_FILE_SCOPE_PATH_CHARS} characters without NUL`,
+    );
+  }
+  if (value === '~' || value.startsWith('~/') || value.startsWith('~\\')) {
+    throw new FileScopePolicyError('tool authorization fileScope root path must not start with "~"; write the absolute path');
+  }
+  if (!isAbsolute(value)) {
+    throw new FileScopePolicyError('tool authorization fileScope root path must be absolute');
+  }
+  if (value.split(/[\\/]/).some(segment => segment === '.' || segment === '..')) {
+    throw new FileScopePolicyError('tool authorization fileScope root path must not contain "." or ".." segments');
+  }
+  // Pure lexical normalization; existence and identity are admission checks
+  // that read the filesystem, which this parser must never do.
+  return resolve(value);
+}
+
+function parseFileScope(value: unknown): ToolFileScope {
+  const raw = fileScopeRecord(value, ['mode', 'roots'], 'fileScope');
+  if (raw.mode !== 'home' && raw.mode !== 'workspaces') {
+    throw new FileScopePolicyError('tool authorization fileScope mode must be "home" or "workspaces"');
+  }
+  if (raw.mode === 'home') {
+    if (Object.hasOwn(raw, 'roots')) {
+      throw new FileScopePolicyError('tool authorization fileScope.roots is only valid with mode "workspaces"');
+    }
+    return Object.freeze({ mode: 'home' });
+  }
+  if (!Object.hasOwn(raw, 'roots')) {
+    throw new FileScopePolicyError('tool authorization fileScope with mode "workspaces" requires roots');
+  }
+  const entries = raw.roots;
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new FileScopePolicyError('tool authorization fileScope roots must be a nonempty array');
+  }
+  if (entries.length > MAX_FILE_SCOPE_ROOTS) {
+    throw new FileScopePolicyError(`tool authorization fileScope must contain at most ${MAX_FILE_SCOPE_ROOTS} roots`);
+  }
+  const ids = new Set<string>();
+  // A repeated absolute path is one root, not two; write wins because it is
+  // the union of the configured access and never widens beyond the file.
+  const byPath = new Map<string, ToolFileScopeRoot>();
+  for (const entry of entries) {
+    const root = fileScopeRecord(entry, ['id', 'path', 'access'], 'fileScope root');
+    let id: string;
+    try {
+      id = ruleText(root.id, 'fileScope root id', MAX_FILE_SCOPE_ID_CHARS);
+    } catch (error) {
+      throw new FileScopePolicyError(error instanceof Error ? error.message : 'invalid tool authorization fileScope root id');
+    }
+    if (ids.has(id)) throw new FileScopePolicyError(`duplicate tool authorization fileScope root id: ${id}`);
+    ids.add(id);
+    const path = fileScopeRootPath(root.path);
+    if (root.access !== 'read' && root.access !== 'write') {
+      throw new FileScopePolicyError('tool authorization fileScope root access must be "read" or "write"');
+    }
+    const existing = byPath.get(path);
+    if (existing === undefined) {
+      byPath.set(path, Object.freeze({ id, path, access: root.access }));
+    } else if (existing.access === 'read' && root.access === 'write') {
+      byPath.set(path, Object.freeze({ id: existing.id, path, access: 'write' }));
+    }
+  }
+  return Object.freeze({ mode: 'workspaces', roots: Object.freeze([...byPath.values()]) });
+}
+
 /** The admission boundary: one copied, frozen policy for every source. */
 export function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy {
-  const raw = policyRecord(value, ['default', 'byRuntime', 'rules'], 'policy');
+  const raw = policyRecord(value, ['default', 'byRuntime', 'rules', 'fileScope'], 'policy');
   const defaultMode = parseToolAuthorizationMode(raw.default);
   const byRuntime = Object.hasOwn(raw, 'byRuntime') ? parseByRuntime(raw.byRuntime) : undefined;
-  const base = { default: defaultMode, ...(byRuntime === undefined ? {} : { byRuntime }) };
+  const fileScope = Object.hasOwn(raw, 'fileScope') ? parseFileScope(raw.fileScope) : undefined;
+  const base = {
+    default: defaultMode,
+    ...(byRuntime === undefined ? {} : { byRuntime }),
+    ...(fileScope === undefined ? {} : { fileScope }),
+  };
   if (!Object.hasOwn(raw, 'rules')) return Object.freeze(base);
   const rawRules = policyRecord(raw.rules, ['alwaysAsk', 'allowWithoutAsking'], 'rules');
   if (PARSED_RULES.has(rawRules)) return Object.freeze({ ...base, rules: rawRules });

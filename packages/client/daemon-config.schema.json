@@ -114,12 +114,57 @@
             }
           },
           "description": "User-defined rules that move single calls across the ask boundary."
+        },
+        "fileScope": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "home",
+                "workspaces"
+              ],
+              "description": "`home` always grants read+write of the canonical Agent home."
+            },
+            "roots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Unique, nonempty local label; never emitted on the wire."
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "Absolute local path; canonicalized and identity-checked at admission, not here."
+                  },
+                  "access": {
+                    "enum": [
+                      "read",
+                      "write"
+                    ],
+                    "description": "`write` implies `read`."
+                  }
+                },
+                "required": [
+                  "id",
+                  "path",
+                  "access"
+                ]
+              },
+              "description": "Only for `workspaces`; at least one unique-id, existing absolute root."
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "description": "Optional explicit file scope (#1061, D15). Absent means `inherit` and\npreserves the existing behavior exactly. Only legal when the offer's\neffective mode is `auto`; an `all` runtime with a scope is rejected\nbefore claim. A configured scope is either enforced (once scoped file\ntools ship) or the offer is declined as `file_scope_unsupported` before\nclaim; it is never silently dropped."
         }
       },
       "required": [
         "default"
       ],
-      "description": "Per-task tool authorization, decided by this Host for every runtime:\n`all` (default) never blocks and emits a `tool-reminder` event for each\nhigh-risk call; `auto` asks the user through the task's approval path\nbefore a high-risk call runs and is declined before claim on a runtime\nwithout `toolAuthorizationAuto`. `byRuntime` overrides the mode for one\nruntime id. `rules` move single calls across the ask boundary and apply\nto every runtime. A config file and an embedded Host supply the same\nobject; it is validated, copied and frozen before claim, once per offer\n(including resume). Invalid policies decline the offer. Rules never\nchange the wire or native launch. Not an OS sandbox or file scope."
+      "description": "Per-task tool authorization, decided by this Host for every runtime:\n`all` (default) never blocks and emits a `tool-reminder` event for each\nhigh-risk call; `auto` asks the user through the task's approval path\nbefore a high-risk call runs and is declined before claim on a runtime\nwithout `toolAuthorizationAuto`. `byRuntime` overrides the mode for one\nruntime id. `rules` move single calls across the ask boundary and apply\nto every runtime. A config file and an embedded Host supply the same\nobject; it is validated, copied and frozen before claim, once per offer\n(including resume). Invalid policies decline the offer. Rules never\nchange the wire or native launch.\n\nThe optional `fileScope` (#1061) is an explicit file boundary for the\nSDK-owned file tools: absent means inherit (unchanged behavior);\n`home` authorizes read+write of the canonical Agent home; `workspaces`\nadds explicit read/write roots. It applies only to `auto` tasks, requires\n`agentHome`, and is never selected by the wire or the model. v1 admits it\nonly on the ordinary Pi RPC lane on darwin/linux; other adapters, the\nprepared/durable lanes, memory-reader offers and Windows decline before\nclaim with `file_scope_unsupported`. This is not an OS sandbox: shell,\nMCP servers and extensions remain outside it."
     },
     "localToolApproval": {
       "const": "allow",

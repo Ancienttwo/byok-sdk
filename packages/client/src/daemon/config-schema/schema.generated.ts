@@ -103,6 +103,45 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               }
             }
           }
+        },
+        "fileScope": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "home",
+                "workspaces"
+              ]
+            },
+            "roots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "access": {
+                    "enum": [
+                      "read",
+                      "write"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "path",
+                  "access"
+                ]
+              }
+            }
+          },
+          "required": [
+            "mode"
+          ]
         }
       },
       "required": [

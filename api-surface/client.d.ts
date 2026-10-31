@@ -3387,7 +3387,7 @@ export interface DaemonConfigCheck {
  */
 export declare function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOptions): DaemonConfigCheck;
 // ==== @byok-sdk/client dist/daemon/config-schema/effective.d.ts ====
-import { type ToolAuthorizationMode } from '../../tool-authorization';
+import { type ToolAuthorizationMode, type ToolFileScope } from '../../tool-authorization';
 import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon';
 import type { DaemonConfigIssue } from './validate';
@@ -3497,6 +3497,14 @@ export type DaemonEffectiveToolAuthorization = ({
 }) & {
     /** Who may approve a `tool-authorization` approval: `host-only` (default) or `allow` (the control socket too). */
     readonly localToolApproval: 'host-only' | 'allow';
+    /**
+     * The configured explicit file scope (#1061), copied and normalized.
+     * Absent means `inherit`: no file-scope policy is configured and behavior
+     * is unchanged. `home` is the canonical Agent home read+write; `workspaces`
+     * adds the listed roots (`write` implies `read`). Whether the selected
+     * runtime/lane/platform can enforce it is per-offer admission.
+     */
+    readonly fileScope?: ToolFileScope;
 };
 export interface EffectiveDaemonConfigInput {
     readonly config: DaemonConfig;
@@ -3614,7 +3622,7 @@ import { type RemovedDaemonConfigField } from './removed-fields';
  *   by daemon construction.
  */
 export type DaemonConfigSource = 'cli' | 'embedded';
-export type DaemonConfigIssueCode = 'not_an_object' | 'missing_required' | 'invalid_type' | 'invalid_value' | 'invalid_version_policy' | 'unknown_field' | 'removed_field' | 'embedded_only' | 'distribution_owned';
+export type DaemonConfigIssueCode = 'not_an_object' | 'missing_required' | 'invalid_type' | 'invalid_value' | 'invalid_version_policy' | 'invalid_file_scope' | 'unknown_field' | 'removed_field' | 'embedded_only' | 'distribution_owned';
 /**
  * One finding of {@link validateDaemonConfig}. Messages name the field path
  * and the expected type, never the supplied value.
@@ -4788,7 +4796,17 @@ export interface DaemonConfig {
      * to every runtime. A config file and an embedded Host supply the same
      * object; it is validated, copied and frozen before claim, once per offer
      * (including resume). Invalid policies decline the offer. Rules never
-     * change the wire or native launch. Not an OS sandbox or file scope.
+     * change the wire or native launch.
+     *
+     * The optional `fileScope` (#1061) is an explicit file boundary for the
+     * SDK-owned file tools: absent means inherit (unchanged behavior);
+     * `home` authorizes read+write of the canonical Agent home; `workspaces`
+     * adds explicit read/write roots. It applies only to `auto` tasks, requires
+     * `agentHome`, and is never selected by the wire or the model. v1 admits it
+     * only on the ordinary Pi RPC lane on darwin/linux; other adapters, the
+     * prepared/durable lanes, memory-reader offers and Windows decline before
+     * claim with `file_scope_unsupported`. This is not an OS sandbox: shell,
+     * MCP servers and extensions remain outside it.
      */
     toolAuthorization?: ToolAuthorizationPolicy;
     /**
@@ -11056,8 +11074,8 @@ export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
 export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets';
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
-export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
-export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization';
+export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS, } from './tool-authorization';
+export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
@@ -14342,11 +14360,48 @@ import type { AgentRef } from './agent-home';
  */
 export type ToolAuthorizationMode = 'auto' | 'all';
 export declare const TOOL_AUTHORIZATION_MODES: readonly ToolAuthorizationMode[];
+/** The access one file-scope root grants. `write` implies `read`. */
+export type ToolFileAccess = 'read' | 'write';
+export declare const TOOL_FILE_ACCESS: readonly ToolFileAccess[];
+/**
+ * One explicit additional workspace root of a file-scope policy. `id` is for
+ * local audit/display only; `path` is a local, already-existing directory the
+ * Host configures, never a model or wire value.
+ */
+export interface ToolFileScopeRoot {
+    /** Unique, nonempty local label; never emitted on the wire. */
+    readonly id: string;
+    /** Absolute local path; canonicalized and identity-checked at admission, not here. */
+    readonly path: string;
+    /** `write` implies `read`. */
+    readonly access: ToolFileAccess;
+}
+/**
+ * The optional explicit file scope of a tool-authorization policy (#1061
+ * slice 1, D15). Absent means `inherit`: the current behavior is unchanged.
+ * `home` authorizes read+write of the canonical Agent home; `workspaces`
+ * additionally authorizes the listed roots. Only legal when the offer's
+ * effective mode is `auto`.
+ */
+export interface ToolFileScope {
+    /** `home` always grants read+write of the canonical Agent home. */
+    readonly mode: 'home' | 'workspaces';
+    /** Only for `workspaces`; at least one unique-id, existing absolute root. */
+    readonly roots?: readonly ToolFileScopeRoot[];
+}
+/** The lane an offer runs in; file-scope support is per lane, not per runtime. */
+export type ToolAuthorizationLane = 'rpc' | 'prepared' | 'durable';
+/** A writer owns the canonical Agent home; memory-reader offers have a different cwd authority. */
+export type ToolAuthorizationHomeAccess = 'writer' | 'memory-reader';
 /** Local facts the Host decides on; never sourced from the wire offer or the model. */
 export interface ToolAuthorizationTask {
     readonly taskId: string;
     readonly runtimeId: string;
     readonly agentRef?: AgentRef;
+    /** Additive: the resolved lane, so a Host resolver can select a per-lane file scope. */
+    readonly lane?: ToolAuthorizationLane;
+    /** Additive: the resolved home access of this offer. */
+    readonly homeAccess?: ToolAuthorizationHomeAccess;
 }
 export interface ToolRule {
     readonly id: string;
@@ -14377,6 +14432,15 @@ export interface ToolAuthorizationPolicy {
     readonly byRuntime?: Readonly<Record<string, ToolAuthorizationMode>>;
     /** User-defined rules that move single calls across the ask boundary. */
     readonly rules?: ToolAuthorizationRules;
+    /**
+     * Optional explicit file scope (#1061, D15). Absent means `inherit` and
+     * preserves the existing behavior exactly. Only legal when the offer's
+     * effective mode is `auto`; an `all` runtime with a scope is rejected
+     * before claim. A configured scope is either enforced (once scoped file
+     * tools ship) or the offer is declined as `file_scope_unsupported` before
+     * claim; it is never silently dropped.
+     */
+    readonly fileScope?: ToolFileScope;
 }
 /** Internal per-offer derivation; never part of the public config surface. */
 export type ToolAuthorizationResolver = (task: ToolAuthorizationTask) => ToolAuthorizationPolicy;
@@ -14389,6 +14453,15 @@ export declare function toolAuthorizationMode(policy: Pick<ToolAuthorizationPoli
  */
 export declare function toolAuthorizationResolver(policy: ToolAuthorizationPolicy): ToolAuthorizationResolver;
 export declare function parseToolAuthorizationMode(value: unknown): ToolAuthorizationMode;
+/**
+ * A syntactically invalid file-scope policy. It is a `TypeError` like the
+ * rest of admission, and its `code` lets `checkDaemonConfig` report the
+ * typed `invalid_file_scope` issue instead of a generic value error.
+ */
+export declare class FileScopePolicyError extends TypeError {
+    readonly code: 'invalid_file_scope';
+    constructor(message: string);
+}
 /** The admission boundary: one copied, frozen policy for every source. */
 export declare function parseToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy;
 /** One native tool call, before execution. `input` is the runtime's own argument object. */

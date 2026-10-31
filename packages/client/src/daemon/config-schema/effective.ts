@@ -5,7 +5,10 @@ import {
   AGENT_MESSAGE_MCP_SERVER_NAME,
   AGENT_RESULT_MCP_SERVER_NAME,
 } from '../../sdk-reserved-mcp';
-import { toolAuthorizationMode, type ToolAuthorizationMode } from '../../tool-authorization';
+import {
+  parseToolAuthorizationPolicy, toolAuthorizationMode,
+  type ToolAuthorizationMode, type ToolFileScope,
+} from '../../tool-authorization';
 import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types';
 import { serviceLogDir } from '../host-layout';
 import { scratchRootSocketBudget } from '../retention/scratch';
@@ -113,6 +116,14 @@ export type DaemonEffectiveToolAuthorization = (
 ) & {
   /** Who may approve a `tool-authorization` approval: `host-only` (default) or `allow` (the control socket too). */
   readonly localToolApproval: 'host-only' | 'allow';
+  /**
+   * The configured explicit file scope (#1061), copied and normalized.
+   * Absent means `inherit`: no file-scope policy is configured and behavior
+   * is unchanged. `home` is the canonical Agent home read+write; `workspaces`
+   * adds the listed roots (`write` implies `read`). Whether the selected
+   * runtime/lane/platform can enforce it is per-offer admission.
+   */
+  readonly fileScope?: ToolFileScope;
 };
 
 export interface EffectiveDaemonConfigInput {
@@ -156,7 +167,10 @@ function effectiveToolAuthorization(config: DaemonConfig, adapters: readonly Run
   const policy = config.toolAuthorization;
   if (policy === undefined) return { mode: 'all', localToolApproval };
   const byRuntime = Object.fromEntries(adapters.map((adapter) => [adapter.descriptor.id, toolAuthorizationMode(policy, adapter.descriptor.id)]));
-  return { mode: 'static', byRuntime, localToolApproval };
+  // Re-parse so the report shows the normalized, frozen scope (duplicate
+  // paths merged, lexically absolute), not the raw config object.
+  const fileScope = parseToolAuthorizationPolicy(policy).fileScope;
+  return { mode: 'static', byRuntime, localToolApproval, ...(fileScope === undefined ? {} : { fileScope }) };
 }
 
 export function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput): DaemonEffectiveConfig {

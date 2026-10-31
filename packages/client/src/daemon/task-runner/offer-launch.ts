@@ -24,7 +24,11 @@ import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
 import { activateOffer, type OfferActivationInput } from './offer-activation';
-import { createAutoToolAuthorizationGate, parseToolAuthorizationPolicy, type ToolAuthorizationPolicy } from '../../tool-authorization';
+import {
+  createAutoToolAuthorizationGate, parseToolAuthorizationPolicy, toolAuthorizationMode,
+  type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolAuthorizationPolicy,
+} from '../../tool-authorization';
+import { fileScopeAdmission } from './file-scope-admission';
 import { mcpEventIdentities } from '../../mcp/event-identity';
 import { DEFAULT_APPROVAL_TIMEOUT_MS } from '../task-runner';
 
@@ -50,11 +54,15 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   // The local Host owns the mode; it never comes from the offer. `auto` needs
   // a pre-execution gate, so a runtime or lane without one is declined here,
   // before claim, instead of running ungated.
+  const lane: ToolAuthorizationLane = pick.descriptor.capabilities.durablePi === true
+    ? 'durable' : preparation === undefined ? 'rpc' : 'prepared';
+  const homeAccess: ToolAuthorizationHomeAccess = readerAttempt ? 'memory-reader' : 'writer';
   let toolAuthorization: ToolAuthorizationPolicy;
   try {
     const resolver = this['deps'].toolAuthorization;
     toolAuthorization = parseToolAuthorizationPolicy(resolver === undefined ? { default: 'all' } : resolver(Object.freeze({
-      taskId, runtimeId: pick.descriptor.id, ...(agentBinding.resolution.agentRef === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
+      taskId, runtimeId: pick.descriptor.id, lane, homeAccess,
+      ...(agentBinding.resolution.agentRef === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
     })));
   } catch (error) {
     console.error(`[byok/client] tool authorization policy unresolved for task ${taskId}: ${errorMessage(error)}`);
@@ -66,6 +74,22 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       decline(`tool_authorization_unsupported: runtime ${pick.descriptor.id} cannot gate ${preparation === undefined ? '' : 'prepared '}tool calls before execution, so auto mode cannot run`, false);
     }
     return;
+  }
+  // A configured file scope is binding: either this lane/runtime/platform can
+  // enforce it, or the offer is declined before claim. It never falls back to
+  // an unscoped run, and `all` (which never blocks a call) cannot carry one.
+  if (toolAuthorization.fileScope !== undefined) {
+    if (toolAuthorizationMode(toolAuthorization, pick.descriptor.id) === 'all') {
+      if (!admissionWithdrawn()) decline('file_scope_conflicts_with_all: a file-scope policy applies only to auto tasks', false);
+      return;
+    }
+    const admissionOfScope = fileScopeAdmission({
+      runtimeId: pick.descriptor.id, lane, homeAccess, platform: process.platform,
+    });
+    if (!admissionOfScope.supported) {
+      if (!admissionWithdrawn()) decline(`file_scope_unsupported: ${admissionOfScope.reason}`, false);
+      return;
+    }
   }
   let runtimeLaunch: PiRuntimeLaunchResources | undefined;
   if (prepared.operation.resolveRuntimeLaunch !== undefined) {

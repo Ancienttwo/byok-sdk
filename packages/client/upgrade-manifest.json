@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "14cdaab6b57133b3f03f46213c684234f753c32b66972e0f9762b56af0a8ec61"
+    "snapshotSha256": "b861c1899899a8d473d6fae01a76054d86af089e437733df54c27f7758e89124"
   },
   "configFields": {
     "status": "tracked",
@@ -110,6 +110,22 @@
         "export:@byok-sdk/client#createAutoToolAuthorizationGate",
         "export:@byok-sdk/client#parseToolAuthorizationPolicy",
         "union:daemon-event#tool-authorization"
+      ]
+    },
+    {
+      "id": "tool-file-scope-policy",
+      "impact": "additive",
+      "summary": "Add the optional DaemonConfig.toolAuthorization.fileScope policy (#1061 slice 1): absent means inherit (unchanged behavior); home authorizes read+write of the canonical Agent home; workspaces adds explicit read/write roots (write implies read). It is legal only for auto tasks and requires agentHome; all + fileScope is rejected with invalid_file_scope. v1 admits it only on the ordinary Pi RPC lane on darwin/linux; other adapters, the prepared/durable lanes, memory-reader offers and Windows decline before claim with file_scope_unsupported and never fall back to an unscoped run. No wire, RuntimeCapabilities or launch-format change; scoped file tools and path enforcement ship in a later slice.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1061",
+      "items": [
+        "export:@byok-sdk/client#FileScopePolicyError",
+        "export:@byok-sdk/client#TOOL_FILE_ACCESS",
+        "export:@byok-sdk/client#ToolAuthorizationHomeAccess",
+        "export:@byok-sdk/client#ToolAuthorizationLane",
+        "export:@byok-sdk/client#ToolAuthorizationTask",
+        "export:@byok-sdk/client#ToolFileAccess",
+        "export:@byok-sdk/client#ToolFileScope",
+        "export:@byok-sdk/client#ToolFileScopeRoot"
       ]
     },
     {
@@ -1128,7 +1144,7 @@
     {
       "item": "config:toolAuthorization",
       "change": "added",
-      "after": "optional schema-sha256=1262d37ce5c5d509",
+      "after": "optional schema-sha256=1e3298b66ffff519",
       "entry": "daemon-config-schema"
     },
     {
@@ -1446,6 +1462,11 @@
       "entry": "storage-retention-bounds"
     },
     {
+      "item": "export:@byok-sdk/client#FileScopePolicyError",
+      "change": "added",
+      "entry": "tool-file-scope-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#GrokAdapter",
       "change": "changed",
       "entry": "runtime-environment-policy"
@@ -1756,6 +1777,11 @@
       "entry": "service-installation-upgrade"
     },
     {
+      "item": "export:@byok-sdk/client#TOOL_FILE_ACCESS",
+      "change": "added",
+      "entry": "tool-file-scope-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#ToolAuthorizationDecision",
       "change": "added",
       "entry": "tool-authorization-rules"
@@ -1764,6 +1790,16 @@
       "item": "export:@byok-sdk/client#ToolAuthorizationGate",
       "change": "changed",
       "entry": "tool-authorization-rules"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolAuthorizationHomeAccess",
+      "change": "added",
+      "entry": "tool-file-scope-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolAuthorizationLane",
+      "change": "added",
+      "entry": "tool-file-scope-policy"
     },
     {
       "item": "export:@byok-sdk/client#ToolAuthorizationPolicy",
@@ -1786,6 +1822,11 @@
       "entry": "tool-authorization-rules"
     },
     {
+      "item": "export:@byok-sdk/client#ToolAuthorizationTask",
+      "change": "changed",
+      "entry": "tool-file-scope-policy"
+    },
+    {
       "item": "export:@byok-sdk/client#ToolAuthorizationVerdict",
       "change": "changed",
       "entry": "tool-authorization-rules"
@@ -1794,6 +1835,21 @@
       "item": "export:@byok-sdk/client#ToolCall",
       "change": "changed",
       "entry": "tool-authorization-rules"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolFileAccess",
+      "change": "added",
+      "entry": "tool-file-scope-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolFileScope",
+      "change": "added",
+      "entry": "tool-file-scope-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#ToolFileScopeRoot",
+      "change": "added",
+      "entry": "tool-file-scope-policy"
     },
     {
       "item": "export:@byok-sdk/client#ToolReminder",
