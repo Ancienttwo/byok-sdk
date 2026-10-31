@@ -41,11 +41,5 @@
   "cycle: packages/client/src/diagnostics/support-bundle.ts -> packages/client/src/diagnostics/diagnostics.ts",
   "cycle: packages/client/src/index.ts -> packages/client/src/diagnostics/device-doctor.ts",
   "cycle: packages/client/src/index.ts -> packages/client/src/diagnostics/operator-actions.ts",
-  "directory: packages/client/src/adapters/pi-durable/replica.ts -> packages/client/src/daemon/journal/sqlite-support.ts",
-  "directory: packages/client/src/adapters/pi/prepared-tools.ts -> packages/client/src/daemon/prepared-agent-memory.ts",
-  "directory: packages/client/src/adapters/pi/prepared-tools.ts -> packages/client/src/daemon/prepared-agent-result.ts",
-  "directory: packages/client/src/local-state-relocation.ts -> packages/client/src/daemon/daemon-owner.ts",
-  "directory: packages/client/src/sdk-native-assets.ts -> packages/client/src/daemon/agent-memory-helper-release.ts",
-  "directory: packages/client/src/sdk-reserved-helper-host.ts -> packages/client/src/bin/sdk-reserved-helper-runners.ts",
   "manifest: packages/conformance/src/simulator/harness.ts -> @byok-sdk/testkit"
 ]

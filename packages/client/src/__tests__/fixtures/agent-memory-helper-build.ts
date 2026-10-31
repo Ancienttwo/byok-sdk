@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { isAgentMemoryFilesystemHelperSupported } from '../../daemon/agent-memory-fs-helper';
-import { resolveAgentMemoryFilesystemHelper } from '../../daemon/agent-memory-helper-release';
+import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release';
 
 const directory = new URL('../../../dist/native/agent-memory-fs/', import.meta.url);
 

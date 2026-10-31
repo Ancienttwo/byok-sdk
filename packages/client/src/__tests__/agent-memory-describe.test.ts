@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
-import { observePreparedMemory } from '../daemon/prepared-agent-memory';
+import { observePreparedMemory } from '../agent-memory/prepared-agent-memory';
 import {
   AGENT_MEMORY_MCP_SERVER_INFO,
   AGENT_MEMORY_TOOLS,

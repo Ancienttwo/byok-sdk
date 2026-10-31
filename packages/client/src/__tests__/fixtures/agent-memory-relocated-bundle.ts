@@ -1,6 +1,6 @@
 import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { resolveAgentMemoryFilesystemHelper } from '../../daemon/agent-memory-helper-release';
+import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release';
 import { openAgentMemoryFilesystemHelper } from '../../daemon/agent-memory-fs-helper';
 import { AgentMemoryService } from '../../daemon/agent-memory';
 

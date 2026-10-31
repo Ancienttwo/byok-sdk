@@ -15,7 +15,7 @@ const capture = vi.hoisted(() => ({
 }));
 // Model an installed/verified macOS or Windows x64 helper at the resolver seam. The tests do
 // not open it: they assert admission before an adapter can start a memory tool.
-vi.mock('../daemon/agent-memory-helper-release', () => ({ resolveAgentMemoryFilesystemHelper: capture.helper }));
+vi.mock('../util/agent-memory-helper-release', () => ({ resolveAgentMemoryFilesystemHelper: capture.helper }));
 vi.mock('../daemon/prepared-tool-surface', async importOriginal => {
   const actual = await importOriginal<typeof import('../daemon/prepared-tool-surface')>();
   return { ...actual, createPreparedToolSurfaceAssembler: (deps: Parameters<typeof actual.createPreparedToolSurfaceAssembler>[0]) => {

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
-import { copyAgentMemoryHelperAssets } from './daemon/agent-memory-helper-release';
+import { copyAgentMemoryHelperAssets } from './util/agent-memory-helper-release';
 
 // Official npm archive integrity, also locked in bun.lock. Never fetched at runtime.
 import { KOFFI } from './sdk-native-assets-pin';

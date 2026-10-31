@@ -213,16 +213,28 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   const afterText = readFileSync(resolve(cwd, path), 'utf8');
   if (path === '.gitattributes') {
     // #603 pins both generated metadata and native build input bytes.
-    // Admit only the reviewed additive LF rules, never unrelated attributes.
-    const rule = 'packages/client/src/daemon/agent-memory-helper-release-pin.ts text eol=lf\n';
+    // Admit only the reviewed LF rules (additions and the exact daemon->util
+    // move), never unrelated attributes.
+    const rule = 'packages/client/src/util/agent-memory-helper-release-pin.ts text eol=lf\n';
+    const previousRule = 'packages/client/src/daemon/agent-memory-helper-release-pin.ts text eol=lf\n';
     const before = beforeText.replace(/\r\n/g, '\n');
     const after = afterText.replace(/\r\n/g, '\n');
     const nativeRules = 'packages/client/native/agent-memory-fs/*.go text eol=lf\n'
       + 'packages/client/native/agent-memory-fs/go.mod text eol=lf\n';
     const additions = [rule, nativeRules, rule + nativeRules];
-    if (!additions.some(addition => after === before + addition
-      && addition.trimEnd().split('\n').every(line => !before.split('\n').includes(line)))) {
-      throw new Error('Reviewed CI mapping required: only the reviewed helper LF attributes may be added');
+    const additive = additions.some(addition => after === before + addition
+      && addition.trimEnd().split('\n').every(line => !before.split('\n').includes(line))
+      // #1099 moved the helper pin from daemon/ to util/. A helper-rule addition
+      // is only reviewed when the base did not already carry the old rule, so
+      // the move cannot be smuggled in as a duplicate.
+      && (!addition.includes(rule) || !before.includes(previousRule)));
+    // The move is the exact one-line replacement, with no other attribute edit.
+    const moved = !before.includes(rule)
+      && before.includes(previousRule)
+      && after === before.replace(previousRule, rule)
+      && !after.includes(previousRule);
+    if (!additive && !moved) {
+      throw new Error('Reviewed CI mapping required: only the reviewed helper LF attributes may be added or moved');
     }
     return { dirs: [] };
   }

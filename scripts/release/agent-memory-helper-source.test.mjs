@@ -53,6 +53,6 @@ test('both release builders run verified native builds before packing', () => {
 });
 
 test('committed helper identity matches the current native sources without a Go build', async () => {
-  const { AGENT_MEMORY_HELPER_RELEASE } = await import('../../packages/client/src/daemon/agent-memory-helper-release-pin.ts');
+  const { AGENT_MEMORY_HELPER_RELEASE } = await import('../../packages/client/src/util/agent-memory-helper-release-pin.ts');
   verifyAgentMemoryHelperSourceDigest(fileURLToPath(new URL('../../packages/client/native/agent-memory-fs/', import.meta.url)), AGENT_MEMORY_HELPER_RELEASE);
 });

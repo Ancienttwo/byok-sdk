@@ -58,7 +58,7 @@ import {
 import {
   parsePreparedMemoryState,
   type PreparedAgentMemoryState,
-} from '../daemon/prepared-agent-memory';
+} from '../agent-memory/prepared-agent-memory';
 
 /**
  * The SDK-owned prepared launch entry for the pi runtime, on official Pi.

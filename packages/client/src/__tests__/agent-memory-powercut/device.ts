@@ -7,7 +7,7 @@ import {
   NATIVE_AGENT_MEMORY_INTENT_BACKEND,
   type AgentMemoryIntentBackend,
 } from '../../daemon/agent-memory-intent';
-import { resolveAgentMemoryFilesystemHelper } from '../../daemon/agent-memory-helper-release';
+import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release';
 import {
   POWERCUT_DEVICE_ID,
   POWERCUT_TENANT_ID,

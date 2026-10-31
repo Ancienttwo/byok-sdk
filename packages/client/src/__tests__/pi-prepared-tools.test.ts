@@ -19,7 +19,7 @@ import {
   type PreparedPiToolSurfaceInput,
 } from '../adapters/pi/prepared-tools';
 import type { McpToolCallHost } from '../adapters/pi/mcp-tools';
-import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
+import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
 import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
 

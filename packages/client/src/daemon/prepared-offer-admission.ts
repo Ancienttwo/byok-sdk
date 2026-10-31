@@ -10,7 +10,7 @@ import type { McpToolsetServerObservation } from '../mcp/observation';
 import { fingerprintPreparedToolSurface } from './prepared-tool-surface';
 import type { InputPreparationRecord } from './input-preparation-store';
 import { inputPreparationReadinessReasons } from './input-preparation-service';
-import type { PreparedAgentMemoryState } from './prepared-agent-memory';
+import type { PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory';
 
 /**
  * The item-by-item comparison one prepared `task.offer` must survive before a

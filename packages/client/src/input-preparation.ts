@@ -1,4 +1,4 @@
-import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
 /**
  * B-P2 local primitive — public types for the task-free runtime input
  * preparation surface (`docs/researches/runtime-input-preparation-contract.md`

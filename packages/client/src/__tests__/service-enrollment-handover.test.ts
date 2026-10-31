@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
-import { DAEMON_OWNER_FILENAME } from '../daemon/daemon-owner';
+import { DAEMON_OWNER_FILENAME } from '../util/daemon-owner';
 import { AuthManager } from '../daemon/auth-manager';
 import { connectControlClient, isControlDaemonGone } from '../daemon/control-client';
 import { runUnpairCommand } from '../bin/commands/unpair';

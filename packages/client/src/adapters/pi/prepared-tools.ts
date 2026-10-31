@@ -11,8 +11,8 @@ import { McpAuthorityError } from '../../mcp/authority-error';
 import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
 import { buildToolExecutorsFromObservation, InputPreparationCompileError } from './input-preparation';
 import { createPiMcpTools, type McpToolCallHost, type PiMcpToolDefinition } from './mcp-tools';
-import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../../daemon/prepared-agent-memory';
-import { preparedResultProjection } from '../../daemon/prepared-agent-result';
+import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../../agent-memory/prepared-agent-memory';
+import { preparedResultProjection } from '../../agent-memory/prepared-agent-result';
 import { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from '../../sdk-reserved-mcp';
 import { preparedAgentMemoryTools } from '../../agent-memory/prepared-capability';
 

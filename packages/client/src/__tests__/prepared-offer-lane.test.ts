@@ -31,8 +31,8 @@ import {
 import { SUPPORTED_PREPARED_COMPILER_VERSION } from '../adapters/pi/input-preparation';
 import { createPreparedToolSurfaceAssembler, fingerprintPreparedToolSurface } from '../daemon/prepared-tool-surface';
 import { admitPreparedOffer } from '../daemon/prepared-offer-admission';
-import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
-import * as preparedAgentMemory from '../daemon/prepared-agent-memory';
+import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory';
+import * as preparedAgentMemory from '../agent-memory/prepared-agent-memory';
 import * as agentMemory from '../daemon/agent-memory';
 import { createInputPreparationService } from '../daemon/input-preparation-service';
 import {

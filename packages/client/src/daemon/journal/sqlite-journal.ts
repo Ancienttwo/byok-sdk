@@ -61,7 +61,7 @@ import {
   openJournalDatabase,
   secureJournalFilePermissions,
   type JournalOpenFaultSeam,
-} from './sqlite-support';
+} from '../../util/sqlite-support';
 
 export { JournalHandleCleanupError };
 

@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { agentMemoryHelperDigest, agentMemoryHelperTargetDigest } from '../src/daemon/agent-memory-helper-digest.ts';
+import { agentMemoryHelperDigest, agentMemoryHelperTargetDigest } from '../src/util/agent-memory-helper-digest.ts';
 
 const installRoot = process.argv[2];
 if (!installRoot) throw new Error('Expected an isolated installed package root');

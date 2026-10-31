@@ -4,7 +4,7 @@ import { basename, join, resolve } from 'node:path';
 import type { StoreCompatibility } from '@byok-sdk/core';
 import { JournalCorruptError, JournalUnavailableError } from '../daemon/journal/journal';
 import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
-import { loadSqliteModule } from '../daemon/journal/sqlite-support';
+import { loadSqliteModule } from '../util/sqlite-support';
 import { DURABLE_REPLICA_DIRNAME, durableReplicaFiles, isReplicaWriterLock } from '../adapters/pi-durable/replica';
 import { openExistingLocalDurableStorage } from '../adapters/pi-durable/storage';
 

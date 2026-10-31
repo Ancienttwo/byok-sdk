@@ -14,8 +14,8 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../daemon/journal/sqlite-support', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../daemon/journal/sqlite-support')>();
+vi.mock('../util/sqlite-support', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../util/sqlite-support')>();
   return { ...actual, isSqliteAvailable: () => false };
 });
 

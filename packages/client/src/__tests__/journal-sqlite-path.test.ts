@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sqliteOpenPath } from '../daemon/journal/sqlite-support';
+import { sqliteOpenPath } from '../util/sqlite-support';
 
 /**
  * #1097: a >MAX_PATH store made SQLite's open fail, and the journal read that

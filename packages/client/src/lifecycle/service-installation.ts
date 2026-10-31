@@ -6,7 +6,7 @@ import type { StoreCompatibility, StoreCompatibilityVerdict } from '@byok-sdk/co
 import { connectControlClient, isControlDaemonGone } from '../daemon/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { assertDaemonStoreQuiescent, DaemonOwnerActiveError } from '../daemon/daemon-owner';
+import { assertDaemonStoreQuiescent, DaemonOwnerActiveError } from '../util/daemon-owner';
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { acquirePathMutationGate, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle';

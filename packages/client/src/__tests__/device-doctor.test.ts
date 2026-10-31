@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, type DaemonConfig } from '../index';
 import { DeviceStore, type DeviceRecord } from '../daemon/store';
 import { AuthManager } from '../daemon/auth-manager';
-import { acquireDaemonOwner } from '../daemon/daemon-owner';
+import { acquireDaemonOwner } from '../util/daemon-owner';
 import { connectControlClient } from '../daemon/control-client';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';

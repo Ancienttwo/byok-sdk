@@ -1,4 +1,4 @@
-import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../../util/daemon-owner';
 import { DaemonHaltError } from '../daemon-lifecycle';
 import { AuthRequestAbortedError } from '../auth-manager';
 import { DeviceCredentialCommandAbortedError } from '../device-credential-store';

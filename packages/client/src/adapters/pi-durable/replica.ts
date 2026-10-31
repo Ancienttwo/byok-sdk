@@ -1,4 +1,4 @@
-import { loadSqliteModule } from '../../daemon/journal/sqlite-support';
+import { loadSqliteModule } from '../../util/sqlite-support';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';

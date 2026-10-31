@@ -2,7 +2,7 @@ import { requestApproval as requestTaskApproval } from './approvals';
 import type { ApprovalKind } from '../approvals';
 // `handleOffer` stages from the runtime launch to a started session: seal the
 // manifest, claim, and start (see ./support.ts for how a member module runs).
-import { observePreparedMemory, type PreparedAgentMemoryState } from '../prepared-agent-memory';
+import { observePreparedMemory, type PreparedAgentMemoryState } from '../../agent-memory/prepared-agent-memory';
 import { InputPreparationRequestError } from '../input-preparation-service';
 import type { PiRuntimeLaunchResources } from '../../adapters/pi/runtime-launch';
 import { DURABLE_REPLICA_DIRNAME } from '../../adapters/pi-durable/replica';

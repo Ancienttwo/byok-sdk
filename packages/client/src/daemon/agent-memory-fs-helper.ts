@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 
 import type { AgentHomeLease } from '../agent-home';
-import { verifyAgentMemoryFilesystemHelper } from './agent-memory-helper-release';
+import { verifyAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release';
 import { AgentMemoryRevisionConflictError } from './agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
 import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';

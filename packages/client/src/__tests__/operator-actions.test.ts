@@ -9,7 +9,7 @@ import {
   DeviceOperatorError, AgentHomeManager, type DaemonConfig,
 } from '../index';
 import { connectControlClient } from '../daemon/control-client';
-import { acquireDaemonOwner } from '../daemon/daemon-owner';
+import { acquireDaemonOwner } from '../util/daemon-owner';
 import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { OPERATIONAL_HEALTH_FILENAME } from '../daemon/operational-health';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';

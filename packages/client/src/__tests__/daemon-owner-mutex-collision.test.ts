@@ -5,7 +5,7 @@ import { createConnection, createServer, type Server, type Socket } from 'node:n
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../util/daemon-owner';
 
 /**
  * The store mutex used to be a listener on a loopback TCP port derived from

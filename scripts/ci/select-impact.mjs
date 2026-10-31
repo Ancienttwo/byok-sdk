@@ -214,13 +214,13 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/native\/agent-memory-fs\//,
     /^packages\/client\/scripts\/[a-z-]*agent-memory[a-z-]*\.mjs$/,
     /^scripts\/release\/agent-memory-helper-source\.test\.mjs$/,
-    /^packages\/client\/src\/(?:agent-memory\/|agent-home|daemon\/(?:agent-memory|prepared-agent-memory|resolve-agent-memory))/,
+    /^packages\/client\/src\/(?:agent-memory\/|agent-home|daemon\/(?:agent-memory|resolve-agent-memory)|util\/agent-memory-helper)/,
     /^packages\/client\/src\/__tests__\/(?:agent-memory|agent-home-directory-barrier|daemon-conn-hello-capabilities)[^/]*$/,
     // #605 W5: the power-cut harness modules live in their own directory.
     /^packages\/client\/src\/__tests__\/agent-memory-powercut\//,
   ],
   'execution-recovery-native': [
-    /^packages\/client\/src\/daemon\/journal\//,
+    /^packages\/client\/src\/(?:daemon\/journal|util\/sqlite-support\.ts)/,
     /^packages\/client\/src\/__tests__\/(?:execution-recovery|journal-sqlite)[^/]*$/,
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
   ],
@@ -236,8 +236,8 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
   ],
   'windows-client': [
-    /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
-    /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write|fold-name-aliases)\.ts|diagnostics\/|bin\/commands\/)/,
+    /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-record)\.ts$/,
+    /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write|fold-name-aliases|daemon-owner)\.ts|diagnostics\/|bin\/commands\/)/,
     /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity|service-enrollment-handover)[^/]*$/,
     // #1165: service enrollment's handover on a named-pipe control endpoint.
     /^packages\/client\/src\/daemon\/(?:control-server|create-daemon\/(?:control-methods|lifecycle|start-run|start))\.ts$/,
@@ -258,7 +258,7 @@ export const familyOwners = Object.freeze({
     /^examples\/packaging\//,
     /^templates\/packaging\//,
     /^packages\/client\/native\/agent-memory-fs\//,
-    /^packages\/client\/src\/(?:sdk-native-assets|sdk-reserved-helper-host)/,
+    /^packages\/client\/src\/(?:sdk-native-assets|sdk-reserved-helper-host|bin\/sdk-reserved-helper-command)/,
     /^packages\/client\/scripts\/single-file-sdk-helper-smoke\.mjs$/,
     /^packages\/server\/src\/(?:__tests__\/)?loopback[^/]*$/,
     /^examples\/byok-mcp-server\/src\/loopback[^/]*$/,
@@ -266,7 +266,7 @@ export const familyOwners = Object.freeze({
   // #1104: the embedded Host bundled as ESM, CJS and SEA on each OS, and the SDK bundle and asset code it qualifies.
   'packaging-consistency': [
     /^examples\/packaging\/(?:embedded-host-(?:fixture\.ts|smoke\.mjs)|bundle-import-meta\.test\.ts)$/,
-    /^packages\/client\/src\/(?:adapters\/packaging|sdk-native-assets|sdk-reserved-helper-host|sdk-distribution-bins)\b/,
+    /^packages\/client\/src\/(?:adapters\/packaging|sdk-native-assets|sdk-reserved-helper-host|sdk-distribution-bins|bin\/sdk-reserved-helper-command)\b/,
     /^packages\/client\/src\/adapters\/pi\/(?:runtime-assets|todo-locale-assets|client-manifest)\.ts$/,
     /^packages\/keys\/src\/pi-provider-launcher-core\.ts$/,
   ],
@@ -276,7 +276,7 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/lifecycle\//,
     /^packages\/client\/src\/bin\/(?:byok-agent|commands\/(?:service|upgrade))\.ts$/,
     /^packages\/client\/src\/daemon\/control-client\.ts$/,
-    /^packages\/client\/src\/daemon\/(?:daemon-owner|owned-process-ledger)\.ts$/,
+    /^packages\/client\/src\/(?:daemon\/owned-process-ledger|util\/daemon-owner)\.ts$/,
     /^packages\/client\/src\/(?:diagnostics\/store-compatibility|adapters\/packaging)\.ts$/,
   ],
   'linux-systemd-smoke': [

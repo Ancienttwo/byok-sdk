@@ -1,7 +1,7 @@
 import { RuntimeEnvironmentUnavailableError } from '../runtime/environment';
-import { preparedResultProjection } from './prepared-agent-result';
+import { preparedResultProjection } from '../agent-memory/prepared-agent-result';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import { observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryHelper, type PreparedAgentMemoryState } from './prepared-agent-memory';
+import { observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryHelper, type PreparedAgentMemoryState } from '../agent-memory/prepared-agent-memory';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import {
   preparedToolBindingDigest,

@@ -182,7 +182,7 @@ async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
   if (command === PI_TEAM_OPERATOR_TOKEN) {
-    // #700: Node's own undici loads before Pi's npm copy (see `loadNodeUndici` in `sdk-reserved-helper-host.ts`).
+    // #700: Node's own undici loads before Pi's npm copy (see `loadNodeUndici` in `sdk-reserved-helper-command.ts`).
     Reflect.get(globalThis, 'Headers');
     await (await import('#byok-pi-runtime-host')).runPiTeamOperatorHost(rest);
     return;

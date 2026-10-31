@@ -43,7 +43,7 @@ import {
   DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
   type JournalFaultStep,
 } from '../daemon/journal/sqlite-journal';
-import { openJournalDatabase } from '../daemon/journal/sqlite-support';
+import { openJournalDatabase } from '../util/sqlite-support';
 import { StoragePressure, LocalStorageEmergencyError } from '../daemon/retention/pressure';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import type { StorageBudgetInput } from '../daemon/retention/config';

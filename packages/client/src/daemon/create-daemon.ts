@@ -45,7 +45,7 @@ import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Uns
 import { type DeviceEnrollment } from './store';
 import { type DeviceMemberStatus } from './e2ee-key-package-notice';
 import { type LocalTaskJournal } from './journal/journal';
-import type { JournalOpenFaultSeam } from './journal/sqlite-support';
+import type { JournalOpenFaultSeam } from '../util/sqlite-support';
 import { promises as fs } from 'node:fs';
 import { type StorageConfig } from './retention/config';
 import { RetentionSweeper, type RetentionTimers } from './retention/sweeper';

@@ -8,13 +8,13 @@ const release = vi.hoisted(() => ({
 }));
 // Model a verified SDK release helper. These tests pin the platform gate and
 // the backend proofs; the PE digest has its own test with the real exe.
-vi.mock('../daemon/agent-memory-helper-release', async importOriginal => {
-  const actual = await importOriginal<typeof import('../daemon/agent-memory-helper-release')>();
+vi.mock('../util/agent-memory-helper-release', async importOriginal => {
+  const actual = await importOriginal<typeof import('../util/agent-memory-helper-release')>();
   release.actualVerify = actual.verifyAgentMemoryFilesystemHelper;
   return { ...actual, verifyAgentMemoryFilesystemHelper: release.verify };
 });
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
-import * as actualRelease from '../daemon/agent-memory-helper-release';
+import * as actualRelease from '../util/agent-memory-helper-release';
 import { isAgentMemoryFilesystemHelperSupported, openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
 import { helperAgentMemoryIntentBackend } from '../daemon/agent-memory-intent';
 

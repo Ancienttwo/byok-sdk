@@ -86,7 +86,7 @@ vi.mock('node:child_process', async (importOriginal) => ({
 
 // Transport-only fault injection. Deployment admission has its own real
 // release-artifact tests; this seam lets the fake child reach EPIPE.
-vi.mock('../daemon/agent-memory-helper-release', () => ({
+vi.mock('../util/agent-memory-helper-release', () => ({
   resolveAgentMemoryFilesystemHelper: () => '/opt/byok-agent-memory-fs',
   verifyAgentMemoryFilesystemHelper: (bin: string) => bin,
 }));

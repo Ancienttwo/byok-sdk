@@ -35,7 +35,7 @@ import {
 import {
   openJournalDatabase,
   type JournalOpenStep,
-} from '../daemon/journal/sqlite-support';
+} from '../util/sqlite-support';
 
 const IDENTITY: JournalIdentity = { tenantId: 'tenant-a', productId: 'test-product', deviceId: 'dev_1' };
 
