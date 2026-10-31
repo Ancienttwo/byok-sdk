@@ -120,7 +120,17 @@ export interface DaemonConfig {
    * to every runtime. A config file and an embedded Host supply the same
    * object; it is validated, copied and frozen before claim, once per offer
    * (including resume). Invalid policies decline the offer. Rules never
-   * change the wire or native launch. Not an OS sandbox or file scope.
+   * change the wire or native launch.
+   *
+   * The optional `fileScope` (#1061) is an explicit file boundary for the
+   * SDK-owned file tools: absent means inherit (unchanged behavior);
+   * `home` authorizes read+write of the canonical Agent home; `workspaces`
+   * adds explicit read/write roots. It applies only to `auto` tasks, requires
+   * `agentHome`, and is never selected by the wire or the model. v1 admits it
+   * only on the ordinary Pi RPC lane on darwin/linux; other adapters, the
+   * prepared/durable lanes, memory-reader offers and Windows decline before
+   * claim with `file_scope_unsupported`. This is not an OS sandbox: shell,
+   * MCP servers and extensions remain outside it.
    */
   toolAuthorization?: ToolAuthorizationPolicy;
   /**

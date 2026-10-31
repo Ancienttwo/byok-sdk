@@ -536,6 +536,9 @@ linked JSON schema for full array/union shapes and descriptions.
 | `toolAuthorization.rules` | advanced | object |
 | `toolAuthorization.rules.alwaysAsk` | advanced | array |
 | `toolAuthorization.rules.allowWithoutAsking` | advanced | array |
+| `toolAuthorization.fileScope` | advanced | object |
+| `toolAuthorization.fileScope.mode` | required when parent is set | "home" / "workspaces" |
+| `toolAuthorization.fileScope.roots` | advanced | array |
 | `localToolApproval` | common | "allow" |
 | `deviceCredentials` | advanced | object |
 | `deviceCredentials.macosKeychainPath` | advanced | string |
@@ -724,6 +727,7 @@ still need correction. Codes do not replace the reported field/path or cause.
 | `embedded_only` | no | Assemble this value in embedded code; omit it from CLI JSON. | [guide](#embedded-path) |
 | `handshake_rejected` | no | Check productId and SDK compatibility with the server, or pair again. | [guide](#troubleshooting) |
 | `host_layout_input_invalid` | no | Fix the named HostLayoutOptions field, then call resolveHostLayout again. | [guide](#directory-ownership) |
+| `invalid_file_scope` | no | Fix DaemonConfig.toolAuthorization.fileScope: use mode home or workspaces, absolute existing root paths without ~ or .. segments, unique root ids, and configure it only when the effective mode is auto and agentHome is set. | [guide](#configuration) |
 | `invalid_type` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `invalid_value` | no | Fix the reported field or construction constraint, then run config check. | [guide](#configuration) |
 | `invalid_version_policy` | no | Fix the reported runtime version policy field: use exact/prefix specs, end a prefix with ".", remove duplicates, and configure block only from the Host. | [guide](#configuration) |

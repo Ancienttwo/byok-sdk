@@ -608,9 +608,13 @@ export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sd
 
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export';
 
-export { classifyToolCall, createAutoToolAuthorizationGate, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES } from './tool-authorization';
+export {
+  classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode,
+  parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS,
+} from './tool-authorization';
 export type {
-  ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationMode, ToolAuthorizationTask,
-  ToolAuthorizationVerdict, ToolCall, ToolReminder, ToolRisk, ToolRiskReason,
+  ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane,
+  ToolAuthorizationMode, ToolAuthorizationTask,
+  ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason,
   ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule,
 } from './tool-authorization';

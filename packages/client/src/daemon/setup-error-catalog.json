@@ -24,6 +24,11 @@
     "nextStep": "Fix the reported runtime version policy field: use exact/prefix specs, end a prefix with \".\", remove duplicates, and configure block only from the Host.",
     "anchor": "#configuration"
   },
+  "invalid_file_scope": {
+    "retryable": false,
+    "nextStep": "Fix DaemonConfig.toolAuthorization.fileScope: use mode home or workspaces, absolute existing root paths without ~ or .. segments, unique root ids, and configure it only when the effective mode is auto and agentHome is set.",
+    "anchor": "#configuration"
+  },
   "daemon_config_invalid": {
     "retryable": false,
     "nextStep": "Fix the reported field or construction constraint, then run config check.",
