@@ -1,6 +1,6 @@
 import { type DaemonConfig, type RuntimeAdapter } from '../../index';
 import { formatRuntimeLines } from '../format';
-import { defaultRuntimeAdapters, probeRuntimes } from '../runtime-probe';
+import { defaultRuntimeAdapters, probeRuntimes } from '../../diagnostics/runtime-probe';
 
 export interface RuntimesDeps {
   log?: (line: string) => void;

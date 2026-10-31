@@ -2,7 +2,7 @@ import { unmeasuredRetentionSnapshot, type RetentionSnapshot } from '../daemon/r
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { DaemonConfig } from '../index';
+import type { DaemonConfig } from '../daemon/create-daemon';
 import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { auditLogPath } from '../bin/audit-log';
 import { isDaemonRecordKind, type DaemonRecordKind } from '../daemon/daemon-record';

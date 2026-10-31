@@ -1,5 +1,9 @@
 import { observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection';
-import { PiAdapter, ClaudeAdapter, CodexAdapter, type DaemonConfig, type RuntimeAdapter } from '../index';
+import type { RuntimeAdapter } from '../types';
+import type { DaemonConfig } from '../daemon/create-daemon';
+import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { CodexAdapter } from '../adapters/codex/codex-adapter';
 
 /**
  * Mirrors `create-daemon.ts`'s own `buildDefaultAdapters`/`buildAdapter`/
