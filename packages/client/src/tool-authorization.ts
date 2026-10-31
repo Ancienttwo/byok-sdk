@@ -101,8 +101,8 @@ export interface ToolAuthorizationPolicy {
    * root is revalidated after claim, before runtime start, and again before
    * the Pi session exists, and an unresolvable root fails the claimed task as
    * `file_scope_unavailable`. A configured scope is never silently dropped.
-   * SDK-owned scoped read/write/edit tools enforce the admitted roots, and
-   * native Pi find/grep/ls are excluded for that session. Every other tool
+   * SDK-owned scoped read/write/edit/find/grep/ls tools enforce the admitted
+   * roots and shadow the native Pi tools of the same name. Every other tool
    * (shell, MCP servers, SDK and user extension tools) is outside the boundary
    * and asks on every call, regardless of the built-in risk level; only an
    * explicit allowWithoutAsking rule can opt one out. It is not an OS sandbox.
@@ -701,7 +701,7 @@ export function createAutoToolAuthorizationGate(input: {
         // #1061: in a file-scoped session every tool outside the SDK file
         // boundary asks on every call. Risk heuristics cannot auto-allow it;
         // only an explicit allowWithoutAsking rule can, because that is the
-        // Host deliberately naming the tool/command it trusts. The three SDK
+        // Host deliberately naming the tool/command it trusts. The six SDK
         // file tools are inside the boundary and are guarded by the scoped
         // tool itself.
         const scopedTools = scopedFileToolNames(gate);

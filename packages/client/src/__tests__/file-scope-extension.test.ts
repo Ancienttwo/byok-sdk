@@ -51,7 +51,7 @@ describe('Pi file-scope extension (#1061 slice 3)', () => {
       onTransportFailure: (denial) => { denials.push(denial); },
     });
     factory(pi as never);
-    expect(tools).toEqual(['read', 'write', 'edit']);
+    expect(tools).toEqual(['read', 'write', 'edit', 'find', 'grep', 'ls']);
     expect(handlers).toHaveLength(1);
 
     const blocked = await handlers[0]!({
@@ -63,6 +63,19 @@ describe('Pi file-scope extension (#1061 slice 3)', () => {
 
     expect(await handlers[0]!({ toolName: 'read', toolCallId: 'call-in', input: { path: inScope } }, { cwd: home })).toBeUndefined();
     expect(denials).toHaveLength(1);
+    // find/grep/ls default to cwd and are prechecked inside the same scope.
+    expect(await handlers[0]!({ toolName: 'find', toolCallId: 'call-find', input: { pattern: '*.txt' } }, { cwd: home })).toBeUndefined();
+    expect(await handlers[0]!({ toolName: 'ls', toolCallId: 'call-ls', input: {} }, { cwd: home })).toBeUndefined();
+    expect(await handlers[0]!({ toolName: 'grep', toolCallId: 'call-grep', input: { pattern: 'ok' } }, { cwd: home })).toBeUndefined();
+    // An out-of-scope discovery path is denied before approval too.
+    const blockedFind = await handlers[0]!({
+      toolName: 'find', toolCallId: 'call-find-out', input: { pattern: '*', path: outside },
+    }, { cwd: home });
+    expect(blockedFind).toMatchObject({ block: true, reason: expect.stringContaining('outside_scope') });
+    expect(denials).toEqual([
+      expect.objectContaining({ toolName: 'read', toolCallId: 'call-out', reason: 'outside_scope' }),
+      expect.objectContaining({ toolName: 'find', toolCallId: 'call-find-out', reason: 'outside_scope' }),
+    ]);
     // Non-file tools are never inspected by this extension.
     expect(await handlers[0]!({ toolName: 'bash', toolCallId: 'call-bash', input: { command: 'cat ' + outsideFile } }, { cwd: home })).toBeUndefined();
   });

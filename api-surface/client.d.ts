@@ -13007,8 +13007,8 @@ export interface ToolAuthorizationPolicy {
      * root is revalidated after claim, before runtime start, and again before
      * the Pi session exists, and an unresolvable root fails the claimed task as
      * `file_scope_unavailable`. A configured scope is never silently dropped.
-     * SDK-owned scoped read/write/edit tools enforce the admitted roots, and
-     * native Pi find/grep/ls are excluded for that session. Every other tool
+     * SDK-owned scoped read/write/edit/find/grep/ls tools enforce the admitted
+     * roots and shadow the native Pi tools of the same name. Every other tool
      * (shell, MCP servers, SDK and user extension tools) is outside the boundary
      * and asks on every call, regardless of the built-in risk level; only an
      * explicit allowWithoutAsking rule can opt one out. It is not an OS sandbox.

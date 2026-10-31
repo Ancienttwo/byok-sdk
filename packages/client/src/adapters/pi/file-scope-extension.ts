@@ -18,16 +18,15 @@ export interface PiFileScopeExtensionOptions {
 }
 
 /**
- * Register the SDK-owned scoped read/write/edit tools in the ordinary Pi RPC
- * session. Each tool guards immediately before touching a file, and the
- * `tool_call` precheck denies an out-of-scope call before the auto-approval
- * gate is asked, so a scope violation is never presented as an approval
- * request.
+ * Register the six SDK-owned scoped file tools (read, write, edit, find, grep,
+ * ls) in the ordinary Pi RPC session. Each tool guards immediately before
+ * touching a path, and the `tool_call` precheck denies an out-of-scope call
+ * before the auto-approval gate is asked, so a scope violation is never
+ * presented as an approval request.
  *
- * The extension does not replace `bash`, which remains the documented
- * out-of-scope shell capability, and it does not replace find/grep/ls in this
- * slice: those native tools are excluded from a scoped session instead, so
- * they cannot read around the scope.
+ * These tools shadow the native Pi file tools of the same name. The extension
+ * does not replace `bash`, which remains the documented out-of-scope shell
+ * capability (subject to the scoped per-call approval floor).
  */
 export function createPiFileScopeExtension(options: PiFileScopeExtensionOptions): ExtensionFactory {
   return (pi: ExtensionAPI) => {

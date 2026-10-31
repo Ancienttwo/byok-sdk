@@ -43,9 +43,9 @@ export interface PiRpcHostConfig {
   readonly toolAuthorization: ToolAuthorizationIpcConfig | null;
   /**
    * The daemon-resolved file scope, or null for an inherit launch. When
-   * present this session registers the SDK scoped read/write/edit tools,
-   * excludes the native find/grep/ls tools, and refuses to start if the
-   * registered loadout drifts (v9, #1061).
+   * present this session registers the six SDK scoped file tools
+   * (read/write/edit/find/grep/ls), which shadow the native Pi tools, and
+   * refuses to start if the registered loadout drifts (v9, #1061).
    */
   readonly fileScope: SerializedFileScopeGrant | null;
   readonly mcp: TaskScopedMcpConfig;
@@ -247,13 +247,11 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     },
     ...(providerApiKey === undefined ? {} : { providerApiKey }),
     ...(fileScope === undefined ? {} : {
-      // find/grep/ls are not SDK-owned yet, so a scoped session removes them
-      // rather than leaving a path-reading native tool active. read/write/edit
-      // are shadowed by the extension above.
-      excludeTools: ['find', 'grep', 'ls'],
+      // All six native file tools are shadowed by SDK-owned scoped tools above.
+      // The assertion refuses to prompt if any of them is still the Pi built-in.
       assertToolLoadout: (session: import('./pi-session-runtime').PiToolLoadoutSession) => assertPiFileScopeRegistry(session, {
-        required: ['read', 'write', 'edit'],
-        forbidden: ['find', 'grep', 'ls'],
+        required: ['read', 'write', 'edit', 'find', 'grep', 'ls'],
+        forbidden: [],
       }),
     }),
     initialModel: 'required', label: 'byok-pi-rpc', reject: fail,
