@@ -11,13 +11,14 @@ import { pathToFileURL } from 'node:url';
 const root = resolve(import.meta.dirname, '../..');
 const adapters = join(root, 'packages/client/src/adapters');
 
-export const RUNTIMES = Object.freeze(['pi', 'claude', 'codex', 'grok', 'hermes']);
+export const RUNTIMES = Object.freeze(['pi', 'claude', 'codex', 'grok', 'hermes', 'dsh']);
 
 /** npm packages of the CLIs the SDK does not bundle. */
 export const NPM_PACKAGES = Object.freeze({
   claude: { name: '@anthropic-ai/claude-code', bin: 'claude' },
   codex: { name: '@openai/codex', bin: 'codex' },
   grok: { name: '@xai-official/grok', bin: 'grok' },
+  dsh: { name: '@deepseek-ai/dsh', bin: 'dsh' },
 });
 
 /**
@@ -46,6 +47,7 @@ export async function qualifiedVersions() {
     codex: await load('codex/codex-version.ts', 'QUALIFIED_CODEX_VERSION'),
     grok: await load('grok/grok-version.ts', 'QUALIFIED_GROK_VERSION'),
     hermes: await load('hermes/hermes-version.ts', 'QUALIFIED_HERMES_VERSION'),
+    dsh: await load('dsh/dsh-version.ts', 'QUALIFIED_DSH_VERSION'),
   };
 }
 
@@ -62,12 +64,15 @@ export function contractEnv(runtime, bin, latestVersion) {
   return [`BYOK_CONTRACT_${key}_BIN=${bin}`, ...(latestVersion === undefined ? [] : [`BYOK_CONTRACT_${key}_VERSION=${latestVersion}`])];
 }
 
+/** One exact npm version; dsh publishes only prereleases (`0.2.1-rc.5`). */
+export const isExactVersion = (version) => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$/.test(version);
+
 const run = (command, args, options = {}) => execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...options }).trim();
 
 function installNpm(runtime, mode, version, dir) {
   const { name, bin } = NPM_PACKAGES[runtime];
   const exact = mode === 'latest' ? run('npm', ['view', name, 'version']) : version;
-  if (!/^\d+\.\d+\.\d+$/.test(exact)) throw new Error(`${name}: not an exact version: ${JSON.stringify(exact)}`);
+  if (!isExactVersion(exact)) throw new Error(`${name}: not an exact version: ${JSON.stringify(exact)}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'package.json'), '{"private":true}\n');
   execFileSync('npm', ['install', '--no-audit', '--no-fund', '--save-exact', `${name}@${exact}`], { cwd: dir, stdio: 'inherit' });
