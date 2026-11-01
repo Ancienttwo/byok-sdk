@@ -49,7 +49,7 @@ those declarations, and of behavior the matrix does not cover; they are not a
 second registry.
 
 - Resume uses each runtime's exact native identity: Claude `--resume`, Codex
-  `thread/resume`, Grok ACP `session/resume`. A new instruction after an idle
+  `thread/resume`, Grok and dsh ACP `session/resume`. A new instruction after an idle
   turn (`followUp`) stays in the same native session or thread.
 - Codex steering targets the exact active `expectedTurnId`. An adapter without
   `steer` returns a typed rejection.
@@ -68,8 +68,8 @@ second registry.
 - Local native interaction opt-in: Claude relays structured AskUserQuestion
   only and passes other `can_use_tool` requests through as allow; Codex relays
   structured question IDs only, keeps `approvalPolicy: never` and refuses
-  approval requests; Grok answers every permission request `cancelled`; Pi has
-  none.
+  approval requests; Grok and dsh answer every permission request `cancelled`;
+  Pi has none.
 - MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`): Claude sets
   it for task toolset servers from its own `mcp_status` answer; Codex from the
   native `mcpToolCall` `server` and `tool`, for every server it runs, SDK
@@ -94,8 +94,8 @@ reminder (`all`); Allow without Asking suppresses both, except for the
 non-overridable credential/login-persistence sensitive-path floor. The resolver
 accepts either a mode or `{ mode, rules }`, validates/copies/freezes it before
 claim and re-resolves it on a resume offer. Pi ordinary RPC/native children and
-Claude use their existing gates; Codex, Grok, Hermes and Pi prepared/durable
-still decline `auto` before claim. Rules and audit metadata remain local; the
+Claude use their existing gates; Codex, Grok, Hermes, dsh and Pi
+prepared/durable still decline `auto` before claim. Rules and audit metadata remain local; the
 server wire protocol, Pi launch v8 and digest format are unchanged. No reviewer
 model, natural-language matching, deny rule or new dependency is introduced.
 The shared matcher has bounded wildcard syntax and identical Node/Bun results;
@@ -463,6 +463,23 @@ directories, `HERMES_HOME/skills` and configured skill directories, which the
 SDK profile does not set. No user-level instruction source reaches the
 session, so Hermes needs no option.
 
+### dsh: user-level configuration
+
+The [dsh adapter](../packages/client/src/adapters/dsh/dsh-adapter.ts) runs
+every session in the Host's `home` as `DSH_HOME` and refuses `~/.dsh` and
+anything below it. It drops ambient `DSH_*` variables and sets `DSH_HOME`,
+`DSH_AGENTS_HOME` (an empty `byok-agents-home` directory in that root),
+`DSH_PERMISSION_MODE` and `DSH_TELEMETRY_MODE=DISABLED` itself.
+
+dsh 0.2.1-rc.5 reads user context from `$DSH_HOME/AGENTS.md`,
+`$DSH_HOME/skills` and `$DSH_AGENTS_HOME/skills` (default `~/.agents/skills`),
+and user MCP servers from the profile and home `cordis.patch.yml` files under
+`DSH_HOME`. With the SDK root none of the user's own copies apply, so dsh needs
+no option. Project context still loads: the workspace `AGENTS.md`/`CLAUDE.md`
+(and `.local` overrides) and the project `.agents/skills`. The runtime contract
+suite checks this with markers in `~/.dsh` and `~/.agents`. A positive control
+shows that a skill in the adapter's own `DSH_AGENTS_HOME` does reach the model.
+
 ### Agent task session records
 
 An Agent task runs in the Agent home, but a runtime may save the session
@@ -482,6 +499,7 @@ for Claude it is `agentSessionPersistence: 'disabled'`, below.
 | Pi, prepared | None: the session is in memory |
 | Pi, durable | `durable-<taskId>.sqlite` replica in the daemon store, disjoint from the Agent home, removed after its retention TTL; the lane recovers from it |
 | Hermes | `state.db` and `sessions/` in the execution's profile, `<home>/profiles/byok-<id>/`, removed when the execution closes, or by the 15-minute sweep after a crash |
+| dsh | `<home>/sessions/<encoded cwd>/<session id>/` in the Host's dsh root, kept so that `session/resume` works; the adapter never removes it |
 
 What the upstream runtimes offer that the SDK does not use:
 
@@ -723,14 +741,76 @@ and the key only in the Hermes child; the
 live-provider run or Linux run is part of this evidence.
 The descriptor declares `platforms: ['darwin', 'linux', 'win32']`.
 
+## dsh adapter (custom harness)
+
+`DshAdapter` (id `dsh`, #1258) runs DeepSeek Harness (`@deepseek-ai/dsh`, a
+developer preview) over ACP v1: one `dsh --profile acp --patch <file>` process
+per session, driven by the vendored OAR ACP session stack. The dsh profile
+(`runtime/dsh-acp-session.js`) is SDK source built on the vendored
+`acpSession`, and loads lazily through the private `#byok-acp-runtime` entry,
+beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes no dispatch selection.
+
+- Model: the required `model` option names `provider`, `model`, `keyEnv` and,
+  for `custom`, `baseUrl`. The adapter writes them into the per-execution
+  `--patch` overlay (mode 0600, in the execution scratch directory). `deepseek`
+  uses the DeepSeek API route; `custom` is a hand-declared OpenAI-compatible
+  route; any other provider id is a dsh pi-ai catalog route. The key itself is
+  only in the environment, under `keyEnv`. `keyEnv` must contain `KEY`,
+  `TOKEN`, `SECRET` or `PASSWORD`, which dsh strips from tool processes. It
+  must not start with `BYOK_` (the runtime environment drops those) or `DSH_`,
+  and it must not be `DEEPSEEK_API_KEY`, which dsh `web_search` also reads.
+- Start: `session/new` (or `session/resume` with the exact `sessionRef`) must
+  answer with the patch route and model in the `model` config option. Any
+  other value fails closed as `authority`, because the overlay did not apply.
+- Working directory: the process starts in the execution scratch directory,
+  so dsh never loads a workspace `.env`. The workspace, realpath-resolved, is
+  the ACP session `cwd`.
+- Permissions: `sandbox` selects `DSH_PERMISSION_MODE`. The default,
+  `danger-full-access`, pairs with dsh approval `never`. `workspace-write` and
+  `read-only` keep dsh's OS sandbox (seatbelt on macOS, bwrap or landlock on
+  Linux). Every `session/request_permission` is answered `cancelled`: that
+  tool fails and the turn continues. `auto` is declined before claim.
+- Events: each `agent_message_chunk` is one committed message, so the
+  descriptor sets `progressEventsAreMessages` and declares no message draft.
+  `tool_call` kinds are always `other`, with the input in `rawInput`; as for
+  Grok, `tool_use.input` is that raw input as JSON text and
+  `tool_result.output` carries the content blocks under `content`.
+  `usage_update` carries context occupancy only (`contextTokens`,
+  `contextWindow`, `contextSource: 'provider'`), never cost counters.
+- Failures: a failed turn is a JSON-RPC error with text only, so it is a
+  non-retryable `semantic` failure with class `unknown`. A failed resume (an
+  unknown id or another workspace) is `authority`. A dsh process that ends on
+  its own is `runtime_exited`.
+- Interrupt and close: `session/cancel`, then a wait for the cancelled prompt
+  answer, bounded by `interruptTimeoutMs`. `close()` sends `session/close`,
+  then disposes the owned process tree. Steering throws
+  `SteerUnsupportedError`.
+- Detection: `dsh --version` (advisory when it is not the qualified
+  `0.2.1-rc.5`), then `dsh --profile acp --help`, which also writes the acp
+  profile into a new root (else `refused: acp_unavailable`). `authPresent`
+  means the `keyEnv` variable is set; the key is not checked.
+- Egress: the DeepSeek route sends `GET https://api.deepseek.com/models` when
+  dsh boots with a key. That call is free, but it is traffic. The contract
+  suite's custom route has no declared host.
+- Platforms: macOS and Linux. dsh ships no win32 build of its native addon.
+
+Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
+[runtime contract suite](runtime-contract.md) against the real qualified dsh.
+Locally on macOS with dsh 0.2.1-rc.5, every case passes except `dsh.sigkill`.
+dsh runs each shell tool in its own process group, and after the dsh root is
+killed from outside, the SDK's owned process tree reaches neither that group
+nor its reparented processes. Closing the session through the SDK does reap
+them (`dsh.close`). The design and probes are in
+[the dsh adapter plan](https://github.com/Ancienttwo/byok-sdk/pull/1256).
+
 ## Selection and platforms
 
 A Host reads the adapter list, not a table of its own. `taskRuntimeTarget(descriptor)`
 from `@byok-sdk/client/adapters` returns `{ runtime }` for a frozen wire runtime
 id (`RUNTIME_IDS` in `@byok-sdk/protocol/constants`) and `{ harnessId }` for any
 other id. `descriptor.platforms` lists the supported `process.platform` values:
-Claude, Codex, Pi and Hermes declare macOS, Linux and Windows; Grok and durable
-Pi declare macOS and Linux. A descriptor without `platforms` has no platform
+Claude, Codex, Pi and Hermes declare macOS, Linux and Windows; Grok, dsh and
+durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
 restriction. `observeRuntimeDetection` refuses an unsupported platform with
 `platform_unsupported` before `detect()` runs, and `projectRuntimeObservation`
 gives the same fields the daemon emits in its `runtimes-detected` event. Both
