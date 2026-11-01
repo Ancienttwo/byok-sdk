@@ -325,8 +325,8 @@ change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
 0.33.0 is a MINOR under the general policy above, with no exception. The
-upgrade manifest from 0.32.0 holds 4 breaking entries, and the release adds
-Postgres migrations 0035 and 0036 and server SQLite schema 8. See the
+upgrade manifest from 0.32.0 holds 7 breaking entries, and the release adds
+Postgres migrations 0035, 0036 and 0037 and server SQLite schema 8. See the
 [0.33.0 candidate notes](releases/v0.33.0.md).
 
 0.32.0 is a MINOR under the general policy above, with no exception. The
