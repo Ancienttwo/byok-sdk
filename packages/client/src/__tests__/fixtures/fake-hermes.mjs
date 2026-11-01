@@ -14,6 +14,8 @@
 // observable input is appended to FAKE_HERMES_RECEIPT as one JSON line.
 // FAKE_HERMES_REPLY_GATE=<dir>: the closing reply streams as `Do`, `ne`,
 // then waits for `<dir>/release` before its last chunk `.`.
+// FAKE_HERMES_TOOL_TREE=<file>: the gateway starts a tool parent whose child left its group (setsid);
+// session/cancel SIGKILLs that parent for the gateway, orphaning the tool.
 // On Windows, ci.yml's windows-client job runs it under hermes-adapter.test.ts and hermes-custody.test.ts (#712).
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -72,6 +74,7 @@ if (argv[0] === 'gateway' && argv[1] === 'run') {
       ignoreTerm: env.FAKE_HERMES_GATEWAY_IGNORE_SIGTERM === '1',
     });
   }
+  if (env.FAKE_HERMES_TOOL_TREE) spawn(process.execPath, [new URL('./process-tree-descendant.mjs', import.meta.url).pathname, env.FAKE_HERMES_TOOL_TREE, String(process.pid), '0', '', '1'], { stdio: 'ignore' });
   // The real gateway prints a banner on stdout even with --quiet.
   console.log('Hermes Gateway Starting...');
   // FAKE_HERMES_GATEWAY_EXIT_BEFORE_READY=1: the gateway ends without ever answering identify.
@@ -218,6 +221,7 @@ function runViewer() {
       void prompt(id, params);
     } else if (method === 'session/cancel') {
       receipt({ mode: 'acp', method, params });
+      if (env.FAKE_HERMES_TOOL_TREE) process.kill(JSON.parse(readFileSync(env.FAKE_HERMES_TOOL_TREE, 'utf8')).descendantPid, 'SIGKILL');
       if (pendingPrompt !== undefined && env.FAKE_HERMES_IGNORE_CANCEL !== '1') {
         send({ id: pendingPrompt, result: { stopReason: 'cancelled', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } } });
         pendingPrompt = undefined;
