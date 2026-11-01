@@ -10,11 +10,11 @@
 
 ## 0. 结论摘要
 
-推荐路径：SDK 为每个 Session 启动一个 `dsh --profile acp --patch <SDK 生成的 patch>` 子进程，用 SDK 自有的 ACP peer（把 Hermes 的 `acp-connection.ts` 提成共享模块）驱动标准 ACP v1；provider、model 与 key 引用写进 patch，key 本身只走环境变量。dsh 的 ACP server 原生支持 `session/new|resume|close|cancel`、stdio/HTTP MCP 和一次性 permission 请求，本机探针在不花额度的 loopback provider 上跑通了完整 turn、MCP 工具调用、取消和跨进程 resume。
+推荐路径：SDK 为每个 Session 启动一个 `dsh --profile acp --patch <SDK 生成的 patch>` 子进程，用 vendored OAR 的 ACP 会话栈（`acpSession` + SDK 自有的 dsh `AcpSessionProfile`，同 Grok）驱动标准 ACP v1；provider、model 与 key 引用写进 patch，key 本身只走环境变量。dsh 的 ACP server 原生支持 `session/new|resume|close|cancel`、stdio/HTTP MCP 和一次性 permission 请求，本机探针在不花额度的 loopback provider 上跑通了完整 turn、MCP 工具调用、取消和跨进程 resume。
 
 | # | 决定（推荐） | 状态 |
 | --- | --- | --- |
-| O1 | 走 ACP（`dsh --profile acp`），不走 `dsh sdk` JSON-RPC、`headless --json` 或 `dsh web` | 已批准 2026-11-01（#1258） |
+| O1 | 走 ACP（`dsh --profile acp`），经 vendored OAR 栈驱动；不走 `dsh sdk` JSON-RPC、`headless --json` 或 `dsh web` | 已批准 2026-11-01（#1258）；2026-11-01 owner 改定为 vendored OAR 栈 |
 | O2 | SDK 拥有 `DSH_HOME`：Host 指定一个持久根目录（同 Hermes `home`），不用用户的 `~/.dsh` | 已批准 2026-11-01（#1258） |
 | O3 | 沙箱默认 `danger-full-access`（与 Codex/OAR 一致），adapter 选项可选 `workspace-write` / `read-only` | 已批准 2026-11-01（#1258） |
 | O4 | 0.33 提供 `model` 选项（provider、model、可选 baseUrl、`keyEnv`），key 在 runtime 环境里；keys launcher 托管作为 S5，可顺延 0.34 | 已批准 2026-11-01（#1258） |
@@ -24,10 +24,10 @@
 | O8 | 走 custom harness id `dsh`（同 Grok），不加 wire runtime id | 已批准 2026-11-01（#1258） |
 | O9 | key 环境变量名用 SDK 自己的名字（如 `BYOK_DSH_PROVIDER_KEY`），不用 `DEEPSEEK_API_KEY` | 已批准 2026-11-01（#1258）；实施改为 Host 指定 `keyEnv`，见下方“实施偏差” |
 
-实施偏差（S1–S4，#1259 #1260 #1262 #1264）：
+实施偏差（第一版切片 #1259 #1260 #1262 #1264 已关闭，OAR 版切片沿用这些结论）：
 
 - O9：#1095 的运行时环境硬性删除 `BYOK_*`，`BYOK_DSH_PROVIDER_KEY` 到不了 dsh。改为 Host 在 `model.keyEnv` 里指定变量名，adapter 校验：名字含 `KEY`/`TOKEN`/`SECRET`/`PASSWORD`（dsh 会从工具子进程去掉），不以 `BYOK_` 或 `DSH_` 开头，不是 `DEEPSEEK_API_KEY`。批准时的两个目的（工具子进程拿不到 key、`web_search` 不用这把 key 计费）不变。
-- 用量：dsh 的 `usage_update` 走共享 ACP 投影，按 spec 已有的上下文用量字段发出，没有成本计数，O6 的“无 token 用量”仍成立。
+- 用量：OAR 把 dsh 的 `usage_update` 投影成上下文用量，adapter 按 spec 已有的上下文用量字段发出，没有成本计数，O6 的“无 token 用量”仍成立。
 - #1252（运行时可执行文件上报）合入 main 后，dsh 的 `detect()` 同样上报 `executablePath`/`executableSource`。
 - §5 的 SIGKILL 用例在本机 macOS + dsh 0.2.1-rc.5 失败：dsh 给每个 shell 工具单独建进程组，dsh 根进程被外部 SIGKILL 后，SDK 的进程树清理够不到那个组，也找不到已被重新挂到 init 的进程。SDK 自己的关闭路径（`dsh.close`）能回收。修复在共享的 `adapters/process-tree.ts`，不在本切片范围，待 owner 决定。
 
@@ -141,13 +141,30 @@ R2 的 workspace 在 `/private/tmp` 下，写上级目录成功是因为 `/tmp` 
 
 ### 3.1 为什么是 ACP
 
-ACP 是 dsh 唯一面向自动化、带反向 permission 请求、带标准 MCP 挂载、带取消与 resume 的入口，也是 dsh 自己做 out-of-process 子代理时用的协议。SDK 已有两个 ACP adapter，Grok 走 vendored OAR profile，Hermes 走 SDK 自有的 `AcpConnection`（`packages/client/src/adapters/hermes/acp-connection.ts`）。上游 OAR 没有 dsh runtime（2026-11-01 `gh api repos/botiverse/oar/contents/packages/oar/src/runtimes` 只有 antigravity、claude、codebuddy、codex、cursor、grok、kimi、opencode、pi、pi-durable、qoder、qwen），所以 dsh 用 SDK 自有 peer。dsh 成为第二个使用者，把 `acp-connection.ts` 移到 `packages/client/src/runtime/acp-connection.ts` 由两者共用，行为不变（S1）。
+ACP 是 dsh 唯一面向自动化、带反向 permission 请求、带标准 MCP 挂载、带取消与 resume 的入口，也是 dsh 自己做 out-of-process 子代理时用的协议。SDK 已有两个 ACP adapter，Grok 走 vendored OAR profile，Hermes 走 SDK 自有的 `AcpConnection`（`packages/client/src/adapters/hermes/acp-connection.ts`）。owner 2026-11-01 定：能统一到 OAR 的就用 OAR，dsh 走 Grok 的形状。
+
+上游 OAR 没有 dsh runtime（2026-11-01 `gh api repos/botiverse/oar/contents/packages/oar/src/runtimes` 只有 antigravity、claude、codebuddy、codex、cursor、grok、kimi、opencode、pi、pi-durable、qoder、qwen）。dsh 的 profile 放在 SDK 源码 `packages/client/src/runtime/dsh-acp-session.ts`：导入 vendored `shared/acp/session.ts` 的 `acpSession`，由私有入口 `#byok-acp-runtime`（`src/runtime/acp-session-runtime.js`）与 `grokSession` 并列导出。vendor fork 仍只有上游字节加已标注的 BYOK 接缝，`source-manifest.json` 不变，`PROVENANCE.md` 加一句说明这个建在 fork 之上的 SDK profile。`adapters/dsh/` 对照 `adapters/grok/`：adapter 负责 env、patch、版本、检测与事件投影。
+
+dsh 各项需求在 OAR 栈上的落点，不改 `shared/acp/*`：
+
+| 需求 | 落点 |
+| --- | --- |
+| `--patch <file>` 启动 | profile `args: ['--profile', 'acp']`，patch 路径走 `SessionOptions.launchArgs`；SDK 桥接类型 `StartAcpSession` 加 `launchArgs` |
+| 进程 cwd 与 workspace 分开 | `shared/acp/session.ts` 用 `options.cwd` 同时作进程 cwd 和 ACP `cwd`；adapter 注入的 `SpawnAcpLineProcess` 把进程 cwd 换成 scratch 目录（进程归调用方，`process.ts` 的 BYOK 接缝） |
+| `DSH_*` 与 key 环境 | OAR 要求显式环境，不合并任何外部环境；adapter 构造 |
+| MCP（含 `submit_result`） | `acpMcpServersParam`，每次 open 都带 stdio 项 |
+| permission 恒 `cancelled` | `client-app.ts` 的 `cancelPermission`（已有 BYOK 改动） |
+| patch 路由确认 | OAR 记录 open 应答并从 `configOptions` 投影 `model` 事件；第一条 `model` 不是 `[route, model]` 时 adapter fail closed，不调 `set_model` |
+| resume 失败 | 不设 `isResumeNotFound`；adapter 按结构化 JSON-RPC 错误码（-32602）归为 `authority`，不匹配错误文本 |
+| 取消、关闭、进程树 | `session/cancel`、`session/close`（dsh 声明支持）；进程树归 SDK `createOwnedLineProcessSpawn` |
+| 失败分类 | `acpFailureOutcome` 的文本兜底带 `fromText`，SDK 按 `unknown` 发出（O6）；进程自己退出是 `runtime_exited` |
+| initialize | OAR 发 `terminal: true`；dsh 不实现客户端终端（`packages/acp/acp/README.md`），不会调用 `terminal/create` |
 
 `dsh sdk` 有更丰富的事件（可能含草稿），代价是 DSH 私有、pre-stable、无审批通道；`headless` 每轮重启；`web` 是人用界面。三者都不选。
 
 ### 3.2 启动形状
 
-每个 SDK Session 一个 dsh 进程（同 Grok/Hermes），由 `createOwnedLineProcessSpawn` 托管：
+每个 SDK Session 一个 dsh 进程（同 Grok/Hermes），由 `createOwnedLineProcessSpawn` 托管，经 OAR `acpSession` 驱动：
 
 ```text
 argv: dsh --profile acp --patch <scratch>/dsh.patch.yml
@@ -167,7 +184,7 @@ SDK 写的 patch（每次执行重新生成，内容只有非秘密字段）：
   config:
     providers:
       byok:
-        apiKeyEnv: BYOK_DSH_PROVIDER_KEY
+        apiKeyEnv: <model.keyEnv>
         api: openai-completions     # 或 catalog 自带协议
         baseURL: https://…          # 可选
         models: [{ id: <model> }]
@@ -234,7 +251,7 @@ DeepSeek 官方路由改写 `llm-deepseek` 项的 `apiKeyEnv`。`packages/keys` 
 
 | # | 问题 | 推荐 | 理由 | 不选的后果 |
 | --- | --- | --- | --- | --- |
-| O1 | 集成协议 | ACP | 标准协议、反向 permission、MCP、cancel、resume 齐全；SDK 已有 ACP peer；dsh 自己也用它做子代理 | `dsh sdk` 无审批通道且事件私有，pre-stable 改动直接打到 adapter；`headless` 无法 followUp/interrupt |
+| O1 | 集成协议 | ACP，经 vendored OAR 栈（2026-11-01 owner 改定） | 标准协议、反向 permission、MCP、cancel、resume 齐全；OAR 已为 Grok 提供 ACP 会话栈；dsh 自己也用它做子代理 | `dsh sdk` 无审批通道且事件私有，pre-stable 改动直接打到 adapter；`headless` 无法 followUp/interrupt |
 | O2 | `DSH_HOME` 归属 | Host 指定的持久根（adapter 构造参数 `home`，不得是 `~/.dsh`） | 用户存储的凭据优先于 env（§1.4），用用户 home 时 SDK 保证不了 BYOK 用的是哪把 key；用户 patch 与插件也会改变 SDK 依赖的组合；resume 需要稳定目录，所以是持久根而不是每次执行一个 | 用 `~/.dsh`：key 来源不可控，用户插件/patch 可替换 ACP 或审批组件，隔离位全为 `no` |
 | O3 | 沙箱默认 | `danger-full-access`；选项 `workspace-write`、`read-only` | 与 Codex 默认和 OAR 一致；`workspace-write` 下依赖安装写 `~/.npm`、`~/.cache` 会被拒，而 AiphaBee 的 Auto 需求保留装依赖能力（#1061 rules 参考来源） | 默认 `workspace-write`：护栏更强（R3 证实），但写 cwd 与 tmp 以外的任务会失败，模型拿到拒绝后无人可批 |
 | O4 | 凭据交付 | 0.33：`model: { provider, model, baseUrl?, keyEnv }`，key 在 runtime env；S5 加 keys launcher 托管，可顺延 0.34 | dsh 的 `apiKeyEnv` 天然支持 env；工具子进程会 scrub 含 `KEY` 的变量；Hermes 已有 launcher 形状可复用 | 0.33 就强制 launcher：工作量翻倍，阻塞首个可用版本 |
@@ -242,23 +259,33 @@ DeepSeek 官方路由改写 `llm-deepseek` 项的 `apiKeyEnv`。`packages/keys` 
 | O6 | 接受的缺口 | 0.33 接受无草稿、无 token 用量、失败只有文本 | 都是 dsh ACP 面的现状；SDK 不得从上下文用量或错误文本合成数据 | 要求齐平就得换 `dsh sdk` 协议或等上游，0.33 交不出 |
 | O7 | 平台 | `darwin`、`linux` | npm 包无 win32 原生预编译；SDK 文件范围 v1 也只支持 POSIX | 声明 win32 无证据，契约套件会对未验证平台做保证 |
 | O8 | runtime 身份 | custom harness id `dsh` | 同 Grok，无 wire 变化，不需要协议版本 | 加 frozen wire id 要改协议并协调 Host |
-| O9 | key 变量名 | `BYOK_DSH_PROVIDER_KEY` | 名字含 `KEY`，dsh 工具子进程会去掉它；不叫 `DEEPSEEK_API_KEY`，`web_search` 不会悄悄用 BYOK key 计费 | 用 `DEEPSEEK_API_KEY`：DeepSeek BYOK 时 `web_search` 会用同一把 key |
+| O9 | key 变量名 | `BYOK_DSH_PROVIDER_KEY`（实施改为 Host 指定 `model.keyEnv`，见 §0） | 名字含 `KEY`，dsh 工具子进程会去掉它；不叫 `DEEPSEEK_API_KEY`，`web_search` 不会悄悄用 BYOK key 计费 | 用 `DEEPSEEK_API_KEY`：DeepSeek BYOK 时 `web_search` 会用同一把 key |
 
 ## 8. 切片计划
 
-每个切片一个 PR，按顺序合入；S3 之前 adapter 不进 `createDaemon` 的默认 adapter 列表。
+每个切片一个 PR，按顺序叠放，目标 0.33；adapter 不进 `createDaemon` 的默认 adapter 列表。第一版切片（#1259 #1260 #1262 #1264）已关闭，分支保留，契约套件、loopback fixture 与文档从那里复用。
 
 | 切片 | 内容 | 依赖 | 验证 |
 | --- | --- | --- | --- |
-| S1 | `hermes/acp-connection.ts` 移到 `runtime/acp-connection.ts`，Hermes 改 import，行为不变 | — | Hermes 单测与 contract 不变；必跑检查 |
-| S2 | `adapters/dsh/`：`dsh-version.ts`、`dsh-capabilities.ts`、`resolve-bin.ts`、patch 生成（纯函数）、`DshAdapter`（detect/prepare/start、`home`、`model`、`sandbox`、`runtimeEnvironment`、`versionPolicy`）、`DshSession`（prompt/followUp/interrupt/close/resume、permission 恒 `cancelled`）、`projection.ts`；`adapters/index.ts` 导出；`docs:capability-matrix` 重生成；api-surface 预算调整（需 owner 确认） | S1、O1–O9 | fake ACP peer 单测：投影、resume 错误映射、cancel 超时、patch 内容不含秘密；必跑检查 |
-| S3 | `__tests__/runtime-contract/dsh.contract.ts`（loopback 经 pi-ai 手写路由）+ §5 三条 dsh 用例；安装脚本加 exact 版本；nightly 矩阵加 `dsh` | S2 | GitHub PR CI 以 rc.5 通过；nightly 手动触发一次 |
-| S4 | 文档：`docs/adapter-capabilities.md` 资格说明与隔离节、`docs/spec.md` runtime 节（列出 `.env`、沙箱、遥测、会话目录的行为）、CHANGELOG | S2 | docs 生成器校验 |
-| S5（可顺延 0.34） | keys launcher 托管：`runDshProviderLauncher`，adapter 选项 `byokLauncher`，与 `model` 互斥 | S2 | 同 Hermes custody 用例 |
+| S1 | `src/runtime/dsh-acp-session.ts`（OAR `AcpSessionProfile`，经 `#byok-acp-runtime` 导出）；`adapters/dsh/`（对照 `adapters/grok/`）：`dsh-version.ts`、`dsh-capabilities.ts`、`resolve-bin.ts`、patch 与环境（纯函数）、`DshAdapter`（detect/prepare/start、`home`、`model`、`sandbox`、`runtimeEnvironment`、`versionPolicy`）、`projection.ts`；`adapters/index.ts` 导出；PROVENANCE 一句；`docs:capability-matrix` 重生成；api-surface 预算调整（需 owner 确认） | O1–O9 | fake dsh 单测：投影、resume 错误映射、cancel、patch 内容不含秘密；必跑检查 |
+| S2 | `__tests__/runtime-contract/dsh.contract.ts`（loopback 经 pi-ai 手写路由）+ §5 的 dsh 用例；安装脚本加 exact 版本；PR 与 nightly 矩阵加 `dsh` | S1 | GitHub PR CI 以 rc.5 运行；`dsh.sigkill` 的已知缺口见上方实施偏差 |
+| S3 | 文档：`docs/adapter-capabilities.md` 资格说明与隔离节、`docs/spec.md` runtime 节、`docs/runtime-contract.md`、CHANGELOG | S1 | docs 生成器校验 |
+| S4（可顺延 0.34） | keys launcher 托管：`runDshProviderLauncher`，adapter 选项 `byokLauncher`，与 `model` 互斥 | S1 | 同 Hermes custody 用例 |
 
 10x 时先撞上的是每个 Session 一个 Node 进程：启动 1–2 s、常驻内存未测（S3 记录 RSS）。到那时再评估一个进程承载多个 ACP session。
 
+## 8a. Hermes 能否迁到同一 OAR 栈（只评估，本 lane 不动 Hermes）
+
+`hermes/acp-connection.ts` 是 123 行的通用 JSON-RPC peer。迁到 OAR 后，它和 `hermes-session-runtime.ts`（278 行）的大部分换成一个约 60 行的 profile 加 adapter 胶水，量级中等（约 300 行改动，加一次 Windows 实机运行）。Hermes 特有的流程留在 adapter：先起 gateway、等 ready pid、viewer 启动前后各核对一次 gateway 身份（`configureSession` 加 viewer 的 spawn 包装），`session/set_mode dont_ask`（`configureSession`），Windows custody 在第一帧前向 viewer stdin 写 `\n`（spawn 包装）。
+
+两个阻塞项：
+
+- OAR `initialize` 固定发 `terminal: true`（`shared/acp/initialize.ts`）。Hermes 现在发 `terminal: false`，工具都在 gateway 里跑；若 Hermes 遵从客户端终端能力，OAR 会把命令转进 SDK 终端宿主，行为改变。需要在共享 OAR 文件里加 profile 级的客户端能力字段（`initialize.ts`/`profile.ts`），或先证明 Hermes 忽略该能力。
+- Hermes 在 win32 有实机资格（`hermes-real-windows`），OAR ACP 栈只在 darwin/linux 跑过 Grok，迁移后要在 Windows 重新取证。
+
 ## 9. 跟踪 issue 草稿（已据此创建 [#1258](https://github.com/Ancienttwo/byok-sdk/issues/1258)）
+
+下文是创建 #1258 时的草稿原文；集成路径与切片以 §3、§8 为准，O9 的实施见 §0 的实施偏差。
 
 标题：
 
