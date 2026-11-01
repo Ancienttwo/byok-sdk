@@ -691,6 +691,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.pi.versionPolicy.allow` | advanced | array |
 | `runtimes.pi.versionPolicy.warn` | advanced | array |
 | `runtimes.pi.versionPolicy.block` | advanced | array |
+| `runtimes.pi.durableLane` | advanced | boolean |
 | `runtimes.claude` | advanced | object |
 | `runtimes.claude.agentUserContext` | advanced | "excluded" / "inherit" |
 | `runtimes.claude.agentSessionPersistence` | advanced | "disabled" / "enabled" |
@@ -718,7 +719,6 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.grok.versionPolicy.warn` | advanced | array |
 | `runtimes.grok.versionPolicy.block` | advanced | array |
 | `runtimeEnvironment` | advanced | union |
-| `durablePi` | advanced | boolean |
 | `piByokLauncher` | advanced | object |
 | `piByokLauncher.command` | required when parent is set | string |
 | `piByokLauncher.args` | advanced | array |
@@ -827,6 +827,7 @@ Manifest transition: **0.32.0 → 0.33.0**. Versions and entries below come from
 |-------|--------|----------------------|
 | daemon-config-runtimes-grok | additive | DaemonConfig.runtimes.grok takes compatInstructions, agentUserMcpServers and versionPolicy, and createDaemon builds the Grok adapter from configuration when runtimeAllowlist lists grok (#1094). Without grok in the allowlist nothing changes; a Host that assembles GrokAdapter itself can move those options into DaemonConfig. [Migration](../docs/device-setup.md#runtime-isolation-and-tool-authorization) |
 | agent-memory-projection-grant-sealing | additive | AgentMemoryProjectionGrant takes an optional sealing { scopeId, epoch } (#1045 S2). With it, the daemon seals each memory projection snapshot under that Agent scope and never sends it in plaintext; without a usable key it sends nothing. A Host that issues no sealing sees no change. The daemon also seals the Agent messages and memory evidence of a task whose offer names agent-message or memory-projection, and advertises sealed-payload-v2 whenever it advertises sealed-payload-v1. [Migration](../docs/migrations/1045-e2ee-v2.md#sealed-memory-projections) |
+| runtime-generic-names | breaking | Runtime names are generic. DaemonConfig.durablePi is removed and raises DaemonConfigFieldRemovedError: set runtimes.pi.durableLane. PiAdapterOptions.durablePi and RuntimeCapabilities.durablePi are durableLane. The daemon wires the durable journal and durableContext from an adapter's capabilities.durableLane, so a Host that builds PiAdapter({ durableLane: true }) for createDaemonWithAdapters needs no daemon option, and such an adapter without an Agent home refuses to start. The launch resources are the new RuntimeLaunchResources (scratch, release()): RuntimeOperationStartInput.runtimeLaunch and PreparedRuntimeOperation.resolveRuntimeLaunch use it instead of the Pi type, which extends it. [Migration](../docs/device-setup.md#removed-fields) |
 <!-- generated:migrations:end -->
 
 ## Removed fields
@@ -847,6 +848,7 @@ Host change that adopts the new contract. No alias or dual configuration path.
 | `workspaceRoot` | DaemonConfig.workspaceRoot was removed: since wire v4 every offer runs in its SDK-owned Agent home, never in a workspaceRoot/<taskId> directory; configure agentHome |
 | `resultDocument` | DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool |
 | `maxConcurrentMutableSessionsPerAgentHome` | DaemonConfig.maxConcurrentMutableSessionsPerAgentHome was removed. A home has one writer Attempt; send concurrent tasks as homeAccess: 'memory-reader' offers and set maxConcurrentReaderAttemptsPerAgentHome to limit them. |
+| `durablePi` | DaemonConfig.durablePi was removed: set runtimes.pi.durableLane, or with createDaemonWithAdapters construct PiAdapter({ durableLane: true }); the daemon wires the durable journal from the adapter's durableLane capability |
 | `agentMemoryFilesystem` | DaemonConfig.agentMemoryFilesystem is removed; an arbitrary helper is not admitted on this platform. Use the SDK release artifact. |
 <!-- generated:removed:end -->
 
