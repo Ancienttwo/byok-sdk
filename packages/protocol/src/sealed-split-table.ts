@@ -1,14 +1,15 @@
 /**
- * The split table of sealed payload v1 (#654 design §8.1, §9.3): for each
- * sealable message type, the field that marks its sealed branch, its data
- * category, its identity fields, the fields that move into the ciphertext,
- * the fields its sealed branch drops, and the rule of each digest field (D16).
+ * The split table of sealed payload v1 and v2 (#654 design §8.1, §9.3;
+ * #1045): for each sealable message type, the field that marks its sealed
+ * branch, its data category, its identity fields, the fields that move into
+ * the ciphertext, the fields its sealed branch drops, and the rule of each
+ * digest field (D16).
  *
  * Plain data with no runtime imports, so `wire-additions.ts` can derive the
  * sealed gates from it and stay free of zod.
  */
 import type { MessageType } from './messages';
-import type { SealedPayloadV1Category } from './sealed-payload';
+import type { SealedPayloadCategory } from './sealed-payload';
 
 /**
  * How the sealed branch of a type treats one digest field of its plaintext
@@ -32,7 +33,7 @@ export interface SealedSplitEntry {
    * and the content MAC bind the wire type as the family.
    */
   readonly marker: 'sealing' | 'sealed';
-  readonly category: SealedPayloadV1Category;
+  readonly category: SealedPayloadCategory;
   /**
    * Payload fields that, after the envelope `task_id`, name this write in the
    * AAD and the content MAC (§8.2, §9.1). The sealed branch requires them.
@@ -44,7 +45,15 @@ export interface SealedSplitEntry {
    * object back and validates the plaintext branch.
    */
   readonly moved: readonly string[];
-  /** Top-level fields of the plaintext branch that the sealed branch drops in v1. */
+  /**
+   * Top-level fields that also move into this ciphertext when the task's
+   * frozen `sealing` names the category (#1045): on a task that seals
+   * `memory-projection`, a terminal seals its `agentHomeMemoryChange`. The
+   * sealed branch schema cannot see the task's sealing, so the Host and the
+   * device check these fields; read them with {@link sealedMovedFields}.
+   */
+  readonly movedWith?: { readonly [category in SealedPayloadCategory]?: readonly string[] };
+  /** Top-level fields of the plaintext branch that the sealed branch drops. */
   readonly forbidden: readonly string[];
   /**
    * Every path of the plaintext branch whose name contains `digest`, `hash` or
@@ -65,6 +74,9 @@ export interface SealedSplitEntry {
    */
   readonly inlineOnly?: true;
 }
+
+/** A terminal of a task that seals `memory-projection` seals its memory-change evidence. */
+const MEMORY_EVIDENCE = { 'memory-projection': ['agentHomeMemoryChange'] } as const;
 
 /** The Host wrote the projection it names, so its hash tells the Host nothing new. */
 const TERMINAL_DIGESTS = {
@@ -111,6 +123,7 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
     category: 'task-output',
     identity: [],
     moved: ['summary', 'finalMessage', 'document'],
+    movedWith: MEMORY_EVIDENCE,
     forbidden: ['artifactRefs', 'preparedObservation'],
     digests: {
       ...TERMINAL_DIGESTS,
@@ -123,6 +136,7 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
     category: 'task-output',
     identity: [],
     moved: ['reason'],
+    movedWith: MEMORY_EVIDENCE,
     forbidden: ['preparedObservation'],
     digests: { ...TERMINAL_DIGESTS, 'preparedObservation.requestDigest': 'forbidden' },
   },
@@ -130,7 +144,7 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
     marker: 'sealed', category: 'task-output', identity: [], moved: ['reason'], forbidden: [], digests: { 'agentRef.profileRevision': 'plain' },
   },
   'task.cancelled': {
-    marker: 'sealed', category: 'task-output', identity: [], moved: ['reason'], forbidden: [], digests: TERMINAL_DIGESTS,
+    marker: 'sealed', category: 'task-output', identity: [], moved: ['reason'], movedWith: MEMORY_EVIDENCE, forbidden: [], digests: TERMINAL_DIGESTS,
   },
   'task.progress': {
     marker: 'sealed', category: 'task-output', identity: ['seq'], moved: ['events'], forbidden: [], digests: { 'events[].spill.blob.contentHash': 'sealed' },
@@ -144,7 +158,41 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
     marker: 'sealed', category: 'task-output', identity: ['approvalId'], moved: ['summary'], forbidden: [], digests: {},
     inlineOnly: true,
   },
+  // #1045 C2. The plaintext SHA-256 of the body would let the Host confirm a
+  // guessed message, and the exact byte count would undo the padding, so the
+  // sealed branch drops both; the sealed member's keyed `contentMac` names
+  // the content instead. `cursor` is in the identity, so the Host cannot
+  // reorder sealed messages of one session.
+  'agent.message.publish': {
+    marker: 'sealed',
+    category: 'agent-message',
+    identity: ['messageId', 'cursor'],
+    moved: ['body'],
+    forbidden: ['contentHash', 'byteCount'],
+    digests: { 'agentRef.profileRevision': 'plain', contentHash: 'forbidden' },
+  },
 } as const satisfies { readonly [type in MessageType]?: SealedSplitEntry });
+
+/**
+ * The receiver capability each category's sealed branches need: the v1
+ * categories `sealed-payload-v1`, the #1045 categories `sealed-payload-v2`.
+ */
+export const SEALED_CATEGORY_CAPABILITY = Object.freeze({
+  'task-input': 'sealed-payload-v1',
+  'agent-message': 'sealed-payload-v2',
+  'task-output': 'sealed-payload-v1',
+  'memory-projection': 'sealed-payload-v2',
+} as const satisfies { readonly [category in SealedPayloadCategory]: string });
+
+/**
+ * The top-level fields a `type` message of a task whose frozen `sealing`
+ * lists `categories` moves into its ciphertext: the type's `moved` fields and
+ * the `movedWith` fields of each listed category.
+ */
+export function sealedMovedFields(type: SealableMessageType, categories: readonly SealedPayloadCategory[]): readonly string[] {
+  const entry: SealedSplitEntry = SEALED_SPLIT_TABLE[type];
+  return [...entry.moved, ...categories.flatMap((category) => entry.movedWith?.[category] ?? [])];
+}
 
 /** A message type with a sealed branch. */
 export type SealableMessageType = keyof typeof SEALED_SPLIT_TABLE;

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { HostLedger, HostMemoryPage, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/server/execution-core';
-import type { AgentMemoryProjectionMutation, AgentRef } from '@byok-sdk/protocol';
+import type { AgentMemoryProjectionPlainMutation, AgentRef } from '@byok-sdk/protocol';
 import { afterEach, expect, it, vi } from 'vitest';
 import { BetaLedger, createBetaMcpServer, createMemoryTools, type KeySpec } from './index';
 import { call, cleanup, connect } from './tools.test-support';
@@ -44,11 +44,11 @@ async function openMemoryHost() {
   });
   const sequence = new Map<string, number>();
   /** One redacted snapshot from the device, in K4's resident-memory profile. */
-  const project = async (residentMemory: string | null, rest: Partial<AgentMemoryProjectionMutation> = {}) => {
+  const project = async (residentMemory: string | null, rest: Partial<AgentMemoryProjectionPlainMutation> = {}) => {
     const agentRef = rest.agentRef ?? main;
     const sourceSeq = (sequence.get(agentRef.agentId) ?? 0) + 1; sequence.set(agentRef.agentId, sourceSeq);
     const bytes = JSON.stringify({ residentMemory });
-    const mutation: AgentMemoryProjectionMutation = { taskId: `task-${sourceSeq}`, agentRef, sessionRef: 'session', runtimeId: 'pi',
+    const mutation: AgentMemoryProjectionPlainMutation = { taskId: `task-${sourceSeq}`, agentRef, sessionRef: 'session', runtimeId: 'pi',
       grantRef: 'grant-1', writerEpoch: 1, sourceSeq, mutationId: randomUUID(), policyRevision: 'policy-1',
       snapshot: { redactedHash: memoryRevision(bytes), redactedByteCount: Buffer.byteLength(bytes), redactedBytes: Buffer.from(bytes).toString('base64url') },
       ...rest };

@@ -333,6 +333,21 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
             },
             "policyRevision": {
               "type": "string"
+            },
+            "sealing": {
+              "type": "object",
+              "properties": {
+                "scopeId": {
+                  "type": "string"
+                },
+                "epoch": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "scopeId",
+                "epoch"
+              ]
             }
           },
           "required": [

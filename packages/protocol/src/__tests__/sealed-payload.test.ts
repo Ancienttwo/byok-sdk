@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import {
+  AGENT_MESSAGE_MAX_BYTES,
   MESSAGE_PAYLOAD_SCHEMAS,
   MESSAGE_TYPES,
   createEnvelope,
@@ -24,6 +25,7 @@ import {
   isSealedPayload,
   isServerToDaemonType,
   requiredReceiverCapabilities,
+  sealedAgentMessageMaxContentLength,
   sealedBase64UrlByteLength,
   sealedPayloadPaddedLength,
   type MessageType,
@@ -94,6 +96,16 @@ describe('sealed payload v1: padded length (§8.6)', () => {
     }
   });
 
+  it('bounds a sealed Agent message by the JSON escaping of its body, within the category limit (#1045 O2)', () => {
+    expect(sealedAgentMessageMaxContentLength(AGENT_MESSAGE_MAX_BYTES)).toBe(1_572_875);
+    expect(sealedAgentMessageMaxContentLength(AGENT_MESSAGE_MAX_BYTES)).toBeLessThanOrEqual(SEALED_PAYLOAD_MAX_CONTENT_LENGTH);
+    // The worst body: every byte a control character that JSON writes as six bytes.
+    for (const maxBytes of [1, 4096, AGENT_MESSAGE_MAX_BYTES]) {
+      expect(JSON.stringify({ body: '\u0001'.repeat(maxBytes) }).length).toBe(sealedAgentMessageMaxContentLength(maxBytes));
+    }
+    expect(() => sealedAgentMessageMaxContentLength(AGENT_MESSAGE_MAX_BYTES + 1)).toThrow(RangeError);
+  });
+
   it('bounds v1 content at 2 MiB, so the padded limit is the padded length of 4 + 2 MiB', () => {
     expect(SEALED_PAYLOAD_MAX_CONTENT_LENGTH).toBe(2 * 1024 * 1024);
     expect(SEALED_PAYLOAD_MAX_PADDED_LENGTH).toBe(sealedPayloadPaddedLength(4 + 2 * 1024 * 1024));
@@ -142,8 +154,7 @@ describe('sealed payload v1: the sealed member', () => {
     const cases: [string, Json][] = [
       ['unknown version', { ...good, v: 2 }],
       ['unknown suite', { ...good, suite: 'byok-sealed-v2.hkdf-sha256.aes-256-gcm' }],
-      ['C4 category', { ...good, category: 'memory-projection' }],
-      ['C2 category', { ...good, category: 'agent-message' }],
+      ['unknown category', { ...good, category: 'agent-draft' }],
       ['illegal padded length', { ...good, paddedLength: 300 }],
       ['padded length above the v1 limit', { ...good, paddedLength: sealedPayloadPaddedLength(SEALED_PAYLOAD_MAX_PADDED_LENGTH + 1) }],
       ['short ciphertext', { ...good, ciphertext: zeros((good.paddedLength as number) + 15) }],
@@ -193,7 +204,9 @@ describe('sealed payload v1: the sealed offer', () => {
         expect(parse('task.offer', { ...payload, instruction: undefined }), `${lane} without instruction`).toBe(false);
         const sealing = payload.sealing as Json;
         expect(parse('task.offer', { ...payload, sealing: { ...sealing, categories: ['task-output', 'task-input'] } }), 'canonical order').toBe(false);
-        expect(parse('task.offer', { ...payload, sealing: { ...sealing, categories: ['agent-message'] } }), 'C2 is not in v1').toBe(false);
+        expect(parse('task.offer', { ...payload, sealing: { ...sealing, categories: ['agent-message', 'task-output'] } }), 'C2 (#1045)').toBe(true);
+        expect(parse('task.offer', { ...payload, sealing: { ...sealing, categories: ['memory-projection'] } }), 'C4 needs task-output').toBe(false);
+        expect(parse('task.offer', { ...payload, sealing: { ...sealing, categories: ['task-output', 'memory-projection'] } }), 'C4 (#1045)').toBe(true);
       }
     }
   });
@@ -392,19 +405,23 @@ describe('sealed payload v1: a plaintext branch never carries sealed content', (
   });
 });
 
+/** The flag a sealed branch needs: v1 for task input and output, v2 for the #1045 categories. */
+const markerFlag = (type: SealableMessageType) => SEALED_SPLIT_TABLE[type].category === 'agent-message' ? 'sealed-payload-v2' : 'sealed-payload-v1';
+
 describe('sealed payload v1: capability gates (§8.4)', () => {
-  it('gates the marker of each sealed branch on sealed-payload-v1, advertised by its receiver', () => {
+  it('gates the marker of each sealed branch on its category flag, advertised by its receiver', () => {
     for (const type of SEALABLE_TYPES) {
       const { marker } = SEALED_SPLIT_TABLE[type];
       const advertisedBy = isServerToDaemonType(type) ? 'device' : 'server';
-      expect(WIRE_ADDITIONS.filter((entry) => entry.surface === type && entry.rule === 'gated' && entry.capability === 'sealed-payload-v1' && entry.field !== 'code'), type)
-        .toEqual([{ kind: 'envelope', rule: 'gated', surface: type, field: marker, capability: 'sealed-payload-v1', advertisedBy }]);
+      const capability = markerFlag(type);
+      expect(WIRE_ADDITIONS.filter((entry) => entry.surface === type && entry.rule === 'gated' && entry.capability === capability && entry.field !== 'code'), type)
+        .toEqual([{ kind: 'envelope', rule: 'gated', surface: type, field: marker, capability, advertisedBy }]);
       // Every row of the type names its receiver.
       for (const entry of WIRE_ADDITIONS.filter((candidate) => candidate.surface === type && candidate.rule === 'gated')) {
         expect(entry.rule === 'gated' && entry.advertisedBy, `${type} ${JSON.stringify(entry)}`).toBe(advertisedBy);
       }
       for (const line of corpus.filter((candidate) => candidate.type === type && isSealedPayload(type, candidate.payload))) {
-        expect(requiredReceiverCapabilities(type, line.payload), type).toContain('sealed-payload-v1');
+        expect(requiredReceiverCapabilities(type, line.payload), type).toContain(capability);
       }
     }
   });
@@ -431,7 +448,7 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
       const sealedFlags = requiredReceiverCapabilities(line.type, line.payload);
       const plainFlags = requiredReceiverCapabilities(line.type, plaintext);
       expect(plainFlags.filter((flag) => !sealedFlags.includes(flag)), line.type).toEqual([]);
-      expect(sealedFlags, line.type).toContain('sealed-payload-v1');
+      expect(sealedFlags, line.type).toContain(markerFlag(line.type as SealableMessageType));
     }
     // The corpus has sealed offers whose plaintext fields carry other gates.
     expect(sealedLines.some((line) => requiredReceiverCapabilities(line.type, line.payload).includes('agent-home-contract'))).toBe(true);
@@ -466,7 +483,22 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
       if (isSealedPayload(line.type, line.payload)) continue;
       if (line.type === 'task.decline' && SEALED_DECLINE_CODES.includes(line.payload.code as never)) continue;
       expect(requiredReceiverCapabilities(line.type, line.payload), line.type).not.toContain('sealed-payload-v1');
+      expect(requiredReceiverCapabilities(line.type, line.payload), line.type).not.toContain('sealed-payload-v2');
     }
+  });
+
+  it('gates an offer whose sealing lists a v2 category, and a sealed disposition, on the device flag (#1045)', () => {
+    const sealing = { scopeId: 'scope-1', epoch: 1 };
+    const sealedFlags = (categories: string[]) => requiredReceiverCapabilities('task.offer', { sealing: { ...sealing, categories } })
+      .filter((flag) => flag.startsWith('sealed-payload-'));
+    expect(sealedFlags(['task-input', 'task-output'])).toEqual(['sealed-payload-v1']);
+    expect(sealedFlags(['task-input', 'agent-message', 'task-output'])).toEqual(['sealed-payload-v1', 'sealed-payload-v2']);
+    expect(sealedFlags(['task-input', 'task-output', 'memory-projection'])).toEqual(['sealed-payload-v1', 'sealed-payload-v2']);
+    const disposition = corpus.find((line) => line.type === 'agent.message.disposition' && line.payload.contentMac !== undefined)!;
+    expect(requiredReceiverCapabilities('agent.message.disposition', disposition.payload)).toEqual(['sealed-payload-v2']);
+    const plainDisposition = corpus.find((line) => line.type === 'agent.message.disposition' && line.payload.contentHash !== undefined)!;
+    expect(requiredReceiverCapabilities('agent.message.disposition', plainDisposition.payload)).toEqual([]);
+    expect(parse('agent.message.disposition', { ...disposition.payload, contentHash: plainDisposition.payload.contentHash }), 'both names').toBe(false);
   });
 });
 
@@ -504,12 +536,12 @@ describe('sealed payload v1: the split table', () => {
   const entries = Object.entries(SEALED_SPLIT_TABLE) as [SealableMessageType, SealedSplitEntry][];
   const jsonSchema = (schema: z.ZodType): Json => z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as Json;
 
-  it('names only current message types, and leaves out what v1 defers (D17)', () => {
+  it('names only current message types, and leaves out what stays plaintext (D17, #1045 O3)', () => {
     for (const [type, entry] of entries) {
       expect(MESSAGE_TYPES).toContain(type);
       expect(isServerToDaemonType(type), type).toBe(entry.category === 'task-input');
     }
-    for (const deferred of ['agent.input.preparation', 'agent.message.draft', 'agent.message.publish', 'agent.egress.reliable'] as const) {
+    for (const deferred of ['agent.input.preparation', 'agent.message.draft', 'agent.egress.reliable'] as const) {
       expect(entries.some(([type]) => (type as string) === deferred), deferred).toBe(false);
     }
     // A prepared Execution is deferred too: the sealed offer drops `preparation`.

@@ -1,4 +1,4 @@
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, type AgentMessagePublishPlainPayload } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { TENANT_A, TENANT_B, createHarness } from './support/harness';
 
@@ -70,7 +70,7 @@ describe('Host exact Agent message disposition readback', () => {
     expect(await harness.cloud.readAgentMessageDisposition(TENANT_B, device.deviceId, taskId, message.payload)).toBeUndefined();
     expect(await harness.cloud.readAgentMessageDisposition(TENANT_A, 'other-device', taskId, message.payload)).toBeUndefined();
     expect(await harness.cloud.readAgentMessageDisposition(TENANT_A, device.deviceId, 'other-task', message.payload)).toBeUndefined();
-    expect(await harness.cloud.readAgentMessageDisposition(TENANT_A, device.deviceId, taskId, { ...message.payload, body: 'other' })).toBeUndefined();
+    expect(await harness.cloud.readAgentMessageDisposition(TENANT_A, device.deviceId, taskId, { ...(message.payload as AgentMessagePublishPlainPayload), body: 'other' })).toBeUndefined();
     const stored = await harness.stores.tasks.readAgentMessage(TENANT_A, {
       taskId, deviceId: device.deviceId, messageId: message.payload.messageId, payloadBody: JSON.stringify(message.payload),
     });
@@ -80,7 +80,7 @@ describe('Host exact Agent message disposition readback', () => {
       '{',
       JSON.stringify({ payload: message.payload, disposition: { ...receipt, outcome: 'invented' } }),
       JSON.stringify({ payload: message.payload, disposition: { ...receipt, sessionRef: 'other-session' } }),
-      JSON.stringify({ payload: { ...message.payload, body: 'other' }, disposition: receipt }),
+      JSON.stringify({ payload: { ...(message.payload as AgentMessagePublishPlainPayload), body: 'other' }, disposition: receipt }),
     ]) {
       lookup.mockResolvedValueOnce({ ...stored!, terminalBody });
       await expect(read()).rejects.toThrow('Invalid persisted Agent message disposition');

@@ -9,6 +9,8 @@ import {
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
 import { AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES } from '@byok-sdk/protocol';
+import { generateScopeKey } from '@byok-sdk/core/sealed-payload';
+import { SealedTasks } from '../daemon/sealed-task';
 import type {
   AgentMemoryFilesystem,
   AgentMemoryFilesystemFileState,
@@ -148,5 +150,36 @@ describe('Agent-memory projection outbox P1 regression', () => {
 
     filesystem.files.set(filePath, 'x'.repeat(AGENT_MEMORY_MAX_LOCAL_LOG_BYTES + 1));
     await expect(AgentMemoryRedactedOutbox.open(taskContext(filesystem, 'task-a', 'session-a'), grant)).rejects.toThrow('size_limit');
+  });
+
+  it('sends a sealed grant\'s snapshot only sealed, appends none without a key, and stops on a pending record of the other form (#1045 C4)', async () => {
+    const filesystem = new InMemoryFilesystem();
+    const scopeKey = generateScopeKey();
+    let lost = true;
+    const sealer = new SealedTasks({
+      keyring: {
+        scopeCategories: async () => ['memory-projection'], openingKey: async () => scopeKey, acceptHeader: async () => true,
+        sealingKey: async () => (lost ? undefined : { scopeKey, epoch: 1, sender: 'm'.repeat(43), chainHead: { seq: 1, hash: `sha256:${'0'.repeat(64)}` } }),
+      },
+      tenantId: 'tenant-memory', deviceId: 'device-memory',
+      blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
+      serverCapabilities: () => [],
+    });
+    const sealedGrant = { ...grant, sealing: { scopeId: 'scope-agent', epoch: 1 } } as const;
+    const outbox = await AgentMemoryRedactedOutbox.open(taskContext(filesystem, 'task-a', 'session-a'), sealedGrant, sealer);
+    await expect(outbox.append(encoder.encode('{"summary":"secret"}'))).rejects.toThrow('cannot be sealed');
+    expect(outbox.pending()).toEqual([]);
+
+    lost = false;
+    const record = await outbox.append(encoder.encode('{"summary":"secret"}'));
+    expect(record.mutation.sealed).toMatchObject({ category: 'memory-projection', scope: { id: 'scope-agent', epoch: 1 } });
+    expect(record.mutation).not.toHaveProperty('snapshot');
+    expect(filesystem.files.get(`.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`)).not.toContain(Buffer.from('{"summary":"secret"}').toString('base64url'));
+
+    const published: unknown[] = [];
+    const plain = await AgentMemoryRedactedOutbox.open(taskContext(filesystem, 'task-b', 'session-b'), grant);
+    await expect(plain.replay({ publish: async ({ mutation }) => { published.push(mutation); return { accepted: true }; } }))
+      .rejects.toThrow('does not match its grant sealing');
+    expect(published).toEqual([]);
   });
 });

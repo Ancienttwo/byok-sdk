@@ -118,6 +118,34 @@ from outside (#1269).
   `runtimes.<id>.versionPolicy` reaches their version verdict, and an invalid
   `piByokLauncher` throws the same error as `createDaemon`.
 
+- **Feature (protocol, client, cloud, cloud-dataplane; #1045)** — sealed
+  payload v2 seals two more categories end to end. A task whose `sealing`
+  names `agent-message` sends its Agent message body as ciphertext, which the
+  cloud hands to the new `agentMessage.consumeSealed`; a task that names
+  `memory-projection` (with `task-output`) moves its terminal's memory
+  evidence into the sealed terminal; and a memory projection grant with
+  `sealing: { scopeId, epoch }` makes the daemon seal the hosted snapshot
+  under an Agent memory scope. Device and cloud advertise `sealed-payload-v2`;
+  each new offer category, the sealed publish and the sealed disposition are
+  gated additions. Nothing falls back to plaintext: a task or grant that seals
+  a category refuses its plaintext form, a submission that seals
+  `agent-message` without `consumeSealed` is refused with
+  `agent_message_sealed_consumer_missing`, and a projection whose form does
+  not match its grant gets 409 `agent_memory_projection_sealing_mismatch`.
+  Drafts, egress payloads, truth `memory` records and input preparation stay
+  plaintext. See [docs/migrations/1045-e2ee-v2.md](docs/migrations/1045-e2ee-v2.md).
+
+- **Breaking (cloud, cloud-dataplane; #1045)** — `ByokCloudOptions.agentMessage`
+  is an `AgentMessageConsumers` with optional `consume` and `consumeSealed`,
+  and `handleInboundEnvelope` takes that object in place of the `consume`
+  function. `AgentMemoryProjectionCommitInput` is a union of a plaintext
+  input with decoded bytes and a sealed input without them, so a custom
+  `AgentMemoryProjectionStore` must store and replay the sealed form;
+  `AgentMemoryProjectionAuthorization` carries the grant's optional `sealing`.
+  Postgres migration 0037 adds the sealed member to the projection head and
+  `content_mac`/`padded_length` to its receipt, with one-form checks; it
+  rewrites no data.
+
 ## 0.32.0 — 2026-11-01 (published)
 
 0.32.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

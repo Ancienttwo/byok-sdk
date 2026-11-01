@@ -72,6 +72,14 @@ export const AGENT_INPUT_PREPARATION_CAPABILITY =
 export const SEALED_PAYLOAD_CAPABILITY = 'sealed-payload-v1' as const;
 
 /**
+ * Sealed payload v2 (#1045): the `agent-message` and `memory-projection`
+ * categories. A device advertises it before a Host may send it an offer whose
+ * `sealing` names either category, or a sealed message disposition; a server
+ * advertises it before a device may send it a sealed `agent.message.publish`.
+ */
+export const SEALED_PAYLOAD_V2_CAPABILITY = 'sealed-payload-v2' as const;
+
+/**
  * A server advertises it before a device may send a sealed task output that
  * names its ciphertext blob (`sealed.ciphertextRef`) instead of carrying it
  * inline. The server then holds the blob for the life of the task.

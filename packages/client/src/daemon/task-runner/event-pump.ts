@@ -9,7 +9,7 @@ import { spillOversizedEvent } from '../event-spill';
 import { ProgressEventTooLargeError } from '../progress-batcher';
 import type { ActiveTask } from './support';
 import { classifyToolCall, describeHighRiskToolCall } from '../../tool-authorization';
-import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage, taskFinalizing, taskTearingDown, taskMessageAccepted, taskMessageSendAttempted } from './support';
+import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, agentMessageSealing, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage, taskFinalizing, taskTearingDown, taskMessageAccepted, taskMessageSendAttempted } from './support';
 import type { TaskRunner } from '../task-runner';
 import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
 import { hostFor } from './host';
@@ -245,7 +245,7 @@ async function pumpTurnEnd(this: TaskRunner, active: ActiveTask, event: Extract<
             agentRef: active.agentRef, requirement: active.messageRequirement,
             contentType: active.messageRequirement.contentType, body,
             ...(outcome.failure === undefined ? {} : { recoverySessionRef: active.session.sessionRef }),
-            maxPendingEvents: 64, maxPendingBytes: 4 * 1024 * 1024 });
+            maxPendingEvents: 64, maxPendingBytes: 4 * 1024 * 1024, ...agentMessageSealing(this, active.taskId) });
         } catch (error) {
           // An in-flight tool author may win the immutable draft.
           if (!taskMessageAccepted(this, active.taskId) && outbox.get(active.taskId) === undefined) throw error;

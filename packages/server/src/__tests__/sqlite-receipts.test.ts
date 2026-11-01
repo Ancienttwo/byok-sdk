@@ -101,7 +101,7 @@ describe('SQLite receipt recovery', () => {
       fault.exec("CREATE TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
       fault.close();
       runtime = open();
-      await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume).then((result) => result.outcome)).rejects.toThrow('injected finalize fault');
+      await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, { consume }).then((result) => result.outcome)).rejects.toThrow('injected finalize fault');
       expect(calls).toBe(1);
       expect(await read()).toBeUndefined();
       await runtime.stores.close(); runtime = open();
@@ -110,7 +110,7 @@ describe('SQLite receipt recovery', () => {
       await runtime.stores.close();
       const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_message_finalize'); repair.close();
       runtime = open();
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, { consume }).then((result) => result.outcome)).toBe('accepted');
       expect(calls).toBe(2);
       const receipt = await read();
       expect(receipt).toMatchObject({ outcome, messageId: message.payload.messageId, agentRef });
@@ -124,7 +124,7 @@ describe('SQLite receipt recovery', () => {
       expect(await runtime.cloud.readAgentMessageDisposition(other, deviceId, taskId, message.payload)).toBeUndefined();
       expect(await runtime.cloud.readAgentMessageDisposition(tenant, 'other-device', taskId, message.payload)).toBeUndefined();
       // Envelope dedup is process-local; durable message replay must still skip the consumer.
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, { consume }).then((result) => result.outcome)).toBe('accepted');
       expect(calls).toBe(2);
       expect(await read()).toEqual(receipt);
     } finally { await runtime.stores.close(); }

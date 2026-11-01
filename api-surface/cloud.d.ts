@@ -522,6 +522,8 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             scopeId: z.ZodString;
             epoch: z.ZodNumber;
             categories: z.ZodArray<z.ZodEnum<{
+                "agent-message": "agent-message";
+                "memory-projection": "memory-projection";
                 "task-input": "task-input";
                 "task-output": "task-output";
             }>>;
@@ -602,7 +604,7 @@ export declare function recordAgentHomeProjectionCompletion(receipts: TenantBoun
  * import, merge, history, RAG, or product-fact surface.
  */
 import type { TenantId } from '@byok-sdk/core';
-import { type AgentMemoryProjectionMutation, type AgentMemoryProjectionReceipt, type AgentMemoryProjectionEraseResult } from '@byok-sdk/protocol';
+import { type AgentMemoryProjectionMutation, type AgentMemoryProjectionPlainMutation, type AgentMemoryProjectionReceipt, type AgentMemoryProjectionSealedMutation, type AgentMemoryProjectionEraseResult } from '@byok-sdk/protocol';
 export type { AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from '@byok-sdk/protocol';
 export interface AgentMemoryProjectionAuthorizerInput {
     readonly tenantId: TenantId;
@@ -616,8 +618,18 @@ export interface AgentMemoryProjectionAuthorizerInput {
     readonly writerEpoch: AgentMemoryProjectionMutation['writerEpoch'];
     readonly policyRevision: AgentMemoryProjectionMutation['policyRevision'];
 }
+/** The Agent memory scope a grant seals its snapshots under (#1045 C4). */
+export interface AgentMemoryProjectionSealing {
+    readonly scopeId: string;
+    readonly epoch: number;
+}
+/**
+ * An authorized result carries the `sealing` of the grant the Host issued:
+ * the authorizer is the authority for which form the snapshot must take.
+ */
 export type AgentMemoryProjectionAuthorization = {
     readonly outcome: 'authorized';
+    readonly sealing?: AgentMemoryProjectionSealing;
 } | {
     readonly outcome: 'denied';
     readonly reasonCode: string;
@@ -638,18 +650,30 @@ export interface AgentMemoryProjectionAuthorizer {
         readonly agentId: string;
     }): Promise<void>;
 }
-/** Input to the durable projection store. `redactedBytes` has already been decoded from the portable base64url body. */
-export interface AgentMemoryProjectionCommitInput {
+/**
+ * Input to the durable projection store. A plaintext snapshot carries
+ * `redactedBytes`, already decoded from the portable base64url body. A sealed
+ * snapshot carries only its sealed member, stored as received: the Host never
+ * holds its plaintext or a plaintext hash.
+ */
+export type AgentMemoryProjectionCommitInput = {
     readonly tenantId: TenantId;
     readonly deviceId: string;
-    readonly mutation: AgentMemoryProjectionMutation;
+    readonly mutation: AgentMemoryProjectionPlainMutation;
     readonly redactedBytes: Uint8Array;
-}
+} | {
+    readonly tenantId: TenantId;
+    readonly deviceId: string;
+    readonly mutation: AgentMemoryProjectionSealedMutation;
+    readonly redactedBytes?: never;
+};
 /**
  * Durable hosted snapshot and immutable metering receipt authority.
  *
- * `commit` must hash the supplied bytes and compare them with the portable
- * redacted hash before every write. It accepts a new epoch only at sourceSeq
+ * For a plaintext snapshot, `commit` must hash the supplied bytes and compare
+ * them with the portable redacted hash before every write; a sealed snapshot
+ * is stored and metered by its padded length. An exact replay compares the
+ * sealed member's `contentMac` and `paddedLength`. It accepts a new epoch only at sourceSeq
  * one, accepts same-epoch writes only gap-free, returns `idempotent` for an
  * exact replay, and rejects stale/gap/binding/hash mismatches. The accepted
  * snapshot and its metering receipt share one transaction boundary.
@@ -665,6 +689,40 @@ export interface AgentMemoryProjectionStore {
         readonly agentId: string;
     }): Promise<AgentMemoryProjectionEraseResult>;
 }
+// ==== @byok-sdk/cloud dist/agent-message-disposition.d.ts ====
+import { type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessagePublishPlainPayload, type AgentMessagePublishSealedPayload, type AgentMessageServerContext, type AgentRef } from '@byok-sdk/protocol';
+import type { TenantId } from '@byok-sdk/core';
+/** A product consumer's terminal decision on one Agent message. */
+export interface AgentMessageDecision {
+    readonly outcome: 'accepted' | 'held' | 'refused';
+    readonly reasonCode?: string;
+}
+/** What a product consumer reads about one Agent message; the payload is the received one. */
+export interface AgentMessageConsumeInput<Payload> {
+    readonly tenant: TenantId;
+    readonly deviceId: string;
+    readonly taskId: string;
+    readonly context: AgentMessageServerContext;
+    readonly payload: Payload;
+}
+/**
+ * The product consumers of Agent messages. `consume` takes a plaintext message;
+ * `consumeSealed` takes the sealed message of a task whose `sealing` names
+ * `agent-message` (#1045), which only a member can open.
+ */
+export interface AgentMessageConsumers {
+    consume?(input: AgentMessageConsumeInput<AgentMessagePublishPlainPayload>): Promise<AgentMessageDecision>;
+    consumeSealed?(input: AgentMessageConsumeInput<AgentMessagePublishSealedPayload>): Promise<AgentMessageDecision>;
+}
+/**
+ * Whether the message fits the frozen byte limit: the exact `byteCount` of a
+ * plaintext message, or the one padded length a body of that limit can seal to.
+ */
+export declare function agentMessageWithinLimit(payload: AgentMessagePublishPayload, maxBytes: number): boolean;
+/** The disposition names a sealed message by its `contentMac` and a plaintext one by its `contentHash`. */
+export declare function sameAgentMessageContent(payload: AgentMessagePublishPayload, disposition: AgentMessageDispositionPayload): boolean;
+export declare function parseAgentMessageDisposition(payload: AgentMessagePublishPayload, terminalBody: string): AgentMessageDispositionPayload;
+export declare function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean;
 // ==== @byok-sdk/cloud dist/agent-message-draft.d.ts ====
 import type { TenantId } from '@byok-sdk/core';
 import { type AgentRef } from '@byok-sdk/protocol';
@@ -1468,6 +1526,7 @@ import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
 import { type ByokCloudObserver } from './inbound';
+import type { AgentMessageConsumers } from './agent-message-disposition';
 import { type AgentHomeProjectionReceiptInput } from './agent-home-projections';
 import { type InputPreparationReceiptInput } from './input-preparations';
 import type { AgentMemoryProjectionAuthorizer, AgentMemoryProjectionStore } from './agent-memory-projection';
@@ -1538,20 +1597,11 @@ export interface ByokCloudOptions {
      * one logical effect and the same outcome/reasonCode on every exact replay.
      * A thrown error leaves admission pending for transport retry; only a returned
      * outcome is a terminal product decision. Do not use callback invocation count
-     * as execution authority.
+     * as execution authority. `consumeSealed` receives the message of a task
+     * whose `sealing` names `agent-message`; a submission that seals it is
+     * refused while `consumeSealed` is absent.
      */
-    readonly agentMessage?: {
-        consume(input: {
-            readonly tenant: TenantId;
-            readonly deviceId: string;
-            readonly taskId: string;
-            readonly context: AgentMessageServerContext;
-            readonly payload: AgentMessagePublishPayload;
-        }): Promise<{
-            readonly outcome: 'accepted' | 'held' | 'refused';
-            readonly reasonCode?: string;
-        }>;
-    };
+    readonly agentMessage?: AgentMessageConsumers;
     /**
      * Post-commit relay for envelopes this cloud durably accepted. Read-only by
      * construction: it is told after the write, it returns `void`, and a throw
@@ -2857,6 +2907,12 @@ export declare const CLOUD_ERROR_CODES: {
     readonly task_offer_append_refused: 'task_offer_append_refused';
     /** A first-write-wins Agent control record was replayed with a different body. */
     readonly agent_content_request_mismatch: 'agent_content_request_mismatch';
+    /**
+     * A task that seals its Agent message (#1045) was submitted to a cloud with
+     * no `agentMessage.consumeSealed`, so no consumer could ever decide it.
+     * Raised before any attempt, receipt or mailbox write.
+     */
+    readonly agent_message_sealed_consumer_missing: 'agent_message_sealed_consumer_missing';
     /** A durable mailbox receipt id resolved to an envelope other than its exact acknowledgement. */
     readonly mailbox_receipt_mismatch: 'mailbox_receipt_mismatch';
     /** A task-free Agent-home request id already names a different immutable desired projection. */
@@ -2895,6 +2951,12 @@ export declare const CLOUD_ERROR_CODES: {
     readonly agent_memory_projection_epoch_exhausted: 'agent_memory_projection_epoch_exhausted';
     /** A hosted memory mutation skipped or reset a required source sequence. */
     readonly agent_memory_projection_sequence_gap: 'agent_memory_projection_sequence_gap';
+    /**
+     * A hosted memory mutation's form did not match its grant (#1045 C4): a
+     * plaintext snapshot under a grant with `sealing`, a sealed one under a grant
+     * without it, or a sealed one under another scope or epoch.
+     */
+    readonly agent_memory_projection_sealing_mismatch: 'agent_memory_projection_sealing_mismatch';
 };
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];
 export declare class ByokCloudError extends Error {
@@ -3077,6 +3139,7 @@ export declare function truthManifestHandler(deps: TruthRouteDeps): (c: Context)
 export declare function truthGetHandler(deps: TruthRouteDeps): (c: Context) => Promise<Response>;
 export declare function truthPutHandler(deps: TruthRouteDeps): (c: Context) => Promise<Response>;
 // ==== @byok-sdk/cloud dist/inbound.d.ts ====
+import { type AgentMessageConsumers } from './agent-message-disposition';
 /**
  * The single inbound choke point for every daemon -> cloud envelope.
  *
@@ -3114,7 +3177,7 @@ export declare function truthPutHandler(deps: TruthRouteDeps): (c: Context) => P
  *    (`onInboundRefused`). It runs after the outcome is fixed, it cannot
  *    change it, and it is not the admission hook.
  */
-import { type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type Envelope, type MessageType } from '@byok-sdk/protocol';
+import { type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type Envelope, type MessageType } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
 import { type ActivityBounds } from './coordination';
 import type { TenantStores } from './tenant-stores';
@@ -3191,16 +3254,7 @@ export interface InboundRefused {
     readonly type: MessageType;
     readonly reason: InboundRefusalReason;
 }
-export declare function handleAgentMessagePublish(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload, consume: ((input: {
-    readonly tenant: TenantStores['tenant'];
-    readonly deviceId: string;
-    readonly taskId: string;
-    readonly context: AgentMessageServerContext;
-    readonly payload: AgentMessagePublishPayload;
-}) => Promise<{
-    readonly outcome: 'accepted' | 'held' | 'refused';
-    readonly reasonCode?: string;
-}>) | undefined, alreadyDeduplicated: boolean): Promise<Refused | {
+export declare function handleAgentMessagePublish(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload, consumers: AgentMessageConsumers | undefined, alreadyDeduplicated: boolean): Promise<Refused | {
     readonly outcome: Exclude<InboundOutcome, 'rejected'>;
     readonly disposition?: AgentMessageDispositionPayload;
 }>;
@@ -3229,6 +3283,7 @@ export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
 export type { TaskAgentMessage } from './task-agent-message';
+export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition';
 export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, SealedAgentDispatchInput, SealedAgentEgressDispatchInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
@@ -3242,7 +3297,7 @@ export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/
 export { ByokCloudError, CLOUD_ERROR_CODES, DeviceRetiredError, TaskOfferAppendRefusedError, isCloudError } from './errors';
 export type { CloudErrorCode } from './errors';
 export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
-export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
+export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionSealing, AgentMemoryProjectionStore, } from './agent-memory-projection';
 export type { TaskArchiveCounts, TaskArchiveListInput, TaskArchiveStepCounts, TaskArchiveStore, TaskArchiveStoreInput, TaskArchiveStoreResult, TaskArchiveWork, } from './task-archive';
 export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
@@ -3649,7 +3704,7 @@ export declare class InMemoryAgentEgressStore implements AgentEgressStore {
 /** In-memory conformance implementation for the one-way hosted memory projection ports. */
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionReceipt } from '@byok-sdk/protocol';
-import type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionStore } from '../../agent-memory-projection';
+import type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionSealing, AgentMemoryProjectionStore } from '../../agent-memory-projection';
 import type { CloudCrypto } from '../../crypto/port';
 /**
  * Reference transaction semantics: current snapshot bytes and immutable
@@ -3668,7 +3723,10 @@ export declare class InMemoryAgentMemoryProjectionStore implements AgentMemoryPr
 /** Test/reference authorizer whose grant registry demonstrates revocation without model booleans. */
 export declare class InMemoryAgentMemoryProjectionAuthorizer implements AgentMemoryProjectionAuthorizer {
     #private;
-    grant(input: AgentMemoryProjectionAuthorizerInput): void;
+    /** `sealing` names the Agent memory scope this grant's snapshots are sealed under (#1045 C4). */
+    grant(input: AgentMemoryProjectionAuthorizerInput & {
+        readonly sealing?: AgentMemoryProjectionSealing;
+    }): void;
     authorize(input: AgentMemoryProjectionAuthorizerInput): Promise<AgentMemoryProjectionAuthorization>;
     revoke(input: {
         readonly tenantId: TenantId;
@@ -5066,7 +5124,11 @@ export interface ReceiptCollectExpiredInput extends CollectExpiredInput {
 // ==== @byok-sdk/cloud dist/task-agent-message.d.ts ====
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { TenantStores } from './tenant-stores';
-/** SDK transmission evidence; payload remains untrusted and never authors a Host product message. */
+/**
+ * SDK transmission evidence; payload remains untrusted and never authors a Host
+ * product message. A task whose `sealing` names `agent-message` (#1045) holds
+ * the sealed message, which only a member can open.
+ */
 export interface TaskAgentMessage {
     readonly payload: AgentMessagePublishPayload;
     readonly context: AgentMessageServerContext;

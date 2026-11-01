@@ -241,12 +241,12 @@ describe('inbound lifecycle recovery', () => {
       return { outcome: 'accepted' as const };
     };
 
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume).then((result) => result.outcome)).rejects.toThrow(
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, { consume }).then((result) => result.outcome)).rejects.toThrow(
       'fault after agent message terminal',
     );
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume).then((result) => result.outcome)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, { consume }).then((result) => result.outcome)).resolves.toBe('accepted');
     expect(consumed).toBe(1);
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume).then((result) => result.outcome)).resolves.toBe('duplicate');
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, { consume }).then((result) => result.outcome)).resolves.toBe('duplicate');
   });
 
   it('keeps two exact AgentRefs on one device isolated by their task attempts and terminal receipts', async () => {

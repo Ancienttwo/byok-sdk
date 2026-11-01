@@ -3,6 +3,7 @@ import {
   decodeEnvelope,
   type AgentEgressPolicy,
   type AgentRef,
+  type AgentMessagePublishPlainPayload,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { agentReliabilityKey } from '../agent-reliability';
@@ -152,7 +153,7 @@ describe('hosted Agent egress contract', () => {
     expect(dispositions).toHaveLength(1);
     expect(dispositions[0]).toMatchObject({ task_id: offered.taskId, payload: { outcome: 'accepted', messageId: message.payload.messageId } });
     const second = createEnvelope('agent.message.publish', {
-      ...message.payload,
+      ...(message.payload as AgentMessagePublishPlainPayload),
       messageId: '10000000-0000-4000-8000-000000000098',
       body: 'second',
       byteCount: 6,

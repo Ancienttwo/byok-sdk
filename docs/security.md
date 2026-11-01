@@ -806,7 +806,8 @@ Issue [#654](https://github.com/Ancienttwo/byok-sdk/issues/654) asks for end-to-
 The design draft is [`docs/plans/2026-10-22-654-hosted-wire-e2ee.md`](plans/2026-10-22-654-hosted-wire-e2ee.md).
 A task whose offer has `sealing` keeps each category named in `sealing.categories` (task input, task output, or both) as ciphertext ([protocol §2.5](protocol.md#25-sealed-payload-v1-654-gated-addition)).
 For those categories the Host stores and reads back only the sealed member and the closed plaintext codes.
-Agent messages, egress, memory projections and routing metadata are not sealed in v1, so their rows below apply to a sealed task too.
+Sealed payload v2 ([#1045](https://github.com/Ancienttwo/byok-sdk/issues/1045)) adds two categories: a task whose `sealing` names `agent-message` keeps its Agent message body as ciphertext, and a memory projection grant with `sealing` keeps the hosted snapshot as ciphertext. A task whose `sealing` names `memory-projection` also moves its terminal's memory evidence into the task output ciphertext.
+Drafts, egress payloads, truth `memory` records and routing metadata are not sealed by v1 or v2, so their rows below apply to a sealed task too.
 The Host refuses a draft for a sealed task.
 [Sealed tasks](#sealed-tasks) states what a sealed task still shows the Host and what sealing does not protect.
 
@@ -824,10 +825,14 @@ The categories are the ones that the #654 design uses (§6.1).
 | --- | --- | --- | --- | --- | --- | --- |
 | C1 Task input: `instruction` with any ContextPack, `agent.input.preparation` context, `task.steer` text | All | `device_request_receipts.body` (`task-offer:`, `agent-input-preparation-request:`); `outbox.body` | An instruction blob; large preparation context | None from the SDK | A copy | Task receipts, outbox bodies and R2: `redactTasks`. Other receipts: tenant erasure only. Outbox rows: maintenance, `discardDeadLetter` or tenant erasure. R2: also maintenance or tenant erasure. |
 | C1 sealed: `instruction` and `task.steer` text of a task whose `sealing` names `task-input` | Ciphertext and the metadata in [Sealed tasks](#sealed-tasks) | `device_request_receipts.body` (`task-offer:`) and `outbox.body` hold the sealed member | A ciphertext blob, if the member names `ciphertextRef` | None from the SDK | A copy of the ciphertext | As unsealed C1. A [scope shred](#scope-shred) also leaves the live ciphertext unopenable. |
-| C2 Agent message: `agent.message.publish` body, `agent.egress.reliable` payload, draft text | All | `agent_message_admission.payload_body` and `terminal_body`; `agent_egress_event.payload_json`; `agent_message_draft.text` | — | None from the SDK | A copy | Admission bodies and drafts: `redactTasks`. Egress rows: tenant erasure only. A draft: also at the terminal or after its TTL. |
+| C2 Agent message: `agent.message.publish` body | All | `agent_message_admission.payload_body` and `terminal_body` | — | None from the SDK | A copy | `redactTasks`. |
+| C2 sealed: the `agent.message.publish` body of a task whose `sealing` names `agent-message` | Ciphertext and the metadata in [Sealed tasks](#sealed-tasks) | `agent_message_admission.payload_body` and `terminal_body` hold the sealed member, with no `contentHash` or `byteCount` | A ciphertext blob, if the member names `ciphertextRef` | None from the SDK | A copy of the ciphertext | As unsealed C2. A [scope shred](#scope-shred) also leaves the live ciphertext unopenable. |
+| C2 egress and drafts: `agent.egress.reliable` payload, draft text. Not sealed by v2 | All | `agent_egress_event.payload_json`; `agent_message_draft.text` | — | None from the SDK | A copy | Egress rows: tenant erasure only. Drafts: `redactTasks`, at the terminal or after their TTL. |
 | C3 Task output: `summary`, `finalMessage`, `document`, artifacts, progress events, approval summaries, failure and cancel reasons, truth `task.terminal` | All | `device_request_receipts.body` (`task:<id>:terminal`); `activity_log_entry.body`; `approval_timeline_tail.entries`; `task.terminal_cause`; `attested_record.body_inline` | Artifact blobs | None from the SDK | A copy | Terminal receipt, `task.terminal_cause`, activity and approval entries, artifacts: `redactTasks`. Truth records and the `task` row: tenant erasure only. Activity and approval entries: also after their TTL. R2: also maintenance or tenant erasure. |
 | C3 sealed: `summary`, `finalMessage`, `document`, artifacts, progress events, approval summaries and failure reasons of a task whose `sealing` names `task-output` | Ciphertext, the closed plaintext codes and the metadata in [Sealed tasks](#sealed-tasks) | `device_request_receipts.body` (`task:<id>:terminal`), `activity_log_entry.body` and `approval_timeline_tail.entries` hold sealed members; `task.terminal_cause` holds only a closed code | A ciphertext blob, if the terminal names `ciphertextRef` | None from the SDK | A copy of the ciphertext | As unsealed C3. A [scope shred](#scope-shred) also leaves the live ciphertext unopenable. A truth `task.terminal` record is not sealed. |
-| C4 Memory projection: the redacted snapshot, truth `memory` records | All | `agent_memory_projection_head.redacted_snapshot`; `attested_record.body_inline` | — | None from the SDK | A copy | Projection head: `eraseAgentMemoryProjection` or tenant erasure. Truth records: tenant erasure only. |
+| C4 Memory projection: the redacted snapshot | All | `agent_memory_projection_head.redacted_snapshot` | — | None from the SDK | A copy | `eraseAgentMemoryProjection` or tenant erasure. |
+| C4 sealed: the snapshot under a grant with `sealing`, and the memory evidence of a task whose `sealing` names `memory-projection` | Ciphertext and the metadata in [Sealed tasks](#sealed-tasks) | `agent_memory_projection_head.sealed_member`, with `content_mac` and `padded_length` on the receipt and no redacted hash; the terminal's sealed member in `device_request_receipts.body` | — | None from the SDK | A copy of the ciphertext | As unsealed C4. The Agent memory scope is not a task scope, so a task's [scope shred](#scope-shred) does not reach it. |
+| C4 truth `memory` records. Not sealed by v2 | All | `attested_record.body_inline` | — | None from the SDK | A copy | Tenant erasure only. |
 | Routing metadata: device name, ids, AgentRef, times, sizes, content digests | All | `device.device_name`; `device_request_receipts.body` (`pairing-completion:v1:`); key, id and digest columns | Object keys | Error logs can name ids | A copy | Device row: `revokeDevice` or tenant erasure. Other metadata goes with its row. |
 
 The columns, one reader at a time:
@@ -837,7 +842,7 @@ The columns, one reader at a time:
 - **R2** keeps blob bytes. Each key holds the plaintext SHA-256 of the bytes (`packages/core/src/blob.ts:110`).
 - **Logs.** The SDK writes no payload to a log. The cloud sets no Hono `onError`. So the Hono default handler writes an uncaught route error with `console.error(err)`. An error that a product hook throws can carry content. The pool and the Postgres mailbox wake log only connection errors (`packages/cloud-dataplane/src/pool.ts:86`, `packages/cloud-dataplane/src/mailbox-wake.ts:46`).
 - **Backups** hold a copy of Postgres and R2 from backup time. A delete in the live store does not reach a backup, and tenant erasure does not either. The operator sets backup retention.
-- **Product backend.** `agentMessage.consume` gets the message body. The observer, `readTaskResult` and `readDeviceTerminal` give the terminal. What the product keeps or logs is outside the SDK.
+- **Product backend.** `agentMessage.consume` gets a plaintext message body; `agentMessage.consumeSealed` gets only the sealed member. The observer, `readTaskResult` and `readDeviceTerminal` give the terminal. What the product keeps or logs is outside the SDK.
 
 ### Sealed tasks
 
@@ -852,12 +857,14 @@ Each sealed task still shows the Host this plaintext:
 - **Each sealed member's header**: the suite, the category, the scope id, epoch and key id, the chain head, the sender, the salt and nonce, the padded length and `contentMac`. The padded length is a size bucket. A member above the inline frame also names `ciphertextRef`, with the SHA-256 and size of the ciphertext (`packages/protocol/src/sealed-payload.ts:174-220`).
 - **The offer's own fields**: `sealing`, `agentRef`, the runtime, the harness, the dispatch selection, the limits, the egress and toolset fields. A routine occurrence also keeps its `routineRef`. Only `instruction` is sealed (`packages/protocol/src/sealed-split-table.ts:92-107`).
 - **The output fields that `SEALED_SPLIT_TABLE` does not move**:
-  - `task.complete` keeps `harnessId`, `sessionRef`, `usage` and `agentHomeMemoryChange`. `usage` has the runtime, the provider, the model, the token counts and the duration ([#1014](https://github.com/Ancienttwo/byok-sdk/issues/1014)). `agentHomeMemoryChange` has the paths of the changed memory files.
+  - `task.complete` keeps `harnessId`, `sessionRef`, `usage` and `agentHomeMemoryChange`. `usage` has the runtime, the provider, the model, the token counts and the duration ([#1014](https://github.com/Ancienttwo/byok-sdk/issues/1014)). `agentHomeMemoryChange` has the paths of the changed memory files; when `sealing` names `memory-projection`, it moves into the ciphertext of `task.complete`, `task.fail` and `task.cancelled`.
   - `task.fail` keeps `retryable`, `recovery` and `failure` (its class and reset time).
   - `task.decline` keeps its `code`, which the Host records as `task.terminal_cause`.
   - `task.artifact` keeps the artifact `name`, `contentType` and `artifactId`.
   - `task.progress` and `task.await_approval` keep `seq` and `approvalId`.
   - The runtime chooses the artifact name and the memory file paths, so they can say what the task is about.
+- **A sealed Agent message** keeps `agentRef`, `sessionRef`, `contract`, `messageId`, `cursor` and `contentType`, and its disposition keeps the outcome and reason code. Only the body is sealed.
+- **A sealed memory projection** keeps `taskId`, `agentRef`, `sessionRef`, `runtimeId`, `grantRef`, `writerEpoch`, `sourceSeq`, `mutationId` and `policyRevision`, and the receipt its time. Only the snapshot is sealed.
 - **The closed plaintext codes** in `SEALED_TASK_PLAIN_CODES` (`packages/protocol/src/sealed-payload.ts:69-73`). A plaintext output of a sealed task can only be one of them.
 - **Each envelope's id, task id, sequence, time and type**, and the routing metadata in the table above.
 
@@ -868,7 +875,8 @@ The Host can only tell whether two submits of the same identity sealed the same 
 Sealing does not protect against:
 
 - **A truth `task.terminal` record that the product writes.** The truth route does not read the offer's `sealing` (`packages/cloud/src/handlers/truth.ts:191-227`). A product that writes a sealed task's terminal through `TruthMemoryClient` stores that body as written, in plaintext if it was plaintext, in `attested_record.body_inline`. The SDK daemon never writes one. Writing only sealed content there is the product's obligation.
-- **The plaintext fields above.** An artifact name, a memory file path, the model or a failure class that a runtime chooses is visible to the Host.
+- **The plaintext fields above.** An artifact name, a memory file path (unless the task seals `memory-projection`), the model or a failure class that a runtime chooses is visible to the Host.
+- **The categories v2 leaves plaintext.** Drafts, `agent.egress.reliable` payloads and truth `memory` records are stored as sent, and so is the message of a task that does not seal `agent-message`.
 - **An active Host.** The Host serves the web client its code. It can also send the device any task, for example one that reads local files and returns them in plaintext.
 - **The device's own storage.** The daemon's local journal and the runtime's files are plaintext on the device.
 - **Revocation.** Removing a member does not take back plaintext that it already opened.
@@ -1037,7 +1045,7 @@ The test runs the scan of [Measured inventory](#measured-inventory) on every tab
 
 The sealed `task.artifact` is in no store: the Host passes it to the observer only.
 The run sends no sealed input by reference.
-Agent messages and memory projections are not sealed in v1, and this run does not send them. [Measured inventory](#measured-inventory) covers where they land.
+This run seals no Agent message or memory projection. The v2 categories are measured at the store: `packages/cloud/src/__tests__/sealed-output-host.test.ts` admits a sealed message and reads it back without a body, and `packages/cloud-dataplane/src/__tests__/agent-memory-projection.test.ts` stores a sealed snapshot on real Postgres and finds neither its canary nor its redacted hash in the head or receipt row. [Measured inventory](#measured-inventory) covers where their plaintext forms land.
 
 ### Plaintext that the canary run does not reach
 
@@ -1067,10 +1075,10 @@ The #654 design gives the digest rules for sealed categories (§9.3).
 | --- | --- | --- |
 | `outbox.body_hash` | The envelope | `deploy/sql/0002_core_domain.sql:101` |
 | `agent_egress_event.content_hash` | The egress payload | `deploy/sql/0013_agent_egress_contract.sql:19` |
-| `agent_memory_projection_head.redacted_hash`, `agent_memory_projection_metering_receipt.redacted_hash` | The redacted snapshot | `deploy/sql/0014_agent_memory_projection.sql:22`, `:78` |
+| `agent_memory_projection_head.redacted_hash`, `agent_memory_projection_metering_receipt.redacted_hash` | The redacted snapshot, for a plaintext snapshot only; a sealed snapshot's rows keep `content_mac` instead | `deploy/sql/0014_agent_memory_projection.sql:22`, `:78`; `deploy/sql/0037_agent_memory_projection_sealed.sql` |
 | `attested_record.content_hash` | The truth record body | `deploy/sql/0002_core_domain.sql:203` |
 | `object_manifest.hash`, `object_reference.hash`, `storage_reservation.content_hash` and the R2 key | The blob bytes | `deploy/sql/0002_core_domain.sql:286`, `:311`, `:400` |
-| `contentHash` in `agent_message_admission.payload_body` | The message body | `packages/client/src/daemon/agent-message-outbox.ts:57-59` |
+| `contentHash` in `agent_message_admission.payload_body` | The message body, for a plaintext message only; a sealed message carries none | `packages/client/src/daemon/agent-message-outbox.ts:57-59` |
 | `skill_pack.content_hash`, `skill_pack_file.content_hash` | Skill pack text | `deploy/sql/0005_skill_packs.sql:44`, `:74` |
 | Input preparation receipt digests | The preparation request and its context | #654 design §9.3 |
 | `contentMac` in a sealed member | The sealed content, keyed with the scope key, so a reader without the key cannot test a guess | `packages/core/src/sealed-payload/sealed-content.ts` |
@@ -1125,7 +1133,8 @@ The #654 design gives the digest rules for sealed categories (§9.3).
   claiming delivery that did not happen.
 - **A sealed task still shows the Host its metadata, and the product can write its terminal in plaintext.**
   The Host sees the plaintext fields of each sealed envelope, such as the artifact name, the changed memory
-  file paths and the model in `usage`, and the truth `task.terminal` route does not check sealing. Stated in
+  file paths (unless the task seals `memory-projection`) and the model in `usage`, and the truth `task.terminal`
+  route does not check sealing. Drafts, egress payloads and truth `memory` records are not sealed by v2. Stated in
   full above ([Sealed tasks](#sealed-tasks)).
 - **A scope shred is complete only on the live Host store.** The Host deletes
   the key packages without verifying the signer. Backup copies of the packages

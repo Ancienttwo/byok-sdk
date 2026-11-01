@@ -426,12 +426,14 @@ export declare class PostgresAgentEgressStore implements AgentEgressStore {
 /**
  * Postgres authority for the optional, one-way hosted Agent-memory projection.
  *
- * The only stored body is the latest accepted redacted snapshot. Immutable
+ * The only stored body is the latest accepted redacted snapshot, or its sealed
+ * member as received under a sealing grant (#1045 C4). Immutable
  * receipt rows retain the complete non-body replay binding and byte metering so
  * an old exact retry is still provable after the head advances or an epoch is
  * superseded. Neither table has a raw-source hash, cwd, path, or audit body.
  */
-import { type AgentMemoryProjectionCommitInput, type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionReceipt, type AgentMemoryProjectionStore, type CloudCrypto } from '@byok-sdk/cloud';
+import { type AgentMemoryProjectionCommitInput, type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionStore, type CloudCrypto } from '@byok-sdk/cloud';
+import { type AgentMemoryProjectionReceipt } from '@byok-sdk/protocol';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { ByokPool } from '../pool';
 export interface PostgresAgentMemoryProjectionStoreOptions {

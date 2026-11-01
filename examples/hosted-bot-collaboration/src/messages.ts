@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import type { ByokCloudOptions, TenantId } from '@byok-sdk/cloud';
+import type { AgentMessageConsumers, TenantId } from '@byok-sdk/cloud';
 import { canonical } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { CommitConflict, revisionOf, type CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
@@ -9,7 +9,8 @@ import { acceptedReply, commitStored } from './retention';
 import type { Decision, HostedCollaborationStore, StorePorts } from './store';
 
 /** The SDK admission hook that H installs (#793 D2c). */
-export type AgentMessageConsumer = NonNullable<ByokCloudOptions['agentMessage']>;
+/** This Host dispatches no sealed task, so it consumes plaintext messages only. */
+export type AgentMessageConsumer = Required<Pick<AgentMessageConsumers, 'consume'>>;
 export type AgentMessageInput = Parameters<AgentMessageConsumer['consume']>[0];
 /** H never holds a message: each decision is final. */
 export type MessageDecision = { outcome: 'accepted' } | { outcome: 'refused'; reasonCode: string };

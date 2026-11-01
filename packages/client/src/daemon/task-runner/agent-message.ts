@@ -10,7 +10,7 @@ import { DAEMON_TASK_FAILURE } from '../task-failure';
 import type { TaskRunner } from '../task-runner';
 import { hostFor } from './host';
 import { beginTerminal } from './finish';
-import { taskMessageSendAttempted } from './support';
+import { agentMessageSealing, taskMessageSendAttempted } from './support';
 import { successfulCompletionPlan } from './event-pump';
 
 export async function publishAgentMessage(this: TaskRunner, input: {
@@ -46,6 +46,7 @@ export async function publishAgentMessage(this: TaskRunner, input: {
     body: input.body,
     maxPendingEvents: 64,
     maxPendingBytes: 4 * 1024 * 1024,
+    ...agentMessageSealing(this, taskId),
   });
   if (!isCurrent()) throw new Error('invalid or expired Agent message task context');
   const current = this['tasks'].get(taskId);

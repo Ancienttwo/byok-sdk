@@ -23,6 +23,7 @@ export type { TenantId } from '@byok-sdk/core';
 // The composition entry points
 export { createByokCloud } from './cloud';
 export type { TaskAgentMessage } from './task-agent-message';
+export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition';
 export type {
   ByokCloud,
   ByokCloudOptions,
@@ -95,6 +96,7 @@ export type {
   AgentMemoryProjectionMeteringReceipt,
   AgentMemoryProjectionMutation,
   AgentMemoryProjectionReceipt,
+  AgentMemoryProjectionSealing,
   AgentMemoryProjectionStore,
 } from './agent-memory-projection';
 

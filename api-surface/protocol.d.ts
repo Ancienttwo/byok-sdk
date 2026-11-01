@@ -1253,7 +1253,7 @@ export type AgentMemoryProjectionSnapshot = z.infer<typeof AgentMemoryProjection
  * The snapshot is a one-way copy of local `MEMORY.md` plus local `notes/`, not
  * a remote authoring, merge, import, history, or RAG contract.
  */
-export declare const AgentMemoryProjectionMutationSchema: z.ZodObject<{
+export declare const AgentMemoryProjectionPlainMutationSchema: z.ZodObject<{
     taskId: z.ZodString;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
@@ -1275,23 +1275,17 @@ export declare const AgentMemoryProjectionMutationSchema: z.ZodObject<{
         redactedByteCount: z.ZodNumber;
         redactedBytes: z.ZodString;
     }, z.core.$strict>;
+    sealed: z.ZodOptional<z.ZodNever>;
 }, z.core.$strict>;
-export type AgentMemoryProjectionMutation = z.infer<typeof AgentMemoryProjectionMutationSchema>;
-/** Stable meter receipt for one accepted redacted snapshot; it never carries the snapshot body. */
-export declare const AgentMemoryProjectionMeteringReceiptSchema: z.ZodObject<{
-    meteringReceiptId: z.ZodUUID;
-    acceptedRedactedBytes: z.ZodNumber;
-    recordedAt: z.ZodISODateTime;
-}, z.core.$strict>;
-export type AgentMemoryProjectionMeteringReceipt = z.infer<typeof AgentMemoryProjectionMeteringReceiptSchema>;
-/** Immutable commit readback. It repeats identity and redacted metadata, never redacted bytes. */
-export declare const AgentMemoryProjectionReceiptSchema: z.ZodObject<{
-    outcome: z.ZodEnum<{
-        accepted: "accepted";
-        idempotent: "idempotent";
-    }>;
-    tenantId: z.ZodString;
-    deviceId: z.ZodString;
+export type AgentMemoryProjectionPlainMutation = z.infer<typeof AgentMemoryProjectionPlainMutationSchema>;
+/**
+ * The mutation under a grant that names a sealing scope (#1045 C4). The
+ * redacted snapshot is sealed, inline only, under the Agent's memory scope;
+ * its plaintext hash and byte count are not carried. The AAD binds
+ * `{ agentId, writerEpoch, sourceSeq, mutationId }`, so the Host cannot move
+ * a snapshot to another Agent, epoch or position.
+ */
+export declare const AgentMemoryProjectionSealedMutationSchema: z.ZodObject<{
     taskId: z.ZodString;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
@@ -1308,6 +1302,136 @@ export declare const AgentMemoryProjectionReceiptSchema: z.ZodObject<{
     sourceSeq: z.ZodNumber;
     mutationId: z.ZodUUID;
     policyRevision: z.ZodString;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"memory-projection">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    snapshot: z.ZodOptional<z.ZodNever>;
+}, z.core.$strict>;
+export type AgentMemoryProjectionSealedMutation = z.infer<typeof AgentMemoryProjectionSealedMutationSchema>;
+/** Narrow with `mutation.sealed !== undefined`. */
+export declare const AgentMemoryProjectionMutationSchema: z.ZodUnion<readonly [z.ZodObject<{
+    taskId: z.ZodString;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    runtimeId: z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>;
+    grantRef: z.ZodString;
+    writerEpoch: z.ZodNumber;
+    sourceSeq: z.ZodNumber;
+    mutationId: z.ZodUUID;
+    policyRevision: z.ZodString;
+    snapshot: z.ZodObject<{
+        redactedHash: z.ZodString;
+        redactedByteCount: z.ZodNumber;
+        redactedBytes: z.ZodString;
+    }, z.core.$strict>;
+    sealed: z.ZodOptional<z.ZodNever>;
+}, z.core.$strict>, z.ZodObject<{
+    taskId: z.ZodString;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    runtimeId: z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>;
+    grantRef: z.ZodString;
+    writerEpoch: z.ZodNumber;
+    sourceSeq: z.ZodNumber;
+    mutationId: z.ZodUUID;
+    policyRevision: z.ZodString;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"memory-projection">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    snapshot: z.ZodOptional<z.ZodNever>;
+}, z.core.$strict>]>;
+export type AgentMemoryProjectionMutation = z.infer<typeof AgentMemoryProjectionMutationSchema>;
+/** Stable meter receipt for one accepted redacted snapshot; it never carries the snapshot body. */
+export declare const AgentMemoryProjectionMeteringReceiptSchema: z.ZodObject<{
+    meteringReceiptId: z.ZodUUID;
+    acceptedRedactedBytes: z.ZodNumber;
+    recordedAt: z.ZodISODateTime;
+}, z.core.$strict>;
+export type AgentMemoryProjectionMeteringReceipt = z.infer<typeof AgentMemoryProjectionMeteringReceiptSchema>;
+/** Immutable commit readback. It repeats identity and redacted metadata, never redacted bytes. */
+export declare const AgentMemoryProjectionPlainReceiptSchema: z.ZodObject<{
+    taskId: z.ZodString;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    runtimeId: z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>;
+    grantRef: z.ZodString;
+    writerEpoch: z.ZodNumber;
+    sourceSeq: z.ZodNumber;
+    mutationId: z.ZodUUID;
+    policyRevision: z.ZodString;
+    outcome: z.ZodEnum<{
+        accepted: "accepted";
+        idempotent: "idempotent";
+    }>;
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
     redactedHash: z.ZodString;
     redactedByteCount: z.ZodNumber;
     metering: z.ZodObject<{
@@ -1316,6 +1440,108 @@ export declare const AgentMemoryProjectionReceiptSchema: z.ZodObject<{
         recordedAt: z.ZodISODateTime;
     }, z.core.$strict>;
 }, z.core.$strict>;
+export type AgentMemoryProjectionPlainReceipt = z.infer<typeof AgentMemoryProjectionPlainReceiptSchema>;
+/** Stable meter receipt for one accepted sealed snapshot: the Host meters the padded length it stores. */
+export declare const AgentMemoryProjectionSealedMeteringReceiptSchema: z.ZodObject<{
+    meteringReceiptId: z.ZodUUID;
+    acceptedPaddedBytes: z.ZodNumber;
+    recordedAt: z.ZodISODateTime;
+}, z.core.$strict>;
+export type AgentMemoryProjectionSealedMeteringReceipt = z.infer<typeof AgentMemoryProjectionSealedMeteringReceiptSchema>;
+/** Immutable commit readback of a sealed snapshot: identity and the sealed member's `contentMac` and padded length. */
+export declare const AgentMemoryProjectionSealedReceiptSchema: z.ZodObject<{
+    taskId: z.ZodString;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    runtimeId: z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>;
+    grantRef: z.ZodString;
+    writerEpoch: z.ZodNumber;
+    sourceSeq: z.ZodNumber;
+    mutationId: z.ZodUUID;
+    policyRevision: z.ZodString;
+    outcome: z.ZodEnum<{
+        accepted: "accepted";
+        idempotent: "idempotent";
+    }>;
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
+    contentMac: z.ZodString;
+    paddedLength: z.ZodNumber;
+    metering: z.ZodObject<{
+        meteringReceiptId: z.ZodUUID;
+        acceptedPaddedBytes: z.ZodNumber;
+        recordedAt: z.ZodISODateTime;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type AgentMemoryProjectionSealedReceipt = z.infer<typeof AgentMemoryProjectionSealedReceiptSchema>;
+export declare const AgentMemoryProjectionReceiptSchema: z.ZodUnion<readonly [z.ZodObject<{
+    taskId: z.ZodString;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    runtimeId: z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>;
+    grantRef: z.ZodString;
+    writerEpoch: z.ZodNumber;
+    sourceSeq: z.ZodNumber;
+    mutationId: z.ZodUUID;
+    policyRevision: z.ZodString;
+    outcome: z.ZodEnum<{
+        accepted: "accepted";
+        idempotent: "idempotent";
+    }>;
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
+    redactedHash: z.ZodString;
+    redactedByteCount: z.ZodNumber;
+    metering: z.ZodObject<{
+        meteringReceiptId: z.ZodUUID;
+        acceptedRedactedBytes: z.ZodNumber;
+        recordedAt: z.ZodISODateTime;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    taskId: z.ZodString;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    runtimeId: z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>;
+    grantRef: z.ZodString;
+    writerEpoch: z.ZodNumber;
+    sourceSeq: z.ZodNumber;
+    mutationId: z.ZodUUID;
+    policyRevision: z.ZodString;
+    outcome: z.ZodEnum<{
+        accepted: "accepted";
+        idempotent: "idempotent";
+    }>;
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
+    contentMac: z.ZodString;
+    paddedLength: z.ZodNumber;
+    metering: z.ZodObject<{
+        meteringReceiptId: z.ZodUUID;
+        acceptedPaddedBytes: z.ZodNumber;
+        recordedAt: z.ZodISODateTime;
+    }, z.core.$strict>;
+}, z.core.$strict>]>;
 export type AgentMemoryProjectionReceipt = z.infer<typeof AgentMemoryProjectionReceiptSchema>;
 /**
  * Server-side erase result. The returned epoch is the minimum legal epoch for
@@ -1735,6 +1961,13 @@ export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparatio
  * `WIRE_ADDITIONS`.
  */
 export declare const SEALED_PAYLOAD_CAPABILITY: 'sealed-payload-v1';
+/**
+ * Sealed payload v2 (#1045): the `agent-message` and `memory-projection`
+ * categories. A device advertises it before a Host may send it an offer whose
+ * `sealing` names either category, or a sealed message disposition; a server
+ * advertises it before a device may send it a sealed `agent.message.publish`.
+ */
+export declare const SEALED_PAYLOAD_V2_CAPABILITY: 'sealed-payload-v2';
 /**
  * A server advertises it before a device may send a sealed task output that
  * names its ciphertext blob (`sealed.ciphertextRef`) instead of carrying it
@@ -2926,7 +3159,7 @@ export declare const InputPreparationStatusQuerySchema: z.ZodObject<{
     profileRevision: z.ZodString;
 }, z.core.$strict>;
 export type InputPreparationStatusQuery = z.infer<typeof InputPreparationStatusQuerySchema>;
-export declare const AgentMemoryProjectionCommitRequestSchema: z.ZodObject<{
+export declare const AgentMemoryProjectionCommitRequestSchema: z.ZodUnion<readonly [z.ZodObject<{
     taskId: z.ZodString;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
@@ -2948,15 +3181,8 @@ export declare const AgentMemoryProjectionCommitRequestSchema: z.ZodObject<{
         redactedByteCount: z.ZodNumber;
         redactedBytes: z.ZodString;
     }, z.core.$strict>;
-}, z.core.$strict>;
-export type AgentMemoryProjectionCommitRequest = z.infer<typeof AgentMemoryProjectionCommitRequestSchema>;
-export declare const AgentMemoryProjectionCommitResponseSchema: z.ZodObject<{
-    outcome: z.ZodEnum<{
-        accepted: "accepted";
-        idempotent: "idempotent";
-    }>;
-    tenantId: z.ZodString;
-    deviceId: z.ZodString;
+    sealed: z.ZodOptional<z.ZodNever>;
+}, z.core.$strict>, z.ZodObject<{
     taskId: z.ZodString;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
@@ -2973,6 +3199,58 @@ export declare const AgentMemoryProjectionCommitResponseSchema: z.ZodObject<{
     sourceSeq: z.ZodNumber;
     mutationId: z.ZodUUID;
     policyRevision: z.ZodString;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"memory-projection">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    snapshot: z.ZodOptional<z.ZodNever>;
+}, z.core.$strict>]>;
+export type AgentMemoryProjectionCommitRequest = z.infer<typeof AgentMemoryProjectionCommitRequestSchema>;
+export declare const AgentMemoryProjectionCommitResponseSchema: z.ZodUnion<readonly [z.ZodObject<{
+    taskId: z.ZodString;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    runtimeId: z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>;
+    grantRef: z.ZodString;
+    writerEpoch: z.ZodNumber;
+    sourceSeq: z.ZodNumber;
+    mutationId: z.ZodUUID;
+    policyRevision: z.ZodString;
+    outcome: z.ZodEnum<{
+        accepted: "accepted";
+        idempotent: "idempotent";
+    }>;
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
     redactedHash: z.ZodString;
     redactedByteCount: z.ZodNumber;
     metering: z.ZodObject<{
@@ -2980,7 +3258,37 @@ export declare const AgentMemoryProjectionCommitResponseSchema: z.ZodObject<{
         acceptedRedactedBytes: z.ZodNumber;
         recordedAt: z.ZodISODateTime;
     }, z.core.$strict>;
-}, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    taskId: z.ZodString;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    runtimeId: z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        pi: "pi";
+    }>;
+    grantRef: z.ZodString;
+    writerEpoch: z.ZodNumber;
+    sourceSeq: z.ZodNumber;
+    mutationId: z.ZodUUID;
+    policyRevision: z.ZodString;
+    outcome: z.ZodEnum<{
+        accepted: "accepted";
+        idempotent: "idempotent";
+    }>;
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
+    contentMac: z.ZodString;
+    paddedLength: z.ZodNumber;
+    metering: z.ZodObject<{
+        meteringReceiptId: z.ZodUUID;
+        acceptedPaddedBytes: z.ZodNumber;
+        recordedAt: z.ZodISODateTime;
+    }, z.core.$strict>;
+}, z.core.$strict>]>;
 export type AgentMemoryProjectionCommitResponse = z.infer<typeof AgentMemoryProjectionCommitResponseSchema>;
 /** `POST /byok/pair` — one-time device pairing (§6). */
 export declare const BYOK_PAIR_PATH = "/byok/pair";
@@ -3065,8 +3373,8 @@ export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
 export type { WireAddition } from './wire-additions';
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
-export { SEALED_DECLINE_CODES, SEALED_INLINE_MAX_PADDED_LENGTH, SEALED_PAYLOAD_CATEGORIES, SEALED_PAYLOAD_MAX_CONTENT_LENGTH, SEALED_PAYLOAD_MAX_PADDED_LENGTH, SEALED_PAYLOAD_SUITE, SEALED_PAYLOAD_V1_CATEGORIES, SEALED_PAYLOAD_VERSION, SEALED_SPLIT_TABLE, SEALED_TASK_PLAIN_CODES, SealedPayloadSchema, SealedTaskInputSchema, SealedTaskOutputSchema, TaskSealingSchema, isSealableMessageType, isSealedPayload, isSealedTaskPlainOutput, sealedBase64UrlByteLength, sealedPayloadPaddedLength, } from './sealed-payload';
-export type { SealedDeclineCode, SealedDigestRule, SealableMessageType, SealedPayload, SealedPayloadCategory, SealedPayloadV1Category, SealedSplitEntry, TaskSealing, } from './sealed-payload';
+export { SEALED_DECLINE_CODES, SEALED_INLINE_MAX_PADDED_LENGTH, SEALED_PAYLOAD_CATEGORIES, SEALED_PAYLOAD_MAX_CONTENT_LENGTH, SEALED_PAYLOAD_MAX_PADDED_LENGTH, SEALED_PAYLOAD_SUITE, SEALED_PAYLOAD_VERSION, SEALED_SPLIT_TABLE, SEALED_TASK_PLAIN_CODES, SealedPayloadSchema, SealedTaskInputSchema, SealedTaskOutputSchema, TaskSealingSchema, isSealableMessageType, isSealedPayload, isSealedTaskPlainOutput, sealedAgentMessageMaxContentLength, sealedBase64UrlByteLength, sealedMovedFields, sealedPayloadPaddedLength, } from './sealed-payload';
+export type { SealedDeclineCode, SealedDigestRule, SealableMessageType, SealedPayload, SealedPayloadCategory, SealedSplitEntry, TaskSealing, } from './sealed-payload';
 export { PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
 export type { ProviderProfileRef, ProviderProfileRevision, ProviderProfileHash, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding';
 export { PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, PROVIDER_PROVISIONING_DISPOSITIONS, PROVIDER_PROVISIONING_KEY_CHECK_RESULTS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningKeyCheckResultSchema, ProviderProvisioningKeyCheckSchema, ProviderProvisioningOperationSchema, ProviderProvisioningOperationGenerationSchema, ProviderProvisioningOperationDigestSchema, ProviderProvisioningRejectionCodeSchema, ProviderProvisioningProviderStatusSchema, ProviderProvisioningCompletionSchema, ProviderProvisioningDispositionSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning';
@@ -3081,16 +3389,16 @@ export { AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
 export { InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
 export type { InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
-export { AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
-export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
+export { AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionPlainMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionPlainReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
+export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionPlainMutation, AgentMemoryProjectionSealedMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionPlainReceipt, AgentMemoryProjectionSealedReceipt, AgentMemoryProjectionSealedMeteringReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
 export { TerminalProjectionContractSchema, TerminalProjectionSelectionSchema, ResultDocumentSchemaSchema, } from './terminal-projection';
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_DEPTH, RESULT_JSON_MAX_DEPTH, RESULT_ISSUES_MAX_COUNT, RESULT_ISSUES_MAX_BYTES, RESULT_SCHEMA_KEYWORDS, RESULT_SCHEMA_INSTANCE_TYPES, checkResultSchema, validateResultOutcome, } from './result-schema';
 export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, ResultIssue, ResultDocumentFailureReason, ResultSchemaCheck, ResultOutcomeCheck, } from './result-schema';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, RuntimeUnavailableEntrySchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, readRuntimeUnavailableCause, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, RuntimeUnavailableCauseReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, RuntimeQuotaScope, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
+export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, RuntimeUnavailableEntrySchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessagePublishPlainPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentMessageDispositionPlainPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, readRuntimeUnavailableCause, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessagePublishPlainPayload, AgentMessagePublishSealedPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentMessageDispositionPlainPayload, AgentMessageDispositionSealedPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, RuntimeUnavailableCauseReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, RuntimeQuotaScope, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -4548,6 +4856,8 @@ export declare const TaskOfferSealedPayloadSchema: z.ZodObject<{
         scopeId: z.ZodString;
         epoch: z.ZodNumber;
         categories: z.ZodArray<z.ZodEnum<{
+            "agent-message": "agent-message";
+            "memory-projection": "memory-projection";
             "task-input": "task-input";
             "task-output": "task-output";
         }>>;
@@ -4821,6 +5131,8 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
         scopeId: z.ZodString;
         epoch: z.ZodNumber;
         categories: z.ZodArray<z.ZodEnum<{
+            "agent-message": "agent-message";
+            "memory-projection": "memory-projection";
             "task-input": "task-input";
             "task-output": "task-output";
         }>>;
@@ -4900,7 +5212,10 @@ export declare const AgentMessageDraftPayloadSchema: z.ZodObject<{
     overflow: z.ZodOptional<z.ZodLiteral<true>>;
 }, z.core.$strict>;
 export type AgentMessageDraftPayload = z.infer<typeof AgentMessageDraftPayloadSchema>;
-export declare const AgentMessagePublishPayloadSchema: z.ZodObject<{
+/** Daemon -> server: one Agent message in plaintext. */
+export declare const AgentMessagePublishPlainPayloadSchema: z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
@@ -4917,8 +5232,14 @@ export declare const AgentMessagePublishPayloadSchema: z.ZodObject<{
     contentHash: z.ZodString;
     byteCount: z.ZodNumber;
 }, z.core.$strict>;
-export type AgentMessagePublishPayload = z.infer<typeof AgentMessagePublishPayloadSchema>;
-export declare const AgentMessageDispositionPayloadSchema: z.ZodObject<{
+export type AgentMessagePublishPlainPayload = z.infer<typeof AgentMessagePublishPlainPayloadSchema>;
+/**
+ * Daemon -> server: one Agent message of a task whose `sealing` lists
+ * `agent-message` (#1045 C2). `body` is sealed; `contentHash` and
+ * `byteCount` are not carried, and `messageId` and `cursor` name the write in
+ * the AAD and the content MAC. Gated on `sealed-payload-v2`.
+ */
+export declare const AgentMessagePublishSealedPayloadSchema: z.ZodObject<{
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
@@ -4927,7 +5248,108 @@ export declare const AgentMessageDispositionPayloadSchema: z.ZodObject<{
     contract: z.ZodString;
     messageId: z.ZodUUID;
     cursor: z.ZodNumber;
+    contentType: z.ZodEnum<{
+        "text/markdown": "text/markdown";
+        "text/plain": "text/plain";
+    }>;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"agent-message">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type AgentMessagePublishSealedPayload = z.infer<typeof AgentMessagePublishSealedPayloadSchema>;
+/** Narrow with `payload.sealed !== undefined`; the plaintext branch's `sealed` is `never`. */
+export declare const AgentMessagePublishPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
+    sealed: z.ZodOptional<z.ZodNever>;
+    sealing: z.ZodOptional<z.ZodNever>;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    contract: z.ZodString;
+    messageId: z.ZodUUID;
+    cursor: z.ZodNumber;
+    contentType: z.ZodEnum<{
+        "text/markdown": "text/markdown";
+        "text/plain": "text/plain";
+    }>;
+    body: z.ZodString;
     contentHash: z.ZodString;
+    byteCount: z.ZodNumber;
+}, z.core.$strict>, z.ZodObject<{
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    contract: z.ZodString;
+    messageId: z.ZodUUID;
+    cursor: z.ZodNumber;
+    contentType: z.ZodEnum<{
+        "text/markdown": "text/markdown";
+        "text/plain": "text/plain";
+    }>;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"agent-message">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>]>;
+export type AgentMessagePublishPayload = z.infer<typeof AgentMessagePublishPayloadSchema>;
+/** Server -> daemon: the disposition of a plaintext message, naming its `contentHash`. */
+export declare const AgentMessageDispositionPlainPayloadSchema: z.ZodObject<{
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    contract: z.ZodString;
+    messageId: z.ZodUUID;
+    cursor: z.ZodNumber;
     outcome: z.ZodEnum<{
         accepted: "accepted";
         held: "held";
@@ -4935,7 +5357,73 @@ export declare const AgentMessageDispositionPayloadSchema: z.ZodObject<{
     }>;
     receiptId: z.ZodUUID;
     reasonCode: z.ZodOptional<z.ZodString>;
+    contentHash: z.ZodString;
+    contentMac: z.ZodOptional<z.ZodNever>;
 }, z.core.$strict>;
+export type AgentMessageDispositionPlainPayload = z.infer<typeof AgentMessageDispositionPlainPayloadSchema>;
+/**
+ * Server -> daemon: the disposition of a sealed message (#1045 C2). It names
+ * the message by its sealed member's `contentMac`, because the sealed message
+ * carries no `contentHash`. Gated on `sealed-payload-v2`.
+ */
+export declare const AgentMessageDispositionSealedPayloadSchema: z.ZodObject<{
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    contract: z.ZodString;
+    messageId: z.ZodUUID;
+    cursor: z.ZodNumber;
+    outcome: z.ZodEnum<{
+        accepted: "accepted";
+        held: "held";
+        refused: "refused";
+    }>;
+    receiptId: z.ZodUUID;
+    reasonCode: z.ZodOptional<z.ZodString>;
+    contentMac: z.ZodString;
+    contentHash: z.ZodOptional<z.ZodNever>;
+}, z.core.$strict>;
+export type AgentMessageDispositionSealedPayload = z.infer<typeof AgentMessageDispositionSealedPayloadSchema>;
+/** Narrow with `payload.contentMac !== undefined`. */
+export declare const AgentMessageDispositionPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    contract: z.ZodString;
+    messageId: z.ZodUUID;
+    cursor: z.ZodNumber;
+    outcome: z.ZodEnum<{
+        accepted: "accepted";
+        held: "held";
+        refused: "refused";
+    }>;
+    receiptId: z.ZodUUID;
+    reasonCode: z.ZodOptional<z.ZodString>;
+    contentHash: z.ZodString;
+    contentMac: z.ZodOptional<z.ZodNever>;
+}, z.core.$strict>, z.ZodObject<{
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    sessionRef: z.ZodString;
+    contract: z.ZodString;
+    messageId: z.ZodUUID;
+    cursor: z.ZodNumber;
+    outcome: z.ZodEnum<{
+        accepted: "accepted";
+        held: "held";
+        refused: "refused";
+    }>;
+    receiptId: z.ZodUUID;
+    reasonCode: z.ZodOptional<z.ZodString>;
+    contentMac: z.ZodString;
+    contentHash: z.ZodOptional<z.ZodNever>;
+}, z.core.$strict>]>;
 export type AgentMessageDispositionPayload = z.infer<typeof AgentMessageDispositionPayloadSchema>;
 /** Server -> daemon: one exact, independently-capability-gated content read. */
 export declare const AgentContentReadPayloadSchema: z.ZodObject<{
@@ -7487,7 +7975,8 @@ export declare function resultOutcomeMaxBytes(schema: ResultSchema): number | nu
 export {};
 // ==== @byok-sdk/protocol dist/sealed-payload.d.ts ====
 /**
- * Sealed payload v1 on the hosted wire (#654 design §8.1, §8.3, §8.6).
+ * Sealed payload on the hosted wire: v1 (#654 design §8.1, §8.3, §8.6) and
+ * the v2 categories (#1045).
  *
  * Sealed is a property of the payload, not a message type: each sealable
  * type's payload is a plaintext branch or a sealed branch. The sealed branch is
@@ -7507,20 +7996,17 @@ export {};
  * length function; a cross-package test keeps the two equal.
  */
 import { z } from 'zod';
-export { SEALED_SPLIT_TABLE, isSealableMessageType, isSealedPayload } from './sealed-split-table';
+export { SEALED_SPLIT_TABLE, isSealableMessageType, isSealedPayload, sealedMovedFields } from './sealed-split-table';
 export type { SealableMessageType, SealedDigestRule, SealedSplitEntry } from './sealed-split-table';
 export declare const SEALED_PAYLOAD_VERSION = 1;
 /** The only suite v1 admits. A new suite is a new constant and a new capability, never a parser branch. */
 export declare const SEALED_PAYLOAD_SUITE = "byok-sealed-v1.hkdf-sha256.aes-256-gcm";
-/** C1–C4 in canonical order. A task lists its sealing categories in this order. */
+/**
+ * C1–C4 in canonical order. A task lists its sealing categories in this order.
+ * Input preparation and drafts have no category; they stay plaintext.
+ */
 export declare const SEALED_PAYLOAD_CATEGORIES: readonly ['task-input', 'agent-message', 'task-output', 'memory-projection'];
 export type SealedPayloadCategory = (typeof SEALED_PAYLOAD_CATEGORIES)[number];
-/**
- * The categories a v1 task may seal (D17): task input and task output. Agent
- * messages, memory projections, input preparation and drafts come later.
- */
-export declare const SEALED_PAYLOAD_V1_CATEGORIES: readonly ['task-input', 'task-output'];
-export type SealedPayloadV1Category = (typeof SEALED_PAYLOAD_V1_CATEGORIES)[number];
 /**
  * Closed `task.decline` codes of a receiver that refuses sealed task input
  * (§8.3). They are plaintext: a device without the scope key cannot seal a
@@ -7552,23 +8038,34 @@ export declare const SEALED_TASK_PLAIN_CODES: Readonly<{
 }>;
 /**
  * True when `payload` is a legal plaintext `type` message of a task whose
- * output is sealed: each field that the `task-output` sealed branch of `type`
- * moves or drops is absent or holds one of {@link SEALED_TASK_PLAIN_CODES}.
- * A type that has a sealed output branch and is not listed there is never
- * legal. A plaintext decline also names its code as `code`. A type with no
- * sealed output branch is always legal.
+ * output is sealed under `categories`: each field that the `task-output`
+ * sealed branch of `type` moves (with the `movedWith` fields of `categories`)
+ * or drops is absent or holds one of {@link SEALED_TASK_PLAIN_CODES}. A type
+ * that has a sealed output branch and is not listed there is never legal. A
+ * plaintext decline also names its code as `code`. A type with no sealed
+ * output branch is always legal.
  */
-export declare function isSealedTaskPlainOutput(type: string, payload: object): boolean;
+export declare function isSealedTaskPlainOutput(type: string, payload: object, categories: readonly SealedPayloadCategory[]): boolean;
 /** Padded frames above this length travel as a ciphertext blob (§8.6). */
 export declare const SEALED_INLINE_MAX_PADDED_LENGTH: number;
-/** Plaintext limit of every v1 category, in UTF-8 bytes of canonical JSON (D8). */
+/** Plaintext limit of every category, in UTF-8 bytes of canonical JSON (D8). */
 export declare const SEALED_PAYLOAD_MAX_CONTENT_LENGTH: number;
+/**
+ * The largest opened content of a sealed `agent.message.publish` whose body
+ * is at most `maxBytes` UTF-8 bytes (#1045 O2): `6 × maxBytes + 11`. At
+ * `AGENT_MESSAGE_MAX_BYTES` it is 1,572,875, below
+ * {@link SEALED_PAYLOAD_MAX_CONTENT_LENGTH}, so every legal body seals. The
+ * device seals within it, and the Host bounds a sealed message's
+ * `paddedLength` by `sealedPayloadPaddedLength(4 + this)` for the task's
+ * frozen `maxBytes`.
+ */
+export declare function sealedAgentMessageMaxContentLength(maxBytes: number): number;
 /**
  * The one legal padded length of a frame of `frameLength` bytes
  * (`4 + contentLength`): the next multiple of 256 up to 16 KiB, Padmé above.
  */
 export declare function sealedPayloadPaddedLength(frameLength: number): number;
-/** The largest padded length a v1 content may have. */
+/** The largest padded length a sealed content may have. */
 export declare const SEALED_PAYLOAD_MAX_PADDED_LENGTH: number;
 /**
  * The byte length of canonical unpadded base64url, or `undefined`. Canonical
@@ -7576,11 +8073,13 @@ export declare const SEALED_PAYLOAD_MAX_PADDED_LENGTH: number;
  * character, so one byte string has exactly one encoding.
  */
 export declare function sealedBase64UrlByteLength(value: string): number | undefined;
-/** A sealed member of any v1 category. */
+/** A sealed member of any category. */
 export declare const SealedPayloadSchema: z.ZodObject<{
     v: z.ZodLiteral<1>;
     suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
     category: z.ZodEnum<{
+        "agent-message": "agent-message";
+        "memory-projection": "memory-projection";
         "task-input": "task-input";
         "task-output": "task-output";
     }>;
@@ -7661,15 +8160,76 @@ export declare const SealedTaskOutputSchema: z.ZodObject<{
         contentType: z.ZodString;
     }, z.core.$strict>>;
 }, z.core.$strict>;
+/** The sealed member of an `agent.message.publish` (#1045 C2). */
+export declare const SealedAgentMessageSchema: z.ZodObject<{
+    v: z.ZodLiteral<1>;
+    suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+    category: z.ZodLiteral<"agent-message">;
+    scope: z.ZodObject<{
+        id: z.ZodString;
+        epoch: z.ZodNumber;
+        keyId: z.ZodString;
+    }, z.core.$strict>;
+    chainHead: z.ZodObject<{
+        seq: z.ZodNumber;
+        hash: z.ZodString;
+    }, z.core.$strict>;
+    sender: z.ZodString;
+    salt: z.ZodString;
+    nonce: z.ZodString;
+    paddedLength: z.ZodNumber;
+    contentMac: z.ZodString;
+    ciphertext: z.ZodOptional<z.ZodString>;
+    ciphertextRef: z.ZodOptional<z.ZodObject<{
+        blobId: z.ZodString;
+        contentHash: z.ZodString;
+        size: z.ZodNumber;
+        contentType: z.ZodString;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+/**
+ * The sealed member of a memory projection (#1045 C4). It is inline only
+ * (owner decision O2): the Host keeps one latest snapshot per Agent and holds
+ * no ciphertext blob for it.
+ */
+export declare const SealedMemoryProjectionSchema: z.ZodObject<{
+    v: z.ZodLiteral<1>;
+    suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+    category: z.ZodLiteral<"memory-projection">;
+    scope: z.ZodObject<{
+        id: z.ZodString;
+        epoch: z.ZodNumber;
+        keyId: z.ZodString;
+    }, z.core.$strict>;
+    chainHead: z.ZodObject<{
+        seq: z.ZodNumber;
+        hash: z.ZodString;
+    }, z.core.$strict>;
+    sender: z.ZodString;
+    salt: z.ZodString;
+    nonce: z.ZodString;
+    paddedLength: z.ZodNumber;
+    contentMac: z.ZodString;
+    ciphertext: z.ZodOptional<z.ZodString>;
+    ciphertextRef: z.ZodOptional<z.ZodObject<{
+        blobId: z.ZodString;
+        contentHash: z.ZodString;
+        size: z.ZodNumber;
+        contentType: z.ZodString;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
 /**
  * A task's frozen sealing policy (§6.2). The offer carries it in plaintext.
  * `epoch` is the epoch of the offer's task-input content, and the lowest epoch
- * the task accepts.
+ * the task accepts. `memory-projection` needs `task-output`: a terminal seals
+ * the task's memory-change evidence inside its task-output ciphertext.
  */
 export declare const TaskSealingSchema: z.ZodObject<{
     scopeId: z.ZodString;
     epoch: z.ZodNumber;
     categories: z.ZodArray<z.ZodEnum<{
+        "agent-message": "agent-message";
+        "memory-projection": "memory-projection";
         "task-input": "task-input";
         "task-output": "task-output";
     }>>;
@@ -7708,7 +8268,7 @@ export declare function sealedOfferRule(payload: {
     readonly routineRef?: unknown;
 }, ctx: z.RefinementCtx): void;
 // ==== @byok-sdk/protocol dist/sealed-split-table.d.ts ====
-import type { SealedPayloadV1Category } from './sealed-payload';
+import type { SealedPayloadCategory } from './sealed-payload';
 /**
  * How the sealed branch of a type treats one digest field of its plaintext
  * branch (D16, design §9.3).
@@ -7730,7 +8290,7 @@ export interface SealedSplitEntry {
      * and the content MAC bind the wire type as the family.
      */
     readonly marker: 'sealing' | 'sealed';
-    readonly category: SealedPayloadV1Category;
+    readonly category: SealedPayloadCategory;
     /**
      * Payload fields that, after the envelope `task_id`, name this write in the
      * AAD and the content MAC (§8.2, §9.1). The sealed branch requires them.
@@ -7742,7 +8302,17 @@ export interface SealedSplitEntry {
      * object back and validates the plaintext branch.
      */
     readonly moved: readonly string[];
-    /** Top-level fields of the plaintext branch that the sealed branch drops in v1. */
+    /**
+     * Top-level fields that also move into this ciphertext when the task's
+     * frozen `sealing` names the category (#1045): on a task that seals
+     * `memory-projection`, a terminal seals its `agentHomeMemoryChange`. The
+     * sealed branch schema cannot see the task's sealing, so the Host and the
+     * device check these fields; read them with {@link sealedMovedFields}.
+     */
+    readonly movedWith?: {
+        readonly [category in SealedPayloadCategory]?: readonly string[];
+    };
+    /** Top-level fields of the plaintext branch that the sealed branch drops. */
     readonly forbidden: readonly string[];
     /**
      * Every path of the plaintext branch whose name contains `digest`, `hash` or
@@ -7812,6 +8382,9 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly category: 'task-output';
         readonly identity: readonly [];
         readonly moved: readonly ["summary", "finalMessage", "document"];
+        readonly movedWith: {
+            readonly 'memory-projection': readonly ['agentHomeMemoryChange'];
+        };
         readonly forbidden: readonly ["artifactRefs", "preparedObservation"];
         readonly digests: {
             readonly 'agentRef.profileRevision': 'plain';
@@ -7826,6 +8399,9 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly category: 'task-output';
         readonly identity: readonly [];
         readonly moved: readonly ["reason"];
+        readonly movedWith: {
+            readonly 'memory-projection': readonly ['agentHomeMemoryChange'];
+        };
         readonly forbidden: readonly ["preparedObservation"];
         readonly digests: {
             readonly 'agentRef.profileRevision': 'plain';
@@ -7849,6 +8425,9 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly category: 'task-output';
         readonly identity: readonly [];
         readonly moved: readonly ["reason"];
+        readonly movedWith: {
+            readonly 'memory-projection': readonly ['agentHomeMemoryChange'];
+        };
         readonly forbidden: readonly [];
         readonly digests: {
             readonly 'agentRef.profileRevision': 'plain';
@@ -7889,7 +8468,34 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly digests: {};
         readonly inlineOnly: true;
     };
+    readonly 'agent.message.publish': {
+        readonly marker: 'sealed';
+        readonly category: 'agent-message';
+        readonly identity: readonly ["messageId", "cursor"];
+        readonly moved: readonly ["body"];
+        readonly forbidden: readonly ["contentHash", "byteCount"];
+        readonly digests: {
+            readonly 'agentRef.profileRevision': 'plain';
+            readonly contentHash: 'forbidden';
+        };
+    };
 }>;
+/**
+ * The receiver capability each category's sealed branches need: the v1
+ * categories `sealed-payload-v1`, the #1045 categories `sealed-payload-v2`.
+ */
+export declare const SEALED_CATEGORY_CAPABILITY: Readonly<{
+    readonly 'task-input': 'sealed-payload-v1';
+    readonly 'agent-message': 'sealed-payload-v2';
+    readonly 'task-output': 'sealed-payload-v1';
+    readonly 'memory-projection': 'sealed-payload-v2';
+}>;
+/**
+ * The top-level fields a `type` message of a task whose frozen `sealing`
+ * lists `categories` moves into its ciphertext: the type's `moved` fields and
+ * the `movedWith` fields of each listed category.
+ */
+export declare function sealedMovedFields(type: SealableMessageType, categories: readonly SealedPayloadCategory[]): readonly string[];
 /** A message type with a sealed branch. */
 export type SealableMessageType = keyof typeof SEALED_SPLIT_TABLE;
 export declare function isSealableMessageType(type: string): type is SealableMessageType;
@@ -8009,7 +8615,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * MCP configuration.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "runtime-unavailable-cause"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-payload-v2", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "runtime-unavailable-cause"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**
@@ -8022,9 +8628,10 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  *
  * - `gated`: the sender must not emit the surface unless the receiver
  *   durably advertised `capability`. A field entry applies when the payload
- *   carries the field (and, with `value`, when the field equals it); a
- *   dotted field names a nested field, for example `sealed.ciphertextRef`. A type
- *   entry applies to every message of that type. Server-to-daemon surfaces
+ *   carries the field (and, with `value`, when the field equals it, or when
+ *   the field is an array that includes it); a dotted field names a nested
+ *   field, for example `sealed.ciphertextRef`. A type entry applies to every
+ *   message of that type. Server-to-daemon surfaces
  *   are gated by a device flag, daemon-to-server surfaces by a server flag.
  * - `strip-safe`: an optional field an older receiver drops without changing
  *   what it executes or acknowledges.

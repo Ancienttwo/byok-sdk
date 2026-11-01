@@ -58,7 +58,6 @@ const GOLDEN_SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1
 const GOLDEN_TENANT = 'tenant-golden';
 const GOLDEN_DEVICE = 'device-golden-1';
 const GOLDEN_SCOPE = { scopeId: 'scope-golden-device-1', epoch: 2 };
-const GOLDEN_CATEGORIES = ['task-input', 'task-output'] as const;
 
 const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
@@ -87,7 +86,7 @@ function bindingOf(line: (typeof corpus)[number]): SealedBinding {
     identity,
     deviceId: GOLDEN_DEVICE,
     agentRef: agentRef == null ? null : { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision },
-    categories: [...GOLDEN_CATEGORIES],
+    categories: [...(offer.payload.sealing as { categories: SealedBinding['categories'] }).categories],
     notAfter: null,
   };
 }
@@ -255,7 +254,7 @@ describe('sealed payload v1: the golden corpus lines are real ciphertext', () =>
     .map((field) => [line.type, field, line] as const));
 
   it('covers every identity field of the split table', () => {
-    expect([...new Set(identityCases.map(([, field]) => field))].sort()).toEqual(['approvalId', 'artifactId', 'seq', 'steerId']);
+    expect([...new Set(identityCases.map(([, field]) => field))].sort()).toEqual(['approvalId', 'artifactId', 'cursor', 'messageId', 'seq', 'steerId']);
   });
 
   it.each(identityCases.map(([type, field, line], index) => [index, type, field, line] as const))(
@@ -366,7 +365,7 @@ describe('sealed payload v1: a routine template opens under the binding its rout
 
 describe('sealed payload v1: a task without output sealing refuses sealed output (#654)', () => {
   const sealedInbound = corpus.filter((line) => !isServerToDaemonType(line.type)
-    && requiredReceiverCapabilities(line.type, line.payload).includes('sealed-payload-v1'));
+    && requiredReceiverCapabilities(line.type, line.payload).some((flag) => flag.startsWith('sealed-payload-')));
 
   it('covers every daemon-to-server sealed type and every sealed decline code', () => {
     expect(new Set(sealedInbound.filter(isSealedLine).map((line) => line.type))).toEqual(
@@ -398,13 +397,13 @@ describe('sealed payload v1: a task without output sealing refuses sealed output
   /**
    * The line without the harness and recovery bindings that this plain task
    * does not have, and with this task's Agent where the type echoes one: a
-   * claim or terminal must echo the attempt's Agent exactly.
+   * claim, terminal or message must echo the attempt's Agent exactly.
    */
   function unbound(type: MessageType, payload: Json): Json {
     const { agentRef: _agentRef, harnessId: _harnessId, recovery: _recovery, ...rest } = payload;
     return ECHOES_AGENT.includes(type) ? { ...rest, agentRef: TEST_AGENT_REF } : rest;
   }
-  const ECHOES_AGENT: readonly MessageType[] = ['task.decline', 'task.complete', 'task.fail', 'task.cancelled'];
+  const ECHOES_AGENT: readonly MessageType[] = ['task.decline', 'task.complete', 'task.fail', 'task.cancelled', 'agent.message.publish'];
 
   it.each(sealedInbound.filter(isSealedLine).map((line, index) => [index, line.type, line] as const))(
     'line %i (%s) is rejected before the envelope identity is reserved',
@@ -474,7 +473,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   it.each(outputOnly.map((line, index) => [index, line.variant, line] as const))(
     'line %i (%s) is enqueued as a task.offer with its sealing, and only to a device with every flag',
     async (_index, variant, line) => {
-      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
       const flags = requiredReceiverCapabilities('task.offer', line.payload);
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: flags.filter((flag) => flag !== 'sealed-payload-v1') });
@@ -489,7 +488,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   it.each(laneLines.map((line, index) => [index, line.variant, line] as const))(
     'the plaintext sibling of line %i (%s) refuses its sealed fields before any device read or state',
     async (_index, variant, line) => {
-      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
       const reads = vi.spyOn(harness.stores.devices, 'get');
@@ -512,7 +511,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   it.each(laneLines.filter((line) => line.variant in enqueueLanes).map((line) => [line.variant, line.payload.sealed === undefined ? 'output only' : 'sealed input', line] as const))(
     '%s (%s) without a taskId: a sealed instruction is refused, because it binds the task id; output-only sealing gets a minted id',
     async (variant, label, line) => {
-      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
       const page = () => harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
@@ -534,7 +533,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
 
   it('checks and enqueues one parsed copy, so a payload that the caller changes during the device read has no effect', async () => {
     const line = laneLines.find((candidate) => candidate.variant === 'sealed resume' && candidate.payload.sealed !== undefined)!;
-    const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+    const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
     const payload: Json = structuredClone(line.payload);
@@ -564,7 +563,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   it.each(byReference.map((line, index) => [index, line.variant, line] as const))(
     'line %i (%s) by ciphertextRef to a blob that is not uploaded is refused on a device with every flag, before any task or mailbox state',
     async (_index, variant, line) => {
-      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
 

@@ -363,6 +363,22 @@
             },
             "policyRevision": {
               "type": "string"
+            },
+            "sealing": {
+              "type": "object",
+              "properties": {
+                "scopeId": {
+                  "type": "string"
+                },
+                "epoch": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "scopeId",
+                "epoch"
+              ],
+              "description": "The Agent scope this writer epoch seals its snapshots under (#1045 C4).\nIt is fixed for the epoch: the Host issues a higher epoch to change it.\nWith it, a snapshot is only ever sent sealed."
             }
           },
           "required": [
