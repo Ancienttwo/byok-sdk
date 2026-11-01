@@ -150,7 +150,7 @@ export class DshAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'dsh',
       supportsDispatchSelection: false,
-      // dsh ships no win32 build of its native addon (docs/plans/2026-11-01-dsh-adapter.md §1.9).
+      // dsh ships no win32 build of its native addon (docs/researches/2026-11-01-dsh-adapter.md §1.9).
       platforms: ['darwin', 'linux'],
       capabilities: DSH_RUNTIME_CAPABILITIES,
       // Each `agent_message_chunk` is one committed assistant message.

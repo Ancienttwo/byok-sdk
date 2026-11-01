@@ -1,7 +1,7 @@
 # PRD：BYOK Bot 平台——routine、Bot 协作、成本与部署
 
 > 初版：2026-10-13。同日并入 Bot 协作层和 SDK 重构 K5–K8。
-> 修订：2026-10-19，随产品 PRD v3 写入第一批裁定和事实修正。本文其余历史基线不变。修订依据 R3/R5/R6 见[产品 PRD §13](../plans/2026-10-18-bot-mode-product-prd.md#13-v3-修订依据)。新增上限仍是 v1 提议值，不代表实现或发布。
+> 修订：2026-10-19，随产品 PRD v3 写入第一批裁定和事实修正。本文其余历史基线不变。修订依据 R3/R5/R6 见[产品 PRD §13](../adr/ADR-039-bot-mode-product-prd.md#13-v3-修订依据)。新增上限仍是 v1 提议值，不代表实现或发布。
 > 状态：待 owner 批准。PR 合并即批准本文的需求、K2 契约草案、K5–K7 重构契约、Bot 协作契约和路线图。合并不授权实现、发布、issue 修改或下游迁移。每个切片单独开 issue 和 PR。
 > 权威关系：[docs/spec.md](../spec.md) 是产品权威。本文只定义计划中的变化。每个切片落地时，在同一个 PR 中修改 spec。决策另记在 [ADR-038](../architecture/adr-2026-10-13-bot-platform.md)。
 > 依据：byok-sdk `main@c3ca6a84`；首个下游 Aiphabee `main@31b7280e`；RAFT Computer 的 reminder 实现（`botiverse/raft-source`）。Bot 协作和 K5–K7 依据 byok-sdk `main@b597b93e`，以及 DeepSeek Bot `c57d25b4`、DS Bot App `aea9380c`（Apache-2.0，只借鉴设计，不复制代码）。
@@ -992,6 +992,6 @@ K8 参考实现，Topology L 和 H 各跑一遍。群聊按 §9.5 的默认 `men
 
 ## K8b Cross-Bot 文档对齐（2026-10-20）
 
-本次只同步已批准的 [K8b 计划](../plans/2026-10-19-k8b-cross-bot.md) Q2、Q7、Q10、Q12 和 §3.9。
+本次只同步已批准的 [K8b 计划](../adr/ADR-041-k8b-cross-bot.md) Q2、Q7、Q10、Q12 和 §3.9。
 这不增加产品裁定，不代表真实 Pi、hosted 路径或两进程 relay 已通过。
 参考实现的验收映射见 [VALIDATION](https://github.com/Ancienttwo/byok-sdk/pull/578)。

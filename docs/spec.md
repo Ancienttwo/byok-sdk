@@ -2914,7 +2914,7 @@ visible readback alone does not prove that order. Windows B and
 `agent-memory-intent.v1` remain BLOCKED until the proof and recovery
 experiments pass. Windows x64 recall and save do not need B. Linux
 checks do not complete Q14's Windows requirement. The acceptance contract is
-`docs/plans/2026-10-19-windows-ntfs-ledger-barrier-decision.md` sections 3 and 7.
+`docs/adr/ADR-042-windows-ntfs-ledger-barrier.md` sections 3 and 7.
 Wire and failure detail: `docs/protocol.md` §2.4.
 
 The daemon publishes the authenticated `conn.hello` capability snapshot as the

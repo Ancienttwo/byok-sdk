@@ -803,7 +803,7 @@ The Host decodes each envelope that a device sends (`packages/protocol/src/http-
 It decodes each mailbox row again before delivery (`packages/cloud/src/handlers/events.ts:157`).
 The stores keep each payload as they get it.
 Issue [#654](https://github.com/Ancienttwo/byok-sdk/issues/654) asks for end-to-end encryption by data category.
-The design draft is [`docs/plans/2026-10-22-654-hosted-wire-e2ee.md`](plans/2026-10-22-654-hosted-wire-e2ee.md).
+The design draft is [`docs/adr/ADR-045-hosted-wire-e2ee.md`](adr/ADR-045-hosted-wire-e2ee.md).
 A task whose offer has `sealing` keeps each category named in `sealing.categories` (task input, task output, or both) as ciphertext ([protocol §2.5](protocol.md#25-sealed-payload-v1-654-gated-addition)).
 For those categories the Host stores and reads back only the sealed member and the closed plaintext codes.
 Sealed payload v2 ([#1045](https://github.com/Ancienttwo/byok-sdk/issues/1045)) adds two categories: a task whose `sealing` names `agent-message` keeps its Agent message body as ciphertext, and a memory projection grant with `sealing` keeps the hosted snapshot as ciphertext. A task whose `sealing` names `memory-projection` also moves its terminal's memory evidence into the task output ciphertext.
@@ -907,7 +907,7 @@ Deletes that a call starts:
   When the task has no terminal receipt (for example, the Host cancelled it before a claim), it writes a tombstone under that key, so a late device terminal stores nothing.
   It refuses a task that is not terminal or that still has a pending outbox row (`packages/cloud/src/task-redaction.ts`, `packages/cloud-dataplane/src/stores/task-redaction.ts`).
   Limits of `redactTasks`:
-  - The tombstone keeps the SHA-256 and the byte length of the plaintext body. A person who can read the database can use them to confirm a guessed body. The replay fences need this digest; the hosted design accepts the trade-off (`docs/plans/2026-10-22-654-hosted-wire-e2ee.md` §11.3).
+  - The tombstone keeps the SHA-256 and the byte length of the plaintext body. A person who can read the database can use them to confirm a guessed body. The replay fences need this digest; the hosted design accepts the trade-off (`docs/adr/ADR-045-hosted-wire-e2ee.md` §11.3).
   - The objects go in a first step, and the rows change in a second transaction. If the second step fails or refuses, the objects are gone but the bodies stay, so their `artifactRefs` name deleted objects. A retry completes the redaction and records `objectsDeleted: 0`.
   - A body that a device writes between the two steps keeps its objects. Orphan GC deletes them after its grace period.
   - It keeps an object when another receipt body or a pending outbox row of the tenant still names it, and leaves it to orphan GC. "Names" is a substring match on `sha256:<hex>`. So the same text in any other body, even plain text, also keeps the object; this fails safe. The check scans the tenant's receipt bodies and pending outbox rows without an index, once per object hash and before the upload gate is taken, so its cost grows with the tenant's receipt count.

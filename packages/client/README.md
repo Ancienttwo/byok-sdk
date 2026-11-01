@@ -1072,7 +1072,7 @@ variable for a `custom` endpoint. The first `detect()` on a new root waits
 while Hermes builds its Python environment there (up to `probeTimeoutMs`,
 default 180 s). A turn start takes about 20 s, so a Host may raise
 `startupTimeoutMs`. Qualified build and limits:
-[S0 note](../../docs/notes/2026-10-20-519-hermes-acp-s0.md). The adapter
+[S0 note](../../docs/researches/2026-10-20-519-hermes-acp-s0.md). The adapter
 declares macOS, Linux and Windows; a real Hermes run on `windows-latest`
 qualifies Windows (#608). There the adapter reaches the gateway over Hermes's
 named pipe; give `resolveBin` the `hermes.exe` that Hermes's installer
