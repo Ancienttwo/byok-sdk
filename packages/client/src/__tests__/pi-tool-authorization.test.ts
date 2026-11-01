@@ -351,7 +351,7 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     expect(g.calls.some(call => call.toolName === 'write')).toBe(false);
   }, 45_000);
 
-  it('declares no auto support on the durable lane', () => {
-    expect(new PiAdapter({ durableLane: true }).descriptor.capabilities.toolAuthorizationAuto).toBe(false);
+  it('declares auto support on the durable lane', () => {
+    expect(new PiAdapter({ durableLane: true }).descriptor.capabilities.toolAuthorizationAuto).toBe(true);
   });
 });

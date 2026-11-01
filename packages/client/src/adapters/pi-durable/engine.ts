@@ -14,7 +14,15 @@ export interface DurableEngineInput {
   resume: boolean; tools?: readonly ToolRegistration[]; ambient: NodeJS.ProcessEnv;
   storageFactory?: DurableStorageFactory<string>;
   shellOwnership?: { own(pid:number):Promise<void>; released(pid:number):void };
+  /** The SDK scoped file tools of a file-scoped execution; they replace the native read/write/edit. */
+  fileTools?: readonly ToolRegistration[];
   beforeTool(id: string, taskId: string, call: ToolCall): Promise<void>;
+  /**
+   * Asked after the parent recorded the tool intent and before the tool runs;
+   * a returned reason blocks the call. A pending answer is an in-flight tool,
+   * so a worker crash meanwhile ends the execution without replay.
+   */
+  authorize?(toolCallId: string, call: ToolCall): Promise<string | undefined>;
   events(events: readonly AgentEvent[]): Promise<void>;
   /** Called once the durable run settled successfully. The structured outcome, if any, went through `submit_result`. */
   completed(): Promise<void>;
@@ -46,12 +54,15 @@ export async function openDurableEngine(input: DurableEngineInput) {
   };
   try {
     if (!input.resume) await resetReplica(input.file); // BEFORE open: no stale scheduler may run.
-    const tools = [...(CodingTools.tools ?? []), ...(input.tools ?? [])].map(tool => ({ ...tool, replay: 'unsafe' as const, ...(['read','write','edit'].includes(tool.name) ? { executionMode: 'sequential' as const } : {}) }));
+    const native = (CodingTools.tools ?? []).filter(tool => input.fileTools === undefined || tool.name === 'bash');
+    const tools = [...native, ...(input.fileTools ?? []), ...(input.tools ?? [])].map(tool => ({ ...tool, replay: 'unsafe' as const, ...(['read','write','edit'].includes(tool.name) ? { executionMode: 'sequential' as const } : {}) }));
     const extension = defineExtension({ name: 'byok-durable', tools, hooks: [hook(ToolTask, {
       beforeTool: async (call, api) => {
+        const toolCallId = `durable:${input.binding.taskId}:${api.taskId}`;
         const denied = await durableToolDenial(call.name, call.arguments, input.binding.canonicalHome, input.replicaRoot);
-        await input.beforeTool(call.id, `durable:${input.binding.taskId}:${api.taskId}`, call);
-        if (denied) return { block: denied }; // parent durable acknowledgement BEFORE native tool intent
+        await input.beforeTool(call.id, toolCallId, call);
+        const blocked = denied ?? await input.authorize?.(toolCallId, call);
+        if (blocked) return { block: blocked }; // parent durable acknowledgement BEFORE native tool intent
       },
     })] });
     const registry = createRegistry(); registry.install(extension);

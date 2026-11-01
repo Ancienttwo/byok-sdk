@@ -51,6 +51,7 @@ import {
   type PreparedPiServerBinding,
 } from '../adapters/pi/prepared-tools';
 import { McpStdioClient, MCP_OBSERVATION_MAX_STDOUT_BYTES, type McpStdioServerSpec } from '../mcp/client';
+import { parseToolAuthorizationIpcConfig, type ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
 import {
   canonicalPreparedAgentMemoryJson,
   validatePreparedAgentMemoryObservation,
@@ -89,7 +90,7 @@ import {
  */
 
 const CONFIG_FORMAT = 'byok.pi.prepared-launch';
-const CONFIG_VERSION = 6;
+const CONFIG_VERSION = 7;
 /**
  * Where this process's provider credential comes from, and the ONE switch the
  * rest of this file branches on. Written by the adapter from
@@ -490,6 +491,8 @@ interface PreparedLaunchConfig {
   /** Private execution helper configuration, kept outside the Host MCP map. */
   readonly memoryCall: McpStdioServerSpec | null;
   readonly mcp: TaskScopedMcpConfig;
+  /** The task's loopback `auto` gate; null when the task is not gated. */
+  readonly toolAuthorization: ToolAuthorizationIpcConfig | null;
 }
 
 function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
@@ -500,7 +503,7 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   if (!isPlainObject(parsed)) fail('the prepared launch configuration must be an object');
-  const keys = ['format','version','credentialSource','cwd','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','agentMemory','memory','memoryCall','terminalProjection','resultCall','mcp'];
+  const keys = ['format','version','credentialSource','cwd','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','agentMemory','memory','memoryCall','terminalProjection','resultCall','mcp','toolAuthorization'];
   if (Object.keys(parsed).length !== keys.length || !keys.every(key => Object.hasOwn(parsed, key))) fail('prepared config has missing or unknown keys');
   if (parsed.format !== CONFIG_FORMAT) fail(`the prepared launch configuration must declare format ${CONFIG_FORMAT}`);
   if (parsed.version !== CONFIG_VERSION) fail(`the prepared launch configuration must declare version ${CONFIG_VERSION}`);
@@ -543,9 +546,16 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
   if (terminalProjection?.mode === 'result-document' ? resultCall === null : resultCall !== null) {
     fail('result helper does not agree with the frozen result selection');
   }
+  let toolAuthorization: ToolAuthorizationIpcConfig | null;
+  try {
+    toolAuthorization = parsed.toolAuthorization === null ? null : parseToolAuthorizationIpcConfig(parsed.toolAuthorization);
+  } catch (error) {
+    fail('toolAuthorization is invalid: ' + (error instanceof Error ? error.message : String(error)));
+  }
   return Object.freeze({
     ...(terminalProjection === undefined ? {} : { terminalProjection }),
     resultCall,
+    toolAuthorization,
     credentialSource: credentialSource as CredentialSource,
     cwd,
     model: parsePreparedExpectedModel(parsed.expected.model),
@@ -843,6 +853,7 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
       agentDir,
       modelRuntime,
       tools: surface.tools.map((entry) => ({ name: entry.name, identity: entry.identity, tool: entry.tool as never })),
+      ...(config.toolAuthorization === null ? {} : { toolAuthorization: config.toolAuthorization }),
       // `session_start` fires inside the official loop's bind; its subscription
       // to session events is installed in the same microtask chain, so the run
       // starts on the next macrotask with every event already forwarded.

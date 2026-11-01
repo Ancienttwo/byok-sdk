@@ -1,6 +1,6 @@
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, realpath, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, readFile, stat, writeFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { execFileSync, spawn as nativeSpawn, type ChildProcess } from 'node:child_process';
@@ -15,6 +15,10 @@ import { buildPiPreparedArgs, buildPiProviderProjection } from '../../../keys/sr
 import { parsePiProviderLauncherOptions, buildPiProviderChildEnvironment } from '../../../keys/src/pi-provider-launcher-core';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { testRuntimeEnv } from './fixtures/runtime-env';
+import type { ToolAuthorizationGate, ToolCall, ToolFileScope } from '../tool-authorization';
+import { resolveFileScopeGrant } from '../file-scope-guard';
+import { bindFileScopeGate } from '../file-scope-gate-binding';
+import type { ScopedFileDenial } from '../file-scope-tools';
 const ownedGroups=new Set<number>();
 const roots: string[] = [], servers: Server[] = [], sessions: Session[] = [];
 afterEach(async () => {
@@ -31,7 +35,7 @@ function finish(res: import('node:http').ServerResponse, content: string) {
     { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } } ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
 function tool(res: import('node:http').ServerResponse, command: string, name = 'bash') {
-  const args = name === 'bash' ? {command} : name === 'edit' ? {path:command,edits:[{oldText:'ORIGINAL_DENIED_DATA',newText:'CHANGED'}]} : name === 'write' ? {path:command,content:'CHANGED'} : {path:command};
+  const args = name === 'bash' ? {command} : name === 'find' ? {pattern:'*',path:command} : name === 'grep' ? {pattern:'REPLICA_MARKER',path:command} : name === 'edit' ? {path:command,edits:[{oldText:'ORIGINAL_DENIED_DATA',newText:'CHANGED'}]} : name === 'write' ? {path:command,content:'CHANGED'} : {path:command};
   const base = { id: 'cmpl-tool', object: 'chat.completion.chunk', created: 0, model: 'test' };
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   res.end([
@@ -39,7 +43,7 @@ function tool(res: import('node:http').ServerResponse, command: string, name = '
     { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } },
   ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
-async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string, paths: {home:string;store:string}) => void, lifecycle?: {ownsLease?():boolean; record?(kind:string,n:number):Promise<void>}) {
+async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string, paths: {home:string;store:string}) => void, lifecycle?: {ownsLease?():boolean; record?(kind:string,n:number):Promise<void>}, gateFor?: (home: string) => Promise<ToolAuthorizationGate>) {
 const __executionScratch = await testExecutionScratch();
 
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-durable-launch-'))); roots.push(root);
@@ -74,8 +78,20 @@ const __executionScratch = await testExecutionScratch();
   const launch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: home, env,  });
   const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, dispatchSelection: selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
   const journal: string[] = [];
-  const session = await prepared.operation.start({ scratch: (launch).scratch,  kind: 'instruction', instruction: 'Host authority input\nHost context second line', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { replicaRoot: path.join(store, 'durable-replicas'), tenantId: 'tenant', lifecycle: { ownsLease: () => lifecycle?.ownsLease?.() ?? true, record: async (kind,n) => { journal.push(`${kind}:${n}`); await lifecycle?.record?.(kind,n); } } } }); sessions.push(session);
+  const toolAuthorization = await gateFor?.(home);
+  const session = await prepared.operation.start({ ...(toolAuthorization === undefined ? {} : { toolAuthorization }), scratch: (launch).scratch,  kind: 'instruction', instruction: 'Host authority input\nHost context second line', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { replicaRoot: path.join(store, 'durable-replicas'), tenantId: 'tenant', lifecycle: { ownsLease: () => lifecycle?.ownsLease?.() ?? true, record: async (kind,n) => { journal.push(`${kind}:${n}`); await lifecycle?.record?.(kind,n); } } } }); sessions.push(session);
   return { session, children, calls: () => calls, bodies, authorizations, home, journal };
+}
+/** A recording auto gate bound to a resolved grant; it denies bash and allows the rest. */
+async function scopedGate(home: string, fileScope: ToolFileScope, asked: string[], denials: ScopedFileDenial[]): Promise<ToolAuthorizationGate> {
+  const gate: ToolAuthorizationGate = { timeoutMs: 5_000, authorize: async (call: ToolCall) => {
+    asked.push(call.toolName);
+    return call.toolName === 'bash' ? { decision: 'deny', code: 'tool_authorization_denied', reason: 'synthetic denial' } : { decision: 'allow' };
+  } };
+  const identity = await stat(home, { bigint: true });
+  const grant = await resolveFileScopeGrant({ fileScope, home: { path: home, identity: { dev: identity.dev, ino: identity.ino } } });
+  bindFileScopeGate(gate, { grant, taskId: 'task', lane: 'durable', homeAccess: 'writer', onDeny: denial => denials.push(denial) });
+  return gate;
 }
 function liveGroup(pgid:number):number[] {return execFileSync('ps',['-eo','pid=,pgid=,stat='],{encoding:'utf8'}).trim().split('\n').map(line=>line.trim().split(/\s+/u)).filter(([,group,stat])=>Number(group)===pgid&&!stat!.startsWith('Z')).map(([pid])=>Number(pid));}
 // Windows durable execution is fail-closed pending a validated parent-death Job Object design.
@@ -212,4 +228,46 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     const results=events.filter(event=>event.type==='tool_result');expect(results).toHaveLength(2);expect(results[1]?.isError).toBe(true);expect(JSON.stringify(results[1])).toContain('structured tool path');
     await expect(readFile(path.join(home,'race-link/forbidden.txt'))).rejects.toThrow();expect(await readFile(path.join(home,'race-ready'),'utf8')).toBe('ready');
   },30_000);
+  it('a file-scoped auto task gets the SDK scoped file tools, denies out-of-scope paths and asks the gate for the rest (#1061)', async () => {
+    const outside = path.join(await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-durable-scope-outside-'))), 'outside.txt'); roots.push(path.dirname(outside));
+    const asked: string[] = [], denials: ScopedFileDenial[] = [];
+    const f = await fixture((res, n) => {
+      if (n === 1) tool(res, outside, 'write'); else if (n === 2) tool(res, 'inside.txt', 'write'); else if (n === 3) tool(res, 'printf x > bash.txt'); else finish(res, 'scoped');
+    }, undefined, home => scopedGate(home, { mode: 'home' }, asked, denials));
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    const tools = (JSON.parse(f.bodies[0]!) as { tools: { function: { name: string } }[] }).tools.map(entry => entry.function.name).sort();
+    expect(tools).toEqual(['bash', 'edit', 'find', 'grep', 'ls', 'read', 'write']);
+    expect(events.filter(event => event.type === 'tool_result').map(event => event.type === 'tool_result' && event.isError)).toEqual([true, false, true]);
+    // The scope denies the outside write before the gate; the gate decides the in-scope write and the shell.
+    expect(denials).toEqual([expect.objectContaining({ toolName: 'write', code: 'file_scope_denied' })]);
+    expect(asked).toEqual(['write', 'bash']);
+    await expect(readFile(outside)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(path.join(f.home, 'inside.txt'), 'utf8')).toBe('CHANGED');
+    await expect(readFile(path.join(f.home, 'bash.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 30_000);
+  // A granted root that contains the daemon store still cannot list the replica store.
+  it.each(['ls','find'])('scoped %s rejects the durable replica store inside a granted root', async name => {
+    const asked: string[] = [], denials: ScopedFileDenial[] = [];
+    const f = await fixture((res,n,_body,paths) => { if (n === 1) tool(res,path.join(paths.store,'durable-replicas'),name); else finish(res,'denied'); },
+      undefined, home => scopedGate(home, { mode: 'workspaces', roots: [{ id: 'all', path: path.dirname(home), access: 'read' }] }, asked, denials));
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
+    const result = events.find(event => event.type === 'tool_result');
+    expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
+    expect(result.isError).toBe(true); expect(JSON.stringify(result.output)).toContain('structured tool path inside replica store');
+    expect(asked).toEqual([]); expect(denials).toEqual([]);
+  }, 30_000);
+  it.each(['find','grep'])('scoped %s started at a granted root that contains the store never walks into the replica store', async name => {
+    const asked: string[] = [], denials: ScopedFileDenial[] = [];
+    const f = await fixture((res,n,_body,paths) => {
+      if (n !== 1) { finish(res,'walked'); return; }
+      writeFileSync(path.join(paths.store,'durable-replicas','probe.txt'),'REPLICA_MARKER'); writeFileSync(path.join(paths.home,'visible.txt'),'REPLICA_MARKER');
+      tool(res,path.dirname(paths.home),name);
+    }, undefined, home => scopedGate(home, { mode: 'workspaces', roots: [{ id: 'all', path: path.dirname(home), access: 'read' }] }, asked, denials));
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
+    const result = events.find(event => event.type === 'tool_result');
+    expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
+    expect(result.isError).toBe(false); expect(asked).toEqual([name]);
+    expect(JSON.stringify(result.output)).toContain('visible.txt'); expect(JSON.stringify(result.output)).not.toContain('durable-replicas');
+  }, 30_000);
 });

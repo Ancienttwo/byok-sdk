@@ -53,6 +53,7 @@ import {
 import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { fileScopeGateBinding } from '../file-scope-gate-binding';
 import { observationOf } from './fixtures/mcp-observation';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
 import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../agent-memory/mcp-server';
@@ -651,6 +652,19 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     expect(launched).not.toHaveProperty('permissionMode');
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-ok', seq: 2 }));
+  });
+
+  it('admits an auto, file-scoped prepared offer and binds the grant to the gate it starts with (#1061)', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, { ...MCP_CAPABLE, toolAuthorizationAuto: true });
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent, { toolAuthorization: () => ({ default: 'auto', fileScope: { mode: 'home' } }) });
+    await runner.handleEnvelope(preparedOffer('task-prepared-scoped', reference(built)));
+    expect(sent.filter((envelope) => envelope.type === 'task.decline')).toHaveLength(0);
+    expect(adapter.preparedStartCalls).toHaveLength(1);
+    const gate = adapter.preparedStartCalls[0]!.input.toolAuthorization;
+    expect(fileScopeGateBinding(gate!)).toMatchObject({ taskId: 'task-prepared-scoped', lane: 'prepared', homeAccess: 'writer' });
+    await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-scoped', seq: 2 }));
   });
 
   it('admits a sealed memory-only artifact with no Host MCP server map', async () => {

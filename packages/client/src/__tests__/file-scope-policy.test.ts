@@ -18,7 +18,8 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeCapabilities, RuntimeOperationStartInput } from '../types';
-import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { PI_STUB_DECLARATIONS, StubRuntimeAdapter, type StubAdapterDeclarations } from './fixtures/stub-adapter';
+import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { freshTestAgentRef, testAgentHomeConfig, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner, testScratchRoot } from './fixtures/execution-scratch';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -37,8 +38,8 @@ const AUTO_CAPABLE: RuntimeCapabilities = {
 /** Records the daemon-built start input so a claim/start can be distinguished from a decline. */
 class GateCapturingAdapter extends StubRuntimeAdapter {
   readonly inputs: RuntimeOperationStartInput[] = [];
-  constructor(capabilities: RuntimeCapabilities, runtimeId = 'pi') {
-    super(runtimeId, { kind: 'available', version: '0.0.0' }, capabilities);
+  constructor(capabilities: RuntimeCapabilities, runtimeId = 'pi', declarations?: StubAdapterDeclarations) {
+    super(runtimeId, { kind: 'available', version: '0.0.0' }, capabilities, undefined, undefined, declarations);
   }
   override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     const result = await super.prepare(input);
@@ -283,12 +284,15 @@ describe('fileScope static validation and effective report', () => {
   });
 });
 
-describe('fileScope admission support matrix (#1061 slice 1)', () => {
-  const pi = { id: 'pi', fileScope: { lanes: ['rpc' as const] } };
+describe('fileScope admission support matrix (#1061)', () => {
+  const pi = new PiAdapter().descriptor;
+  const durablePi = new PiAdapter({ durableLane: true }).descriptor;
   const claude = { id: 'claude' };
   it.each([
     ['ordinary Pi RPC on darwin', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }],
     ['ordinary Pi RPC on linux', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }],
+    ['the Pi prepared lane', { descriptor: pi, lane: 'prepared' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }],
+    ['the durable Pi worker', { descriptor: durablePi, lane: 'durable' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }],
     ['any runtime that declares the lane', { descriptor: { id: 'acme', fileScope: { lanes: ['rpc' as const] } }, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }],
   ])('admits %s', (_label, facts) => {
     expect(fileScopeAdmission(facts)).toEqual({ supported: true });
@@ -297,8 +301,7 @@ describe('fileScope admission support matrix (#1061 slice 1)', () => {
   it.each([
     ['another runtime', { descriptor: claude, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /runtime claude/],
     ['a runtime named pi that declares no scope', { descriptor: { id: 'pi' }, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /runtime pi cannot enforce/],
-    ['the prepared lane', { descriptor: pi, lane: 'prepared' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /prepared lane/],
-    ['the durable lane', { descriptor: pi, lane: 'durable' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }, /durable Pi worker/],
+    ['a lane the adapter does not declare', { descriptor: pi, lane: 'durable' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }, /durable lane of this runtime/],
     ['a memory-reader offer', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'memory-reader' as const, platform: 'darwin' as NodeJS.Platform }, /memory-reader/],
     ['Windows', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'win32' as NodeJS.Platform }, /not supported on win32/],
   ])('refuses %s', (_label, facts, reason) => {
@@ -320,15 +323,15 @@ describe('fileScope fail-closed admission through the task runner', () => {
     expect(adapter.inputs).toEqual([]);
   });
 
-  it('declines the durable Pi worker before claim', async () => {
-    const adapter = new GateCapturingAdapter({ ...AUTO_CAPABLE, durableLane: true });
+  it('admits the durable Pi worker and binds the grant to its gate with the durable lane', async () => {
+    const adapter = new GateCapturingAdapter({ ...AUTO_CAPABLE, durableLane: true }, 'pi', { ...PI_STUB_DECLARATIONS, fileScope: { lanes: ['durable'] } });
     const sent: Envelope[] = [];
     const seen: ToolAuthorizationTask[] = [];
     await offer(makeRunner(adapter, sent, (task) => { seen.push(task); return { default: 'auto', fileScope: { mode: 'home' } }; }), 'scope-durable');
     expect(seen).toEqual([expect.objectContaining({ taskId: 'scope-durable', runtimeId: 'pi', lane: 'durable', homeAccess: 'writer' })]);
-    expect(declineReason(sent)).toMatch(/^file_scope_unsupported: the durable Pi worker /);
-    expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
-    expect(adapter.inputs).toEqual([]);
+    expect(declineReason(sent)).toBeUndefined();
+    expect(adapter.inputs).toHaveLength(1);
+    expect(fileScopeGateBinding(adapter.inputs[0]!.toolAuthorization!)).toMatchObject({ taskId: 'scope-durable', lane: 'durable', homeAccess: 'writer' });
   });
 
   it('declines an all-mode runtime with a file scope instead of running unscoped', async () => {

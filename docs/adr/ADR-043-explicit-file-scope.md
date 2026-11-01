@@ -18,7 +18,7 @@
 3. **文件范围只在 auto 任务上有效。** all 的既有合同是「不阻止任何工具调用」；文件越界是硬拒绝，不能与 all 同时成立。两者同时出现应在准入前报错，不静默忽略。
 4. **只有 SDK 自有的 scoped file tools 才能称为文件边界。** 用 Pi 的 tool_call hook 对原生 read/write/edit/find/grep/ls 做路径检查，能提供有用的 advisory gate，但它是 check-then-open，存在 TOCTOU 与 symlink 置换窗口，不能宣称「目标文件未被创建」这类保证。D2 已获 owner 批准：把六个文件工具换成 SDK 实现。D14 同时限定 v1 不引入 native dependency，也不使用 descriptor-relative/openat：POSIX 只用 Node 内建的 lstat、realpath.native 与 stat dev/ino 做 canonical containment 和 identity 校验；Windows v1 无法在不引入 native code 的前提下可靠处理短名/junction，因此整体返回 file_scope_unsupported。v1 仍是 canonical check-then-open，残余 TOCTOU 必须如实说明。
 5. **文件工具范围不是 shell sandbox。** 保留 bash/powershell 时，命令仍可读写宿主任意路径；MCP server、用户扩展和子代理的 shell 也一样。能力名、文档与错误信息不得暗示「home 隔离」「只读」「无法访问外部」。需要强隔离时，必须另配工具选择与 OS sandbox，不在本设计内假装提供。
-6. **Pi 只支持 ordinary RPC lane，且 v1 仅 POSIX。** prepared lane 没有 native file tools；durable Pi 未验证；Windows v1 不支持。它们遇到文件范围必须在 claim 前 decline，而不是丢掉范围继续跑。Claude/Codex/Grok/Hermes 本轮不设计实现，遇到策略同样 fail closed。
+6. **Pi 只支持 ordinary RPC lane，且 v1 仅 POSIX。** prepared lane 没有 native file tools；durable Pi 未验证；Windows v1 不支持。它们遇到文件范围必须在 claim 前 decline，而不是丢掉范围继续跑。Claude/Codex/Grok/Hermes 本轮不设计实现，遇到策略同样 fail closed。（v2 修订见 §5.3：prepared 与 durable lane 在 POSIX 上已支持。）
 7. **子任务不得扩大父任务权限。** 原生 pi-subagents 的 foreground/background/nested/resumed child 必须加载同一份文件范围扩展并重新验证根身份；做不到就拒绝启动 child 或不提供 subagent，不能退回未 scoped 的内置文件工具。
 
 ## 1. 现状与问题
@@ -348,8 +348,10 @@ interface FileScopePolicyAdoption {
 
 ### 5.3 prepared 与 durable lane
 
-- **prepared**：prepared session 只注册 counted MCP tools，没有 native file tools（prepared-tools.ts）。若解析出的 fileScope 不为空，必须在 claim 前 decline file_scope_unsupported；不能把 fileScope 塞进 prepared launch，也不能让 prepared 任务在「无 native 文件工具」时假装范围生效。prepared 本来就不 resume。
-- **durable Pi**：durable worker 的 respawn/frames 未验证，且 **PiAdapter** 目前只把 agent resources 限定在 ordinary RPC lane。durable + fileScope → claim 前 decline file_scope_unsupported。若以后要支持，必须单独定义 worker 的 root identity、respawn 后的重新验证与工具重放边界，不能复用本设计默认。
+v1 时两条 lane 在 claim 前 decline file_scope_unsupported。#1239 的逐次审批落地后，范围外的每个工具调用都要过 auto gate，v2（#1061，0.34.0）按同一合同支持这两条 lane，仅 POSIX：
+
+- **prepared**：prepared session 仍只注册 counted MCP tools，不加 scoped file tools，因为 counted tool manifest 只含 MCP 工具，加工具会改变预先计数的请求。grant 不写进 prepared launch；daemon 照常在 claim 后重新校验 root，并把 grant 绑定到这个任务的 gate。gate 经 v7 prepared launch 交给 host，用与 ordinary lane 相同的 Pi tool_call hook。scope floor 让每个 counted tool 调用逐次审批（allowWithoutAsking 规则除外），所以没有任何工具能不经审批碰到文件。prepared 不 resume，也没有 subagent。
+- **durable Pi**：v3 durable launch 带 gate 配置和序列化 grant。worker 每次启动（首次和每次 respawn）都在任何工具存在前重新解析 root，root 被替换或缺失就启动失败。scoped 时 harness 的原生 read/write/edit 被换成六个 SDK scoped 工具，bash 保留并逐次审批。gate 在父进程记下 tool intent 之后、工具执行之前询问；等待审批的调用算 in-flight tool，worker 在等待中崩溃时，按 slice 1 规则结束执行，不重放。一个 gate IPC 服务同一执行的所有 worker。durable lane 没有 subagent。replica store 的结构化路径拒绝保持不变。
 - **Windows ordinary RPC**：v1 即使 lane 正确也不支持；在 claim 前返回 file_scope_unsupported，不 spawn、不创建 session。不要尝试短名/junction 检测后继续。
 - 以上 lane/平台的拒绝必须发生在 adapter 启动前；prepare() 返回值/daemon decline 的错误码要能让 Host 区分「这个任务需要 fileScope，但该 lane/平台不支持」。
 

@@ -21,6 +21,8 @@ import {
   PreparedSessionError,
   sha256Hex,
 } from './prepared-request';
+import { createPiToolAuthorizationHook } from './tool-authorization-hook';
+import type { ToolAuthorizationIpcConfig } from '../../tool-authorization-ipc';
 
 /**
  * The prepared session on OFFICIAL Pi: a public `createAgentSession` whose
@@ -294,6 +296,11 @@ export interface CreatePreparedSessionOptions {
   readonly sessionId?: string;
   /** Called when the extension runtime is bound (`session_start`), i.e. from inside `runRpcMode`'s bind. */
   readonly onSessionStart?: () => void;
+  /**
+   * The task's `auto` gate. The same `tool_call` hook as the ordinary lane asks
+   * it before every counted tool call; a denial becomes that call's error result.
+   */
+  readonly toolAuthorization?: ToolAuthorizationIpcConfig;
 }
 
 export interface PreparedSessionHandle {
@@ -339,7 +346,10 @@ export async function createPreparedPiSession(options: CreatePreparedSessionOpti
     systemPrompt,
     systemPromptOverride: () => systemPrompt,
     appendSystemPromptOverride: () => [],
-    extensionFactories: [{ name: 'byok-prepared-context', factory: extension }] as never,
+    extensionFactories: [
+      { name: 'byok-prepared-context', factory: extension },
+      ...(options.toolAuthorization === undefined ? [] : [{ name: 'byok-tool-authorization', factory: createPiToolAuthorizationHook(options.toolAuthorization) }]),
+    ] as never,
   });
   await resourceLoader.reload();
 
