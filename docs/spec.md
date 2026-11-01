@@ -4000,11 +4000,14 @@ key that names no runtime of the daemon, or `auto` for a runtime without
 The mode is one daemon-level contract shared by every runtime; adapters do not
 carry a permission policy of their own, and the remote offer never selects it.
 An invalid policy — including the removed `{ mode }` spelling, a bare mode
-string, a function or legacy wording such as `full access` or `inherit` —
-declines the offer with `tool_authorization_unresolved`. Without a policy
-every task runs in `all`. Resolution failures use the fixed wire reason
-`tool_authorization_unresolved: local tool authorization policy could not be resolved`;
-rule IDs and diagnostic details remain in local logs. Rules never enter the server protocol,
+string, a function, legacy wording such as `full access` or `inherit`, or a
+rule or `fileScope` that fails admission — raises `DaemonConfigInvalidError`
+at construction (`code: 'daemon_config_invalid'`; the issue path is
+`toolAuthorization`, or `toolAuthorization.fileScope` with code
+`invalid_file_scope`), and `checkDaemonConfig` reports the same issue. No
+offer ever sees an invalid policy, so there is no per-offer resolution
+failure. Without a policy every task runs in `all`. Rule IDs and diagnostic
+details stay in that local error. Rules never enter the server protocol,
 native settings or model prompt. A running task and its native subagents keep
 their snapshot; each new offer, including resume, resolves the current policy
 again. Pi launch v8 and its digest contract are unchanged: rules live in the

@@ -235,6 +235,28 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     expect(daemon.status().config.toolAuthorization).toEqual({ mode: 'static', byRuntime: { pi: 'all' }, localToolApproval: 'host-only' });
   });
 
+  // #1091 F3: an invalid policy never reaches an offer; construction rejects it.
+  it.each([
+    ['duplicate rule ids', { default: 'auto', rules: { alwaysAsk: [
+      { id: 'PRIVATE_RULE', match: { toolName: 'read' } }, { id: 'PRIVATE_RULE', match: { toolName: 'write' } },
+    ] } }, 'toolAuthorization', 'invalid_value'],
+    ['an empty rule match', { default: 'auto', rules: { alwaysAsk: [{ id: 'empty', match: {} }] } }, 'toolAuthorization', 'invalid_value'],
+    ['a duplicate id across the two lists', { default: 'all', rules: {
+      alwaysAsk: [{ id: 'same', match: { toolName: 'read' } }], allowWithoutAsking: [{ id: 'same', match: { toolName: 'write' } }],
+    } }, 'toolAuthorization', 'invalid_value'],
+    ['an unknown selector', { default: 'auto', rules: { alwaysAsk: [{ id: 'bad', match: { commandRegex: '.*' } }] } }, 'toolAuthorization', 'invalid_value'],
+    ['a relative pathGlob', { default: 'auto', rules: { alwaysAsk: [{ id: 'rel', match: { pathGlob: 'src/**' } }] } }, 'toolAuthorization', 'invalid_value'],
+    ['an invalid fileScope', { default: 'auto', fileScope: { mode: 'workspaces' } }, 'toolAuthorization.fileScope', 'invalid_file_scope'],
+  ])('rejects %s at construction with DaemonConfigInvalidError', async (_label, policy, issuePath, code) => {
+    const config = await bundled({ agentHome: testAgentHomeConfig(), toolAuthorization: policy as DaemonConfig['toolAuthorization'] });
+    const adapters = [new StubRuntimeAdapter('pi', undefined, { toolAuthorizationAuto: true })];
+    const issues = constructionIssues(() => createDaemonWithAdapters(config, adapters));
+    expect(issues).toEqual([expect.objectContaining({ severity: 'error', code, path: issuePath })]);
+    const check = checkDaemonConfig(config, { source: 'embedded', adapters });
+    expect(check.ok).toBe(false);
+    expect(check.issues.filter(issue => issue.severity === 'error')).toEqual(issues);
+  });
+
   it.each([
     ['codexSandbox', 'configure the injected Codex adapter directly'],
     ['runtimeEnvironment', 'pass runtimeEnvironment to each injected adapter'],
