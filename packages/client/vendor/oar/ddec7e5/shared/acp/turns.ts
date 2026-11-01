@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR c88a514 so a failed prompt reads its turn frames only after earlier notifications are recorded (Apache-2.0).
+// BYOK change: Modified from OAR c88a514 so a failed prompt reads its turn frames only after earlier notifications are recorded, and a native cancel follows a read of the agent's descendants (Apache-2.0).
 import type {
   InputImage,
   InputOptions,
@@ -226,8 +226,15 @@ export function createAcpTurns(deps: {
     },
     async abort(state, request) {
       if (!state.abortRequested) {
-        // BYOK change: no process-table observation before the native cancel;
-        // the SDK process-tree authority owns tool cleanup.
+        // BYOK change: no upstream observation window. The injected process
+        // remembers the agent's descendants synchronously before the native
+        // cancel can orphan them; the SDK process-tree authority kills those
+        // still alive at dispose. No cancel goes out unless the read succeeded.
+        try {
+          runtime.observeDescendants();
+        } catch (error) {
+          return { kind: "rejected", code: "error", reason: error instanceof Error ? error.message : String(error) };
+        }
         state.abortRequested = true;
         try {
           await runtime.connection.agent.notify(methods.agent.session.cancel, { sessionId: rootId });

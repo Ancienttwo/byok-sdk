@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { RuntimeDisposalFailure } from '../../runtime-failure';
 
 function rows(): string[][] {
-  const result=execFileSync('ps', ['-eo', 'pid=,ppid=,pgid=,stat='], { encoding: 'utf8' }).trim().split('\n').map(line => line.trim().split(/\s+/u));
+  const result=execFileSync('/bin/ps', ['-eo', 'pid=,ppid=,pgid=,stat='], { encoding: 'utf8' }).trim().split('\n').map(line => line.trim().split(/\s+/u));
   if(!result.some(([pid])=>Number(pid)===process.pid)||result.some(row=>row.length!==4||row.slice(0,3).some(value=>!Number.isSafeInteger(Number(value))||Number(value)<0)||!row[3]))throw new Error('invalid durable process snapshot');
   return result;
 }

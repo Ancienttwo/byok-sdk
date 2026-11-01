@@ -14,6 +14,10 @@
 // with an internal error.
 // `inspect --json` logs an `inspect` fact and prints FAKE_ACP_INSPECT (default:
 // no servers and no plugins); FAKE_ACP_INSPECT=fail exits 1 instead.
+// The `orphan-tool` prompt starts a tool parent in this group whose own child
+// left it (setsid) and writes their pids to FAKE_ACP_TOOL_TREE; the native
+// cancel then SIGKILLs the parent, orphaning the tool, as a real cancel can.
+import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -41,6 +45,7 @@ const log = (fact) => { if (process.env.FAKE_ACP_LOG) appendFileSync(process.env
 log({ kind: 'start', argv: args, cwd: process.cwd(), env: process.env, pid: process.pid });
 
 const pending = new Map();
+let toolParent;
 const reverse = new Map();
 let reverseId = 0;
 let ledgers = 0;
@@ -76,6 +81,12 @@ async function prompt(message) {
   const input = full.trim().split('\n').at(-1) ?? '';
   if (input === 'hold' || process.env.FAKE_ACP_HANG === '1') { pending.set(message.id, 'hold'); return; }
   if (input === 'hold-silent') { pending.set(message.id, 'silent'); return; }
+  if (input === 'orphan-tool') {
+    const tree = new URL('./process-tree-descendant.mjs', import.meta.url).pathname;
+    toolParent = spawn(process.execPath, [tree, process.env.FAKE_ACP_TOOL_TREE, String(process.pid), '0', '', '1'], { stdio: 'ignore' });
+    pending.set(message.id, 'hold');
+    return;
+  }
   if (input === 'exit') { process.exit(9); }
   // Grok's own words for a -32603; `fail-text:` adds the provider's answer as `data`.
   if (input === 'fail') { error(message.id, -32603, 'Internal error'); return; }
@@ -210,6 +221,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (message.id === undefined) {
     if (message.method === 'session/cancel') {
       log({ kind: 'cancel' });
+      toolParent?.kill('SIGKILL');
       // A `silent` prompt models an agent that never answers its cancel.
       for (const [id, kind] of [...pending]) {
         if (kind === 'silent') continue;
