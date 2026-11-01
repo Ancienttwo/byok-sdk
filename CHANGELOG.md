@@ -83,6 +83,12 @@ These changes need 0.34.0, the next MINOR.
   prepared starts. See
   [Tool authorization](docs/spec.md#tool-authorization-auto-and-all-1061).
 
+- **Fix (client; #1303)** — on the durable Pi lane, the model now sees the text
+  a task MCP tool or SDK reserved MCP tool returns. The worker passed MCP
+  results to the harness in a field it does not read, so the model and the
+  `tool_result` event got an empty result; error status and details were not
+  affected.
+
 ## 0.33.0 — 2026-11-01 (published)
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

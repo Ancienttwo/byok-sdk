@@ -8,13 +8,14 @@ import path from 'node:path';
 import os from 'node:os';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { sealRuntimeOperationManifest, type Session, type MessageDraftDelta } from '../types';
+import { sealRuntimeOperationManifest, type RuntimeOperationStartInput, type Session, type MessageDraftDelta } from '../types';
 import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 import { buildPiPreparedArgs, buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
 import { parsePiProviderLauncherOptions, buildPiProviderChildEnvironment } from '../../../keys/src/pi-provider-launcher-core';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { testRuntimeEnv } from './fixtures/runtime-env';
+import { probeMcpServer } from '../daemon/mcp-tools-probe';
 import type { ToolAuthorizationGate, ToolCall, ToolFileScope } from '../tool-authorization';
 import { resolveFileScopeGrant } from '../file-scope-guard';
 import { bindFileScopeGate } from '../file-scope-gate-binding';
@@ -35,7 +36,7 @@ function finish(res: import('node:http').ServerResponse, content: string) {
     { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } } ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
 function tool(res: import('node:http').ServerResponse, command: string, name = 'bash') {
-  const args = name === 'bash' ? {command} : name === 'find' ? {pattern:'*',path:command} : name === 'grep' ? {pattern:'REPLICA_MARKER',path:command} : name === 'edit' ? {path:command,edits:[{oldText:'ORIGINAL_DENIED_DATA',newText:'CHANGED'}]} : name === 'write' ? {path:command,content:'CHANGED'} : {path:command};
+  const args = name === 'bash' ? {command} : name.startsWith('mcp__') ? {text:command} : name === 'find' ? {pattern:'*',path:command} : name === 'grep' ? {pattern:'REPLICA_MARKER',path:command} : name === 'edit' ? {path:command,edits:[{oldText:'ORIGINAL_DENIED_DATA',newText:'CHANGED'}]} : name === 'write' ? {path:command,content:'CHANGED'} : {path:command};
   const base = { id: 'cmpl-tool', object: 'chat.completion.chunk', created: 0, model: 'test' };
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   res.end([
@@ -43,7 +44,7 @@ function tool(res: import('node:http').ServerResponse, command: string, name = '
     { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } },
   ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
-async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string, paths: {home:string;store:string}) => void, lifecycle?: {ownsLease?():boolean; record?(kind:string,n:number):Promise<void>}, gateFor?: (home: string) => Promise<ToolAuthorizationGate>) {
+async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string, paths: {home:string;store:string}) => void, lifecycle?: {ownsLease?():boolean; record?(kind:string,n:number):Promise<void>}, gateFor?: (home: string) => Promise<ToolAuthorizationGate>, mcp?: Pick<RuntimeOperationStartInput, 'mcpServers' | 'mcpToolsetTools'>) {
 const __executionScratch = await testExecutionScratch();
 
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-durable-launch-'))); roots.push(root);
@@ -72,14 +73,14 @@ const __executionScratch = await testExecutionScratch();
   });
   const selection = { lane: 'byok' as const, runtimeId: 'pi' as const, providerId: 'probe', modelId: 'test' };
   const offer = { instruction: 'Host authority input\nHost context second line', dispatchSelection: selection };
-  const prepared = await adapter.prepare({ offer } as never);
+  const prepared = await adapter.prepare({ offer, ...mcp } as never);
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
   const env = testRuntimeEnv();
   const launch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: home, env,  });
   const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, dispatchSelection: selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
   const journal: string[] = [];
   const toolAuthorization = await gateFor?.(home);
-  const session = await prepared.operation.start({ ...(toolAuthorization === undefined ? {} : { toolAuthorization }), scratch: (launch).scratch,  kind: 'instruction', instruction: 'Host authority input\nHost context second line', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { replicaRoot: path.join(store, 'durable-replicas'), tenantId: 'tenant', lifecycle: { ownsLease: () => lifecycle?.ownsLease?.() ?? true, record: async (kind,n) => { journal.push(`${kind}:${n}`); await lifecycle?.record?.(kind,n); } } } }); sessions.push(session);
+  const session = await prepared.operation.start({ ...mcp, ...(toolAuthorization === undefined ? {} : { toolAuthorization }), scratch: (launch).scratch,  kind: 'instruction', instruction: 'Host authority input\nHost context second line', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { replicaRoot: path.join(store, 'durable-replicas'), tenantId: 'tenant', lifecycle: { ownsLease: () => lifecycle?.ownsLease?.() ?? true, record: async (kind,n) => { journal.push(`${kind}:${n}`); await lifecycle?.record?.(kind,n); } } } }); sessions.push(session);
   return { session, children, calls: () => calls, bodies, authorizations, home, journal };
 }
 /** A recording auto gate bound to a resolved grant; it denies bash and allows the rest. */
@@ -269,5 +270,20 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
     expect(result.isError).toBe(false); expect(asked).toEqual([name]);
     expect(JSON.stringify(result.output)).toContain('visible.txt'); expect(JSON.stringify(result.output)).not.toContain('durable-replicas');
+  }, 30_000);
+  it('a task MCP tool result reaches the model and the tool_result event (#1303)', async () => {
+    const audit = path.join(await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-durable-mcp-'))), 'audit.jsonl'); roots.push(path.dirname(audit));
+    const server = { command: process.execPath, args: [path.resolve(import.meta.dirname, 'fixtures/toolset-echo-mcp.mjs'), audit] };
+    // The real observation of the real server, as the daemon admits it.
+    const observed = await probeMcpServer('echo', server, { env: { PATH: process.env.PATH! } });
+    const f = await fixture((res, n) => { if (n === 1) tool(res, 'ECHO_MARKER', 'mcp__echo__echo'); else finish(res, 'echoed'); }, undefined, undefined,
+      { mcpServers: { echo: server }, mcpToolsetTools: { echo: { ...observed, toolsetId: 'echo.v1' } } });
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    const result = events.find(event => event.type === 'tool_result');
+    expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
+    expect(result.isError).toBe(false); expect(JSON.stringify(result.output)).toContain('byok-echo:ECHO_MARKER');
+    const toolMessage = (JSON.parse(f.bodies[1]!) as { messages: { role: string; content: unknown }[] }).messages.find(message => message.role === 'tool');
+    expect(JSON.stringify(toolMessage?.content)).toContain('byok-echo:ECHO_MARKER');
   }, 30_000);
 });
