@@ -159,10 +159,11 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     // State is read, not replayed: the live reader saw the states it was
     // reading for, in order, and ended at the terminal.
     const order = ['Offered', 'Claimed', 'Running', 'Complete'];
-    const states = (await live).map((e) => (e.kind === 'state' ? e.state : 'not a state'));
-    expect(states.at(-1)).toBe('Complete');
-    expect(states.map((state) => order.indexOf(state))).toEqual([...states.map((state) => order.indexOf(state))].sort());
-    expect(states).not.toContain('not a state');
+    const events = await live;
+    expect(events.every((e) => e.kind === 'state')).toBe(true);
+    const ranks = events.map((e) => (e.kind === 'state' ? order.indexOf(e.state) : -1));
+    expect(ranks.at(-1)).toBe(order.indexOf('Complete'));
+    expect(ranks.every((rank, index) => rank >= 0 && (index === 0 || rank > ranks[index - 1]!))).toBe(true);
 
     // ...and one that only subscribes afterwards reads the terminal and ends.
     const late: ServerTaskEvent[] = [];

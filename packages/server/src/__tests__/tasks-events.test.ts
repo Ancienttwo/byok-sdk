@@ -506,6 +506,32 @@ describe('readTaskEvents over its sources', () => {
     expect((await collect({ [Symbol.asyncIterator]: () => fromMarker.reader })).map((entry) => entry.event)).toEqual(read.slice(1).map((entry) => entry.event));
   });
 
+  it('marks history dropped before a cursor taken while the task had no log, but not on a fresh read', async () => {
+    const fake = fakeSources(RUNNING);
+    const { reader } = readFake(fake.sources);
+    const [running] = await take(reader, 1);
+    await reader.return!();
+    const watching = readFake(fake.sources, { from: 'state' });
+    const [watched] = await take(watching.reader, 1);
+    await watching.reader.return!();
+    // Revisions 1 and 2 are written and evicted after both cursors; 3 is retained.
+    fake.append([text('one')]);
+    fake.append([text('two')]);
+    fake.append([text('three')]);
+    fake.state.entries = fake.state.entries.slice(2);
+    fake.state.floor = 2;
+    fake.state.facts = { state: 'Complete', at: '2026-11-01T00:00:01.000Z' };
+    const complete = { kind: 'state', state: 'Complete', at: '2026-11-01T00:00:01.000Z' };
+    for (const cursor of [running!.cursor, watched!.cursor]) {
+      const resumed = readFake(fake.sources, { after: cursor });
+      expect((await collect({ [Symbol.asyncIterator]: () => resumed.reader })).map((entry) => entry.event)).toEqual([
+        { kind: 'error', reason: 'events_truncated' }, { kind: 'agent', event: text('three') }, complete,
+      ]);
+    }
+    const fresh = readFake(fake.sources);
+    expect((await collect({ [Symbol.asyncIterator]: () => fresh.reader })).map((entry) => entry.event)).toEqual([{ kind: 'agent', event: text('three') }, complete]);
+  });
+
   it('marks removed history and yields what the stores still say', async () => {
     const fake = fakeSources(RUNNING);
     fake.append([text('gone')]);

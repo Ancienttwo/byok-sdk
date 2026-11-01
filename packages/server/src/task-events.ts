@@ -171,7 +171,8 @@ async function* followTaskEvents(
           yield entry({ kind: 'state', state: facts.state, at: facts.at });
         }
       }
-      const log = readLog(sources, taskId, position, window === 0);
+      // Only a read that started with no position may skip an evicted prefix it never saw.
+      const log = readLog(sources, taskId, position, window === 0, window === 0 && after === undefined && from === undefined);
       try {
         for (let item = await log.next(); ; item = await log.next()) {
           if (signal.aborted) return;
@@ -211,13 +212,15 @@ async function logHead(sources: TaskEventSources, taskId: string): Promise<Posit
  * the position past everything read. A position whose history is gone (evicted
  * below the retained floor, expired, removed, another generation) yields one
  * `events_truncated` marker, whose cursor stands at the start of what is
- * retained, then the retained entries.
+ * retained, then the retained entries. So does a position taken before the log
+ * existed, unless `fresh`, once the log has evicted anything.
  */
 async function* readLog(
   sources: TaskEventSources,
   taskId: string,
   start: Position,
   firstRead: boolean,
+  fresh: boolean,
 ): AsyncGenerator<{ readonly event: ServerTaskEvent; readonly position: Position }, Position, undefined> {
   let position = start;
   let tail: ActivityTail | undefined;
@@ -232,6 +235,10 @@ async function* readLog(
   }
   if (tail === undefined) return position;
   const generation = tail.cursor.generation;
+  if (position.log === undefined && !fresh && tail.floor > 0) {
+    position = withLog(position, { generation, revision: tail.floor });
+    yield { event: TRUNCATED, position };
+  }
   // A fresh read starts at what is retained; an evicted prefix it never saw is not a gap.
   let revision = position.log?.revision ?? tail.floor;
   let read = false;
