@@ -692,9 +692,11 @@ export function createAutoToolAuthorizationGate(input: {
       try {
         // A runtime label is not an MCP authority. Only an exact admitted mapping
         // may attach identity to a gate request, even if the request supplies one.
+        // A runtime lookup is asked for only when an MCP selector needs it, so
+        // a policy without one never waits on it.
         const { mcp: _untrustedMcp, ...nativeCall } = rawCall;
         const mcp = resolveMcpIdentity === undefined ? input.mcpIdentities?.get(rawCall.toolName)
-          : await Promise.race([resolveMcpIdentity(), expired]);
+          : needsMcpIdentity ? await Promise.race([resolveMcpIdentity(), expired]) : undefined;
         if (mcp === 'expired') {
           withdraw.abort();
           return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` });

@@ -241,6 +241,7 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
       { id: 'PRIVATE_RULE', match: { toolName: 'read' } }, { id: 'PRIVATE_RULE', match: { toolName: 'write' } },
     ] } }, 'toolAuthorization', 'invalid_value'],
     ['an empty rule match', { default: 'auto', rules: { alwaysAsk: [{ id: 'empty', match: {} }] } }, 'toolAuthorization', 'invalid_value'],
+    ['a non-array rule list', { default: 'auto', rules: { allowWithoutAsking: 'all' } }, 'toolAuthorization.rules.allowWithoutAsking', 'invalid_type'],
     ['a duplicate id across the two lists', { default: 'all', rules: {
       alwaysAsk: [{ id: 'same', match: { toolName: 'read' } }], allowWithoutAsking: [{ id: 'same', match: { toolName: 'write' } }],
     } }, 'toolAuthorization', 'invalid_value'],

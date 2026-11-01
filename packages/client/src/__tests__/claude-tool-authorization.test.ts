@@ -140,6 +140,25 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
     await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
   });
 
+  it('never asks for mcp_status without an MCP selector, so a silent Claude cannot deny a helper', async () => {
+    const workspace = await tempRoot();
+    const receipt = path.join(workspace, 'status-receipt');
+    const requestAuthorization = vi.fn(async () => ({ approved: false }));
+    const verdicts: string[] = [];
+    const gate = createAutoToolAuthorizationGate({ workspace, timeoutMs: 300,
+      rules: { alwaysAsk: [{ id: 'merges', match: { commandGlob: 'gh pr merge **' } }] }, requestAuthorization,
+      onDecision: ({ verdict }) => { verdicts.push(verdict.decision === 'deny' ? verdict.code : 'allow'); },
+    });
+    const { salesko: _salesko, ...helpersOnly } = helperServers;
+    const session = await start(workspace, gate, { ...process.env, FAKE_MCP_STATUS_NO_ACK: '1', FAKE_MCP_STATUS_RECEIPT: receipt,
+      FAKE_TOOL_NAME: `mcp__${AGENT_RESULT_MCP_SERVER_NAME}__${AGENT_RESULT_TOOL_NAME}` }, helpersOnly);
+    await takeTurn(session);
+    expect(verdicts).toEqual(['allow']);
+    expect(requestAuthorization).not.toHaveBeenCalled();
+    await expect(fs.access(receipt)).rejects.toThrow();
+    expect(await fs.readFile(path.join(workspace, 'tool-1.txt'), 'utf8')).toBe('actual fixture write');
+  });
+
   it('gives no identity to a helper name Claude reports with another command', async () => {
     const workspace = await tempRoot();
     const requestAuthorization = vi.fn(async () => ({ approved: true }));

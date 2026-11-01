@@ -4082,6 +4082,7 @@ must all match. A rule has a unique nonblank `id`, optional display-only
   that same command/args match, so a Host MCP rule applies to helpers by
   identity and does not deny them for missing identity; helper events still
   carry no `mcp`.
+  The gate asks for that lookup only when the policy has an MCP selector.
   Identity lookup consumes the same authorization deadline as approval wait.
   In `auto`, an MCP call without trusted identity is denied when the policy
   includes MCP selectors. Names are not split on `__`; unobserved personal
