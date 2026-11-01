@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { RUNTIMES } from './runtime-contract-install.mjs';
 
@@ -87,13 +90,91 @@ test('every whole-runtime skip is explicit and names the bundled Pi pin', () => 
   }
 });
 
-test('reports a failure to one tracking issue with the retained evidence link', () => {
+test('reports only after a failed latest leg, with issue write access', () => {
   assert.match(report, /needs: latest/u);
   assert.match(report, /needs\.latest\.result == 'failure'/u);
   assert.match(report, /issues: write/u);
-  assert.match(report, /gh issue create --title "\$TITLE" --body "\$body"/u);
-  assert.match(report, /gh issue comment "\$number" --body "\$body"/u);
-  assert.ok(report.includes('#artifacts'), 'links the retained evidence');
-  assert.ok(report.includes('runtime-contract-<runtime>-latest'));
-  assert.ok(report.includes('Refs #1103'));
+});
+
+/** The report step's bash script and its literal TITLE, as GitHub runs them. */
+function reportStep() {
+  const lines = report.split('\n');
+  const runAt = lines.findIndex((line) => line === '        run: |');
+  assert.notEqual(runAt, -1, 'the report step has a run block');
+  const script = [];
+  for (const line of lines.slice(runAt + 1)) {
+    if (line.length > 0 && !line.startsWith('          ')) break;
+    script.push(line.slice(10));
+  }
+  const title = /^ {10}TITLE: '([^']+)'$/mu.exec(report);
+  assert.ok(title, 'the report step sets a literal TITLE');
+  return { script: script.join('\n'), title: title[1] };
+}
+
+/**
+ * Runs the step under GitHub's bash flags with a stub gh that records each
+ * call's argv; no request reaches GitHub.
+ */
+function runReport(existingIssue) {
+  const { script, title } = reportStep();
+  const dir = mkdtempSync(join(tmpdir(), 'byok-nightly-report-'));
+  try {
+    const calls = join(dir, 'calls');
+    mkdirSync(calls);
+    writeFileSync(join(dir, 'gh'), [
+      '#!/usr/bin/env bash',
+      'set -eu',
+      'n=$(ls "$STUB_CALLS" | wc -l | tr -d " ")',
+      'printf "%s\\0" "$@" > "$STUB_CALLS/$(printf %03d "$n")"',
+      'case "$1 $2" in',
+      '  "run view") echo "latest (codex), latest (pi)" ;;',
+      '  "issue list") printf "%s\\n" "$STUB_ISSUE" ;;',
+      'esac',
+      '',
+    ].join('\n'));
+    chmodSync(join(dir, 'gh'), 0o755);
+    writeFileSync(join(dir, 'step.sh'), script);
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', join(dir, 'step.sh')], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        STUB_CALLS: calls,
+        STUB_ISSUE: existingIssue ?? '',
+        GITHUB_RUN_ID: '4242',
+        GITHUB_SHA: 'abc123def',
+        RUN_URL: 'https://github.com/o/r/actions/runs/4242',
+        TITLE: title,
+      },
+    });
+    const argv = readdirSync(calls).sort().map((name) => readFileSync(join(calls, name), 'utf8').split('\0').slice(0, -1));
+    return { result, argv, title };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const expectedBody = [
+  'The runtime contract suite failed against the latest CLI.',
+  '',
+  '- Run: https://github.com/o/r/actions/runs/4242',
+  '- Failed legs: latest (codex), latest (pi)',
+  '- Commit: abc123def',
+  '- Retained evidence: https://github.com/o/r/actions/runs/4242#artifacts',
+  '  (`runtime-contract-<runtime>-latest`, 7 days)',
+  '',
+  'See docs/runtime-contract.md. Refs #1103.',
+].join('\n');
+
+test('comments on the open tracking issue with literal Markdown backticks', () => {
+  const { result, argv } = runReport('17');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(argv.map((call) => call.slice(0, 2).join(' ')), ['run view', 'issue list', 'issue comment']);
+  assert.deepEqual(argv[2], ['issue', 'comment', '17', '--body', expectedBody]);
+});
+
+test('creates the tracking issue when none is open', () => {
+  const { result, argv, title } = runReport(undefined);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(argv.map((call) => call.slice(0, 2).join(' ')), ['run view', 'issue list', 'issue create']);
+  assert.deepEqual(argv[2], ['issue', 'create', '--title', title, '--body', expectedBody]);
 });
