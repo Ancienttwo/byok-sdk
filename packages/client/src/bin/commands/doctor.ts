@@ -9,7 +9,7 @@ import {
 import { resolveStoreDir } from '../config';
 import { serviceLogDir } from '../../daemon/host-layout';
 import type { ServiceEnvironmentRecord } from '../../login-shell-environment';
-import { formatRuntimeEnvironmentLines, formatServiceEnvironment } from '../../diagnostics/format';
+import { formatRuntimeEnvironmentLines, formatRuntimeExecutable, formatServiceEnvironment } from '../../diagnostics/format';
 import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from '../../diagnostics/device-doctor';
 
 export interface DoctorOptions extends CollectDiagnosticsOptions {
@@ -75,6 +75,11 @@ function formatDoctorLines(diagnostics: DoctorDiagnostics, logDir: string, envir
       ];
       if (change.direction === 'downgrade') details.push('the installed CLI may have been replaced');
       return [details.join(' ')];
+    }),
+    // #1103 O10: the executable detection ran. Local-only; the support bundle drops it.
+    ...snapshot.runtimes.flatMap((runtime) => {
+      const executable = formatRuntimeExecutable(runtime);
+      return executable === undefined ? [] : [`runtime-executable: ${runtime.idHash} ${executable}`];
     }),
   ];
   for (const check of snapshot.checks) lines.push(`check ${check.id}: ${check.status} (${check.summary})`);

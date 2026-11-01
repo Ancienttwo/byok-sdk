@@ -74,6 +74,13 @@ export type RuntimeVersionVerdict =
   | { readonly state: 'block'; readonly qualifiedVersion: string; readonly matched: string };
 
 /**
+ * Who chose the runtime executable (#1103 O10): `config` the adapter's Host
+ * `resolveBin` option, `env` a `BYOK_<RUNTIME>_BIN` variable, `path` a bare
+ * name found on the runtime environment's PATH.
+ */
+export type RuntimeExecutableSource = 'config' | 'path' | 'env';
+
+/**
  * One probe outcome, never a separately authored presence boolean. Authentication
  * observation is each adapter's native non-secret login-state probe (a status
  * command, credential env-var names, or Pi's shape-only agent-dir login check)
@@ -81,7 +88,13 @@ export type RuntimeVersionVerdict =
  * contain no arbitrary diagnostics.
  */
 export type RuntimeDetectResult =
-  | { readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory; readonly versionVerdict?: RuntimeVersionVerdict }
+  | {
+    readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory; readonly versionVerdict?: RuntimeVersionVerdict;
+    /** The absolute executable this probe ran (#1103 O10). Local-only and user-path sensitive: never on the wire, in audit or in a support bundle. */
+    readonly executablePath?: string;
+    /** Who chose that executable; present whenever `executablePath` is. */
+    readonly executableSource?: RuntimeExecutableSource;
+  }
   | { readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'> }
   | { readonly kind: 'refused'; readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable'> }
   | { readonly kind: 'refused'; readonly reason: 'runtime_environment_unavailable'; readonly code: ServiceEnvironmentUnavailableCode };

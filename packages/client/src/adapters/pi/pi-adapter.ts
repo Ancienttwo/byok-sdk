@@ -47,6 +47,7 @@ import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../.
 import { locateBundledPiAssets } from './todo-locale-assets';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
 import { mapPiContextUsage, mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 import { abortPiRpcAndSettle } from './interrupt-settlement';
@@ -287,8 +288,8 @@ export class PiAdapter implements RuntimeAdapter {
           ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, version),
         };
       }
-      const bin = this.resolveBin();
-      const invocation = piInvocation(bin);
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolvePiBin);
+      const invocation = piInvocation(resolved.bin);
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env,
         invocation.entry === undefined ? [] : [invocation.entry]);
       if (probe.kind !== 'available') return probe;
@@ -296,6 +297,7 @@ export class PiAdapter implements RuntimeAdapter {
       const authPresent = await probePiAuthPresent(env);
       return {
         kind: 'available', version, authPresent,
+        ...runtimeExecutableFields(resolved, resolved.bin.command),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, version),
       };
     } catch (error) {
@@ -699,7 +701,7 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   private resolveBin(): ResolvedBin {
-    return (this.options.resolveBin ?? resolvePiBin)();
+    return resolveRuntimeCommand(this.options.resolveBin, resolvePiBin).bin;
   }
 }
 

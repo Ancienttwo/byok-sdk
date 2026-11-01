@@ -45,7 +45,7 @@ describe('resolveRuntimeInvocation', () => {
   it('keeps the command unchanged off Windows and reads no file', () => {
     const { host, looked } = windows({});
     for (const platform of ['darwin', 'linux'] as const) {
-      expect(resolveRuntimeInvocation('claude', { ...host, platform })).toEqual({ command: 'claude', args: [] });
+      expect(resolveRuntimeInvocation('claude', { ...host, platform })).toEqual({ command: 'claude', args: [], executable: 'claude' });
     }
     expect(looked).toEqual([]);
   });
@@ -55,6 +55,7 @@ describe('resolveRuntimeInvocation', () => {
     expect(resolveRuntimeInvocation('claude', host)).toEqual({
       command: 'C:\\node\\node.exe',
       args: [`C:\\npm\\${CLAUDE_ENTRY}`],
+      executable: 'C:\\npm\\claude.cmd',
     });
   });
 
@@ -63,6 +64,7 @@ describe('resolveRuntimeInvocation', () => {
     expect(resolveRuntimeInvocation('claude', host)).toEqual({
       command: 'C:\\node\\node.exe',
       args: [`C:\\npm\\${CLAUDE_ENTRY}`],
+      executable: 'C:\\npm\\claude.cmd',
     });
   });
 
@@ -76,12 +78,13 @@ describe('resolveRuntimeInvocation', () => {
     expect(resolveRuntimeInvocation('D:\\tools\\claude.cmd', host)).toEqual({
       command: 'C:\\node\\node.exe',
       args: [`D:\\tools\\${CLAUDE_ENTRY}`],
+      executable: 'D:\\tools\\claude.cmd',
     });
   });
 
   it('runs a native .exe directly and follows PATH order before PATHEXT order', () => {
     const { host } = windows({ 'C:\\empty\\claude.exe': '', 'C:\\npm\\claude.cmd': npmNodeShim(CLAUDE_ENTRY) });
-    expect(resolveRuntimeInvocation('claude', host)).toEqual({ command: 'C:\\empty\\claude.exe', args: [] });
+    expect(resolveRuntimeInvocation('claude', host)).toEqual({ command: 'C:\\empty\\claude.exe', args: [], executable: 'C:\\empty\\claude.exe' });
     const sameDir = windows({ 'C:\\npm\\claude.exe': '', 'C:\\npm\\claude.cmd': npmNodeShim(CLAUDE_ENTRY), 'C:\\node\\node.exe': '' },
       { PATH: 'C:\\npm;C:\\node', PATHEXT: '.CMD;.EXE' });
     expect(resolveRuntimeInvocation('claude', sameDir.host).command).toBe('C:\\node\\node.exe');
@@ -102,7 +105,7 @@ describe('resolveRuntimeInvocation', () => {
 
   it('still finds a native .exe when PATHEXT omits it', () => {
     const { host } = windows({ 'C:\\npm\\claude.exe': '' }, { PATH: 'C:\\npm', PATHEXT: '.CMD' });
-    expect(resolveRuntimeInvocation('claude', host)).toEqual({ command: 'C:\\npm\\claude.exe', args: [] });
+    expect(resolveRuntimeInvocation('claude', host)).toEqual({ command: 'C:\\npm\\claude.exe', args: [], executable: 'C:\\npm\\claude.exe' });
   });
 
   it('keeps the code of a failed shim read and drops its local path', () => {
@@ -113,7 +116,7 @@ describe('resolveRuntimeInvocation', () => {
 
   it('passes an unknown extension through unchanged', () => {
     const { host } = windows({ 'C:\\fixtures\\fake-claude.mjs': '' });
-    expect(resolveRuntimeInvocation('C:\\fixtures\\fake-claude.mjs', host)).toEqual({ command: 'C:\\fixtures\\fake-claude.mjs', args: [] });
+    expect(resolveRuntimeInvocation('C:\\fixtures\\fake-claude.mjs', host)).toEqual({ command: 'C:\\fixtures\\fake-claude.mjs', args: [], executable: 'C:\\fixtures\\fake-claude.mjs' });
   });
 
   it('refuses every other batch file instead of running it through cmd.exe', () => {

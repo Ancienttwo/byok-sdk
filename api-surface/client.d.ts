@@ -4051,7 +4051,7 @@ import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detect
 import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentReport } from '../runtime/environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
-import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeVersionVerdict } from '../types';
+import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
 import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation';
 /**
@@ -4320,6 +4320,12 @@ export interface ControlStatusResult {
     runtimeVersionChanges?: Array<{
         readonly id: string;
         readonly versionChange: RuntimeVersionChange;
+    }>;
+    /** #1103 O10: the executable each runtime's detection ran, same side-channel rule; absent from an older daemon. */
+    runtimeExecutables?: Array<{
+        readonly id: string;
+        readonly executablePath?: string;
+        readonly executableSource: RuntimeExecutableSource;
     }>;
     /** Absent for a pre-#392 control peer. */
     environment?: ServiceEnvironmentStatus;
@@ -5841,7 +5847,7 @@ export type DaemonRecord = Extract<DaemonEvent, {
 } | {
     kind: 'runtimes-detected';
     ts: string;
-    runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict' | 'versionChange'>>;
+    runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict' | 'versionChange' | 'executablePath' | 'executableSource'>>;
 } | {
     kind: 'shutdown-requested';
     ts: string;
@@ -9233,7 +9239,7 @@ export interface InspectDaemonStoresInput {
  */
 export declare function inspectDaemonStores(input: InspectDaemonStoresInput): Promise<readonly StoreCompatibility[]>;
 // ==== @byok-sdk/client dist/diagnostics/types.d.ts ====
-import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeVersionVerdict } from '../types';
+import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types';
 import type { RuntimeVersionChange } from '../runtime-detection';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
@@ -9277,6 +9283,9 @@ export interface DiagnosticsSnapshot {
         versionVerdict?: RuntimeVersionVerdict;
         /** #1103 §2.6: the local restart comparison. Absent on a first run, an unchanged version or an older daemon. */
         versionChange?: RuntimeVersionChange;
+        /** #1103 O10: the executable detection ran and who chose it. Local-only; a support bundle drops both. */
+        executablePath?: string;
+        executableSource?: RuntimeExecutableSource;
         authPresent?: boolean;
         steer: boolean;
         resume: boolean;
@@ -9390,7 +9399,7 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -12380,7 +12389,7 @@ export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleas
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
 import type { RuntimeId } from '@byok-sdk/protocol';
 import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
-import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeVersionVerdict } from './types';
+import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types';
 /** How one restart changed an installed runtime's version token (#1103 §2.6). */
 export type RuntimeVersionChangeDirection = 'upgrade' | 'downgrade' | 'changed' | 'unknown';
 /** The local, restart-only version comparison; never sent on the wire or into audit. */
@@ -12417,6 +12426,17 @@ export interface RuntimeObservation {
      * unavailable runtime, or an older daemon.
      */
     versionChange?: RuntimeVersionChange;
+    /**
+     * #1103 O10: the absolute executable detection ran, and who chose it.
+     * Local-only (`Daemon.status()`, control `status` through the additive
+     * `runtimeExecutables` side channel, `doctor`); never on the wire, in audit
+     * or in a support bundle, because the path can name the local user. Absent
+     * when detection did not run an executable it can name: an unavailable
+     * runtime, a bare command the OS finds on PATH at spawn (source `path`
+     * only), the bundled Pi package, or an older daemon.
+     */
+    executablePath?: string;
+    executableSource?: RuntimeExecutableSource;
     authPresent?: boolean;
     steer: boolean;
     resume: boolean;
@@ -12443,6 +12463,15 @@ export declare function attachRuntimeVersionVerdicts(observations: RuntimeObserv
  * @internal
  */
 export declare function attachRuntimeVersionChanges(observations: RuntimeObservation[], value: unknown): RuntimeObservation[];
+/**
+ * Merge the control status's additive executable channel (#1103 O10) into
+ * observations, under the same side-channel rule as
+ * {@link attachRuntimeVersionChanges}. A missing or malformed entry means
+ * unknown; the reader never resolves a path itself.
+ *
+ * @internal
+ */
+export declare function attachRuntimeExecutables(observations: RuntimeObservation[], value: unknown): RuntimeObservation[];
 /** Reject legacy/mixed authoring shapes; copy only validated, known facts. */
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
 /**
@@ -13205,6 +13234,12 @@ export type RuntimeVersionVerdict = {
     readonly matched: string;
 };
 /**
+ * Who chose the runtime executable (#1103 O10): `config` the adapter's Host
+ * `resolveBin` option, `env` a `BYOK_<RUNTIME>_BIN` variable, `path` a bare
+ * name found on the runtime environment's PATH.
+ */
+export type RuntimeExecutableSource = 'config' | 'path' | 'env';
+/**
  * One probe outcome, never a separately authored presence boolean. Authentication
  * observation is each adapter's native non-secret login-state probe (a status
  * command, credential env-var names, or Pi's shape-only agent-dir login check)
@@ -13217,6 +13252,10 @@ export type RuntimeDetectResult = {
     readonly authPresent?: boolean;
     readonly advisory?: RuntimeDetectionAdvisory;
     readonly versionVerdict?: RuntimeVersionVerdict;
+    /** The absolute executable this probe ran (#1103 O10). Local-only and user-path sensitive: never on the wire, in audit or in a support bundle. */
+    readonly executablePath?: string;
+    /** Who chose that executable; present whenever `executablePath` is. */
+    readonly executableSource?: RuntimeExecutableSource;
 } | {
     readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'>;
 } | {
