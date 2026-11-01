@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.32.0",
-    "snapshotSha256": "948a4217dba7d8ea121cd20b31445e56a2174264032cf1706b3522dc070ea136"
+    "snapshotSha256": "e1f49b876ef12432ae4fb6d309326d74c58c8e1f0c6e8fc9d7d9cf57e280b211"
   },
   "configFields": {
     "status": "tracked",
@@ -177,6 +177,15 @@
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStore",
         "export:@byok-sdk/server#ByokServer"
       ]
+    },
+    {
+      "id": "agent-memory-projection-grant-sealing",
+      "impact": "additive",
+      "summary": "AgentMemoryProjectionGrant takes an optional sealing { scopeId, epoch } (#1045 S2). With it, the daemon seals each memory projection snapshot under that Agent scope and never sends it in plaintext; without a usable key it sends nothing. A Host that issues no sealing sees no change. The daemon also seals the Agent messages and memory evidence of a task whose offer names agent-message or memory-projection, and advertises sealed-payload-v2 whenever it advertises sealed-payload-v1.",
+      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "items": [
+        "export:@byok-sdk/client#AgentMemoryProjectionGrant"
+      ]
     }
   ],
   "changes": [
@@ -186,6 +195,11 @@
       "before": "optional schema-sha256=a433ba0fb0c2e2f1",
       "after": "optional schema-sha256=278bbd8285f89b7a",
       "entry": "daemon-config-runtimes-grok"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryProjectionGrant",
+      "change": "changed",
+      "entry": "agent-memory-projection-grant-sealing"
     },
     {
       "item": "export:@byok-sdk/client#DaemonConfig",

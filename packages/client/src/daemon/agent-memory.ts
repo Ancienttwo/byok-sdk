@@ -8,6 +8,7 @@ import {
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
   AgentMemoryProjectionMutationSchema,
   type AgentMemoryProjectionMutation,
+  type AgentMemoryProjectionSealedMutation,
 } from '@byok-sdk/protocol';
 import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES as PROTOCOL_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES as PROTOCOL_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
 import { AGENT_HOME_INTERNAL_DIRECTORY, type AgentHomeLease, type AgentRef } from '../agent-home';
@@ -90,6 +91,22 @@ export interface AgentMemoryProjectionGrant {
   readonly grantRef: AgentMemoryProjectionMutation['grantRef'];
   readonly writerEpoch: AgentMemoryProjectionMutation['writerEpoch'];
   readonly policyRevision: AgentMemoryProjectionMutation['policyRevision'];
+  /**
+   * The Agent scope this writer epoch seals its snapshots under (#1045 C4).
+   * It is fixed for the epoch: the Host issues a higher epoch to change it.
+   * With it, a snapshot is only ever sent sealed.
+   */
+  readonly sealing?: { readonly scopeId: string; readonly epoch: number };
+}
+
+/** Seals one projection snapshot under a grant's Agent scope; `undefined` when the scope or its key is not usable. */
+export interface AgentMemoryProjectionSealer {
+  sealMemoryProjection(input: {
+    readonly sealing: { readonly scopeId: string; readonly epoch: number };
+    readonly agentRef: AgentRef;
+    readonly identity: { readonly agentId: string; readonly writerEpoch: number; readonly sourceSeq: number; readonly mutationId: string };
+    readonly redactedBytes: string;
+  }): Promise<AgentMemoryProjectionSealedMutation['sealed'] | undefined>;
 }
 export interface AgentMemoryRedactedOutboxRecord {
   readonly version: 2;
@@ -877,10 +894,15 @@ export class AgentMemoryRedactedOutbox {
   private state!: OutboxState;
   private fileRevision!: string;
   private writeTail: Promise<void> = Promise.resolve();
-  private constructor(private readonly context: AgentMemoryTaskContext, private readonly grant: AgentMemoryProjectionGrant, readonly filePath: string) {}
-  static async open(input: AgentMemoryTaskContext, grant: AgentMemoryProjectionGrant): Promise<AgentMemoryRedactedOutbox> {
+  private constructor(
+    private readonly context: AgentMemoryTaskContext,
+    private readonly grant: AgentMemoryProjectionGrant,
+    readonly filePath: string,
+    private readonly sealer: AgentMemoryProjectionSealer | undefined,
+  ) {}
+  static async open(input: AgentMemoryTaskContext, grant: AgentMemoryProjectionGrant, sealer?: AgentMemoryProjectionSealer): Promise<AgentMemoryRedactedOutbox> {
     const context = taskContext(input);
-    const outbox = new AgentMemoryRedactedOutbox(context, grant, path.join(context.canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY, AGENT_MEMORY_OUTBOX_FILENAME));
+    const outbox = new AgentMemoryRedactedOutbox(context, grant, path.join(context.canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY, AGENT_MEMORY_OUTBOX_FILENAME), sealer);
     await outbox.load(); await outbox.admitGrant();
     return outbox;
   }
@@ -891,17 +913,36 @@ export class AgentMemoryRedactedOutbox {
     const currentHighWater = this.state.highWater[0]?.sourceSeq ?? 0;
     if (currentHighWater >= AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE) throw new AgentMemoryError('Agent memory outbox source sequence is exhausted');
     const sourceSeq = currentHighWater + 1;
+    const mutationId = randomUUID();
+    const redacted = Buffer.from(bytes).toString('base64url');
     const mutation = AgentMemoryProjectionMutationSchema.parse({
       taskId: this.context.taskId, agentRef: this.context.agentRef, sessionRef: this.context.sessionRef, runtimeId: this.context.runtimeId,
-      grantRef: this.grant.grantRef, writerEpoch: this.grant.writerEpoch, sourceSeq, mutationId: randomUUID(), policyRevision: this.grant.policyRevision,
-      snapshot: { redactedHash: digestBytes(bytes), redactedByteCount: bytes.byteLength, redactedBytes: Buffer.from(bytes).toString('base64url') },
+      grantRef: this.grant.grantRef, writerEpoch: this.grant.writerEpoch, sourceSeq, mutationId, policyRevision: this.grant.policyRevision,
+      ...(this.grant.sealing === undefined
+        ? { snapshot: { redactedHash: digestBytes(bytes), redactedByteCount: bytes.byteLength, redactedBytes: redacted } }
+        : { sealed: await this.seal(this.grant.sealing, { agentId: this.context.agentRef.agentId, writerEpoch: this.grant.writerEpoch, sourceSeq, mutationId }, redacted) }),
     });
     const record: AgentMemoryRedactedOutboxRecord = Object.freeze({ version: 2, mutation: Object.freeze(mutation), createdAt: new Date().toISOString() });
     await this.persist(stateWithHighWater(this.state, mutation.writerEpoch, mutation.sourceSeq, [record]));
     return record;
   }); }
+  /** A grant with `sealing` gets a sealed snapshot or none; the snapshot never goes out in plaintext. */
+  private async seal(
+    sealing: NonNullable<AgentMemoryProjectionGrant['sealing']>,
+    identity: { readonly agentId: string; readonly writerEpoch: number; readonly sourceSeq: number; readonly mutationId: string },
+    redactedBytes: string,
+  ): Promise<AgentMemoryProjectionSealedMutation['sealed']> {
+    const sealed = await this.sealer?.sealMemoryProjection({ sealing, agentRef: this.context.agentRef, identity, redactedBytes });
+    if (sealed === undefined) throw new AgentMemoryError('Agent memory projection cannot be sealed under its grant');
+    return sealed;
+  }
   async replay(port: AgentMemoryProjectionPort): Promise<AgentMemoryProjectionReplayOutcome> { return this.exclusive(async () => {
     for (const record of this.pending()) {
+      // One writer epoch has one form. A pending record of the other form stops the outbox unsent.
+      const { sealed } = record.mutation;
+      if ((sealed === undefined) !== (this.grant.sealing === undefined) || (sealed !== undefined && sealed.scope.id !== this.grant.sealing?.scopeId)) {
+        throw new AgentMemoryError('Agent memory outbox record does not match its grant sealing');
+      }
       if (!(await publishAgentMemoryProjection(port, record.mutation)).accepted) {
         return Object.freeze({
           status: 'pending' as const,
@@ -949,7 +990,7 @@ export class AgentMemoryRedactedOutbox {
 }
 
 /** Missing capability, grant, redactor, or port has exactly zero network side effects. */
-export async function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined): Promise<void> {
+export async function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined, sealer?: AgentMemoryProjectionSealer): Promise<void> {
   if (projection?.capability !== AGENT_MEMORY_PROJECTION_CAPABILITY || !projection.grant || !projection.redactor || !projection.port) return;
   const context = taskContext(input);
   const { grant, redactor, port } = projection;
@@ -958,7 +999,7 @@ export async function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContex
     // replay, snapshot/redaction, append, and trailing replay in one
     // transaction so independently closing sessions cannot load the same file
     // revision and lose the later projection to a revision conflict.
-    const outbox = await AgentMemoryRedactedOutbox.open(context, grant);
+    const outbox = await AgentMemoryRedactedOutbox.open(context, grant, sealer);
     // Pending redacted mutations retain their original task/session/runtime/grant
     // binding. Drain them before touching local source files or minting a newer
     // sequence, so an offline replay cannot create a source-sequence gap.

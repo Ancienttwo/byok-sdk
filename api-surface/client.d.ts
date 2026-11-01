@@ -2608,7 +2608,7 @@ export declare function parseAgentMemoryIntentLedger(content: string): readonly 
  */
 export declare function createAgentMemoryIntentProcessor(options: AgentMemoryIntentProcessorOptions): (payload: AgentMemoryIntentAvailablePayload) => Promise<AgentMemoryIntentProcessResult>;
 // ==== @byok-sdk/client dist/daemon/agent-memory.d.ts ====
-import { AGENT_MEMORY_PROJECTION_CAPABILITY, type AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_PROJECTION_CAPABILITY, type AgentMemoryProjectionMutation, type AgentMemoryProjectionSealedMutation } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentRef } from '../agent-home';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
 import { AgentMemoryError, AgentMemoryValidationError, type AgentMemoryProjectionPort, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
@@ -2675,6 +2675,32 @@ export interface AgentMemoryProjectionGrant {
     readonly grantRef: AgentMemoryProjectionMutation['grantRef'];
     readonly writerEpoch: AgentMemoryProjectionMutation['writerEpoch'];
     readonly policyRevision: AgentMemoryProjectionMutation['policyRevision'];
+    /**
+     * The Agent scope this writer epoch seals its snapshots under (#1045 C4).
+     * It is fixed for the epoch: the Host issues a higher epoch to change it.
+     * With it, a snapshot is only ever sent sealed.
+     */
+    readonly sealing?: {
+        readonly scopeId: string;
+        readonly epoch: number;
+    };
+}
+/** Seals one projection snapshot under a grant's Agent scope; `undefined` when the scope or its key is not usable. */
+export interface AgentMemoryProjectionSealer {
+    sealMemoryProjection(input: {
+        readonly sealing: {
+            readonly scopeId: string;
+            readonly epoch: number;
+        };
+        readonly agentRef: AgentRef;
+        readonly identity: {
+            readonly agentId: string;
+            readonly writerEpoch: number;
+            readonly sourceSeq: number;
+            readonly mutationId: string;
+        };
+        readonly redactedBytes: string;
+    }): Promise<AgentMemoryProjectionSealedMutation['sealed'] | undefined>;
 }
 export interface AgentMemoryRedactedOutboxRecord {
     readonly version: 2;
@@ -2827,13 +2853,16 @@ export declare class AgentMemoryRedactedOutbox {
     private readonly context;
     private readonly grant;
     readonly filePath: string;
+    private readonly sealer;
     private state;
     private fileRevision;
     private writeTail;
     private constructor();
-    static open(input: AgentMemoryTaskContext, grant: AgentMemoryProjectionGrant): Promise<AgentMemoryRedactedOutbox>;
+    static open(input: AgentMemoryTaskContext, grant: AgentMemoryProjectionGrant, sealer?: AgentMemoryProjectionSealer): Promise<AgentMemoryRedactedOutbox>;
     pending(): readonly AgentMemoryRedactedOutboxRecord[];
     append(bytes: Uint8Array): Promise<AgentMemoryRedactedOutboxRecord>;
+    /** A grant with `sealing` gets a sealed snapshot or none; the snapshot never goes out in plaintext. */
+    private seal;
     replay(port: AgentMemoryProjectionPort): Promise<AgentMemoryProjectionReplayOutcome>;
     private load;
     private loadBody;
@@ -2842,7 +2871,7 @@ export declare class AgentMemoryRedactedOutbox {
     private exclusive;
 }
 /** Missing capability, grant, redactor, or port has exactly zero network side effects. */
-export declare function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined): Promise<void>;
+export declare function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined, sealer?: AgentMemoryProjectionSealer): Promise<void>;
 // ==== @byok-sdk/client dist/daemon/agent-session-handoff-store.d.ts ====
 import { type AgentRef } from '../agent-home';
 export type AgentTerminalCause = 'complete' | 'failed' | 'cancelled';

@@ -444,6 +444,7 @@ describe('required Agent message completion gate', () => {
       contentType: 'text/markdown', body: 'exact reply', maxPendingEvents: 4, maxPendingBytes: 2000 });
     const record = await outbox.activate('pending', 'session-one');
     const payload = outbox.publishPayload(record!);
+    if (payload.sealed !== undefined) throw new Error("plaintext message expected");
     const sent: Envelope[] = [];
     const createRunner = () => new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag,...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [], storeDir: root, productId: 'recovery-test', deviceId: 'device-one', tenantId: 'tenant-one',

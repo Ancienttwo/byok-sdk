@@ -25,6 +25,10 @@ import {
   isSealedPayload,
   isSealedTaskPlainOutput,
   requiredReceiverCapabilities,
+  sealedAgentMessageMaxContentLength,
+  sealedMovedFields,
+  type AgentMemoryProjectionSealedMutation,
+  type AgentMessagePublishSealedPayload,
   type AgentRef,
   type BlobRef,
   type Envelope,
@@ -35,6 +39,7 @@ import {
   type TaskSealing,
 } from '@byok-sdk/protocol';
 import { BlobHttpError } from './blob-http-error';
+import type { AgentMemoryProjectionSealer } from './agent-memory';
 import { routineTemplateBinding, routineTemplateExpired, type RoutineRef } from './sealed-routine-template';
 import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
 
@@ -113,6 +118,17 @@ class SealedRetryError extends Error {}
 /** Fields a `task.fail` keeps when a task that cannot seal reports `sealed_key_unavailable`. */
 const UNSEALABLE_FAIL_FIELDS = ['harnessId', 'usage', 'agentRef', 'agentHomeProjection', 'agentHomeMemoryChange'] as const;
 
+/** The fields a closed plaintext terminal keeps: a task that seals `memory-projection` keeps its memory evidence sealed only (#1045). */
+function plainTerminalFields(fields: readonly string[], categories: readonly SealedCategory[]): readonly string[] {
+  return categories.includes('memory-projection') ? fields.filter((field) => field !== 'agentHomeMemoryChange') : fields;
+}
+
+/** The family that binds a sealed Agent-memory projection; it is an HTTP write, not a wire type. */
+const MEMORY_PROJECTION_FAMILY = 'agent.memory.projection';
+
+/** The opened content of a memory projection is `{"redactedBytes":"…"}`, inline only: at most the inline frame less its 4-byte length prefix. */
+const MEMORY_PROJECTION_MAX_CONTENT_LENGTH = SEALED_INLINE_MAX_PADDED_LENGTH - 4;
+
 function pick(payload: JsonObject, fields: readonly string[]): JsonObject {
   return Object.fromEntries(fields.filter((field) => payload[field] !== undefined).map((field) => [field, payload[field]]));
 }
@@ -136,6 +152,11 @@ export class SealedTasks {
   /** Whether this task has a sealing policy at all. */
   isSealed(taskId: string | undefined): boolean {
     return taskId !== undefined && this.#tasks.has(taskId);
+  }
+
+  /** Whether this task seals its Agent messages (#1045 C2). */
+  sealsMessages(taskId: string | undefined): boolean {
+    return taskId !== undefined && this.#tasks.get(taskId)?.sealing.categories.includes('agent-message') === true;
   }
 
   /** Whether this task's input is sealed, so a plaintext steer is a downgrade (§6.2). */
@@ -187,7 +208,7 @@ export class SealedTasks {
       }
       payload = { ...plain, ...opened.plaintext };
     }
-    if (sealing.categories.includes('task-output') && await this.#sealingKey(sealing) === undefined) {
+    if ((sealing.categories.includes('task-output') || sealing.categories.includes('agent-message')) && await this.#sealingKey(sealing) === undefined) {
       return { ok: false, code: 'sealed_key_unavailable' };
     }
     let offer: Envelope;
@@ -271,7 +292,7 @@ export class SealedTasks {
     if (offer.type !== 'task.offer' || sealing === undefined || !sealing.categories.includes('task-output') || isSealedTaskPlainOutput(terminal.type, terminal.payload, sealing.categories)) {
       return terminal;
     }
-    if (!sealable) return this.unsealable(terminal)!;
+    if (!sealable) return this.unsealable(terminal, sealing.categories)!;
     const task: SealedTask = { sealing, agentRef: agentRef ?? null, steerIds: new Set(), tail: Promise.resolve() };
     return (await this.#sealOutbound(task, terminal))!;
   }
@@ -304,7 +325,7 @@ export class SealedTasks {
       sealed = await this.#seal(taskId, task, 'task.fail', failure);
       plain = createEnvelope('task.fail', failure as never, { taskId });
     }
-    if (sealed === undefined) return this.unsealable(envelope);
+    if (sealed === undefined) return this.unsealable(envelope, task.sealing.categories);
     this.#plainBySealedId.set(sealed.id, plain);
     return sealed;
   }
@@ -316,7 +337,8 @@ export class SealedTasks {
     if (present.length > 0) throw new Error(`${type} of sealed task ${taskId} carries ${present.join(', ')}, which its sealed branch does not carry`);
     const key = await this.#sealingKey(task.sealing);
     if (key === undefined) return undefined;
-    const kept = omit(payload, entry.moved);
+    const moved = sealedMovedFields(type as SealableMessageType, task.sealing.categories);
+    const kept = omit(payload, moved);
     const identity = { taskId, ...pick(kept, entry.identity) } as SealedBinding['identity'];
     const { header, ciphertext } = await sealContent({
       scopeKey: key.scopeKey,
@@ -325,7 +347,7 @@ export class SealedTasks {
       sender: key.sender,
       category: 'task-output',
       binding: this.#binding(type, 'daemon-to-server', identity, task.sealing, task.agentRef),
-      plaintext: pick(payload, entry.moved) as never,
+      plaintext: pick(payload, moved) as never,
       maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
     });
     if (header.paddedLength <= SEALED_INLINE_MAX_PADDED_LENGTH) {
@@ -345,6 +367,71 @@ export class SealedTasks {
     }
     const ciphertextRef = omit(await this.#upload(ciphertext) as unknown as JsonObject, ['url']);
     return createEnvelope(type, { ...kept, sealed: { ...header, ciphertextRef } } as never, { taskId });
+  }
+
+  /**
+   * Seals the body of a task's Agent message once (#1045 C2). The message
+   * outbox keeps the sealed member, so every retry sends the same bytes.
+   * Throws when the task has no sealing key, or when the member needs a
+   * ciphertext blob the current server does not hold: the message is not
+   * sent, and never in plaintext.
+   */
+  async sealPublish(taskId: string, draft: { readonly messageId: string; readonly cursor: number; readonly body: string; readonly maxBytes: number }): Promise<AgentMessagePublishSealedPayload['sealed']> {
+    const task = this.#tasks.get(taskId);
+    if (task === undefined || !task.sealing.categories.includes('agent-message')) throw new Error(`task ${taskId} does not seal Agent messages`);
+    const key = await this.#sealingKey(task.sealing);
+    if (key === undefined) throw new Error(`no sealing key for the Agent message of sealed task ${taskId}`);
+    const { header, ciphertext } = await sealContent({
+      scopeKey: key.scopeKey,
+      scope: { id: task.sealing.scopeId, epoch: key.epoch },
+      chainHead: key.chainHead,
+      sender: key.sender,
+      category: 'agent-message',
+      binding: this.#binding('agent.message.publish', 'daemon-to-server', { taskId, messageId: draft.messageId, cursor: draft.cursor }, task.sealing, task.agentRef),
+      plaintext: { body: draft.body },
+      maxContentLength: sealedAgentMessageMaxContentLength(draft.maxBytes),
+    });
+    type Member = AgentMessagePublishSealedPayload['sealed'];
+    if (header.paddedLength <= SEALED_INLINE_MAX_PADDED_LENGTH) return { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } as Member;
+    const advertised = this.options.serverCapabilities();
+    if (advertised === undefined || !requiredReceiverCapabilities('agent.message.publish', { sealed: { ciphertextRef: {} } }).every((flag) => advertised.includes(flag))) {
+      throw new Error(`the Agent message of sealed task ${taskId} needs a ciphertext blob the server does not hold now`);
+    }
+    return { ...header, ciphertextRef: omit(await this.#upload(ciphertext) as unknown as JsonObject, ['url']) } as Member;
+  }
+
+  /**
+   * Seals one Agent-memory projection snapshot under the grant's Agent scope
+   * (#1045 C4), inline only. The scope policy must name `memory-projection`
+   * and nothing else (a policy floor, as for an offer). `undefined` when the
+   * scope or its key is not usable; the caller then sends nothing.
+   */
+  async sealMemoryProjection(input: Parameters<AgentMemoryProjectionSealer['sealMemoryProjection']>[0]): Promise<AgentMemoryProjectionSealedMutation['sealed'] | undefined> {
+    const policy = await this.#keyring(() => this.options.keyring.scopeCategories(input.sealing.scopeId));
+    if (policy === undefined || !policy.includes('memory-projection') || policy.some((category) => category !== 'memory-projection')) return undefined;
+    const key = await this.#keyring(() => this.options.keyring.sealingKey(input.sealing.scopeId, input.sealing.epoch));
+    if (key === undefined) return undefined;
+    const { agentId, writerEpoch, sourceSeq, mutationId } = input.identity;
+    const { header, ciphertext } = await sealContent({
+      scopeKey: key.scopeKey,
+      scope: { id: input.sealing.scopeId, epoch: key.epoch },
+      chainHead: key.chainHead,
+      sender: key.sender,
+      category: 'memory-projection',
+      binding: {
+        tenantId: this.options.tenantId,
+        family: MEMORY_PROJECTION_FAMILY,
+        direction: 'daemon-to-server',
+        identity: { agentId, writerEpoch, sourceSeq, mutationId },
+        deviceId: this.options.deviceId,
+        agentRef: { agentId: input.agentRef.agentId, profileRevision: input.agentRef.profileRevision },
+        categories: ['memory-projection'],
+        notAfter: null,
+      },
+      plaintext: { redactedBytes: input.redactedBytes },
+      maxContentLength: MEMORY_PROJECTION_MAX_CONTENT_LENGTH,
+    });
+    return { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } as AgentMemoryProjectionSealedMutation['sealed'];
   }
 
   async #upload(ciphertext: Uint8Array): Promise<BlobRef> {
@@ -406,17 +493,17 @@ export class SealedTasks {
     return createEnvelope('task.fail', this.#unsealableFailure(kept) as never, { taskId: refused.task_id! });
   }
 
-  /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
-  unsealable(envelope: Envelope): Envelope | undefined {
+  /** The closed plaintext form of a terminal that has no sealing key (decision 12d), under the task's frozen categories. */
+  unsealable(envelope: Envelope, categories: readonly SealedCategory[]): Envelope | undefined {
     const taskId = envelope.task_id!;
     const payload = envelope.payload as JsonObject;
     const code = 'sealed_key_unavailable';
     switch (envelope.type) {
       case 'task.complete':
       case 'task.fail':
-        return createEnvelope('task.fail', { reason: code, retryable: false, ...this.#daemonFailure(), ...pick(payload, UNSEALABLE_FAIL_FIELDS) } as never, { taskId });
+        return createEnvelope('task.fail', { reason: code, retryable: false, ...this.#daemonFailure(), ...pick(payload, plainTerminalFields(UNSEALABLE_FAIL_FIELDS, categories)) } as never, { taskId });
       case 'task.cancelled':
-        return createEnvelope('task.cancelled', omit(payload, ['reason']) as never, { taskId });
+        return createEnvelope('task.cancelled', omit(payload, categories.includes('memory-projection') ? ['reason', 'agentHomeMemoryChange'] : ['reason']) as never, { taskId });
       case 'task.decline':
         return createEnvelope('task.decline', { reason: code, code, retryable: false, ...pick(payload, ['agentRef', 'admission']) } as never, { taskId });
       default:

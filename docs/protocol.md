@@ -1627,13 +1627,31 @@ v1 suite, keys and binding rules. The design is
   schema refuses `ciphertextRef`. The sealed receipt carries `contentMac`,
   `paddedLength` and `metering.acceptedPaddedBytes`, and no `redactedHash`.
   The Host-issued projection grant gates this branch, not an envelope row.
+- **Device rules (#1045 S2).** The daemon advertises `sealed-payload-v2`
+  exactly when it advertises `sealed-payload-v1`. It declines an offer that
+  seals `agent-message` with `sealing_policy_mismatch` when the server does
+  not advertise the flags of a sealed publish, and it needs a sealing key
+  before such a task runs, as for `task-output`. It seals a message body once,
+  when the draft enters the Agent's message outbox, and every retry sends
+  those bytes; without a key the message tool fails and nothing is sent. It
+  matches a disposition by `contentMac` for a sealed message and by
+  `contentHash` for a plaintext one. A closed plaintext terminal of a task
+  that seals `memory-projection` drops `agentHomeMemoryChange`.
+- **Projection sealing.** A grant with `sealing: { scopeId, epoch }` names an
+  Agent scope of the member chain, separate from task scopes. Its policy must
+  be exactly `memory-projection`. The opened content is
+  `{"redactedBytes": "<base64url>"}`, at most 262,140 bytes, bound to family
+  `agent.memory.projection`, direction `daemon-to-server`, identity
+  `{ agentId, writerEpoch, sourceSeq, mutationId }`, the writing device, the
+  Agent and categories `['memory-projection']`. Without a usable key the
+  device appends no mutation. One writer epoch has one form: a pending record
+  whose form differs from its grant stops the outbox unsent.
 
-No package seals or admits v2 content yet, and none advertises
-`sealed-payload-v2`. The cloud refuses a sealed publish with
-`sealed_payload_unsupported`, and a sealed memory projection with 422.
-Device sealing, hosted message admission and hosted projection storage follow
-in later #1045 slices. The embedded `@byok-sdk/server` takes plaintext Agent
-messages and memory projections only.
+The cloud does not admit v2 content yet: it refuses a sealed publish with
+`sealed_payload_unsupported`, and a sealed memory projection with 422. Hosted
+message admission and hosted projection storage follow in later #1045
+slices. The embedded `@byok-sdk/server` takes plaintext Agent messages and
+memory projections only.
 
 ### 2.6 E2EE member routes (#654 E2c-2)
 

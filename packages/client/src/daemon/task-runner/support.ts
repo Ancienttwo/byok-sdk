@@ -26,7 +26,7 @@ import type { AgentTerminalCause } from '../agent-session-handoff-store';
 import type { BlobResolver } from '../blob-client';
 import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-record';
 import { ProgressBatcher } from '../progress-batcher';
-import { AgentMessageOutbox } from '../agent-message-outbox';
+import { AgentMessageOutbox, type AgentMessageDraftSealer } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state';
@@ -700,6 +700,12 @@ export function taskFinalizing(runner: TaskRunner, taskId: string): boolean {
 
 export function taskMessageAccepted(runner: TaskRunner, taskId: string): boolean {
   return hostFor(runner).current(taskId)?.message.accepted === true;
+}
+
+/** The draft sealer of a task that seals its Agent messages (#1045 C2); nothing for any other task. */
+export function agentMessageSealing(runner: TaskRunner, taskId: string): { readonly seal?: AgentMessageDraftSealer } {
+  const sealedTasks = runner['deps'].sealedTasks;
+  return sealedTasks?.sealsMessages(taskId) === true ? { seal: (draft) => sealedTasks.sealPublish(taskId, draft) } : {};
 }
 
 export function taskMessageSendAttempted(runner: TaskRunner, taskId: string): boolean {
