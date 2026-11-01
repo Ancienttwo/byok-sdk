@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "b9d4d0c71b315795ca964bd4842be459290af813e5c4998d0433a0f18e256367"
+    "snapshotSha256": "26e5b66ac32d7e787f0f3c8e5976d418ccb990ab53a7621745e63a15530ee11c"
   },
   "configFields": {
     "status": "tracked",
@@ -180,6 +180,15 @@
         "export:@byok-sdk/protocol#RuntimeVersionPolicyProjectionSchema",
         "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
         "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY"
+      ]
+    },
+    {
+      "id": "runtime-executable-local-status",
+      "impact": "additive",
+      "summary": "RuntimeDetectResult (available), RuntimeObservation, DiagnosticsSnapshot.runtimes[] and Daemon.status().runtimes[] carry optional local-only executablePath and executableSource ('config' | 'path' | 'env') for the executable detection ran (#1103 O10). Control status adds the runtimeExecutables side channel so an older CLI's strict runtimes parser still accepts the array; status, runtimes and doctor print the executable. Neither field enters conn.hello, presence, audit.jsonl, DaemonRecord or a support bundle. Absence means unknown. Nothing to change unless a Host reads the new fields.",
+      "migration": "docs/spec.md#local-runtime-probe-observation",
+      "items": [
+        "export:@byok-sdk/client#RuntimeExecutableSource"
       ]
     },
     {
@@ -1705,6 +1714,11 @@
       "item": "export:@byok-sdk/client#RuntimeEnvironmentUnavailableError",
       "change": "added",
       "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeExecutableSource",
+      "change": "added",
+      "entry": "runtime-executable-local-status"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeIsolationCapabilities",

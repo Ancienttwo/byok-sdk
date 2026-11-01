@@ -1,7 +1,8 @@
+import path from 'node:path';
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import type { RuntimeId } from '@byok-sdk/protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from './login-shell-environment';
-import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeVersionVerdict } from './types';
+import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types';
 
 /** How one restart changed an installed runtime's version token (#1103 §2.6). */
 export type RuntimeVersionChangeDirection = 'upgrade' | 'downgrade' | 'changed' | 'unknown';
@@ -41,6 +42,17 @@ export interface RuntimeObservation {
    * unavailable runtime, or an older daemon.
    */
   versionChange?: RuntimeVersionChange;
+  /**
+   * #1103 O10: the absolute executable detection ran, and who chose it.
+   * Local-only (`Daemon.status()`, control `status` through the additive
+   * `runtimeExecutables` side channel, `doctor`); never on the wire, in audit
+   * or in a support bundle, because the path can name the local user. Absent
+   * when detection did not run an executable it can name: an unavailable
+   * runtime, a bare command the OS finds on PATH at spawn (source `path`
+   * only), a Pi lane that launches an SDK entry, or an older daemon.
+   */
+  executablePath?: string;
+  executableSource?: RuntimeExecutableSource;
   authPresent?: boolean;
   steer: boolean;
   resume: boolean;
@@ -65,6 +77,8 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
     ...(detected.kind === 'available' && detected.version !== undefined ? { version: bounded(detected.version, 256) } : {}),
     ...(detected.kind === 'available' && detected.advisory !== undefined ? { qualifiedVersion: bounded(detected.advisory.qualifiedVersion, 256) } : {}),
     ...(verdict === undefined ? {} : { versionVerdict: verdict }),
+    ...(detected.kind === 'available' && detected.executablePath !== undefined ? { executablePath: detected.executablePath } : {}),
+    ...(detected.kind === 'available' && detected.executableSource !== undefined ? { executableSource: detected.executableSource } : {}),
     ...(detected.kind === 'available' && detected.authPresent !== undefined ? { authPresent: detected.authPresent } : {}),
     steer: descriptor.capabilities.steer === true,
     resume: descriptor.capabilities.resume === true,
@@ -188,9 +202,50 @@ export function attachRuntimeVersionChanges(observations: RuntimeObservation[], 
   });
 }
 
+/**
+ * Merge the control status's additive executable channel (#1103 O10) into
+ * observations, under the same side-channel rule as
+ * {@link attachRuntimeVersionChanges}. A missing or malformed entry means
+ * unknown; the reader never resolves a path itself.
+ *
+ * @internal
+ */
+export function attachRuntimeExecutables(observations: RuntimeObservation[], value: unknown): RuntimeObservation[] {
+  if (!Array.isArray(value)) return observations;
+  const executables = new Map<string, Pick<RuntimeObservation, 'executablePath' | 'executableSource'>>();
+  for (const raw of value) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const entry = raw as Record<string, unknown>;
+    if (Object.keys(entry).some((key) => !['id', 'executablePath', 'executableSource'].includes(key))) continue;
+    if (typeof entry.id !== 'string' || entry.id.length === 0 || entry.id.length > 128 || /[\r\n\t]/.test(entry.id)) continue;
+    if (entry.executableSource === undefined || !isExecutableFields(entry.executablePath, entry.executableSource)) continue;
+    executables.set(entry.id, {
+      ...(entry.executablePath === undefined ? {} : { executablePath: entry.executablePath as string }),
+      executableSource: entry.executableSource as RuntimeExecutableSource,
+    });
+  }
+  if (executables.size === 0) return observations;
+  return observations.map((observation) => {
+    const executable = executables.get(observation.id);
+    // Only an available runtime ran an executable.
+    return executable === undefined || !observation.present ? observation : { ...observation, ...executable };
+  });
+}
+
 const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable', 'acp_unavailable', 'platform_unsupported']);
 const ENVIRONMENT_CODES: readonly string[] = SERVICE_ENVIRONMENT_UNAVAILABLE_CODES;
 const MAX_VERSION_CHARS = 256;
+const MAX_EXECUTABLE_PATH_CHARS = 4096;
+const EXECUTABLE_SOURCES: readonly string[] = Object.freeze(['config', 'path', 'env'] satisfies RuntimeExecutableSource[]);
+
+/** Both optional; a path must be absolute, printable and explained by a source. */
+function isExecutableFields(executablePath: unknown, executableSource: unknown): boolean {
+  if (executableSource !== undefined && !EXECUTABLE_SOURCES.includes(executableSource as string)) return false;
+  if (executablePath === undefined) return true;
+  return executableSource !== undefined && typeof executablePath === 'string'
+    && executablePath.length > 0 && executablePath.length <= MAX_EXECUTABLE_PATH_CHARS
+    && !/[\u0000-\u001f\u007f]/.test(executablePath) && path.isAbsolute(executablePath);
+}
 
 function isVersionText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= MAX_VERSION_CHARS;
@@ -232,9 +287,10 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
   }
   const result = value as Record<string, unknown>;
   if (!Object.hasOwn(result, 'kind')) throw new TypeError('invalid runtime detection result');
-  const { kind, version, authPresent, advisory, versionVerdict } = result;
+  const { kind, version, authPresent, advisory, versionVerdict, executablePath, executableSource } = result;
   if (kind === 'available') {
-    if (Object.keys(result).some((key) => !['kind', 'version', 'authPresent', 'advisory', 'versionVerdict'].includes(key))
+    if (Object.keys(result).some((key) => !['kind', 'version', 'authPresent', 'advisory', 'versionVerdict', 'executablePath', 'executableSource'].includes(key))
+      || !isExecutableFields(executablePath, executableSource)
       || (version !== undefined && typeof version !== 'string')
       || (authPresent !== undefined && typeof authPresent !== 'boolean')
       || (advisory !== undefined && !isAdvisory(advisory))
@@ -256,6 +312,8 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
       kind,
       ...(version === undefined ? {} : { version }),
       ...(authPresent === undefined ? {} : { authPresent }),
+      ...(executablePath === undefined ? {} : { executablePath: executablePath as string }),
+      ...(executableSource === undefined ? {} : { executableSource: executableSource as RuntimeExecutableSource }),
       ...(advisory === undefined ? {} : { advisory: Object.freeze({ reason: advisory.reason, qualifiedVersion: advisory.qualifiedVersion }) }),
       ...(verdict === undefined ? {} : {
         versionVerdict: Object.freeze({

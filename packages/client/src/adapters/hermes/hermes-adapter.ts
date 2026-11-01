@@ -36,6 +36,7 @@ import { HERMES_VERSION_POLICY, hermesVersionLine, hermesVersionToken } from './
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { resolveHermesBin } from './resolve-bin';
 import { comparablePath } from '../../util/comparable-path';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
 
 const VERSION_TIMEOUT_MS = 5_000;
 const OPEN_REQUEST_TIMEOUT_MS = 60_000;
@@ -219,7 +220,7 @@ export class HermesAdapter implements RuntimeAdapter {
   }
 
   private command(): string {
-    return (this.options.resolveBin ?? resolveHermesBin)().command;
+    return resolveRuntimeCommand(this.options.resolveBin, resolveHermesBin).bin.command;
   }
 
   runtimeEnvironment(): Promise<RuntimeEnvironment> {
@@ -246,7 +247,8 @@ export class HermesAdapter implements RuntimeAdapter {
    */
   async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> {
     try {
-      const command = this.command();
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveHermesBin);
+      const command = resolved.bin.command;
       await ensureHermesRoot(this.root);
       await sweepStaleHermesProfiles(this.root, this.liveHomes, Date.now(), this.options.nativeAssetRoot);
       const version = await probeHermesVersion(command, await this.rootEnvironment());
@@ -257,6 +259,7 @@ export class HermesAdapter implements RuntimeAdapter {
         kind: 'available',
         version: version.line,
         authPresent: probe.authPresent,
+        ...runtimeExecutableFields(resolved, command),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, hermesVersionToken(version.line)),
       };
     } catch (error) {
