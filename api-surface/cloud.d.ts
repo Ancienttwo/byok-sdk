@@ -791,7 +791,15 @@ import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import { type TenantId } from '@byok-sdk/core';
 import { z } from 'zod';
 export declare const DEFAULT_APPROVAL_TIMELINE_CAPACITY = 50;
+/** How long a timeline stays readable after its task's output closes; there is no idle expiry (#1113 A3). */
 export declare const DEFAULT_APPROVAL_TIMELINE_TTL_MS: number;
+/** Serialized UTF-8 bytes a timeline retains, counted over its observations' JSON. */
+export declare const MAX_APPROVAL_TIMELINE_BYTES: number;
+/**
+ * One event's serialized bound: half the timeline less room for observation
+ * metadata, so the pending request and the next observation always fit.
+ */
+export declare const MAX_APPROVAL_EVENT_BYTES: number;
 export declare const APPROVAL_SUMMARY_MAX_BYTES: number;
 export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObject<{
     type: z.ZodLiteral<"approval_requested">;
@@ -926,13 +934,19 @@ export interface ApprovalTimelineTail {
     readonly cursor?: number;
     readonly dropped: number;
     readonly capacity: number;
-    readonly expiresAt: string;
+    /**
+     * When the task's output closed: its first terminal or an accepted Host
+     * cancellation. From then on no observation or decision is admitted.
+     */
+    readonly terminalAt?: string;
+    /** {@link DEFAULT_APPROVAL_TIMELINE_TTL_MS} after `terminalAt`; absent while the task is open. */
+    readonly expiresAt?: string;
 }
 export interface ApprovalTimelineAppendInput {
     readonly taskId: string;
     readonly sourceEnvelopeId: string;
     readonly event: ApprovalTimelineEvent;
-    readonly ttlMs?: number;
+    /** Retained observations, 2 to {@link DEFAULT_APPROVAL_TIMELINE_CAPACITY}. */
     readonly capacity?: number;
 }
 /**
@@ -965,7 +979,6 @@ export interface ApprovalTimelineStore {
 }
 export interface ValidatedApprovalTimelineAppend {
     readonly capacity: number;
-    readonly ttlMs: number;
     readonly event: ApprovalTimelineEvent;
 }
 export declare function validateApprovalTimelineAppend(input: ApprovalTimelineAppendInput): ValidatedApprovalTimelineAppend;
@@ -973,6 +986,21 @@ export declare function validateApprovalTimelineResolve(input: ApprovalTimelineR
 export declare function approvalTimelineKey(tenant: TenantId, taskId: string): string;
 export declare function parseApprovalObservations(value: unknown): readonly ApprovalObservation[];
 export declare function approvalTimelineCursor(entries: readonly ApprovalObservation[]): number | undefined;
+/**
+ * The unresolved request: the latest request no later resolution names. A
+ * resolution without an id resolves the single outstanding request.
+ */
+export declare function pendingApprovalObservation(entries: readonly ApprovalObservation[]): ApprovalObservation | undefined;
+/**
+ * Appends `observation` and evicts the oldest observations until at most
+ * `capacity` remain within {@link MAX_APPROVAL_TIMELINE_BYTES}. The pending
+ * request is never evicted: validation bounds every event to half the bytes
+ * and capacity to at least two, so it and the new observation always fit.
+ */
+export declare function retainApprovalObservations(entries: readonly ApprovalObservation[], observation: ApprovalObservation, capacity: number): {
+    readonly entries: readonly ApprovalObservation[];
+    readonly evicted: number;
+};
 // ==== @byok-sdk/cloud dist/auth/bearer.d.ts ====
 /**
  * The single bearer check every device-facing route shares.
@@ -2727,6 +2755,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly activity_history_gap: 'activity_history_gap';
     readonly activity_cursor_invalid: 'activity_cursor_invalid';
     readonly activity_task_settled: 'activity_task_settled';
+    /** The task's output closed: its approval timeline admits no further observation (#1113 A3). */
+    readonly approval_timeline_settled: 'approval_timeline_settled';
     readonly activity_store_unavailable: 'activity_store_unavailable';
     readonly maintenance_invalid_input: 'maintenance_invalid_input';
     readonly maintenance_result_invalid: 'maintenance_result_invalid';
@@ -3241,7 +3271,7 @@ export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
 export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundObjects, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
-export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, sameApprovalTimelineEvent, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
+export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, MAX_APPROVAL_EVENT_BYTES, MAX_APPROVAL_TIMELINE_BYTES, approvalTimelineCursor, parseApprovalObservations, pendingApprovalObservation, retainApprovalObservations, sameApprovalTimelineEvent, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
 export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineResolvePendingInput, ApprovalTimelineResolvePendingResult, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
 export { StaleApprovalError, pendingApproval } from './approval-control';
 export type { PendingApproval } from './approval-control';
@@ -3661,8 +3691,17 @@ export declare class InMemoryAgentMessageDraftStore implements AgentMessageDraft
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline';
-/** Deletes the task's tail for the Host task archive (#1120); returns the rows removed. */
+/**
+ * Removes the task's observations for the Host task archive (#1120) and keeps
+ * the closed tail as a fence, so no later observation recreates it. Returns
+ * the rows that held observations.
+ */
 export declare function deleteApprovalTimelineTail(store: InMemoryApprovalTimelineStore, tenant: TenantId, taskId: string): number;
+/**
+ * Close the timeline in the caller's synchronous step, at the instant the
+ * task's output closed. The first close wins (#1113 A3).
+ */
+export declare function closeApprovalTimeline(store: InMemoryApprovalTimelineStore, tenant: TenantId, taskId: string, terminalAt: string): void;
 export declare class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
     #private;
     private readonly clock;
@@ -3670,6 +3709,7 @@ export declare class InMemoryApprovalTimelineStore implements ApprovalTimelineSt
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
     resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
     read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
+    /** Clears expired observations and keeps each closed tail as its fence. */
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/blobs.d.ts ====

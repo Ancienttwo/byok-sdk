@@ -444,9 +444,11 @@ import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingIn
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { ByokPool } from '../pool';
 export declare class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
+    #private;
     private readonly pool;
     private readonly clock;
     constructor(pool: ByokPool, clock: Clock);
+    /** Clears expired observations and keeps each closed row as its fence. */
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
     resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;

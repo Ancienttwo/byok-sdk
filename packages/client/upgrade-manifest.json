@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "3cbfc585b3cca2eaf64bb9e0d7d5d5c524f22637f67430e527f34072ff082bdb"
+    "snapshotSha256": "acda2db72e30857b7c8e601126c350240fe6dc0a215e64f99b7b51378251abe8"
   },
   "configFields": {
     "status": "tracked",
@@ -54,6 +54,24 @@
         "export:@byok-sdk/cloud#TimelineEventSchema",
         "export:@byok-sdk/ui-runtime#TimelineOrderKey",
         "export:@byok-sdk/ui-runtime#TimelineMetadata"
+      ]
+    },
+    {
+      "id": "approval-timeline-closes-with-task",
+      "impact": "breaking",
+      "summary": "An approval timeline no longer idle-expires (#1113 A3). It closes in the same transaction as its task's first terminal or accepted Host cancellation and expires ten minutes after that instant; reads and replays never renew it. ApprovalTimelineAppendInput loses ttlMs, and ApprovalTimelineTail gains terminalAt while its expiresAt becomes optional, present only once closed. On a closed timeline ApprovalTimelineStore.append throws the new approval_timeline_settled code and resolvePending returns absent, so a request pending at the close can no longer be decided; ByokCloud refuses a late task.await_approval with task_settled_by_cloud. A timeline keeps at most 50 observations and MAX_APPROVAL_TIMELINE_BYTES (1 MiB) of serialized observations, evicting the oldest first and never the pending request; one event is at most MAX_APPROVAL_EVENT_BYTES and capacity must be 2 to 50, else coordination_input_invalid. Archive, redaction and expiry clear a closed timeline's entries and keep its row as the fence. A custom ApprovalTimelineStore must close with its task, refuse appends once closed, and retain through retainApprovalObservations or the same bounds; pendingApprovalObservation is the shared pending fold.",
+      "migration": "docs/migrations/1113-durable-activity-log.md#task-output-closure-a3",
+      "items": [
+        "export:@byok-sdk/cloud#ApprovalTimelineAppendInput",
+        "export:@byok-sdk/cloud#ApprovalTimelineTail",
+        "export:@byok-sdk/cloud#MAX_APPROVAL_EVENT_BYTES",
+        "export:@byok-sdk/cloud#MAX_APPROVAL_TIMELINE_BYTES",
+        "export:@byok-sdk/cloud#pendingApprovalObservation",
+        "export:@byok-sdk/cloud#retainApprovalObservations",
+        "export:@byok-sdk/cloud#validateApprovalTimelineAppend",
+        "export:@byok-sdk/cloud#validateApprovalTimelineResolve",
+        "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore"
       ]
     },
     {
@@ -412,7 +430,7 @@
     {
       "id": "dead-letter-retention",
       "impact": "breaking",
-      "summary": "Automatic maintenance now reaps mailbox dead letters once mailboxDeadLetterRetentionMs (default 30 days) has passed after they expired, but keeps each device's highest-seq dead letter as the recoverableFrom floor. RetentionPolicy gains mailboxDeadLetterRetentionMs, so a Host that passes a complete policy must add it. A custom MailboxStore receives the new required reapDeadLettersBefore input in collectExpired and must reap the same way. discardDeadLetter refuses the floor row with cleanup_dead_letter_is_recovery_floor. Migration 0031 adds the tenant_retention_policy column with the 30-day default and replaces outbox_tenant_bytes_idx with a pending-only partial index. Migration 0034 replaces activity_tail with an empty durable activity log in place: stop old writers/readers, explicitly accept loss of bounded pre-cutover activity history, reject old cursors with a gap, and drop the old table; no row conversion or dual read. TENANT_ERASURE_TABLES replaces activity_tail with activity_log_entry/activity_log_head, affecting Hosts that iterate the table list. Migration 0035 adds a trigger on task that closes a task's activity log in the same transaction as its first terminal or accepted Host cancellation (#1113 A3): later task.progress and task.artifact are refused with task_settled_by_cloud, also on a redacted or archived task, and the log expires ten minutes after that instant without renewal. 0035 closes already-closed tasks at their original deadline; deploying code before 0035 leaves admission open until it runs.",
+      "summary": "Automatic maintenance now reaps mailbox dead letters once mailboxDeadLetterRetentionMs (default 30 days) has passed after they expired, but keeps each device's highest-seq dead letter as the recoverableFrom floor. RetentionPolicy gains mailboxDeadLetterRetentionMs, so a Host that passes a complete policy must add it. A custom MailboxStore receives the new required reapDeadLettersBefore input in collectExpired and must reap the same way. discardDeadLetter refuses the floor row with cleanup_dead_letter_is_recovery_floor. Migration 0031 adds the tenant_retention_policy column with the 30-day default and replaces outbox_tenant_bytes_idx with a pending-only partial index. Migration 0034 replaces activity_tail with an empty durable activity log in place: stop old writers/readers, explicitly accept loss of bounded pre-cutover activity history, reject old cursors with a gap, and drop the old table; no row conversion or dual read. TENANT_ERASURE_TABLES replaces activity_tail with activity_log_entry/activity_log_head, affecting Hosts that iterate the table list. Migration 0035 adds a trigger on task that closes a task's activity log and approval timeline in the same transaction as its first terminal or accepted Host cancellation (#1113 A3): later task.progress, task.artifact and task.await_approval are refused with task_settled_by_cloud, also on a redacted or archived task, a request pending at the close can no longer be decided, and both expire ten minutes after that instant without renewal. An open approval timeline no longer idle-expires: 0035 drops the idle deadline of every open row and adds approval_timeline_tail.terminal_at with a constraint that only a closed row has expires_at. 0035 closes already-closed tasks at their original deadline. Deploy 0035 and the code together: each fails against the other's approval schema.",
       "migration": "deploy/runbooks/activity-tail-cutover.md#one-shot-cutover",
       "acceptance": "accept",
       "items": [
@@ -920,7 +938,7 @@
       "id": "retired-device-stream-closed",
       "impact": "breaking",
       "acceptance": "accept",
-      "summary": "A retired device's mailbox stream is now closed (#1160). Revoking or superseding a device closes its stream in the retirement's transaction, and every later append for that device id is refused, whatever its admission and even for a known messageId: core raises mailbox_stream_closed (MailboxStreamClosedError, with deviceId and closeCause), and ByokCloud raises device_retired (DeviceRetiredError, with deviceId and retirementCause). Before, a writer whose check ran before the retirement (offers, agent controls, scope-key notices, approve/reject, steer, inbound acks, dead-letter replay) could still commit a pending row for the retired device. An offer refused this way settles its attempt cancelled with the retirement cause in the same call and names its taskId; a scope-key notice skips a recipient retired after the list was read; a /byok/messages batch whose reply is refused answers 401. Registering the same device id again reopens the stream; rows, cursor, seq and recoverableFrom are kept. Custom stores must implement MailboxStore.closeStream and reopenStream, refuse appends on a closed stream, and close on revoke and supersede and reopen on register; MailboxStore.expirePending no longer takes seqs 'all'. Postgres: migration 0033 adds device_stream.closed_at and closed_cause and closes, as device_revoked, the stream of every device whose row is already gone (a supersede before the upgrade reads as a revoke); the migration writes the tombstone and does not expire those pending rows, which the dead-letter retention collects. Embedded SQLite: the schema is now 8. A schema 6 or 7 file is upgraded in place when it opens, keeping its pairings and rows: 6 to 7 runs the same backfill, and 7 to 8 (#1113) adds the durable activity log tables empty, since no activity history was persisted before the upgrade. Task activity now survives a restart and is removed by the terminal-task archive. Older versions are refused as before, and a v8 file cannot be opened by an earlier build. Schema 8 also closes a task's activity log in the same transaction as its first terminal or accepted Host cancellation (#1113 A3): later progress and artifacts are refused with task_settled_by_cloud and the log expires ten minutes after that instant; the 7->8 upgrade closes already-closed tasks at their original deadline, and a v8 file without the closure trigger is refused as SQLITE_SCHEMA_INVALID.",
+      "summary": "A retired device's mailbox stream is now closed (#1160). Revoking or superseding a device closes its stream in the retirement's transaction, and every later append for that device id is refused, whatever its admission and even for a known messageId: core raises mailbox_stream_closed (MailboxStreamClosedError, with deviceId and closeCause), and ByokCloud raises device_retired (DeviceRetiredError, with deviceId and retirementCause). Before, a writer whose check ran before the retirement (offers, agent controls, scope-key notices, approve/reject, steer, inbound acks, dead-letter replay) could still commit a pending row for the retired device. An offer refused this way settles its attempt cancelled with the retirement cause in the same call and names its taskId; a scope-key notice skips a recipient retired after the list was read; a /byok/messages batch whose reply is refused answers 401. Registering the same device id again reopens the stream; rows, cursor, seq and recoverableFrom are kept. Custom stores must implement MailboxStore.closeStream and reopenStream, refuse appends on a closed stream, and close on revoke and supersede and reopen on register; MailboxStore.expirePending no longer takes seqs 'all'. Postgres: migration 0033 adds device_stream.closed_at and closed_cause and closes, as device_revoked, the stream of every device whose row is already gone (a supersede before the upgrade reads as a revoke); the migration writes the tombstone and does not expire those pending rows, which the dead-letter retention collects. Embedded SQLite: the schema is now 8. A schema 6 or 7 file is upgraded in place when it opens, keeping its pairings and rows: 6 to 7 runs the same backfill, and 7 to 8 (#1113) adds the durable activity log tables empty, since no activity history was persisted before the upgrade. Task activity now survives a restart and is removed by the terminal-task archive. Older versions are refused as before, and a v8 file cannot be opened by an earlier build. Schema 8 also closes a task's activity log and approval timeline in the same transaction as its first terminal or accepted Host cancellation (#1113 A3): later progress, artifacts and approval reports are refused with task_settled_by_cloud and both expire ten minutes after that instant. An open approval timeline no longer idle-expires; the 7->8 upgrade rebuilds approval_timeline_tail without the idle deadline, keeping every observation, closes already-closed tasks at their original deadline, and a v8 file without the closure trigger is refused as SQLITE_SCHEMA_INVALID.",
       "migration": "docs/hosted-host-contract.md#revokedevice",
       "items": [
         "export:@byok-sdk/cloud#DeviceRetiredError",
@@ -2340,6 +2358,16 @@
       "entry": "device-route-rate-admission"
     },
     {
+      "item": "export:@byok-sdk/cloud#ApprovalTimelineAppendInput",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ApprovalTimelineTail",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
       "item": "export:@byok-sdk/cloud#BlobContentProxy",
       "change": "changed",
       "entry": "device-route-rate-admission"
@@ -2448,6 +2476,16 @@
       "item": "export:@byok-sdk/cloud#MAX_ACTIVITY_BYTES",
       "change": "added",
       "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MAX_APPROVAL_EVENT_BYTES",
+      "change": "added",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MAX_APPROVAL_TIMELINE_BYTES",
+      "change": "added",
+      "entry": "approval-timeline-closes-with-task"
     },
     {
       "item": "export:@byok-sdk/cloud#MaintenanceStepReport",
@@ -2615,9 +2653,29 @@
       "entry": "activity-log-read-contract"
     },
     {
+      "item": "export:@byok-sdk/cloud#pendingApprovalObservation",
+      "change": "added",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
       "item": "export:@byok-sdk/cloud#projectTimelineEvents",
       "change": "changed",
       "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#retainApprovalObservations",
+      "change": "added",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#validateApprovalTimelineAppend",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#validateApprovalTimelineResolve",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#CLOUD_CLEANUP_ERROR_CODES",
@@ -2633,6 +2691,11 @@
       "item": "export:@byok-sdk/cloud-dataplane#PostgresActivityStore",
       "change": "changed",
       "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresBoardStore",
@@ -2683,6 +2746,11 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresActivityStore",
       "change": "changed",
       "entry": "activity-log-read-contract"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresBoardStore",
@@ -3709,7 +3777,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
-      "after": "migrations=35 last=0035_task_output_closure.sql sha256=963d04854fcae85f",
+      "after": "migrations=35 last=0035_task_output_closure.sql sha256=d423be13e488d6f1",
       "entry": "dead-letter-retention"
     },
     {

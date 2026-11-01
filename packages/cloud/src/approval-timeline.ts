@@ -6,7 +6,15 @@ import { ByokCloudError } from './errors';
 import { sameSealedProjection } from './sealed-comparison';
 
 export const DEFAULT_APPROVAL_TIMELINE_CAPACITY = 50;
+/** How long a timeline stays readable after its task's output closes; there is no idle expiry (#1113 A3). */
 export const DEFAULT_APPROVAL_TIMELINE_TTL_MS = 10 * 60 * 1_000;
+/** Serialized UTF-8 bytes a timeline retains, counted over its observations' JSON. */
+export const MAX_APPROVAL_TIMELINE_BYTES = 1024 * 1024;
+/**
+ * One event's serialized bound: half the timeline less room for observation
+ * metadata, so the pending request and the next observation always fit.
+ */
+export const MAX_APPROVAL_EVENT_BYTES = MAX_APPROVAL_TIMELINE_BYTES / 2 - 4 * 1024;
 export const APPROVAL_SUMMARY_MAX_BYTES = 16 * 1_024;
 
 const NonBlankIdSchema = z.string().max(200).regex(/\S/, 'value must not be blank');
@@ -105,14 +113,20 @@ export interface ApprovalTimelineTail {
   readonly cursor?: number;
   readonly dropped: number;
   readonly capacity: number;
-  readonly expiresAt: string;
+  /**
+   * When the task's output closed: its first terminal or an accepted Host
+   * cancellation. From then on no observation or decision is admitted.
+   */
+  readonly terminalAt?: string;
+  /** {@link DEFAULT_APPROVAL_TIMELINE_TTL_MS} after `terminalAt`; absent while the task is open. */
+  readonly expiresAt?: string;
 }
 
 export interface ApprovalTimelineAppendInput {
   readonly taskId: string;
   readonly sourceEnvelopeId: string;
   readonly event: ApprovalTimelineEvent;
-  readonly ttlMs?: number;
+  /** Retained observations, 2 to {@link DEFAULT_APPROVAL_TIMELINE_CAPACITY}. */
   readonly capacity?: number;
 }
 
@@ -148,7 +162,6 @@ export interface ApprovalTimelineStore {
 
 export interface ValidatedApprovalTimelineAppend {
   readonly capacity: number;
-  readonly ttlMs: number;
   readonly event: ApprovalTimelineEvent;
 }
 
@@ -156,17 +169,11 @@ export function validateApprovalTimelineAppend(
   input: ApprovalTimelineAppendInput,
 ): ValidatedApprovalTimelineAppend {
   const capacity = input.capacity ?? DEFAULT_APPROVAL_TIMELINE_CAPACITY;
-  const ttlMs = input.ttlMs ?? DEFAULT_APPROVAL_TIMELINE_TTL_MS;
-  if (!Number.isSafeInteger(capacity) || capacity <= 0) {
+  // Two keeps room for the pending request and the observation that follows it.
+  if (!Number.isSafeInteger(capacity) || capacity < 2 || capacity > DEFAULT_APPROVAL_TIMELINE_CAPACITY) {
     throw new ByokCloudError(
       'coordination_input_invalid',
-      `Approval timeline capacity must be a positive integer, received ${String(capacity)}.`,
-    );
-  }
-  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
-    throw new ByokCloudError(
-      'coordination_input_invalid',
-      `Approval timeline ttl must be a positive number of milliseconds, received ${String(ttlMs)}.`,
+      `Approval timeline capacity must be an integer from 2 to ${DEFAULT_APPROVAL_TIMELINE_CAPACITY}, received ${String(capacity)}.`,
     );
   }
   const parsed = z
@@ -191,7 +198,10 @@ export function validateApprovalTimelineAppend(
       `Approval summary exceeds ${APPROVAL_SUMMARY_MAX_BYTES} UTF-8 bytes.`,
     );
   }
-  return { capacity, ttlMs, event: parsed.data.event };
+  if (new TextEncoder().encode(JSON.stringify(parsed.data.event)).byteLength > MAX_APPROVAL_EVENT_BYTES) {
+    throw new ByokCloudError('coordination_input_invalid', `Approval event exceeds ${MAX_APPROVAL_EVENT_BYTES} serialized UTF-8 bytes.`);
+  }
+  return { capacity, event: parsed.data.event };
 }
 
 export function validateApprovalTimelineResolve(
@@ -225,4 +235,49 @@ export function approvalTimelineCursor(
   entries: readonly ApprovalObservation[],
 ): number | undefined {
   return entries.at(-1)?.revision;
+}
+
+/**
+ * The unresolved request: the latest request no later resolution names. A
+ * resolution without an id resolves the single outstanding request.
+ */
+export function pendingApprovalObservation(entries: readonly ApprovalObservation[]): ApprovalObservation | undefined {
+  let pending: ApprovalObservation | undefined;
+  for (const entry of entries) {
+    if (entry.event.type === 'approval_requested') {
+      pending = entry;
+      continue;
+    }
+    if (pending !== undefined && (pending.event.approvalId === undefined || pending.event.approvalId === entry.event.approvalId)) {
+      pending = undefined;
+    }
+  }
+  return pending;
+}
+
+function observationBytes(entry: ApprovalObservation): number {
+  return new TextEncoder().encode(JSON.stringify(entry)).byteLength;
+}
+
+/**
+ * Appends `observation` and evicts the oldest observations until at most
+ * `capacity` remain within {@link MAX_APPROVAL_TIMELINE_BYTES}. The pending
+ * request is never evicted: validation bounds every event to half the bytes
+ * and capacity to at least two, so it and the new observation always fit.
+ */
+export function retainApprovalObservations(
+  entries: readonly ApprovalObservation[],
+  observation: ApprovalObservation,
+  capacity: number,
+): { readonly entries: readonly ApprovalObservation[]; readonly evicted: number } {
+  const retained = [...entries, observation];
+  const pending = pendingApprovalObservation(retained);
+  let bytes = retained.reduce((total, entry) => total + observationBytes(entry), 0);
+  let evicted = 0;
+  while (retained.length > capacity || bytes > MAX_APPROVAL_TIMELINE_BYTES) {
+    const index = retained.findIndex((entry) => entry !== pending);
+    bytes -= observationBytes(retained.splice(index, 1)[0]!);
+    evicted += 1;
+  }
+  return { entries: retained, evicted };
 }

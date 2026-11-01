@@ -116,8 +116,8 @@ lifecycle atomicity remains A3 work, and cross-process invalidation A4.
 
 ## Task output closure (A3)
 
-A task's activity log now closes in the same commit as the attempt write that
-first closes the task's output. That write is either:
+A task's activity log and approval timeline now close in the same commit as
+the attempt write that first closes the task's output. That write is either:
 - the task's first terminal (a device terminal, an abandonment, or a device
   retirement);
 - an accepted Host cancellation, also for a claimed task still in
@@ -125,18 +125,36 @@ first closes the task's output. That write is either:
 
 From then on:
 
-- **Late output is refused.** A `task.progress` or `task.artifact` that arrives
-  after the close is refused with `task_settled_by_cloud`. A redacted or
-  archived task gets the same answer, so removing content no longer changes
-  it. Before this, late output was stored, or on a redacted task completed as
-  received.
-- **The deadline is frozen.** The log expires ten minutes after the closing
+- **Late output is refused.** A `task.progress`, `task.artifact` or
+  `task.await_approval` that arrives after the close is refused with
+  `task_settled_by_cloud`. A redacted or archived task gets the same answer,
+  so removing content no longer changes it. Before this, late output was
+  stored, or on a redacted task completed as received. `ApprovalTimelineStore`
+  `append` on a closed timeline throws the new `approval_timeline_settled`, and
+  `resolvePending` returns `absent`: a request still pending at the close can
+  no longer be decided.
+- **The deadline is frozen.** Both expire ten minutes after the closing
   instant. Reads, replays and later terminals never renew it, and an active
   task's log still never idle-expires.
-- **A task that logged nothing is closed too.** `readActivity` returns an empty
-  log carrying `terminalAt` and `expiresAt` where it used to return
-  `undefined`. Removal counts (`ephemeralRowsDeleted`) count only a log that
-  held history.
+- **A task that logged nothing is closed too.** `readActivity` and
+  `readApprovalTimeline` return an empty closed tail carrying `terminalAt` and
+  `expiresAt` where they used to return `undefined`. Removal counts
+  (`ephemeralRowsDeleted`) count only a log or timeline that held history.
+  Archive, redaction and expiry clear a closed tail's entries and keep its row
+  as the fence, so a late observation never recreates it.
+
+The approval timeline's retention changes with it:
+- **No idle expiry.** An open timeline keeps its observations until its task's
+  output closes. `ApprovalTimelineAppendInput.ttlMs` is removed, and
+  `ApprovalTimelineTail` gains `terminalAt`; its `expiresAt` is now present only
+  once closed.
+- **Bounded by count and bytes.** At most 50 observations and
+  `MAX_APPROVAL_TIMELINE_BYTES` (1 MiB) of serialized observations are kept,
+  the oldest evicted first and counted in `dropped`. The pending request is
+  never evicted. One event is at most `MAX_APPROVAL_EVENT_BYTES`, and
+  `capacity` must be 2 to 50; either violation is refused as
+  `coordination_input_invalid`. `pendingApprovalObservation` and
+  `retainApprovalObservations` are exported for custom adapters.
 
 The built-in compositions do this at the storage boundary:
 - Postgres: the trigger that migration 0035 adds on `task`;
@@ -146,15 +164,21 @@ The built-in compositions do this at the storage boundary:
 So every lifecycle path closes the log, bulk retirement included. Under that
 trigger, Postgres locks the task row before its head, the same order as
 redaction and the archive; append locks only the head. A custom composition
-must close its activity log in the same commit as its first terminal or
-accepted cancellation, for example with `ActivityStore.settle`.
+must close its activity log and approval timeline in the same commit as its
+first terminal or accepted cancellation, for example with
+`ActivityStore.settle`.
 
-Upgrading closes the log of every task whose output had already closed, at its
-original deadline, never a new ten minutes:
+Upgrading closes the log and timeline of every task whose output had already
+closed, at its original deadline, never a new ten minutes. An open task's
+timeline loses its idle deadline and keeps every observation, including one
+the old deadline had already lapsed:
 - Postgres: 0035 runs a one-shot backfill;
 - SQLite: the open that creates the v8 log runs it.
 
 A terminal task from before `terminal_at` was recorded closes at its last
 update. A v8 SQLite file without the closure trigger is refused as
-`SQLITE_SCHEMA_INVALID`. Deploying the code before 0035 is safe, but output
-admission stays open until 0035 runs.
+`SQLITE_SCHEMA_INVALID`. Deploy 0035 and the code together: the new
+Postgres approval adapter reads the `terminal_at` column 0035 adds, and an
+older adapter's idle deadline on an open row violates 0035's
+`approval_timeline_tail_closed` constraint, so each fails against the other's
+schema.

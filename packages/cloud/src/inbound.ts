@@ -758,13 +758,12 @@ async function applyInboundGate(
   ) {
     return refuse('agent_identity_mismatch');
   }
-  // A redacted or archived task keeps no new content. A late approval report
-  // is complete as received, the same as one stored and then redacted. So is a
-  // terminal that names its ciphertext blob: its references are gone, and the
-  // terminal receipt is already a tombstone. Late progress and artifacts are
-  // refused below as on any task whose output closed (#1113 A3), so removing
-  // the content does not change their answer.
-  if ((REDACTABLE_REPORT_TYPES.includes(envelope.type) || ciphertextRef !== undefined)
+  // A redacted or archived task keeps no new content. A terminal that names
+  // its ciphertext blob is complete as received: its references are gone, and
+  // the terminal receipt is already a tombstone. Late progress, artifacts and
+  // approval reports are refused below as on any task whose output closed
+  // (#1113 A3), so removing the content does not change their answer.
+  if (ciphertextRef !== undefined
     && TERMINAL_TASK_STATUSES.includes(attempt.status)
     && await taskContentRemoved(stores, attempt)) {
     return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
@@ -803,7 +802,7 @@ async function applyInboundGate(
     lifecycleRefusal = await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt?.agentRef);
   } catch (caught) {
     if (isCloudError(caught, 'activity_batch_too_large')) return refuse('activity_batch_too_large');
-    if (isCloudError(caught, 'activity_task_settled')) return refuse('task_settled_by_cloud');
+    if (isCloudError(caught, 'activity_task_settled') || isCloudError(caught, 'approval_timeline_settled')) return refuse('task_settled_by_cloud');
     if (isCloudError(caught, 'activity_history_gap')) return refuse('task_settled_by_cloud');
     throw caught;
   }
@@ -811,7 +810,6 @@ async function applyInboundGate(
   return completeInboundEnvelope(stores, deviceId, envelope.id, attempt?.agentRef);
 }
 
-const REDACTABLE_REPORT_TYPES: readonly string[] = ['task.await_approval', 'task.approval_resolved'];
 const TERMINAL_TASK_STATUSES: readonly string[] = ['complete', 'failed', 'cancelled'];
 
 /** Marks an envelope complete only after all of its authoritative facts converged. */

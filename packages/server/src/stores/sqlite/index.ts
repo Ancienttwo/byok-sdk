@@ -88,10 +88,9 @@ const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'term
 const TASK_ARCHIVE_COLUMNS = ['archive_after', 'archived_at', 'archive_settled_at'] as const;
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
-import { APPROVAL_TIMELINE_SCHEMA, SqliteApprovalTimelineStore } from './approval-timeline';
-import {
-  ACTIVITY_CLOSURE_BACKFILL, ACTIVITY_CLOSURE_TRIGGER, ACTIVITY_CLOSURE_TRIGGER_NAME, ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore,
-} from './activity';
+import { APPROVAL_TIMELINE_SCHEMA, APPROVAL_TIMELINE_V7_REBUILD, SqliteApprovalTimelineStore } from './approval-timeline';
+import { ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore } from './activity';
+import { OUTPUT_CLOSURE_BACKFILL, OUTPUT_CLOSURE_TRIGGER, OUTPUT_CLOSURE_TRIGGER_NAME } from './output-closure';
 import type { WakeStore } from '../../wakes/store';
 import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
@@ -148,6 +147,7 @@ function upgradeSchemaFromV6(db: DatabaseSync): void {
  */
 function upgradeSchemaFromV7(db: DatabaseSync): void {
   db.exec(ACTIVITY_LOG_SCHEMA);
+  db.exec(APPROVAL_TIMELINE_V7_REBUILD);
   db.prepare("UPDATE byok_sqlite_meta SET value = '8' WHERE key = 'schema_version'").run();
 }
 
@@ -290,8 +290,8 @@ class SqliteCoordinator {
       // openSqliteDatabase holds EXCLUSIVE ownership before this schema transaction.
       this.db.exec('BEGIN IMMEDIATE');
       try {
-        // Set when this open created the activity log, so the output closure is installed once with it.
-        let createdActivityLog = false;
+        // Set when this open created the v8 logs, so the output closure is installed once with them.
+        let createdOutputLogs = false;
         const hasMetadata = this.db
           .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
           .get();
@@ -302,7 +302,7 @@ class SqliteCoordinator {
           const firstStep = SCHEMA_UPGRADES.findIndex(([from]) => from === version?.value);
           if (firstStep >= 0) {
             for (const [, step] of SCHEMA_UPGRADES.slice(firstStep)) step(this.db);
-            createdActivityLog = true;
+            createdOutputLogs = true;
           } else if (version?.value !== SQLITE_SCHEMA_VERSION) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
               `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SCHEMA_UPGRADES.map(([from]) => from).join(' and ')} in place. ` +
@@ -328,16 +328,16 @@ class SqliteCoordinator {
           this.db.exec(WAKE_SCHEMA);
           this.db.exec(APPROVAL_TIMELINE_SCHEMA);
           this.db.exec(ACTIVITY_LOG_SCHEMA);
-          createdActivityLog = true;
+          createdOutputLogs = true;
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         assertProjection('claimed_harness_id FROM task_attempt');
-        assertProjection('tenant_id, task_id, entries_json, next_revision, dropped, capacity, expires_at FROM approval_timeline_tail');
+        assertProjection('tenant_id, task_id, entries_json, next_revision, dropped, capacity, terminal_at, expires_at FROM approval_timeline_tail');
         for (const projection of ACTIVITY_LOG_PROJECTIONS) assertProjection(projection);
         const approvalColumns = this.db.prepare('PRAGMA table_info(approval_timeline_tail)').all();
-        const approvalNames = ['tenant_id', 'task_id', 'entries_json', 'next_revision', 'dropped', 'capacity', 'expires_at'];
+        const approvalNames = ['tenant_id', 'task_id', 'entries_json', 'next_revision', 'dropped', 'capacity', 'terminal_at', 'expires_at'];
         if (approvalColumns.length !== approvalNames.length || approvalColumns.some((column, index) =>
-          column.name !== approvalNames[index] || column.notnull !== 1 ||
+          column.name !== approvalNames[index] || column.notnull !== (index < 6 ? 1 : 0) ||
           column.type !== (index >= 3 && index <= 5 ? 'INTEGER' : 'TEXT') ||
           column.pk !== (index < 2 ? index + 1 : 0))) {
           throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite approval timeline schema');
@@ -366,12 +366,12 @@ class SqliteCoordinator {
         assertProjection(`${TASK_ARCHIVE_COLUMNS.join(', ')} FROM task_attempt`);
         // The closure reads the phase columns, so it follows them. An upgraded
         // file's already-closed tasks keep their original deadline.
-        if (createdActivityLog) {
-          this.db.exec(ACTIVITY_CLOSURE_TRIGGER);
-          this.db.exec(ACTIVITY_CLOSURE_BACKFILL);
+        if (createdOutputLogs) {
+          this.db.exec(OUTPUT_CLOSURE_TRIGGER);
+          this.db.exec(OUTPUT_CLOSURE_BACKFILL);
         }
-        if (this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(ACTIVITY_CLOSURE_TRIGGER_NAME) === undefined) {
-          throw schemaError('SQLITE_SCHEMA_INVALID', 'Missing BYOK SQLite activity output closure');
+        if (this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(OUTPUT_CLOSURE_TRIGGER_NAME) === undefined) {
+          throw schemaError('SQLITE_SCHEMA_INVALID', 'Missing BYOK SQLite task output closure');
         }
         assertProjection('tenant_id, wake_id, dedup_key, available_at, payload, state, due_at, retry_at, deliveries, last_error, done_at FROM wake');
         if (wake === undefined && this.db.prepare("SELECT 1 FROM wake WHERE state = 'queued' LIMIT 1").get() !== undefined) {

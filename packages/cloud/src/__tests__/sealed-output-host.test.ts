@@ -258,11 +258,11 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
     const task = await offeredTask(OUTPUT_SEALING);
     expect(await task.send('task.complete', SEALED_OUTPUTS['task.complete'])).toEqual({ outcome: 'accepted' });
     await task.harness.stores.receipts.record(TENANT_A, { key: taskRedactionReceiptKey(task.taskId), body: '{}' });
-    // The terminal closed the task's output (#1113 A3): late progress is refused, redacted or not.
+    // The terminal closed the task's output (#1113 A3): late progress and approvals are refused, redacted or not.
     expect(await task.send('task.progress', SEALED_OUTPUTS['task.progress'])).toEqual({ outcome: 'rejected', reason: 'task_settled_by_cloud' });
-    expect(await task.send('task.await_approval', SEALED_OUTPUTS['task.await_approval'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.await_approval', SEALED_OUTPUTS['task.await_approval'])).toEqual({ outcome: 'rejected', reason: 'task_settled_by_cloud' });
     expect((await task.harness.cloud.readActivity(TENANT_A, task.taskId))?.entries).toEqual([]);
-    expect(await task.harness.cloud.readApprovalTimeline(TENANT_A, task.taskId)).toBeUndefined();
+    expect((await task.harness.cloud.readApprovalTimeline(TENANT_A, task.taskId))?.entries).toEqual([]);
   });
 
   it.each(['task.progress', 'task.await_approval'] as const)(

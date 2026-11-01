@@ -32,6 +32,7 @@
  * silently approved.
  */
 import type { ApprovalTimelineTail } from './approval-timeline';
+import { pendingApprovalObservation } from './approval-timeline';
 
 /**
  * M5 (approval targeting): thrown by `ByokCloud.approveTask`/`rejectTask` when
@@ -85,22 +86,11 @@ export interface PendingApproval {
 export function pendingApproval(
   tail: ApprovalTimelineTail | undefined,
 ): PendingApproval | undefined {
-  if (tail === undefined) return undefined;
-  let pending: PendingApproval | undefined;
-  for (const entry of tail.entries) {
-    const event = entry.event;
-    if (event.type === 'approval_requested') {
-      pending = {
-        sourceEnvelopeId: entry.sourceEnvelopeId,
-        revision: entry.revision,
-        ...(event.approvalId === undefined ? {} : { approvalId: event.approvalId }),
-      };
-      continue;
-    }
-    if (pending === undefined) continue;
-    if (pending.approvalId === undefined || pending.approvalId === event.approvalId) {
-      pending = undefined;
-    }
-  }
-  return pending;
+  const entry = tail === undefined ? undefined : pendingApprovalObservation(tail.entries);
+  if (entry === undefined) return undefined;
+  return {
+    sourceEnvelopeId: entry.sourceEnvelopeId,
+    revision: entry.revision,
+    ...(entry.event.approvalId === undefined ? {} : { approvalId: entry.event.approvalId }),
+  };
 }

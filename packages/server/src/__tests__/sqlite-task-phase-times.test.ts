@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { isSqliteAvailable } from '../sqlite-support';
+import { rewindToV7 } from './sqlite-v7-fixture';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
@@ -31,8 +32,7 @@ describeSqlite('SQLite task attempt phase instants (#980)', () => {
     // v8's activity output closure reads the phase columns, so only an older
     // file can lack them: rewind this one to v7, which had neither.
     const raw = new DatabaseSync(path);
-    raw.exec(`DROP TRIGGER activity_log_output_closed; DROP TABLE activity_log_entry; DROP TABLE activity_log_head;
-      UPDATE byok_sqlite_meta SET value = '7' WHERE key = 'schema_version'`);
+    raw.exec(rewindToV7('2026-10-27T00:10:00.000Z'));
     for (const column of PHASE_COLUMNS) raw.exec(`ALTER TABLE task_attempt DROP COLUMN ${column}`);
     raw.close();
 

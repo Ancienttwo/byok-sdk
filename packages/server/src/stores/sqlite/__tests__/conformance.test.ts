@@ -6,8 +6,10 @@ import { createWebCrypto } from '@byok-sdk/cloud';
 import {
   ackAndCollectMailbox,
   conformanceMailbox,
+  runApprovalTimelineConformance,
   runCloudConformance,
   runCoreConformance,
+  type ApprovalTimelineCompositionFactory,
   type CloudCompositionFactory,
   type CoreCompositionFactory,
 } from '@byok-sdk/conformance';
@@ -97,7 +99,27 @@ const cloudFactory: CloudCompositionFactory = {
   },
 };
 
+const approvalFactory: ApprovalTimelineCompositionFactory = {
+  create() {
+    const database = temporaryDatabase();
+    const clock = createMutableClock();
+    const composition = createSqliteEmbeddedStores(
+      { path: database.path },
+      { clock, crypto: createWebCrypto() },
+    );
+    return {
+      store: composition.cloud.approvals,
+      advanceTime: (ms) => clock.advance(ms),
+      dispose: async () => {
+        await composition.close();
+        database.remove();
+      },
+    };
+  },
+};
+
 if (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') {
   runCoreConformance('server SQLite embedded', coreFactory);
   runCloudConformance('server SQLite embedded', cloudFactory);
+  runApprovalTimelineConformance('server SQLite embedded', approvalFactory);
 }
