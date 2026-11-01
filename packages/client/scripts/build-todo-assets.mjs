@@ -81,7 +81,7 @@ await copyFile(new URL('src/runtime/acp-session-runtime.d.ts', root), new URL('d
 for (const name of ['THIRD-PARTY.md', 'third-party-manifest.json']) {
   await copyFile(new URL(`vendor/${name}`, root), new URL(name, assets));
 }
-for (const directory of ['pi-tui/0.85.1', 'get-east-asian-width/1.6.0', 'oar/044633e']) {
+for (const directory of ['pi-tui/0.85.1', 'get-east-asian-width/1.6.0', 'oar/ddec7e5']) {
   const target = new URL(`provenance/${directory}/`, assets);
   await mkdir(target, { recursive: true });
   for (const name of ['LICENSE', 'PROVENANCE.md', 'source-manifest.json']) {

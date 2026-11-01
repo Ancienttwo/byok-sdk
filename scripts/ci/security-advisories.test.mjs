@@ -17,17 +17,17 @@ function fixture(t, manifest = { format: 'byok.vendor-source', version: 1, packa
   return { root, output: join(root, 'report'), scannerPath: 'test-scanner' };
 }
 
-const oarCommit = '044633e9be0dfbae6d171591ef03ea31593e9fb5';
+const oarCommit = 'ddec7e575a5f8e65ea35011e64c0d35eef08f6bd';
 const oarRelease = {
   ecosystem: 'npm',
   name: '@botiverse/oar',
-  version: '0.80.1',
-  integrity: 'sha512-PDTmr6fvEKyRs+NFGDpmRrvlxqh840FUs6Lyw5pI+aiWqlzq2Sf+VPCOznIPROJjd1ZA6XNamgu3zecAt/U0XA==',
+  version: '0.83.0',
+  integrity: 'sha512-NcuJljjWXegNwgeb8i91TOCC5N7+iL4nG1DyWiMur48p5l0ur3WACpOgMQf317+UYhTXv50Rv+eC0tLPbSv0aQ==',
   gitCommit: oarCommit,
-  provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.80.1',
+  provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.83.0',
 };
 const oarManifest = (overrides = {}) => ({
-  format: 'byok.vendor-source', version: 1, package: '@botiverse/oar', packageVersion: '0.80.1',
+  format: 'byok.vendor-source', version: 1, package: '@botiverse/oar', packageVersion: '0.83.0',
   commit: oarCommit, repository: 'https://github.com/botiverse/oar', release: oarRelease, ...overrides,
 });
 
@@ -79,17 +79,17 @@ test('release evidence makes a commit-pinned vendor query the authoritative npm 
   assert.equal(report.coverage.length, 1);
   assert.deepEqual(report.coverage[0], {
     source: 'packages/client/vendor/example/source-manifest.json',
-    name: '@botiverse/oar', version: '0.80.1', ecosystem: 'npm', commit: oarCommit,
+    name: '@botiverse/oar', version: '0.83.0', ecosystem: 'npm', commit: oarCommit,
     integrity: oarRelease.integrity, provenance: oarRelease.provenance,
   });
   assert.equal(report.inventory[0].commit, oarCommit);
   assert.deepEqual(report.inventory[0].release, {
-    ecosystem: 'npm', name: '@botiverse/oar', version: '0.80.1', integrity: oarRelease.integrity,
+    ecosystem: 'npm', name: '@botiverse/oar', version: '0.83.0', integrity: oarRelease.integrity,
     commit: oarCommit, provenance: oarRelease.provenance,
   });
   const input = JSON.parse(readFileSync(join(options.output, 'vendor-osv-scanner.json')));
-  assert.deepEqual(input.results[0].packages[0].package, { name: '@botiverse/oar', version: '0.80.1', ecosystem: 'npm' });
-  assert.match(readFileSync(join(options.output, 'summary.md'), 'utf8'), /AUTHORITATIVE COVERAGE: .*@botiverse\/oar@0\.80\.1 from npm release \(provenance commit 044633e/);
+  assert.deepEqual(input.results[0].packages[0].package, { name: '@botiverse/oar', version: '0.83.0', ecosystem: 'npm' });
+  assert.match(readFileSync(join(options.output, 'summary.md'), 'utf8'), /AUTHORITATIVE COVERAGE: .*@botiverse\/oar@0\.83\.0 from npm release \(provenance commit ddec7e5/);
 });
 
 test('release evidence that disagrees with the vendored identity fails closed', t => {

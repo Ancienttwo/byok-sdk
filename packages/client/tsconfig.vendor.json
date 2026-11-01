@@ -10,7 +10,7 @@
   },
   "include": [
     "vendor/rpiv-todo/2.15.0/**/*.ts",
-    "vendor/oar/044633e/**/*.ts",
+    "vendor/oar/ddec7e5/**/*.ts",
     "src/bin/pi-todo-runtime.js",
     "src/runtime/dsh-acp-session.js",
     "vendor/pi-tui/0.85.1/**/*.d.ts",

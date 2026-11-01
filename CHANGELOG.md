@@ -45,6 +45,13 @@ These changes need 0.34.0, the next MINOR.
   start unless Pi selects exactly that default, so an own-login task never
   falls back to whichever provider has a key in the environment.
 
+- **Internal (client)** — the SDK-owned OAR source moves from 0.80.1 to
+  0.83.0 (`vendor/oar/ddec7e5/`, upstream commit `ddec7e57`). The Windows
+  process-tree walk ignores a parent edge to a reused pid. Upstream's ACP
+  cancellation observation is not vendored, because it relies on the upstream
+  executable manager; the SDK process-tree authority keeps owning cleanup. All
+  sixteen BYOK deltas are preserved and API surface is unchanged.
+
 ## 0.33.0 — 2026-11-01 (published)
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
