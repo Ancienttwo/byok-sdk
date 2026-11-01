@@ -172,6 +172,7 @@ describe('tenant isolation across every device-class resource', () => {
         'sealed-payload-v1',
         'sealed-output-ciphertext-ref',
         'runtime-failure-class',
+        'runtime-quota-scope',
       ],
     });
     expect(JSON.stringify(events.body)).not.toContain('secret work');

@@ -443,6 +443,7 @@ export type {
   TaskCompletePayload,
   TaskFailPayload,
   RuntimeFailureClass,
+  RuntimeQuotaScope,
   TaskFailure,
   TaskFailureReading,
   TaskCancelledPayload,

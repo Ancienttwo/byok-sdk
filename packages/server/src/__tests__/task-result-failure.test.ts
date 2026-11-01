@@ -5,8 +5,8 @@ import { toTaskResult } from '../snapshot';
 const failed: TerminalResult = { taskId: 'task-1', state: 'failed', reason: 'limit', retryable: false, recordedAt: '2026-10-24T00:00:00.000Z' };
 
 describe('toTaskResult: the runtime failure class (#869)', () => {
-  it('copies the terminal failure verbatim', () => {
-    const failure = { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } as const;
+  it('copies the terminal failure verbatim, with a quota scope (#1271)', () => {
+    const failure = { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' } as const;
     expect(toTaskResult({ ...failed, failure })).toMatchObject({ state: 'Failed', reason: 'limit', failure });
   });
 

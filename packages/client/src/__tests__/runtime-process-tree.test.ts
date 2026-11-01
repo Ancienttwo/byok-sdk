@@ -9,7 +9,7 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { isRuntimeDisposalFailure } from '../runtime-failure';
-import { disposeOwnedProcessTree, withOwnedProcessTree } from '../adapters/process-tree';
+import { OWNED_TREE_OBSERVE_MS, adoptOwnedProcessTree, disposeOwnedProcessTree, withOwnedProcessTree } from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
@@ -199,7 +199,9 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
   it.each([
     { stop: 'honours SIGTERM', ignoreTerm: '0' },
     { stop: 'ignores SIGTERM', ignoreTerm: '1' },
-  ])('dispose ends a setsid grandchild when the root $stop', async ({ ignoreTerm }) => {
+    // #1269: once the root is gone nothing below it leads to the grandchild; the observation taken while it ran does.
+    { stop: 'is SIGKILLed from outside', ignoreTerm: '0', outsideKill: true },
+  ])('dispose ends a setsid grandchild when the root $stop', async ({ ignoreTerm, outsideKill }) => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-process-tree-setsid-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
     // The owned root starts its grandchild with `detached: true`: a session and group of its own.
@@ -212,6 +214,12 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     const pids = [receipt.descendantPid, receipt.grandchildPid];
     try {
       expect(pids.map(processExists)).toEqual([true, true]);
+      await adoptOwnedProcessTree({ child, label: 'setsid fixture' });
+      if (outsideKill) {
+        await new Promise((resolve) => setTimeout(resolve, 2 * OWNED_TREE_OBSERVE_MS));
+        child.kill('SIGKILL');
+        await closeReceipt;
+      }
       await disposeOwnedProcessTree({
         child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'setsid fixture', termGraceMs: 300,
       });
