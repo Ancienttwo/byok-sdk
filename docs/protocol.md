@@ -1590,7 +1590,7 @@ instruction and the output in plaintext.
 
 **Sealed payload v2 (#1045, gated addition).** v2 adds two categories on the
 v1 suite, keys and binding rules. The design is
-[https://github.com/Ancienttwo/byok-sdk/pull/1053](https://github.com/Ancienttwo/byok-sdk/pull/1053).
+[2026-10-28-1045-e2ee-v2.md, approved in PR #1279](https://github.com/Ancienttwo/byok-sdk/blob/6d70942c4113e910c483a951cbf0dc613546a6f3/docs/plans/2026-10-28-1045-e2ee-v2.md).
 `SEALED_CATEGORY_CAPABILITY` maps each category to its flag:
 
 | Category | Flag | What it seals |

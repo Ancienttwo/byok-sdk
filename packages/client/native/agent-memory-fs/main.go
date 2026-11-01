@@ -354,7 +354,7 @@ func openSession(req openRequest) (*session, *protocolError) {
 	// It promises single-file atomicity under a process crash and the strict
 	// flushes of each write, not durability after an OS crash or power loss.
 	// The Windows chain rule waits for the B decision (W2 in
-	// docs/researches/2026-10-22-605-windows-memory.md).
+	// docs/plans/2026-10-22-605-windows-memory.md).
 	if runtime.GOOS != "windows" {
 		if err := syncHomeChain(req.Root, root); err != nil {
 			return nil, failure("io_failure", "home directory barrier failed")

@@ -15,7 +15,7 @@ import (
 	"unsafe"
 )
 
-// W2 experiment (docs/researches/2026-10-22-605-windows-memory.md §5). It walks each
+// W2 experiment (docs/plans/2026-10-22-605-windows-memory.md §5). It walks each
 // home chain from the home to its volume root with the production primitives:
 // os.OpenRoot, Root.Open(".") and platformStrictSync. It logs one W2 line for
 // each directory. DIAGNOSTIC ONLY: an ancestor result is data, not a pass or a
