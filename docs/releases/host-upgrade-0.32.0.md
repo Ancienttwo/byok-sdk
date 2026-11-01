@@ -1,24 +1,26 @@
 # Host upgrade to 0.32.0
 
 This page lists what a Host must do to move from 0.30.2, or from 0.31.0, to
-0.32.0 (#978). AiphaBee pins 0.30.2 and moves straight to 0.32.0, so the page
-covers both releases in one pass. The owner fixed 0.32.0 as the revision for
-#978 and #977 on 2026-11-01.
+0.32.0. A Host on 0.30.2 can move straight to 0.32.0, so the page covers both
+releases in one pass. The owner first fixed 0.32.0 as the revision for #978
+and #977 on 2026-11-01 and revised it to 0.33.0 the same day: AiphaBee skips
+0.32.0 and moves from 0.30.2 to 0.33.0, so it follows the 0.33.0 checklist
+instead of this page.
 
-Its fixed source is the release PR's final merged SHA, recorded below when
-the release is cut, not moving `main` or Unreleased. The release PR is based
-on main `ccf8b2e4d`, and the rows and migration list below are counted from
-the upgrade manifest at that base. It has not been walked through. The behavior authorities are the upgrade
+Its fixed source is the release commit `5f975955`, the squash merge of the
+release PR #1250 on `main`, not moving `main` or Unreleased. The release PR
+was based on main `ccf8b2e4d`, and the rows and migration list below are
+counted from the upgrade manifest at that base. It has not been walked through. The behavior authorities are the upgrade
 manifest that `@byok-sdk/client` ships (`upgrade-manifest.json`, 0.31.0 to
 0.32.0) and the CHANGELOG 0.32.0 and 0.31.0 sections at that commit. When
 this page and them disagree, they win. Source paths and API names below refer
-to this candidate.
+to this release.
 
 This page is an upgrade checklist. It does not say that 0.32.0, or a Host on
 it, is ready for production. The product loop gate is #977.
 
-0.32.0 is not published. The candidate notes are
-[`docs/releases/v0.32.0.md`](v0.32.0.md). For #1113, 0.32.0 carries #1172
+0.32.0 is published on npm `latest` for all nine packages. The release
+record is [`docs/releases/v0.32.0.md`](v0.32.0.md). For #1113, 0.32.0 carries #1172
 and #1176; A2b and A3 to A5 move to 0.33.
 
 ## Version policy
@@ -46,11 +48,11 @@ All nine public packages move together. Pin each one to exactly 0.32.0.
 
 | Release field | Value |
 | --- | --- |
-| Git tag | `v0.32.0` (not created) |
-| Release commit SHA | the release PR's final merged SHA, recorded at release (not yet) |
+| Git tag | `v0.32.0` |
+| Release commit SHA | `5f9759558911d76d0d61a5f4fa4eea2116c0dbe1` |
 | Release PR base | main `ccf8b2e4d057e06bb5dc98aa9ddd2b8834fd556b` (not the release SHA) |
 
-When the release is cut, verify a source checkout with
+Verify a source checkout with
 `git rev-parse 'v0.32.0^{commit}'`; the result must equal the release commit
 above. The annotated tag object is not the source commit.
 
@@ -103,13 +105,13 @@ v4:
 
 ## Stores
 
-The 0.32.0 inspectors decide what the candidate does with each store before
+The 0.32.0 inspectors decide what 0.32.0 does with each store before
 the switch (#1102): `byok-agent upgrade check --store [--json] [--config <path>]`
 or `inspectDaemonStores({ storeDir })` in client, `inspectSqliteStore(path)` in
 server and `inspectProviderProfileStore(path)` in keys. Each opens a private
 copy and leaves the original unchanged. The fixtures in
 `scripts/release/fixtures/stores/index.json`, which the server, client and
-keys tests check, pin the verdicts this candidate gives a store written by
+keys tests check, pin the verdicts 0.32.0 gives a store written by
 0.30.2 and 0.31.0 on its first open:
 
 | Store | Written by 0.30.2 | Written by 0.31.0 |
@@ -158,7 +160,7 @@ application would reject or whose window sum exceeds
 0034 is the one-shot activity log cutover
 ([runbook](../../deploy/runbooks/activity-tail-cutover.md#one-shot-cutover)).
 0.32.0 ships it with the A1+A2a part of #1113 (#1176); the runbook still asks
-for final A1 to A5 acceptance, which moves to 0.33 (see the candidate notes).
+for final A1 to A5 acceptance, which moves to 0.33 (see the release notes).
 Before 0034, stop every old
 activity reader and writer and explicitly accept the loss of the bounded
 pre-cutover activity history. There is no application-only rollback after
@@ -291,7 +293,7 @@ on any failed gate; a package pin alone does not establish acceptance.
    embeds the SDK on each machine that shares a store, Agent home root,
    skill-pack store or Pi session directory. From 0.30.2 this is also the v3
    drain: a pending v3 row stops a v4 start.
-3. **Precheck the stores.** With the 0.32.0 candidate installed beside the old
+3. **Precheck the stores.** With 0.32.0 installed beside the old
    build, run `byok-agent upgrade check --store --json` for each `storeDir`,
    and `inspectSqliteStore` and `inspectProviderProfileStore` where the Host
    has those stores. Expect the verdicts of the [store table](#stores): for a
@@ -394,14 +396,14 @@ does not prove that a restored existing store upgrades.
 
 ### Walkthrough evidence
 
-This checklist is anchored to the release PR's final merged SHA. No one has
+This checklist is anchored to the release commit `5f975955`. No one has
 walked it through.
 
-- [ ] **[unverified] Release commit recorded** in the fixed revisions table,
-  and the tag `v0.32.0` points to it.
+- [x] **Release commit recorded** in the fixed revisions table, and the tag
+  `v0.32.0` points to it.
 - [ ] **[unverified] Maintainer walked the complete checklist** in a clean
-  environment, or linked the completed AiphaBee upgrade evidence (0.30.2 to
-  0.32.0) to #978.
+  environment. AiphaBee upgrade evidence for #978 follows the 0.33.0
+  checklist, not this page.
 - [ ] **[unverified]** Backup restored; store precheck verdicts recorded;
   migrations 0030 to 0034 (or 0031 to 0034) applied to the restored copy;
   rollback rehearsed on that recovery set.
