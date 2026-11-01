@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "acda2db72e30857b7c8e601126c350240fe6dc0a215e64f99b7b51378251abe8"
+    "snapshotSha256": "791e8c34c2721d802c26b7bbb7e30547920d1e829ca20d80040337726eea7f81"
   },
   "configFields": {
     "status": "tracked",
@@ -198,6 +198,15 @@
         "export:@byok-sdk/protocol#RuntimeVersionPolicyProjectionSchema",
         "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
         "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY"
+      ]
+    },
+    {
+      "id": "runtime-executable-local-status",
+      "impact": "additive",
+      "summary": "RuntimeDetectResult (available), RuntimeObservation, DiagnosticsSnapshot.runtimes[] and Daemon.status().runtimes[] carry optional local-only executablePath and executableSource ('config' | 'path' | 'env') for the executable detection ran (#1103 O10). Control status adds the runtimeExecutables side channel so an older CLI's strict runtimes parser still accepts the array; status, runtimes and doctor print the executable. Neither field enters conn.hello, presence, audit.jsonl, DaemonRecord or a support bundle. Absence means unknown. Nothing to change unless a Host reads the new fields.",
+      "migration": "docs/spec.md#local-runtime-probe-observation",
+      "items": [
+        "export:@byok-sdk/client#RuntimeExecutableSource"
       ]
     },
     {
@@ -884,7 +893,7 @@
     {
       "id": "tool-authorization-policy-unification",
       "impact": "breaking",
-      "summary": "DaemonConfig.toolAuthorization is one policy document, { default, byRuntime?, rules? }, for both a config file and an embedded Host; the function-or-object union is gone. StaticToolAuthorization, staticToolAuthorizationMode, staticToolAuthorizationResolver and ToolAuthorizationResolver are removed, and ToolAuthorizationPolicy no longer has the { mode } spelling (a single mode is { default: mode }). Replace a function resolver with the policy object; per-runtime modes move to byRuntime and rules keep their reviewed precedence and admission rules.",
+      "summary": "DaemonConfig.toolAuthorization is one policy document, { default, byRuntime?, rules? }, for both a config file and an embedded Host; the function-or-object union is gone. StaticToolAuthorization, staticToolAuthorizationMode, staticToolAuthorizationResolver and ToolAuthorizationResolver are removed, and ToolAuthorizationPolicy no longer has the { mode } spelling (a single mode is { default: mode }). Replace a function resolver with the policy object; per-runtime modes move to byRuntime and rules keep their reviewed precedence and admission rules. An invalid policy (a bad rule, selector, glob or fileScope) now throws DaemonConfigInvalidError (code daemon_config_invalid) at daemon construction, with the issue path toolAuthorization or toolAuthorization.fileScope (code invalid_file_scope), instead of a plain TypeError or FileScopePolicyError; checkDaemonConfig reports the same issue. Offers are no longer declined with tool_authorization_unresolved. Catch DaemonConfigInvalidError where a Host caught the TypeError.",
       "migration": "docs/spec.md#tool-authorization-auto-and-all-1061",
       "items": [
         "export:@byok-sdk/client#ToolAuthorizationPolicy",
@@ -1686,6 +1695,11 @@
       "item": "export:@byok-sdk/client#RuntimeEnvironmentUnavailableError",
       "change": "added",
       "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeExecutableSource",
+      "change": "added",
+      "entry": "runtime-executable-local-status"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeIsolationCapabilities",

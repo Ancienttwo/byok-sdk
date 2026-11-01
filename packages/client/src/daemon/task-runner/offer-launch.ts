@@ -25,7 +25,7 @@ import type { AcceptedOfferPayload } from './support';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
 import { activateOffer, type OfferActivationInput } from './offer-activation';
 import {
-  createAutoToolAuthorizationGate, parseToolAuthorizationPolicy, toolAuthorizationMode,
+  createAutoToolAuthorizationGate, toolAuthorizationMode,
   type ToolAuthorizationHomeAccess, type ToolAuthorizationLane, type ToolAuthorizationPolicy,
 } from '../../tool-authorization';
 import { fileScopeAdmission } from './file-scope-admission';
@@ -60,18 +60,12 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   const lane: ToolAuthorizationLane = pick.descriptor.capabilities.durablePi === true
     ? 'durable' : preparation === undefined ? 'rpc' : 'prepared';
   const homeAccess: ToolAuthorizationHomeAccess = readerAttempt ? 'memory-reader' : 'writer';
-  let toolAuthorization: ToolAuthorizationPolicy;
-  try {
-    const resolver = this['deps'].toolAuthorization;
-    toolAuthorization = parseToolAuthorizationPolicy(resolver === undefined ? { default: 'all' } : resolver(Object.freeze({
-      taskId, runtimeId: pick.descriptor.id, lane, homeAccess,
-      ...(agentBinding.resolution.agentRef === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
-    })));
-  } catch (error) {
-    console.error(`[byok/client] tool authorization policy unresolved for task ${taskId}: ${errorMessage(error)}`);
-    if (!admissionWithdrawn()) decline('tool_authorization_unresolved: local tool authorization policy could not be resolved', false);
-    return;
-  }
+  // Daemon construction admitted the policy; the derived resolver cannot fail.
+  const resolver = this['deps'].toolAuthorization;
+  const toolAuthorization: ToolAuthorizationPolicy = resolver === undefined ? { default: 'all' } : resolver(Object.freeze({
+    taskId, runtimeId: pick.descriptor.id, lane, homeAccess,
+    ...(agentBinding.resolution.agentRef === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
+  }));
   const effectiveToolAuthorization = toolAuthorizationMode(toolAuthorization, pick.descriptor.id);
   if (effectiveToolAuthorization === 'auto' && (pick.descriptor.capabilities.toolAuthorizationAuto !== true || preparation !== undefined)) {
     if (!admissionWithdrawn()) {

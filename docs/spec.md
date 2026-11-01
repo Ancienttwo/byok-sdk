@@ -1141,6 +1141,24 @@ and never blocks startup. Version text and the change never enter
 `conn.hello`, presence, `audit.jsonl` or `DaemonRecord`, and offline
 `doctor` reports unknown instead of reconstructing a previous version.
 
+The runtime executable is local-only evidence too (#1103 O10). An available
+`RuntimeDetectResult` and `RuntimeObservation` may carry `executablePath` (the
+absolute file detection ran) and `executableSource`: `config` when the
+adapter's Host `resolveBin` option chose it, `env` for a `BYOK_<RUNTIME>_BIN`
+override, `path` for a bare name. Both come from the adapter's one bin
+resolution and, for Claude and Codex, `resolveRuntimeInvocation`; no reader
+searches PATH to fill them. On win32 that invocation finds Claude's or Codex's
+file on PATH, so their `path` source has a path. Otherwise a bare name is
+found by the OS at spawn, so `path` carries no path. Pi reports the fields only
+for a Host `resolveBin` on its plain pi-rpc lane, the one lane that launches
+that file; its bundled package, `BYOK_PI_BIN`, durable lane and SDK helper
+host launch SDK entries and report neither field.
+`Daemon.status()` carries them inline, control `status` through the additive
+`runtimeExecutables` channel, and `status`, `runtimes` and `doctor` print them
+as `executable=<source>("<path>")`. The path can name the local user, so it
+never enters `conn.hello`, presence, `audit.jsonl`, `DaemonRecord` or a
+support bundle.
+
 For the next minor, a newer CLI reports unknown when an older daemon omits
 these fields. It never translates `runtimeIds` into availability or executes
 a local probe to fill the missing daemon facts.
@@ -4010,11 +4028,14 @@ key that names no runtime of the daemon, or `auto` for a runtime without
 The mode is one daemon-level contract shared by every runtime; adapters do not
 carry a permission policy of their own, and the remote offer never selects it.
 An invalid policy — including the removed `{ mode }` spelling, a bare mode
-string, a function or legacy wording such as `full access` or `inherit` —
-declines the offer with `tool_authorization_unresolved`. Without a policy
-every task runs in `all`. Resolution failures use the fixed wire reason
-`tool_authorization_unresolved: local tool authorization policy could not be resolved`;
-rule IDs and diagnostic details remain in local logs. Rules never enter the server protocol,
+string, a function, legacy wording such as `full access` or `inherit`, or a
+rule or `fileScope` that fails admission — raises `DaemonConfigInvalidError`
+at construction (`code: 'daemon_config_invalid'`; the issue path is
+`toolAuthorization`, or `toolAuthorization.fileScope` with code
+`invalid_file_scope`), and `checkDaemonConfig` reports the same issue. No
+offer ever sees an invalid policy, so there is no per-offer resolution
+failure. Without a policy every task runs in `all`. Rule IDs and diagnostic
+details stay in that local error. Rules never enter the server protocol,
 native settings or model prompt. A running task and its native subagents keep
 their snapshot; each new offer, including resume, resolves the current policy
 again. Pi launch v8 and its digest contract are unchanged: rules live in the
@@ -4075,13 +4096,21 @@ must all match. A rule has a unique nonblank `id`, optional display-only
   rule for that call, including tool-name-only rules. Ask rules still match.
 - `pathGlob`: lexically resolved path; ask matches any extracted path, while
   allow requires every extracted path, including batch changes/move targets,
-  to match the same rule. It does not inspect arbitrary argument fields. In
+  to match the same rule. An ask also matches each path's real path through
+  its nearest existing parent (darwin `/tmp` under a `/private/tmp/**` rule,
+  a workspace symlink into a protected directory), so it can only add asks;
+  an allow stays lexical. It does not inspect arbitrary argument fields. In
   `auto` paths use the hook's call cwd; `all` has no per-call cwd in its event
   and resolves relative paths against the task workspace.
 - `mcpServer`, `mcpTool`: trusted MCP identity from the admitted task tool
   observation, or the normalized event in `all`. Claude shares one runtime
   `mcp_status` lookup between its pre-execution gate and event reporting,
   matching the task's configured command/args and rejecting ambiguous names.
+  The gate resolves every server the SDK wrote, the SDK helpers included, by
+  that same command/args match, so a Host MCP rule applies to helpers by
+  identity and does not deny them for missing identity; helper events still
+  carry no `mcp`.
+  The gate asks for that lookup only when the policy has an MCP selector.
   Identity lookup consumes the same authorization deadline as approval wait.
   In `auto`, an MCP call without trusted identity is denied when the policy
   includes MCP selectors. Names are not split on `__`; unobserved personal

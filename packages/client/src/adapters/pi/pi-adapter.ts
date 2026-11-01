@@ -47,6 +47,7 @@ import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../.
 import { locateBundledPiAssets } from './todo-locale-assets';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
+import { runtimeExecutableFields } from '../runtime-executable';
 import { mapPiContextUsage, mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 import { abortPiRpcAndSettle } from './interrupt-settlement';
@@ -296,6 +297,11 @@ export class PiAdapter implements RuntimeAdapter {
       const authPresent = await probePiAuthPresent(env);
       return {
         kind: 'available', version, authPresent,
+        // Only a Host resolveBin on the plain pi-rpc lane launches this file;
+        // every other lane runs an SDK entry, so it reports no executable.
+        ...(this.options.resolveBin !== undefined && this.options.durablePi !== true
+          ? runtimeExecutableFields({ source: 'config' }, bin.command)
+          : {}),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, version),
       };
     } catch (error) {
