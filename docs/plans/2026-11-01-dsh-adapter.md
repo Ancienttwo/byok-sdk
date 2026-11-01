@@ -1,6 +1,6 @@
 # DeepSeek Harness（`dsh`）RuntimeAdapter 设计包（0.33）
 
-状态：design-only，待 owner 决定 O1–O9。本文件只记录调研证据、接口映射和切片计划；不改产品代码、协议、api-surface、spec、测试或版本号。owner 已于 2026-11-01 决定 0.33 加入 dsh 支持。
+状态：design-only，decision-complete。**O1–O9 已由 owner 于 2026-11-01 按推荐全部批准**，跟踪 issue [#1258](https://github.com/Ancienttwo/byok-sdk/issues/1258)。本文件只记录调研证据、接口映射和切片计划；不改产品代码、协议、api-surface、spec、测试或版本号。owner 已于 2026-11-01 决定 0.33 加入 dsh 支持。
 
 - byok-sdk 基线：`main@e2c0bba72`。文中 SDK 路径相对仓库根，指这一版。
 - dsh 证据：本机只读 checkout `~/Projects/deepseek-harness@1343896318`（2026-10-31，根 `package.json` 版本 `0.2.1-rc.2`）。文中 dsh 路径相对这个 checkout。
@@ -14,15 +14,15 @@
 
 | # | 决定（推荐） | 状态 |
 | --- | --- | --- |
-| O1 | 走 ACP（`dsh --profile acp`），不走 `dsh sdk` JSON-RPC、`headless --json` 或 `dsh web` | 待 owner |
-| O2 | SDK 拥有 `DSH_HOME`：Host 指定一个持久根目录（同 Hermes `home`），不用用户的 `~/.dsh` | 待 owner |
-| O3 | 沙箱默认 `danger-full-access`（与 Codex/OAR 一致），adapter 选项可选 `workspace-write` / `read-only` | 待 owner |
-| O4 | 0.33 提供 `model` 选项（provider、model、可选 baseUrl、`keyEnv`），key 在 runtime 环境里；keys launcher 托管作为 S5，可顺延 0.34 | 待 owner |
-| O5 | 版本策略 `exact` `0.2.1-rc.5`，未限定即 `warn`；nightly 跟 npm `latest` dist-tag | 待 owner |
-| O6 | 0.33 接受三个缺口：无草稿（`messageDraft: false`）、无 token 用量事件、失败只有文本 | 待 owner |
-| O7 | 平台只声明 `darwin`、`linux`；Windows 不进 0.33 | 待 owner |
-| O8 | 走 custom harness id `dsh`（同 Grok），不加 wire runtime id | 待 owner |
-| O9 | key 环境变量名用 SDK 自己的名字（如 `BYOK_DSH_PROVIDER_KEY`），不用 `DEEPSEEK_API_KEY` | 待 owner |
+| O1 | 走 ACP（`dsh --profile acp`），不走 `dsh sdk` JSON-RPC、`headless --json` 或 `dsh web` | 已批准 2026-11-01（#1258） |
+| O2 | SDK 拥有 `DSH_HOME`：Host 指定一个持久根目录（同 Hermes `home`），不用用户的 `~/.dsh` | 已批准 2026-11-01（#1258） |
+| O3 | 沙箱默认 `danger-full-access`（与 Codex/OAR 一致），adapter 选项可选 `workspace-write` / `read-only` | 已批准 2026-11-01（#1258） |
+| O4 | 0.33 提供 `model` 选项（provider、model、可选 baseUrl、`keyEnv`），key 在 runtime 环境里；keys launcher 托管作为 S5，可顺延 0.34 | 已批准 2026-11-01（#1258） |
+| O5 | 版本策略 `exact` `0.2.1-rc.5`，未限定即 `warn`；nightly 跟 npm `latest` dist-tag | 已批准 2026-11-01（#1258） |
+| O6 | 0.33 接受三个缺口：无草稿（`messageDraft: false`）、无 token 用量事件、失败只有文本 | 已批准 2026-11-01（#1258） |
+| O7 | 平台只声明 `darwin`、`linux`；Windows 不进 0.33 | 已批准 2026-11-01（#1258） |
+| O8 | 走 custom harness id `dsh`（同 Grok），不加 wire runtime id | 已批准 2026-11-01（#1258） |
+| O9 | key 环境变量名用 SDK 自己的名字（如 `BYOK_DSH_PROVIDER_KEY`），不用 `DEEPSEEK_API_KEY` | 已批准 2026-11-01（#1258） |
 
 阻塞项：做一个 `all` 模式、POSIX、无草稿的 dsh adapter 没有阻塞项。下列能力在 0.33 做不到，需要 dsh 上游变化或单独设计：`auto` 工具授权（无全量执行前门）、`fileScope`（只有一个 workspace 根）、消息草稿与 token 用量（ACP 只发已提交消息与上下文用量）、类型化失败分类、Windows。
 
@@ -223,7 +223,7 @@ DeepSeek 官方路由改写 `llm-deepseek` 项的 `apiKeyEnv`。`packages/keys` 
 - dsh 会话目录的保留与清理（#1105）。
 - 沙箱 `inherit`：SDK 自有 home 下没有用户配置可继承。
 
-## 7. owner 决定
+## 7. owner 决定（2026-11-01 按推荐批准，#1258）
 
 | # | 问题 | 推荐 | 理由 | 不选的后果 |
 | --- | --- | --- | --- | --- |
@@ -251,7 +251,7 @@ DeepSeek 官方路由改写 `llm-deepseek` 项的 `apiKeyEnv`。`packages/keys` 
 
 10x 时先撞上的是每个 Session 一个 Node 进程：启动 1–2 s、常驻内存未测（S3 记录 RSS）。到那时再评估一个进程承载多个 ACP session。
 
-## 9. 跟踪 issue 草稿（未创建）
+## 9. 跟踪 issue 草稿（已据此创建 [#1258](https://github.com/Ancienttwo/byok-sdk/issues/1258)）
 
 标题：
 
