@@ -202,6 +202,8 @@ describe('HermesAdapter detect', () => {
         kind: 'available',
         version: 'Hermes Agent v0.22.2+2364.g0b10b9f (2026.9.24) · stable · local 0b10b9f8155a',
         authPresent: true,
+        executablePath: command,
+        executableSource: 'config',
         versionVerdict: { state: 'allow', qualifiedVersion: '0.22.2+2364.g0b10b9f' },
       });
       const probe = await read();
@@ -236,6 +238,8 @@ describe('HermesAdapter detect', () => {
         kind: 'available',
         version: 'Hermes Agent v0.23.0 (2026.10.1) · stable',
         authPresent: false,
+        executablePath: command,
+        executableSource: 'config',
         advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.22.2+2364.g0b10b9f' },
         versionVerdict: { state: 'warn', qualifiedVersion: '0.22.2+2364.g0b10b9f' },
       });
