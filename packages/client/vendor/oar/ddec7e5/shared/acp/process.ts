@@ -44,6 +44,8 @@ export interface AcpLineProcess {
   onLine(handler: (line: string) => void): void;
   onExit(handler: (code: number | null) => void): void;
   kill(): void;
+  /** Read the process table now and remember this process's descendants for its disposal; throws when the table cannot be read. */
+  observeDescendants(): void;
 }
 
 // BYOK change: the caller passes the complete filtered environment; nothing ambient is merged.
@@ -75,7 +77,9 @@ export interface AcpProcess {
   readonly exitCode: number | null;
   readonly redact?: (text: string) => string;
   kill(): void;
-  // BYOK change: no `resources` reader, native diagnostics or shutdown/cancellation observation; the SDK process-tree authority owns the tree.
+  // BYOK change: no `resources` reader, native diagnostics or upstream shutdown/cancellation observation; the SDK process-tree authority owns the tree.
+  /** BYOK change: the injected line process's synchronous descendant read, taken before a native cancel. */
+  observeDescendants(): void;
 }
 
 /**
@@ -211,6 +215,7 @@ export function startAcpProcess(
     get exitCode() {
       return exitCode;
     },
+    observeDescendants: () => { child.observeDescendants(); },
     kill() {
       if (!ended) {
         connection.close(acpProcessExitedError(null));

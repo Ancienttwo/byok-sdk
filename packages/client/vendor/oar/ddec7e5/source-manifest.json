@@ -419,8 +419,8 @@
       "path": "shared/acp/process.ts",
       "sourcePath": "packages/oar/src/shared/acp/process.ts",
       "upstreamSha256": "88918784e4c127fa3eeffb709fc33daad833b5bf91900e5586e1edbc2df2418b",
-      "vendoredSha256": "8af37ffce50ae00a4a983ae7d280234545b971e3e284214e0e7a010a42b83e6f",
-      "delta": "Caller-owned process: startAcpProcess takes an injected SpawnAcpLineProcess and passes exactly the explicit filtered env and cwd; no executable manager, killTree option, resources reader or native diagnostics. The owned process splits stdout into bounded lines; each line goes back to the official ndJsonStream with its newline, and each written message goes through the acknowledged stdin write, so the SDK keeps its own framing, parse-error answers and write order. Upstream incoming/outgoing filters and the draining-EOF input are retained around the injected streams. No prepareShutdown, markNativeStop or observeCancellation members: the SDK process-tree authority reads the descendants itself."
+      "vendoredSha256": "0c548905a01e46726681cdfcdc11b9ff1441ad2080c08d5258129949356c0ff9",
+      "delta": "Caller-owned process: startAcpProcess takes an injected SpawnAcpLineProcess and passes exactly the explicit filtered env and cwd; no executable manager, killTree option, resources reader or native diagnostics. The owned process splits stdout into bounded lines; each line goes back to the official ndJsonStream with its newline, and each written message goes through the acknowledged stdin write, so the SDK keeps its own framing, parse-error answers and write order. Upstream incoming/outgoing filters and the draining-EOF input are retained around the injected streams. No prepareShutdown, markNativeStop or observeCancellation members. Instead the injected line process and AcpProcess carry one synchronous observeDescendants(): the SDK process-tree authority reads the process table and remembers the agent's descendants for its disposal, and throws when the table cannot be read."
     },
     {
       "path": "shared/acp/profile.ts",
@@ -470,8 +470,8 @@
       "path": "shared/acp/turns.ts",
       "sourcePath": "packages/oar/src/shared/acp/turns.ts",
       "upstreamSha256": "befd7b527e0e8de3fa5e98d82cd9e137c11c9ee8bd47fcfad674f0ea01280aac",
-      "vendoredSha256": "aa30e8f8e2be89407b56c87bcb3c115f0debd4cd8934ff21ad78b6633bb437e5",
-      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort sends the native cancel without the upstream process-table observation window (pendingCancellation is absent); the SDK process-tree authority owns tool cleanup."
+      "vendoredSha256": "170816b09111f0cb9cf49c9be6b06a7277beb46e21cabe3a39f52babea683bfc",
+      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort has no upstream observation window (pendingCancellation is absent): it calls runtime.observeDescendants() synchronously before the native cancel, so a tool the cancel orphans stays known to the SDK process-tree authority, which kills it at dispose while it is the same process. A failed read rejects the abort with code error and sends no cancel."
     },
     {
       "path": "shared/acp/usage-wait.ts",
@@ -507,8 +507,8 @@
       "path": "shared/executable/process-tree.ts",
       "sourcePath": "packages/oar/src/shared/executable/process-tree.ts",
       "upstreamSha256": "a73e3b60f5387a1d8bf6fc9c9394a7a509b960b9a6d06e5a97f46f9a59773d39",
-      "vendoredSha256": "e595b1c130f8b5d8dbc00bcc863edff385cb5f5a339c49fb1b28a60604b4b3a0",
-      "delta": "Node strip-only TypeScript compatibility: InvalidProcessTableError declares its reason field explicitly instead of a constructor parameter property. Everything else keeps upstream 0.83.0 bytes, including the bounded observation and failure-shape APIs."
+      "vendoredSha256": "78cad04be31a503b3cccb53bb9bd19fad2f8f2f169e5f85bc9cd8c6009bddc5a",
+      "delta": "Node strip-only TypeScript compatibility: InvalidProcessTableError declares its reason field explicitly instead of a constructor parameter property. The ps reader runs /bin/ps by its absolute path, so a host PATH without /bin cannot hide the process table. Everything else keeps upstream 0.83.0 bytes, including the bounded observation and failure-shape APIs."
     },
     {
       "path": "shared/failure-class.ts",

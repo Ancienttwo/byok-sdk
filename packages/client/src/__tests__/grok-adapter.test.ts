@@ -215,6 +215,42 @@ describe('GrokAdapter sessions', () => {
     expect(await turn(s)).toEqual([usage, { type: 'turn_end' }]);
   });
 
+  // #1297: the tool left the agent's group and the cancel orphaned it, so it is below the agent in no read at close.
+  it.skipIf(process.platform === 'win32')('close ends a setsid tool that the native cancel orphaned', async () => {
+    const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const until = async (done: () => boolean): Promise<void> => {
+      for (const deadline = Date.now() + 5_000; !done(); await new Promise(resolve => setTimeout(resolve, 20))) {
+        if (Date.now() > deadline) throw new Error('condition not met within 5 s');
+      }
+    };
+    // Only the read before the cancel may see the tool, never the periodic observation.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const resources = await ctx();
+    const treeFile = path.join(resources.workspaceDir, 'tool-tree.json');
+    const s = await open(adapter(), { instruction: 'orphan-tool' }, { ...resources, env: { ...resources.env, FAKE_ACP_TOOL_TREE: treeFile } });
+    await until(() => { try { return JSON.parse(readFileSync(treeFile, 'utf8')).grandchildPid > 0; } catch { return false; } });
+    const { descendantPid: parent, grandchildPid: tool } = JSON.parse(readFileSync(treeFile, 'utf8')) as { descendantPid: number; grandchildPid: number };
+    try {
+      await s.interrupt();
+      await until(() => !alive(parent));
+      expect(alive(tool)).toBe(true);
+      await s.close();
+      expect(alive(tool)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      if (alive(tool)) process.kill(tool, 'SIGKILL');
+    }
+  });
+
+  it('sends no native cancel when the agent\'s descendants cannot be read first', async () => {
+    vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
+    const resources = await ctx();
+    const s = await open(adapter(), { instruction: 'hold' }, resources);
+    await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
+    await s.interrupt();
+    expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(false);
+  });
+
   it('fails the session when the cancel is not answered within the interrupt bound', async () => {
     const resources = await ctx();
     const s = await open(adapter({ interruptTimeoutMs: 200 }), { instruction: 'hold-silent' }, resources);

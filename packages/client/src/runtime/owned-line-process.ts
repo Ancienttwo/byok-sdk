@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import {
-  adoptOwnedProcessTree, disposeOwnedProcessTree, withOwnedProcessTree,
+  adoptOwnedProcessTree, disposeOwnedProcessTree, rememberOwnedDescendants, withOwnedProcessTree,
 } from '../adapters/process-tree';
 import { createJsonlLineDecoder } from '../util/jsonl-lines';
 
@@ -130,6 +130,8 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       spawned, exited, kill,
       dispose: (): Promise<void> => { terminationRequested = true; return cleanup(); },
       get exitedOnItsOwn() { return exitedOnItsOwn; },
+      /** Before an ACP native cancel: its tools stay killable at disposal after the cancel orphans them. */
+      observeDescendants: (): void => rememberOwnedDescendants(child),
       exitError: () => failure ?? new Error(`app-server exited (code=${exitCode})${stderrTail.length ? `; stderr: ${stderrTail.toString('utf8').trim()}` : ''}`),
       write(text: string) {
         if (!adopted || closed || failure !== undefined) throw failure ?? new Error('owned line process is not writable');

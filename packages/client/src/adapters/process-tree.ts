@@ -45,6 +45,8 @@ export interface OwnedProcessTreeOptions {
   spawnFn?: typeof spawn;
   /** DI seam for liveness probing — defaults to `process.kill`. */
   killFn?: KillFn;
+  /** DI seam for the POSIX process-table reads — defaults to the vendored `readProcessTable`. */
+  readProcessTableFn?: () => ProcessTable;
 }
 
 function defaultKill(pid: number, signal: NodeJS.Signals | number): void {
@@ -82,7 +84,7 @@ function observeOwnedRoots(): void {
     // disposal reads the table again before it signals anything.
     return;
   }
-  for (const [child, pid] of observedRoots) rememberDescendants(child, pid, table);
+  for (const [child, pid] of observedRoots) rememberDescendants(child, pid, () => table);
 }
 
 function observeOwnedRoot(child: ChildProcess, pid: number): void {
@@ -227,7 +229,7 @@ export function readBootId(
   platform: NodeJS.Platform,
   deps: { readFile: (file: string) => string; sysctl: (key: string) => string } = {
     readFile: (file) => readFileSync(file, 'utf8'),
-    sysctl: (key) => execFileSync('sysctl', ['-n', key], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }),
+    sysctl: (key) => execFileSync('/usr/sbin/sysctl', ['-n', key], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }),
   },
 ): string {
   let id: string;
@@ -545,14 +547,40 @@ function isRunning(child: ChildProcess): boolean {
  * entry seen before stays while `table` shows the same process (same start
  * time), so one whose parent exited is still remembered.
  */
-function rememberDescendants(child: ChildProcess, pid: number, table?: ProcessTable): void {
+function rememberDescendants(child: ChildProcess, pid: number, read: () => ProcessTable): void {
   if (!isRunning(child)) return;
-  const current = table ?? readProcessTable();
+  const current = read();
   const state = stateFor(child);
   const remembered = new Map<number, ProcessEntry>();
   for (const entry of state.descendants) if (current.get(entry.pid)?.start === entry.start) remembered.set(entry.pid, entry);
   for (const entry of descendantsOf(current, pid)) remembered.set(entry.pid, entry);
   state.descendants = [...remembered.values()];
+}
+
+/**
+ * POSIX: remember a running owned root's descendants now, for its disposal.
+ * Call it just before an act that can orphan some of them: an ACP native
+ * cancel ends a tool's parent, and a tool that left the root's group is then
+ * below the root in no later read. Disposal kills what was remembered while
+ * the same process (same start time) holds the pid. A root that is not
+ * observed (win32, or it exited) has nothing to remember. Throws when the
+ * process table cannot be read.
+ */
+export function rememberOwnedDescendants(child: ChildProcess): void {
+  const pid = observedRoots.get(child);
+  if (pid !== undefined) rememberDescendants(child, pid, readProcessTable);
+}
+
+/** Disposal's process-table read: an unreadable table fails the disposal typed, naming the read, and nothing is signalled on a guess. */
+function readDisposalTable(options: OwnedProcessTreeOptions): ProcessTable {
+  try {
+    return (options.readProcessTableFn ?? readProcessTable)();
+  } catch (cause) {
+    throw new RuntimeDisposalFailure({
+      stage: 'signal',
+      reason: `${options.label} runtime process table could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
+    }, { cause });
+  }
 }
 
 /**
@@ -736,7 +764,7 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
     state.requested = true;
     return;
   }
-  rememberDescendants(options.child, pid);
+  rememberDescendants(options.child, pid, () => readDisposalTable(options));
   signalGroup(pid, 'SIGTERM', options.label, options.killFn ?? defaultKill);
   stateFor(options.child).requested = true;
 }
@@ -856,15 +884,16 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
     return;
   }
 
+  const readTable = (): ProcessTable => readDisposalTable(options);
   if (groupExists(pid, options.label, kill) && !terminationState.get(options.child)?.requested) {
-    rememberDescendants(options.child, pid);
+    rememberDescendants(options.child, pid, readTable);
     signalGroup(pid, 'SIGTERM', options.label, kill);
     stateFor(options.child).requested = true;
   }
   const killed: number[] = [];
   if (!(await waitUntil(() => groupExists(pid, options.label, kill), termGraceMs))) {
     // Read again first: the root may have started more since the SIGTERM.
-    const table = readProcessTable();
+    const table = readTable();
     const more = isRunning(options.child) ? descendantsOf(table, pid) : [];
     signalGroup(pid, 'SIGKILL', options.label, kill);
     killed.push(...killDescendants(options.child, () => table, more));
@@ -877,7 +906,7 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   }
   // The group is gone. What the root left running outside it, from the read
   // before the SIGTERM, goes now (OAR does this when the root exits).
-  killed.push(...killDescendants(options.child, readProcessTable));
+  killed.push(...killDescendants(options.child, readTable));
   if (!(await waitUntil(() => killed.some((descendant) => processExists(descendant, options.label, kill)), killGraceMs))) {
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',
