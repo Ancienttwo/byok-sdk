@@ -140,15 +140,18 @@ jobs:
           failed=$(gh run view "$GITHUB_RUN_ID" --json jobs \
             --jq '[.jobs[] | select(.conclusion == "failure") | .name]
               | join(", ")')
-          body="The runtime contract suite failed against the latest CLI.
+          # The single-quoted format keeps the Markdown backticks literal;
+          # printf fills in the values, which are never parsed as format.
+          printf -v body 'The runtime contract suite failed against the latest CLI.
 
-          - Run: $RUN_URL
-          - Failed legs: $failed
-          - Commit: $GITHUB_SHA
-          - Retained evidence: $RUN_URL#artifacts
+          - Run: %s
+          - Failed legs: %s
+          - Commit: %s
+          - Retained evidence: %s#artifacts
             (`runtime-contract-<runtime>-latest`, 7 days)
 
-          See docs/runtime-contract.md. Refs #1103."
+          See docs/runtime-contract.md. Refs #1103.' \
+            "$RUN_URL" "$failed" "$GITHUB_SHA" "$RUN_URL"
           number=$(gh issue list --state open --json number,title \
             --search "\"$TITLE\" in:title" \
             --jq "[.[] | select(.title == env.TITLE)][0].number // empty")
