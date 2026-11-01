@@ -440,7 +440,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/protocol/agent-memory` | Agent memory Host contract; schema-free | — | forbidden | 1418 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 6960 B |
 | `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1532 B |
-| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 694735 B |
+| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 693989 B |
 | `@byok-sdk/server/execution-core` | Host execution core: FIFO, ledger, routines, memory restore | `@cfworker/json-schema`, `zod` | allowed | 398598 B |
 | `@byok-sdk/server/execution-core/canonical` | Worker-safe canonical JSON hash | — | forbidden | 574 B |
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1761 B |
