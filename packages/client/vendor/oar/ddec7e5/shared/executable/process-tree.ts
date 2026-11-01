@@ -99,7 +99,8 @@ function readProcfs(): ProcessTableRead {
 
 /** Other POSIX systems (macOS): one `ps` run; `lstart` is the start time to the second. */
 function readPs(): ProcessTableRead {
-  const output = execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid=,lstart="], {
+  // BYOK change: run `ps` by its absolute path; the host's PATH may not name /bin.
+  const output = execFileSync("/bin/ps", ["-A", "-o", "pid=,ppid=,pgid=,lstart="], {
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C" },
     stdio: ["ignore", "pipe", "ignore"],

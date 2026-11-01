@@ -52,6 +52,20 @@ These changes need 0.34.0, the next MINOR.
   executable manager; the SDK process-tree authority keeps owning cleanup. All
   sixteen BYOK deltas are preserved and API surface is unchanged.
 
+- **Fix (client; #1298)** — runtime disposal reads the process table with
+  `/bin/ps` on macOS, so a Host whose `PATH` lacks `/bin` disposes Pi and
+  other runtimes normally. A process-table read that still fails reaches the
+  Host as a `RuntimeDisposalFailure` (`stage: 'signal'`) whose reason names the
+  failed read, not as an untyped disposal failure. The durable Pi shell check
+  and the macOS boot identity also run `/bin/ps` and `/usr/sbin/sysctl` by
+  absolute path.
+
+- **Fix (client; #1297)** — on POSIX, a Grok or dsh tool that left the agent's
+  process group no longer outlives its session after a native cancel orphaned
+  it. The SDK records the agent's descendants just before it sends
+  `session/cancel`, and close kills the recorded tools that are still the same
+  process. When that read fails, the cancel is refused and nothing is sent.
+
 ## 0.33.0 — 2026-11-01 (published)
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

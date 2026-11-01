@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -201,7 +201,9 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     { stop: 'ignores SIGTERM', ignoreTerm: '1' },
     // #1269: once the root is gone nothing below it leads to the grandchild; the observation taken while it ran does.
     { stop: 'is SIGKILLed from outside', ignoreTerm: '0', outsideKill: true },
-  ])('dispose ends a setsid grandchild when the root $stop', async ({ ignoreTerm, outsideKill }) => {
+    // #1298: the host's PATH need not name the process-table reader.
+    { stop: 'honours SIGTERM, under an empty PATH', ignoreTerm: '0', emptyPath: true },
+  ])('dispose ends a setsid grandchild when the root $stop', async ({ ignoreTerm, outsideKill, emptyPath }) => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-process-tree-setsid-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
     // The owned root starts its grandchild with `detached: true`: a session and group of its own.
@@ -220,14 +222,31 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
         child.kill('SIGKILL');
         await closeReceipt;
       }
+      if (emptyPath) vi.stubEnv('PATH', '');
       await disposeOwnedProcessTree({
         child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'setsid fixture', termGraceMs: 300,
       });
       expect(pids.map(processExists)).toEqual([false, false]);
     } finally {
+      vi.unstubAllEnvs();
       reapAll(pids);
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }
   });
-});
 
+  it('an unreadable process table fails the disposal typed, naming the read (#1298)', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], withOwnedProcessTree({ stdio: 'ignore', env: {} }));
+    await new Promise((resolve) => child.once('spawn', resolve));
+    const unreadable = (): never => { throw new Error('Process table ps: spawn_failed (ENOENT) after 1 ms'); };
+    try {
+      await expect(disposeOwnedProcessTree({
+        child, waitClosed: () => new Promise(() => {}), isClosed: () => false, label: 'pi', readProcessTableFn: unreadable,
+      })).rejects.toMatchObject({
+        name: 'RuntimeDisposalFailure', stage: 'signal', message: 'pi runtime process table could not be read: Process table ps: spawn_failed (ENOENT) after 1 ms',
+      });
+      expect(processExists(child.pid!)).toBe(true);
+    } finally {
+      reapAll([child.pid!]);
+    }
+  });
+});
