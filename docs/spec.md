@@ -311,9 +311,9 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.31.0`; publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.32.0`; publication requires separate
 release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.31.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.32.0`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -323,6 +323,11 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.32.0 is a MINOR under the general policy above, with no exception. The
+upgrade manifest from 0.31.0 holds 28 breaking entries, and the release adds
+Postgres migrations 0031 to 0034 and server SQLite schema 7. See the
+[0.32.0 candidate notes](releases/v0.32.0.md).
 
 0.31.0 is a MINOR under the general policy above, with no exception. It adds
 public API and Postgres migration 0030, and it has pre-1.0 breaking cuts: the
