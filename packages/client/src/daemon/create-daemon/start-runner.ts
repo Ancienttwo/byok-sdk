@@ -69,7 +69,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     // Queue the exact bytes; observer delivery projections run only after
     // the awaited outbound settlement, including terminal journal fsync.
     send: sendEnvelope,
-    ...(config.durablePi !== true ? {} : { durablePi: true, recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
+    ...(!adapters.some(adapter => adapter.descriptor.capabilities.durableLane === true) ? {} : { recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
       await withReplyTransition(async () => {
         const task = await activeJournal.readTask(taskId, journalIdentity);
         const to = task?.localState.startsWith('required-reply-') ? task.localState : 'running';

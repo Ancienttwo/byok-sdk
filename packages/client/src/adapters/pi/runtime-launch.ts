@@ -1,4 +1,5 @@
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
+import type { RuntimeLaunchResources } from '../../types';
 import { buildAllowlistedEnv } from '../../runtime/environment';
 import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated';
 import { promises as fs } from 'node:fs';
@@ -10,8 +11,7 @@ import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './mcp-environment';
 /** The SDK-owned Pi entry a launch starts. */
 export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 
-export interface PiRuntimeLaunchResources {
-  readonly scratch: ExecutionScratch;
+export interface PiRuntimeLaunchResources extends RuntimeLaunchResources {
   readonly kind: PiRuntimeLaunchKind;
   /** The interpreter, or the executable itself. */
   readonly command: string;
@@ -32,8 +32,6 @@ export interface PiRuntimeLaunchResources {
    * into. Present exactly when `credentialSource` is `keys-profile`.
    */
   readonly projectionDir?: string;
-  /** A single client-owned cleanup authority, idempotent across declined/start/terminal paths. */
-  release(): Promise<void>;
 }
 
 function failure(reason: string): RuntimeExecutionFailure {

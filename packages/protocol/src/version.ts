@@ -3,12 +3,18 @@ export const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
 
 /**
- * Wire protocol version. Every v4 change is a version bump, a gated addition
+ * Wire protocol version. Every v5 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * receiver-capability gates and additions. No v4 release has been published
- * yet, so `src/__tests__/compat.test.ts` has no published v4 decoder to prove
+ * receiver-capability gates and additions. No v5 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v5 decoder to prove
  * additions against; cross-release gates stay unproven until one exists.
+ *
+ * v5 renames the runtime capability `durablePi` to `durableLane`, beside
+ * `preparedLane`, on `conn.hello` runtimes and harnesses, `task.claim` and
+ * presence: the durable worker is a lane an adapter declares, not a Pi name
+ * on the wire. Nothing else changes. A v4 envelope is rejected; there is no
+ * v4 reader. Drain, then upgrade server and client together.
  *
  * v4 completes the ADR-034 cutover and retires the approval paths kept for
  * pre-M5 peers. It removes the v3 handshake answer, the runtime-only offers
@@ -43,7 +49,7 @@ export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /**
  * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader

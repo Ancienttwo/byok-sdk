@@ -396,7 +396,6 @@ export interface TaskRunnerDeps {
   /** Durable normal-turn result failure intent, before handing off a required reply. */
   recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
   recordAgentMessageAccepted?(taskId: string): Promise<void>;
-  durablePi?: boolean;
   recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
   /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;

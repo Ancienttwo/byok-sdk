@@ -110,7 +110,7 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
  */
 const CLOUD_EMITTED: readonly MessageType[] = ['agent.message.disposition'];
 
-const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url));
+const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url));
 const gatedLines = readFileSync(corpusPath, 'utf8')
   .split('\n')
   .filter((line) => line.length > 0)

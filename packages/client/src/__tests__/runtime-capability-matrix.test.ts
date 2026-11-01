@@ -23,14 +23,14 @@ const MATRIX_FIELDS = [
   'mcpToolsets',
   'messageDraft',
   'toolAuthorizationAuto',
-  'durablePi',
+  'durableLane',
   'preparedLane',
   'isolation',
 ] as const;
 
 const adapters = (): ReadonlyArray<readonly [string, RuntimeAdapter]> => [
   ['pi', new PiAdapter()],
-  ['pi (durablePi)', new PiAdapter({ durablePi: true })],
+  ['pi (durableLane)', new PiAdapter({ durableLane: true })],
   ['claude', new ClaudeAdapter()],
   ['codex', new CodexAdapter()],
   ['grok', new GrokAdapter()],
@@ -58,7 +58,7 @@ describe('runtime capability matrix projection to conn.hello / presence', () => 
   it('omits every field the adapter does not declare instead of inventing false', () => {
     const wire = toRuntimeInfoCapabilities({ steer: false, resume: true, approvalInteractive: false });
     expect(wire).toEqual({ steer: false, resume: true, approvalInteractive: false });
-    for (const field of ['mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durablePi', 'preparedLane', 'isolation'] as const) {
+    for (const field of ['mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane', 'isolation'] as const) {
       expect(field in wire, field).toBe(false);
     }
   });

@@ -37,11 +37,11 @@ function resultDocumentExecution(deviceId: string) {
 }
 
 describe('protocol-version admission at cloud lifecycle boundaries', () => {
-  it('is wire v4', () => {
-    expect(PROTOCOL_VERSION).toBe(4);
+  it('is wire v5', () => {
+    expect(PROTOCOL_VERSION).toBe(5);
   });
 
-  it.each([1, 2, 3])('rejects the retired v:%i at the exported inbound gate before the claim lifecycle mutation', async (v) => {
+  it.each([1, 2, 3, 4])('rejects the retired v:%i at the exported inbound gate before the claim lifecycle mutation', async (v) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
@@ -57,7 +57,7 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
   });
 
-  it.each([1, 2, 3])('rejects the retired v:%i at POST /byok/messages before it can be acknowledged as accepted', async (v) => {
+  it.each([1, 2, 3, 4])('rejects the retired v:%i at POST /byok/messages before it can be acknowledged as accepted', async (v) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
@@ -73,13 +73,13 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
   });
 
-  it('keeps the supported v:4 claim path accepted', async () => {
+  it('keeps the supported v:5 claim path accepted', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId });
-    expect(claim.v).toBe(4);
+    expect(claim.v).toBe(5);
 
     await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, claim).then((result) => result.outcome)).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('claimed');
@@ -99,10 +99,10 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     };
     const capabilitiesBefore = (await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities;
 
-    // A v4 envelope that declares only v2: the handshake gate.
-    const v4Hello = createEnvelope('conn.hello', helloPayload as never);
+    // A v5 envelope that declares only v2: the handshake gate.
+    const currentHello = createEnvelope('conn.hello', helloPayload as never);
     const helloRefusal = refusalRecorder();
-    expect(await handleInboundEnvelope(stores, device.deviceId, v4Hello, undefined, undefined, helloRefusal.observer)
+    expect(await handleInboundEnvelope(stores, device.deviceId, currentHello, undefined, undefined, helloRefusal.observer)
       .then((result) => result.outcome)).toBe('rejected');
     expect(helloRefusal.refused.map((entry) => entry.reason)).toEqual(['hello_protocol_version_unsupported']);
 

@@ -31,7 +31,7 @@ export interface PresenceRuntimeCapabilities {
   readonly mcpToolsets?: boolean;
   readonly messageDraft?: boolean;
   readonly toolAuthorizationAuto?: boolean;
-  readonly durablePi?: boolean;
+  readonly durableLane?: boolean;
   readonly preparedLane?: boolean;
   readonly isolation?: {
     readonly userContext?: boolean;
@@ -64,7 +64,7 @@ export function freezePresenceRuntimeFact(runtime: PresenceRuntimeFact): Presenc
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
     ...(capabilities === undefined ? {} : {
       capabilities: Object.freeze({
-        ...definedFlags(capabilities, ['steer', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durablePi', 'preparedLane']),
+        ...definedFlags(capabilities, ['steer', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane']),
         ...(capabilities.isolation === undefined ? {} : {
           isolation: Object.freeze(definedFlags(capabilities.isolation, ['userContext', 'userMcpServers', 'sessionPersistence'])),
         }),

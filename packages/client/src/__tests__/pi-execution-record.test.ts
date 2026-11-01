@@ -89,7 +89,7 @@ function terminal(sent: readonly Envelope[]): Envelope | undefined {
 describe('Pi trajectory evidence: declaration and RPC counting', () => {
   it('declares the event stream for the RPC lanes and not for the durable worker', () => {
     expect(new PiAdapter().descriptor.trajectoryEvidence).toBe('event-stream');
-    expect(new PiAdapter({ durablePi: true }).descriptor.trajectoryEvidence).toBeUndefined();
+    expect(new PiAdapter({ durableLane: true }).descriptor.trajectoryEvidence).toBeUndefined();
   });
 
   it('treats every Pi 1.3.0 bookkeeping frame as routine, not as an unmapped gap', () => {

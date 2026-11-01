@@ -57,7 +57,7 @@ export type WireAddition =
   | { readonly kind: 'envelope'; readonly rule: 'strip-safe'; readonly surface: MessageType; readonly field: string }
   | { readonly kind: 'http'; readonly rule: 'strip-safe'; readonly surface: HttpWireSurface; readonly field: string };
 
-const MATRIX_FIELDS = ['toolAuthorizationAuto', 'durablePi', 'preparedLane', 'isolation'] as const;
+const MATRIX_FIELDS = ['toolAuthorizationAuto', 'durableLane', 'preparedLane', 'isolation'] as const;
 
 const offerRow = (field: string | undefined, capability: CapabilityFlag, value?: string): WireAddition => ({
   kind: 'envelope', rule: 'gated', surface: 'task.offer',

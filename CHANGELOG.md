@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+These changes need 0.34.0, the next MINOR.
+
+- **Breaking (protocol, core, client, server, cloud, cloud-dataplane)** — wire
+  v5 (`PROTOCOL_VERSION = 5`). The runtime capability `durablePi` is renamed
+  `durableLane` (the durable worker lane, Pi today) on `conn.hello` runtimes
+  and harnesses, `task.claim`, presence (`DevicePresenceEntry` runtime
+  capabilities) and `RuntimeCapabilities`. Nothing else on the wire changes.
+  There is no v4 reader: drain the v4 deployment (pending mailbox rows
+  acknowledged, executions terminal, daemon pending terminals acknowledged),
+  then start the server side and the daemons together. A pending v4 row stops
+  startup with `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`,
+  `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED` or
+  `DaemonJournalProtocolUnsupportedError` and is left unchanged; retained rows
+  open, so the stores need not be new. A hosted terminal receipt written by a
+  v4 build no longer decodes (`terminal_receipt_unreadable`). The v4 golden
+  corpora retire at 0.33.0, the last v4 release. See
+  [the wire v5 migration](docs/migrations/wire-v5-durable-lane.md).
+
+- **Breaking (client)** — runtime names are generic.
+  `DaemonConfig.durablePi` is removed (`DaemonConfigFieldRemovedError`): set
+  `runtimes.pi.durableLane`. `PiAdapterOptions.durablePi` is `durableLane`.
+  The daemon wires the durable journal and `durableContext` from an adapter's
+  `capabilities.durableLane`, so a Host that builds `PiAdapter({ durableLane:
+  true })` for `createDaemonWithAdapters` needs no daemon option, and such an
+  adapter without an Agent home refuses to start. The runtime launch resources
+  are the exported `RuntimeLaunchResources` (`scratch`, `release()`):
+  `RuntimeOperationStartBase.runtimeLaunch` and `resolveRuntimeLaunch` use it
+  instead of the Pi type, which now extends it. See
+  [runtime names](docs/migrations/wire-v5-durable-lane.md#runtime-names).
+
 - **Fix (client; #1295)** — an ordinary Pi task no longer exits at start when
   the user's Pi has its own pi-web-access or rpiv-todo installed. The bundled
   copies are now Pi replaceable extensions: an extension that registers one of

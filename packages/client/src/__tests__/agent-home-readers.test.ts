@@ -732,7 +732,7 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     const hostStorageRoot = await temp('byok-readers-durable-home-');
     const storeDir = await temp('byok-readers-durable-store-');
     const durable = new StubRuntimeAdapter('pi', { kind: 'available', version: '0.0.0' }, {
-      steer: false, resume: false, approvalInteractive: true, mcpToolsets: true, durablePi: true,
+      steer: false, resume: false, approvalInteractive: true, mcpToolsets: true, durableLane: true,
     });
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });

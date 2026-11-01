@@ -134,8 +134,8 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (suppliedJournal !== undefined && (typeof suppliedJournal.listPrunableConfirmedTasks !== 'function' || typeof suppliedJournal.pruneConfirmedJournalTask !== 'function')) throw new LocalStorageConfigError('config', 'requires the journal confirmed-retention ports');
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   const piByokLauncher = resolvePiByokLauncher(config);
-  if (config.durablePi === true && (!config.agentHome || !config.piByokLauncher)) throw new Error('durablePi requires Agent home and Pi custody launcher');
-  if (config.durablePi === true && process.platform === 'win32') throw new Error('durablePi is unavailable on Windows until parent-death Job Object recovery is validated');
+  if (config.runtimes?.pi?.durableLane === true && (!config.agentHome || !config.piByokLauncher)) throw new Error('runtimes.pi.durableLane requires Agent home and Pi custody launcher');
+  if (config.runtimes?.pi?.durableLane === true && process.platform === 'win32') throw new Error('runtimes.pi.durableLane is unavailable on Windows until parent-death Job Object recovery is validated');
   // M5 batch-3 (workstream 2): validated synchronously, up front — see
   // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
   // zero/negative-is-an-error / `Number.POSITIVE_INFINITY`-is-the-real-

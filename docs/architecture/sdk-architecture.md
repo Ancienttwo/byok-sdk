@@ -244,7 +244,7 @@ flowchart TB
 
 | 文件 | 主要 exports / 功能 |
 | --- | --- |
-| `version.ts` | `PROTOCOL_VERSION = 4`、`CAPABILITY_FLAGS` |
+| `version.ts` | `PROTOCOL_VERSION = 5`、`CAPABILITY_FLAGS` |
 | `messages.ts` | runtime info、每个消息类型的 payload schema、direction type lists、`MESSAGE_PAYLOAD_SCHEMAS` 单一来源 |
 | `envelope.ts` | discriminated union；所有 `task.*` 必须有 `task_id`，server→daemon 必须有 envelope `seq` |
 | `codec.ts` | `parseMessage`、`decodeEnvelope`、`encodeEnvelope`、`createEnvelope` |
@@ -333,10 +333,10 @@ stateDiagram-v2
 
 ### 2.4 Freeze 与兼容边界
 
-- 当前 wire 是 `v4`：#925 把 `PROTOCOL_VERSION` 由 3 升到 4，删除 `conn.ack`、runtime-only offer 及其 sealed 类型、`strict-agent-only` 与三个审批 capability flag，`approvalId` 在 `task.await_approval`、`task.approve`、`task.reject` 上成为必填。v4 端点拒绝 v3 对端；不提供 receipt 迁移，v3 写过的 store 不受支持，设备与 Host 在新 store 上一起升级（[升级说明](../releases/925-wire-v4.md)）。历史：K7（#468）把 2 升到 3（result-document 的 `schema` 成为必填）；ADR-037 把 1 升到 2（删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`）。v2、v3 corpus 与 registry 只读。
-- 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v4 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表。v4 尚无已发布版本：`compat.test.ts` 用最后一个 v3 版本 0.30.2（`byok-protocol-previous`）作 rejection oracle，它拒绝每个 v4 envelope；v4 registry 为空，跨版本的 addition 声明在首个 v4 release 发布并 pin 之前没有证明。
+- 当前 wire 是 `v5`：#1290 把 `PROTOCOL_VERSION` 由 4 升到 5，runtime capability `durablePi` 改名 `durableLane`，其余 v4 形状不变。v5 端点拒绝 v4 对端，部署先排空，再让 server 侧与 daemon 一起升级；保留的 store 照常打开，只有未处理的 v4 行会挡住启动，v4 build 存下的 hosted terminal receipt 不再能解码（[wire v5 迁移](../migrations/wire-v5-durable-lane.md)）。0.33.0 是最后一个 v4 版本。历史：#925 把 3 升到 4（删除 `conn.ack`、runtime-only offer 及其 sealed 类型、`strict-agent-only` 与三个审批 capability flag，`approvalId` 成为必填，v3 写过的 store 不受支持，见[升级说明](../releases/925-wire-v4.md)）；K7（#468）把 2 升到 3（result-document 的 `schema` 成为必填）；ADR-037 把 1 升到 2（删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`）。v2、v3、v4 corpus 与 registry 只读。
+- 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v5 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表。v5 尚无已发布版本：`compat.test.ts` 用最后一个 v4 版本 0.33.0（`byok-protocol-previous`）作 rejection oracle，它拒绝每个 v5 envelope；v5 registry 为空，跨版本的 addition 声明在首个 v5 release 发布并 pin 之前没有证明。
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
-- server 只接受当前 major（v4，`PROTOCOL_VERSION = 4`，`packages/protocol/src/version.ts`）。v3 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
+- server 只接受当前 major（v5，`PROTOCOL_VERSION = 5`，`packages/protocol/src/version.ts`）。v4 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
 
 ## 3. `@byok-sdk/server`：`@byok-sdk/cloud` domain kernel 的 self-hosted façade
 

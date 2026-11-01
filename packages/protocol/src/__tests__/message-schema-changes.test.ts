@@ -277,7 +277,7 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
     // payload, and the envelope never sets task_id. M1 requires the envelope
     // field, so this must now be rejected rather than silently unroutable.
     const raw = {
-      v: 4,
+      v: 5,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.claim',
@@ -409,7 +409,7 @@ describe('runtime messageDraft capability', () => {
   it('is optional discovery data in hello and claim', () => {
     const capabilities = { messageDraft: true };
     const hello = MESSAGE_PAYLOAD_SCHEMAS['conn.hello'].parse({
-      protocolVersions: [4], capabilities: [], deviceId: 'device-1', productId: 'app',
+      protocolVersions: [5], capabilities: [], deviceId: 'device-1', productId: 'app',
       runtimes: [{ id: 'pi', version: '1', authPresent: true, capabilities }],
     });
     expect(hello.runtimes?.[0]?.capabilities).toEqual(capabilities);

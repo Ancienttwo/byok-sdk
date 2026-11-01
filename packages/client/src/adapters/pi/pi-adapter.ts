@@ -102,7 +102,7 @@ export interface PiAdapterOptions {
   /** The environment Pi and its MCP servers get (#1095). Default: the login-shell snapshot. */
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** Opt-in ordinary, lease-bound durable worker. */
-  durablePi?: boolean;
+  durableLane?: boolean;
   /** Override bin resolution — tests substitute the fake-pi fixture script. */
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
@@ -255,7 +255,7 @@ export class PiAdapter implements RuntimeAdapter {
       skillPaths: options.agentSkillPaths === undefined ? [] : options.agentSkillPaths,
       extensionPaths: options.agentExtensionPaths === undefined ? [] : options.agentExtensionPaths,
     });
-    if (options.durablePi !== undefined && typeof options.durablePi !== 'boolean') throw new Error('PiAdapterOptions.durablePi must be boolean; pass replicaRoot through durableContext');
+    if (options.durableLane !== undefined && typeof options.durableLane !== 'boolean') throw new Error('PiAdapterOptions.durableLane must be boolean; pass replicaRoot through durableContext');
     this.descriptor = freezeRuntimeAdapterDescriptor({
       ...this.descriptor,
       ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
@@ -263,7 +263,7 @@ export class PiAdapter implements RuntimeAdapter {
     // T0 verified the RPC lanes only. The durable worker's own frames and
     // respawn path are unverified, so it declares no trajectory evidence.
     // Windows waits for validated parent-death Job Object recovery.
-    if (options.durablePi === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
+    if (options.durableLane === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
@@ -309,7 +309,7 @@ export class PiAdapter implements RuntimeAdapter {
         kind: 'available', version, authPresent,
         // Only a Host resolveBin on the plain pi-rpc lane launches this file;
         // every other lane runs an SDK entry, so it reports no executable.
-        ...(this.options.resolveBin !== undefined && this.options.durablePi !== true
+        ...(this.options.resolveBin !== undefined && this.options.durableLane !== true
           ? runtimeExecutableFields({ source: 'config' }, bin.command)
           : {}),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, version),
@@ -320,8 +320,8 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (this.options.durablePi === true && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
-    if (this.options.durablePi === true && input.offer.dispatchSelection === undefined) {
+    if (this.options.durableLane === true && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
+    if (this.options.durableLane === true && input.offer.dispatchSelection === undefined) {
       return { kind: 'reject', reason: 'durable Pi requires an ordinary BYOK selection', retryable: false };
     }
     // Fail closed BEFORE anything is spawned. pi registers one tool per
@@ -429,7 +429,7 @@ export class PiAdapter implements RuntimeAdapter {
 
     let boundRuntime: PiRuntimeLaunchResources | undefined;
     let sessionLease: PiSessionRetentionLease | undefined;
-    const sessionDir = pinnedSelection === undefined || this.options.durablePi === true ? undefined : this.options.byokLauncher!.sessionDir;
+    const sessionDir = pinnedSelection === undefined || this.options.durableLane === true ? undefined : this.options.byokLauncher!.sessionDir;
     const acquireSessionLease = async (sessionRef: string) => {
       if (sessionDir === undefined) return undefined;
       if (sessionLease !== undefined) throw authorityFailure('Pi operation already owns a session retention lease');
@@ -442,8 +442,8 @@ export class PiAdapter implements RuntimeAdapter {
         acquireSessionLease,
         resolveRuntimeLaunch: async (resources) => {
           if (boundRuntime !== undefined) throw authorityFailure('runtime launch resources were already resolved');
-          if (this.options.durablePi === true && resources.kind === 'prepared') throw authorityFailure('durable Pi does not admit the prepared lane');
-          const kind = this.options.durablePi === true ? 'pi-durable' : resources.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc';
+          if (this.options.durableLane === true && resources.kind === 'prepared') throw authorityFailure('durable Pi does not admit the prepared lane');
+          const kind = this.options.durableLane === true ? 'pi-durable' : resources.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc';
           boundRuntime = await resolvePiRuntimeLaunch({
             ...resources, sessionCwd: resources.cwd, kind,
             env: pinnedSelection === undefined ? resources.env : withoutProviderCredentials(resources.env),
@@ -477,10 +477,10 @@ export class PiAdapter implements RuntimeAdapter {
           return boundRuntime;
         },
         start: async (startInput: RuntimeOperationStartInput): Promise<Session> => {
-          const runtimeLaunch = startInput.runtimeLaunch;
-          if (runtimeLaunch === undefined || runtimeLaunch !== boundRuntime) throw authorityFailure('Pi start requires its resolved runtime launch');
+          const runtimeLaunch = boundRuntime;
+          if (runtimeLaunch === undefined || startInput.runtimeLaunch !== runtimeLaunch) throw authorityFailure('Pi start requires its resolved runtime launch');
           if (runtimeLaunch.scratch !== startInput.scratch) throw authorityFailure('Pi start scratch differs from runtime launch');
-          if (runtimeLaunch.kind !== (this.options.durablePi === true ? 'pi-durable' : startInput.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc')) throw authorityFailure('Pi start lane differs from runtime launch');
+          if (runtimeLaunch.kind !== (this.options.durableLane === true ? 'pi-durable' : startInput.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc')) throw authorityFailure('Pi start lane differs from runtime launch');
           if (runtimeLaunch.sessionCwd !== startInput.manifest.cwd) throw authorityFailure('Pi runtime session cwd differs from manifest');
           const resources = startInput.manifest.agentRef === undefined ? INHERITED_PI_AGENT_RESOURCES : this.agentResources;
           if ((resources.userContext === 'excluded' || resources.skillPaths.length > 0 || resources.extensionPaths.length > 0) && runtimeLaunch.kind !== 'pi-rpc') {
@@ -528,7 +528,7 @@ export class PiAdapter implements RuntimeAdapter {
           // `pi --mode rpc` can never consume a prepared request, so this branch
           // launches the SDK-owned in-process host instead
           // (`../../bin/byok-pi-prepared.ts`).
-          if (this.options.durablePi === true) {
+          if (this.options.durableLane === true) {
             if (startInput.kind !== 'instruction' || launcherArgs === undefined || this.options.byokLauncher === undefined) throw authorityFailure('durable Pi requires ordinary custody launch');
             if (startInput.durableContext === undefined) throw authorityFailure('durable Pi requires replica and journal context');
             return await startDurablePi({ input: startInput, runtimeLaunch, replicaRoot: startInput.durableContext.replicaRoot,

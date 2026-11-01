@@ -217,7 +217,7 @@ describe('steerTask (GAP-2)', () => {
   });
 
   it('steerSealedTask delivers the sealed task.steer only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
-    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8');
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url), 'utf8');
     const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined)!.payload;
     const harness = createHarness();
@@ -245,7 +245,7 @@ describe('steerTask (GAP-2)', () => {
   });
 
   it('steerSealedTask refuses a sealed steer by ciphertextRef to a blob that is not committed, and writes no mailbox row (#654)', async () => {
-    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8');
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url), 'utf8');
     const byReference = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined && 'ciphertextRef' in line.payload.sealed)!.payload;
     const harness = createHarness();

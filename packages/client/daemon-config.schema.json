@@ -915,6 +915,10 @@
                 "unqualified"
               ],
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
+            },
+            "durableLane": {
+              "type": "boolean",
+              "description": "`PiAdapterOptions.durableLane`: the opt-in durable worker. Disabled by default. Requires `agentHome` and `piByokLauncher`; unavailable on Windows."
             }
           }
         },
@@ -1422,10 +1426,6 @@
       ],
       "description": "The environment every runtime `createDaemon` builds gives its children\n(#1095): by default the user's login-shell snapshot, so a variable the\nHost sets in `process.env` reaches a runtime only when `pass` names it.\n`createDaemonWithAdapters` refuses this field: each injected adapter\ntakes its own `runtimeEnvironment` option."
     },
-    "durablePi": {
-      "type": "boolean",
-      "description": "Disabled by default. Requires Agent homes, journal and custody launcher."
-    },
     "piByokLauncher": {
       "type": "object",
       "properties": {
@@ -1456,7 +1456,8 @@
         "command",
         "profileDbPath",
         "sessionDir"
-      ]
+      ],
+      "description": "Separate-process Pi BYOK credential boundary. Required only for a\n`dispatchSelection` in the BYOK lane; subscription runtimes and legacy\nPi tasks do not invoke it."
     },
     "runtimePreference": {
       "type": "array",
@@ -1705,6 +1706,10 @@
     },
     {
       "path": "maxConcurrentMutableSessionsPerAgentHome",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "durablePi",
       "migration": "docs/spec.md#removed-daemonconfig-fields"
     },
     {

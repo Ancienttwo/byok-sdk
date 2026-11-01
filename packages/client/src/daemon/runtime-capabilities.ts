@@ -28,7 +28,7 @@ export function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRu
     ...(caps.mcpToolsets === undefined ? {} : { mcpToolsets: caps.mcpToolsets }),
     ...(caps.messageDraft === undefined ? {} : { messageDraft: caps.messageDraft }),
     ...(caps.toolAuthorizationAuto === undefined ? {} : { toolAuthorizationAuto: caps.toolAuthorizationAuto }),
-    ...(caps.durablePi === undefined ? {} : { durablePi: caps.durablePi }),
+    ...(caps.durableLane === undefined ? {} : { durableLane: caps.durableLane }),
     ...(caps.preparedLane === undefined ? {} : { preparedLane: caps.preparedLane }),
     ...(caps.isolation === undefined ? {} : { isolation: { ...caps.isolation } }),
   };

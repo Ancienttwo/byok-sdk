@@ -113,7 +113,7 @@ describe('agent-memory-intent.v1 capability', () => {
 
 describe('agent.memory.intent.available notice', () => {
   const envelopeBase = {
-    v: 4,
+    v: 5,
     id: '20000000-0000-4000-8000-000000000099',
     ts: '2026-09-28T05:00:00.000Z',
     type: 'agent.memory.intent.available',

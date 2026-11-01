@@ -759,7 +759,7 @@ export declare function hermesCustodyArgs(launcher: HermesByokLauncher, binding:
 export declare function prepareHermesCustody(launcher: HermesByokLauncher, offer: RuntimeAdapterPrepareInput['offer']): Promise<PreparedHermesCustody>;
 export {};
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types';
 export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection';
 export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
@@ -891,7 +891,7 @@ export interface PiAdapterOptions {
     /** The environment Pi and its MCP servers get (#1095). Default: the login-shell snapshot. */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     /** Opt-in ordinary, lease-bound durable worker. */
-    durablePi?: boolean;
+    durableLane?: boolean;
     /** Override bin resolution — tests substitute the fake-pi fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
@@ -1203,61 +1203,6 @@ export interface CopyPiRuntimeAssetsOptions {
  * file paths, relative to `outDir`, in sorted order.
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
-// ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
-import type { ExecutionScratch } from '../../daemon/retention/scratch';
-/** The SDK-owned Pi entry a launch starts. */
-export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
-export interface PiRuntimeLaunchResources {
-    readonly scratch: ExecutionScratch;
-    readonly kind: PiRuntimeLaunchKind;
-    /** The interpreter, or the executable itself. */
-    readonly command: string;
-    /** The script the interpreter runs. Absent for an executable. */
-    readonly entry?: string;
-    /**
-     * The fixed argv after the entry. A single-file product re-enters itself
-     * with `__byok_sdk_helper <kind>`; the installed package needs none.
-     */
-    readonly fixedArgs: readonly string[];
-    /** The real path of the session cwd. The Pi process starts in it, as in OAR. */
-    readonly cwd: string;
-    readonly env: Readonly<Record<string, string>>;
-    readonly sessionCwd: string;
-    readonly credentialSource: 'pi-auth-store' | 'keys-profile';
-    /**
-     * The fresh 0700 directory the keys launcher writes the provider projection
-     * into. Present exactly when `credentialSource` is `keys-profile`.
-     */
-    readonly projectionDir?: string;
-    /** A single client-owned cleanup authority, idempotent across declined/start/terminal paths. */
-    release(): Promise<void>;
-}
-export declare function resolvePiRuntimeLaunch(options: {
-    kind: PiRuntimeLaunchKind;
-    sessionCwd: string;
-    env: Readonly<Record<string, string | undefined>>;
-    scratch: ExecutionScratch;
-    keysSessionDir?: string;
-    /** The SDK Pi entry for this kind. */
-    resolveInvocation: () => {
-        command: string;
-        entry?: string;
-        fixedArgs?: readonly string[];
-    };
-}): Promise<PiRuntimeLaunchResources>;
-/**
- * The spawn command of one Pi host launch. Without a launcher the host starts
- * directly. With one, the keys launcher starts the host and writes the
- * provider projection into the launch's projection directory.
- */
-export declare function piLaunchCommand(launch: PiRuntimeLaunchResources, runtimeEntry: 'pi-rpc' | 'pi-prepared' | 'pi-durable', configDigest: string, hostArgs: readonly string[], launcher: {
-    readonly command: string;
-    readonly args: readonly string[];
-    readonly profileArgs: readonly string[];
-} | undefined): {
-    command: string;
-    args: string[];
-};
 // ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
 import { type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
 /**
@@ -5081,6 +5026,8 @@ export interface DaemonConfig {
             agentUserContext?: PiAdapterOptions['agentUserContext'];
             /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
             versionPolicy?: RuntimeVersionPolicy;
+            /** `PiAdapterOptions.durableLane`: the opt-in durable worker. Disabled by default. Requires `agentHome` and `piByokLauncher`; unavailable on Windows. */
+            durableLane?: PiAdapterOptions['durableLane'];
         };
         claude?: {
             /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
@@ -5119,8 +5066,6 @@ export interface DaemonConfig {
      * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
      * Pi tasks do not invoke it.
      */
-    /** Disabled by default. Requires Agent homes, journal and custody launcher. */
-    durablePi?: boolean;
     piByokLauncher?: import('../adapters/pi/pi-adapter').PiByokLauncherConfig;
     /**
      * M5 batch-3 (workstream 1): explicit auto-select priority order for
@@ -9542,7 +9487,7 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -13312,7 +13257,6 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
-import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type { AgentEvent, TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
 import type { AgentRef } from './agent-home';
@@ -13448,8 +13392,8 @@ export interface RuntimeCapabilities {
     readonly messageDraft?: boolean;
     /** Local native interaction support only; omission is unsupported. Not the approval channel. */
     readonly nativeInteractions?: NativeInteractionCapabilities;
-    /** The durable Pi worker. Omission means an ordinary adapter. */
-    readonly durablePi?: boolean;
+    /** The durable worker lane (Pi today). Omission means an ordinary adapter. */
+    readonly durableLane?: boolean;
     /**
      * Accepts a prepared offer (the prepared lane). Omission means unsupported.
      * `auto` never applies to a prepared offer, whatever `toolAuthorizationAuto` says.
@@ -13831,6 +13775,16 @@ export interface DurableLifecycle {
     record(kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number): Promise<void>;
     ownsLease(): boolean;
 }
+/**
+ * What an adapter's `resolveRuntimeLaunch` resolved before claim. The daemon
+ * only passes it back to the same operation's `start`; its fields beyond these
+ * are the adapter's own.
+ */
+export interface RuntimeLaunchResources {
+    readonly scratch: ExecutionScratch;
+    /** A single cleanup authority, idempotent across declined, start and terminal paths. */
+    release(): Promise<void>;
+}
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
     readonly scratch: ExecutionScratch;
@@ -13842,7 +13796,8 @@ interface RuntimeOperationStartBase {
         readonly lifecycle: DurableLifecycle;
         readonly replicaRoot: string;
     };
-    readonly runtimeLaunch?: PiRuntimeLaunchResources;
+    /** The resources this operation's `resolveRuntimeLaunch` returned, by identity. */
+    readonly runtimeLaunch?: RuntimeLaunchResources;
     /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
     readonly mcpEnv?: Readonly<Record<string, string>>;
     /** Startup cancellation only; rejection must preserve unresolved process ownership. */
@@ -13914,7 +13869,7 @@ export interface PreparedRuntimeOperation {
         cwd: string;
         env: Readonly<Record<string, string | undefined>>;
         scratch: ExecutionScratch;
-    }): Promise<PiRuntimeLaunchResources>;
+    }): Promise<RuntimeLaunchResources>;
     start(input: RuntimeOperationStartInput): Promise<Session>;
 }
 /**

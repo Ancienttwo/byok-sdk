@@ -2568,7 +2568,7 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
             messageDraft: z.ZodOptional<z.ZodBoolean>;
             toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
-            durablePi: z.ZodOptional<z.ZodBoolean>;
+            durableLane: z.ZodOptional<z.ZodBoolean>;
             preparedLane: z.ZodOptional<z.ZodBoolean>;
             isolation: z.ZodOptional<z.ZodObject<{
                 userContext: z.ZodOptional<z.ZodBoolean>;
@@ -2693,7 +2693,7 @@ export declare const MESSAGES_SEND_MAX_BODY_BYTES: number;
  */
 export declare const MessagesSendRequestSchema: z.ZodObject<{
     messages: z.ZodArray<z.ZodObject<{
-        v: z.ZodLiteral<4>;
+        v: z.ZodLiteral<5>;
         id: z.ZodUUID;
     }, z.core.$loose>>;
 }, z.core.$strip>;
@@ -4271,7 +4271,7 @@ export declare const RuntimeCapabilitiesSchema: z.ZodObject<{
     mcpToolsets: z.ZodOptional<z.ZodBoolean>;
     messageDraft: z.ZodOptional<z.ZodBoolean>;
     toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
-    durablePi: z.ZodOptional<z.ZodBoolean>;
+    durableLane: z.ZodOptional<z.ZodBoolean>;
     preparedLane: z.ZodOptional<z.ZodBoolean>;
     isolation: z.ZodOptional<z.ZodObject<{
         userContext: z.ZodOptional<z.ZodBoolean>;
@@ -4315,7 +4315,7 @@ export declare const RuntimeInfoSchema: z.ZodObject<{
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
         toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
-        durablePi: z.ZodOptional<z.ZodBoolean>;
+        durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
             userContext: z.ZodOptional<z.ZodBoolean>;
@@ -4346,7 +4346,7 @@ export declare const HarnessInfoSchema: z.ZodObject<{
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
         toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
-        durablePi: z.ZodOptional<z.ZodBoolean>;
+        durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
             userContext: z.ZodOptional<z.ZodBoolean>;
@@ -4374,7 +4374,7 @@ export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
         toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
-        durablePi: z.ZodOptional<z.ZodBoolean>;
+        durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
             userContext: z.ZodOptional<z.ZodBoolean>;
@@ -4476,7 +4476,7 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
             messageDraft: z.ZodOptional<z.ZodBoolean>;
             toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
-            durablePi: z.ZodOptional<z.ZodBoolean>;
+            durableLane: z.ZodOptional<z.ZodBoolean>;
             preparedLane: z.ZodOptional<z.ZodBoolean>;
             isolation: z.ZodOptional<z.ZodObject<{
                 userContext: z.ZodOptional<z.ZodBoolean>;
@@ -4503,7 +4503,7 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
             messageDraft: z.ZodOptional<z.ZodBoolean>;
             toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
-            durablePi: z.ZodOptional<z.ZodBoolean>;
+            durableLane: z.ZodOptional<z.ZodBoolean>;
             preparedLane: z.ZodOptional<z.ZodBoolean>;
             isolation: z.ZodOptional<z.ZodObject<{
                 userContext: z.ZodOptional<z.ZodBoolean>;
@@ -5871,7 +5871,7 @@ export declare const TaskClaimPayloadSchema: z.ZodObject<{
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
         toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
-        durablePi: z.ZodOptional<z.ZodBoolean>;
+        durableLane: z.ZodOptional<z.ZodBoolean>;
         preparedLane: z.ZodOptional<z.ZodBoolean>;
         isolation: z.ZodOptional<z.ZodObject<{
             userContext: z.ZodOptional<z.ZodBoolean>;
@@ -8548,12 +8548,18 @@ export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelec
 export declare const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
 /**
- * Wire protocol version. Every v4 change is a version bump, a gated addition
+ * Wire protocol version. Every v5 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * receiver-capability gates and additions. No v4 release has been published
- * yet, so `src/__tests__/compat.test.ts` has no published v4 decoder to prove
+ * receiver-capability gates and additions. No v5 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v5 decoder to prove
  * additions against; cross-release gates stay unproven until one exists.
+ *
+ * v5 renames the runtime capability `durablePi` to `durableLane`, beside
+ * `preparedLane`, on `conn.hello` runtimes and harnesses, `task.claim` and
+ * presence: the durable worker is a lane an adapter declares, not a Pi name
+ * on the wire. Nothing else changes. A v4 envelope is rejected; there is no
+ * v4 reader. Drain, then upgrade server and client together.
  *
  * v4 completes the ADR-034 cutover and retires the approval paths kept for
  * pre-M5 peers. It removes the v3 handshake answer, the runtime-only offers
@@ -8588,7 +8594,7 @@ export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export declare const PROTOCOL_VERSION = 4;
+export declare const PROTOCOL_VERSION = 5;
 /**
  * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
  * Attempt gets its own run directory under the Agent home, and readers are

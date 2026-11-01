@@ -25,7 +25,7 @@ the runtime does instead. `auto` never applies to a prepared offer, whatever the
 `toolAuthorizationAuto` row says: the daemon declines it before claim.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durablePi`) |
+| Capability | Wire field | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `0.2.1-rc.5` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.4.0` | `1.4.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | no | yes | no |
@@ -35,7 +35,7 @@ the runtime does instead. `auto` never applies to a prepared offer, whatever the
 | Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no |
 | Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | no | yes | no |
 | Prepared lane | `preparedLane` | no | no | no | no | no | yes | no |
-| Durable Pi worker | `durablePi` | no | no | no | no | no | no | yes |
+| Durable worker lane | `durableLane` | no | no | no | no | no | no | yes |
 | Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | yes | yes | yes | no |
 | Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | no | no |
 | Turns off the transcript store | `isolation.sessionPersistence` | yes | no | no | no | no | no | no |
@@ -77,7 +77,7 @@ second registry.
   durable lanes. Grok does not set it: ACP `tool_call` defines no MCP server
   field, and live Grok evidence is pending (#633).
 - Trajectory evidence: only ordinary Pi declares `event-stream`, and Pi with
-  `durablePi: true` does not; Claude and Codex records are `unknown`.
+  `durableLane: true` does not; Claude and Codex records are `unknown`.
 - Process tree (POSIX): disposal ends a runtime's tool processes in process
   groups of their own after the root was killed from outside, if one of the
   once-a-second observations saw them while the root ran
@@ -983,7 +983,7 @@ not prove that each run is complete. The record never changes the terminal or
 a retry decision. Downstream read paths and display text are in section 7 of
 the [downstream diagnostics guide](agent-diagnostics-integration.md).
 
-- Pi: `PiAdapter` declares `event-stream`. With `durablePi: true` it does not
+- Pi: `PiAdapter` declares `event-stream`. With `durableLane: true` it does not
   declare it, because T0 did not verify the durable worker's own frames and
   respawn path. `PiSession.evidence()` counts stdout lines that are not a JSON
   object, an unterminated last line, and unmapped frame types. It reports no
@@ -1012,7 +1012,7 @@ built-in runtime name does not inherit them.
   A scoped offer on any other lane, or on an adapter without the declaration,
   declines before claim with `file_scope_unsupported`. Memory-reader offers
   and platforms other than darwin and linux still decline. `PiAdapter`
-  declares `['rpc']`, also with `durablePi: true`, where the durable lane
+  declares `['rpc']`, also with `durableLane: true`, where the durable lane
   stays undeclared.
 - `RuntimeAdapterDescriptor.providerProfileBinding: true`: the adapter runs an
   exact `byok-profile` dispatch selection. The daemon advertises

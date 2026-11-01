@@ -4,13 +4,12 @@ import type { ApprovalKind } from '../approvals';
 // manifest, claim, and start (see ./support.ts for how a member module runs).
 import { observePreparedMemory, type PreparedAgentMemoryState } from '../../agent-memory/prepared-agent-memory';
 import { InputPreparationRequestError } from '../input-preparation-service';
-import type { PiRuntimeLaunchResources } from '../../adapters/pi/runtime-launch';
 import { DURABLE_REPLICA_DIRNAME } from '../../adapters/pi-durable/replica';
 import { terminalIdentity } from '../terminal-identity';
 import { abortedStartOf, startOwnedRuntime } from '../runtime-start';
 import path from 'node:path';
 import { createEnvelope } from '@byok-sdk/protocol';
-import { sealRuntimeOperationManifest, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types';
+import { sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types';
 import { admitPreparedOffer, type PreparedOfferServerProjection } from '../prepared-offer-admission';
 import type { InputPreparationStore } from '../input-preparation-store';
 import { inputPreparationDigest } from '../../input-preparation';
@@ -57,7 +56,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   // The local Host owns the mode; it never comes from the offer. `auto` needs
   // a pre-execution gate, so a runtime or lane without one is declined here,
   // before claim, instead of running ungated.
-  const lane: ToolAuthorizationLane = pick.descriptor.capabilities.durablePi === true
+  const lane: ToolAuthorizationLane = pick.descriptor.capabilities.durableLane === true
     ? 'durable' : preparation === undefined ? 'rpc' : 'prepared';
   const homeAccess: ToolAuthorizationHomeAccess = readerAttempt ? 'memory-reader' : 'writer';
   // Daemon construction admitted the policy; the derived resolver cannot fail.
@@ -89,7 +88,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       return;
     }
   }
-  let runtimeLaunch: PiRuntimeLaunchResources | undefined;
+  let runtimeLaunch: RuntimeLaunchResources | undefined;
   if (prepared.operation.resolveRuntimeLaunch !== undefined) {
     try {
       const resolveRuntimeLaunch = prepared.operation.resolveRuntimeLaunch;
@@ -462,7 +461,7 @@ async function startAndActivateRuntime(
   // launch and the scoped tools can report per-call denies. Shell, MCP,
   // extensions and (for the tools this slice has not replaced yet) native Pi
   // tools remain the documented out-of-scope capabilities.
-  const fileScopeLane: ToolAuthorizationLane = pick.descriptor.capabilities.durablePi === true
+  const fileScopeLane: ToolAuthorizationLane = pick.descriptor.capabilities.durableLane === true
     ? 'durable' : preparedLaunch === undefined ? 'rpc' : 'prepared';
   const fileScopeHomeAccess: ToolAuthorizationHomeAccess = readerAttempt ? 'memory-reader' : 'writer';
   let fileScopeGrant: FileScopeGrant | undefined;
@@ -549,7 +548,7 @@ async function startAndActivateRuntime(
   const startInput: RuntimeOperationStartInput = {
     scratch,
     ...(input.sessionLease === undefined ? {} : { sessionLease: input.sessionLease }),
-    ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {
+    ...(pick.descriptor.capabilities.durableLane !== true ? {} : { durableContext: {
       tenantId: this['deps'].tenantId!, replicaRoot: path.join(this['deps'].storeDir, DURABLE_REPLICA_DIRNAME), lifecycle: {
         ownsLease: () => !blobAbort.signal.aborted && !this['pendingCancelled'].has(taskId),
         record: async (kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number) => {

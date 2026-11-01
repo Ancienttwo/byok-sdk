@@ -11,7 +11,7 @@ const ALL_PHASES = {
   toolsetProbeMs: 120,
   runtimeLaunchMs: 9,
 };
-const sealedDecline = readFileSync(new URL('./golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
+const sealedDecline = readFileSync(new URL('./golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> })
   .find((line) => line.type === 'task.decline' && line.payload.sealed !== undefined)!.payload;
 

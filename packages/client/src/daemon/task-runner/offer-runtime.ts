@@ -45,7 +45,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     decline(pick.reason, pick.retryable, pick.runtimeUnavailable === undefined ? undefined : 'runtime_unavailable', pick.runtimeUnavailable);
     return undefined;
   }
-  if (readerAttempt && pick.descriptor.capabilities.durablePi === true) {
+  if (readerAttempt && pick.descriptor.capabilities.durableLane === true) {
     // Durable Pi binds its replica to the canonical home as its cwd.
     decline('durable Pi runs only in the canonical Agent home; it does not run memory-reader Attempts', false);
     return undefined;
