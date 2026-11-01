@@ -36,6 +36,8 @@
 --   deploy/sql/0032_terminal_task_archive.sql (terminal-task archive window column, backfilled to cover each stored policy's mailbox windows; nullable task archive instants; two tenant-leading partial task indexes; no new table or key)
 --   deploy/sql/0033_device_stream_closed.sql (retired-device stream tombstone on device_stream; no new table or key)
 --   deploy/sql/0034_activity_log.sql (tenant-first durable activity head, envelope rows and source identity fences; replaces activity_tail)
+--   deploy/sql/0035_task_output_closure.sql (task trigger that closes the activity log and approval timeline at the task's output close; approval_timeline_tail.terminal_at and its closed-row check; no new table or key)
+--   deploy/sql/0036_task_events_wake.sql (content-free task events wake triggers on task, activity_log_head and approval_timeline_tail; no new table or key)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
