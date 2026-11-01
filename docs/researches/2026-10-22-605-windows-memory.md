@@ -6,7 +6,7 @@
 日期：2026-10-22（Asia/Taipei）。
 SDK 基线：`7c0bbebc`。下文的 `file:line` 都指这个基线。
 关联：[issue 605](https://github.com/Ancienttwo/byok-sdk/issues/605)；
-[WO-09a 决策稿](2026-10-19-windows-ntfs-ledger-barrier-decision.md)（§3 定义，§7 验收）；
+[WO-09a 决策稿](../adr/ADR-042-windows-ntfs-ledger-barrier.md)（§3 定义，§7 验收）；
 [WO-09 验证稿](2026-10-19-wo09-windows-ledger-validation.md)；
 [model S 证据稿](2026-10-20-windows-ntfs-model-s-evidence.md)。
 已关闭：#522、#521、#603、#604。仍开放、不在本文范围：#614（记忆 admission 开关）、#609（memory-reader 运行目录）。
@@ -98,7 +98,7 @@ release pin 不变：source digest 不含 `_test.go`（`packages/client/scripts/
 - 每个 helper PR 多一个 Windows job。手动 run 的 Go step 用了 48–65 秒，整个 job 3–4 分钟。
 - 新 leg 也进入发版门。release validation 运行全部 family，`ci-required` 要求完整清单。改 `.node-version` 的 PR 选中全部 family（`select-impact.mjs:317-321`），改 `.gitattributes` 的 PR 也选中这个 family（`:308-312`）。所以 0.28.3 的 release validation 和这些 PR 都要等这个 Windows leg 通过。
 - 随机 kill 测试有统计断言。手动 run 里 4 次都通过。例行运行后若出现 flake，按 flake 处理，不放宽断言。
-- 默认 temp 在 C:，fsync 慢（`docs/notes/2026-10-22-windows-k8-fsync-stalls.md`）。新 leg 保持默认 temp，和手动 run 的 admin step 一致。
+- 默认 temp 在 C:，fsync 慢（`docs/researches/2026-10-22-windows-k8-fsync-stalls.md`）。新 leg 保持默认 temp，和手动 run 的 admin step 一致。
 - family id 仍叫 `agent-memory-helper-linux`，但它现在也跑 Windows。改名要改 selector，见 Q4。
 
 ## 5. 必须等待的切片

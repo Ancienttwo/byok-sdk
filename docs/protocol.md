@@ -1237,7 +1237,7 @@ completion and readback are Host authority on Host routes.
 
 Sealed payload v1 lets a member seal task input and task output, so that the
 Host stores only ciphertext for these categories. The design is
-[docs/plans/2026-10-22-654-hosted-wire-e2ee.md](plans/2026-10-22-654-hosted-wire-e2ee.md).
+[docs/adr/ADR-045-hosted-wire-e2ee.md](adr/ADR-045-hosted-wire-e2ee.md).
 `@byok-sdk/core/sealed-payload` seals and opens the bytes.
 `packages/protocol/src/sealed-payload.ts` and `sealed-split-table.ts` hold the
 wire rules. This section states the wire rules.

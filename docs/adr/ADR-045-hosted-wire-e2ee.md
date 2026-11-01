@@ -1,4 +1,7 @@
-# 托管 wire 按数据类别端到端加密（#654 设计草案）
+# ADR-045：托管 wire 按数据类别端到端加密（#654 设计草案）
+
+> **来源**：PR [#685](https://github.com/Ancienttwo/byok-sdk/pull/685) 加入本文；跟踪 issue [#654](https://github.com/Ancienttwo/byok-sdk/issues/654)。移入时（2026-11-01）的状态：正文状态行仍写「设计草案第二版，等待 owner 决定」；v1（C1、C3）和 v2（#1045：C2 消息正文、C4 记忆投影）已交付，见 §6.1 的后记。[`docs/security.md:910`](../security.md) 把 §11.3 的取舍作为已接受的设计引用。
+> **移入**：#1291 把本文从已退役的 plans 目录（`2026-10-22-654-hosted-wire-e2ee.md`）移到这里。正文未改；只把指向已移走或已删除文件的链接改为新位置或合入它的 PR。
 
 状态：设计草案第二版，等待 owner 决定。本文不改变现行 SDK API、wire、schema、存储或部署。
 
@@ -7,7 +10,7 @@ SDK 基线：`7c0bbebc720de5bebb13b7529ad161b9c19f03bb`。第一版随 [PR #685]
 第二版新增：§2.0 托管 wire 地图；§6.1 的 v1 范围；§7.9 多设备；§8.1 与 §8.6 的填充帧和大内容规则；§9.3 漏列的内容摘要字段；§13.5 故障模式；§13.6 0.28.3 的首个切片；§14 的新决定与 owner 问题。§8.1 的填充帧和 §9.3 的摘要字段来自 PR #685 的两条审查意见。§8.6 的批次上限问题是第二版核对时发现的。
 下游源码核对基线：AiphaBee `5b5fc4ce`，只读核对。未核对下游线上部署。
 2026-10-23 修订：按 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655) 的身份对应决定，更新 §7.2、§7.4、§7.9、§12.1 和 §14（新增 §14.2）。再按设备划分 scope，更新新设备加入（§7.9）和浏览器恢复（§1、§5.4、§7.8、§13.2、§13.5、§14）。
-关联：[issue 654](https://github.com/Ancienttwo/byok-sdk/issues/654)。发版台账 [issue 715](https://github.com/Ancienttwo/byok-sdk/issues/715) 把 #654 列进 0.28.3，先出设计。设备身份对应见 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655)。H 路径见[双车道 Host 方案](2026-10-21-dual-host-collaboration.md)。托管 Host 的现行契约见 [hosted Host contract](../hosted-host-contract.md)（PR #682 合入）。
+关联：[issue 654](https://github.com/Ancienttwo/byok-sdk/issues/654)。发版台账 [issue 715](https://github.com/Ancienttwo/byok-sdk/issues/715) 把 #654 列进 0.28.3，先出设计。设备身份对应见 [issue 655](https://github.com/Ancienttwo/byok-sdk/issues/655)。H 路径见[双车道 Host 方案](https://github.com/Ancienttwo/byok-sdk/pull/655)。托管 Host 的现行契约见 [hosted Host contract](../hosted-host-contract.md)（PR #682 合入）。
 
 ## 1. 目标、范围与建议
 
@@ -238,7 +241,7 @@ v1 保持明文的 Host 内容：`agent.home.projection` 的 persona 值、`agen
 
 v1 的范围（§14 D17）：只交付 C1 和 C3，C2 按需开启。下面三项等到 v2：
 
-> 后记（#1045，0.33.0）：v1 实际只交付了 C1 和 C3，C2 没有在 v1 开启。v2 交付了 C2 的 `agent.message.publish` 正文和 C4 记忆投影（含 `agentHomeMemoryChange`），见 [2026-10-28-1045-e2ee-v2.md](2026-10-28-1045-e2ee-v2.md)。输入准备、草稿、egress 和 truth `memory` 记录仍是明文。
+> 后记（#1045，0.33.0）：v1 实际只交付了 C1 和 C3，C2 没有在 v1 开启。v2 交付了 C2 的 `agent.message.publish` 正文和 C4 记忆投影（含 `agentHomeMemoryChange`），见 [https://github.com/Ancienttwo/byok-sdk/pull/1053](https://github.com/Ancienttwo/byok-sdk/pull/1053)。输入准备、草稿、egress 和 truth `memory` 记录仍是明文。
 
 - C4 记忆投影。AiphaBee 的首批配置让 Bot 记忆保持明文（D3）。
 - `agent.input.preparation` 的 `context`。输入准备的回执带多个对内容计算的摘要（§9.3），要先改 Pi 的准备协议。v1 中，Host 不为带 `sealing` 的 task 发起输入准备。设备收到带 `sealing` 的 prepared offer 时也拒绝。
