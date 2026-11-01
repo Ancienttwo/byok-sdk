@@ -11,6 +11,7 @@ import { type AgentContentReadSurface, type AgentContentReadPolicySelection, AGE
 import { PiAdapter } from '../../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../../adapters/codex/codex-adapter';
+import { GrokAdapter } from '../../adapters/grok/grok-adapter';
 import { DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_MAX_TTL_MS } from '@byok-sdk/core';
 import type { AgentContentReadConfig, DaemonConfig, DeviceAssertionConfig } from '../create-daemon';
 
@@ -325,12 +326,21 @@ export function policyRevisionMismatchPolicies(
  */
 export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 
-export function buildAdapter(id: RuntimeId, config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter {
+/**
+ * Every runtime `createDaemon` can build, in construction order. `grok` is a
+ * custom harness, not a wire runtime id, so it is built only when
+ * `runtimeAllowlist` lists it; an unset allowlist keeps `ALL_RUNTIME_IDS`.
+ */
+const SDK_BUILT_RUNTIME_IDS: readonly SdkBuiltRuntimeId[] = [...ALL_RUNTIME_IDS, 'grok'];
+type SdkBuiltRuntimeId = RuntimeId | 'grok';
+
+export function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter {
   const environment = config.runtimeEnvironment === undefined ? {} : { runtimeEnvironment: config.runtimeEnvironment };
   // `DaemonConfig.runtimes`, already validated; an unset option keeps the adapter default.
   const pi = config.runtimes?.pi;
   const claude = config.runtimes?.claude;
   const codex = config.runtimes?.codex;
+  const grok = config.runtimes?.grok;
   switch (id) {
     case 'pi':
       return new PiAdapter({
@@ -354,13 +364,20 @@ export function buildAdapter(id: RuntimeId, config: DaemonConfig, piByokLauncher
         ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
         ...(codex?.versionPolicy === undefined ? {} : { versionPolicy: codex.versionPolicy, versionPolicySource: 'daemon-config' as const }),
       });
+    case 'grok':
+      return new GrokAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        ...(grok?.compatInstructions === undefined ? {} : { compatInstructions: grok.compatInstructions }),
+        ...(grok?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: grok.agentUserMcpServers }),
+        ...(grok?.versionPolicy === undefined ? {} : { versionPolicy: grok.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+      });
   }
 }
 
 /**
  * Builds `createDaemon`'s bundled adapter set from `DaemonConfig.runtimeAllowlist`
  * — see that field's own doc comment for the unset-vs-set contract. Filters
- * `ALL_RUNTIME_IDS` (rather than mapping the allowlist directly) so an
+ * `SDK_BUILT_RUNTIME_IDS` (rather than mapping the allowlist directly) so an
  * allowlist entry that isn't a real runtime id is silently ignored — the same
  * "unknown id never gets an adapter" fail-closed shape `TaskRunner.pickAdapter`
  * already applies to an unknown *requested* runtime — and it de-duplicates
@@ -386,7 +403,7 @@ export function injectedAdapterConfigConflicts(config: object): { readonly key: 
 
 export function buildDefaultAdapters(config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter[] {
   const ids = config.runtimeAllowlist
-    ? ALL_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
+    ? SDK_BUILT_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
     : ALL_RUNTIME_IDS;
   return ids.map((id) => buildAdapter(id, config, piByokLauncher));
 }

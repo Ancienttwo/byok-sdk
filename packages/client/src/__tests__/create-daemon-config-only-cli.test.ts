@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ClaudeAdapterOptions } from '../adapters/claude/claude-adapter';
 import type { CodexAdapterOptions } from '../adapters/codex/codex-adapter';
+import type { GrokAdapterOptions } from '../adapters/grok/grok-adapter';
 import type { PiAdapterOptions } from '../adapters/pi/pi-adapter';
 import { loadConfig } from '../bin/config';
 import { runConfigCheckCommand } from '../bin/commands/config-check';
@@ -22,6 +23,7 @@ const constructed = vi.hoisted(() => ({
   pi: [] as PiAdapterOptions[],
   claude: [] as ClaudeAdapterOptions[],
   codex: [] as CodexAdapterOptions[],
+  grok: [] as GrokAdapterOptions[],
 }));
 vi.mock('../adapters/pi/pi-adapter', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../adapters/pi/pi-adapter')>();
@@ -52,6 +54,16 @@ vi.mock('../adapters/codex/codex-adapter', async (importOriginal) => {
     }
   }
   return { ...actual, CodexAdapter: RecordingCodexAdapter };
+});
+vi.mock('../adapters/grok/grok-adapter', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../adapters/grok/grok-adapter')>();
+  class RecordingGrokAdapter extends actual.GrokAdapter {
+    constructor(options: GrokAdapterOptions = {}) {
+      super(options);
+      constructed.grok.push(options);
+    }
+  }
+  return { ...actual, GrokAdapter: RecordingGrokAdapter };
 });
 
 const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'salesko-config-only.json');
@@ -90,6 +102,7 @@ function clearConstructed(): void {
   constructed.pi.splice(0);
   constructed.claude.splice(0);
   constructed.codex.splice(0);
+  constructed.grok.splice(0);
 }
 
 afterEach(async () => {
@@ -121,6 +134,7 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     expect(constructed.pi).toEqual([expect.objectContaining({ agentUserContext: 'excluded' })]);
     expect(constructed.claude).toEqual([expect.objectContaining({ agentUserContext: 'excluded', agentSessionPersistence: 'disabled' })]);
     expect(constructed.codex).toEqual([]);
+    expect(constructed.grok).toEqual([]);
   });
 
   it('byok-agent config check reports the same effective values with no issues', async () => {
@@ -155,5 +169,41 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     const lines: string[] = [];
     expect(runConfigCheckCommand(file, { strict: true, json: false }, { log: (line) => lines.push(line) })).toBe(0);
     expect(lines.join('\n')).toContain('codex [sdk-built] auto unsupported agentUserMcpServers=excluded sandbox=danger-full-access');
+  });
+
+  it('builds the Grok adapter from the file alone when runtimeAllowlist lists grok', async () => {
+    const versionPolicy = { qualifiedVersion: '0.2.3', unqualified: 'warn' as const, block: [{ kind: 'exact' as const, version: '0.2.1' }] };
+    const { file } = await salesko((input) => {
+      input.runtimeAllowlist = ['grok'];
+      input.runtimes = { grok: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy } };
+      input.toolAuthorization = { default: 'all' };
+    });
+    const daemon = createDaemon(loadConfig(file));
+    const effective = daemon.status().config;
+    expect(effective.warnings).toEqual([]);
+    expect(effective.runtimes).toEqual([{
+      id: 'grok', source: 'sdk-built', toolAuthorizationAuto: false,
+      isolation: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded' }, versionPolicy,
+    }]);
+    expect(effective.toolAuthorization).toEqual({ mode: 'static', byRuntime: { grok: 'all' }, localToolApproval: 'host-only' });
+    expect(constructed.grok).toEqual([expect.objectContaining({
+      compatInstructions: 'disabled', agentUserMcpServers: 'excluded', versionPolicy, versionPolicySource: 'daemon-config',
+    })]);
+    expect([...constructed.pi, ...constructed.claude, ...constructed.codex]).toEqual([]);
+
+    const lines: string[] = [];
+    expect(runConfigCheckCommand(file, { strict: true, json: false }, { log: (line) => lines.push(line) })).toBe(0);
+    expect(lines.join('\n')).toContain('grok [sdk-built] auto unsupported compatInstructions=disabled agentUserMcpServers=excluded');
+  });
+
+  it('does not build Grok without runtimeAllowlist, even when runtimes.grok is set', async () => {
+    const { file } = await salesko((input) => {
+      delete input.runtimeAllowlist;
+      input.runtimes = { grok: { compatInstructions: 'disabled' } };
+      input.toolAuthorization = { default: 'all' };
+    });
+    const daemon = createDaemon(loadConfig(file));
+    expect(daemon.status().config.runtimes.map((runtime) => runtime.id)).toEqual(['pi', 'claude', 'codex']);
+    expect(constructed.grok).toEqual([]);
   });
 });

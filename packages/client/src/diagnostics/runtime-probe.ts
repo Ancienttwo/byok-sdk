@@ -4,17 +4,20 @@ import type { DaemonConfig } from '../daemon/create-daemon';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { GrokAdapter } from '../adapters/grok/grok-adapter';
 
 /**
  * Mirrors `create-daemon.ts`'s own `buildDefaultAdapters`/`buildAdapter`/
  * `ALL_RUNTIME_IDS` (the bundled pi/claude/codex set, filtered by
- * `DaemonConfig.runtimeAllowlist`) — NOT a call into that file, which isn't
+ * `DaemonConfig.runtimeAllowlist`, plus the `grok` custom harness only when
+ * the allowlist lists it) — NOT a call into that file, which isn't
  * exported and is out of this change's scope to edit. Small enough (3 ids)
  * that duplicating it here beats reaching into `create-daemon.ts`'s
  * internals; if the two ever drift, `create-daemon-white-label.test.ts`'s
  * own allowlist coverage is the tell.
  */
 const ALL_RUNTIME_IDS = ['pi', 'claude', 'codex'] as const;
+const SDK_BUILT_RUNTIME_IDS = [...ALL_RUNTIME_IDS, 'grok'] as const;
 export const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
 const MAX_RUNTIME_ID_CHARS = 128;
 
@@ -43,7 +46,7 @@ async function detectWithTimeout(adapter: RuntimeAdapter, timeoutMs: number): Re
 export function defaultRuntimeAdapters(config: Pick<DaemonConfig, 'runtimeAllowlist' | 'runtimeEnvironment'>): RuntimeAdapter[] {
   const { runtimeAllowlist } = config;
   const options = config.runtimeEnvironment === undefined ? {} : { runtimeEnvironment: config.runtimeEnvironment };
-  const ids = runtimeAllowlist ? ALL_RUNTIME_IDS.filter((id) => runtimeAllowlist.includes(id)) : ALL_RUNTIME_IDS;
+  const ids = runtimeAllowlist ? SDK_BUILT_RUNTIME_IDS.filter((id) => runtimeAllowlist.includes(id)) : ALL_RUNTIME_IDS;
   return ids.map((id) => {
     switch (id) {
       case 'pi':
@@ -52,6 +55,8 @@ export function defaultRuntimeAdapters(config: Pick<DaemonConfig, 'runtimeAllowl
         return new ClaudeAdapter(options);
       case 'codex':
         return new CodexAdapter(options);
+      case 'grok':
+        return new GrokAdapter(options);
     }
   });
 }

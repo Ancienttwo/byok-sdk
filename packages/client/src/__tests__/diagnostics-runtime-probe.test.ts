@@ -13,6 +13,10 @@ describe('diagnostics/runtime-probe: defaultRuntimeAdapters', () => {
     expect(adapters.map((a) => a.descriptor.id).sort()).toEqual(['claude', 'codex']);
   });
 
+  it('adds the grok custom harness only when the allowlist lists it', () => {
+    expect(defaultRuntimeAdapters({ runtimeAllowlist: ['grok', 'pi'] }).map((a) => a.descriptor.id)).toEqual(['pi', 'grok']);
+  });
+
   it('silently ignores an unknown id in the allowlist', () => {
     const adapters = defaultRuntimeAdapters({ runtimeAllowlist: ['pi', 'not-a-real-runtime'] });
     expect(adapters.map((a) => a.descriptor.id)).toEqual(['pi']);

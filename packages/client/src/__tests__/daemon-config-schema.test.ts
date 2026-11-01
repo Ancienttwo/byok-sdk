@@ -80,6 +80,7 @@ describe('generated DaemonConfig schema (#1094)', () => {
       pi: { properties: { agentUserContext: { enum: ['excluded', 'inherit'] } } },
       claude: { properties: { agentUserContext: { enum: ['excluded', 'inherit'] }, agentSessionPersistence: { enum: ['disabled', 'enabled'] } } },
       codex: { properties: { agentUserMcpServers: { enum: ['excluded', 'inherit'] } } },
+      grok: { properties: { compatInstructions: { enum: ['disabled', 'inherit'] }, agentUserMcpServers: { enum: ['excluded', 'inherit'] } } },
     });
     expect(schema.properties.agentHome.properties.projection).toMatchObject({ 'x-byok-surface': 'embedded-only' });
     expect(schema.properties.localAgentRelease).toMatchObject({ 'x-byok-surface': 'distribution-owned', not: {} });
@@ -151,6 +152,9 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     ['a bad byRuntime mode', { toolAuthorization: { default: 'all', byRuntime: { claude: 'never' } } }, 'invalid_value', 'toolAuthorization.byRuntime.claude'],
     ['a bad isolation value', { runtimes: { claude: { agentUserContext: 'none' } } }, 'invalid_value', 'runtimes.claude.agentUserContext'],
     ['a bad codex isolation value', { runtimes: { codex: { agentUserMcpServers: true } } }, 'invalid_value', 'runtimes.codex.agentUserMcpServers'],
+    ['a bad grok compatInstructions value', { runtimeAllowlist: ['grok'], toolAuthorization: { default: 'all' }, runtimes: { grok: { compatInstructions: 'off' } } }, 'invalid_value', 'runtimes.grok.compatInstructions'],
+    ['a bad grok isolation value', { runtimeAllowlist: ['grok'], toolAuthorization: { default: 'all' }, runtimes: { grok: { agentUserMcpServers: 'none' } } }, 'invalid_value', 'runtimes.grok.agentUserMcpServers'],
+    ['a grok prefix without a component boundary', { runtimeAllowlist: ['grok'], toolAuthorization: { default: 'all' }, runtimes: { grok: { versionPolicy: { qualifiedVersion: '0.2.3', unqualified: 'warn', block: [{ kind: 'prefix', prefix: '0.2' }] } } } }, 'invalid_version_policy', 'runtimes.grok.versionPolicy.block[0].prefix'],
     ['a prefix without a component boundary', { runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy: { qualifiedVersion: '0.160.0', unqualified: 'warn', block: [{ kind: 'prefix', prefix: '0.16' }] } } } }, 'invalid_version_policy', 'runtimes.codex.versionPolicy.block[0].prefix'],
     ['an empty exact version', { runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy: { qualifiedVersion: '0.160.0', unqualified: 'warn', block: [{ kind: 'exact', version: '' }] } } } }, 'invalid_version_policy', 'runtimes.codex.versionPolicy.block[0].version'],
     ['a duplicate spec', { runtimeAllowlist: ['claude'], runtimes: { claude: { versionPolicy: { qualifiedVersion: '2.1.312', unqualified: 'allow', allow: [{ kind: 'exact', version: '2.1.313' }], warn: [{ kind: 'exact', version: '2.1.313' }] } } } }, 'invalid_version_policy', 'runtimes.claude.versionPolicy.warn[0]'],

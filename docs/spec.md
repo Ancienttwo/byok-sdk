@@ -4231,8 +4231,8 @@ that called it uses `resolveHostLayout(...).storeDir`.
 
 ### Runtime version policy
 
-`DaemonConfig.runtimes.<id>.versionPolicy` (pi/claude/codex; other adapters
-after #1094 extends the block) is a complete `RuntimeVersionPolicy` object:
+`DaemonConfig.runtimes.<id>.versionPolicy` (pi/claude/codex/grok; other
+adapters take it as a constructor option) is a complete `RuntimeVersionPolicy` object:
 `qualifiedVersion`, `unqualified` (`allow`/`warn`/`block`), and optional
 `allow`/`warn`/`block` lists of `exact` or component-boundary `prefix` specs.
 It **replaces** the adapter's descriptor default and any constructor option
