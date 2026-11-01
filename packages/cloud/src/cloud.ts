@@ -189,6 +189,7 @@ import {
 } from './handlers/truth';
 import { CloudRouteRegistry, type CloudRouteHandler, type RouteDescriptor } from './router/registry';
 import { readAgentMessageDisposition, type ByokCloudObserver } from './inbound';
+import type { AgentMessageConsumers } from './agent-message-disposition';
 import {
   type AgentHomeProjectionReceiptInput,
 } from './agent-home-projections';
@@ -285,17 +286,11 @@ export interface ByokCloudOptions {
    * one logical effect and the same outcome/reasonCode on every exact replay.
    * A thrown error leaves admission pending for transport retry; only a returned
    * outcome is a terminal product decision. Do not use callback invocation count
-   * as execution authority.
+   * as execution authority. `consumeSealed` receives the message of a task
+   * whose `sealing` names `agent-message`; a submission that seals it is
+   * refused while `consumeSealed` is absent.
    */
-  readonly agentMessage?: {
-    consume(input: {
-      readonly tenant: TenantId;
-      readonly deviceId: string;
-      readonly taskId: string;
-      readonly context: AgentMessageServerContext;
-      readonly payload: AgentMessagePublishPayload;
-    }): Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>;
-  };
+  readonly agentMessage?: AgentMessageConsumers;
   /**
    * Post-commit relay for envelopes this cloud durably accepted. Read-only by
    * construction: it is told after the write, it returns `void`, and a throw
@@ -1055,8 +1050,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       { method: 'POST', path: BYOK_AGENT_MEMORY_PROJECTIONS_PATH, class: 'device' },
       agentMemoryProjectionHandler({
         ...deviceRouteDeps,
-        commit: (stores, deviceId, mutation, redactedBytes) =>
-          agentMemoryApi.commitAgentMemoryProjectionFromStores(stores, deviceId, mutation, redactedBytes),
+        commit: (stores, deviceId, submission) =>
+          agentMemoryApi.commitAgentMemoryProjectionFromStores(stores, deviceId, submission),
       }),
     );
   }

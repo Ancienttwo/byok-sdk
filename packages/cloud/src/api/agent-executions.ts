@@ -45,7 +45,9 @@ export function createAgentExecutionsApi({
     validated: AgentExecutionInput | SealedAgentExecutionInput,
   ): Promise<EnqueuedOffer> {
     const { deviceId, payload } = validated;
-    if (payload.messageEgress !== undefined && typeof options.agentMessage?.consume !== 'function') {
+    // A task that seals its message needs `consumeSealed` instead; agentMessageOfferWriter checks it.
+    const sealsMessage = payload.sealing?.categories.includes('agent-message') === true;
+    if (payload.messageEgress !== undefined && !sealsMessage && typeof options.agentMessage?.consume !== 'function') {
       throw new Error('Agent execution with messageEgress requires a registered Agent message consumer.');
     }
     const beforeMailbox = agentMessageOfferWriter(deviceId, payload, validated.agentMessageContext);

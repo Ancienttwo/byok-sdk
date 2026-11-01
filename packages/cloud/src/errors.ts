@@ -118,6 +118,12 @@ export const CLOUD_ERROR_CODES = {
   task_offer_append_refused: 'task_offer_append_refused',
   /** A first-write-wins Agent control record was replayed with a different body. */
   agent_content_request_mismatch: 'agent_content_request_mismatch',
+  /**
+   * A task that seals its Agent message (#1045) was submitted to a cloud with
+   * no `agentMessage.consumeSealed`, so no consumer could ever decide it.
+   * Raised before any attempt, receipt or mailbox write.
+   */
+  agent_message_sealed_consumer_missing: 'agent_message_sealed_consumer_missing',
   /** A durable mailbox receipt id resolved to an envelope other than its exact acknowledgement. */
   mailbox_receipt_mismatch: 'mailbox_receipt_mismatch',
   /** A task-free Agent-home request id already names a different immutable desired projection. */
@@ -156,6 +162,12 @@ export const CLOUD_ERROR_CODES = {
   agent_memory_projection_epoch_exhausted: 'agent_memory_projection_epoch_exhausted',
   /** A hosted memory mutation skipped or reset a required source sequence. */
   agent_memory_projection_sequence_gap: 'agent_memory_projection_sequence_gap',
+  /**
+   * A hosted memory mutation's form did not match its grant (#1045 C4): a
+   * plaintext snapshot under a grant with `sealing`, a sealed one under a grant
+   * without it, or a sealed one under another scope or epoch.
+   */
+  agent_memory_projection_sealing_mismatch: 'agent_memory_projection_sealing_mismatch',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

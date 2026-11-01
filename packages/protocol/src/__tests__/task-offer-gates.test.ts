@@ -13,6 +13,7 @@ import * as v3Release from 'byok-protocol-previous';
 import {
   AgentMemorySelectionSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
+  SEALED_PAYLOAD_CATEGORIES,
   SessionSelectionSchema,
   TaskOfferPlainPayloadSchema,
   TaskOfferSealedPayloadSchema,
@@ -56,6 +57,10 @@ function decoderWithout(row: OfferRow, payload: Json): z.ZodType {
     return z.strictObject({ ...rest, agentMemory: AgentMemorySelectionSchema.exclude([row.value as never]).optional() });
   }
   if (row.field === 'session.mode' && row.value === 'fresh') return z.strictObject({ ...rest, session: SessionSelectionSchema.options[0] });
+  if (row.field === 'sealing.categories') {
+    const categories = z.array(z.enum(SEALED_PAYLOAD_CATEGORIES).exclude([row.value as never]));
+    return z.strictObject({ ...rest, sealing: z.strictObject({ scopeId: z.string(), epoch: z.number(), categories }) });
+  }
   throw new Error(`no decoder without ${row.field}=${row.value} (known: ${String(known !== undefined)})`);
 }
 
@@ -65,7 +70,7 @@ describe('task.offer gates: an unknown gated field stops the daemon (Q4)', () =>
     (_name, row) => {
       const lines = v4Offers.filter((payload) => {
         const value = fieldOf(payload, row.field);
-        return value !== undefined && (row.value === undefined || value === row.value);
+        return value !== undefined && (row.value === undefined || (Array.isArray(value) ? value.includes(row.value) : value === row.value));
       });
       expect(lines.length, 'the v4 corpus carries the row').toBeGreaterThan(0);
       for (const payload of lines) {

@@ -82,7 +82,7 @@ export async function quiesceAndSnapshotAgentMemory(this: TaskRunner, active: Ac
       leaseId: active.agentBinding.lease.leaseId,
       homeIdentity: active.agentBinding.lease.homeIdentity,
     });
-    await snapshotAndProjectAgentMemory(context, this['deps'].agentMemoryHostedProjection);
+    await snapshotAndProjectAgentMemory(context, this['deps'].agentMemoryHostedProjection, this['deps'].sealedTasks);
   } catch (error) {
     // Projection never becomes a second task-terminal authority. A failed
     // snapshot/upload is observable locally and preserves the raw home plus

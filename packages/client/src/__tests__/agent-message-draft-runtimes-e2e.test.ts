@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentMessagePublishPayload, Envelope } from '@byok-sdk/protocol';
+import type { AgentMessagePublishPlainPayload, Envelope } from '@byok-sdk/protocol';
 import type { AgentMessageDraftEvent } from '@byok-sdk/server';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -92,7 +92,7 @@ async function setup(runtime: RuntimeCase) {
   const gate = path.join(root, 'gate');
   await fs.mkdir(gate);
   const adapter = runtime.adapter(await launcher(root, fixture(runtime.fixture), runtime.env(gate)), root);
-  const accepted: AgentMessagePublishPayload[] = [];
+  const accepted: AgentMessagePublishPlainPayload[] = [];
   const sent: Envelope[] = [];
   real = await startRealServer({ productId, storage: { kind: 'memory' }, longPollHoldMs: 30,
     agentMessage: { consume: async ({ payload }) => { accepted.push(payload); return { outcome: 'accepted' }; } },

@@ -1,6 +1,6 @@
 // `TaskRunner` members for offer admission before any runtime work, and for
 // sealed offers (see ./support.ts for how a member module runs).
-import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode } from '@byok-sdk/protocol';
+import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode, type TaskSealing } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeResolutionError, type AgentRef } from '../../agent-home';
 import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-readers';
 import type { OfferPhaseContext } from './support';
@@ -236,6 +236,14 @@ export async function handleSealedOffer(this: TaskRunner, envelope: Envelope, ad
   const sealedTasks = this['deps'].sealedTasks;
   if (sealedTasks === undefined || !this['sealedCodesAllowed']()) {
     this['declineSealedOffer'](taskId, admission, agentRef, 'sealed_key_unavailable');
+    return;
+  }
+  // #1045: a task that seals its Agent messages needs a server that takes a sealed publish.
+  const { sealing } = envelope.payload as { sealing?: TaskSealing };
+  const serverCapabilities = this['deps'].getServerCapabilities?.() ?? [];
+  if (sealing?.categories.includes('agent-message') === true
+    && !requiredReceiverCapabilities('agent.message.publish', { sealed: {} }).every((flag) => serverCapabilities.includes(flag))) {
+    this['declineSealedOffer'](taskId, admission, agentRef, 'sealing_policy_mismatch');
     return;
   }
   this['sealedOpening'].add(taskId);

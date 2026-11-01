@@ -238,6 +238,8 @@ v1 保持明文的 Host 内容：`agent.home.projection` 的 persona 值、`agen
 
 v1 的范围（§14 D17）：只交付 C1 和 C3，C2 按需开启。下面三项等到 v2：
 
+> 后记（#1045，0.33.0）：v1 实际只交付了 C1 和 C3，C2 没有在 v1 开启。v2 交付了 C2 的 `agent.message.publish` 正文和 C4 记忆投影（含 `agentHomeMemoryChange`），见 [2026-10-28-1045-e2ee-v2.md](2026-10-28-1045-e2ee-v2.md)。输入准备、草稿、egress 和 truth `memory` 记录仍是明文。
+
 - C4 记忆投影。AiphaBee 的首批配置让 Bot 记忆保持明文（D3）。
 - `agent.input.preparation` 的 `context`。输入准备的回执带多个对内容计算的摘要（§9.3），要先改 Pi 的准备协议。v1 中，Host 不为带 `sealing` 的 task 发起输入准备。设备收到带 `sealing` 的 prepared offer 时也拒绝。
 - 草稿（§10.4）。

@@ -1745,7 +1745,7 @@ export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): 
 export {};
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types';
@@ -1848,7 +1848,7 @@ export interface CreateByokServerOptions {
             readonly deviceId: string;
             readonly taskId: string;
             readonly context: AgentMessageServerContext;
-            readonly payload: AgentMessagePublishPayload;
+            readonly payload: AgentMessagePublishPlainPayload;
         }): Promise<{
             readonly outcome: 'accepted' | 'held' | 'refused';
             readonly reasonCode?: string;

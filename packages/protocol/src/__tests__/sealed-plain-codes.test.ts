@@ -24,7 +24,7 @@ describe('isSealedTaskPlainOutput (#654 12d)', () => {
     ['task.started', {}],
     ['task.approval_resolved', { approvalId: 'a', decision: 'approve', resolvedBy: 'local', at: '2026-10-24T00:00:00.000Z' }],
   ])('accepts %s %j', (type, payload) => {
-    expect(isSealedTaskPlainOutput(type, payload)).toBe(true);
+    expect(isSealedTaskPlainOutput(type, payload, ['task-output'])).toBe(true);
   });
 
   it.each([
@@ -44,6 +44,17 @@ describe('isSealedTaskPlainOutput (#654 12d)', () => {
     ['task.complete', {}],
     ['task.await_approval', { summary: 'ok?' }],
   ])('refuses %s %j', (type, payload) => {
-    expect(isSealedTaskPlainOutput(type, payload)).toBe(false);
+    expect(isSealedTaskPlainOutput(type, payload, ['task-output'])).toBe(false);
+  });
+
+  it.each(['task.fail', 'task.cancelled'])('keeps %s memory evidence plaintext only when the task does not seal memory-projection (#1045)', (type) => {
+    const payload = {
+      ...(type === 'task.fail' ? { reason: 'sealed_key_unavailable', retryable: false } : {}),
+      agentHomeMemoryChange: { outcome: 'reader-attributed', paths: ['notes/plan.md'] },
+    };
+    expect(isSealedTaskPlainOutput(type, payload, ['task-output'])).toBe(true);
+    expect(isSealedTaskPlainOutput(type, payload, ['task-output', 'memory-projection'])).toBe(false);
+    const { agentHomeMemoryChange: _evidence, ...without } = payload;
+    expect(isSealedTaskPlainOutput(type, without, ['task-output', 'memory-projection'])).toBe(true);
   });
 });

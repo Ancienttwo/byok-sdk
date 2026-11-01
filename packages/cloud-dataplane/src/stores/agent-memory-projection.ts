@@ -1,7 +1,8 @@
 /**
  * Postgres authority for the optional, one-way hosted Agent-memory projection.
  *
- * The only stored body is the latest accepted redacted snapshot. Immutable
+ * The only stored body is the latest accepted redacted snapshot, or its sealed
+ * member as received under a sealing grant (#1045 C4). Immutable
  * receipt rows retain the complete non-body replay binding and byte metering so
  * an old exact retry is still provable after the head advances or an epoch is
  * superseded. Neither table has a raw-source hash, cwd, path, or audit body.
@@ -9,7 +10,6 @@
 import {
   type AgentMemoryProjectionCommitInput,
   type AgentMemoryProjectionEraseResult,
-  type AgentMemoryProjectionReceipt,
   type AgentMemoryProjectionStore,
   ByokCloudError,
   type CloudCrypto,
@@ -20,6 +20,8 @@ import {
   AgentMemoryProjectionReceiptSchema,
   AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
+  type AgentMemoryProjectionMutation,
+  type AgentMemoryProjectionReceipt,
 } from '@byok-sdk/protocol';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
@@ -54,8 +56,10 @@ interface MeteringReceiptRow {
   readonly runtime_id: string;
   readonly grant_ref: string;
   readonly policy_revision: string;
-  readonly redacted_hash: string;
-  readonly redacted_byte_count: number;
+  readonly redacted_hash: string | null;
+  readonly redacted_byte_count: number | null;
+  readonly content_mac: string | null;
+  readonly padded_length: number | null;
   readonly metering_receipt_id: string;
   readonly recorded_at: Date;
 }
@@ -75,6 +79,8 @@ const RECEIPT_COLUMNS = [
   'policy_revision',
   'redacted_hash',
   'redacted_byte_count',
+  'content_mac',
+  'padded_length',
   'metering_receipt_id',
   'recorded_at',
 ].join(', ');
@@ -98,12 +104,18 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
 
   async commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt> {
     const mutation = AgentMemoryProjectionMutationSchema.parse(input.mutation);
-    await this.#assertRedactedSnapshot(
-      input.redactedBytes,
-      mutation.snapshot.redactedBytes,
-      mutation.snapshot.redactedByteCount,
-      mutation.snapshot.redactedHash,
-    );
+    // A sealed member is stored as received; only plaintext bytes are hashed.
+    const redactedBytes = mutation.sealed === undefined ? input.redactedBytes : undefined;
+    if (mutation.sealed === undefined) {
+      if (redactedBytes === undefined) throw hashMismatch('A plaintext memory projection carries no decoded redacted bytes.');
+      await this.#assertRedactedSnapshot(
+        redactedBytes,
+        mutation.snapshot.redactedBytes,
+        mutation.snapshot.redactedByteCount,
+        mutation.snapshot.redactedHash,
+      );
+    }
+    const content = contentColumns(mutation);
 
     const client = await this.#pool.connect();
     try {
@@ -112,7 +124,7 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
 
       const receipt = await this.#readReceipt(client, input.tenantId, mutation.agentRef.agentId, mutation.writerEpoch, mutation.sourceSeq);
       if (receipt !== undefined) {
-        if (!sameReceiptBinding(receipt, input, mutation)) {
+        if (!sameReceiptBinding(receipt, input, mutation, content)) {
           throw replayMismatch();
         }
         await client.query('COMMIT');
@@ -139,7 +151,7 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
       const meteringReceiptId = this.#crypto.randomUuid();
       await client.query(
         `INSERT INTO agent_memory_projection_metering_receipt (${RECEIPT_COLUMNS})
-         VALUES ($1, $2, $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14::integer, $15::uuid, $16)`,
+         VALUES ($1, $2, $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14::integer, $15, $16::integer, $17::uuid, $18)`,
         [
           input.tenantId,
           mutation.agentRef.agentId,
@@ -153,8 +165,10 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
           mutation.runtimeId,
           mutation.grantRef,
           mutation.policyRevision,
-          mutation.snapshot.redactedHash,
-          mutation.snapshot.redactedByteCount,
+          content.redacted_hash,
+          content.redacted_byte_count,
+          content.content_mac,
+          content.padded_length,
           meteringReceiptId,
           now,
         ],
@@ -165,12 +179,12 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
            tenant_id, agent_id, writer_epoch, source_seq, mutation_id,
            device_id, task_id, agent_profile_revision, session_ref, runtime_id,
            grant_ref, policy_revision, redacted_hash, redacted_snapshot,
-           redacted_byte_count, committed_at
+           redacted_byte_count, sealed_member, committed_at
          ) VALUES (
            $1, $2, $3, $4, $5::uuid,
            $6, $7, $8, $9, $10,
            $11, $12, $13, decode($14, 'base64'),
-           $15::integer, $16
+           $15::integer, $16::jsonb, $17
          )
          ON CONFLICT (tenant_id, agent_id) DO UPDATE SET
            writer_epoch = EXCLUDED.writer_epoch,
@@ -186,6 +200,7 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
            redacted_hash = EXCLUDED.redacted_hash,
            redacted_snapshot = EXCLUDED.redacted_snapshot,
            redacted_byte_count = EXCLUDED.redacted_byte_count,
+           sealed_member = EXCLUDED.sealed_member,
            committed_at = EXCLUDED.committed_at`,
         [
           input.tenantId,
@@ -200,35 +215,32 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
           mutation.runtimeId,
           mutation.grantRef,
           mutation.policyRevision,
-          mutation.snapshot.redactedHash,
-          toBase64(input.redactedBytes),
-          mutation.snapshot.redactedByteCount,
+          content.redacted_hash,
+          redactedBytes === undefined ? null : toBase64(redactedBytes),
+          content.redacted_byte_count,
+          mutation.sealed === undefined ? null : JSON.stringify(mutation.sealed),
           now,
         ],
       );
 
       await client.query('COMMIT');
-      return AgentMemoryProjectionReceiptSchema.parse({
-        outcome: 'accepted',
-        tenantId: input.tenantId,
-        deviceId: input.deviceId,
-        taskId: mutation.taskId,
-        agentRef: mutation.agentRef,
-        sessionRef: mutation.sessionRef,
-        runtimeId: mutation.runtimeId,
-        grantRef: mutation.grantRef,
-        writerEpoch: mutation.writerEpoch,
-        sourceSeq: mutation.sourceSeq,
-        mutationId: mutation.mutationId,
-        policyRevision: mutation.policyRevision,
-        redactedHash: mutation.snapshot.redactedHash,
-        redactedByteCount: mutation.snapshot.redactedByteCount,
-        metering: {
-          meteringReceiptId,
-          acceptedRedactedBytes: mutation.snapshot.redactedByteCount,
-          recordedAt: now.toISOString(),
-        },
-      });
+      return toReceipt({
+        tenant_id: input.tenantId,
+        agent_id: mutation.agentRef.agentId,
+        writer_epoch: mutation.writerEpoch,
+        source_seq: mutation.sourceSeq,
+        mutation_id: mutation.mutationId,
+        device_id: input.deviceId,
+        task_id: mutation.taskId,
+        agent_profile_revision: mutation.agentRef.profileRevision,
+        session_ref: mutation.sessionRef,
+        runtime_id: mutation.runtimeId,
+        grant_ref: mutation.grantRef,
+        policy_revision: mutation.policyRevision,
+        ...content,
+        metering_receipt_id: meteringReceiptId,
+        recorded_at: now,
+      }, 'accepted');
     } catch (cause) {
       await rollback(client);
       throw cause;
@@ -379,10 +391,20 @@ function assertNextMutation(
   }
 }
 
+/** The receipt's content columns: the redacted hash and size, or the sealed member's `contentMac` and padded length. */
+type ContentColumns = Pick<MeteringReceiptRow, 'redacted_hash' | 'redacted_byte_count' | 'content_mac' | 'padded_length'>;
+
+function contentColumns(mutation: AgentMemoryProjectionMutation): ContentColumns {
+  return mutation.sealed === undefined
+    ? { redacted_hash: mutation.snapshot.redactedHash, redacted_byte_count: mutation.snapshot.redactedByteCount, content_mac: null, padded_length: null }
+    : { redacted_hash: null, redacted_byte_count: null, content_mac: mutation.sealed.contentMac, padded_length: mutation.sealed.paddedLength };
+}
+
 function sameReceiptBinding(
   receipt: MeteringReceiptRow,
   input: AgentMemoryProjectionCommitInput,
-  mutation: ReturnType<typeof AgentMemoryProjectionMutationSchema.parse>,
+  mutation: AgentMemoryProjectionMutation,
+  content: ContentColumns,
 ): boolean {
   return (
     receipt.tenant_id === input.tenantId &&
@@ -397,12 +419,15 @@ function sameReceiptBinding(
     receipt.source_seq === mutation.sourceSeq &&
     receipt.mutation_id === mutation.mutationId &&
     receipt.policy_revision === mutation.policyRevision &&
-    receipt.redacted_hash === mutation.snapshot.redactedHash &&
-    receipt.redacted_byte_count === mutation.snapshot.redactedByteCount
+    receipt.redacted_hash === content.redacted_hash &&
+    receipt.redacted_byte_count === content.redacted_byte_count &&
+    receipt.content_mac === content.content_mac &&
+    receipt.padded_length === content.padded_length
   );
 }
 
 function toReceipt(row: MeteringReceiptRow, outcome: 'accepted' | 'idempotent'): AgentMemoryProjectionReceipt {
+  const recordedAt = row.recorded_at.toISOString();
   return AgentMemoryProjectionReceiptSchema.parse({
     outcome,
     tenantId: row.tenant_id,
@@ -416,13 +441,17 @@ function toReceipt(row: MeteringReceiptRow, outcome: 'accepted' | 'idempotent'):
     sourceSeq: row.source_seq,
     mutationId: row.mutation_id,
     policyRevision: row.policy_revision,
-    redactedHash: row.redacted_hash,
-    redactedByteCount: row.redacted_byte_count,
-    metering: {
-      meteringReceiptId: row.metering_receipt_id,
-      acceptedRedactedBytes: row.redacted_byte_count,
-      recordedAt: row.recorded_at.toISOString(),
-    },
+    ...(row.content_mac === null
+      ? {
+        redactedHash: row.redacted_hash,
+        redactedByteCount: row.redacted_byte_count,
+        metering: { meteringReceiptId: row.metering_receipt_id, acceptedRedactedBytes: row.redacted_byte_count, recordedAt },
+      }
+      : {
+        contentMac: row.content_mac,
+        paddedLength: row.padded_length,
+        metering: { meteringReceiptId: row.metering_receipt_id, acceptedPaddedBytes: row.padded_length, recordedAt },
+      }),
   });
 }
 

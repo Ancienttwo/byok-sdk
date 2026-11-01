@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { AgentMemoryIntentCompletion, AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
+import type { AgentMemoryIntentCompletion, AgentMemoryProjectionPlainMutation } from '@byok-sdk/protocol';
 import {
   HostLedger,
   MIN_TOMBSTONE_RETENTION_MS,
@@ -24,11 +24,11 @@ let current = true;
 let clock = 1000;
 const notify = vi.fn(async () => {});
 function options() { return { now: () => clock, isCurrent: () => current, notify,
-  authorizeProjection: (_deviceId: string, mutation: AgentMemoryProjectionMutation) => mutation.grantRef === 'approved' }; }
+  authorizeProjection: (_deviceId: string, mutation: AgentMemoryProjectionPlainMutation) => mutation.grantRef === 'approved' }; }
 function approval(rest: Partial<MemoryApproval> = {}): MemoryApproval {
   return { ...binding, approvalRef: randomUUID(), path: 'MEMORY.md', operation: 'replace', content: 'new text', expiresAt: 5000, ...rest };
 }
-function projection(text: string | null, rest: Partial<AgentMemoryProjectionMutation> = {}): AgentMemoryProjectionMutation {
+function projection(text: string | null, rest: Partial<AgentMemoryProjectionPlainMutation> = {}): AgentMemoryProjectionPlainMutation {
   const bytes = JSON.stringify({ residentMemory: text });
   return { taskId: 'task', agentRef, sessionRef: 'session', runtimeId: 'pi', grantRef: 'approved', writerEpoch: 1, sourceSeq: 1,
     mutationId: randomUUID(), policyRevision: 'policy-1', snapshot: { redactedHash: memoryRevision(bytes),

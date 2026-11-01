@@ -363,7 +363,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
     const published = async () => {
       await vi.waitFor(() => expect(sent.some(e => e.type === 'agent.message.publish')).toBe(true));
       const publish = sent.find(e => e.type === 'agent.message.publish');
-      if (publish?.type !== 'agent.message.publish') throw new Error('missing publish');
+      if (publish?.type !== 'agent.message.publish' || publish.payload.sealed !== undefined) throw new Error('missing publish');
       const lastRevision = frames().at(-1)?.payload.revision;
       const lastFrames = frames().filter(e => e.payload.revision === lastRevision);
       expect(lastFrames.length).toBeGreaterThan(0);
@@ -378,7 +378,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
         offset += size;
       }
       expect(sent.indexOf(publish)).toBeGreaterThan(sent.findLastIndex(e => e.type === 'agent.message.draft'));
-      return { publish, lastFrames };
+      return { publish: { ...publish, payload: publish.payload }, lastFrames };
     };
     return { runner, sent, session: adapter.sessions[0]!, frames, published,
       contextToken: adapter.startCalls[0]!.ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT! };

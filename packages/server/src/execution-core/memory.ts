@@ -4,7 +4,7 @@ import {
   AgentMemoryIntentCompletionSchema,
   AgentMemoryIntentReadbackSchema,
   AgentMemoryIntentV1Schema,
-  AgentMemoryProjectionMutationSchema,
+  AgentMemoryProjectionPlainMutationSchema,
   type AgentMemoryIntentCompletion,
   type AgentMemoryIntentReadback,
   type AgentMemoryIntentV1,
@@ -253,7 +253,8 @@ export class HostMemoryPage {
   /** Host-owned opaque profile: {residentMemory: policyApprovedText | null}. It conveys no edit proof. */
   projectionPort(deviceId: string): AgentMemoryProjectionPort {
     return { publish: async ({ mutation: value }) => {
-      const mutation = AgentMemoryProjectionMutationSchema.parse(value);
+      // This Host reads the resident memory text, so it takes plaintext projections only (#1045 Q1).
+      const mutation = AgentMemoryProjectionPlainMutationSchema.parse(value);
       if (!this.options.isCurrent({ deviceId, agentRef: mutation.agentRef }) || !this.options.authorizeProjection(deviceId, mutation)) throw new Error('Memory projection not authorized');
       const bytes = Buffer.from(mutation.snapshot.redactedBytes, 'base64url');
       if (memoryRevisionBytes(bytes) !== mutation.snapshot.redactedHash) throw new Error('Memory projection hash mismatch');

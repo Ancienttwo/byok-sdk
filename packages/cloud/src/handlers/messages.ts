@@ -36,9 +36,9 @@ import {
   MessagesSendRequestSchema,
   type AgentContentReceiptPayload,
   type AgentMessageDispositionPayload,
-  type AgentMessagePublishPayload,
   type MessagesSendResponse,
 } from '@byok-sdk/protocol';
+import type { AgentMessageConsumers } from '../agent-message-disposition';
 import { handleInboundEnvelope, readAgentMessageDisposition, type ByokCloudObserver, type InboundRefusalReason } from '../inbound';
 import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
@@ -110,15 +110,7 @@ export interface MessagesRouteDeps extends DeviceRouteDeps {
     deviceId: string,
     payload: AgentContentReceiptPayload,
   ) => Promise<void>;
-  readonly agentMessage?: {
-    consume(input: {
-      readonly tenant: TenantStores['tenant'];
-      readonly deviceId: string;
-      readonly taskId: string;
-      readonly context: import('@byok-sdk/protocol').AgentMessageServerContext;
-      readonly payload: AgentMessagePublishPayload;
-    }): Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>;
-  };
+  readonly agentMessage?: AgentMessageConsumers;
   readonly appendAgentMessageDisposition: (
     stores: TenantStores,
     deviceId: string,
@@ -189,7 +181,7 @@ function batchHandler(deps: MessagesRouteDeps) {
         device.deviceId,
         envelope,
         deps.activityBounds,
-        envelope.type === 'agent.message.publish' ? deps.agentMessage?.consume : undefined,
+        envelope.type === 'agent.message.publish' ? deps.agentMessage : undefined,
         deps.observer,
         deps.clock.now().toISOString(),
       );

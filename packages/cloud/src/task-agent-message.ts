@@ -4,10 +4,14 @@ import {
   type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload,
 } from '@byok-sdk/protocol';
 import type { TenantStores } from './tenant-stores';
-import { parseAgentMessageDisposition } from './agent-message-disposition';
+import { agentMessageWithinLimit, parseAgentMessageDisposition } from './agent-message-disposition';
 import { assertTaskContentPresent } from './task-redaction';
 
-/** SDK transmission evidence; payload remains untrusted and never authors a Host product message. */
+/**
+ * SDK transmission evidence; payload remains untrusted and never authors a Host
+ * product message. A task whose `sealing` names `agent-message` (#1045) holds
+ * the sealed message, which only a member can open.
+ */
 export interface TaskAgentMessage {
   readonly payload: AgentMessagePublishPayload;
   readonly context: AgentMessageServerContext;
@@ -48,7 +52,7 @@ export async function readTaskAgentMessage(
     || !sameRef(payload.agentRef, agentRef) || !sameRef(frozen.data.agentRef, agentRef)
     || payload.contract !== frozen.data.requirement.contract || payload.contentType !== frozen.data.requirement.contentType
     || (frozen.data.sessionRef !== undefined && payload.sessionRef !== frozen.data.sessionRef)
-    || payload.byteCount > frozen.data.requirement.maxBytes) throw invalid();
+    || !agentMessageWithinLimit(payload, frozen.data.requirement.maxBytes)) throw invalid();
   // A consumer may have refused precisely because the sender's body/hash/byte
   // claims were invalid. Readback preserves that received payload and decision;
   // it must not reinterpret a refusal as storage corruption or product acceptance.
