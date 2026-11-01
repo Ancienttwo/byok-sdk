@@ -77,13 +77,10 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-The next source candidate is 0.32.0 for all nine packages. It is not
-published.
-See the [candidate notes](../../docs/releases/v0.32.0.md).
-The current release is 0.31.0 for all nine packages, keys included. The
+The current release is 0.32.0 for all nine packages, keys included. The
 registry lists it as `latest`.
-See the [release notes](../../docs/releases/v0.31.0.md).
-The registry readback of 2026-10-29 (UTC) reports `latest` 0.31.0 for all nine packages.
+See the [release notes](../../docs/releases/v0.32.0.md).
+The registry readback of 2026-11-01 (UTC) reports `latest` 0.32.0 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -98,11 +95,12 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From
 0.28.2 all nine carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.31.0 for all nine packages on 2026-10-29 (UTC).
+the dist-tag `latest`, observed at 0.32.0 for all nine packages on 2026-11-01 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records that prior `latest` for all nine packages: 0.31.0. A registry read at
-release confirms it.
+records the prior `latest` for all nine packages. It still records 0.31.0,
+the baseline of the 0.32.0 publication. It does not describe the current
+registry. Review it in the next release preparation.
 This train has no first publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
@@ -111,11 +109,12 @@ failed registry reads do not establish package absence.
 
 Source preparation and npm execution need separate authorization. The owner
 provided both for 0.27.0. The registry lists 0.28.0, 0.28.1, 0.28.2, 0.28.3,
-0.29.0, 0.30.0, 0.30.1, 0.30.2 and 0.31.0 as published (2026-10-20,
-2026-10-21, 2026-10-22, 2026-10-23, 2026-10-24, 2026-10-26 and 2026-10-29,
-UTC). This repository has no publication record for most of these versions;
-the [0.31.0 notes](../../docs/releases/v0.31.0.md) hold the one for 0.31.0.
-The 0.32.0 candidate has source-preparation authorization only.
+0.29.0, 0.30.0, 0.30.1, 0.30.2, 0.31.0 and 0.32.0 as published (2026-10-20,
+2026-10-21, 2026-10-22, 2026-10-23, 2026-10-24, 2026-10-26, 2026-10-29 and
+2026-11-01, UTC). This repository has no publication record for most of these
+versions; the [0.31.0 notes](../../docs/releases/v0.31.0.md) and the
+[0.32.0 notes](../../docs/releases/v0.32.0.md) hold the ones for 0.31.0 and
+0.32.0.
 Live qualification and production rollout remain separate operations.
 The [publication record](../../docs/releases/v0.27.0-publication.md) confirms
 the exact source, package order and completed registry readback.
