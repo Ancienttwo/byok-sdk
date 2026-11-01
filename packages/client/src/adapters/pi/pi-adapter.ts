@@ -6,7 +6,7 @@ import type { RuntimeTaskInput } from '../../types';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { startDurablePi } from '../pi-durable/session';
 import { serializePiHostConfig } from './runtime-host-binding';
-import { parsePiMcpEnvironment } from './mcp-environment';
+import { parsePiMcpEnvironment, projectPiMcpEnvironment } from './mcp-environment';
 import { piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from './runtime-launch';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
@@ -230,6 +230,11 @@ export class PiAdapter implements RuntimeAdapter {
     // `PiSession` turns only a non-aborted `agent_settled` into `turn_end`.
     trajectoryEvidence: 'event-stream',
     platforms: ['darwin', 'linux', 'win32'],
+    // #1061 slice 1: the digest-bound launch carries the resolved scope and
+    // the scoped file tools enforce it on the ordinary RPC lane only.
+    fileScope: { lanes: ['rpc'] },
+    // An exact `byok-profile` selection runs through the BYOK launcher.
+    providerProfileBinding: true,
     capabilities: PI_RUNTIME_CAPABILITIES,
   });
 
@@ -265,6 +270,11 @@ export class PiAdapter implements RuntimeAdapter {
 
   runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy);
+  }
+
+  /** Pi's directory selectors and provider credentials stay with Pi; its MCP servers never inherit them. */
+  projectMcpEnvironment(env: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
+    return projectPiMcpEnvironment(env);
   }
 
   async detect(): Promise<RuntimeDetectResult> {
