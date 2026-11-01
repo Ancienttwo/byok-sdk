@@ -4,8 +4,10 @@ import {
   AgentMemoryProjectionCommitRequestSchema,
   agentMemoryProjectionBase64UrlByteLength,
   type AgentMemoryProjectionCommitResponse,
+  type AgentMemoryProjectionPlainMutation,
 } from '@byok-sdk/protocol';
 import { base64UrlDecode } from '../crypto/web-crypto';
+import type { AgentMemoryProjectionSubmission } from '../api/agent-memory';
 import { isCloudError } from '../errors';
 import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 import type { TenantStores } from '../tenant-stores';
@@ -21,8 +23,7 @@ export interface AgentMemoryProjectionRouteDeps extends DeviceRouteDeps {
   readonly commit: (
     stores: TenantStores,
     deviceId: string,
-    mutation: import('@byok-sdk/protocol').AgentMemoryProjectionPlainMutation,
-    redactedBytes: Uint8Array,
+    submission: AgentMemoryProjectionSubmission,
   ) => Promise<AgentMemoryProjectionCommitResponse>;
 }
 
@@ -35,24 +36,14 @@ export function agentMemoryProjectionHandler(deps: AgentMemoryProjectionRouteDep
     if (body.tooLarge) return c.json({ error: 'Agent-memory projection request body too large' }, 413);
     const parsed = AgentMemoryProjectionCommitRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'invalid Agent-memory projection mutation' }, 422);
-    // This route stores plaintext snapshots only; a sealed snapshot is refused, never decoded.
-    if (parsed.data.sealed !== undefined) return c.json({ error: 'sealed Agent-memory projection unsupported' }, 422);
-    // The schema rejects non-canonical encodings. Decode remains explicit so a
-    // handler can never hand a different byte sequence to the hashing store.
-    if (agentMemoryProjectionBase64UrlByteLength(parsed.data.snapshot.redactedBytes) === undefined) {
-      return c.json({ error: 'invalid Agent-memory projection mutation' }, 422);
-    }
-
-    const decoded = base64UrlDecode(parsed.data.snapshot.redactedBytes);
-    if (decoded === undefined || decoded.byteLength !== parsed.data.snapshot.redactedByteCount) {
-      return c.json({ error: 'invalid Agent-memory projection mutation' }, 422);
-    }
+    // A sealed snapshot is stored as received; the Host never decodes or opens it.
+    const submission = parsed.data.sealed !== undefined
+      ? { mutation: parsed.data }
+      : decodedSubmission(parsed.data);
+    if (submission === undefined) return c.json({ error: 'invalid Agent-memory projection mutation' }, 422);
 
     try {
-      return c.json(
-        await deps.commit(authenticated.stores, authenticated.device.deviceId, parsed.data, decoded),
-        200,
-      );
+      return c.json(await deps.commit(authenticated.stores, authenticated.device.deviceId, submission), 200);
     } catch (error) {
       if (
         isCloudError(error, 'agent_memory_projection_authorization_denied') ||
@@ -61,7 +52,8 @@ export function agentMemoryProjectionHandler(deps: AgentMemoryProjectionRouteDep
         isCloudError(error, 'agent_memory_projection_stale_epoch') ||
         isCloudError(error, 'agent_memory_projection_erased_epoch') ||
         isCloudError(error, 'agent_memory_projection_epoch_exhausted') ||
-        isCloudError(error, 'agent_memory_projection_sequence_gap')
+        isCloudError(error, 'agent_memory_projection_sequence_gap') ||
+        isCloudError(error, 'agent_memory_projection_sealing_mismatch')
       ) return c.json({ error: error.code }, 409);
       if (isCloudError(error, 'agent_memory_projection_hash_mismatch')) {
         return c.json({ error: error.code }, 422);
@@ -69,4 +61,13 @@ export function agentMemoryProjectionHandler(deps: AgentMemoryProjectionRouteDep
       throw error;
     }
   };
+}
+
+function decodedSubmission(mutation: AgentMemoryProjectionPlainMutation): AgentMemoryProjectionSubmission | undefined {
+  // The schema rejects non-canonical encodings. Decode remains explicit so a
+  // handler can never hand a different byte sequence to the hashing store.
+  if (agentMemoryProjectionBase64UrlByteLength(mutation.snapshot.redactedBytes) === undefined) return undefined;
+  const redactedBytes = base64UrlDecode(mutation.snapshot.redactedBytes);
+  if (redactedBytes === undefined || redactedBytes.byteLength !== mutation.snapshot.redactedByteCount) return undefined;
+  return { mutation, redactedBytes };
 }

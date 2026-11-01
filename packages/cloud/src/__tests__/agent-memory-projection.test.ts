@@ -1,8 +1,11 @@
 import { createMutableClock } from '@byok-sdk/core';
+import { sealContent } from '@byok-sdk/core/sealed-payload';
 import {
   AGENT_MEMORY_PROJECTION_CAPABILITY,
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
+  type AgentMemoryProjectionMutation,
   type AgentMemoryProjectionPlainMutation,
+  type AgentMemoryProjectionSealedMutation,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import {
@@ -99,7 +102,7 @@ async function prepareTask() {
 async function post(
   harness: Awaited<ReturnType<typeof prepareTask>>['harness'],
   authorization: Record<string, string>,
-  body: AgentMemoryProjectionPlainMutation,
+  body: AgentMemoryProjectionMutation,
 ) {
   return harness.request(BYOK_AGENT_MEMORY_PROJECTIONS_PATH, {
     method: 'POST',
@@ -246,5 +249,87 @@ describe('in-memory Agent-memory hosted projection conformance', () => {
     const replayAfterRevoke = await post(harness, device.authorization, body);
     expect(replayAfterRevoke.status).toBe(409);
     expect(await replayAfterRevoke.json()).toEqual({ error: 'agent_memory_projection_authorization_denied' });
+  });
+});
+
+describe('a sealed snapshot under a sealing grant (#1045 S4)', () => {
+  const SEALING = { scopeId: 'scope-agent-memory', epoch: 3 } as const;
+
+  /** The mutation of `plain` with its snapshot sealed under `scope`, as the device seals it; the Host reads only outer fields. */
+  async function sealedMutation(
+    plain: AgentMemoryProjectionPlainMutation,
+    scope: { readonly id: string; readonly epoch: number } = { id: SEALING.scopeId, epoch: SEALING.epoch },
+  ): Promise<AgentMemoryProjectionSealedMutation> {
+    const { snapshot, ...identity } = plain;
+    const content = await sealContent({
+      scopeKey: Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+      scope,
+      chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+      sender: 'A'.repeat(43),
+      category: 'memory-projection',
+      binding: {
+        tenantId: TENANT_A,
+        family: 'agent.memory.projection',
+        direction: 'daemon-to-server',
+        identity: { agentId: plain.agentRef.agentId, writerEpoch: plain.writerEpoch, sourceSeq: plain.sourceSeq, mutationId: plain.mutationId },
+        deviceId: 'device-memory',
+        agentRef: plain.agentRef,
+        categories: ['memory-projection'],
+        notAfter: null,
+      },
+      plaintext: { redactedBytes: snapshot.redactedBytes },
+      maxContentLength: 262140,
+    });
+    return {
+      ...identity,
+      sealed: { ...content.header, category: 'memory-projection', ciphertext: base64UrlEncode(content.ciphertext) },
+    } as AgentMemoryProjectionSealedMutation;
+  }
+
+  /** A task whose grant carries `sealing`, or none. */
+  async function grantedTask(sealing: typeof SEALING | undefined) {
+    const prepared = await prepareTask();
+    const { body, device } = prepared;
+    prepared.authorizer.grant({
+      tenantId: TENANT_A, deviceId: device.deviceId, taskId: body.taskId, agentRef: body.agentRef,
+      sessionRef: body.sessionRef, runtimeId: body.runtimeId, grantRef: body.grantRef,
+      writerEpoch: body.writerEpoch, policyRevision: body.policyRevision,
+      ...(sealing === undefined ? {} : { sealing }),
+    });
+    return prepared;
+  }
+
+  it('stores the sealed member as received, meters its padded length, and replays it by contentMac', async () => {
+    const { harness, device, body } = await grantedTask(SEALING);
+    const sealed = await sealedMutation(body);
+    const response = await post(harness, device.authorization, sealed);
+    expect(response.status).toBe(200);
+    const receipt = await response.json() as Record<string, unknown>;
+    expect(receipt).toMatchObject({
+      outcome: 'accepted', contentMac: sealed.sealed.contentMac, paddedLength: sealed.sealed.paddedLength,
+      metering: { acceptedPaddedBytes: sealed.sealed.paddedLength },
+    });
+    expect(receipt).not.toHaveProperty('redactedHash');
+    expect(receipt).not.toHaveProperty('redactedByteCount');
+    expect(await (await post(harness, device.authorization, sealed)).json()).toEqual({ ...receipt, outcome: 'idempotent' });
+
+    // Other content at the same position names a different contentMac.
+    const other = await mutation(createWebCrypto(), { snapshot: { ...body.snapshot, redactedBytes: base64UrlEncode(new TextEncoder().encode('other')) } });
+    const changed = await post(harness, device.authorization, await sealedMutation(other));
+    expect(changed.status).toBe(409);
+    expect(await changed.json()).toEqual({ error: 'agent_memory_projection_replay_mismatch' });
+  });
+
+  it.each([
+    ['a plaintext snapshot under a sealing grant', SEALING, (body: AgentMemoryProjectionPlainMutation) => Promise.resolve(body)],
+    ['a sealed snapshot under a plaintext grant', undefined, (body: AgentMemoryProjectionPlainMutation) => sealedMutation(body)],
+    ['a snapshot sealed under another scope epoch', SEALING, (body: AgentMemoryProjectionPlainMutation) =>
+      sealedMutation(body, { id: SEALING.scopeId, epoch: SEALING.epoch + 1 })],
+  ] as const)('refuses %s with 409 and stores nothing', async (_name, sealing, form) => {
+    const { harness, device, body, store } = await grantedTask(sealing);
+    const response = await post(harness, device.authorization, await form(body));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'agent_memory_projection_sealing_mismatch' });
+    await expect(store.erase({ tenantId: TENANT_A, agentId: AGENT_REF.agentId })).resolves.toEqual({ nextWriterEpoch: 1 });
   });
 });

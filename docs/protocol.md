@@ -1667,10 +1667,24 @@ v1 suite, keys and binding rules. The design is
   `readAgentMessageDisposition` return either form. Only a member can open
   the body.
 
-The cloud does not store a sealed memory projection yet: it refuses one with
-422 until hosted projection storage lands in a later #1045 slice. The
-embedded `@byok-sdk/server` dispatches no sealed task, so it takes plaintext
-Agent messages and memory projections only.
+- **Cloud projection storage (#1045 S4).** The Host's
+  `AgentMemoryProjectionAuthorizer` returns the `sealing` of the grant it
+  issued with an authorized result. A grant with `sealing` takes only a
+  snapshot sealed under exactly that scope and epoch, and a grant without it
+  only a plaintext snapshot; anything else is refused with 409
+  `agent_memory_projection_sealing_mismatch` before the store is called. The
+  route never decodes or opens a sealed snapshot. The store keeps the sealed
+  member as received in `agent_memory_projection_head.sealed_member` and the
+  receipt's `contentMac` and padded length (migration 0037); a row holds one
+  form, and neither table keeps a plaintext hash or byte count of sealed
+  content. A replay at the same writer epoch and source sequence is
+  idempotent when its form, `contentMac` and padded length match, and a
+  replay mismatch otherwise. Erase and its epoch fence are unchanged. The
+  Agent memory scope belongs to the member chain and is separate from task
+  scopes, so a task redaction's scope shred does not touch it.
+
+The embedded `@byok-sdk/server` dispatches no sealed task, so it takes
+plaintext Agent messages and memory projections only.
 
 ### 2.6 E2EE member routes (#654 E2c-2)
 

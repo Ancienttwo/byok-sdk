@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.32.0",
-    "snapshotSha256": "b98778a1d60302fde74ea885f82f9e18851b0e49f167b7f9419a8b50418c4900"
+    "snapshotSha256": "0b4ceabc2e6774c2338f5d856e1103c76b7c9c65c3485f6b0500cf342e4ac57e"
   },
   "configFields": {
     "status": "tracked",
@@ -161,16 +161,15 @@
       ]
     },
     {
-      "id": "plaintext-memory-projection-hosts",
+      "id": "cloud-sealed-memory-projection",
       "impact": "breaking",
-      "summary": "Cloud and dataplane name the plaintext branch of the memory projection store (#1045 S1): AgentMemoryProjectionStore.commit takes an AgentMemoryProjectionPlainMutation and returns an AgentMemoryProjectionPlainReceipt. The shapes are the 0.32.0 shapes; a Host that implements its own AgentMemoryProjectionStore or annotates these values with the union names switches to the plaintext names. The cloud refuses a sealed memory projection with 422.",
+      "summary": "The hosted memory projection stores a sealed snapshot under a grant that names a sealing scope (#1045 S4). AgentMemoryProjectionAuthorization's authorized result carries the grant's optional sealing { scopeId, epoch } (AgentMemoryProjectionSealing), and InMemoryAgentMemoryProjectionAuthorizer.grant takes it. The cloud refuses a snapshot whose form does not match its grant with 409 agent_memory_projection_sealing_mismatch. AgentMemoryProjectionCommitInput is a union: a plaintext mutation with its decoded redactedBytes, or a sealed mutation with none, which the store keeps as received and meters by padded length; a Host that implements its own AgentMemoryProjectionStore handles both. Postgres migration 0037 adds the sealed member to the head and contentMac and padded length to the receipt, with one-form checks, and rewrites no data.",
       "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
       "items": [
+        "export:@byok-sdk/cloud#AgentMemoryProjectionAuthorization",
         "export:@byok-sdk/cloud#AgentMemoryProjectionCommitInput",
-        "export:@byok-sdk/cloud#AgentMemoryProjectionStore",
-        "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
-        "export:@byok-sdk/cloud-dataplane#PostgresAgentMemoryProjectionStore",
-        "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStore"
+        "export:@byok-sdk/cloud#AgentMemoryProjectionSealing",
+        "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionAuthorizer"
       ]
     },
     {
@@ -268,14 +267,19 @@
       "entry": "dsh-adapter"
     },
     {
-      "item": "export:@byok-sdk/cloud#AgentMemoryProjectionCommitInput",
+      "item": "export:@byok-sdk/cloud#AgentMemoryProjectionAuthorization",
       "change": "changed",
-      "entry": "plaintext-memory-projection-hosts"
+      "entry": "cloud-sealed-memory-projection"
     },
     {
-      "item": "export:@byok-sdk/cloud#AgentMemoryProjectionStore",
+      "item": "export:@byok-sdk/cloud#AgentMemoryProjectionCommitInput",
       "change": "changed",
-      "entry": "plaintext-memory-projection-hosts"
+      "entry": "cloud-sealed-memory-projection"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentMemoryProjectionSealing",
+      "change": "added",
+      "entry": "cloud-sealed-memory-projection"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentMessageConsumeInput",
@@ -323,9 +327,9 @@
       "entry": "task-events-wake"
     },
     {
-      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionAuthorizer",
       "change": "changed",
-      "entry": "plaintext-memory-projection-hosts"
+      "entry": "cloud-sealed-memory-projection"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryCloudComposition",
@@ -408,11 +412,6 @@
       "entry": "approval-timeline-closes-with-task"
     },
     {
-      "item": "export:@byok-sdk/cloud-dataplane#PostgresAgentMemoryProjectionStore",
-      "change": "changed",
-      "entry": "plaintext-memory-projection-hosts"
-    },
-    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
       "change": "changed",
       "entry": "approval-timeline-closes-with-task"
@@ -446,11 +445,6 @@
       "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
       "change": "added",
       "entry": "task-events-wake"
-    },
-    {
-      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStore",
-      "change": "changed",
-      "entry": "plaintext-memory-projection-hosts"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore",
@@ -651,7 +645,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=34 last=0034_activity_log.sql sha256=4c4c6101f62a0fd8",
-      "after": "migrations=36 last=0036_task_events_wake.sql sha256=a19ee4a174cd329c",
+      "after": "migrations=37 last=0037_agent_memory_projection_sealed.sql sha256=90707df3bd89ebed",
       "entry": "task-output-closes-at-terminal"
     },
     {

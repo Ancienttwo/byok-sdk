@@ -1050,8 +1050,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       { method: 'POST', path: BYOK_AGENT_MEMORY_PROJECTIONS_PATH, class: 'device' },
       agentMemoryProjectionHandler({
         ...deviceRouteDeps,
-        commit: (stores, deviceId, mutation, redactedBytes) =>
-          agentMemoryApi.commitAgentMemoryProjectionFromStores(stores, deviceId, mutation, redactedBytes),
+        commit: (stores, deviceId, submission) =>
+          agentMemoryApi.commitAgentMemoryProjectionFromStores(stores, deviceId, submission),
       }),
     );
   }

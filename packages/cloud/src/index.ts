@@ -96,6 +96,7 @@ export type {
   AgentMemoryProjectionMeteringReceipt,
   AgentMemoryProjectionMutation,
   AgentMemoryProjectionReceipt,
+  AgentMemoryProjectionSealing,
   AgentMemoryProjectionStore,
 } from './agent-memory-projection';
 

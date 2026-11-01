@@ -162,6 +162,12 @@ export const CLOUD_ERROR_CODES = {
   agent_memory_projection_epoch_exhausted: 'agent_memory_projection_epoch_exhausted',
   /** A hosted memory mutation skipped or reset a required source sequence. */
   agent_memory_projection_sequence_gap: 'agent_memory_projection_sequence_gap',
+  /**
+   * A hosted memory mutation's form did not match its grant (#1045 C4): a
+   * plaintext snapshot under a grant with `sealing`, a sealed one under a grant
+   * without it, or a sealed one under another scope or epoch.
+   */
+  agent_memory_projection_sealing_mismatch: 'agent_memory_projection_sealing_mismatch',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

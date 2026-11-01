@@ -604,7 +604,7 @@ export declare function recordAgentHomeProjectionCompletion(receipts: TenantBoun
  * import, merge, history, RAG, or product-fact surface.
  */
 import type { TenantId } from '@byok-sdk/core';
-import { type AgentMemoryProjectionMutation, type AgentMemoryProjectionPlainMutation, type AgentMemoryProjectionPlainReceipt, type AgentMemoryProjectionEraseResult } from '@byok-sdk/protocol';
+import { type AgentMemoryProjectionMutation, type AgentMemoryProjectionPlainMutation, type AgentMemoryProjectionReceipt, type AgentMemoryProjectionSealedMutation, type AgentMemoryProjectionEraseResult } from '@byok-sdk/protocol';
 export type { AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from '@byok-sdk/protocol';
 export interface AgentMemoryProjectionAuthorizerInput {
     readonly tenantId: TenantId;
@@ -618,8 +618,18 @@ export interface AgentMemoryProjectionAuthorizerInput {
     readonly writerEpoch: AgentMemoryProjectionMutation['writerEpoch'];
     readonly policyRevision: AgentMemoryProjectionMutation['policyRevision'];
 }
+/** The Agent memory scope a grant seals its snapshots under (#1045 C4). */
+export interface AgentMemoryProjectionSealing {
+    readonly scopeId: string;
+    readonly epoch: number;
+}
+/**
+ * An authorized result carries the `sealing` of the grant the Host issued:
+ * the authorizer is the authority for which form the snapshot must take.
+ */
 export type AgentMemoryProjectionAuthorization = {
     readonly outcome: 'authorized';
+    readonly sealing?: AgentMemoryProjectionSealing;
 } | {
     readonly outcome: 'denied';
     readonly reasonCode: string;
@@ -640,24 +650,36 @@ export interface AgentMemoryProjectionAuthorizer {
         readonly agentId: string;
     }): Promise<void>;
 }
-/** Input to the durable projection store. `redactedBytes` has already been decoded from the portable base64url body. */
-export interface AgentMemoryProjectionCommitInput {
+/**
+ * Input to the durable projection store. A plaintext snapshot carries
+ * `redactedBytes`, already decoded from the portable base64url body. A sealed
+ * snapshot carries only its sealed member, stored as received: the Host never
+ * holds its plaintext or a plaintext hash.
+ */
+export type AgentMemoryProjectionCommitInput = {
     readonly tenantId: TenantId;
     readonly deviceId: string;
     readonly mutation: AgentMemoryProjectionPlainMutation;
     readonly redactedBytes: Uint8Array;
-}
+} | {
+    readonly tenantId: TenantId;
+    readonly deviceId: string;
+    readonly mutation: AgentMemoryProjectionSealedMutation;
+    readonly redactedBytes?: never;
+};
 /**
  * Durable hosted snapshot and immutable metering receipt authority.
  *
- * `commit` must hash the supplied bytes and compare them with the portable
- * redacted hash before every write. It accepts a new epoch only at sourceSeq
+ * For a plaintext snapshot, `commit` must hash the supplied bytes and compare
+ * them with the portable redacted hash before every write; a sealed snapshot
+ * is stored and metered by its padded length. An exact replay compares the
+ * sealed member's `contentMac` and `paddedLength`. It accepts a new epoch only at sourceSeq
  * one, accepts same-epoch writes only gap-free, returns `idempotent` for an
  * exact replay, and rejects stale/gap/binding/hash mismatches. The accepted
  * snapshot and its metering receipt share one transaction boundary.
  */
 export interface AgentMemoryProjectionStore {
-    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionPlainReceipt>;
+    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt>;
     /**
      * Server-side deletion leaves a body-free epoch fence. The host must mint a
      * later writer grant from `nextWriterEpoch`; no device/runtime is required.
@@ -2929,6 +2951,12 @@ export declare const CLOUD_ERROR_CODES: {
     readonly agent_memory_projection_epoch_exhausted: 'agent_memory_projection_epoch_exhausted';
     /** A hosted memory mutation skipped or reset a required source sequence. */
     readonly agent_memory_projection_sequence_gap: 'agent_memory_projection_sequence_gap';
+    /**
+     * A hosted memory mutation's form did not match its grant (#1045 C4): a
+     * plaintext snapshot under a grant with `sealing`, a sealed one under a grant
+     * without it, or a sealed one under another scope or epoch.
+     */
+    readonly agent_memory_projection_sealing_mismatch: 'agent_memory_projection_sealing_mismatch';
 };
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];
 export declare class ByokCloudError extends Error {
@@ -3269,7 +3297,7 @@ export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/
 export { ByokCloudError, CLOUD_ERROR_CODES, DeviceRetiredError, TaskOfferAppendRefusedError, isCloudError } from './errors';
 export type { CloudErrorCode } from './errors';
 export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
-export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
+export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionSealing, AgentMemoryProjectionStore, } from './agent-memory-projection';
 export type { TaskArchiveCounts, TaskArchiveListInput, TaskArchiveStepCounts, TaskArchiveStore, TaskArchiveStoreInput, TaskArchiveStoreResult, TaskArchiveWork, } from './task-archive';
 export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
@@ -3675,8 +3703,8 @@ export declare class InMemoryAgentEgressStore implements AgentEgressStore {
 // ==== @byok-sdk/cloud dist/stores/in-memory/agent-memory-projection.d.ts ====
 /** In-memory conformance implementation for the one-way hosted memory projection ports. */
 import type { Clock, TenantId } from '@byok-sdk/core';
-import { type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionPlainReceipt } from '@byok-sdk/protocol';
-import type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionStore } from '../../agent-memory-projection';
+import { type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionReceipt } from '@byok-sdk/protocol';
+import type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionSealing, AgentMemoryProjectionStore } from '../../agent-memory-projection';
 import type { CloudCrypto } from '../../crypto/port';
 /**
  * Reference transaction semantics: current snapshot bytes and immutable
@@ -3686,7 +3714,7 @@ import type { CloudCrypto } from '../../crypto/port';
 export declare class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjectionStore {
     #private;
     constructor(clock: Clock, crypto: CloudCrypto);
-    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionPlainReceipt>;
+    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt>;
     erase(input: {
         readonly tenantId: TenantId;
         readonly agentId: string;
@@ -3695,7 +3723,10 @@ export declare class InMemoryAgentMemoryProjectionStore implements AgentMemoryPr
 /** Test/reference authorizer whose grant registry demonstrates revocation without model booleans. */
 export declare class InMemoryAgentMemoryProjectionAuthorizer implements AgentMemoryProjectionAuthorizer {
     #private;
-    grant(input: AgentMemoryProjectionAuthorizerInput): void;
+    /** `sealing` names the Agent memory scope this grant's snapshots are sealed under (#1045 C4). */
+    grant(input: AgentMemoryProjectionAuthorizerInput & {
+        readonly sealing?: AgentMemoryProjectionSealing;
+    }): void;
     authorize(input: AgentMemoryProjectionAuthorizerInput): Promise<AgentMemoryProjectionAuthorization>;
     revoke(input: {
         readonly tenantId: TenantId;

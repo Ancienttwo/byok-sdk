@@ -11,8 +11,8 @@ import {
   type AgentMemoryProjectionMeteringReceipt,
   type AgentMemoryProjectionMutation,
   type AgentMemoryProjectionPlainMutation,
-  type AgentMemoryProjectionPlainReceipt,
   type AgentMemoryProjectionReceipt,
+  type AgentMemoryProjectionSealedMutation,
   type AgentMemoryProjectionEraseResult,
 } from '@byok-sdk/protocol';
 
@@ -36,8 +36,18 @@ export interface AgentMemoryProjectionAuthorizerInput {
   readonly policyRevision: AgentMemoryProjectionMutation['policyRevision'];
 }
 
+/** The Agent memory scope a grant seals its snapshots under (#1045 C4). */
+export interface AgentMemoryProjectionSealing {
+  readonly scopeId: string;
+  readonly epoch: number;
+}
+
+/**
+ * An authorized result carries the `sealing` of the grant the Host issued:
+ * the authorizer is the authority for which form the snapshot must take.
+ */
 export type AgentMemoryProjectionAuthorization =
-  | { readonly outcome: 'authorized' }
+  | { readonly outcome: 'authorized'; readonly sealing?: AgentMemoryProjectionSealing }
   | { readonly outcome: 'denied'; readonly reasonCode: string };
 
 /**
@@ -54,25 +64,39 @@ export interface AgentMemoryProjectionAuthorizer {
   revoke(input: { readonly tenantId: TenantId; readonly agentId: string }): Promise<void>;
 }
 
-/** Input to the durable projection store. `redactedBytes` has already been decoded from the portable base64url body. */
-export interface AgentMemoryProjectionCommitInput {
-  readonly tenantId: TenantId;
-  readonly deviceId: string;
-  readonly mutation: AgentMemoryProjectionPlainMutation;
-  readonly redactedBytes: Uint8Array;
-}
+/**
+ * Input to the durable projection store. A plaintext snapshot carries
+ * `redactedBytes`, already decoded from the portable base64url body. A sealed
+ * snapshot carries only its sealed member, stored as received: the Host never
+ * holds its plaintext or a plaintext hash.
+ */
+export type AgentMemoryProjectionCommitInput =
+  | {
+    readonly tenantId: TenantId;
+    readonly deviceId: string;
+    readonly mutation: AgentMemoryProjectionPlainMutation;
+    readonly redactedBytes: Uint8Array;
+  }
+  | {
+    readonly tenantId: TenantId;
+    readonly deviceId: string;
+    readonly mutation: AgentMemoryProjectionSealedMutation;
+    readonly redactedBytes?: never;
+  };
 
 /**
  * Durable hosted snapshot and immutable metering receipt authority.
  *
- * `commit` must hash the supplied bytes and compare them with the portable
- * redacted hash before every write. It accepts a new epoch only at sourceSeq
+ * For a plaintext snapshot, `commit` must hash the supplied bytes and compare
+ * them with the portable redacted hash before every write; a sealed snapshot
+ * is stored and metered by its padded length. An exact replay compares the
+ * sealed member's `contentMac` and `paddedLength`. It accepts a new epoch only at sourceSeq
  * one, accepts same-epoch writes only gap-free, returns `idempotent` for an
  * exact replay, and rejects stale/gap/binding/hash mismatches. The accepted
  * snapshot and its metering receipt share one transaction boundary.
  */
 export interface AgentMemoryProjectionStore {
-  commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionPlainReceipt>;
+  commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt>;
   /**
    * Server-side deletion leaves a body-free epoch fence. The host must mint a
    * later writer grant from `nextWriterEpoch`; no device/runtime is required.
