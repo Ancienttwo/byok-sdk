@@ -25,7 +25,7 @@ import { assertRuntimeEnvironmentPolicy, buildAllowlistedEnv, buildRuntimeEnviro
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import { classifyDetectError } from '../detect-outcome';
 import type { ResolvedBin } from '../codex/resolve-bin';
-import { AcpConnection, AcpMethodNotFound, AcpRpcError } from './acp-connection';
+import { AcpConnection, AcpMethodNotFound, AcpRpcError } from '../../runtime/acp-connection';
 import { identifyHermesGateway, servesHermesHome, type HermesGatewayIdentity, type IdentifyHermesGatewayOptions } from './gateway-identity';
 import { mayStopForeignHermesGateway, ownsHermesGatewayPid } from './gateway-ownership';
 import {
@@ -297,7 +297,7 @@ export class HermesAdapter implements RuntimeAdapter {
       const connection = new AcpConnection(child, {
         notification: () => {},
         request: (method) => { throw new AcpMethodNotFound(method); },
-      });
+      }, 'Hermes');
       child.onExit(() => connection.close(new Error('hermes acp exited during the probe')));
       const result = await withDeadline(
         connection.request('initialize', INITIALIZE_PARAMS),

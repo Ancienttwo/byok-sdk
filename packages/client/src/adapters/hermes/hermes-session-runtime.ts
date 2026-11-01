@@ -5,7 +5,7 @@ import type { Session, PolicyUnsupportedError, SteerUnsupportedError } from '../
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import type { RuntimeExecutionFailure, RuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import type { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
-import type { AcpConnection, AcpMethodNotFound, AcpRpcError } from './acp-connection';
+import type { AcpConnection, AcpMethodNotFound, AcpRpcError } from '../../runtime/acp-connection';
 import type { identifyHermesGateway, servesHermesHome } from './gateway-identity';
 import type { ownsHermesGatewayPid } from './gateway-ownership';
 import type { removeHermesProfile } from './hermes-home';
@@ -100,7 +100,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
           if (method === 'session/request_permission') return { outcome: { outcome: 'cancelled' } };
           throw new AcpMethodNotFound(method);
         },
-      });
+      }, 'Hermes');
       void viewer.exited.then(() => this.exited('acp viewer'), (error) => this.fail(error));
       return this.connection;
     }

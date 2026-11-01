@@ -1,9 +1,8 @@
 /**
- * Newline-delimited JSON-RPC 2.0 peer for the ACP methods the Hermes adapter
- * uses: `initialize`, `session/new`, `session/set_mode`, `session/prompt`,
- * `session/cancel`, the `session/update` notification and the
- * `session/request_permission` reverse request. Hermes speaks ACP protocol
- * version 1 (Python `agent-client-protocol` 0.9.0).
+ * Newline-delimited JSON-RPC 2.0 peer for an ACP protocol version 1 agent the
+ * SDK drives over stdio: client requests such as `initialize`,
+ * `session/new` and `session/prompt`, agent notifications such as
+ * `session/update`, and agent requests such as `session/request_permission`.
  *
  * Every line on the agent's stdout must be one JSON-RPC message. A line that
  * is not throws to the owned line transport, which fails and disposes the
@@ -21,7 +20,7 @@ export interface AcpPeerHandlers {
   request(method: string, params: Record<string, unknown>): unknown;
 }
 
-/** A JSON-RPC error answer. `details` is Hermes's `data.details` reason code when present. */
+/** A JSON-RPC error answer. `details` is the agent's `data.details` reason code when present (Hermes sets one). */
 export class AcpRpcError extends Error {
   constructor(readonly method: string, readonly code: number, message: string, readonly details?: string) {
     super(`ACP ${method} failed (${code}): ${details ?? message}`);
@@ -44,7 +43,8 @@ export class AcpConnection {
   private readonly pending = new Map<number, { method: string; resolve(value: unknown): void; reject(error: Error): void }>();
   private closed?: Error;
 
-  constructor(private readonly transport: AcpLineTransport, private readonly handlers: AcpPeerHandlers) {
+  /** `peer` names the agent in protocol-violation errors, for example `Hermes`. */
+  constructor(private readonly transport: AcpLineTransport, private readonly handlers: AcpPeerHandlers, private readonly peer: string) {
     transport.onLine((line) => this.receive(line));
   }
 
@@ -83,13 +83,13 @@ export class AcpConnection {
     } catch {
       message = undefined;
     }
-    if (message === undefined || message.jsonrpc !== '2.0') throw new Error('Hermes ACP stdout carried a line that is not a JSON-RPC 2.0 message');
+    if (message === undefined || message.jsonrpc !== '2.0') throw new Error(`${this.peer} ACP stdout carried a line that is not a JSON-RPC 2.0 message`);
     const method = typeof message.method === 'string' ? message.method : undefined;
     const id = message.id;
     if (method === undefined) {
-      if (typeof id !== 'number') throw new Error('Hermes ACP response had no numeric request id');
+      if (typeof id !== 'number') throw new Error(`${this.peer} ACP response had no numeric request id`);
       const waiter = this.pending.get(id);
-      if (waiter === undefined) throw new Error(`Hermes ACP answered unknown request id ${id}`);
+      if (waiter === undefined) throw new Error(`${this.peer} ACP answered unknown request id ${id}`);
       this.pending.delete(id);
       const error = record(message.error);
       if (error === undefined) {
@@ -110,7 +110,7 @@ export class AcpConnection {
       this.handlers.notification(method, params);
       return;
     }
-    if (typeof id !== 'number' && typeof id !== 'string') throw new Error('Hermes ACP request had an invalid id');
+    if (typeof id !== 'number' && typeof id !== 'string') throw new Error(`${this.peer} ACP request had an invalid id`);
     let reply: Record<string, unknown>;
     try {
       reply = { result: this.handlers.request(method, params) ?? null };
