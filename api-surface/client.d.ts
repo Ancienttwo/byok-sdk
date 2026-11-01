@@ -880,7 +880,7 @@ import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './rpc-client';
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
-    /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores. Default inherit. Not a tool permission. */
+    /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores and the global default model selection. Default inherit. Not a tool permission. */
     agentUserContext?: 'inherit' | 'excluded';
     /** Agent RPC tasks only: explicit absolute local skill files/directories, including with excluded context. Default []. */
     agentSkillPaths?: readonly string[];

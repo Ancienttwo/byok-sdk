@@ -3,7 +3,7 @@ import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-
 import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAgentDir, type CreateAgentSessionOptions } from '@earendil-works/pi-coding-agent';
+import { getAgentDir, type CreateAgentSessionOptions, type InlineExtension } from '@earendil-works/pi-coding-agent';
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
@@ -204,7 +204,13 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   else if (process.connected) fail('an undeclared custody IPC channel is open');
   const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
   const { createTodoExtension } = await import('#byok-pi-todo-runtime');
-  const extensionFactories = [webExtension, createByokMcpExtension(config.mcp)];
+  // The bundled web access and todo are defaults for a Pi with neither. Pi
+  // leaves a replaceable extension out when another extension registers one of
+  // its tool, command or flag names, so the user's own install takes its place
+  // instead of failing the launch with a name conflict (#1295).
+  const extensionFactories: InlineExtension[] = [
+    { name: 'byok-web-access', factory: webExtension, replaceable: true }, createByokMcpExtension(config.mcp),
+  ];
   // pi-subagents is an installed dependency that reads its own package files at
   // run time, so a bundled product has no subagents (the sealed build drops this
   // branch). Under keys-profile a child session opens its own model runtime and
@@ -225,7 +231,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
       config.fileScope === null || config.toolAuthorization === null ? undefined : fileScopeExtension,
     ));
   }
-  extensionFactories.push(createTodoExtension(localeAnchor));
+  extensionFactories.push({ name: 'byok-todo', factory: createTodoExtension(localeAnchor), replaceable: true });
   if (fileScope !== undefined) {
     if (config.toolAuthorization === null) fail('file scope requires the auto tool-authorization gate');
     extensionFactories.push(createPiFileScopeExtension({ grant: fileScope, gate: config.toolAuthorization }));
