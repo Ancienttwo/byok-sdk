@@ -43,8 +43,8 @@ import {
  *    protocol version.
  * 3. v4 self-consistency. `golden/v4.envelopes.ndjson` and
  *    `golden/v4.http.ndjson` are append-only and the current decoder reads
- *    them exactly. `golden/v4.releases.json` registers 0.31.0 and 0.32.0 and
- *    has no floor yet.
+ *    them exactly. `golden/v4.releases.json` registers 0.31.0 and has no
+ *    floor yet.
  * 4. Published rejection oracle. `byok-protocol-previous` (0.30.2, the last
  *    v3 release) rejects every v4 corpus line and a v4 `conn.hello`: a v3
  *    peer cannot read v4 bytes. None of its bytes is v4 evidence.
