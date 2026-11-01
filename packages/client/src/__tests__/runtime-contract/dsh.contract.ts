@@ -1,7 +1,7 @@
 import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, expect } from 'vitest';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../../adapters/dsh/dsh-adapter';
 import { dshEnvironment } from '../../adapters/dsh/dsh-profile';
 import { QUALIFIED_DSH_VERSION } from '../../adapters/dsh/dsh-version';
@@ -9,7 +9,7 @@ import { setLoginShellSnapshotSource } from '../../login-shell-environment';
 import { TEST_LOGIN_SHELL_SNAPSHOT } from '../fixtures/runtime-env';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import {
-  baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, egressCheck, expectAuth,
+  baseEnv, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck, expectAuth,
   expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, withProcessEnv, writeSubmitResultServer,
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
@@ -225,19 +225,20 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await closed(); }),
 });
 
-describe(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, () => {
-  it('dsh.patch: every model request reaches the patch route and names the patch model', async () => {
+defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, {
+  'dsh.patch': ['every model request reaches the patch route and names the patch model', check(async () => {
     const { provider } = await contractTurn();
     const models = provider.requests.filter(request => request.model);
     expect(models.length).toBeGreaterThan(0);
     for (const request of models) expect(JSON.parse(request.text).model).toBe(MODEL);
-  }, 180_000);
-  it('dsh.userSkills: the skill marker reaches the model from the adapter\'s DSH_AGENTS_HOME (positive control)', async () => {
+  })],
+  'dsh.userSkills': ['the skill marker reaches the model from the adapter\'s DSH_AGENTS_HOME (positive control)', check(async () => {
     expect((await skillControl()).saw(SKILL_MARKER)).toBe(true);
-  }, 180_000);
-  it('dsh.close: closing a session while its shell tool runs reaps the tool processes', async () => {
+  })],
+  'dsh.close': ['closing a session while its shell tool runs reaps the tool processes', check(async () => {
     const { survivors, diagnostic } = await closed();
     expect(survivors, diagnostic).toEqual([]);
-  }, 240_000);
-  it.skip('dsh.sigkill: skipped: known 0.33 limitation (#1269): after the dsh root is SIGKILLed from outside, its shell tools, each in its own process group, outlive the session', () => {});
+  }, 240_000)],
+  'dsh.sigkill': ['after the dsh root is SIGKILLed from outside, close() reaps its tool processes',
+    skip('known 0.33 limitation (#1269): dsh runs each shell tool in its own process group, which the owned process tree cannot reach once the root is killed from outside')],
 });

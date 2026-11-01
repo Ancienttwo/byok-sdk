@@ -108,6 +108,22 @@ export function defineRuntimeContract(title: string, descriptor: RuntimeAdapterD
   });
 }
 
+/**
+ * Register a runtime's own cases beside its contract, under the same rule as
+ * the shared plan: each case is a check or a skip with a reason.
+ */
+export function defineRuntimeCases(title: string, cases: Readonly<Record<string, readonly [description: string, entry: ContractCheck | ContractSkip]>>): void {
+  for (const [id, [, entry]] of Object.entries(cases)) {
+    if ('skip' in entry && entry.skip.trim() === '') throw new Error(`${title}: ${id} skip needs a reason`);
+  }
+  describe(title, () => {
+    for (const [id, [description, entry]] of Object.entries(cases)) {
+      if ('skip' in entry) it.skip(`${id}: skipped: ${entry.skip}`, () => {});
+      else it(`${id}: ${description}`, entry.run, entry.timeoutMs ?? 180_000);
+    }
+  });
+}
+
 /** Register every case as skipped for one reason that covers the whole runtime in this mode. */
 export function skipRuntimeContract(title: string, reason: string): void {
   describe(title, () => {
