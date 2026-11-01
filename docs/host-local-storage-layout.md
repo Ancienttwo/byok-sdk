@@ -184,6 +184,25 @@ expires after 30 days; a Host that reads it keeps it with
 `ttlMs['terminal-evidence']`. The never-populated `retired-namespace` class is
 gone.
 
+### K4 Host ledger
+
+The K4 Host ledger (`HostLedger` in `@byok-sdk/server/execution-core`) is a separate
+Host SQLite database, not an SDK retention class. It declares no total bound. The
+10k-task soak (#1105) asserts only what the code guarantees:
+
+- `ignoredWakes` never exceeds 128 entries (`IGNORED_WAKE_AUDIT_LIMIT`).
+- `HostLedger.compact` leaves no intent, execution, occurrence, slot, outbox, applied
+  or application row of the compacted tasks, and the JSON body shrinks.
+
+Known limit, measured and not asserted: nothing compacts the ledger on its own. The
+Host calls `compact` with the intent keys it has acknowledged, and each compacted
+caller intent leaves an identity tombstone with no expiry, so that table grows with the
+number of compacted intents for the life of the database. The soak measures 112 serialized
+bytes per compacted intent (the `host_retired_identity` row as JSON), before SQLite page and
+index overhead. Application tombstones are written per applied task but expire with the
+compaction window. Changing tombstone expiry changes replay dedup and is a separate owner
+decision. See [Host execution core](host-execution-core.md).
+
 ## Responsibility matrix
 
 | Concern | BYOK SDK | Salesko / embedding host |
