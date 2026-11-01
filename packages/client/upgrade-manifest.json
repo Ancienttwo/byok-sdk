@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.33.0",
-    "snapshotSha256": "3e6071f71ac1a7c47fe7907ced28f9331e22238e23433be1cb3370cd8a56ad17"
+    "snapshotSha256": "903fad9f85d20705a0a1d11a59cd923398596db5fdbae8547859d11c859285d9"
   },
   "configFields": {
     "status": "tracked",
@@ -225,6 +225,44 @@
         "config:agentMemory",
         "export:@byok-sdk/client#AgentMemoryProjectionGrant"
       ]
+    },
+    {
+      "id": "wire-v5-durable-lane",
+      "impact": "breaking",
+      "summary": "The envelope wire is v5 (PROTOCOL_VERSION = 5). The runtime capability durablePi is renamed durableLane (the durable worker lane, Pi today) in RuntimeCapabilitiesSchema, so on conn.hello runtimes and harnesses, task.claim, presence and PresenceRuntimeCapabilities; nothing else on the wire changes. There is no v4 reader and no negotiation: drain the 0.32.0 deployment (pending mailbox rows acknowledged, executions terminal, daemon pending terminals acknowledged), then start the server side and the daemons together. A pending v4 row stops startup with SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED or DaemonJournalProtocolUnsupportedError and is left unchanged; retained rows open, so the stores need not be new. A hosted terminal receipt written by a v4 build no longer decodes (terminal_receipt_unreadable), so read the results you still need before the cut.",
+      "migration": "docs/releases/host-upgrade-0.33.0.md#wire-protocol",
+      "items": [
+        "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+        "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+        "export:@byok-sdk/protocol#HarnessInfoSchema",
+        "export:@byok-sdk/protocol#HarnessInventorySchema",
+        "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+        "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+        "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+        "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+        "export:@byok-sdk/protocol#RuntimeInfoSchema",
+        "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+        "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION"
+      ]
+    },
+    {
+      "id": "runtime-generic-names",
+      "impact": "breaking",
+      "summary": "Runtime names are generic. DaemonConfig.durablePi is removed and raises DaemonConfigFieldRemovedError: set runtimes.pi.durableLane. PiAdapterOptions.durablePi and RuntimeCapabilities.durablePi are durableLane. The daemon wires the durable journal and durableContext from an adapter's capabilities.durableLane, so a Host that builds PiAdapter({ durableLane: true }) for createDaemonWithAdapters needs no daemon option, and such an adapter without an Agent home refuses to start. The launch resources are the new RuntimeLaunchResources (scratch, release()): RuntimeOperationStartInput.runtimeLaunch and PreparedRuntimeOperation.resolveRuntimeLaunch use it instead of the Pi type, which extends it.",
+      "migration": "docs/device-setup.md#removed-fields",
+      "items": [
+        "config:durablePi",
+        "export:@byok-sdk/client#PiAdapterOptions",
+        "export:@byok-sdk/client#PreparedRuntimeOperation",
+        "export:@byok-sdk/client#RuntimeCapabilities",
+        "export:@byok-sdk/client#RuntimeLaunchResources",
+        "export:@byok-sdk/client#RuntimeOperationStartInput",
+        "export:@byok-sdk/client/adapters#PiAdapterOptions",
+        "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
+        "export:@byok-sdk/client/adapters#RuntimeCapabilities",
+        "export:@byok-sdk/client/adapters#RuntimeLaunchResources",
+        "export:@byok-sdk/client/adapters#RuntimeOperationStartInput"
+      ]
     }
   ],
   "changes": [
@@ -236,10 +274,16 @@
       "entry": "agent-memory-projection-grant-sealing"
     },
     {
+      "item": "config:durablePi",
+      "change": "removed",
+      "before": "optional schema-sha256=7cb541e84f226754",
+      "entry": "runtime-generic-names"
+    },
+    {
       "item": "config:runtimes",
       "change": "changed",
       "before": "optional schema-sha256=a433ba0fb0c2e2f1",
-      "after": "optional schema-sha256=278bbd8285f89b7a",
+      "after": "optional schema-sha256=9f4e9eb2caa55a95",
       "entry": "daemon-config-runtimes-grok"
     },
     {
@@ -278,6 +322,16 @@
       "entry": "adapter-admission-declarations"
     },
     {
+      "item": "export:@byok-sdk/client#PiAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-generic-names"
+    },
+    {
+      "item": "export:@byok-sdk/client#PreparedRuntimeOperation",
+      "change": "changed",
+      "entry": "runtime-generic-names"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeAdapter",
       "change": "changed",
       "entry": "adapter-admission-declarations"
@@ -286,6 +340,21 @@
       "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
       "change": "changed",
       "entry": "adapter-admission-declarations"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeCapabilities",
+      "change": "changed",
+      "entry": "runtime-generic-names"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeLaunchResources",
+      "change": "added",
+      "entry": "runtime-generic-names"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "runtime-generic-names"
     },
     {
       "item": "export:@byok-sdk/client/adapters#DshAdapter",
@@ -313,6 +382,16 @@
       "entry": "adapter-admission-declarations"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-generic-names"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
+      "change": "changed",
+      "entry": "runtime-generic-names"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapter",
       "change": "changed",
       "entry": "adapter-admission-declarations"
@@ -321,6 +400,21 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
       "change": "changed",
       "entry": "adapter-admission-declarations"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeCapabilities",
+      "change": "changed",
+      "entry": "runtime-generic-names"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeLaunchResources",
+      "change": "added",
+      "entry": "runtime-generic-names"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "runtime-generic-names"
     },
     {
       "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",
@@ -513,6 +607,11 @@
       "entry": "approval-timeline-closes-with-task"
     },
     {
+      "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
+    },
+    {
       "item": "export:@byok-sdk/protocol#AgentMemoryProjectionCommitRequestSchema",
       "change": "changed",
       "entry": "sealed-payload-v2-protocol"
@@ -613,6 +712,36 @@
       "entry": "task-fail-quota-scope"
     },
     {
+      "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInfoSchema",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInventorySchema",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
+    },
+    {
       "item": "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPES",
       "change": "added",
       "entry": "task-fail-quota-scope"
@@ -621,6 +750,16 @@
       "item": "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPE_CAPABILITY",
       "change": "added",
       "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeInfoSchema",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
     },
     {
       "item": "export:@byok-sdk/protocol#RuntimeQuotaScope",
@@ -656,6 +795,11 @@
       "item": "export:@byok-sdk/protocol#SealedSplitEntry",
       "change": "changed",
       "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
     },
     {
       "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
@@ -711,6 +855,11 @@
       "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
       "change": "changed",
       "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v5-durable-lane"
     },
     {
       "item": "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPES",
