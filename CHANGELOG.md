@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+## 0.32.0 — 2026-11-01 (published)
+
+0.32.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.31.0 to 0.32.0) lists every
+Host-visible change since 0.31.0: 28 breaking and 19 additive entries, each
+with a migration link. Many changes in this release are recorded only there,
+so read the manifest together with the entries below. The envelope wire stays
+v4. It adds Postgres migrations 0031 to 0034, and the embedded server upgrades
+a SQLite schema 6 file to schema 7 in place. Migration 0034 drops
+`activity_tail` and starts an empty activity log with no pre-cutover history
+([cutover runbook](deploy/runbooks/activity-tail-cutover.md)); 0.32.0 carries
+the A1+A2a part of #1113, and A2b and A3 to A5 move to 0.33 (see the [0.32.0
+release notes](docs/releases/v0.32.0.md)). The breaking changes by package:
+protocol bounds and redacts `task.fail` reasons (#1124), opens the device
+vocabularies a newer device may extend and makes `MessagesSendRequestSchema`
+validate the frame only (#1121), removes `BYOK_ACTIVITY_PATH` (#1113), and
+becomes the only home of the Agent memory contract at
+`@byok-sdk/protocol/agent-memory` (#1106); client loads the upstream
+pi-subagents 0.83.1 package, makes tool-authorization approval Host-only
+(#1101), validates `DaemonConfig` against its schema and removes
+`DeviceStore.defaultDir` (#1094), binds a `storeDir` to the enrollment it
+paired (#1094), requires `expiresIn` on pair and token responses (#1114),
+bounds every retention class (#1105), caps concurrent tasks and halts on an
+unreadable cursor (#1121), stops inheriting the daemon's environment
+(#1095), makes the path-mutation gate an OS lock (#1149), makes service units
+one library API (#1097) and makes `toolAuthorization` one policy document
+(#1061); cloud changes the activity read contract and removes
+`POST /byok/activity` (#1113), refuses an undeclared capability port (#1096),
+changes `InboundRateLimiter` to one per-device route budget (#1118), adds
+the dead-letter retention and terminal task archive policy fields and the
+`taskArchive` port (#1115, #1120), requires `proofReceiptRetention` (#1120),
+settles a retired device's tasks (#1119) and closes its mailbox stream
+(#1160); cloud-dataplane requires `rateLimit` on `createPostgresCloudStores`
+(#1118); server publishes the K4 Host execution core as
+`@byok-sdk/server/execution-core` (#1106), drops `SQLITE_MIGRATION_REFUSED`
+(#1096) and writes SQLite schema 7, which an earlier build cannot open
+(#1160); ui-runtime orders `TimelineOrderKey` by store revision and offset
+(#1113). The npm registry lists all nine public packages at 0.32.0 as
+`latest`, published on 2026-11-01 (UTC), and the registry readback of all
+nine passed. The release commit is `5f975955` on `main`, and the annotated tag
+`v0.32.0` and its GitHub Release point to it. This release does not say that
+0.32.0, or a Host on it, is ready for production.
+
 - **Security (build and test toolchain; #1122)** — clears the ten remaining
   lockfile advisories: `glob` 13.0.6 → 14.0.2 (GHSA-3g3m-2fjr-6pw4),
   `minimatch` 10.2.6 → 11.0.1 (GHSA-g3hv-75wg-m249) and `undici` 8.10.2 →
