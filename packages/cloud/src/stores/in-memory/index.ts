@@ -26,7 +26,7 @@ import { InMemoryTaskArchiveStore } from './task-archive';
 import { archiveAccessOf, type InMemoryMailboxArchiveAccess, type InMemoryObjectArchiveAccess } from './core-access';
 import { InMemoryTaskAttemptState, InMemoryTaskAttemptStore } from './task-attempts';
 import { InMemoryTaskCancellationStore } from './task-cancellations';
-import { InMemoryActivityStore, deleteActivityTail } from './activity';
+import { InMemoryActivityStore, closeActivityLog, deleteActivityTail } from './activity';
 import { InMemoryApprovalTimelineStore, deleteApprovalTimelineTail } from './approval-timeline';
 import { InMemoryAgentEgressStore } from './agent-egress';
 
@@ -92,12 +92,12 @@ export function createInMemoryCloudStores(
   taskArchive?: InMemoryTaskArchiveFactory,
 ): InMemoryCloudComposition {
   const blobs = createInMemoryBlobs(objects, objectBytes);
-  const taskState = new InMemoryTaskAttemptState(clock);
+  const activity = new InMemoryActivityStore(clock);
+  const approvals = new InMemoryApprovalTimelineStore(clock);
+  const taskState = new InMemoryTaskAttemptState(clock, (tenant, taskId, at) => closeActivityLog(activity, tenant, taskId, at));
   const tasks = new InMemoryTaskAttemptStore(clock, taskState);
   const devices = new InMemoryDeviceDirectory(taskState, mailbox);
   const pairing = new InMemoryPairingCodeStore(clock, devices);
-  const activity = new InMemoryActivityStore(clock);
-  const approvals = new InMemoryApprovalTimelineStore(clock);
   const agentMessageDraft = new InMemoryAgentMessageDraftStore(clock);
   const receipts = new InMemoryRequestReceiptStore(clock);
   const proofReceipts = new InMemoryProofRequestReceiptStore(clock);

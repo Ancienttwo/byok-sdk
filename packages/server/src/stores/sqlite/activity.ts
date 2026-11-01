@@ -47,6 +47,38 @@ CREATE TABLE activity_log_entry (
 CREATE INDEX activity_log_retained ON activity_log_entry (tenant_id, task_id, revision) WHERE body IS NOT NULL;
 `;
 
+/** The instant a task stops admitting output: its first terminal, or an accepted Host cancellation. */
+const CLOSED_AT = (row: string) => `COALESCE(${row}.terminal_at, ${row}.cancellation_requested_at)`;
+const DEADLINE = (at: string, ttlMs: string) => `strftime('%Y-%m-%dT%H:%M:%fZ', ${at}, printf('+%.3f seconds', ${ttlMs} / 1000.0))`;
+export const ACTIVITY_CLOSURE_TRIGGER_NAME = 'activity_log_output_closed';
+/**
+ * Whichever store writes it, the attempt update that first closes a task's
+ * output closes the task's activity log in the same transaction: admission
+ * ends and the terminal deadline is frozen (#1113 A3). A head is created when
+ * the task logged nothing, so a later append is refused too.
+ */
+export const ACTIVITY_CLOSURE_TRIGGER = `
+CREATE TRIGGER ${ACTIVITY_CLOSURE_TRIGGER_NAME}
+AFTER UPDATE OF status, terminal_at, cancellation_requested_at ON task_attempt
+WHEN ${CLOSED_AT('OLD')} IS NULL AND ${CLOSED_AT('NEW')} IS NOT NULL
+BEGIN
+  INSERT OR IGNORE INTO activity_log_head (tenant_id, task_id, generation) VALUES (NEW.tenant_id, NEW.task_id, lower(hex(randomblob(16))));
+  UPDATE activity_log_head SET terminal_at = ${CLOSED_AT('NEW')}, expires_at = ${DEADLINE(CLOSED_AT('NEW'), 'ttl_ms')}
+  WHERE tenant_id = NEW.tenant_id AND task_id = NEW.task_id AND terminal_at IS NULL AND removed = 0;
+END;`;
+/**
+ * Runs once, in the open that creates the log: a task whose output closed
+ * before the log existed gets a closed head at its original deadline, never a
+ * new ten minutes. A terminal task from before terminal_at was recorded closes
+ * at its last update.
+ */
+export const ACTIVITY_CLOSURE_BACKFILL = `
+INSERT OR IGNORE INTO activity_log_head (tenant_id, task_id, generation, terminal_at, expires_at)
+SELECT tenant_id, task_id, lower(hex(randomblob(16))), closed_at, ${DEADLINE('closed_at', String(ACTIVITY_TERMINAL_TTL_MS))}
+FROM (SELECT tenant_id, task_id, COALESCE(terminal_at, cancellation_requested_at,
+  CASE WHEN status IN ('complete', 'failed', 'cancelled') THEN updated_at END) AS closed_at FROM task_attempt)
+WHERE closed_at IS NOT NULL;`;
+
 /** The columns an existing file must hold; a missing table is refused, never recreated. */
 export const ACTIVITY_LOG_PROJECTIONS = [
   'tenant_id, task_id, generation, revision, floor, dropped, source_dropped, capacity, byte_capacity, retained_bytes, ttl_ms, terminal_at, expires_at, removed FROM activity_log_head',
@@ -155,7 +187,7 @@ function tail(db: DatabaseSync, head: Head, after = 0): ActivityTail {
 /**
  * Removes a task's activity content inside the caller's transaction, keeping a
  * removed head so a later append cannot recreate history. Returns 1 when live
- * (not already removed) history existed.
+ * (not already removed) history existed; a head closed with nothing logged held none.
  */
 export function removeActivityContent(db: DatabaseSync, tenant: TenantId, taskId: string): number {
   const created = insertHead(db, tenant, taskId);
@@ -164,7 +196,7 @@ export function removeActivityContent(db: DatabaseSync, tenant: TenantId, taskId
     .run(tenant, taskId);
   db.prepare('UPDATE activity_log_head SET removed = 1, floor = revision, retained_bytes = 0 WHERE tenant_id = ? AND task_id = ?')
     .run(tenant, taskId);
-  return !created && !head.removed ? 1 : 0;
+  return !created && !head.removed && head.revision > 0 ? 1 : 0;
 }
 
 /** Every operation is one coordinator transaction on the task head; no process-local replay state. */

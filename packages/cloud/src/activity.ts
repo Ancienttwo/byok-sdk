@@ -100,7 +100,8 @@ export interface ActivityStore {
   read(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
   /**
    * Freeze first terminal and final revision under the same task serialization as append.
-   * Durable adapters must enlist this boundary in the canonical lifecycle transaction (A3).
+   * A composition closes the log in the same commit as the task's first terminal or accepted
+   * Host cancellation; the built-in ones do it in that attempt write itself (#1113 A3).
    */
   settle(tenant: TenantId, taskId: string, terminalAt: string): Promise<ActivityTail>;
 }

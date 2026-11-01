@@ -89,7 +89,9 @@ const TASK_ARCHIVE_COLUMNS = ['archive_after', 'archived_at', 'archive_settled_a
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
 import { APPROVAL_TIMELINE_SCHEMA, SqliteApprovalTimelineStore } from './approval-timeline';
-import { ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore } from './activity';
+import {
+  ACTIVITY_CLOSURE_BACKFILL, ACTIVITY_CLOSURE_TRIGGER, ACTIVITY_CLOSURE_TRIGGER_NAME, ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore,
+} from './activity';
 import type { WakeStore } from '../../wakes/store';
 import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
@@ -288,6 +290,8 @@ class SqliteCoordinator {
       // openSqliteDatabase holds EXCLUSIVE ownership before this schema transaction.
       this.db.exec('BEGIN IMMEDIATE');
       try {
+        // Set when this open created the activity log, so the output closure is installed once with it.
+        let createdActivityLog = false;
         const hasMetadata = this.db
           .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
           .get();
@@ -298,6 +302,7 @@ class SqliteCoordinator {
           const firstStep = SCHEMA_UPGRADES.findIndex(([from]) => from === version?.value);
           if (firstStep >= 0) {
             for (const [, step] of SCHEMA_UPGRADES.slice(firstStep)) step(this.db);
+            createdActivityLog = true;
           } else if (version?.value !== SQLITE_SCHEMA_VERSION) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
               `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SCHEMA_UPGRADES.map(([from]) => from).join(' and ')} in place. ` +
@@ -323,6 +328,7 @@ class SqliteCoordinator {
           this.db.exec(WAKE_SCHEMA);
           this.db.exec(APPROVAL_TIMELINE_SCHEMA);
           this.db.exec(ACTIVITY_LOG_SCHEMA);
+          createdActivityLog = true;
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         assertProjection('claimed_harness_id FROM task_attempt');
@@ -358,6 +364,15 @@ class SqliteCoordinator {
             WHERE archive_after IS NULL AND status IN ('complete', 'failed', 'cancelled')`);
         }
         assertProjection(`${TASK_ARCHIVE_COLUMNS.join(', ')} FROM task_attempt`);
+        // The closure reads the phase columns, so it follows them. An upgraded
+        // file's already-closed tasks keep their original deadline.
+        if (createdActivityLog) {
+          this.db.exec(ACTIVITY_CLOSURE_TRIGGER);
+          this.db.exec(ACTIVITY_CLOSURE_BACKFILL);
+        }
+        if (this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(ACTIVITY_CLOSURE_TRIGGER_NAME) === undefined) {
+          throw schemaError('SQLITE_SCHEMA_INVALID', 'Missing BYOK SQLite activity output closure');
+        }
         assertProjection('tenant_id, wake_id, dedup_key, available_at, payload, state, due_at, retry_at, deliveries, last_error, done_at FROM wake');
         if (wake === undefined && this.db.prepare("SELECT 1 FROM wake WHERE state = 'queued' LIMIT 1").get() !== undefined) {
           throw new WakeHookMissingError();

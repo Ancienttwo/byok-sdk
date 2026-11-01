@@ -37,6 +37,7 @@ import { runBlobConformance } from './blobs';
 import { runCloudTenantIsolationConformance } from './tenant-isolation';
 import { runDeviceRetirementConformance } from './device-retirement';
 import { runTaskArchiveConformance } from './task-archive';
+import { runTaskOutputClosureConformance } from './task-output-closure';
 
 /**
  * The cloud-local ports this suite certifies.
@@ -354,5 +355,6 @@ export function runCloudConformance(name: string, factory: CloudCompositionFacto
     runDeviceRetirementConformance(factory);
     runCloudRetentionConformance(name, factory);
     runTaskArchiveConformance(factory);
+    runTaskOutputClosureConformance(factory);
   });
 }

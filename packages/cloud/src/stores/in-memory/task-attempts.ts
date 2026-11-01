@@ -320,9 +320,34 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
   }
 }
 
+/** The instant a task stops admitting output: its first terminal, or an accepted Host cancellation. */
+function outputClosedAt(attempt: TaskAttempt): string | undefined {
+  return attempt.terminalAt ?? attempt.cancellation?.requestedAt;
+}
+
+/**
+ * Every attempt write goes through `set`, so the write that first closes a
+ * task's output also closes its logs, in the same synchronous step: the
+ * in-memory stand-in for the SQL stores' trigger (#1113 A3).
+ */
+class AttemptMap extends Map<string, TaskAttempt> {
+  readonly #closed: ((tenant: TenantId, taskId: string, at: string) => void) | undefined;
+  constructor(closed: ((tenant: TenantId, taskId: string, at: string) => void) | undefined) {
+    super();
+    this.#closed = closed;
+  }
+  override set(key: string, attempt: TaskAttempt): this {
+    const before = this.get(key);
+    super.set(key, attempt);
+    const at = outputClosedAt(attempt);
+    if (at !== undefined && (before === undefined || outputClosedAt(before) === undefined)) this.#closed?.(attempt.tenantId, attempt.taskId, at);
+    return this;
+  }
+}
+
 /** Shared mutable state for the task and cancellation reference ports. */
 export class InMemoryTaskAttemptState {
-  readonly attempts = new Map<string, TaskAttempt>();
+  readonly attempts: Map<string, TaskAttempt>;
   readonly messageAdmissions = new Map<string, StoredAgentMessageAdmission>();
   /** `archive_settled_at` of archived tasks (#1120), by tenant/task key. */
   readonly archiveSettled = new Map<string, string>();
@@ -331,8 +356,10 @@ export class InMemoryTaskAttemptState {
   /** Settles when the exclusive section in progress (or queued last) ends. */
   #exclusiveTail: Promise<void> = Promise.resolve();
 
-  constructor(clock: Clock) {
+  /** `outputClosed` runs synchronously in the write that first closes a task's output. */
+  constructor(clock: Clock, outputClosed?: (tenant: TenantId, taskId: string, at: string) => void) {
     this.#clock = clock;
+    this.attempts = new AttemptMap(outputClosed);
   }
 
   now(): string {

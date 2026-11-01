@@ -1985,6 +1985,12 @@ the deployment migration stops old writers and waits one full activity TTL
 before enabling the typed reader and writer; expired hints are discarded rather
 than translated into new semantics.
 
+A task's log closes in the same commit as the attempt write that first closes
+the task's output: its first terminal, or an accepted Host cancellation, also
+of a claimed task. Later progress and artifacts are refused with
+`task_settled_by_cloud`, the log expires ten minutes after that instant, and no
+read, replay or later terminal renews it (#1113 A3).
+
 Unknown event types retain their original event index and render as neutral
 placeholders. Known but malformed variants fail closed. Each `progress.text`
 remains an ordered fragment. The fold may group adjacent fragments for view

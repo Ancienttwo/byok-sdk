@@ -113,3 +113,48 @@ The terminal-task archive now removes activity content inside its transaction
 (a rollback restores it) and keeps a removed head, so a later read with a
 cursor reports `activity_history_gap` and a later append is refused. Canonical
 lifecycle atomicity remains A3 work, and cross-process invalidation A4.
+
+## Task output closure (A3)
+
+A task's activity log now closes in the same commit as the attempt write that
+first closes the task's output. That write is either:
+- the task's first terminal (a device terminal, an abandonment, or a device
+  retirement);
+- an accepted Host cancellation, also for a claimed task still in
+  `cancel_requested`.
+
+From then on:
+
+- **Late output is refused.** A `task.progress` or `task.artifact` that arrives
+  after the close is refused with `task_settled_by_cloud`. A redacted or
+  archived task gets the same answer, so removing content no longer changes
+  it. Before this, late output was stored, or on a redacted task completed as
+  received.
+- **The deadline is frozen.** The log expires ten minutes after the closing
+  instant. Reads, replays and later terminals never renew it, and an active
+  task's log still never idle-expires.
+- **A task that logged nothing is closed too.** `readActivity` returns an empty
+  log carrying `terminalAt` and `expiresAt` where it used to return
+  `undefined`. Removal counts (`ephemeralRowsDeleted`) count only a log that
+  held history.
+
+The built-in compositions do this at the storage boundary:
+- Postgres: the trigger that migration 0035 adds on `task`;
+- SQLite: the same trigger, created with the v8 schema;
+- in-memory: the attempt state.
+
+So every lifecycle path closes the log, bulk retirement included. Under that
+trigger, Postgres locks the task row before its head, the same order as
+redaction and the archive; append locks only the head. A custom composition
+must close its activity log in the same commit as its first terminal or
+accepted cancellation, for example with `ActivityStore.settle`.
+
+Upgrading closes the log of every task whose output had already closed, at its
+original deadline, never a new ten minutes:
+- Postgres: 0035 runs a one-shot backfill;
+- SQLite: the open that creates the v8 log runs it.
+
+A terminal task from before `terminal_at` was recorded closes at its last
+update. A v8 SQLite file without the closure trigger is refused as
+`SQLITE_SCHEMA_INVALID`. Deploying the code before 0035 is safe, but output
+admission stays open until 0035 runs.

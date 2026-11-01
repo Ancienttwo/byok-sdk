@@ -322,10 +322,11 @@ export async function rewriteTaskBodies(
     'INSERT INTO activity_log_head (tenant_id, task_id, removed) VALUES ($1, $2, true) ON CONFLICT DO NOTHING RETURNING task_id',
     [tenant, taskId],
   );
-  const head = await client.query<{ removed: boolean }>(
-    'SELECT removed FROM activity_log_head WHERE tenant_id = $1 AND task_id = $2 FOR UPDATE', [tenant, taskId],
+  const head = await client.query<{ removed: boolean; revision: bigint }>(
+    'SELECT removed, revision FROM activity_log_head WHERE tenant_id = $1 AND task_id = $2 FOR UPDATE', [tenant, taskId],
   );
-  let ephemeralRowsDeleted = createdHead.rowCount === 0 && head.rows[0]?.removed === false ? 1 : 0;
+  // A head closed with nothing logged held no history.
+  let ephemeralRowsDeleted = createdHead.rowCount === 0 && head.rows[0]?.removed === false && head.rows[0].revision > 0n ? 1 : 0;
   await client.query(
     'UPDATE activity_log_entry SET body = NULL, byte_size = 0 WHERE tenant_id = $1 AND task_id = $2 AND body IS NOT NULL', [tenant, taskId],
   );

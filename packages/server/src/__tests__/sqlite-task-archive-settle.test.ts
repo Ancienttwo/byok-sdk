@@ -65,10 +65,11 @@ describeSqlite('SQLite terminal-task archive, its activity log and its in-memory
     const work = () => taskArchive.listWork(TENANT, { archiveBefore: LATER, limit: 10 });
     try {
       await tasks.open(TENANT, { taskId: TASK, deviceId: 'device' });
-      await tasks.recordStatus(TENANT, { taskId: TASK, status: 'complete' });
-      await receipts.record(TENANT, { key: TERMINAL_KEY, body: TERMINAL_BODY });
+      // Activity is admitted only before the terminal closes the task's output (#1113 A3).
       await activity.append(TENANT, { taskId: TASK, sourceEnvelopeId: 'source', batchSeq: 1,
         events: [{ type: 'progress', text: 'kept until archived' }], dropped: 0, ttlMs: 300_000 });
+      await tasks.recordStatus(TENANT, { taskId: TASK, status: 'complete' });
+      await receipts.record(TENANT, { key: TERMINAL_KEY, body: TERMINAL_BODY });
       expect(await agentMessageDraft.apply(TENANT, { taskId: TASK, deviceId: 'device', agentRef: AGENT_REF, revision: 1,
         offset: 0, text: 'draft', maxBytes: 16, now: clock.now().toISOString() })).toBe('applied');
 

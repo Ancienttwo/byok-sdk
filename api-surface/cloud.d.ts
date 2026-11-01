@@ -263,7 +263,8 @@ export interface ActivityStore {
     read(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
     /**
      * Freeze first terminal and final revision under the same task serialization as append.
-     * Durable adapters must enlist this boundary in the canonical lifecycle transaction (A3).
+     * A composition closes the log in the same commit as the task's first terminal or accepted
+     * Host cancellation; the built-in ones do it in that attempt write itself (#1113 A3).
      */
     settle(tenant: TenantId, taskId: string, terminalAt: string): Promise<ActivityTail>;
 }
@@ -3585,6 +3586,11 @@ import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type T
 import { type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail } from '../../activity';
 /** Remove content, retaining a fence against resurrection and a cursor gap. */
 export declare function deleteActivityTail(store: InMemoryActivityStore, tenant: TenantId, taskId: string): number;
+/**
+ * Close admission and freeze the terminal deadline in the caller's synchronous
+ * step. The first close wins; removed content stays removed.
+ */
+export declare function closeActivityLog(store: InMemoryActivityStore, tenant: TenantId, taskId: string, terminalAt: string): void;
 export declare class InMemoryActivityStore implements ActivityStore {
     #private;
     private readonly clock;
@@ -4166,7 +4172,8 @@ export declare class InMemoryTaskAttemptState {
     readonly messageAdmissions: Map<string, StoredAgentMessageAdmission>;
     /** `archive_settled_at` of archived tasks (#1120), by tenant/task key. */
     readonly archiveSettled: Map<string, string>;
-    constructor(clock: Clock);
+    /** `outputClosed` runs synchronously in the write that first closes a task's output. */
+    constructor(clock: Clock, outputClosed?: (tenant: TenantId, taskId: string, at: string) => void);
     now(): string;
     /**
      * Serialize every state-changing operation for one tenant/task key. It also

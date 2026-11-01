@@ -57,20 +57,32 @@ function open(file: string) {
   return createSqliteEmbeddedStores({ path: file }, { clock: createMutableClock(new Date(NOW)), crypto: createWebCrypto() });
 }
 
-/** A v7 file: this build's schema without the activity log tables that v8 added. */
+/**
+ * A v7 file: this build's schema without the activity log tables and output
+ * closure that v8 added. Besides an open task it holds tasks whose output
+ * already closed: a completed one, a claimed one with an accepted
+ * cancellation, and a failed one from before terminal_at was recorded, last
+ * updated months before the upgrade.
+ */
 async function seededV7Store(): Promise<string> {
   const directory = mkdtempSync(join(tmpdir(), 'byok-sqlite-v7-'));
   scratch.push(directory);
   const file = join(directory, 'server.db');
   const stores = open(file);
   try {
-    await stores.cloud.tasks.open(TENANT, { taskId: 'kept-task', deviceId: 'kept' });
+    for (const taskId of ['kept-task', 'done-task', 'cancel-task', 'legacy-task']) {
+      await stores.cloud.tasks.open(TENANT, { taskId, deviceId: 'kept' });
+    }
+    await stores.cloud.tasks.recordStatus(TENANT, { taskId: 'done-task', status: 'complete' });
   } finally {
     await stores.close();
   }
   const db = new DatabaseSync(file);
   try {
-    db.exec("DROP TABLE activity_log_entry; DROP TABLE activity_log_head; UPDATE byok_sqlite_meta SET value = '7' WHERE key = 'schema_version'");
+    db.exec(`DROP TRIGGER activity_log_output_closed; DROP TABLE activity_log_entry; DROP TABLE activity_log_head;
+      UPDATE task_attempt SET status = 'cancel_requested', owner_device_id = 'kept', cancellation_requested_at = '2026-09-30T23:59:00.000Z' WHERE task_id = 'cancel-task';
+      UPDATE task_attempt SET status = 'failed', updated_at = '2026-01-01T00:02:00.000Z' WHERE task_id = 'legacy-task';
+      UPDATE byok_sqlite_meta SET value = '7' WHERE key = 'schema_version'`);
   } finally {
     db.close();
   }
@@ -158,6 +170,38 @@ describeSqlite('SQLite in-place schema upgrades', () => {
       db.close();
     }
     expect(activityTables(file)).toEqual(['activity_log_entry', 'activity_log_head']);
+  });
+
+  it('closes the activity of tasks whose output closed before the upgrade, at their original deadline', async () => {
+    const file = await seededV7Store();
+    const stores = open(file);
+    try {
+      const done = await stores.cloud.tasks.get(TENANT, 'done-task');
+      const closedAt = { 'done-task': done?.terminalAt, 'cancel-task': '2026-09-30T23:59:00.000Z' };
+      for (const [taskId, at] of Object.entries(closedAt)) {
+        expect(at, taskId).toBeDefined();
+        await expect(stores.cloud.activity.read(TENANT, taskId), taskId).resolves.toMatchObject({
+          entries: [], terminalAt: at, expiresAt: new Date(Date.parse(at!) + 600_000).toISOString(),
+        });
+        await expect(stores.cloud.activity.append(TENANT, { ...progress, taskId }), taskId).rejects.toMatchObject({ code: 'activity_task_settled' });
+      }
+      // Closed at its last update months ago: already expired, never given a new ten minutes.
+      await expect(stores.cloud.activity.read(TENANT, 'legacy-task')).resolves.toBeUndefined();
+      await expect(stores.cloud.activity.append(TENANT, { ...progress, taskId: 'legacy-task' })).rejects.toMatchObject({ code: 'activity_task_settled' });
+      await expect(stores.cloud.activity.append(TENANT, progress)).resolves.not.toHaveProperty('terminalAt');
+    } finally {
+      await stores.close();
+    }
+  });
+
+  it('refuses a v8 file missing its activity output closure', async () => {
+    const file = await seededV7Store();
+    const db = new DatabaseSync(file);
+    db.exec(`${ACTIVITY_LOG_SCHEMA}; UPDATE byok_sqlite_meta SET value = '8' WHERE key = 'schema_version'`);
+    db.close();
+    expect(() => open(file)).toThrow(expect.objectContaining({
+      code: 'SQLITE_SCHEMA_INVALID', foundVersion: '8', message: expect.stringContaining('activity output closure'),
+    }));
   });
 
   it.each(['activity_log_entry', 'activity_log_head'])('refuses a v8 file missing %s without recreating it', async (table) => {

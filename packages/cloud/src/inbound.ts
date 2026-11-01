@@ -758,10 +758,12 @@ async function applyInboundGate(
   ) {
     return refuse('agent_identity_mismatch');
   }
-  // A redacted or archived task keeps no new content. A late progress,
-  // approval or artifact report is complete as received, the same as one
-  // stored and then redacted. So is a terminal that names its ciphertext blob:
-  // its references are gone, and the terminal receipt is already a tombstone.
+  // A redacted or archived task keeps no new content. A late approval report
+  // is complete as received, the same as one stored and then redacted. So is a
+  // terminal that names its ciphertext blob: its references are gone, and the
+  // terminal receipt is already a tombstone. Late progress and artifacts are
+  // refused below as on any task whose output closed (#1113 A3), so removing
+  // the content does not change their answer.
   if ((REDACTABLE_REPORT_TYPES.includes(envelope.type) || ciphertextRef !== undefined)
     && TERMINAL_TASK_STATUSES.includes(attempt.status)
     && await taskContentRemoved(stores, attempt)) {
@@ -809,7 +811,7 @@ async function applyInboundGate(
   return completeInboundEnvelope(stores, deviceId, envelope.id, attempt?.agentRef);
 }
 
-const REDACTABLE_REPORT_TYPES: readonly string[] = ['task.progress', 'task.artifact', 'task.await_approval', 'task.approval_resolved'];
+const REDACTABLE_REPORT_TYPES: readonly string[] = ['task.await_approval', 'task.approval_resolved'];
 const TERMINAL_TASK_STATUSES: readonly string[] = ['complete', 'failed', 'cancelled'];
 
 /** Marks an envelope complete only after all of its authoritative facts converged. */

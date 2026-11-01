@@ -369,10 +369,11 @@ describe('ByokCloud.redactTasks', () => {
     expect(replay.body).toMatchObject({ accepted: 0, rejected: 1, outcomes: [{ outcome: 'rejected', reason: 'not_permitted' }] });
     expect(fixture.consumed).toEqual([`message ${SECRET}`]);
 
-    // Late progress keeps no content.
+    // Late progress keeps no content: the terminal closed the task's output
+    // (#1113 A3), so it is refused as it was before the redaction.
     const progress = createEnvelope('task.progress', { seq: 9, events: [{ type: 'progress', text: `late ${SECRET}` }] }, { taskId: 'task-1' });
-    expect((await fixture.send(device, progress)).body).toMatchObject({ accepted: 1 });
-    await expect(fixture.cloud.readActivity(TENANT_A, 'task-1')).resolves.toBeUndefined();
+    expect((await fixture.send(device, progress)).body).toMatchObject({ accepted: 0, rejected: 1 });
+    expect((await fixture.cloud.readActivity(TENANT_A, 'task-1'))?.entries).toEqual([]);
 
     // A late claim is refused with the existing reason, not a server error.
     const claim = await fixture.send(device, createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, runtime: 'codex' }, { taskId: 'task-1' }));
