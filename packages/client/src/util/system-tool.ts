@@ -30,9 +30,12 @@ const WINDOWS_SYSTEM_ROOT = /^[A-Za-z]:\\[^\0\r\n]*$/u;
 
 /** A system tool has no trusted location on this platform, or is not at it. Nothing was started. */
 export class SystemToolUnavailableError extends Error {
-  constructor(readonly tool: string, detail: string) {
+  readonly tool: string;
+
+  constructor(tool: string, detail: string) {
     super(`system tool ${tool} is unavailable: ${detail}`);
     this.name = 'SystemToolUnavailableError';
+    this.tool = tool;
   }
 }
 
