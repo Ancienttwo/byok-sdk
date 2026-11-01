@@ -26,7 +26,7 @@ A release ships `packages/client/upgrade-manifest.json` with one entry per Host-
 from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 4 (#925). The first v4
 release, 0.31.0, and 0.32.0 are published: `golden/v4.releases.json` registers
-both corpora and has no floor. No published v4 decoder is pinned as an oracle yet, so
+both corpora and the corpus of the 0.33.0 source candidate, and has no floor. No published v4 decoder is pinned as an oracle yet, so
 cross-release gates stay unproven until one is pinned.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`

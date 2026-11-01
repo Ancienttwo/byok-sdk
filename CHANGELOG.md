@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.33.0 — source candidate
+
+0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.32.0 to 0.33.0) lists every
+Host-visible change since 0.32.0: 4 breaking and 5 additive entries, each
+with a migration link. The envelope wire stays v4 and gains one gated field,
+`task.fail.failure.scope` behind the `runtime-quota-scope` flag (#1271). It
+adds Postgres migrations 0035 and 0036, and the embedded server upgrades a
+SQLite schema 6 or 7 file to schema 8 in place, one-way. 0.33.0 completes
+#1113 (A2b to A5; see the [0.33.0 candidate notes](docs/releases/v0.33.0.md)
+and the [Host upgrade checklist](docs/releases/host-upgrade-0.33.0.md)). The
+breaking changes by package: server writes SQLite schema 8, which 0.32.0 and
+earlier cannot open (#1113 A2b, A3), and serves `tasks.events` from durable
+cursors, refusing older cursors as `cursor_unknown` and removing the event
+buffer options (#1113); cloud and cloud-dataplane close a task's activity log
+and approval timeline with its first terminal or accepted cancellation,
+refuse later output with `task_settled_by_cloud`, stop idle-expiring an open
+approval timeline and remove `ApprovalTimelineAppendInput.ttlMs`, with
+Postgres migration 0035 (#1113 A3). On POSIX, disposal now also ends the
+observed descendants of a runtime root that exited by itself or was killed
+from outside (#1269).
+
 - **Feature (client; #1258)** — `DshAdapter` runs DeepSeek Harness
   (`@deepseek-ai/dsh`, qualified 0.2.1-rc.5) over ACP on the custom-harness
   path (`harnessId: 'dsh'`). It runs on macOS and Linux, in a Host-owned
