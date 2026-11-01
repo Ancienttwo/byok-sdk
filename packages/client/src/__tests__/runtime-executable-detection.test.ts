@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -11,6 +11,7 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../adapters/runtime-executable';
 import { validateRuntimeDetectResult } from '../runtime-detection';
 import type { RuntimeAdapter } from '../types';
+import { npmNodeShim } from './fixtures/npm-node-shim';
 
 const fixture = (name: string): string => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 const windows = process.platform === 'win32';
@@ -73,15 +74,19 @@ describe.skipIf(windows)('runtime detection reports the executable it ran', () =
     });
   }
 
-  it('pi: the Host resolveBin option reports source config, an env override source env', async () => {
+  it('pi: a Host resolveBin reports source config, because the pi-rpc lane launches that file', async () => {
     const fakePi = fixture('fake-pi.mjs');
     expect(await new PiAdapter({ resolveBin: () => ({ command: fakePi, source: 'env' }) }).detect()).toMatchObject({
       kind: 'available', executablePath: fakePi, executableSource: 'config',
     });
-    vi.stubEnv('BYOK_PI_BIN', fakePi);
-    expect(await new PiAdapter().detect()).toMatchObject({
-      kind: 'available', executablePath: fakePi, executableSource: 'env',
-    });
+  });
+
+  it('pi: BYOK_PI_BIN alone reports no executable, because every lane then launches an SDK entry', async () => {
+    vi.stubEnv('BYOK_PI_BIN', fixture('fake-pi.mjs'));
+    const detected = await new PiAdapter().detect();
+    expect(detected).toMatchObject({ kind: 'available' });
+    expect(detected).not.toHaveProperty('executablePath');
+    expect(detected).not.toHaveProperty('executableSource');
   });
 
   it('claude: the Host resolveBin option reports source config', async () => {
@@ -97,10 +102,29 @@ describe.skipIf(windows)('runtime detection reports the executable it ran', () =
   });
 });
 
+/**
+ * On win32 the adapter's own `resolveRuntimeInvocation` finds Claude and
+ * Codex on PATH (PATH order, then PATHEXT), so a bare name reports the file
+ * it found: here the npm `.cmd` shim, which the launch runs through node.
+ */
+describe.runIf(windows)('win32 PATH lookup reports the file the invocation found', () => {
+  for (const runtime of CASES.filter((candidate) => candidate.id === 'claude' || candidate.id === 'codex')) {
+    it(`${runtime.id}: an npm shim on PATH reports source path and the .cmd path`, async () => {
+      const bin = await tempDir('bp-');
+      const entry = `${runtime.id}-entry.mjs`;
+      await fs.writeFile(path.join(bin, entry), `await import(${JSON.stringify(pathToFileURL(runtime.fixture).href)});\n`);
+      await fs.writeFile(path.join(bin, `${runtime.id}.cmd`), npmNodeShim(entry));
+      vi.stubEnv(runtime.envName, '');
+      vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`);
+      expect(await (await runtime.create()).detect()).toMatchObject({
+        kind: 'available', executableSource: 'path', executablePath: path.join(bin, `${runtime.id}.cmd`),
+      });
+    });
+  }
+});
+
 describe('runtime executable fields', () => {
-  it('names no source for the bundled Pi package and no path for a relative command', () => {
-    const packaged = resolveRuntimeCommand(undefined, () => ({ command: '/sdk/node_modules/pi/dist/cli.js', source: 'package' as const }));
-    expect(runtimeExecutableFields(packaged, packaged.bin.command)).toEqual({});
+  it('names no path for a relative command', () => {
     const relative = resolveRuntimeCommand(undefined, () => ({ command: 'tools/claude', source: 'env' as const }));
     expect(runtimeExecutableFields(relative, relative.bin.command)).toEqual({ executableSource: 'env' });
   });

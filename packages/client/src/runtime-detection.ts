@@ -49,7 +49,7 @@ export interface RuntimeObservation {
    * or in a support bundle, because the path can name the local user. Absent
    * when detection did not run an executable it can name: an unavailable
    * runtime, a bare command the OS finds on PATH at spawn (source `path`
-   * only), the bundled Pi package, or an older daemon.
+   * only), a Pi lane that launches an SDK entry, or an older daemon.
    */
   executablePath?: string;
   executableSource?: RuntimeExecutableSource;
@@ -92,15 +92,14 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
   for (const raw of value) {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
     const r = raw as Record<string, unknown>;
-    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'versionVerdict', 'versionChange', 'executablePath', 'executableSource', 'authPresent', 'steer', 'resume'].includes(key))
+    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'versionVerdict', 'versionChange', 'authPresent', 'steer', 'resume'].includes(key))
       || typeof r.id !== 'string' || r.id.length === 0 || r.id.length > 128 || /[\r\n\t]/.test(r.id)
       || typeof r.steer !== 'boolean' || typeof r.resume !== 'boolean'
       || r.present !== (r.outcome === 'available')
       || (r.version !== undefined && (typeof r.version !== 'string' || r.version.length > 256 || /[\r\n\t]/.test(r.version)))
       || (r.qualifiedVersion !== undefined && (typeof r.qualifiedVersion !== 'string' || r.qualifiedVersion.length > 256 || /[\r\n\t]/.test(r.qualifiedVersion)))
       || (r.versionVerdict !== undefined && !isVersionVerdict(r.versionVerdict))
-      || (r.versionChange !== undefined && !isVersionChange(r.versionChange))
-      || !isExecutableFields(r.executablePath, r.executableSource)) return undefined;
+      || (r.versionChange !== undefined && !isVersionChange(r.versionChange))) return undefined;
     try {
       validateRuntimeDetectResult({
         kind: r.outcome,
@@ -110,8 +109,6 @@ export function parseRuntimeObservations(value: unknown): RuntimeObservation[] |
         ...(r.authPresent === undefined ? {} : { authPresent: r.authPresent }),
         ...(r.qualifiedVersion === undefined ? {} : { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: r.qualifiedVersion } }),
         ...(r.versionVerdict === undefined ? {} : { versionVerdict: r.versionVerdict }),
-        ...(r.executablePath === undefined ? {} : { executablePath: r.executablePath }),
-        ...(r.executableSource === undefined ? {} : { executableSource: r.executableSource }),
       });
     } catch { return undefined; }
     const verdict = r.versionVerdict as RuntimeVersionVerdict | undefined;

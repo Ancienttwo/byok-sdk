@@ -1143,10 +1143,13 @@ The runtime executable is local-only evidence too (#1103 O10). An available
 absolute file detection ran) and `executableSource`: `config` when the
 adapter's Host `resolveBin` option chose it, `env` for a `BYOK_<RUNTIME>_BIN`
 override, `path` for a bare name. Both come from the adapter's one bin
-resolution and its `resolveRuntimeInvocation`; no reader searches PATH to fill
-them. On win32 that resolution finds the file on PATH, so a `path` source has
-a path; elsewhere the OS finds a bare name at spawn, so `path` carries no
-path. The bundled Pi package and the SDK helper host report neither field.
+resolution and, for Claude and Codex, `resolveRuntimeInvocation`; no reader
+searches PATH to fill them. On win32 that invocation finds Claude's or Codex's
+file on PATH, so their `path` source has a path. Otherwise a bare name is
+found by the OS at spawn, so `path` carries no path. Pi reports the fields only
+for a Host `resolveBin` on its plain pi-rpc lane, the one lane that launches
+that file; its bundled package, `BYOK_PI_BIN`, durable lane and SDK helper
+host launch SDK entries and report neither field.
 `Daemon.status()` carries them inline, control `status` through the additive
 `runtimeExecutables` channel, and `status`, `runtimes` and `doctor` print them
 as `executable=<source>("<path>")`. The path can name the local user, so it
