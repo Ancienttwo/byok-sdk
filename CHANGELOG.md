@@ -63,7 +63,10 @@ These changes need 0.34.0, the next MINOR.
   approval is pending ends the execution like any in-flight tool. `PiAdapter`
   with `durableLane: true` now reports `toolAuthorizationAuto: true` on
   `conn.hello` and presence. Windows, memory-reader offers and other adapters
-  still decline before claim. See
+  still decline before claim. The daemon now hands an `auto` gate to a prepared
+  start too: a custom adapter that declares both `preparedLane` and
+  `toolAuthorizationAuto` must enforce `startInput.toolAuthorization` on its
+  prepared starts. See
   [Tool authorization](docs/spec.md#tool-authorization-auto-and-all-1061).
 
 ## 0.33.0 — 2026-11-01 (published)

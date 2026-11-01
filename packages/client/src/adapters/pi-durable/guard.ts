@@ -34,17 +34,21 @@ function toolPath(cwd: string, value: string): string {
 }
 /**
  * Bash is YOLO: only a literal BYOK control assignment is denied; no shell path
- * sandbox is claimed. A structured file tool may reach any path except the
- * durable replica store.
+ * sandbox is claimed. A structured file tool may name any path except one in
+ * the durable replica store.
  */
 export async function durableToolDenial(name: string, args: Record<string, unknown>, cwd: string, replicaRoot: string): Promise<string | undefined> {
   if (name === 'bash') {
     if (typeof args.command !== 'string') return 'invalid shell command';
     return /\bBYOK_[A-Z0-9_]*\s*=/u.test(args.command) ? 'BYOK control assignment denied' : undefined;
   }
-  if (!['read', 'write', 'edit'].includes(name)) return undefined;
-  if (typeof args.path !== 'string' || args.path.length === 0) return 'invalid structured tool path';
-  const candidate = toolPath(cwd, args.path);
+  // The scoped discovery tools of a file-scoped execution take an optional
+  // directory that defaults to the cwd; the store is refused by path for them too.
+  const discovery = ['find', 'grep', 'ls'].includes(name);
+  if (!discovery && !['read', 'write', 'edit'].includes(name)) return undefined;
+  const requested = discovery && args.path === undefined ? '.' : args.path;
+  if (typeof requested !== 'string' || requested.length === 0) return 'invalid structured tool path';
+  const candidate = toolPath(cwd, requested);
   const store = await canonical(path.resolve(replicaRoot));
   const candidates = name === 'read' ? [candidate, candidate.replace(/ (AM|PM)\./giu, '\u202F$1.'), candidate.normalize('NFD'), candidate.replace(/'/gu, '\u2019'), candidate.normalize('NFD').replace(/'/gu, '\u2019')] : [candidate];
   for (const variant of new Set(candidates)) {

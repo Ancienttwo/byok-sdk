@@ -103,10 +103,11 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     if (disposal) return disposal;
     closing = true; recovery.stop();
     const attempt = (async () => {
-      try { if (rpc) await rpc.dispose(); } finally { await disposeDurableShellGroups(shellGroups); }
-      if (pump) await pump; // owned tree receipt before replica cleanup or lease release
-      await resetReplica(file);
-      await gate?.close();
+      try {
+        try { if (rpc) await rpc.dispose(); } finally { await disposeDurableShellGroups(shellGroups); }
+        if (pump) await pump; // owned tree receipt before replica cleanup or lease release
+        await resetReplica(file);
+      } finally { await gate?.close(); } // a failed teardown never leaves the loopback gate listening
       await input.scratch.release();
       await runtimeLaunch.release(); queue.end();
     })();
