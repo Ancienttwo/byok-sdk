@@ -143,7 +143,7 @@ R2 的 workspace 在 `/private/tmp` 下，写上级目录成功是因为 `/tmp` 
 
 ACP 是 dsh 唯一面向自动化、带反向 permission 请求、带标准 MCP 挂载、带取消与 resume 的入口，也是 dsh 自己做 out-of-process 子代理时用的协议。SDK 已有两个 ACP adapter，Grok 走 vendored OAR profile，Hermes 走 SDK 自有的 `AcpConnection`（`packages/client/src/adapters/hermes/acp-connection.ts`）。owner 2026-11-01 定：能统一到 OAR 的就用 OAR，dsh 走 Grok 的形状。
 
-上游 OAR 没有 dsh runtime（2026-11-01 `gh api repos/botiverse/oar/contents/packages/oar/src/runtimes` 只有 antigravity、claude、codebuddy、codex、cursor、grok、kimi、opencode、pi、pi-durable、qoder、qwen）。dsh 的 profile 放在 SDK 源码 `packages/client/src/runtime/dsh-acp-session.ts`：导入 vendored `shared/acp/session.ts` 的 `acpSession`，由私有入口 `#byok-acp-runtime`（`src/runtime/acp-session-runtime.js`）与 `grokSession` 并列导出。vendor fork 仍只有上游字节加已标注的 BYOK 接缝，`source-manifest.json` 不变，`PROVENANCE.md` 加一句说明这个建在 fork 之上的 SDK profile。`adapters/dsh/` 对照 `adapters/grok/`：adapter 负责 env、patch、版本、检测与事件投影。
+上游 OAR 没有 dsh runtime（2026-11-01 `gh api repos/botiverse/oar/contents/packages/oar/src/runtimes` 只有 antigravity、claude、codebuddy、codex、cursor、grok、kimi、opencode、pi、pi-durable、qoder、qwen）。dsh 的 profile 放在 SDK 源码 `packages/client/src/runtime/dsh-acp-session.js`（用 `.js`：声明构建的 `rootDir` 是 `src`，`.ts` 无法导入 vendor 文件；它和其他 bridge 一样由 `tsconfig.vendor.json` 做类型检查）：导入 vendored `shared/acp/session.ts` 的 `acpSession`，由私有入口 `#byok-acp-runtime`（`src/runtime/acp-session-runtime.js`）与 `grokSession` 并列导出。vendor fork 仍只有上游字节加已标注的 BYOK 接缝，`source-manifest.json` 不变，`PROVENANCE.md` 加一句说明这个建在 fork 之上的 SDK profile。`adapters/dsh/` 对照 `adapters/grok/`：adapter 负责 env、patch、版本、检测与事件投影。
 
 dsh 各项需求在 OAR 栈上的落点，不改 `shared/acp/*`：
 
@@ -263,11 +263,11 @@ DeepSeek 官方路由改写 `llm-deepseek` 项的 `apiKeyEnv`。`packages/keys` 
 
 ## 8. 切片计划
 
-每个切片一个 PR，按顺序叠放，目标 0.33；adapter 不进 `createDaemon` 的默认 adapter 列表。第一版切片（#1259 #1260 #1262 #1264）已关闭，分支保留，契约套件、loopback fixture 与文档从那里复用。
+每个切片一个 PR，按顺序叠放，目标 0.33；adapter 不进 `createDaemon` 的默认 adapter 列表。第一版切片（#1259 #1260 #1262 #1264）已关闭，分支保留，契约套件、loopback fixture 与文档从那里复用。新切片：S1 #1266、S2 #1267、S3 #1268。
 
 | 切片 | 内容 | 依赖 | 验证 |
 | --- | --- | --- | --- |
-| S1 | `src/runtime/dsh-acp-session.ts`（OAR `AcpSessionProfile`，经 `#byok-acp-runtime` 导出）；`adapters/dsh/`（对照 `adapters/grok/`）：`dsh-version.ts`、`dsh-capabilities.ts`、`resolve-bin.ts`、patch 与环境（纯函数）、`DshAdapter`（detect/prepare/start、`home`、`model`、`sandbox`、`runtimeEnvironment`、`versionPolicy`）、`projection.ts`；`adapters/index.ts` 导出；PROVENANCE 一句；`docs:capability-matrix` 重生成；api-surface 预算调整（需 owner 确认） | O1–O9 | fake dsh 单测：投影、resume 错误映射、cancel、patch 内容不含秘密；必跑检查 |
+| S1 | `src/runtime/dsh-acp-session.js`（OAR `AcpSessionProfile`，经 `#byok-acp-runtime` 导出）；`adapters/dsh/`（对照 `adapters/grok/`）：`dsh-version.ts`、`dsh-capabilities.ts`、`resolve-bin.ts`、patch 与环境（纯函数）、`DshAdapter`（detect/prepare/start、`home`、`model`、`sandbox`、`runtimeEnvironment`、`versionPolicy`）、`projection.ts`；`adapters/index.ts` 导出；PROVENANCE 一句；`docs:capability-matrix` 重生成；api-surface 预算调整（需 owner 确认） | O1–O9 | fake dsh 单测：投影、resume 错误映射、cancel、patch 内容不含秘密；必跑检查 |
 | S2 | `__tests__/runtime-contract/dsh.contract.ts`（loopback 经 pi-ai 手写路由）+ §5 的 dsh 用例；安装脚本加 exact 版本；PR 与 nightly 矩阵加 `dsh` | S1 | GitHub PR CI 以 rc.5 运行；`dsh.sigkill` 的已知缺口见上方实施偏差 |
 | S3 | 文档：`docs/adapter-capabilities.md` 资格说明与隔离节、`docs/spec.md` runtime 节、`docs/runtime-contract.md`、CHANGELOG | S1 | docs 生成器校验 |
 | S4（可顺延 0.34） | keys launcher 托管：`runDshProviderLauncher`，adapter 选项 `byokLauncher`，与 `model` 互斥 | S1 | 同 Hermes custody 用例 |
