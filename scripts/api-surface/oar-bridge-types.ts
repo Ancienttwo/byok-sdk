@@ -136,7 +136,7 @@ import type { grokSession as vendorGrokSession } from '../../packages/client/ven
 
 type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
 type AcpBridgeOptions = Mutable<
-  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'mcpServers'>
+  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'launchArgs' | 'mcpServers'>
 >;
 type AcpBridgeHooks = Mutable<Omit<AcpSessionHooks, 'onRecord'>> & {
   onRecord?: (record: AcpBridge.AcpRecord) => void;
@@ -149,11 +149,12 @@ type AcpBridgeSession = {
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'grokSession'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, 'SessionNotFoundError' | 'RuntimeFailureError' | 'grokSession' | 'dshSession'>>;
 export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
 export type CheckGrokVendor = Assert<Equal<typeof vendorGrokSession, VendorStartAcp>>;
 export type CheckGrokBridge = Assert<Equal<typeof AcpBridge.grokSession, AcpBridge.StartAcpSession>>;
+export type CheckDshBridge = Assert<Equal<typeof AcpBridge.dshSession, AcpBridge.StartAcpSession>>;
 export type CheckAcpNotFound = Assert<Equal<AcpBridge.SessionNotFoundError, VendorSessionNotFoundError>>;
 export type CheckAcpNotFoundConstructor = Assert<Equal<
   ConstructorParameters<typeof AcpBridge.SessionNotFoundError>,

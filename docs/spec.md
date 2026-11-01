@@ -600,12 +600,15 @@ or delete history to bypass the fence. Required approval columns and composite
 primary key are checked on open; missing authority is an error, not an empty tail.
 
 SQLite persists the existing `ApprovalTimelineStore` authority with the same
-capacity and absolute expiry (defaults: 50 observations, ten minutes). Requests,
-resolutions, source IDs, revisions and dropped count survive reopen. Reopen and
-exact replay do not renew TTL. Snapshots, statistics, host decisions and the
-`tasks.events` state seed read this same authority, without startup reconstruction
-or device resend. Expired tails remain absent; this is not indefinite pending
-approval retention or a durable audit log. Host resolve compares the observed
+bounds as every adapter: at most 50 observations and 1 MiB of serialized
+observations, the oldest evicted first and the pending request never. One
+event is at most `MAX_APPROVAL_EVENT_BYTES`. An open timeline does not expire;
+it closes with its task's output and expires ten minutes after that instant
+(#1113 A3). Requests, resolutions, source IDs, revisions and dropped count
+survive reopen. Reopen and exact replay do not renew the deadline. Snapshots,
+statistics, host decisions and the `tasks.events` state seed read this same
+authority, without startup reconstruction or device resend. Expired tails
+remain absent; this is not a durable audit log. Host resolve compares the observed
 source/revision and appends its decision within the same SQLite transaction.
 
 Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
@@ -1027,6 +1030,32 @@ file's `runtimeEnvironment` policy and no names; the same file's static
 are validated and reported as effective values, so a CLI task selects its
 runtime and `auto`/`all` mode from that file without embedded adapters.
 
+### dsh runtime (#1258)
+
+The dsh adapter builds the process environment from `runtimeEnvironment()`
+and then owns dsh's bootstrap names: it drops every inherited `DSH_*` and sets
+`DSH_HOME` to the Host's `home`, `DSH_AGENTS_HOME` to an empty directory in
+it, `DSH_PERMISSION_MODE` to the `sandbox` option and
+`DSH_TELEMETRY_MODE=DISABLED`. dsh reads its key in this order: stored
+`$DSH_HOME/.credentials.yaml`, the launch environment, `.env` in the invoking
+directory, `$DSH_HOME/.env`. The process starts in the execution scratch
+directory, so a workspace `.env` never applies. A Host must not leave stored
+credentials or a `.env` in the dsh root, or dsh uses them before the key in
+the environment.
+
+Sessions persist under `<home>/sessions/<encoded cwd>/<session id>/`; resume
+needs them, and the SDK removes none. The DeepSeek route sends `GET
+https://api.deepseek.com/models` at boot when a key is present. dsh reports
+context occupancy (`usage_update`) and no provider cost counters, so a dsh
+task has no cost usage. The `keyEnv` rules are in
+[adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
+
+dsh starts each shell tool in its own process group. `close()` on a live dsh
+root reaps them. A dsh root killed from outside (SIGKILL, OOM) leaves those
+tool processes running: the owned process tree reaches neither their groups
+nor, once they are reparented, the processes themselves. This is a known 0.33
+limitation ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
+
 ### Local runtime probe observation
 
 `RuntimeDetectResult` has one required `kind`: `available`, `not-found`,
@@ -1067,7 +1096,7 @@ Runtime version policy is one pure data object on an adapter descriptor
 constructor option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
 objects that replace one another wholesale through one resolver; fields are
 never merged. The default policy preserves today's behavior exactly: Codex,
-Grok and Hermes warn on an unqualified version, Claude and Pi do not warn, and
+Grok, Hermes and dsh warn on an unqualified version, Claude and Pi do not warn, and
 no default policy blocks. Only a Host layer may configure a block; a descriptor
 default that carries one is rejected as `invalid_version_policy`
 (`block_requires_host`). A block is enforced locally before claim and produces
@@ -1667,9 +1696,9 @@ makes itself `unknown`. The class never changes `retry`.
 | Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status` |
 | Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
-| Pi, Hermes | no structured field: `unknown` |
+| Pi, Hermes, dsh | no structured field: `unknown` |
 
-Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes) and Hermes report a
+Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes), Hermes and dsh report a
 runtime process that ends on its own before its terminal, during start or a turn,
 as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
 Pi's durable lane recovers a worker that ends on its own during a run (within its
@@ -2011,6 +2040,21 @@ the deployment migration stops old writers and waits one full activity TTL
 before enabling the typed reader and writer; expired hints are discarded rather
 than translated into new semantics.
 
+A task's log and approval timeline close in the same commit as the attempt
+write that first closes the task's output: its first terminal, or an accepted
+Host cancellation, also of a claimed task. Later progress, artifacts and
+approval reports are refused with `task_settled_by_cloud`, a pending request
+can no longer be decided, both expire ten minutes after that instant, and no
+read, replay or later terminal renews them (#1113 A3).
+
+A task events wake hints that a task's state, activity log or approval
+timeline changed, after the commit and with no content: it names only the
+tenant and task, and a reader re-reads the sources. In-memory and embedded
+SQLite stores signal their own `taskEventsWake`; Postgres signals through
+migration 0036's triggers to `createPostgresTaskEventsWake`, so commits on any
+instance wake readers on every instance. A reader no hint reaches re-reads
+within `fallbackMs` (5 seconds by default) (#1113 A4).
+
 Unknown event types retain their original event index and render as neutral
 placeholders. Known but malformed variants fail closed. Each `progress.text`
 remains an ordered fragment. The fold may group adjacent fragments for view
@@ -2041,11 +2085,11 @@ authorization, and both tenant-scoped reads happen before a 304 response. The
 reference remains GET-only and does not define an approval action, SaaS identity
 provider, public browser route, SSE lifecycle, or `ThreadMessageLike` contract.
 
-The embedded server's `tasks.events` is a different thing: an in-process
-notification feed of one task, valid within one server instance, with no
-retention claim beyond its bounded relay buffer. It is not a second projection
-authority, and it is not a host read port for the hosted activity model (see
-[Embedded per-task event feed](#embedded-per-task-event-feed)).
+The embedded server's `tasks.events` reads this same activity log, so it is
+not a second projection authority: its Agent progress and artifacts are the
+log's entries, resumable by a cursor across a restart (see
+[Embedded per-task event feed](#embedded-per-task-event-feed)). A hosted Host
+reads one task's progress with `readActivity(tenant, taskId, { after })`.
 
 At 10x activity volume, the first expected pressure is whole-row JSONB tail
 updates, per-task hot-row contention, and host polling—not the bounded O(events)
@@ -3435,64 +3479,66 @@ the execution identity. This does not authorize a new execution after failure.
 
 ### Embedded per-task event feed
 
-Embedded `tasks.events(taskId, { after?, from?, signal? })` hands a Host the relay
-notifications of one task by taskId, so a submitted task without a TaskHandle
-has its state, Agent events, artifacts and approval requests (with the
-`approvalId` that `tasks.approve`/`reject` take). It reads the existing relay
-feed; it adds no wire message, store, SQL or Cloud port, and it is not a read
-model. Task facts stay with `tasks.get`, `tasks.attempt` and the terminal
-receipt. `TaskHandle.events()` reads the same feed without cursors.
+Embedded `tasks.events(taskId, { after?, from?, signal? })` hands a Host one
+task's state, Agent progress, artifacts and approval requests (with the
+`approvalId` that `tasks.approve`/`reject` take), so a submitted task without a
+TaskHandle can be followed. It is a read-time projection of three authorities
+(#1113): canonical task state and the approval timeline, read the way
+`tasks.get` reads them, and the durable activity log that `readActivity`
+serves. It adds no wire message, store or Cloud port, and holds no history of
+its own. `TaskHandle.events()` reads the same feed without cursors.
 
-- Each entry carries an opaque cursor `<feedId>.<seq>`. `feedId` is random per
-  feed and `seq` increases within it, so a cursor is valid only for one server
-  instance's current feed of the task. Order is that instance's arrival order;
-  progress, artifacts and approvals have no protocol total order.
-- A read starts after `after`, at the start of what is retained, or, with
-  `from: 'state'`, at the entries where the task's current state began: its
-  latest `state` entry, preceded by the pending `await_approval` request while
-  it awaits approval. The relay keeps those entries apart from the bounded
-  queue, so that start survives drop-oldest with its original cursors.
+- Each read window yields the pending approval request when it is new, the
+  state when it changed, then the activity log's entries in revision order:
+  each event of a progress batch as an `agent` entry and each plaintext
+  artifact as an `artifact` entry. Facts are read before the log, so a
+  terminal state is yielded after a log read that follows it, and ends the
+  feed. The window order is not a causal order across sources that never
+  shared one.
+- State is the current fact, coalesced, not a journal of transitions: a reader
+  that was not reading while a task moved through several states sees only its
+  present state. `ByokServer.events.subscribe()` still announces each
+  transition this instance observed.
+- Each entry carries an opaque cursor naming what the reader consumed of each
+  source: the activity log generation and revision with an offset inside a
+  batch, the approval revision and the last state. Resuming inside a progress
+  batch yields the rest of that batch. A cursor stays valid across a restart
+  over the same storage; with SQLite storage the log, the timeline and task
+  state all persist.
+- A read starts after `after`; with `from: 'state'`, at the pending request
+  and the current state, followed only by activity logged from then on;
+  otherwise at the current state followed by all retained activity.
+- Activity a reader had not reached when the log dropped it (the 1,000 entry /
+  4 MiB bounds, archive) is replaced by one `{ kind: 'error', reason:
+  'events_truncated' }` entry whose cursor resumes at the start of what is
+  retained. A terminal task stays readable for as long as its activity is
+  retained, then reads as its terminal state alone.
 - Refusals are thrown by the first `next()`, before any entry: `after` and
-  `from` together are a `TypeError`; an unknown task
-  is `task_not_found`; a cursor the feed never handed out is
-  `TaskEventsUnavailableError` `cursor_unknown`; a terminal task with no
-  retained feed is `feed_expired`. Terminal is judged by the `tasks.get`
-  projection, so an accepted Host cancellation is terminal even while the
-  attempt reads `cancel_requested`.
-- A live task with no feed in this instance (after a restart) gets one that
-  starts with its current state from the `tasks.get` projection (`state`,
-  `updatedAt`), unless a transition reached the feed first; earlier events are
-  not reconstructed. While it awaits approval, the pending request read from
-  the approval timeline comes first, in the relay's own `await_approval` form:
-  only a plaintext request with an `approvalId`, since the relay announces no
-  sealed request. A read of a stored task that finds a feed a dispatch just
-  opened (a resubmit) attaches to it the same way, so a refused dispatch hands
-  the feed to the reader instead of ending it. The kernel notifies the relay
-  after the write's own await, so those entries can appear twice. A read stopped
-  before its first store read completed creates nothing, a read never creates
-  relay state for an unknown or terminal task, and only a Host read can create
-  it: device envelopes for a task with no feed still allocate nothing.
-- Once a read attached a task's feed, the feed stays until the task's terminal
-  plus `taskEventRetentionMs`, however its readers leave (`return()`, abort,
-  disconnect), so a reader that reconnects resumes with its cursor, unless the
-  read that attached it finds the task gone or finished.
-- While this instance's dispatch of a task is in flight, its feed buffers every
-  delivery, device envelopes and Host transitions alike, including a feed a
-  Host read attached, so `Offered` is the first entry of a dispatched feed. A
-  refused dispatch drops a feed it opened and returns an attached feed to its
-  readers with what it buffered.
-- Each feed is bounded by `taskEventBufferLimit` and drops its oldest entries.
-  A reader whose resume position was dropped receives one `events_truncated`
-  marker for that gap, whose cursor stands just before the oldest retained
-  entry. A terminal feed ends at its terminal event and is reclaimed after
-  `taskEventRetentionMs`.
+  `from` together are a `TypeError`; an unknown task is `task_not_found`; a
+  cursor this server did not hand out for this task, including one from the
+  pre-#1113 relay, is `TaskEventsUnavailableError` `cursor_unknown`. Terminal
+  is judged by the `tasks.get` projection, so an accepted Host cancellation is
+  terminal even while the attempt reads `cancel_requested`.
+- Readers wait on the stores' task events wake: every committed write of the
+  task's state, activity log or approval timeline, retirement and maintenance
+  included, wakes them, and they then read the stores. A wake may cause an
+  extra read, never an event. A reader no hint reached reads again within the
+  wake's five-second fallback. Wakes are in-process; the embedded server has
+  one storage owner.
+- The embedded server refuses sealed dispatch, so its log holds no sealed
+  progress; a sealed entry is refused rather than dropped. A sealed approval
+  request moves the state to `AwaitApproval` without an `await_approval`
+  entry. Hosted sealed progress stays opaque ciphertext in `readActivity`.
 - Authorization is by taskId within the server's one tenant, as for
   `tasks.get`, `approve`, `reject` and `cancel`. The feed carries raw tool input
   and output; the Host authenticates users and redacts before any browser sees
   it, as in the hosted boundary above.
 
-The hosted `ByokCloud` gains no stream. Hosted Hosts keep `readActivity`,
-`readApprovalTimeline` and `observer.onInboundCommitted`.
+Activity admission does not yet close at a task's terminal, and the log has no
+terminal-relative expiry until the lifecycle transactions settle it (#1113 A3);
+archive removes it. The hosted `ByokCloud` gains no stream: a hosted Host
+reads `readActivity(tenant, taskId, { after })` with the returned cursor,
+`readApprovalTimeline`, and `observer.onInboundCommitted`.
 
 Embedded `tasks.attempt(taskId)` returns the same canonical durable TaskAttempt
 as Cloud `readTaskAttempt(tenant, taskId)`, including the independent cancellation
@@ -3664,6 +3710,8 @@ its cumulative `total` remains the provider cost authority. Claude reports
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
+dsh reports ACP `usage_update` (`used` against `size`) as `provider` context
+usage, and no cost counters.
 Historical v1 envelopes remain readable and unchanged; older consumers ignore
 these optional fields.
 
@@ -4075,6 +4123,7 @@ it never runs ungated, and no third mode exists. Current coverage:
 | Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |
 | Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
 | Hermes | Declined before claim | No pre-execution hook |
+| dsh | Declined before claim | No pre-execution hook; every ACP permission request is answered `cancelled` |
 
 Classification is one function (`classifyToolCall`) used by both modes. The
 precedence is **Always Ask > sensitive-path floor > Allow without Asking >
@@ -4268,8 +4317,8 @@ that called it uses `resolveHostLayout(...).storeDir`.
 
 ### Runtime version policy
 
-`DaemonConfig.runtimes.<id>.versionPolicy` (pi/claude/codex; other adapters
-after #1094 extends the block) is a complete `RuntimeVersionPolicy` object:
+`DaemonConfig.runtimes.<id>.versionPolicy` (pi/claude/codex/grok; other
+adapters take it as a constructor option) is a complete `RuntimeVersionPolicy` object:
 `qualifiedVersion`, `unqualified` (`allow`/`warn`/`block`), and optional
 `allow`/`warn`/`block` lists of `exact` or component-boundary `prefix` specs.
 It **replaces** the adapter's descriptor default and any constructor option

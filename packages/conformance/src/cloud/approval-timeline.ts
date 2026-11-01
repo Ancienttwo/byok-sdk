@@ -290,23 +290,51 @@ export function runApprovalTimelineConformance(
       });
     });
 
-    it('expires the complete bounded window and restarts revision authority', async () => {
+    it('keeps an open timeline however long it idles', async () => {
       await withComposition(factory, async (handle) => {
         await handle.store.append(TENANT_A, {
-          taskId: 'task-expiry',
-          sourceEnvelopeId: 'before-expiry',
-          event: requested('approval-old'),
-          ttlMs: 1_000,
+          taskId: 'task-idle',
+          sourceEnvelopeId: 'before-idle',
+          event: requested('approval-idle'),
         });
-        await handle.advanceTime(1_000);
-        expect(await handle.store.read(TENANT_A, 'task-expiry')).toBeUndefined();
-        const restarted = await handle.store.append(TENANT_A, {
-          taskId: 'task-expiry',
-          sourceEnvelopeId: 'after-expiry',
-          event: requested('approval-new'),
+        // An open task's timeline has no deadline; only its output closing starts one (#1113 A3).
+        await handle.advanceTime(24 * 60 * 60 * 1_000);
+        const tail = await handle.store.read(TENANT_A, 'task-idle');
+        expect(tail?.entries.map((entry) => entry.sourceEnvelopeId)).toEqual(['before-idle']);
+        expect(tail).not.toHaveProperty('expiresAt');
+        const next = await handle.store.append(TENANT_A, {
+          taskId: 'task-idle',
+          sourceEnvelopeId: 'after-idle',
+          event: { type: 'approval_resolved', approvalId: 'approval-idle', decision: 'approve', resolvedBy: 'local', at: '2026-08-16T12:00:00.000Z' },
         });
-        expect(restarted.entries.map((entry) => entry.revision)).toEqual([1]);
-        expect(restarted.dropped).toBe(0);
+        expect(next.entries.map((entry) => entry.revision)).toEqual([1, 2]);
+      });
+    });
+
+    it('never evicts the pending request', async () => {
+      await withComposition(factory, async ({ store }) => {
+        await store.append(TENANT_A, { taskId: 'task-pending', sourceEnvelopeId: 'request', event: requested('approval-pending'), capacity: 2 });
+        for (const approvalId of ['other-1', 'other-2']) {
+          await store.append(TENANT_A, {
+            taskId: 'task-pending',
+            sourceEnvelopeId: `resolution-${approvalId}`,
+            event: { type: 'approval_resolved', approvalId, decision: 'reject', resolvedBy: 'local', at: '2026-08-16T12:00:00.000Z' },
+            capacity: 2,
+          });
+        }
+        const tail = await store.read(TENANT_A, 'task-pending');
+        expect(tail?.entries.map((entry) => entry.sourceEnvelopeId)).toEqual(['request', 'resolution-other-2']);
+        expect(tail?.dropped).toBe(1);
+      });
+    });
+
+    it('refuses a capacity outside 2..50', async () => {
+      await withComposition(factory, async ({ store }) => {
+        for (const capacity of [1, 51]) {
+          await expect(store.append(TENANT_A, {
+            taskId: 'task-capacity-invalid', sourceEnvelopeId: `envelope-${capacity}`, event: requested('approval-1'), capacity,
+          })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        }
       });
     });
 

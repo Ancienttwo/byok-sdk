@@ -263,7 +263,8 @@ export interface ActivityStore {
     read(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
     /**
      * Freeze first terminal and final revision under the same task serialization as append.
-     * Durable adapters must enlist this boundary in the canonical lifecycle transaction (A3).
+     * A composition closes the log in the same commit as the task's first terminal or accepted
+     * Host cancellation; the built-in ones do it in that attempt write itself (#1113 A3).
      */
     settle(tenant: TenantId, taskId: string, terminalAt: string): Promise<ActivityTail>;
 }
@@ -790,7 +791,15 @@ import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import { type TenantId } from '@byok-sdk/core';
 import { z } from 'zod';
 export declare const DEFAULT_APPROVAL_TIMELINE_CAPACITY = 50;
+/** How long a timeline stays readable after its task's output closes; there is no idle expiry (#1113 A3). */
 export declare const DEFAULT_APPROVAL_TIMELINE_TTL_MS: number;
+/** Serialized UTF-8 bytes a timeline retains, counted over its observations' JSON. */
+export declare const MAX_APPROVAL_TIMELINE_BYTES: number;
+/**
+ * One event's serialized bound: half the timeline less room for observation
+ * metadata, so the pending request and the next observation always fit.
+ */
+export declare const MAX_APPROVAL_EVENT_BYTES: number;
 export declare const APPROVAL_SUMMARY_MAX_BYTES: number;
 export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObject<{
     type: z.ZodLiteral<"approval_requested">;
@@ -925,13 +934,19 @@ export interface ApprovalTimelineTail {
     readonly cursor?: number;
     readonly dropped: number;
     readonly capacity: number;
-    readonly expiresAt: string;
+    /**
+     * When the task's output closed: its first terminal or an accepted Host
+     * cancellation. From then on no observation or decision is admitted.
+     */
+    readonly terminalAt?: string;
+    /** {@link DEFAULT_APPROVAL_TIMELINE_TTL_MS} after `terminalAt`; absent while the task is open. */
+    readonly expiresAt?: string;
 }
 export interface ApprovalTimelineAppendInput {
     readonly taskId: string;
     readonly sourceEnvelopeId: string;
     readonly event: ApprovalTimelineEvent;
-    readonly ttlMs?: number;
+    /** Retained observations, 2 to {@link DEFAULT_APPROVAL_TIMELINE_CAPACITY}. */
     readonly capacity?: number;
 }
 /**
@@ -964,7 +979,6 @@ export interface ApprovalTimelineStore {
 }
 export interface ValidatedApprovalTimelineAppend {
     readonly capacity: number;
-    readonly ttlMs: number;
     readonly event: ApprovalTimelineEvent;
 }
 export declare function validateApprovalTimelineAppend(input: ApprovalTimelineAppendInput): ValidatedApprovalTimelineAppend;
@@ -972,6 +986,21 @@ export declare function validateApprovalTimelineResolve(input: ApprovalTimelineR
 export declare function approvalTimelineKey(tenant: TenantId, taskId: string): string;
 export declare function parseApprovalObservations(value: unknown): readonly ApprovalObservation[];
 export declare function approvalTimelineCursor(entries: readonly ApprovalObservation[]): number | undefined;
+/**
+ * The unresolved request: the latest request no later resolution names. A
+ * resolution without an id resolves the single outstanding request.
+ */
+export declare function pendingApprovalObservation(entries: readonly ApprovalObservation[]): ApprovalObservation | undefined;
+/**
+ * Appends `observation` and evicts the oldest observations until at most
+ * `capacity` remain within {@link MAX_APPROVAL_TIMELINE_BYTES}. The pending
+ * request is never evicted: validation bounds every event to half the bytes
+ * and capacity to at least two, so it and the new observation always fit.
+ */
+export declare function retainApprovalObservations(entries: readonly ApprovalObservation[], observation: ApprovalObservation, capacity: number): {
+    readonly entries: readonly ApprovalObservation[];
+    readonly evicted: number;
+};
 // ==== @byok-sdk/cloud dist/auth/bearer.d.ts ====
 /**
  * The single bearer check every device-facing route shares.
@@ -2726,6 +2755,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly activity_history_gap: 'activity_history_gap';
     readonly activity_cursor_invalid: 'activity_cursor_invalid';
     readonly activity_task_settled: 'activity_task_settled';
+    /** The task's output closed: its approval timeline admits no further observation (#1113 A3). */
+    readonly approval_timeline_settled: 'approval_timeline_settled';
     readonly activity_store_unavailable: 'activity_store_unavailable';
     readonly maintenance_invalid_input: 'maintenance_invalid_input';
     readonly maintenance_result_invalid: 'maintenance_result_invalid';
@@ -3240,7 +3271,7 @@ export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
 export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundObjects, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
-export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, sameApprovalTimelineEvent, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
+export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, MAX_APPROVAL_EVENT_BYTES, MAX_APPROVAL_TIMELINE_BYTES, approvalTimelineCursor, parseApprovalObservations, pendingApprovalObservation, retainApprovalObservations, sameApprovalTimelineEvent, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
 export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineResolvePendingInput, ApprovalTimelineResolvePendingResult, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
 export { StaleApprovalError, pendingApproval } from './approval-control';
 export type { PendingApproval } from './approval-control';
@@ -3270,8 +3301,9 @@ export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } fr
 export type { ReceiptRetentionClass } from './receipt-retention';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
-export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
-export type { InProcessMailboxWakeOptions } from './stores/in-memory/mailbox-wake';
+export type { TaskEventsWake, TaskEventsWakeSubscription } from './task-events-wake';
+export { createInProcessMailboxWake, createInProcessTaskEventsWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS, DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS, } from './stores/in-memory/mailbox-wake';
+export type { InProcessMailboxWakeOptions, InProcessTaskEventsWakeOptions } from './stores/in-memory/mailbox-wake';
 export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft';
 // ==== @byok-sdk/cloud dist/input-preparations.d.ts ====
 /**
@@ -3583,12 +3615,18 @@ export declare class SteerRejectedError extends Error {
 // ==== @byok-sdk/cloud dist/stores/in-memory/activity.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
 import { type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail } from '../../activity';
+import { type TaskChanged } from './task-change-map';
 /** Remove content, retaining a fence against resurrection and a cursor gap. */
 export declare function deleteActivityTail(store: InMemoryActivityStore, tenant: TenantId, taskId: string): number;
+/**
+ * Close admission and freeze the terminal deadline in the caller's synchronous
+ * step. The first close wins; removed content stays removed.
+ */
+export declare function closeActivityLog(store: InMemoryActivityStore, tenant: TenantId, taskId: string, terminalAt: string): void;
 export declare class InMemoryActivityStore implements ActivityStore {
     #private;
     private readonly clock;
-    constructor(clock: Clock);
+    constructor(clock: Clock, changed?: TaskChanged);
     append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
     settle(tenant: TenantId, taskId: string, terminalAt: string): Promise<ActivityTail>;
     read(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
@@ -3655,15 +3693,26 @@ export declare class InMemoryAgentMessageDraftStore implements AgentMessageDraft
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline';
-/** Deletes the task's tail for the Host task archive (#1120); returns the rows removed. */
+import { type TaskChanged } from './task-change-map';
+/**
+ * Removes the task's observations for the Host task archive (#1120) and keeps
+ * the closed tail as a fence, so no later observation recreates it. Returns
+ * the rows that held observations.
+ */
 export declare function deleteApprovalTimelineTail(store: InMemoryApprovalTimelineStore, tenant: TenantId, taskId: string): number;
+/**
+ * Close the timeline in the caller's synchronous step, at the instant the
+ * task's output closed. The first close wins (#1113 A3).
+ */
+export declare function closeApprovalTimeline(store: InMemoryApprovalTimelineStore, tenant: TenantId, taskId: string, terminalAt: string): void;
 export declare class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
     #private;
     private readonly clock;
-    constructor(clock: Clock);
+    constructor(clock: Clock, changed?: TaskChanged);
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
     resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
     read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
+    /** Clears expired observations and keeps each closed tail as its fence. */
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/blobs.d.ts ====
@@ -3908,6 +3957,7 @@ import type { ProofReceiptRetentionAuthority } from '../../maintenance';
 import type { TaskArchiveStore } from '../../task-archive';
 import type { BlobContentProxy, CloudStores } from '../ports';
 import { type InMemoryBlobBytes } from './blobs';
+import type { TaskEventsWake } from '../../task-events-wake';
 export { AllowAllRateLimiter } from './rate-limiter';
 export { BLOB_URL_TTL_MS, InMemoryBlobContentProxy, InMemoryCloudBlobStore, createInMemoryBlobs, createInMemoryBlobBytes, InMemoryBlobBytes, } from './blobs';
 export type { InMemoryBlobs, InMemoryBlobStoreOptions } from './blobs';
@@ -3936,6 +3986,8 @@ export interface InMemoryCloudComposition {
     readonly blobContentProxy: BlobContentProxy;
     /** The owner of the used proof `requestId`s in `stores.proofReceipts`, for `proofReceiptRetention`. */
     readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
+    /** Hints after every write to a task's state, activity log or approval timeline in these stores (#1113 A4). */
+    readonly taskEventsWake: TaskEventsWake;
 }
 /** Deletes a task's ephemeral rows from the in-memory stores that `createInMemoryCloudStores` built; each returns the rows removed. */
 export interface InMemoryEphemeralTaskRows {
@@ -3954,13 +4006,26 @@ export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCry
 taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
 // ==== @byok-sdk/cloud dist/stores/in-memory/mailbox-wake.d.ts ====
 import type { MailboxWake } from '../../mailbox-wake';
+import type { TaskEventsWake } from '../../task-events-wake';
 export declare const DEFAULT_MAILBOX_WAKE_FALLBACK_MS = 5000;
+/** How long a task event reader no hint reached waits before it re-reads (#1113 A4). */
+export declare const DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS = 5000;
 export interface InProcessMailboxWakeOptions {
     /** Bounds delivery latency when all hints are lost. Defaults to 5 seconds. */
     readonly fallbackMs?: number;
 }
+export interface InProcessTaskEventsWakeOptions {
+    /** Bounds read latency when all hints are lost. Defaults to 5 seconds. */
+    readonly fallbackMs?: number;
+}
 /** Request-local subscriptions behind a port; losing the table only delays reads. */
 export declare function createInProcessMailboxWake(options?: InProcessMailboxWakeOptions): MailboxWake;
+/**
+ * Hints for task event readers in this process. It covers only writers in the
+ * same process: a composition whose writers span processes needs a transport
+ * that observes their commits, such as the Postgres task events wake.
+ */
+export declare function createInProcessTaskEventsWake(options?: InProcessTaskEventsWakeOptions): TaskEventsWake;
 // ==== @byok-sdk/cloud dist/stores/in-memory/nonces.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
@@ -4095,6 +4160,7 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
+import { type TaskChanged } from './task-change-map';
 interface StoredAgentMessageAdmission extends AgentMessageAdmission {
     readonly deviceId: string;
 }
@@ -4166,7 +4232,11 @@ export declare class InMemoryTaskAttemptState {
     readonly messageAdmissions: Map<string, StoredAgentMessageAdmission>;
     /** `archive_settled_at` of archived tasks (#1120), by tenant/task key. */
     readonly archiveSettled: Map<string, string>;
-    constructor(clock: Clock);
+    /**
+     * `outputClosed` runs synchronously in the write that first closes a task's
+     * output; `changed` after every attempt write.
+     */
+    constructor(clock: Clock, outputClosed?: (tenant: TenantId, taskId: string, at: string) => void, changed?: TaskChanged);
     now(): string;
     /**
      * Serialize every state-changing operation for one tenant/task key. It also
@@ -4194,6 +4264,22 @@ export declare class InMemoryTaskCancellationStore implements TaskCancellationSt
     constructor(state: InMemoryTaskAttemptState, mailbox: MailboxStore, devices: Pick<DeviceDirectory, 'get'>);
     request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
     abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined>;
+}
+// ==== @byok-sdk/cloud dist/stores/in-memory/task-change-map.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+/** Called after a write to a task's in-memory state, in the writer's synchronous step. */
+export type TaskChanged = (tenant: TenantId, taskId: string) => void;
+/**
+ * A per-task state map that reports each write, so a task events wake hears
+ * every writer of the map, module helpers included (#1113 A4).
+ */
+export declare class TaskChangeMap<V> extends Map<string, V> {
+    #private;
+    constructor(identify: (value: V) => {
+        readonly tenantId: TenantId;
+        readonly taskId: string;
+    }, changed: TaskChanged | undefined);
+    set(key: string, value: V): this;
 }
 // ==== @byok-sdk/cloud dist/stores/ports-contract.d.ts ====
 /**
@@ -5116,6 +5202,25 @@ export declare function archiveTerminalTasks(ports: {
 }, tenant: TenantId, input: TaskArchiveListInput & {
     readonly now: string;
 }): Promise<TaskArchiveStepCounts>;
+// ==== @byok-sdk/cloud dist/task-events-wake.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+/**
+ * A lossy hint that a task's activity log, approval timeline or state may have
+ * changed (#1113 A4). It names only the tenant and task, never content, and it
+ * is never a cursor or event authority: a woken reader re-reads those sources.
+ * One hint can cause an extra read, never a new event.
+ */
+export interface TaskEventsWake {
+    /** Called after a commit that changed the task. Synchronous and non-throwing. */
+    changed(tenant: TenantId, taskId: string): void;
+    /** Subscribe before reading so a commit between the read and next() is retained. */
+    subscribe(tenant: TenantId, taskId: string, signal: AbortSignal): TaskEventsWakeSubscription;
+}
+export interface TaskEventsWakeSubscription {
+    /** Resolves on a hint, the fallback interval, maxWaitMs, abort, or close. */
+    next(maxWaitMs: number): Promise<void>;
+    close(): void;
+}
 // ==== @byok-sdk/cloud dist/task-redaction.d.ts ====
 /**
  * Scoped row-delete for plaintext task content (#654 E5a).

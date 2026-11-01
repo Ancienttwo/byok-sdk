@@ -225,7 +225,7 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
     try {
       expect(inspect.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'task_attempt_status_idx'").get())
         .toEqual({ name: 'task_attempt_status_idx' });
-      expect(inspect.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '7' });
+      expect(inspect.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '8' });
     } finally { inspect.close(); }
   });
 

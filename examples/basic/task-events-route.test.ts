@@ -1,6 +1,6 @@
 // The SSE route's own decisions: 404 before streaming, cursors as SSE ids,
-// `Last-Event-ID` passed back as `after`, `from: 'state'` for a new stream or an
-// unknown cursor, and the final snapshot when a finished task's feed is gone.
+// `Last-Event-ID` passed back as `after`, and `from: 'state'` for a new stream
+// or an unknown cursor.
 // The feed itself is covered by @byok-sdk/server's tests.
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
@@ -97,13 +97,5 @@ describe('GET /api/tasks/:taskId/events', () => {
       { id: 'feed-b.5', event: waiting.event },
     ]);
     expect(calls).toEqual([{ after: 'feed-a.3' }, { from: 'state' }]);
-  });
-
-  it('sends only the final state when a finished task has no feed left', async () => {
-    const complete = { ...SNAPSHOT, state: 'Complete' } as TaskSnapshot;
-    const { tasks, calls } = scripted(complete, [new TaskEventsUnavailableError('task-1', 'feed_expired')]);
-    const response = await app(tasks).request('/api/tasks/task-1/events');
-    expect(await messages(response)).toEqual([{ event: { kind: 'state', state: 'Complete', at: SNAPSHOT.updatedAt } }]);
-    expect(calls).toEqual([{ from: 'state' }]);
   });
 });

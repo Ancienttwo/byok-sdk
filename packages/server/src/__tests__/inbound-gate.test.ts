@@ -112,10 +112,8 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       expect(firstRes.status).toBe(200);
       expect(await firstRes.json()).toMatchObject({ accepted: 4 }); // no `rejected` key: nothing was rejected
 
-      const claimed = await iter.next();
-      expect(claimed.value).toMatchObject({ kind: 'state', state: 'Claimed' });
-      const running = await iter.next();
-      expect(running.value).toMatchObject({ kind: 'state', state: 'Running' });
+      // The reader reads state, not a replay of transitions: the batch landed
+      // between its reads, so it sees the progress, then where the task is now.
       const agentEvt = await iter.next();
       expect(agentEvt.value).toMatchObject({ kind: 'agent', event: { type: 'progress', text: 'working...' } });
       const awaitEvt = await iter.next();
@@ -143,6 +141,23 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
 
       await expectNoMoreEvents(iter);
       expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // NOT Failed
+      // One transition per envelope on the per-transition server feed, none for the retry.
+      const transitions: string[] = [];
+      for await (const event of started.byok.events.subscribe()) {
+        if (event.kind !== 'task.state' || event.taskId !== handle.taskId) continue;
+        transitions.push(event.state);
+        if (event.state === 'AwaitApproval') break;
+      }
+      expect(transitions).toEqual(['Claimed', 'Running', 'AwaitApproval']);
+      const after = started.byok.events.subscribe()[Symbol.asyncIterator]();
+      const replayed: string[] = [];
+      for (;;) {
+        const next = await Promise.race([after.next(), new Promise<'idle'>((resolve) => setTimeout(() => resolve('idle'), 50))]);
+        if (next === 'idle' || next.done) break;
+        if (next.value.kind === 'task.state' && next.value.taskId === handle.taskId) replayed.push(next.value.state);
+      }
+      await after.return!();
+      expect(replayed).toEqual(transitions);
     });
 
     it('a fresh (non-duplicate-id) task.await_approval arriving while already AwaitApproval is an idempotent no-op, not a forced Failed (structural guard, independent of id-based dedup)', async () => {
@@ -164,7 +179,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // NOT Failed
     });
 
-    it('a fresh envelope with the same approvalId emits one approval request and state notification', async () => {
+    it('a fresh envelope with the same approvalId emits one new approval request, and no repeated state', async () => {
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
@@ -174,12 +189,12 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       await waitForTaskEvent(handle, (e) => e.kind === 'await_approval');
 
       const iter = handle.events()[Symbol.asyncIterator]();
-      for (let i = 0; i < 5; i++) await iter.next();
+      expect((await iter.next()).value).toMatchObject({ kind: 'await_approval', summary: 'first', approvalId: 'appr-first' });
+      expect((await iter.next()).value).toMatchObject({ kind: 'state', state: 'AwaitApproval' });
 
       await daemon.send(createEnvelope('task.await_approval', { summary: 'second, redundant', approvalId: 'appr-first' }, { taskId: handle.taskId }));
 
       expect((await iter.next()).value).toMatchObject({ kind: 'await_approval', summary: 'second, redundant', approvalId: 'appr-first' });
-      expect((await iter.next()).value).toMatchObject({ kind: 'state', state: 'AwaitApproval' });
       expect((await started.byok.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-first');
       await expectNoMoreEvents(iter);
     });
@@ -202,7 +217,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
 
       const iter = handle.events()[Symbol.asyncIterator]();
-      for (let i = 0; i < 3; i++) await iter.next(); // drain Offered, Claimed, Running
+      expect((await iter.next()).value).toMatchObject({ kind: 'state', state: 'Running' });
 
       const injected: Envelope[] = [
         createEnvelope(

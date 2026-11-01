@@ -122,27 +122,13 @@ export { TENANT_ERASURE_ERROR_CODES, TENANT_ERASURE_TABLES, PostgresTenantErasur
 export type { PostgresTenantErasureCompositionOptions, PostgresTenantErasureOptions, TenantErasureConflict, TenantErasureErrorCode, TenantErasureReadback, TenantErasureResult, TenantErasureStatus, } from './tenant-erasure';
 export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake';
 export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
+export { createPostgresTaskEventsWake, TaskEventsWakeProbeMissedError } from './task-events-wake';
+export type { PostgresTaskEventsWake, PostgresTaskEventsWakeOptions } from './task-events-wake';
+export type { PostgresWakeOptions } from './postgres-wake';
 // ==== @byok-sdk/cloud-dataplane dist/mailbox-wake.d.ts ====
 import { type MailboxWake } from '@byok-sdk/cloud';
-export interface PostgresMailboxWakeOptions {
-    /** Session-mode DSN. Hyperdrive and transaction-mode poolers cannot carry LISTEN. */
-    readonly connectionString: string;
-    readonly fallbackMs?: number;
-    /** Missing probe or connection failure; default reports to console.error. Must not throw. */
-    readonly onError?: (error: Error) => void;
-    /**
-     * Self-NOTIFY observation deadline for the connect probe and every periodic
-     * probe; defaults to 5 seconds. A miss retires the connection.
-     */
-    readonly probeTimeoutMs?: number;
-    /**
-     * Period of the self-NOTIFY probe on an established connection; defaults to
-     * 30 seconds. It detects a half-open path (an idle NAT or load balancer
-     * dropping the flow without closing it), which otherwise stops notifications
-     * silently.
-     */
-    readonly probeIntervalMs?: number;
-}
+import { type PostgresWakeOptions } from './postgres-wake';
+export type PostgresMailboxWakeOptions = PostgresWakeOptions;
 /** A self-NOTIFY probe was not observed, so the connection cannot be trusted to carry notifications. */
 export declare class MailboxWakeProbeMissedError extends Error {
     readonly name = "MailboxWakeProbeMissedError";
@@ -317,6 +303,52 @@ export type ByokPool = Pool & {
  */
 export declare function createByokPool(options: ByokPoolOptions): ByokPool;
 export {};
+// ==== @byok-sdk/cloud-dataplane dist/postgres-wake.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+/** Listener options shared by the Postgres mailbox and task events wakes. */
+export interface PostgresWakeOptions {
+    /** Session-mode DSN. Hyperdrive and transaction-mode poolers cannot carry LISTEN. */
+    readonly connectionString: string;
+    /** Bounds read latency when every hint is lost; defaults to 5 seconds. */
+    readonly fallbackMs?: number;
+    /** Missing probe or connection failure; default reports to console.error. Must not throw. */
+    readonly onError?: (error: Error) => void;
+    /**
+     * Self-NOTIFY observation deadline for the connect probe and every periodic
+     * probe; defaults to 5 seconds. A miss retires the connection.
+     */
+    readonly probeTimeoutMs?: number;
+    /**
+     * Period of the self-NOTIFY probe on an established connection; defaults to
+     * 30 seconds. It detects a half-open path (an idle NAT or load balancer
+     * dropping the flow without closing it), which otherwise stops notifications
+     * silently.
+     */
+    readonly probeIntervalMs?: number;
+}
+/** Which notifications a listener carries, and the in-process wake it relays them to. */
+export interface PostgresWakeChannel {
+    readonly channel: string;
+    readonly applicationName: string;
+    /** Names the wake in errors and reports. */
+    readonly label: string;
+    readonly inner: {
+        notify(tenant: TenantId, key: string): void;
+        subscribe(tenant: TenantId, key: string, signal: AbortSignal): WakeSubscription;
+    };
+    probeMissed(message: string): Error;
+}
+export interface WakeSubscription {
+    next(maxWaitMs: number): Promise<void>;
+    close(): void;
+}
+export interface PostgresWake {
+    subscribe(tenant: TenantId, key: string, signal: AbortSignal): WakeSubscription;
+    /** Host-owned lifetime, like pool.end(). Closes all outstanding subscriptions. */
+    close(): Promise<void>;
+}
+/** One resident Node listener, independent of the request pool and the authority it hints about. */
+export declare function createPostgresWake(spec: PostgresWakeChannel, options: PostgresWakeOptions): PostgresWake;
 // ==== @byok-sdk/cloud-dataplane dist/runtime.d.ts ====
 /**
  * The Worker-loadable online surface of `@byok-sdk/cloud-dataplane`.
@@ -444,9 +476,11 @@ import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingIn
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { ByokPool } from '../pool';
 export declare class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
+    #private;
     private readonly pool;
     private readonly clock;
     constructor(pool: ByokPool, clock: Clock);
+    /** Clears expired observations and keeps each closed row as its fence. */
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
     resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
@@ -1710,6 +1744,27 @@ export declare function refusalFor(db: Querier, tenant: TenantId, taskId: string
  */
 export declare function readOutbox(db: Querier, tenant: TenantId, taskId: string, task: TaskRow, forUpdate: boolean, pendingOnly?: boolean): Promise<readonly OutboxBody[]>;
 export {};
+// ==== @byok-sdk/cloud-dataplane dist/task-events-wake.d.ts ====
+import { type TaskEventsWake } from '@byok-sdk/cloud';
+import { type PostgresWakeOptions } from './postgres-wake';
+export type PostgresTaskEventsWakeOptions = PostgresWakeOptions;
+/** A self-NOTIFY probe was not observed, so the connection cannot be trusted to carry notifications. */
+export declare class TaskEventsWakeProbeMissedError extends Error {
+    readonly name = "TaskEventsWakeProbeMissedError";
+}
+export interface PostgresTaskEventsWake extends TaskEventsWake {
+    /** Host-owned lifetime, like pool.end(). Closes all outstanding subscriptions. */
+    close(): Promise<void>;
+}
+/**
+ * Task event hints for every instance on one database (#1113 A4): migration
+ * 0036's triggers notify at each commit that changes a task's state, activity
+ * log or approval timeline, whichever process or maintenance run wrote it. One
+ * resident listener serves every subscription in this process; a lost hint
+ * delays a reader by at most `fallbackMs`, and a reconnect wakes every
+ * subscription so its reader rescans.
+ */
+export declare function createPostgresTaskEventsWake(options: PostgresTaskEventsWakeOptions): PostgresTaskEventsWake;
 // ==== @byok-sdk/cloud-dataplane dist/tenant-erasure.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { ByokPool } from './pool';

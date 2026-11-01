@@ -3,11 +3,13 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { CLAUDE_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/claude/claude-capabilities.ts';
 import { CODEX_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/codex/codex-capabilities.ts';
+import { DSH_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/dsh/dsh-capabilities.ts';
 import { GROK_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/grok/grok-capabilities.ts';
 import { HERMES_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/hermes/hermes-capabilities.ts';
 import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/pi/pi-capabilities.ts';
 import { QUALIFIED_CLAUDE_VERSION } from '../../packages/client/src/adapters/claude/claude-version.ts';
 import { QUALIFIED_CODEX_VERSION } from '../../packages/client/src/adapters/codex/codex-version.ts';
+import { QUALIFIED_DSH_VERSION } from '../../packages/client/src/adapters/dsh/dsh-version.ts';
 import { QUALIFIED_GROK_VERSION } from '../../packages/client/src/adapters/grok/grok-version.ts';
 import { QUALIFIED_HERMES_VERSION } from '../../packages/client/src/adapters/hermes/hermes-version.ts';
 
@@ -21,6 +23,7 @@ const piPin = JSON.parse(readFileSync(path.join(root, 'packages/client/package.j
 export const COLUMNS = [
   ['Claude', CLAUDE_RUNTIME_CAPABILITIES, QUALIFIED_CLAUDE_VERSION],
   ['Codex', CODEX_RUNTIME_CAPABILITIES, QUALIFIED_CODEX_VERSION],
+  ['dsh', DSH_RUNTIME_CAPABILITIES, QUALIFIED_DSH_VERSION],
   ['Grok', GROK_RUNTIME_CAPABILITIES, QUALIFIED_GROK_VERSION],
   ['Hermes', HERMES_RUNTIME_CAPABILITIES, QUALIFIED_HERMES_VERSION],
   ['Pi', PI_RUNTIME_CAPABILITIES, piPin],

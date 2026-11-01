@@ -37,7 +37,7 @@ export interface ContractCheck { readonly run: () => Promise<void>; readonly tim
 export const check = (run: () => Promise<void>, timeoutMs?: number): ContractCheck => ({ run, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
 export type ContractPlan = { readonly [K in ContractCaseId]: ContractCheck | ContractSkip };
 
-export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes';
+export type ContractRuntime = 'pi' | 'claude' | 'codex' | 'grok' | 'hermes' | 'dsh';
 export type ContractMode = 'qualified' | 'latest';
 
 /** The run mode. The suite's own vitest config refuses to start without it, so this never defaults. */
@@ -104,6 +104,29 @@ export function defineRuntimeContract(title: string, descriptor: RuntimeAdapterD
       const entry = plan[id];
       if ('skip' in entry) it.skip(`${id}: skipped: ${entry.skip}`, () => {});
       else it(`${id}: ${CONTRACT_CASES[id]}`, entry.run, entry.timeoutMs ?? 180_000);
+    }
+  });
+}
+
+export type RuntimeCases = Readonly<Record<string, readonly [description: string, entry: ContractCheck | ContractSkip]>>;
+
+/** A runtime's own cases follow the shared plan's skip rule: a skip names its reason. */
+export function assertRuntimeCases(title: string, cases: RuntimeCases): void {
+  for (const [id, [, entry]] of Object.entries(cases)) {
+    if ('skip' in entry && entry.skip.trim() === '') throw new Error(`${title}: ${id} skip needs a reason`);
+  }
+}
+
+/**
+ * Register a runtime's own cases beside its contract, under the same rule as
+ * the shared plan: each case is a check or a skip with a reason.
+ */
+export function defineRuntimeCases(title: string, cases: RuntimeCases): void {
+  assertRuntimeCases(title, cases);
+  describe(title, () => {
+    for (const [id, [description, entry]] of Object.entries(cases)) {
+      if ('skip' in entry) it.skip(`${id}: skipped: ${entry.skip}`, () => {});
+      else it(`${id}: ${description}`, entry.run, entry.timeoutMs ?? 180_000);
     }
   });
 }

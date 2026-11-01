@@ -158,6 +158,10 @@ function sdkBuiltIsolation(id: string, config: DaemonConfig): Readonly<Record<st
       agentUserMcpServers: runtimes?.codex?.agentUserMcpServers ?? 'inherit',
       sandbox: config.codexSandbox ?? 'danger-full-access',
     };
+    case 'grok': return {
+      compatInstructions: runtimes?.grok?.compatInstructions ?? 'inherit',
+      agentUserMcpServers: runtimes?.grok?.agentUserMcpServers ?? 'inherit',
+    };
     default: return undefined;
   }
 }

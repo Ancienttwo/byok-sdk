@@ -749,7 +749,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = all three bundled adapters\n— pi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildDefaultAdapters`), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
+      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildDefaultAdapters`; the `grok` custom harness is\nbuilt only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
     },
     "runtimes": {
       "type": "object",
@@ -1204,6 +1204,162 @@
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             }
           }
+        },
+        "grok": {
+          "type": "object",
+          "properties": {
+            "compatInstructions": {
+              "enum": [
+                "disabled",
+                "inherit"
+              ],
+              "description": "`GrokAdapterOptions.compatInstructions`: `disabled` turns off Grok's Claude and Cursor instruction and rules compatibility scanning. Default `inherit`."
+            },
+            "agentUserMcpServers": {
+              "enum": [
+                "excluded",
+                "inherit"
+              ],
+              "description": "`GrokAdapterOptions.agentUserMcpServers`: `excluded` switches off the user MCP sources Grok can disable and refuses an Agent task while another is enabled. Default `inherit`."
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string",
+                  "description": "The normalized token this SDK was qualified against, for example `0.160.0`."
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ],
+                  "description": "What an unmatched token means. A descriptor default may not use `block`; only a Host layer may."
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Explicitly known-good versions outside the qualified range."
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions that must stay a warning even where `unqualified` is `allow`."
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "description": "Versions this Host refuses before claim. Host layer only."
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ],
+              "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
+            }
+          },
+          "description": "Applies only when `runtimeAllowlist` lists `grok`."
         }
       },
       "description": "Isolation options of the runtime adapters `createDaemon` builds (#1094),\npassed to each adapter's constructor; an unset option keeps the\nadapter's default, under which a runtime keeps the user's own context,\nsessions and MCP servers. Which runtimes are built stays\n`runtimeAllowlist`, and the Codex sandbox stays `codexSandbox`.\n`createDaemonWithAdapters` rejects this key, even when undefined:\nconfigure each injected adapter directly."

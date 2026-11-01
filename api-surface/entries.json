@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2097398,
+      "budgetBytes": 2116884,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -110,7 +110,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 377477,
+      "budgetBytes": 395397,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -425,7 +425,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 364929,
+      "budgetBytes": 383017,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -483,8 +483,8 @@
   "@byok-sdk/client#byok-acp-runtime": {
     "kind": "imports",
     "policy": {
-      "purpose": "Private ACP runtime stack (Grok)",
-      "budgetBytes": 80400,
+      "purpose": "Private ACP runtime stack (Grok, dsh)",
+      "budgetBytes": 80556,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1171,7 +1171,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 532333,
+      "budgetBytes": 535354,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1229,7 +1229,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 776634,
+      "budgetBytes": 779418,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1359,7 +1359,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 739290,
+      "budgetBytes": 741159,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2047,7 +2047,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 673718,
+      "budgetBytes": 693989,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2255,7 +2255,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 557064,
+      "budgetBytes": 560085,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2342,7 +2342,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2052716,
+      "budgetBytes": 2075465,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2378,6 +2378,7 @@
         "zod"
       ],
       "lazyImports": [
+        "#byok-acp-runtime",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",

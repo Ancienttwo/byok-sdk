@@ -3,3 +3,4 @@
 export { SessionNotFoundError } from '../../vendor/oar/044633e/contracts/session-not-found-error.js';
 export { RuntimeFailureError } from '../../vendor/oar/044633e/contracts/runtime-failure-error.js';
 export { grokSession } from '../../vendor/oar/044633e/runtimes/grok/session.js';
+export { dshSession } from './dsh-acp-session.js';

@@ -212,10 +212,14 @@ and a static tool-authorization policy in `toolAuthorization`:
 ```
 
 - `runtimes.pi.agentUserContext`, `runtimes.claude.agentUserContext`,
-  `runtimes.claude.agentSessionPersistence` and
-  `runtimes.codex.agentUserMcpServers` go to the adapter constructors. An unset
+  `runtimes.claude.agentSessionPersistence`,
+  `runtimes.codex.agentUserMcpServers`, `runtimes.grok.compatInstructions` and
+  `runtimes.grok.agentUserMcpServers` go to the adapter constructors. An unset
   option keeps the adapter default (`inherit`, `enabled`). Which runtimes run
-  stays `runtimeAllowlist`; the Codex sandbox stays `codexSandbox`.
+  stays `runtimeAllowlist`; the Codex sandbox stays `codexSandbox`. Grok is a
+  custom harness, so `createDaemon` builds it only when `runtimeAllowlist`
+  lists `grok`; it runs on darwin and linux and reports `platform_unsupported`
+  elsewhere.
   `createDaemonWithAdapters` rejects `runtimes`: configure injected adapters
   directly.
 - A `fileScope` is only legal when every runtime of the daemon resolves to
@@ -701,6 +705,15 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.codex.versionPolicy.allow` | advanced | array |
 | `runtimes.codex.versionPolicy.warn` | advanced | array |
 | `runtimes.codex.versionPolicy.block` | advanced | array |
+| `runtimes.grok` | advanced | object |
+| `runtimes.grok.compatInstructions` | advanced | "disabled" / "inherit" |
+| `runtimes.grok.agentUserMcpServers` | advanced | "excluded" / "inherit" |
+| `runtimes.grok.versionPolicy` | advanced | object |
+| `runtimes.grok.versionPolicy.qualifiedVersion` | required when parent is set | string |
+| `runtimes.grok.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
+| `runtimes.grok.versionPolicy.allow` | advanced | array |
+| `runtimes.grok.versionPolicy.warn` | advanced | array |
+| `runtimes.grok.versionPolicy.block` | advanced | array |
 | `runtimeEnvironment` | advanced | union |
 | `durablePi` | advanced | boolean |
 | `piByokLauncher` | advanced | object |
@@ -809,6 +822,7 @@ Manifest transition: **0.32.0 → 0.32.0**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| daemon-config-runtimes-grok | additive | DaemonConfig.runtimes.grok takes compatInstructions, agentUserMcpServers and versionPolicy, and createDaemon builds the Grok adapter from configuration when runtimeAllowlist lists grok (#1094). Without grok in the allowlist nothing changes; a Host that assembles GrokAdapter itself can move those options into DaemonConfig. [Migration](../docs/device-setup.md#runtime-isolation-and-tool-authorization) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

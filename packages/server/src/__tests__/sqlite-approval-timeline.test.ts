@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createMutableClock, tenantId } from '@byok-sdk/core';
+import { createMutableClock, tenantId, type TenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { createSqliteEmbeddedStores, type SqliteEmbeddedStores } from '../stores/sqlite';
 
@@ -12,6 +12,13 @@ const request = {
   taskId: 'task', sourceEnvelopeId: 'request-1',
   event: { type: 'approval_requested', approvalId: 'approval-1', summary: 'Allow write?' },
 } as const;
+
+/** Closes the task's output, which closes its approval timeline (#1113 A3). */
+async function closeTask(store: SqliteEmbeddedStores, tenantOf: TenantId, taskId: string): Promise<void> {
+  await store.cloud.tasks.open(tenantOf, { taskId, deviceId: 'device' });
+  await store.cloud.tasks.claim(tenantOf, { taskId, deviceId: 'device' });
+  await store.cloud.tasks.recordStatus(tenantOf, { taskId, status: 'complete' });
+}
 
 describe('SQLite approval timeline persistence', () => {
   const roots: string[] = [];
@@ -56,14 +63,17 @@ describe('SQLite approval timeline persistence', () => {
     expect(await third.cloud.approvals.resolvePending(tenant, decision)).toMatchObject({ status: 'replayed', tail: { cursor: 2 } });
   });
 
-  it('does not refresh expiry on reopen or replay and expires at the exact TTL boundary', async () => {
+  it('freezes the deadline at the task\'s close across reopen and replay and expires at the exact boundary', async () => {
     const { clock, open, close } = fixture();
     const first = open();
-    const tail = await first.cloud.approvals.append(tenant, request);
+    await first.cloud.approvals.append(tenant, request);
+    await closeTask(first, tenant, request.taskId);
+    const closed = await first.cloud.approvals.read(tenant, request.taskId);
+    expect(closed).toMatchObject({ terminalAt: clock.now().toISOString(), expiresAt: new Date(clock.now().getTime() + 600_000).toISOString() });
     await close(first);
     clock.advance(599_999);
     const second = open();
-    expect(await second.cloud.approvals.append(tenant, request)).toEqual(tail);
+    expect(await second.cloud.approvals.append(tenant, request)).toEqual(closed);
     await close(second);
     clock.advance(1);
     const third = open();
@@ -72,7 +82,19 @@ describe('SQLite approval timeline persistence', () => {
       event: { type: 'approval_resolved', approvalId: 'approval-1', resolvedBy: 'host', decision: 'approve', at: clock.now().toISOString() },
     })).toEqual({ status: 'absent' });
     expect(await third.cloud.approvals.read(tenant, 'task')).toBeUndefined();
-    expect((await third.cloud.approvals.append(tenant, { ...request, sourceEnvelopeId: 'new-request' })).cursor).toBe(1);
+    // The closed row stays as the fence: expiry never restarts the timeline.
+    await expect(third.cloud.approvals.append(tenant, { ...request, sourceEnvelopeId: 'new-request' })).rejects.toMatchObject({ code: 'approval_timeline_settled' });
+  });
+
+  it('keeps an open timeline across reopen however long it idles', async () => {
+    const { clock, open, close } = fixture();
+    const first = open();
+    const tail = await first.cloud.approvals.append(tenant, request);
+    await close(first);
+    clock.advance(7 * 24 * 60 * 60 * 1_000);
+    const second = open();
+    expect(await second.cloud.approvals.collectExpired(tenant, { now: clock.now().toISOString(), limit: 10 })).toMatchObject({ removed: 0 });
+    expect(await second.cloud.approvals.read(tenant, 'task')).toEqual(tail);
   });
 
   it('persists bounded tails and collects expired rows by tenant and limit', async () => {
@@ -82,15 +104,18 @@ describe('SQLite approval timeline persistence', () => {
       for (let i = 0; i < 3; i++) await first.cloud.approvals.append(tenant, {
         ...request, taskId: id, sourceEnvelopeId: `request-${i}`, capacity: 2,
       });
+      await closeTask(first, tenant, id);
     }
     const other = tenantId('other');
     await first.cloud.approvals.append(other, request);
+    await closeTask(first, other, request.taskId);
     await close(first);
     const second = open();
     expect(await second.cloud.approvals.read(tenant, 'task')).toMatchObject({ cursor: 3, dropped: 1, capacity: 2 });
     clock.advance(600_000);
     expect(await second.cloud.approvals.collectExpired(tenant, { now: clock.now().toISOString(), limit: 1 })).toMatchObject({ removed: 1, more: true });
     expect(await second.cloud.approvals.collectExpired(tenant, { now: clock.now().toISOString(), limit: 1 })).toMatchObject({ removed: 1, more: false });
+    expect(await second.cloud.approvals.collectExpired(tenant, { now: clock.now().toISOString(), limit: 1 })).toMatchObject({ removed: 0, more: false });
     expect(await second.cloud.approvals.collectExpired(other, { now: clock.now().toISOString(), limit: 1 })).toMatchObject({ removed: 1, more: false });
   });
 
@@ -119,7 +144,7 @@ describe('SQLite approval timeline persistence', () => {
     const db = new DatabaseSync(path);
     db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version);
     const before = db.prepare('SELECT * FROM approval_timeline_tail').all(); db.close();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '7' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '8' }));
     const inspect = new DatabaseSync(path, { readOnly: true });
     try {
       expect(inspect.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);
@@ -138,7 +163,7 @@ describe('SQLite approval timeline persistence', () => {
   it('refuses missing approval authority without recreating it', async () => {
     const { path, open, close } = fixture(); await close(open());
     const db = new DatabaseSync(path); db.exec('DROP TABLE approval_timeline_tail'); db.close();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '7' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '8' }));
     const inspect = new DatabaseSync(path, { readOnly: true });
     try { expect(inspect.prepare("SELECT name FROM sqlite_master WHERE name = 'approval_timeline_tail'").get()).toBeUndefined(); }
     finally { inspect.close(); }

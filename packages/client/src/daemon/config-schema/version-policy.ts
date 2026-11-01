@@ -1,7 +1,7 @@
 import { runtimeVersionPolicyIssues } from '../../runtime-version-policy';
 import type { DaemonConfigIssue } from './validate';
 
-const RUNTIMES = ['pi', 'claude', 'codex'] as const;
+const RUNTIMES = ['pi', 'claude', 'codex', 'grok'] as const;
 
 /**
  * Semantic checks the generated JSON schema cannot express (#1103): a

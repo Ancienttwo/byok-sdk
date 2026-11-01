@@ -4,6 +4,8 @@ Source: https://github.com/botiverse/oar, version 0.80.1, fixed commit `044633e9
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 92 source files plus LICENSE. Seventy-six source files keep upstream bytes. Sixteen source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, and the Codex goal-event projection. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
 
+Upstream has no dsh runtime. The SDK-owned dsh profile, `packages/client/src/runtime/dsh-acp-session.js`, builds on the vendored `shared/acp/session.ts` `acpSession`. It lives in SDK source, not in this fork, and adds no manifest row.
+
 The SDK typechecks this source with the ES2024 library (`packages/client/tsconfig.json`, `scripts/api-surface/tsconfig.oar-bridge.json`). The emit target stays ES2022, and the Node 24 engine floor provides the ES2023/ES2024 built-ins upstream uses (`Array.prototype.toSorted`, `Promise.withResolvers`).
 
 ## Authoritative release binding

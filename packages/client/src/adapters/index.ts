@@ -40,6 +40,8 @@ export { GrokAdapter } from './grok/grok-adapter';
 export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
 export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
+export { DshAdapter } from './dsh/dsh-adapter';
+export type { DshAdapterOptions, DshModelSelection, DshSandboxMode } from './dsh/dsh-adapter';
 
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type {

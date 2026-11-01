@@ -77,7 +77,11 @@ describe('the inbound gate', () => {
       ],
     });
     const accepted: string[] = [];
-    for (const type of DAEMON_TO_SERVER_TYPES) {
+    // One task carries every type, so its terminals come last: a terminal
+    // closes the task's output, and later output is refused (#1113 A3).
+    const terminal = (type: string) => ['task.decline', 'task.complete', 'task.fail', 'task.cancelled'].includes(type);
+    const sent = [...DAEMON_TO_SERVER_TYPES.filter((type) => !terminal(type)), ...DAEMON_TO_SERVER_TYPES.filter(terminal)];
+    for (const type of sent) {
       const envelope = envelopeOfType(type, taskId, deviceId);
       if (envelope.type === 'agent.content.receipt') {
         await stores.receipts.record({
@@ -115,7 +119,7 @@ describe('the inbound gate', () => {
     // `agent.message.publish` has its own exact task/Agent binding and product
     // consumer contract; its common dedup admission is covered by the
     // issue regression rather than this generic lifecycle fixture.
-    expect(accepted).toEqual([...DAEMON_TO_SERVER_TYPES].filter((type) => type !== 'agent.message.publish' && type !== 'agent.message.draft'));
+    expect(accepted).toEqual(sent.filter((type) => type !== 'agent.message.publish' && type !== 'agent.message.draft'));
   });
 
   it('step 2: rejects an envelope from a device other than the immutable offer target before claim', async () => {

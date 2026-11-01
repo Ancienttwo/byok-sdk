@@ -43,6 +43,8 @@ export type StartAcpSession = (
     env: Readonly<Record<string, string>>;
     resume?: string;
     model?: string;
+    /** OAR SessionOptions.launchArgs: joined to the profile's argv where the profile places them. */
+    launchArgs?: readonly string[];
     /** OAR SessionOptions.mcpServers: the ACP `mcpServers` of session/new and session/resume. */
     mcpServers?: readonly (
       | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }
@@ -56,3 +58,5 @@ export type StartAcpSession = (
 ) => Promise<RawAcpSession>;
 /** OAR's Grok Build profile: `grok agent --always-approve --no-leader stdio`. */
 export declare const grokSession: StartAcpSession;
+/** The SDK's dsh profile on the vendored ACP stack: `dsh --profile acp`, plus the adapter's `--patch <file>`. */
+export declare const dshSession: StartAcpSession;

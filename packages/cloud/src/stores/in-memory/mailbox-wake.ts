@@ -1,28 +1,56 @@
 import type { TenantId } from '@byok-sdk/core';
 import type { MailboxWake, MailboxWakeSubscription } from '../../mailbox-wake';
+import type { TaskEventsWake } from '../../task-events-wake';
 
 export const DEFAULT_MAILBOX_WAKE_FALLBACK_MS = 5_000;
+/** How long a task event reader no hint reached waits before it re-reads (#1113 A4). */
+export const DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS = 5_000;
 
 export interface InProcessMailboxWakeOptions {
   /** Bounds delivery latency when all hints are lost. Defaults to 5 seconds. */
   readonly fallbackMs?: number;
 }
 
+export interface InProcessTaskEventsWakeOptions {
+  /** Bounds read latency when all hints are lost. Defaults to 5 seconds. */
+  readonly fallbackMs?: number;
+}
+
 /** Request-local subscriptions behind a port; losing the table only delays reads. */
 export function createInProcessMailboxWake(options: InProcessMailboxWakeOptions = {}): MailboxWake {
-  const fallbackMs = options.fallbackMs ?? DEFAULT_MAILBOX_WAKE_FALLBACK_MS;
+  const wake = createInProcessKeyedWake('mailbox wake', options.fallbackMs ?? DEFAULT_MAILBOX_WAKE_FALLBACK_MS);
+  return { appended: wake.notify, subscribe: wake.subscribe };
+}
+
+/**
+ * Hints for task event readers in this process. It covers only writers in the
+ * same process: a composition whose writers span processes needs a transport
+ * that observes their commits, such as the Postgres task events wake.
+ */
+export function createInProcessTaskEventsWake(options: InProcessTaskEventsWakeOptions = {}): TaskEventsWake {
+  const wake = createInProcessKeyedWake('task events wake', options.fallbackMs ?? DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS);
+  return { changed: wake.notify, subscribe: wake.subscribe };
+}
+
+/** One tenant-scoped key space of hints, shared by the mailbox and task event wakes. */
+interface KeyedWake {
+  notify(tenant: TenantId, key: string): void;
+  subscribe(tenant: TenantId, key: string, signal: AbortSignal): MailboxWakeSubscription;
+}
+
+function createInProcessKeyedWake(name: string, fallbackMs: number): KeyedWake {
   if (!Number.isSafeInteger(fallbackMs) || fallbackMs <= 0 || fallbackMs > 2_147_483_647) {
-    throw new RangeError('mailbox wake fallbackMs must be a positive timer-safe integer');
+    throw new RangeError(`${name} fallbackMs must be a positive timer-safe integer`);
   }
   const routes = new Map<string, Set<() => void>>();
-  const keyFor = (tenant: TenantId, deviceId: string): string => JSON.stringify([tenant, deviceId]);
+  const keyFor = (tenant: TenantId, key: string): string => JSON.stringify([tenant, key]);
 
   return {
-    appended(tenant, deviceId) {
-      for (const notify of routes.get(keyFor(tenant, deviceId)) ?? []) notify();
+    notify(tenant, routeKey) {
+      for (const notify of routes.get(keyFor(tenant, routeKey)) ?? []) notify();
     },
-    subscribe(tenant, deviceId, signal) {
-      const key = keyFor(tenant, deviceId);
+    subscribe(tenant, routeKey, signal) {
+      const key = keyFor(tenant, routeKey);
       let closed = false;
       let pending = false;
       let release: (() => void) | undefined;
@@ -42,9 +70,9 @@ export function createInProcessMailboxWake(options: InProcessMailboxWakeOptions 
       const subscription: MailboxWakeSubscription = {
         next(maxWaitMs) {
           if (!Number.isFinite(maxWaitMs) || maxWaitMs < 0) {
-            throw new RangeError('mailbox wake maxWaitMs must be finite and nonnegative');
+            throw new RangeError(`${name} maxWaitMs must be finite and nonnegative`);
           }
-          if (release !== undefined) throw new Error('mailbox wake next() is already pending');
+          if (release !== undefined) throw new Error(`${name} next() is already pending`);
           if (closed || pending || maxWaitMs === 0) {
             pending = false;
             return Promise.resolve();

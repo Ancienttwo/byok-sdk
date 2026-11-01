@@ -106,21 +106,14 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_1' });
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Complete');
 
-    // events() replays from the start even though we're draining it *after*
-    // the task already finished — the whole point of AsyncEventQueue — and it
-    // ENDS at the terminal, so this loop terminates.
+    // Read after the task finished, events() still serves its retained
+    // activity, then the terminal state (the current fact, not every earlier
+    // transition), and ENDS there, so this loop terminates.
     const events: ServerTaskEvent[] = [];
     for await (const event of handle.events()) events.push(event);
 
-    expect(events.map((e) => e.kind)).toEqual(['state', 'state', 'state', 'agent', 'agent', 'state']);
-    expect(events.map((e) => (e.kind === 'state' ? e.state : null))).toEqual([
-      'Offered',
-      'Claimed',
-      'Running',
-      null,
-      null,
-      'Complete',
-    ]);
+    expect(events.map((e) => e.kind)).toEqual(['agent', 'agent', 'state']);
+    expect(events.at(-1)).toMatchObject({ kind: 'state', state: 'Complete' });
     expect(events.filter((e) => e.kind === 'agent').map((e) => (e.kind === 'agent' ? e.event.type : null))).toEqual([
       'progress',
       'turn_end',
@@ -136,16 +129,11 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     expect(machine).not.toHaveProperty('clientVersion');
   });
 
-  it('events() ends at the terminal, not when the retention window expires', async () => {
-    // The retention window is set an hour out, so the ONLY thing that can end
-    // either iteration below is the terminal transition closing the feed. A
-    // reclamation-terminated iterator would hang here instead — which is what
-    // this pins: retention decides when the buffer is dropped, never when a
-    // consumer's `for await` completes.
+  it('events() ends at the terminal', async () => {
+    // Nothing but the terminal can end either iteration below.
     const instance = createByokServer({
       productId: PRODUCT_ID,
       longPollHoldMs: SHORT_HOLD_MS,
-      taskEventRetentionMs: 60 * 60_000,
     });
     const startedServer = await startServer(instance);
     server = startedServer.server;
@@ -168,18 +156,19 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
       createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_end' }, { taskId: handle.taskId }),
     );
 
-    expect((await live).map((e) => (e.kind === 'state' ? e.state : null))).toEqual([
-      'Offered',
-      'Claimed',
-      'Running',
-      'Complete',
-    ]);
+    // State is read, not replayed: the live reader saw the states it was
+    // reading for, in order, and ended at the terminal.
+    const order = ['Offered', 'Claimed', 'Running', 'Complete'];
+    const events = await live;
+    expect(events.every((e) => e.kind === 'state')).toBe(true);
+    const ranks = events.map((e) => (e.kind === 'state' ? order.indexOf(e.state) : -1));
+    expect(ranks.at(-1)).toBe(order.indexOf('Complete'));
+    expect(ranks.every((rank, index) => rank >= 0 && (index === 0 || rank > ranks[index - 1]!))).toBe(true);
 
-    // ...and one that only subscribes afterwards still replays the whole feed
-    // from the start and then ends, because closing does not empty the buffer.
+    // ...and one that only subscribes afterwards reads the terminal and ends.
     const late: ServerTaskEvent[] = [];
     for await (const event of handle.events()) late.push(event);
-    expect(late).toEqual(await live);
+    expect(late).toEqual([(await live).at(-1)]);
   });
 
   it('task.claim is an idempotent CAS: a retried claim from the same device is a no-op', async () => {
@@ -213,16 +202,15 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_3' });
 
-    const events: ServerTaskEvent[] = [];
-    for await (const event of handle.events()) events.push(event);
-    // Offered, Claimed, Running, Complete — the retried claim produced no
-    // extra (or Failed) state events.
-    expect(events.map((e) => (e.kind === 'state' ? e.state : null))).toEqual([
-      'Offered',
-      'Claimed',
-      'Running',
-      'Complete',
-    ]);
+    // The per-transition server feed: Claimed, Running, Complete — the retried
+    // claim produced no extra (or Failed) state events.
+    const states: string[] = [];
+    for await (const event of started.byok.events.subscribe()) {
+      if (event.kind !== 'task.state' || event.taskId !== handle.taskId) continue;
+      states.push(event.state);
+      if (event.state === 'Complete') break;
+    }
+    expect(states).toEqual(['Claimed', 'Running', 'Complete']);
   });
 
   it('cancel path: cancel() is authoritative immediately and notifies the daemon', async () => {

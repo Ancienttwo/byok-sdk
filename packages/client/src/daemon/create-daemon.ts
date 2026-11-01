@@ -27,6 +27,7 @@ import {
 import { assertCodexSandboxSetting, type CodexAdapterOptions, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import type { ClaudeAdapterOptions } from '../adapters/claude/claude-adapter';
 import type { PiAdapterOptions } from '../adapters/pi/pi-adapter';
+import type { GrokAdapterOptions } from '../adapters/grok/grok-adapter';
 import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../runtime/environment';
 import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals';
 import { AuthManager } from './auth-manager';
@@ -249,9 +250,10 @@ export interface DaemonConfig {
   /**
    * Restricts which runtimes this daemon will ever use — enforced in two
    * places that must stay consistent: `createDaemon` (this file) builds its
-   * bundled adapter set FROM this list (unset = all three bundled adapters
-   * — pi, claude, codex; set = exactly the listed runtime ids, unknown ids
-   * ignored — see `buildDefaultAdapters`), and `TaskRunner.pickAdapter`
+   * bundled adapter set FROM this list (unset = the three wire runtimes —
+   * pi, claude, codex; set = exactly the listed runtime ids, unknown ids
+   * ignored — see `buildDefaultAdapters`; the `grok` custom harness is
+   * built only when listed), and `TaskRunner.pickAdapter`
    * (`task-runner.ts`) separately fail-closed-rejects any `task.offer`
    * naming a runtime outside this list regardless of which adapters were
    * constructed. `createDaemonWithAdapters` callers supply their own
@@ -286,6 +288,15 @@ export interface DaemonConfig {
     codex?: {
       /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
       agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
+      /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+      versionPolicy?: RuntimeVersionPolicy;
+    };
+    /** Applies only when `runtimeAllowlist` lists `grok`. */
+    grok?: {
+      /** `GrokAdapterOptions.compatInstructions`: `disabled` turns off Grok's Claude and Cursor instruction and rules compatibility scanning. Default `inherit`. */
+      compatInstructions?: GrokAdapterOptions['compatInstructions'];
+      /** `GrokAdapterOptions.agentUserMcpServers`: `excluded` switches off the user MCP sources Grok can disable and refuses an Agent task while another is enabled. Default `inherit`. */
+      agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
       /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
       versionPolicy?: RuntimeVersionPolicy;
     };

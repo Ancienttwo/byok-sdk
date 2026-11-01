@@ -2,7 +2,7 @@ import { ownHermesLauncher, prepareHermesCustody, hermesCustodyArgs, type Hermes
 import type { RuntimeTaskInput } from '../../types';
 export type { HermesByokLauncher } from './hermes-custody';
 import { randomBytes } from 'node:crypto';
-import { promises as fs, realpathSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
@@ -35,6 +35,7 @@ import { HERMES_RUNTIME_CAPABILITIES } from './hermes-capabilities';
 import { HERMES_VERSION_POLICY, hermesVersionLine, hermesVersionToken } from './hermes-version';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
 import { resolveHermesBin } from './resolve-bin';
+import { comparablePath } from '../../util/comparable-path';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
 
 const VERSION_TIMEOUT_MS = 5_000;
@@ -146,28 +147,6 @@ function probeHermesVersion(command: string, env: Record<string, string>): Promi
   });
 }
 
-/**
- * Real path of the nearest existing ancestor plus the rest, so a symlink or a
- * case variant cannot hide `~/.hermes`, even below a directory not yet created.
- */
-function canonicalPath(value: string): string {
-  let existing = path.resolve(value);
-  const rest: string[] = [];
-  for (;;) {
-    try {
-      existing = realpathSync.native(existing);
-      break;
-    } catch {
-      const parent = path.dirname(existing);
-      if (parent === existing) break;
-      rest.unshift(path.basename(existing));
-      existing = parent;
-    }
-  }
-  const resolved = path.join(existing, ...rest);
-  return process.platform === 'darwin' || process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-}
-
 /** A busy gateway can miss one `identify` deadline; ask a few times before treating it as gone. */
 async function identifyAfterAttach(home: string, options: IdentifyHermesGatewayOptions): Promise<HermesGatewayIdentity | undefined> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -219,9 +198,9 @@ export class HermesAdapter implements RuntimeAdapter {
   constructor(options: HermesAdapterOptions) {
     if (typeof options?.home !== 'string' || !path.isAbsolute(options.home)) throw new TypeError('HermesAdapterOptions.home must be an absolute path');
     const root = path.resolve(options.home);
-    const candidate = canonicalPath(root);
+    const candidate = comparablePath(root);
     const userHomes = [path.join(os.homedir(), '.hermes'), ...(process.platform === 'win32' ? [path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'hermes')] : [])];
-    for (const userHome of userHomes.map(canonicalPath)) {
+    for (const userHome of userHomes.map(comparablePath)) {
       if (candidate === userHome || candidate.startsWith(`${userHome}${path.sep}`)) throw new TypeError('HermesAdapterOptions.home must not be the user\'s Hermes home (~/.hermes, %LOCALAPPDATA%\\hermes)');
     }
     if (options.byokLauncher !== undefined && options.model !== undefined) throw new TypeError('Hermes model and byokLauncher are mutually exclusive');
