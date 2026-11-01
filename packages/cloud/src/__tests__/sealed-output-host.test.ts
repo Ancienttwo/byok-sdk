@@ -22,6 +22,7 @@ import {
   type SealableMessageType,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
+import type { AgentMessageConsumers } from '../agent-message-disposition';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
 import { hashOfferBytes, taskOfferMessageId } from '../offer-identity';
 import { taskRedactionReceiptKey } from '../task-redaction';
@@ -651,4 +652,94 @@ describe('the output rule of the frozen sealing (#654 12d)', () => {
       expect(await task.harness.cloud.readTaskResult(TENANT_A, task.taskId)).toMatchObject({ state: 'complete', summary: 'done' });
     },
   );
+});
+
+describe('the sealed Agent message of a task that seals it (#1045 S3)', () => {
+  /** The corpus Agent egress offer whose sealing names `agent-message`, with the message limit `maxBytes`. */
+  const messageOffer = (maxBytes: number) => {
+    const line = corpus.find((entry) => entry.type === 'task.offer'
+      && (entry.payload.sealing as { categories?: string[] } | undefined)?.categories?.includes('agent-message'))!;
+    const payload = line.payload as { messageEgress: object; agentRef: object; runtime: string };
+    return { ...payload, messageEgress: { ...payload.messageEgress, maxBytes } };
+  };
+  const SEALED_MESSAGE = corpus.find((line) => line.type === 'agent.message.publish' && line.payload.sealed !== undefined)!
+    .payload as { agentRef: object; sealed: { contentMac: string } } & Record<string, unknown>;
+  const { sealed: _sealed, ...MESSAGE_FIELDS } = SEALED_MESSAGE;
+  const PLAIN_MESSAGE = {
+    ...MESSAGE_FIELDS, body: 'hello', byteCount: 5,
+    contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+  };
+
+  async function messageTask(consumers: AgentMessageConsumers, maxBytes = 262144) {
+    const harness = createHarness({ agentMessage: consumers });
+    const device = await harness.pairDevice(TENANT_A);
+    const payload = messageOffer(maxBytes);
+    const capabilities = [...requiredReceiverCapabilities('task.offer', payload), 'agent-message-egress'];
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
+    taskCount += 1;
+    const taskId = `sealed-message-${taskCount}`;
+    const enqueue = () => harness.cloud.enqueueSealedAgentEgressOffer(TENANT_A, device.deviceId, {
+      taskId, payload: payload as never, agentMessageContext: { destinationBinding: 'conversation/1045/turn/1' },
+    });
+    const stores = tenantStoresFor(
+      { kind: 'device', tenantId: TENANT_A as TenantId, productId: PRODUCT_ID, deviceId: device.deviceId },
+      { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
+    );
+    const publish = (message: object) => handleInboundEnvelope(stores, device.deviceId,
+      createEnvelope('agent.message.publish', message as never, { taskId }) as Envelope, undefined, consumers);
+    const claim = async () => {
+      await enqueue();
+      expect(await handleInboundEnvelope(stores, device.deviceId, createEnvelope('task.claim', {
+        deviceId: device.deviceId, runtime: payload.runtime, agentRef: payload.agentRef,
+      } as never, { taskId }) as Envelope)).toEqual({ outcome: 'accepted' });
+    };
+    return { harness, device, taskId, enqueue, claim, publish };
+  }
+
+  it('refuses the submission before any write while the cloud has no consumeSealed', async () => {
+    const task = await messageTask({ consume: async () => ({ outcome: 'accepted' }) });
+    await expect(task.enqueue()).rejects.toMatchObject({ code: 'agent_message_sealed_consumer_missing' });
+    expect(await task.harness.cloud.readTaskAttempt(TENANT_A, task.taskId)).toBeUndefined();
+  });
+
+  it('gives the sealed message to consumeSealed alone, refuses its plaintext form, and reads it back by contentMac', async () => {
+    const consumed: string[] = [];
+    const task = await messageTask({
+      consume: async () => { consumed.push('plain'); return { outcome: 'accepted' }; },
+      consumeSealed: async ({ payload }) => { consumed.push(payload.sealed.contentMac); return { outcome: 'accepted' }; },
+    });
+    await task.claim();
+    expect(await task.publish(PLAIN_MESSAGE)).toEqual(refused('sealed_output_required'));
+    expect(await task.publish(SEALED_MESSAGE)).toEqual({ outcome: 'accepted' });
+    // The device retries the same sealed bytes under a new envelope id: no second decision.
+    expect(await task.publish(SEALED_MESSAGE)).toEqual({ outcome: 'accepted' });
+    expect(consumed).toEqual([SEALED_MESSAGE.sealed.contentMac]);
+
+    const disposition = await task.harness.cloud.readAgentMessageDisposition(TENANT_A, task.device.deviceId, task.taskId, SEALED_MESSAGE as never);
+    expect(disposition).toMatchObject({ outcome: 'accepted', contentMac: SEALED_MESSAGE.sealed.contentMac });
+    expect(disposition).not.toHaveProperty('contentHash');
+    expect(await task.harness.cloud.readTaskAgentMessage(TENANT_A, task.device.deviceId, task.taskId, SEALED_MESSAGE.agentRef as never))
+      .toMatchObject({ payload: SEALED_MESSAGE, disposition });
+  });
+
+  it('admits a by-reference sealed message only for its committed blob, which the task then holds', async () => {
+    const task = await messageTask({ consumeSealed: async () => ({ outcome: 'accepted' }) });
+    await task.claim();
+    const size = (BY_REFERENCE_MEMBER as { ciphertextRef: { size: number } }).ciphertextRef.size;
+    const member = { ...BY_REFERENCE_MEMBER, category: 'agent-message' };
+    expect(await task.publish({ ...MESSAGE_FIELDS, sealed: member })).toEqual(refused('sealed_ciphertext_invalid'));
+
+    const ref = await uploadCiphertext(task.harness, task.device, randomBytes(size));
+    expect(await task.publish({ ...MESSAGE_FIELDS, sealed: { ...member, ciphertextRef: ref } })).toEqual({ outcome: 'accepted' });
+    expect((await task.harness.core.objects.get(TENANT_A, ref.contentHash as ContentHash))?.refCount).toBe(1);
+  });
+
+  it('refuses a sealed message above the padded length its frozen byte limit allows', async () => {
+    const task = await messageTask({ consumeSealed: async () => ({ outcome: 'accepted' }) }, 1);
+    await task.claim();
+    const ref = await uploadCiphertext(task.harness, task.device,
+      randomBytes((BY_REFERENCE_MEMBER as { ciphertextRef: { size: number } }).ciphertextRef.size));
+    expect(await task.publish({ ...MESSAGE_FIELDS, sealed: { ...BY_REFERENCE_MEMBER, category: 'agent-message', ciphertextRef: ref } }))
+      .toEqual(refused('agent_message_too_large'));
+  });
 });

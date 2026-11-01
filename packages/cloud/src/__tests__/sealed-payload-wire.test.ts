@@ -473,7 +473,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   it.each(outputOnly.map((line, index) => [index, line.variant, line] as const))(
     'line %i (%s) is enqueued as a task.offer with its sealing, and only to a device with every flag',
     async (_index, variant, line) => {
-      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
       const flags = requiredReceiverCapabilities('task.offer', line.payload);
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: flags.filter((flag) => flag !== 'sealed-payload-v1') });
@@ -488,7 +488,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   it.each(laneLines.map((line, index) => [index, line.variant, line] as const))(
     'the plaintext sibling of line %i (%s) refuses its sealed fields before any device read or state',
     async (_index, variant, line) => {
-      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
       const reads = vi.spyOn(harness.stores.devices, 'get');
@@ -511,7 +511,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   it.each(laneLines.filter((line) => line.variant in enqueueLanes).map((line) => [line.variant, line.payload.sealed === undefined ? 'output only' : 'sealed input', line] as const))(
     '%s (%s) without a taskId: a sealed instruction is refused, because it binds the task id; output-only sealing gets a minted id',
     async (variant, label, line) => {
-      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
       const page = () => harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 });
@@ -533,7 +533,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
 
   it('checks and enqueues one parsed copy, so a payload that the caller changes during the device read has no effect', async () => {
     const line = laneLines.find((candidate) => candidate.variant === 'sealed resume' && candidate.payload.sealed !== undefined)!;
-    const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+    const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
     const payload: Json = structuredClone(line.payload);
@@ -563,7 +563,7 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   it.each(byReference.map((line, index) => [index, line.variant, line] as const))(
     'line %i (%s) by ciphertextRef to a blob that is not uploaded is refused on a device with every flag, before any task or mailbox state',
     async (_index, variant, line) => {
-      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+      const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
       await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
 

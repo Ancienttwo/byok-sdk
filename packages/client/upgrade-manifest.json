@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.32.0",
-    "snapshotSha256": "446c200693f8b0bb8611ee150edf6fa3bc1cccad74b62bea1ae1fe6b9176f0f3"
+    "snapshotSha256": "b98778a1d60302fde74ea885f82f9e18851b0e49f167b7f9419a8b50418c4900"
   },
   "configFields": {
     "status": "tracked",
@@ -161,21 +161,29 @@
       ]
     },
     {
-      "id": "plaintext-agent-message-memory-hosts",
+      "id": "plaintext-memory-projection-hosts",
       "impact": "breaking",
-      "summary": "Cloud, dataplane and server name the plaintext branch where they take or return only plaintext (#1045 S1): the agentMessage.consume payload, TaskAgentMessage.payload and the readAgentMessageDisposition / tasks.messageDisposition result are the plaintext message types, and AgentMemoryProjectionStore.commit takes an AgentMemoryProjectionPlainMutation and returns an AgentMemoryProjectionPlainReceipt. The shapes are the 0.32.0 shapes; a Host that implements its own AgentMemoryProjectionStore or annotates these values with the union names switches to the plaintext names. The cloud refuses a sealed agent.message.publish with sealed_payload_unsupported and a sealed memory projection with 422.",
+      "summary": "Cloud and dataplane name the plaintext branch of the memory projection store (#1045 S1): AgentMemoryProjectionStore.commit takes an AgentMemoryProjectionPlainMutation and returns an AgentMemoryProjectionPlainReceipt. The shapes are the 0.32.0 shapes; a Host that implements its own AgentMemoryProjectionStore or annotates these values with the union names switches to the plaintext names. The cloud refuses a sealed memory projection with 422.",
       "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
       "items": [
         "export:@byok-sdk/cloud#AgentMemoryProjectionCommitInput",
         "export:@byok-sdk/cloud#AgentMemoryProjectionStore",
-        "export:@byok-sdk/cloud#ByokCloud",
-        "export:@byok-sdk/cloud#ByokCloudOptions",
         "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
-        "export:@byok-sdk/cloud#TaskAgentMessage",
-        "export:@byok-sdk/cloud#handleInboundEnvelope",
         "export:@byok-sdk/cloud-dataplane#PostgresAgentMemoryProjectionStore",
-        "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStore",
-        "export:@byok-sdk/server#ByokServer"
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStore"
+      ]
+    },
+    {
+      "id": "cloud-sealed-agent-message",
+      "impact": "breaking",
+      "summary": "The cloud admits the sealed Agent message of a task whose sealing names agent-message, and advertises sealed-payload-v2 (#1045 S3). ByokCloudOptions.agentMessage is an AgentMessageConsumers: consume takes a plaintext message and consumeSealed a sealed one, which only a member can open; both are optional. A submission that seals agent-message with messageEgress is refused with agent_message_sealed_consumer_missing while consumeSealed is absent. TaskAgentMessage.payload and readAgentMessageDisposition return either form, as in 0.32.0; a sealed disposition names the message by contentMac. handleInboundEnvelope takes the AgentMessageConsumers object in place of the consume function.",
+      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "items": [
+        "export:@byok-sdk/cloud#AgentMessageConsumeInput",
+        "export:@byok-sdk/cloud#AgentMessageConsumers",
+        "export:@byok-sdk/cloud#AgentMessageDecision",
+        "export:@byok-sdk/cloud#ByokCloudOptions",
+        "export:@byok-sdk/cloud#handleInboundEnvelope"
       ]
     },
     {
@@ -262,12 +270,27 @@
     {
       "item": "export:@byok-sdk/cloud#AgentMemoryProjectionCommitInput",
       "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
+      "entry": "plaintext-memory-projection-hosts"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentMemoryProjectionStore",
       "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
+      "entry": "plaintext-memory-projection-hosts"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentMessageConsumeInput",
+      "change": "added",
+      "entry": "cloud-sealed-agent-message"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentMessageConsumers",
+      "change": "added",
+      "entry": "cloud-sealed-agent-message"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentMessageDecision",
+      "change": "added",
+      "entry": "cloud-sealed-agent-message"
     },
     {
       "item": "export:@byok-sdk/cloud#ApprovalTimelineAppendInput",
@@ -280,14 +303,9 @@
       "entry": "approval-timeline-closes-with-task"
     },
     {
-      "item": "export:@byok-sdk/cloud#ByokCloud",
-      "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
-    },
-    {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",
       "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
+      "entry": "cloud-sealed-agent-message"
     },
     {
       "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
@@ -307,7 +325,7 @@
     {
       "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
       "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
+      "entry": "plaintext-memory-projection-hosts"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryCloudComposition",
@@ -350,11 +368,6 @@
       "entry": "sealed-payload-v2-protocol"
     },
     {
-      "item": "export:@byok-sdk/cloud#TaskAgentMessage",
-      "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
-    },
-    {
       "item": "export:@byok-sdk/cloud#TaskEventsWake",
       "change": "added",
       "entry": "task-events-wake"
@@ -372,7 +385,7 @@
     {
       "item": "export:@byok-sdk/cloud#handleInboundEnvelope",
       "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
+      "entry": "cloud-sealed-agent-message"
     },
     {
       "item": "export:@byok-sdk/cloud#pendingApprovalObservation",
@@ -397,7 +410,7 @@
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresAgentMemoryProjectionStore",
       "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
+      "entry": "plaintext-memory-projection-hosts"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
@@ -437,7 +450,7 @@
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStore",
       "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
+      "entry": "plaintext-memory-projection-hosts"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore",
@@ -613,11 +626,6 @@
       "item": "export:@byok-sdk/protocol/constants#SEALED_PAYLOAD_V2_CAPABILITY",
       "change": "added",
       "entry": "sealed-payload-v2-protocol"
-    },
-    {
-      "item": "export:@byok-sdk/server#ByokServer",
-      "change": "changed",
-      "entry": "plaintext-agent-message-memory-hosts"
     },
     {
       "item": "export:@byok-sdk/server#CreateByokServerOptions",

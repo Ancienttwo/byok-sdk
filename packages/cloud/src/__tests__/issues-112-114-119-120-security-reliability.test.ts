@@ -263,7 +263,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     let invocations = 0;
     let effects = 0;
     const createConsumer = () => async (
-      input: Parameters<NonNullable<NonNullable<Parameters<typeof createHarness>[0]>['agentMessage']>['consume']>[0],
+      input: Parameters<NonNullable<NonNullable<NonNullable<Parameters<typeof createHarness>[0]>['agentMessage']>['consume']>>[0],
     ) => {
       invocations += 1;
       const key = JSON.stringify([input.tenant, input.deviceId, input.taskId, input.payload.agentRef, input.payload.messageId]);

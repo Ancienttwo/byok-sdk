@@ -3,6 +3,7 @@ import {
   MAILBOX_READ_AHEAD_MAX_SEQS,
   RUNTIME_FAILURE_CLASS_CAPABILITY,
   SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
+  SEALED_PAYLOAD_V2_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
 } from '@byok-sdk/protocol';
 /**
@@ -93,6 +94,9 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
   // A sealed terminal or artifact may name its ciphertext blob, which the
   // task holds while it lives (#654 §58a).
   SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
+  // `handleAgentMessagePublish` admits the sealed Agent message of a task whose
+  // `sealing` names `agent-message`, for `agentMessage.consumeSealed` (#1045).
+  SEALED_PAYLOAD_V2_CAPABILITY,
   // The inbound gate parses `task.fail.failure` on both branches,
   // and `projectTerminalResult` copies it (#869).
   RUNTIME_FAILURE_CLASS_CAPABILITY,

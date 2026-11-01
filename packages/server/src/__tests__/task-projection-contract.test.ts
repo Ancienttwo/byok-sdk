@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, type AgentMessagePublishPlainPayload, type Envelope } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer } from '../index';
 import {
   claimAndStart, connectFakeDaemonLongPoll, sendOne, startServer, stopServer,
@@ -251,6 +251,6 @@ describe('ByokServer.tasks projection contract (#1113)', () => {
     // Terminal ingestion deletes display-only draft text; the published body survives.
     expect(publishedDraft.at(-1)).toEqual(messageDraft.at(-1));
     expect(publishedDraft.filter(event => event.kind === 'append').map(event => event.text).join(''))
-      .toBe(agentMessage!.payload.body);
+      .toBe((agentMessage!.payload as AgentMessagePublishPlainPayload).body);
   });
 });

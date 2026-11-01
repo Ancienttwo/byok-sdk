@@ -136,11 +136,11 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     }
     const taskId = `summary-${outcome}`;
     const precedingMessage = precedingTurns ? await sdk.tasks.agentMessage('preceding-user-turn', deviceId, agentRef) : undefined;
-    if (precedingTurns) expect(precedingMessage?.payload.body).toBe('Constraint retained.');
+    if (precedingTurns) expect((precedingMessage?.payload as AgentMessagePublishPlainPayload | undefined)?.body).toBe('Constraint retained.');
     // The Host supplies these complete bytes; no SDK transcript builder or Summary CAS is simulated.
     const summaryInstruction = precedingTurns
       ? JSON.stringify({ instruction: 'Summarize only this frozen historical input.',
-        history: [{ input: frozenInstructions.get('preceding-user-turn'), reply: precedingMessage!.payload.body }] })
+        history: [{ input: frozenInstructions.get('preceding-user-turn'), reply: (precedingMessage!.payload as AgentMessagePublishPlainPayload).body }] })
       : 'Summarize only this frozen historical input.';
     frozenInstructions.set(taskId, summaryInstruction);
     const input = { taskId, deviceId, payload: { agentRef, runtime: 'pi' as const,
@@ -256,7 +256,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     expect(await sdk.tasks.agentMessage(taskId, deviceId, agentRef)).toBeUndefined();
     if (precedingTurns) {
       expect(await sdk.tasks.agentMessage('preceding-user-turn', deviceId, agentRef)).toEqual(precedingMessage);
-      expect((await sdk.tasks.agentMessage('dependent-user-turn', deviceId, agentRef))?.payload.body).toBe('User answer');
+      expect(((await sdk.tasks.agentMessage('dependent-user-turn', deviceId, agentRef))?.payload as AgentMessagePublishPlainPayload | undefined)?.body).toBe('User answer');
     }
     expect(await sdk.tasks.deviceTerminal('nonexistent-summary')).toBeUndefined();
     expect(adapter.sessions).toHaveLength(outcome === 'document' ? 4 : 1);

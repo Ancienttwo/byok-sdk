@@ -104,8 +104,9 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
 
 /**
  * The cloud emits a message disposition itself, after it admits the device's
- * publish; no Host enqueues one. Its `contentMac` gate belongs to that inbound
- * path (#1045 S3), and this package emits only plaintext dispositions until then.
+ * publish; no Host enqueues one. It carries `contentMac` only for a sealed
+ * message, which the inbound path admits only on a task whose offer sealed
+ * `agent-message`, and that offer was gated on the device flag (#1045 S3).
  */
 const CLOUD_EMITTED: readonly MessageType[] = ['agent.message.disposition'];
 

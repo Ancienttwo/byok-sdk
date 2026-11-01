@@ -118,6 +118,12 @@ export const CLOUD_ERROR_CODES = {
   task_offer_append_refused: 'task_offer_append_refused',
   /** A first-write-wins Agent control record was replayed with a different body. */
   agent_content_request_mismatch: 'agent_content_request_mismatch',
+  /**
+   * A task that seals its Agent message (#1045) was submitted to a cloud with
+   * no `agentMessage.consumeSealed`, so no consumer could ever decide it.
+   * Raised before any attempt, receipt or mailbox write.
+   */
+  agent_message_sealed_consumer_missing: 'agent_message_sealed_consumer_missing',
   /** A durable mailbox receipt id resolved to an envelope other than its exact acknowledgement. */
   mailbox_receipt_mismatch: 'mailbox_receipt_mismatch',
   /** A task-free Agent-home request id already names a different immutable desired projection. */

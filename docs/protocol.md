@@ -1647,11 +1647,30 @@ v1 suite, keys and binding rules. The design is
   device appends no mutation. One writer epoch has one form: a pending record
   whose form differs from its grant stops the outbox unsent.
 
-The cloud does not admit v2 content yet: it refuses a sealed publish with
-`sealed_payload_unsupported`, and a sealed memory projection with 422. Hosted
-message admission and hosted projection storage follow in later #1045
-slices. The embedded `@byok-sdk/server` takes plaintext Agent messages and
-memory projections only.
+- **Cloud message admission (#1045 S3).** The cloud advertises
+  `sealed-payload-v2`. A submission whose `sealing` names `agent-message`
+  and that carries `messageEgress` is refused with
+  `agent_message_sealed_consumer_missing` before any write while
+  `agentMessage.consumeSealed` is absent. The task's frozen `sealing` allows
+  one form of its message: a sealed publish to a task that does not seal
+  `agent-message` is refused with `sealed_payload_unsupported` before any
+  other check, and a plaintext publish to a task that does is refused with
+  `sealed_output_required`. A sealed message fits the frozen `maxBytes` when
+  its `paddedLength` is at most
+  `sealedPayloadPaddedLength(4 + sealedAgentMessageMaxContentLength(maxBytes))`,
+  else `agent_message_too_large`. A `ciphertextRef` must name a committed
+  blob (`sealed_ciphertext_invalid`), which the task holds once the message
+  is reserved. Retries compare the exact payload bytes, so a sender that
+  sealed again is a different message. `consumeSealed` decides a sealed
+  message and `consume` a plaintext one; the disposition names the message
+  by `contentMac` or `contentHash`, and `readTaskAgentMessage` and
+  `readAgentMessageDisposition` return either form. Only a member can open
+  the body.
+
+The cloud does not store a sealed memory projection yet: it refuses one with
+422 until hosted projection storage lands in a later #1045 slice. The
+embedded `@byok-sdk/server` dispatches no sealed task, so it takes plaintext
+Agent messages and memory projections only.
 
 ### 2.6 E2EE member routes (#654 E2c-2)
 

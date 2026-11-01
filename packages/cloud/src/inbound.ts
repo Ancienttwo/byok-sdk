@@ -1,5 +1,8 @@
 import { readTaskAgentMessageBinding } from './task-agent-message';
-import { parseAgentMessageDisposition, sameAgentRef } from './agent-message-disposition';
+import {
+  agentMessageWithinLimit, parseAgentMessageDisposition, sameAgentRef,
+  type AgentMessageConsumers, type AgentMessageDecision,
+} from './agent-message-disposition';
 import { taskOfferMessageId, hashOfferBytes } from './offer-identity';
 /**
  * The single inbound choke point for every daemon -> cloud envelope.
@@ -59,9 +62,8 @@ import {
   type AgentContentReceiptPayload,
   type AgentContentReadPayload,
   type AgentEgressReliablePayload,
-  type AgentMessageDispositionPlainPayload,
+  type AgentMessageDispositionPayload,
   type AgentMessagePublishPayload,
-  type AgentMessagePublishPlainPayload,
   type AgentMessageServerContext,
   type Envelope,
   type MessageType,
@@ -234,20 +236,20 @@ export async function handleAgentMessagePublish(
   deviceId: string,
   taskId: string,
   payload: AgentMessagePublishPayload,
-  consume: ((input: {
-    readonly tenant: TenantStores['tenant'];
-    readonly deviceId: string;
-    readonly taskId: string;
-    readonly context: AgentMessageServerContext;
-    readonly payload: AgentMessagePublishPlainPayload;
-  }) => Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>) | undefined,
+  consumers: AgentMessageConsumers | undefined,
   alreadyDeduplicated: boolean,
-): Promise<Refused | { readonly outcome: Exclude<InboundOutcome, 'rejected'>; readonly disposition?: AgentMessageDispositionPlainPayload }> {
-  // This gate admits no sealed Agent message: it advertises no sealed-payload-v2.
-  if (payload.sealed !== undefined) return refuse('sealed_payload_unsupported');
+): Promise<Refused | { readonly outcome: Exclude<InboundOutcome, 'rejected'>; readonly disposition?: AgentMessageDispositionPayload }> {
   const device = await stores.devices.get(deviceId);
   const attempt = await stores.tasks.get(taskId);
   const binding = await stores.receipts.get(`agent-message-offer:${deviceId}:${taskId}`);
+  // #1045: the task's frozen sealing allows one form of its message. A sealed
+  // message is refused first, as every sealed report of a task that does not
+  // seal its category is.
+  const sealing = attempt?.deviceId === deviceId && attempt.agentRef !== undefined
+    ? await frozenOfferSealing(stores, deviceId, taskId, attempt.agentRef)
+    : undefined;
+  const sealsMessages = sealing !== 'redacted' && sealing?.categories.includes('agent-message') === true;
+  if (payload.sealed !== undefined && !sealsMessages) return refuse('sealed_payload_unsupported');
   if (
     device === undefined || device.revoked ||
     !hasCapabilities(device.capabilities, [AGENT_MESSAGE_EGRESS_CAPABILITY])
@@ -269,7 +271,13 @@ export async function handleAgentMessagePublish(
     frozen.requirement.contentType !== payload.contentType ||
     typeof frozen.requirement.maxBytes !== 'number'
   ) return refuse('agent_message_binding_mismatch');
-  if (payload.byteCount > frozen.requirement.maxBytes) return refuse('agent_message_too_large');
+  if (payload.sealed === undefined && sealsMessages) return refuse('sealed_output_required');
+  if (!agentMessageWithinLimit(payload, frozen.requirement.maxBytes)) return refuse('agent_message_too_large');
+  // A sealed message above the inline limit names its ciphertext blob; every step so far only read.
+  const ciphertextRef = sealedCiphertextRef(payload);
+  if (ciphertextRef !== undefined && !(await sealedCiphertextCommitted(stores.objects, ciphertextRef))) {
+    return refuse('sealed_ciphertext_invalid');
+  }
 
   // Terminal receipt replay is intentionally before the live-state reservation:
   // an already-consumed side effect remains a replay even when the task has
@@ -296,8 +304,11 @@ export async function handleAgentMessagePublish(
   // not. A conflicting or newly lifecycle-ineligible reservation still fails
   // closed in the store.
   if (reservation !== 'reserved' && reservation !== 'pending') return refuse('agent_message_reservation_conflict');
+  // The task holds the blob of its admitted message while it lives.
+  if (ciphertextRef !== undefined) await retainSealedCiphertext(stores.objects, taskId, ciphertextRef);
 
-  let decision: { readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string };
+  const consume = messageConsumer(consumers, { tenant: stores.tenant, deviceId, taskId, context: frozen.context }, payload);
+  let decision: AgentMessageDecision;
   if (consume === undefined) {
     if (reservation === 'pending') {
       throw new Error('Agent message consumer is unavailable while reconciling an exact pending admission.');
@@ -307,7 +318,7 @@ export async function handleAgentMessagePublish(
     // A throw cannot author a disposition: the product may have committed
     // immediately before the transport failed. Leave the exact reservation
     // pending so the same idempotent consume contract can reconcile it.
-    decision = await consume({ tenant: stores.tenant, deviceId, taskId, context: frozen.context, payload });
+    decision = await consume();
   }
   const disposition = agentMessageDisposition(payload, decision);
   const admission = await stores.tasks.finalizeAgentMessage({
@@ -324,17 +335,31 @@ export async function handleAgentMessagePublish(
   return terminal === undefined ? refuse('agent_message_admission_unconfirmed') : { outcome: 'accepted', disposition: terminal };
 }
 
+/** The consumer of the message's form: `consume` for plaintext, `consumeSealed` for a sealed message. */
+function messageConsumer(
+  consumers: AgentMessageConsumers | undefined,
+  input: { readonly tenant: TenantStores['tenant']; readonly deviceId: string; readonly taskId: string; readonly context: AgentMessageServerContext },
+  payload: AgentMessagePublishPayload,
+): (() => Promise<AgentMessageDecision>) | undefined {
+  if (payload.sealed === undefined) {
+    const consume = consumers?.consume;
+    return consume === undefined ? undefined : () => consume({ ...input, payload });
+  }
+  const consumeSealed = consumers?.consumeSealed;
+  return consumeSealed === undefined ? undefined : () => consumeSealed({ ...input, payload });
+}
+
 function agentMessageDisposition(
-  payload: AgentMessagePublishPlainPayload,
-  decision: { readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string },
-): AgentMessageDispositionPlainPayload {
+  payload: AgentMessagePublishPayload,
+  decision: AgentMessageDecision,
+): AgentMessageDispositionPayload {
   return {
     agentRef: payload.agentRef,
     sessionRef: payload.sessionRef,
     contract: payload.contract,
     messageId: payload.messageId,
     cursor: payload.cursor,
-    contentHash: payload.contentHash,
+    ...(payload.sealed === undefined ? { contentHash: payload.contentHash } : { contentMac: payload.sealed.contentMac }),
     outcome: decision.outcome,
     receiptId: crypto.randomUUID(),
     ...(decision.reasonCode === undefined ? {} : { reasonCode: decision.reasonCode }),
@@ -347,9 +372,7 @@ export async function readAgentMessageDisposition(
   deviceId: string,
   taskId: string,
   payload: AgentMessagePublishPayload,
-): Promise<AgentMessageDispositionPlainPayload | undefined> {
-  // No sealed Agent message is admitted, so none has a disposition.
-  if (payload.sealed !== undefined) return undefined;
+): Promise<AgentMessageDispositionPayload | undefined> {
   const admission = await stores.tasks.readAgentMessage({
     taskId,
     deviceId,
