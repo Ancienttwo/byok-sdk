@@ -4158,9 +4158,9 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
  * unfalsifiable.
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import { type TaskChanged } from './task-change-map';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
+import { type TaskChanged } from './task-change-map';
 interface StoredAgentMessageAdmission extends AgentMessageAdmission {
     readonly deviceId: string;
 }
