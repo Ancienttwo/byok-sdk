@@ -20,14 +20,26 @@
 //   bun scripts/soak/client-retention-soak.mjs --tasks 1000
 //   bun scripts/soak/client-retention-soak.mjs --tasks 10000 --out soak-report.json
 //
+// The same tasks also drive the K4 Host ledger (`@byok-sdk/server/execution-core`,
+// #1106): each task enqueues and settles one intent through the real transitions,
+// and each batch's results are acknowledged and compacted. The ledger declares no
+// total bound, so only what the code guarantees is asserted: `ignoredWakes` never
+// exceeds IGNORED_WAKE_AUDIT_LIMIT, and `compact` empties every per-task table and
+// shrinks the JSON body. The identity rows that remain (caller intent tombstones
+// never expire) are measured and reported, never failed.
+//
 // Exit code is nonzero when a sweep reports a failure, a class scan is
-// truncated, storage admission would be refused, or a measured class exceeds
-// its declared bound.
+// truncated, storage admission would be refused, a measured class exceeds
+// its declared bound, or a guaranteed K4 ledger property breaks.
 
 import { promises as fs, mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createEnvelope, WIRE_ADDITIONS } from '../../packages/protocol/dist/index.js';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS } from '../../packages/server/src/execution-core/ledger.ts';
+import { hash } from '../../packages/server/src/execution-core/model.ts';
+import { auditIgnoredWake, IGNORED_WAKE_AUDIT_LIMIT } from '../../packages/server/src/execution-core/routines.ts';
+import { enqueue, settle } from '../../packages/server/src/execution-core/transitions.ts';
 import { AgentHomeManager } from '../../packages/client/src/agent-home.ts';
 import { AgentEgressController } from '../../packages/client/src/daemon/agent-egress-controller.ts';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../packages/client/src/daemon/agent-egress-policy.ts';
@@ -54,6 +66,49 @@ const PI_SESSION_REF = /^[A-Za-z0-9-]{1,128}$/u;
 const ADVERTISED_CAPABILITIES = [...new Set(WIRE_ADDITIONS.flatMap(function (row) {
   return row.kind === 'envelope' && row.rule === 'gated' && row.advertisedBy === 'device' ? [row.capability] : [];
 }))];
+
+const K4_PER_TASK_TABLES = ['intents', 'executions', 'occurrences', 'slots', 'outbox', 'applied', 'application'];
+const K4_TOMBSTONE_RETENTION_MS = Math.max(30 * DAY_MS, MIN_TOMBSTONE_RETENTION_MS);
+
+/** One settled K4 intent per soak task, written through the production transitions in one ledger transaction. */
+function k4SettleTask(ledger, agentRef, egressPolicy, key, failed, now) {
+  ledger.transaction(state => {
+    const intent = enqueue(state, ledger.tenant, { key, source: 'user', waitUntil: now + DAY_MS, execution: { deviceId: 'soak-device', payload: {
+      session: { mode: 'fresh' }, instruction: 'retention soak task', runtime: 'pi', agentRef, egressPolicy,
+      terminalProjection: { mode: 'result-document', contract: RESULT_CONTRACT, schema: RESULT_SCHEMA },
+    } } });
+    if (!failed) {
+      state.executions[intent.taskId].terminal = { recordedAt: new Date(now).toISOString(), envelope: {
+        v: 1, id: '00000000-0000-4000-8000-000000000001', ts: new Date(now).toISOString(), type: 'task.complete',
+        task_id: intent.taskId, seq: 1, payload: { summary: '', sessionRef: 'soak', document: JSON.stringify({ ok: true }) },
+      } };
+      state.applied[intent.taskId] = true;
+    }
+    settle(state, intent, failed ? 'failed' : 'succeeded');
+    // The Host has delivered the result projection; compaction refuses unacknowledged outbox rows.
+    delete state.outbox['projection:' + hash('intent:' + key)];
+    auditIgnoredWake(state, { dedupKey: 'soak-ignored:' + key }, now, 'unknown_key');
+  });
+}
+
+function k4Measure(ledger) {
+  const body = ledger.snapshot();
+  const dump = ledger.dumpForSwitch();
+  const tombstones = { intent: 0, application: 0, slot: 0, row: 0 };
+  const tombstoneBytesByKind = { intent: 0, application: 0, slot: 0, row: 0 };
+  for (const row of dump.tombstones) {
+    tombstones[row.kind]++;
+    tombstoneBytesByKind[row.kind] += Buffer.byteLength(JSON.stringify(row));
+  }
+  return {
+    bodyBytes: Buffer.byteLength(JSON.stringify(body)),
+    perTaskRows: Object.fromEntries(K4_PER_TASK_TABLES.map(table => [table, Object.keys(body[table]).length])),
+    ignoredWakes: (body.ignoredWakes ?? []).length,
+    tombstones, tombstoneBytesByKind,
+  };
+}
+
+function k4Check(id, ok, detail) { return { id, status: ok ? 'pass' : 'fail', detail }; }
 
 function parseArgs(argv) {
   const options = {
@@ -266,6 +321,10 @@ async function main() {
   });
   const pressure = new StoragePressure(config.budget);
   const failures = [];
+  const k4 = new HostLedger(path.join(tempRoot, 'host-ledger.sqlite'), 'soak-host');
+  const k4Samples = [];
+  const k4Checks = [];
+  let k4Compacted = 0, k4Baseline;
   const sweeper = new RetentionSweeper({
     config, registry, pressure, clock, freeBytes: async () => 512 * 1024 * 1024 * 1024,
     jitter: (_sequence, interval) => interval,
@@ -348,6 +407,7 @@ async function main() {
     }
   };
 
+  k4Baseline = k4Measure(k4);
   // Baseline measurement and a startup pass, like a daemon boot.
   let sweep = await sweepUntilQuiet(sweeper, 'startup', 2);
   await recordSample('startup', sweep);
@@ -357,6 +417,7 @@ async function main() {
   for (let batch = 0; batch < totalBatches && nextTask < options.tasks; batch++) {
     const batchStart = simulatedNow;
     const batchCount = Math.min(options.batchSize, options.tasks - nextTask);
+    const k4BatchKeys = [];
     for (let index = 0; index < batchCount; index++) {
       const taskNumber = nextTask++;
       const taskId = 'soak-task-' + taskNumber.toString().padStart(6, '0');
@@ -400,6 +461,8 @@ async function main() {
       }
       adapter.startError = undefined;
       await waitFor(() => runner.activeTaskCount === 0, 'active task cleanup ' + taskId);
+      k4SettleTask(k4, agentRef, DEFAULT_AGENT_EGRESS_POLICY, taskId, shouldFail, batchStart);
+      k4BatchKeys.push(taskId);
       running.tasksCompleted++;
     }
     // Stamp only files from this batch, so earlier batches keep their own
@@ -408,6 +471,12 @@ async function main() {
     await stampNewFiles(ledgerDir, seen.ledger, when);
     await stampNewFiles(resultsDir, seen.results, when);
     await stampNewFiles(canonicalHome, seen.home, when);
+    // The Host acknowledges the batch's results and compacts, as a product retention loop would.
+    const k4Before = k4Measure(k4);
+    const compaction = k4.compact({ acknowledgedIntentKeys: k4BatchKeys, now: batchStart, tombstoneRetentionMs: K4_TOMBSTONE_RETENTION_MS });
+    k4Compacted += compaction.compactedIntents;
+    const k4After = k4Measure(k4);
+    k4Samples.push({ batch: batch + 1, tasksCompleted: running.tasksCompleted, compactedIntents: k4Compacted, compaction, before: k4Before, after: k4After });
     // Pre-sweep sample: what this batch actually accumulated before retention
     // has had a chance to run.
     await recordSample('batch-' + (batch + 1) + '-pre-sweep', undefined);
@@ -424,8 +493,27 @@ async function main() {
   const finalClasses = samples.at(-1).classes;
   const boundChecks = checkBounds(registry, finalClasses);
   const boundFailures = boundChecks.filter(check => check.status === 'fail');
-  const failuresTotal = failures.length + boundFailures.length;
 
+  const k4Final = k4Samples.at(-1);
+  const k4PeakBody = Math.max(...k4Samples.map(sample => sample.before.bodyBytes));
+  const k4MaxIgnored = Math.max(...k4Samples.map(sample => Math.max(sample.before.ignoredWakes, sample.after.ignoredWakes)));
+  k4Checks.push(k4Check('ignored-wakes', k4MaxIgnored <= IGNORED_WAKE_AUDIT_LIMIT,
+    'max ' + k4MaxIgnored + ' <= ' + IGNORED_WAKE_AUDIT_LIMIT + ' entries'));
+  k4Checks.push(k4Check('compact-empties-per-task-tables', k4Samples.every(sample => Object.values(sample.after.perTaskRows).every(count => count === 0)),
+    'intents/executions/occurrences/slots/outbox/applied/application are empty after every compact'));
+  k4Checks.push(k4Check('compact-shrinks-body', k4Samples.every(sample => sample.compaction.afterBytes < sample.compaction.beforeBytes),
+    'peak body ' + k4PeakBody + ' bytes, post-compact body ' + k4Final.after.bodyBytes + ' bytes (empty ledger ' + k4Baseline.bodyBytes + ')'));
+  // Known limit, measured and not asserted: caller intent tombstones never expire (docs/host-local-storage-layout.md#k4-host-ledger).
+  const permanentBytes = k4Final.after.tombstoneBytesByKind.intent;
+  const k4Growth = {
+    compactedIntents: k4Compacted,
+    tombstones: k4Final.after.tombstones,
+    tombstoneBytesByKind: k4Final.after.tombstoneBytesByKind,
+    // Intent tombstones have a null expiry; application and slot tombstones expire with the compaction window.
+    permanentTombstoneBytesPerCompactedIntent: k4Compacted === 0 ? 0 : permanentBytes / k4Compacted,
+  };
+  k4.close();
+  const failuresTotal = failures.length + boundFailures.length + k4Checks.filter(check => check.status === 'fail').length;
   const finishedAt = new Date();
   const durationMs = performance.now() - started;
   const report = {
@@ -450,6 +538,7 @@ async function main() {
     samples,
     final: samples.at(-1),
     boundChecks,
+    k4Ledger: { checks: k4Checks, growth: k4Growth, baseline: k4Baseline, samples: k4Samples },
     peak: { bytes: peakBytes, entries: peakEntries, scanMs: { min: Number.isFinite(scanMsMin) ? scanMsMin : null, max: scanMsMax } },
     sweepFailures: failures,
     passed: failuresTotal === 0 && outcomes.unexpected === 0,
@@ -472,11 +561,19 @@ async function main() {
       + boundChecks.filter(check => check.status === 'exempt').length + ' exempt, '
       + boundChecks.filter(check => check.status === 'not-observed').length + ' not observed',
     '- Sweep failures: ' + failures.length,
+    '- K4 ledger: ' + k4Checks.filter(check => check.status === 'pass').length + ' pass, ' + k4Checks.filter(check => check.status === 'fail').length + ' fail; '
+      + k4Compacted + ' intents compacted; permanent identity growth ' + k4Growth.permanentTombstoneBytesPerCompactedIntent.toFixed(1)
+      + ' B/intent as serialized rows, before SQLite page and index overhead (' + k4Growth.tombstones.intent + ' intent, '
+      + k4Growth.tombstones.application + ' application, ' + k4Growth.tombstones.slot + ' slot rows)',
     '- Result: ' + (report.passed ? 'PASS' : 'FAIL'),
     '',
     '| Class | Status | Entries | Bytes | Oldest age (ms) | Bound |',
     '| --- | --- | ---: | ---: | ---: | --- |',
     ...boundChecks.map(check => '| ' + check.classId + ' | ' + check.status + ' | ' + check.entries + ' | ' + check.bytes + ' | ' + (check.oldestAgeMs ?? '') + ' | ' + check.bound.kind + ' |'),
+    '',
+    '| K4 ledger check | Status | Detail |',
+    '| --- | --- | --- |',
+    ...k4Checks.map(check => '| ' + check.id + ' | ' + check.status + ' | ' + check.detail + ' |'),
     '',
   ];
   const summary = summaryLines.join('\n');
