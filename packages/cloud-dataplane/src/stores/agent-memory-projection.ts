@@ -9,17 +9,17 @@
 import {
   type AgentMemoryProjectionCommitInput,
   type AgentMemoryProjectionEraseResult,
-  type AgentMemoryProjectionReceipt,
   type AgentMemoryProjectionStore,
   ByokCloudError,
   type CloudCrypto,
 } from '@byok-sdk/cloud';
 import {
-  AgentMemoryProjectionMutationSchema,
+  AgentMemoryProjectionPlainMutationSchema,
   AgentMemoryProjectionEraseResultSchema,
-  AgentMemoryProjectionReceiptSchema,
+  AgentMemoryProjectionPlainReceiptSchema,
   AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
+  type AgentMemoryProjectionPlainReceipt,
 } from '@byok-sdk/protocol';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
@@ -96,8 +96,8 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
     this.#crypto = options.crypto;
   }
 
-  async commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt> {
-    const mutation = AgentMemoryProjectionMutationSchema.parse(input.mutation);
+  async commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionPlainReceipt> {
+    const mutation = AgentMemoryProjectionPlainMutationSchema.parse(input.mutation);
     await this.#assertRedactedSnapshot(
       input.redactedBytes,
       mutation.snapshot.redactedBytes,
@@ -208,7 +208,7 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
       );
 
       await client.query('COMMIT');
-      return AgentMemoryProjectionReceiptSchema.parse({
+      return AgentMemoryProjectionPlainReceiptSchema.parse({
         outcome: 'accepted',
         tenantId: input.tenantId,
         deviceId: input.deviceId,
@@ -382,7 +382,7 @@ function assertNextMutation(
 function sameReceiptBinding(
   receipt: MeteringReceiptRow,
   input: AgentMemoryProjectionCommitInput,
-  mutation: ReturnType<typeof AgentMemoryProjectionMutationSchema.parse>,
+  mutation: ReturnType<typeof AgentMemoryProjectionPlainMutationSchema.parse>,
 ): boolean {
   return (
     receipt.tenant_id === input.tenantId &&
@@ -402,8 +402,8 @@ function sameReceiptBinding(
   );
 }
 
-function toReceipt(row: MeteringReceiptRow, outcome: 'accepted' | 'idempotent'): AgentMemoryProjectionReceipt {
-  return AgentMemoryProjectionReceiptSchema.parse({
+function toReceipt(row: MeteringReceiptRow, outcome: 'accepted' | 'idempotent'): AgentMemoryProjectionPlainReceipt {
+  return AgentMemoryProjectionPlainReceiptSchema.parse({
     outcome,
     tenantId: row.tenant_id,
     deviceId: row.device_id,

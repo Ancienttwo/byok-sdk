@@ -10,6 +10,8 @@ import type { TenantId } from '@byok-sdk/core';
 import {
   type AgentMemoryProjectionMeteringReceipt,
   type AgentMemoryProjectionMutation,
+  type AgentMemoryProjectionPlainMutation,
+  type AgentMemoryProjectionPlainReceipt,
   type AgentMemoryProjectionReceipt,
   type AgentMemoryProjectionEraseResult,
 } from '@byok-sdk/protocol';
@@ -56,7 +58,7 @@ export interface AgentMemoryProjectionAuthorizer {
 export interface AgentMemoryProjectionCommitInput {
   readonly tenantId: TenantId;
   readonly deviceId: string;
-  readonly mutation: AgentMemoryProjectionMutation;
+  readonly mutation: AgentMemoryProjectionPlainMutation;
   readonly redactedBytes: Uint8Array;
 }
 
@@ -70,7 +72,7 @@ export interface AgentMemoryProjectionCommitInput {
  * snapshot and its metering receipt share one transaction boundary.
  */
 export interface AgentMemoryProjectionStore {
-  commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt>;
+  commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionPlainReceipt>;
   /**
    * Server-side deletion leaves a body-free epoch fence. The host must mint a
    * later writer grant from `nextWriterEpoch`; no device/runtime is required.

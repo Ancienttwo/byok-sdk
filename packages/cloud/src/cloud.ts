@@ -105,8 +105,9 @@ import {
   type TaskOfferSealedPayload,
   type AgentRef,
   type AgentContentReadPayload,
-  type AgentMessageDispositionPayload,
+  type AgentMessageDispositionPlainPayload,
   type AgentMessagePublishPayload,
+  type AgentMessagePublishPlainPayload,
   type AgentMessageServerContext,
   type AgentHomeProjectionCompletionRequest,
   type AgentHomeProjectionPayload,
@@ -293,7 +294,7 @@ export interface ByokCloudOptions {
       readonly deviceId: string;
       readonly taskId: string;
       readonly context: AgentMessageServerContext;
-      readonly payload: AgentMessagePublishPayload;
+      readonly payload: AgentMessagePublishPlainPayload;
     }): Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>;
   };
   /**
@@ -890,7 +891,7 @@ export interface ByokCloud {
    */
   readAgentMessageDisposition(
     tenant: TenantId, deviceId: string, taskId: string, payload: AgentMessagePublishPayload,
-  ): Promise<AgentMessageDispositionPayload | undefined>;
+  ): Promise<AgentMessageDispositionPlainPayload | undefined>;
 
   /** Exact durable egress fact and receipt selected by (tenant, device, AgentRef, event id). */
   readAgentEgress(

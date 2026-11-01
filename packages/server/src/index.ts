@@ -51,7 +51,7 @@ import {
   type AgentMemorySelection,
   type AgentRef,
   type AgentMessagePublishPayload,
-  type AgentMessageDispositionPayload,
+  type AgentMessageDispositionPlainPayload,
   type TaskState,
 } from '@byok-sdk/protocol';
 import { TaskEventRelay } from './relay';
@@ -231,7 +231,7 @@ export interface ByokServer {
     /** Discover the unique message and its pending/final disposition through the frozen Agent binding. */
     agentMessage(taskId: string, deviceId: string, agentRef: AgentRef): Promise<import('@byok-sdk/cloud').TaskAgentMessage | undefined>;
     /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
-    messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
+    messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPlainPayload | undefined>;
     /** Request cancellation through the kernel without a process-owned TaskHandle. */
     cancel(taskId: string, reason?: string): Promise<void>;
     /** Settle a task no device will finish through the kernel (`ByokCloud.abandonTask`), without a process-owned TaskHandle. */

@@ -1796,7 +1796,7 @@ describe('prepared daemon-authored message egress', () => {
     session.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some(e => e.type === 'agent.message.publish')).toBe(true));
     const published = sent.find(e => e.type === 'agent.message.publish');
-    if (published?.type !== 'agent.message.publish') throw new Error('missing message');
+    if (published?.type !== 'agent.message.publish' || published.payload.sealed !== undefined) throw new Error('missing message');
     expect(published.payload.body).toBe('**prepared reply**');
     expect(sent.some(e => e.type === 'task.complete')).toBe(false);
     const exact = {

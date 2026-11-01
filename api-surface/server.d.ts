@@ -952,7 +952,7 @@ import { type MaintenanceReport } from '@byok-sdk/cloud';
 export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import { type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type EnqueuedAgentControl, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
-import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
+import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPlainPayload } from '@byok-sdk/protocol';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskEventEntry, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types';
 export { TaskEventsUnavailableError } from './types';
@@ -1074,7 +1074,7 @@ export interface ByokServer {
         /** Discover the unique message and its pending/final disposition through the frozen Agent binding. */
         agentMessage(taskId: string, deviceId: string, agentRef: AgentRef): Promise<import('@byok-sdk/cloud').TaskAgentMessage | undefined>;
         /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
-        messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
+        messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPlainPayload | undefined>;
         /** Request cancellation through the kernel without a process-owned TaskHandle. */
         cancel(taskId: string, reason?: string): Promise<void>;
         /** Settle a task no device will finish through the kernel (`ByokCloud.abandonTask`), without a process-owned TaskHandle. */
@@ -1745,7 +1745,7 @@ export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): 
 export {};
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types';
@@ -1848,7 +1848,7 @@ export interface CreateByokServerOptions {
             readonly deviceId: string;
             readonly taskId: string;
             readonly context: AgentMessageServerContext;
-            readonly payload: AgentMessagePublishPayload;
+            readonly payload: AgentMessagePublishPlainPayload;
         }): Promise<{
             readonly outcome: 'accepted' | 'held' | 'refused';
             readonly reasonCode?: string;

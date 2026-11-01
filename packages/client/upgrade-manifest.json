@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.32.0",
-    "snapshotSha256": "fb46c5fe1ccb9f26502912659e993f8efc51e1655d0ae19ff83382c24af0010b"
+    "snapshotSha256": "948a4217dba7d8ea121cd20b31445e56a2174264032cf1706b3522dc070ea136"
   },
   "configFields": {
     "status": "tracked",
@@ -116,6 +116,67 @@
         "export:@byok-sdk/client/adapters#DshSandboxMode",
         "export:@byok-sdk/client/testing#FakeRuntimeAdapterId"
       ]
+    },
+    {
+      "id": "sealed-payload-v2-protocol",
+      "impact": "breaking",
+      "summary": "The protocol defines sealed payload v2 (#1045 S1): TaskSealingSchema (and so the cloud's SealedAgentExecutionInputSchema) accepts the agent-message and memory-projection categories, gated by the new sealed-payload-v2 flag, and memory-projection needs task-output in the same policy. agent.message.publish, agent.message.disposition and the Agent-memory projection mutation and receipt are now unions of a plaintext and a sealed branch; the plaintext branch has its own name (AgentMessagePublishPlainPayload, AgentMessageDispositionPlainPayload, AgentMemoryProjectionPlainMutation, AgentMemoryProjectionPlainReceipt and their schemas), so narrow with payload.sealed === undefined or use the plaintext name. SEALED_PAYLOAD_V1_CATEGORIES and SealedPayloadV1Category are removed; use SEALED_PAYLOAD_CATEGORIES and SealedPayloadCategory. isSealedTaskPlainOutput takes the task's frozen sealing categories as a third argument. New: SEALED_PAYLOAD_V2_CAPABILITY, sealedMovedFields and sealedAgentMessageMaxContentLength. No package seals or admits v2 content yet.",
+      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "items": [
+        "export:@byok-sdk/protocol#AgentMemoryProjectionCommitRequestSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionCommitResponseSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionMutationSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionPlainMutation",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionPlainMutationSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionPlainReceipt",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionPlainReceiptSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionReceiptSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSealedMeteringReceipt",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSealedMutation",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSealedReceipt",
+        "export:@byok-sdk/protocol#AgentMessageDispositionPayloadSchema",
+        "export:@byok-sdk/protocol#AgentMessageDispositionPlainPayload",
+        "export:@byok-sdk/protocol#AgentMessageDispositionPlainPayloadSchema",
+        "export:@byok-sdk/protocol#AgentMessageDispositionSealedPayload",
+        "export:@byok-sdk/protocol#AgentMessagePublishPayloadSchema",
+        "export:@byok-sdk/protocol#AgentMessagePublishPlainPayload",
+        "export:@byok-sdk/protocol#AgentMessagePublishPlainPayloadSchema",
+        "export:@byok-sdk/protocol#AgentMessagePublishSealedPayload",
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#SEALED_PAYLOAD_V1_CATEGORIES",
+        "export:@byok-sdk/protocol#SEALED_PAYLOAD_V2_CAPABILITY",
+        "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+        "export:@byok-sdk/protocol#SealedPayloadSchema",
+        "export:@byok-sdk/protocol#SealedPayloadV1Category",
+        "export:@byok-sdk/protocol#SealedSplitEntry",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#TaskSealingSchema",
+        "export:@byok-sdk/protocol#isSealedTaskPlainOutput",
+        "export:@byok-sdk/protocol#sealedAgentMessageMaxContentLength",
+        "export:@byok-sdk/protocol#sealedMovedFields",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#SEALED_PAYLOAD_V2_CAPABILITY",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema"
+      ]
+    },
+    {
+      "id": "plaintext-agent-message-memory-hosts",
+      "impact": "breaking",
+      "summary": "Cloud, dataplane and server name the plaintext branch where they take or return only plaintext (#1045 S1): the agentMessage.consume payload, TaskAgentMessage.payload and the readAgentMessageDisposition / tasks.messageDisposition result are the plaintext message types, and AgentMemoryProjectionStore.commit takes an AgentMemoryProjectionPlainMutation and returns an AgentMemoryProjectionPlainReceipt. The shapes are the 0.32.0 shapes; a Host that implements its own AgentMemoryProjectionStore or annotates these values with the union names switches to the plaintext names. The cloud refuses a sealed agent.message.publish with sealed_payload_unsupported and a sealed memory projection with 422.",
+      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "items": [
+        "export:@byok-sdk/cloud#AgentMemoryProjectionCommitInput",
+        "export:@byok-sdk/cloud#AgentMemoryProjectionStore",
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#ByokCloudOptions",
+        "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+        "export:@byok-sdk/cloud#TaskAgentMessage",
+        "export:@byok-sdk/cloud#handleInboundEnvelope",
+        "export:@byok-sdk/cloud-dataplane#PostgresAgentMemoryProjectionStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStore",
+        "export:@byok-sdk/server#ByokServer"
+      ]
     }
   ],
   "changes": [
@@ -177,6 +238,16 @@
       "entry": "dsh-adapter"
     },
     {
+      "item": "export:@byok-sdk/cloud#AgentMemoryProjectionCommitInput",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentMemoryProjectionStore",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
+    },
+    {
       "item": "export:@byok-sdk/cloud#ApprovalTimelineAppendInput",
       "change": "changed",
       "entry": "approval-timeline-closes-with-task"
@@ -185,6 +256,16 @@
       "item": "export:@byok-sdk/cloud#ApprovalTimelineTail",
       "change": "changed",
       "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloudOptions",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
     },
     {
       "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
@@ -200,6 +281,11 @@
       "item": "export:@byok-sdk/cloud#InMemoryActivityStore",
       "change": "changed",
       "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryCloudComposition",
@@ -237,6 +323,16 @@
       "entry": "approval-timeline-closes-with-task"
     },
     {
+      "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAgentMessage",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TaskEventsWake",
       "change": "added",
       "entry": "task-events-wake"
@@ -250,6 +346,11 @@
       "item": "export:@byok-sdk/cloud#createInProcessTaskEventsWake",
       "change": "added",
       "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#handleInboundEnvelope",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
     },
     {
       "item": "export:@byok-sdk/cloud#pendingApprovalObservation",
@@ -270,6 +371,11 @@
       "item": "export:@byok-sdk/cloud#validateApprovalTimelineResolve",
       "change": "changed",
       "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresAgentMemoryProjectionStore",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
@@ -307,9 +413,189 @@
       "entry": "task-events-wake"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresAgentMemoryProjectionStore",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore",
       "change": "changed",
       "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionCommitRequestSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionCommitResponseSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionMutationSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionPlainMutation",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionPlainMutationSchema",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionPlainReceipt",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionPlainReceiptSchema",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionReceiptSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSealedMeteringReceipt",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSealedMutation",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSealedReceipt",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageDispositionPayloadSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageDispositionPlainPayload",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageDispositionPlainPayloadSchema",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageDispositionSealedPayload",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessagePublishPayloadSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessagePublishPlainPayload",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessagePublishPlainPayloadSchema",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessagePublishSealedPayload",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_PAYLOAD_V1_CATEGORIES",
+      "change": "removed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_PAYLOAD_V2_CAPABILITY",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SealedPayloadSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SealedPayloadV1Category",
+      "change": "removed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SealedSplitEntry",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSealingSchema",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#isSealedTaskPlainOutput",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#sealedAgentMessageMaxContentLength",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#sealedMovedFields",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#SEALED_PAYLOAD_V2_CAPABILITY",
+      "change": "added",
+      "entry": "sealed-payload-v2-protocol"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "plaintext-agent-message-memory-hosts"
     },
     {
       "item": "export:@byok-sdk/server#CreateByokServerOptions",

@@ -102,6 +102,13 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'task.steer': steerSealedRunningTask,
 };
 
+/**
+ * The cloud emits a message disposition itself, after it admits the device's
+ * publish; no Host enqueues one. Its `contentMac` gate belongs to that inbound
+ * path (#1045 S3), and this package emits only plaintext dispositions until then.
+ */
+const CLOUD_EMITTED: readonly MessageType[] = ['agent.message.disposition'];
+
 const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url));
 const gatedLines = readFileSync(corpusPath, 'utf8')
   .split('\n')
@@ -116,7 +123,7 @@ const gatedLines = readFileSync(corpusPath, 'utf8')
       flags: requiredReceiverCapabilities(envelope.type, envelope.payload),
     };
   })
-  .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0);
+  .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0 && !CLOUD_EMITTED.includes(entry.type));
 
 /** Whether the line's surface has a hosted entry that accepts its payload. */
 const submitExpressible = (entry: (typeof gatedLines)[number]): boolean => {
@@ -154,7 +161,8 @@ async function expectTerminalProjectionRequired(run: Promise<unknown>): Promise<
 describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
   it('every device-advertised gated surface has a hosted enqueue path under test', () => {
     const surfaces = new Set(WIRE_ADDITIONS.flatMap((entry) =>
-      entry.kind === 'envelope' && entry.rule === 'gated' && entry.advertisedBy === 'device' ? [entry.surface] : []));
+      entry.kind === 'envelope' && entry.rule === 'gated' && entry.advertisedBy === 'device' && !CLOUD_EMITTED.includes(entry.surface)
+        ? [entry.surface] : []));
     expect([...surfaces].filter((surface) => ENQUEUE[surface] === undefined)).toEqual([]);
     expect(new Set(gatedLines.map((entry) => entry.type))).toEqual(surfaces);
   });
@@ -165,7 +173,7 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     const table = new Set(
       WIRE_ADDITIONS.flatMap((entry) => (
         entry.kind === 'envelope' && entry.rule === 'gated' && entry.advertisedBy === 'device' && entry.surface === 'task.offer'
-          && entry.field !== 'preparation' && entry.field !== 'sealing' ? [entry.capability] : [])),
+          && entry.field !== 'preparation' && entry.field !== 'sealing' && entry.field !== 'sealing.categories' ? [entry.capability] : [])),
     );
     expect(union(fresh)).toEqual(table);
     expect(union(fresh.filter(submitExpressible))).toEqual(table);

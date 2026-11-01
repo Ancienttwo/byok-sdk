@@ -431,7 +431,8 @@ export declare class PostgresAgentEgressStore implements AgentEgressStore {
  * an old exact retry is still provable after the head advances or an epoch is
  * superseded. Neither table has a raw-source hash, cwd, path, or audit body.
  */
-import { type AgentMemoryProjectionCommitInput, type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionReceipt, type AgentMemoryProjectionStore, type CloudCrypto } from '@byok-sdk/cloud';
+import { type AgentMemoryProjectionCommitInput, type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionStore, type CloudCrypto } from '@byok-sdk/cloud';
+import { type AgentMemoryProjectionPlainReceipt } from '@byok-sdk/protocol';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { ByokPool } from '../pool';
 export interface PostgresAgentMemoryProjectionStoreOptions {
@@ -448,7 +449,7 @@ export interface PostgresAgentMemoryProjectionStoreOptions {
 export declare class PostgresAgentMemoryProjectionStore implements AgentMemoryProjectionStore {
     #private;
     constructor(options: PostgresAgentMemoryProjectionStoreOptions);
-    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt>;
+    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionPlainReceipt>;
     /** Delete body/receipts but retain a body-free epoch fence under one source lock. */
     erase(input: {
         readonly tenantId: TenantId;

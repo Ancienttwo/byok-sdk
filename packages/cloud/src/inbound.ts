@@ -59,12 +59,14 @@ import {
   type AgentContentReceiptPayload,
   type AgentContentReadPayload,
   type AgentEgressReliablePayload,
-  type AgentMessageDispositionPayload,
+  type AgentMessageDispositionPlainPayload,
   type AgentMessagePublishPayload,
+  type AgentMessagePublishPlainPayload,
   type AgentMessageServerContext,
   type Envelope,
   type MessageType,
   type SealedSplitEntry,
+  type TaskSealing,
 } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
 import {
@@ -237,10 +239,12 @@ export async function handleAgentMessagePublish(
     readonly deviceId: string;
     readonly taskId: string;
     readonly context: AgentMessageServerContext;
-    readonly payload: AgentMessagePublishPayload;
+    readonly payload: AgentMessagePublishPlainPayload;
   }) => Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>) | undefined,
   alreadyDeduplicated: boolean,
-): Promise<Refused | { readonly outcome: Exclude<InboundOutcome, 'rejected'>; readonly disposition?: AgentMessageDispositionPayload }> {
+): Promise<Refused | { readonly outcome: Exclude<InboundOutcome, 'rejected'>; readonly disposition?: AgentMessageDispositionPlainPayload }> {
+  // This gate admits no sealed Agent message: it advertises no sealed-payload-v2.
+  if (payload.sealed !== undefined) return refuse('sealed_payload_unsupported');
   const device = await stores.devices.get(deviceId);
   const attempt = await stores.tasks.get(taskId);
   const binding = await stores.receipts.get(`agent-message-offer:${deviceId}:${taskId}`);
@@ -321,9 +325,9 @@ export async function handleAgentMessagePublish(
 }
 
 function agentMessageDisposition(
-  payload: AgentMessagePublishPayload,
+  payload: AgentMessagePublishPlainPayload,
   decision: { readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string },
-): AgentMessageDispositionPayload {
+): AgentMessageDispositionPlainPayload {
   return {
     agentRef: payload.agentRef,
     sessionRef: payload.sessionRef,
@@ -343,7 +347,9 @@ export async function readAgentMessageDisposition(
   deviceId: string,
   taskId: string,
   payload: AgentMessagePublishPayload,
-): Promise<AgentMessageDispositionPayload | undefined> {
+): Promise<AgentMessageDispositionPlainPayload | undefined> {
+  // No sealed Agent message is admitted, so none has a disposition.
+  if (payload.sealed !== undefined) return undefined;
   const admission = await stores.tasks.readAgentMessage({
     taskId,
     deviceId,
@@ -461,12 +467,12 @@ async function frozenOfferSealing(
   deviceId: string,
   taskId: string,
   agentRef: AgentRef | undefined,
-): Promise<{ readonly categories: readonly string[] } | 'redacted' | undefined> {
+): Promise<Pick<TaskSealing, 'categories'> | 'redacted' | undefined> {
   const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, agentRef, hashOfferBytes);
   const offer = await stores.receipts.get(`task-offer:${messageId}`);
   if (offer === undefined) return undefined;
   if (isTaskRedactionTombstone(offer.body)) return 'redacted';
-  return (JSON.parse(offer.body) as { payload: { sealing?: { categories: readonly string[] } } }).payload.sealing;
+  return (JSON.parse(offer.body) as { payload: { sealing?: TaskSealing } }).payload.sealing;
 }
 
 /**
@@ -487,9 +493,9 @@ async function sealedOutputRefusal(
   const sealedType = isSealedPayload(envelope.type, envelope.payload);
   const sealing = await frozenOfferSealing(stores, deviceId, taskId, agentRef);
   if (sealing === 'redacted') return undefined;
-  const outputSealed = sealing?.categories.includes('task-output') === true;
-  if (sealedType) return outputSealed ? undefined : refuse('sealed_payload_unsupported');
-  return !outputSealed || isSealedTaskPlainOutput(envelope.type, envelope.payload) ? undefined : refuse('sealed_output_required');
+  if (sealing === undefined || !sealing.categories.includes('task-output')) return sealedType ? refuse('sealed_payload_unsupported') : undefined;
+  if (sealedType) return undefined;
+  return isSealedTaskPlainOutput(envelope.type, envelope.payload, sealing.categories) ? undefined : refuse('sealed_output_required');
 }
 
 export async function handleInboundEnvelope(

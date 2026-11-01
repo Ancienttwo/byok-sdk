@@ -522,6 +522,8 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             scopeId: z.ZodString;
             epoch: z.ZodNumber;
             categories: z.ZodArray<z.ZodEnum<{
+                "agent-message": "agent-message";
+                "memory-projection": "memory-projection";
                 "task-input": "task-input";
                 "task-output": "task-output";
             }>>;
@@ -602,7 +604,7 @@ export declare function recordAgentHomeProjectionCompletion(receipts: TenantBoun
  * import, merge, history, RAG, or product-fact surface.
  */
 import type { TenantId } from '@byok-sdk/core';
-import { type AgentMemoryProjectionMutation, type AgentMemoryProjectionReceipt, type AgentMemoryProjectionEraseResult } from '@byok-sdk/protocol';
+import { type AgentMemoryProjectionMutation, type AgentMemoryProjectionPlainMutation, type AgentMemoryProjectionPlainReceipt, type AgentMemoryProjectionEraseResult } from '@byok-sdk/protocol';
 export type { AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from '@byok-sdk/protocol';
 export interface AgentMemoryProjectionAuthorizerInput {
     readonly tenantId: TenantId;
@@ -642,7 +644,7 @@ export interface AgentMemoryProjectionAuthorizer {
 export interface AgentMemoryProjectionCommitInput {
     readonly tenantId: TenantId;
     readonly deviceId: string;
-    readonly mutation: AgentMemoryProjectionMutation;
+    readonly mutation: AgentMemoryProjectionPlainMutation;
     readonly redactedBytes: Uint8Array;
 }
 /**
@@ -655,7 +657,7 @@ export interface AgentMemoryProjectionCommitInput {
  * snapshot and its metering receipt share one transaction boundary.
  */
 export interface AgentMemoryProjectionStore {
-    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt>;
+    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionPlainReceipt>;
     /**
      * Server-side deletion leaves a body-free epoch fence. The host must mint a
      * later writer grant from `nextWriterEpoch`; no device/runtime is required.
@@ -1463,7 +1465,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail, ActivityReadOptions } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type TaskOfferPlainPayload, type TaskOfferSealedPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type TaskOfferPlainPayload, type TaskOfferSealedPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPlainPayload, type AgentMessagePublishPayload, type AgentMessagePublishPlainPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1546,7 +1548,7 @@ export interface ByokCloudOptions {
             readonly deviceId: string;
             readonly taskId: string;
             readonly context: AgentMessageServerContext;
-            readonly payload: AgentMessagePublishPayload;
+            readonly payload: AgentMessagePublishPlainPayload;
         }): Promise<{
             readonly outcome: 'accepted' | 'held' | 'refused';
             readonly reasonCode?: string;
@@ -2086,7 +2088,7 @@ export interface ByokCloud {
      * Missing or pending admission returns undefined; invalid persisted evidence
      * throws. The Host supplies the complete original payload, not a Turn ID.
      */
-    readAgentMessageDisposition(tenant: TenantId, deviceId: string, taskId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
+    readAgentMessageDisposition(tenant: TenantId, deviceId: string, taskId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPlainPayload | undefined>;
     /** Exact durable egress fact and receipt selected by (tenant, device, AgentRef, event id). */
     readAgentEgress(tenant: TenantId, deviceId: string, agentRef: AgentRef, eventId: string): Promise<AgentEgressRecord | undefined>;
     /**
@@ -3114,7 +3116,7 @@ export declare function truthPutHandler(deps: TruthRouteDeps): (c: Context) => P
  *    (`onInboundRefused`). It runs after the outcome is fixed, it cannot
  *    change it, and it is not the admission hook.
  */
-import { type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type Envelope, type MessageType } from '@byok-sdk/protocol';
+import { type AgentMessageDispositionPlainPayload, type AgentMessagePublishPayload, type AgentMessagePublishPlainPayload, type AgentMessageServerContext, type Envelope, type MessageType } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
 import { type ActivityBounds } from './coordination';
 import type { TenantStores } from './tenant-stores';
@@ -3196,16 +3198,16 @@ export declare function handleAgentMessagePublish(stores: TenantStores, deviceId
     readonly deviceId: string;
     readonly taskId: string;
     readonly context: AgentMessageServerContext;
-    readonly payload: AgentMessagePublishPayload;
+    readonly payload: AgentMessagePublishPlainPayload;
 }) => Promise<{
     readonly outcome: 'accepted' | 'held' | 'refused';
     readonly reasonCode?: string;
 }>) | undefined, alreadyDeduplicated: boolean): Promise<Refused | {
     readonly outcome: Exclude<InboundOutcome, 'rejected'>;
-    readonly disposition?: AgentMessageDispositionPayload;
+    readonly disposition?: AgentMessageDispositionPlainPayload;
 }>;
 /** Reads only a terminal immutable admission; pending rows have no disposition to acknowledge. */
-export declare function readAgentMessageDisposition(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
+export declare function readAgentMessageDisposition(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPlainPayload | undefined>;
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */
 export declare function terminalReceiptKey(taskId: string): string;
 export declare function handleInboundEnvelope(stores: TenantStores, deviceId: string, envelope: Envelope, activityBounds?: ActivityBounds, agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4], observer?: ByokCloudObserver, now?: string): Promise<InboundResult>;
@@ -3648,7 +3650,7 @@ export declare class InMemoryAgentEgressStore implements AgentEgressStore {
 // ==== @byok-sdk/cloud dist/stores/in-memory/agent-memory-projection.d.ts ====
 /** In-memory conformance implementation for the one-way hosted memory projection ports. */
 import type { Clock, TenantId } from '@byok-sdk/core';
-import { type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionReceipt } from '@byok-sdk/protocol';
+import { type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionPlainReceipt } from '@byok-sdk/protocol';
 import type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionStore } from '../../agent-memory-projection';
 import type { CloudCrypto } from '../../crypto/port';
 /**
@@ -3659,7 +3661,7 @@ import type { CloudCrypto } from '../../crypto/port';
 export declare class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjectionStore {
     #private;
     constructor(clock: Clock, crypto: CloudCrypto);
-    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt>;
+    commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionPlainReceipt>;
     erase(input: {
         readonly tenantId: TenantId;
         readonly agentId: string;
@@ -5064,11 +5066,11 @@ export interface ReceiptCollectExpiredInput extends CollectExpiredInput {
     readonly requestBefore: string;
 }
 // ==== @byok-sdk/cloud dist/task-agent-message.d.ts ====
-import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
+import { type AgentRef, type AgentMessagePublishPlainPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { TenantStores } from './tenant-stores';
 /** SDK transmission evidence; payload remains untrusted and never authors a Host product message. */
 export interface TaskAgentMessage {
-    readonly payload: AgentMessagePublishPayload;
+    readonly payload: AgentMessagePublishPlainPayload;
     readonly context: AgentMessageServerContext;
     /** Absent while the exact first-message reservation remains pending. */
     readonly disposition?: AgentMessageDispositionPayload;

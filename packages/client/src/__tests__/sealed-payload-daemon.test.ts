@@ -474,7 +474,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'missing-egress');
     expect(decline.payload).toEqual({ agentRef: agentOf('missing-egress'), reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false, admission: { totalMs: expect.any(Number) } });
     // The Host's inbound check reads this helper, so the decline settles the task.
-    expect(isSealedTaskPlainOutput('task.decline', decline.payload)).toBe(true);
+    expect(isSealedTaskPlainOutput('task.decline', decline.payload, ['task-output'])).toBe(true);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('agent-egress-policy'));
     expect(adapter.startCalls).toHaveLength(0);
   });
@@ -825,7 +825,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     });
     const fail = await server!.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === taskId);
     expect(fail.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
-    expect(isSealedTaskPlainOutput(fail.type, fail.payload)).toBe(true);
+    expect(isSealedTaskPlainOutput(fail.type, fail.payload, ['task-output'])).toBe(true);
     expect(JSON.stringify(taskEnvelopes(taskId))).not.toContain('result_not_submitted');
   });
 
@@ -1188,7 +1188,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
       && ['task.complete_sealed', 'task.fail_sealed', 'task.fail', 'task.complete'].includes(wireForm(envelope)));
     expect(wireForm(terminal)).toBe('task.fail');
     expect(terminal.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
-    expect(isSealedTaskPlainOutput(terminal.type, terminal.payload)).toBe(true);
+    expect(isSealedTaskPlainOutput(terminal.type, terminal.payload, ['task-output'])).toBe(true);
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
     expect(JSON.stringify(taskEnvelopes('restart-other-member'))).not.toContain('large summary');
     expect(taskEnvelopes('restart-other-member').map(wireForm)).not.toContain('task.complete_sealed');
@@ -1430,7 +1430,7 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
     });
     const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail' && envelope.task_id === 'refused-other-member');
     expect(failed.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
-    expect(isSealedTaskPlainOutput(failed.type, failed.payload)).toBe(true);
+    expect(isSealedTaskPlainOutput(failed.type, failed.payload, ['task-output'])).toBe(true);
     await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-other-member')?.truth_state).toBe('confirmed'), BUDGET_MS);
     expect(terminalTypes('refused-other-member')).toEqual(['task.fail']);
   });

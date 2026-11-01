@@ -1,13 +1,13 @@
 /** In-memory conformance implementation for the one-way hosted memory projection ports. */
 import type { Clock, TenantId } from '@byok-sdk/core';
 import {
-  AgentMemoryProjectionMutationSchema,
+  AgentMemoryProjectionPlainMutationSchema,
   AgentMemoryProjectionEraseResultSchema,
-  AgentMemoryProjectionReceiptSchema,
+  AgentMemoryProjectionPlainReceiptSchema,
   AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
   type AgentMemoryProjectionEraseResult,
   type AgentMemoryProjectionMeteringReceipt,
-  type AgentMemoryProjectionReceipt,
+  type AgentMemoryProjectionPlainReceipt,
 } from '@byok-sdk/protocol';
 import type {
   AgentMemoryProjectionAuthorization,
@@ -46,7 +46,7 @@ function receiptKey(input: AgentMemoryProjectionCommitInput): string {
   return `${agentKey(input.tenantId, mutation.agentRef.agentId)}\u0000${mutation.writerEpoch}\u0000${mutation.sourceSeq}`;
 }
 
-function sameMutationReceipt(receipt: AgentMemoryProjectionReceipt, input: AgentMemoryProjectionCommitInput): boolean {
+function sameMutationReceipt(receipt: AgentMemoryProjectionPlainReceipt, input: AgentMemoryProjectionCommitInput): boolean {
   const { mutation } = input;
   return (
     receipt.tenantId === input.tenantId &&
@@ -87,7 +87,7 @@ export class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjection
   readonly #crypto: CloudCrypto;
   readonly #heads = new Map<string, ProjectionHead>();
   readonly #snapshots = new Map<string, StoredSnapshot>();
-  readonly #receipts = new Map<string, AgentMemoryProjectionReceipt>();
+  readonly #receipts = new Map<string, AgentMemoryProjectionPlainReceipt>();
   /** Minimum legal future epoch after server-side erasure; contains no body. */
   readonly #eraseFences = new Map<string, number>();
   readonly #mutationTails = new Map<string, Promise<void>>();
@@ -97,8 +97,8 @@ export class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjection
     this.#crypto = crypto;
   }
 
-  async commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt> {
-    const mutation = AgentMemoryProjectionMutationSchema.parse(input.mutation);
+  async commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionPlainReceipt> {
+    const mutation = AgentMemoryProjectionPlainMutationSchema.parse(input.mutation);
     if (input.redactedBytes.byteLength !== mutation.snapshot.redactedByteCount) {
       throw new ByokCloudError(
         'agent_memory_projection_hash_mismatch',
@@ -124,7 +124,7 @@ export class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjection
             'A memory projection epoch and source sequence already names a different immutable mutation.',
           );
         }
-        return AgentMemoryProjectionReceiptSchema.parse({ ...prior, outcome: 'idempotent' });
+        return AgentMemoryProjectionPlainReceiptSchema.parse({ ...prior, outcome: 'idempotent' });
       }
 
       const fence = this.#eraseFences.get(key);
@@ -161,7 +161,7 @@ export class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjection
         acceptedRedactedBytes: mutation.snapshot.redactedByteCount,
         recordedAt,
       };
-      const receipt = AgentMemoryProjectionReceiptSchema.parse({
+      const receipt = AgentMemoryProjectionPlainReceiptSchema.parse({
         outcome: 'accepted',
         tenantId: input.tenantId,
         deviceId: input.deviceId,

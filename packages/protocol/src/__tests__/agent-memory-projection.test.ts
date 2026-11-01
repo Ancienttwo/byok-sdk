@@ -7,12 +7,12 @@ import {
   AgentMemoryProjectionMutationSchema,
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
   agentMemoryProjectionBase64UrlByteLength,
-  type AgentMemoryProjectionMutation,
+  type AgentMemoryProjectionPlainMutation,
 } from '../index';
 
 const HASH = `sha256:${'a'.repeat(64)}`;
 
-function mutation(overrides: Partial<AgentMemoryProjectionMutation> = {}): AgentMemoryProjectionMutation {
+function mutation(overrides: Partial<AgentMemoryProjectionPlainMutation> = {}): AgentMemoryProjectionPlainMutation {
   return {
     taskId: 'memory-task',
     agentRef: { agentId: 'agent-memory', profileRevision: 'profile-r1' },
@@ -93,6 +93,34 @@ describe('Agent-memory hosted projection protocol', () => {
     expect(AgentMemoryProjectionCommitResponseSchema.parse(receipt)).toEqual(receipt);
     expect(AgentMemoryProjectionCommitResponseSchema.safeParse({ ...receipt, redactedBytes: 'c2FmZQ' }).success).toBe(false);
     expect(AgentMemoryProjectionCommitResponseSchema.safeParse({ ...receipt, cwd: '/leak' }).success).toBe(false);
+  });
+
+  it('carries a sealed snapshot inline only, without its plaintext hash or byte count (#1045 C4)', () => {
+    const zeros = (bytes: number) => Buffer.alloc(bytes).toString('base64url');
+    const sealedMember = (paddedLength: number) => ({
+      v: 1, suite: 'byok-sealed-v1.hkdf-sha256.aes-256-gcm', category: 'memory-projection',
+      scope: { id: 'scope-agent-memory', epoch: 1, keyId: 'A'.repeat(22) },
+      chainHead: { seq: 1, hash: HASH }, sender: 'B'.repeat(43), salt: zeros(32), nonce: zeros(12),
+      paddedLength, contentMac: `hmac-sha256:${'c'.repeat(64)}`, ciphertext: zeros(paddedLength + 16),
+    });
+    const { snapshot: _snapshot, ...identity } = mutation();
+    const sealed = { ...identity, sealed: sealedMember(256) };
+    expect(AgentMemoryProjectionCommitRequestSchema.parse(sealed)).toEqual(sealed);
+    expect(AgentMemoryProjectionMutationSchema.safeParse({ ...sealed, snapshot: mutation().snapshot }).success, 'both forms').toBe(false);
+    expect(AgentMemoryProjectionMutationSchema.safeParse({ ...sealed, sealed: { ...sealedMember(256), category: 'task-output' } }).success, 'category').toBe(false);
+    // Above the inline maximum a sealed content would name a blob; a memory projection has none.
+    expect(AgentMemoryProjectionMutationSchema.safeParse({ ...sealed, sealed: sealedMember(270336) }).success, 'inline only').toBe(false);
+    const { ciphertext: _ciphertext, ...outer } = sealedMember(270336);
+    const blob = { blobId: 'blob-1', contentHash: HASH, size: 270352, contentType: 'application/octet-stream' };
+    expect(AgentMemoryProjectionMutationSchema.safeParse({ ...sealed, sealed: { ...outer, ciphertextRef: blob } }).success, 'no blob').toBe(false);
+
+    const receipt = {
+      ...identity, outcome: 'accepted' as const, tenantId: 'tenant-a', deviceId: 'device-a',
+      contentMac: sealed.sealed.contentMac, paddedLength: 256,
+      metering: { meteringReceiptId: '10000000-0000-4000-8000-000000000002', acceptedPaddedBytes: 256, recordedAt: '2026-08-26T00:00:00.000Z' },
+    };
+    expect(AgentMemoryProjectionCommitResponseSchema.parse(receipt)).toEqual(receipt);
+    expect(AgentMemoryProjectionCommitResponseSchema.safeParse({ ...receipt, redactedHash: HASH }).success, 'no plaintext hash').toBe(false);
   });
 
   it('makes server erase return only a strictly positive next writer epoch', () => {

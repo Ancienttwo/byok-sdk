@@ -12,7 +12,7 @@ import {
   requiredReceiverCapabilities,
   type AgentContentReceiptPayload,
   type AgentEgressAckPayload,
-  type AgentMessageDispositionPayload,
+  type AgentMessageDispositionPlainPayload,
   type AgentMessageServerContext,
   type AgentRef,
   type Envelope,
@@ -385,7 +385,7 @@ export function createEnqueuePaths({ root, controlPlane, options }: Dependencies
     stores: TenantStores,
     deviceId: string,
     taskId: string,
-    payload: AgentMessageDispositionPayload,
+    payload: AgentMessageDispositionPlainPayload,
   ): Promise<void> {
     const message = await stores.mailbox.append({
       admission: 'limited',

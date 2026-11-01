@@ -1233,10 +1233,10 @@ wire rules. This section states the wire rules.
 The Host keeps each sealed member as it gets it and returns it from its read
 interfaces. What a sealed task still shows the Host, and what sealing does not
 protect, is in [security.md, Sealed tasks](security.md#sealed-tasks).
-`SEALED_PAYLOAD_CATEGORIES` also names `agent-message` and
-`memory-projection`, but they are reserved values: `TaskSealingSchema` accepts
-only `task-input` and `task-output` (`SEALED_PAYLOAD_V1_CATEGORIES`), so v1
-seals no Agent message and no memory projection.
+`TaskSealingSchema` accepts the four categories of
+`SEALED_PAYLOAD_CATEGORIES`. `task-input` and `task-output` are v1;
+`agent-message` and `memory-projection` are v2 (#1045, see "Sealed payload v2"
+at the end of this section).
 
 **Sealed branches.** Sealed is a branch of a message type's payload, not a
 message type. Each sealable type's payload schema is the union of a
@@ -1249,7 +1249,7 @@ content. In TypeScript, narrow with `payload.sealing !== undefined` on
 `isSealedPayload(type, payload)`. The `type` stays plaintext, so the Host
 moves the task lifecycle by `type` as before.
 
-| Type | Marker | Category | Identity | Moved into `sealed` | Dropped in v1 |
+| Type | Marker | Category | Identity | Moved into `sealed` | Dropped |
 | --- | --- | --- | --- | --- | --- |
 | `task.offer` | `sealing` | `task-input` | | `instruction` | `preparation` |
 | `task.steer` | `sealed` | `task-input` | `steerId` | `text` | |
@@ -1260,6 +1260,7 @@ moves the task lifecycle by `type` as before.
 | `task.progress` | `sealed` | `task-output` | `seq` | `events` | |
 | `task.artifact` | `sealed` | `task-output` | `artifactId` (UUID, required) | `inline` | `blobRef` |
 | `task.await_approval` | `sealed` | `task-output` | `approvalId` (required) | `summary` | |
+| `agent.message.publish` (v2) | `sealed` | `agent-message` | `messageId`, `cursor` | `body` | `contentHash`, `byteCount` |
 
 A sealed branch is its plaintext branch without the moved and dropped fields,
 plus `sealed` (and, on `task.offer`, `sealing` and `routineRef`). The
@@ -1291,8 +1292,8 @@ ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
 gate: they are always inline. A daemon that receives a sealed offer without
 advertising `sealed-payload-v1` declines it before opening it (Freeze rule).
 
-A prepared offer (`preparation`), input preparation, Agent messages, egress,
-drafts and memory projections are not sealed in v1. The split table forbids
+A prepared offer (`preparation`), input preparation, egress and drafts are
+not sealed. Agent messages and memory projections are sealed only under v2. The split table forbids
 `preparation` on the sealed `task.offer` branch.
 
 **Sealing policy.** A sealed offer carries `sealing: { scopeId, epoch,
@@ -1575,6 +1576,64 @@ refuses a draft for a task whose offer has any `sealing`, with
 `agent_message_draft_invalid`. A sealed task must not go to
 `@byok-sdk/cloud-do`: it runs the model with platform keys, so it reads the
 instruction and the output in plaintext.
+
+**Sealed payload v2 (#1045, gated addition).** v2 adds two categories on the
+v1 suite, keys and binding rules. The design is
+[docs/plans/2026-10-28-1045-e2ee-v2.md](plans/2026-10-28-1045-e2ee-v2.md).
+`SEALED_CATEGORY_CAPABILITY` maps each category to its flag:
+
+| Category | Flag | What it seals |
+| --- | --- | --- |
+| `agent-message` | `sealed-payload-v2` | the `body` of `agent.message.publish` |
+| `memory-projection` | `sealed-payload-v2` | the memory projection snapshot, and the terminal memory evidence |
+
+- **Policy.** `memory-projection` is legal only with `task-output` in the same
+  `categories`; `TaskSealingSchema` refuses it alone, because its evidence
+  rides on the task terminal.
+- **Capability.** The device advertises `sealed-payload-v2` before a Host may
+  send it an offer whose `sealing.categories` includes `agent-message` or
+  `memory-projection` (one value gate per category), or an
+  `agent.message.disposition` with `contentMac`. The server advertises it
+  before a device may send a sealed `agent.message.publish`; a sealed publish
+  by `ciphertextRef` also needs `sealed-output-ciphertext-ref`. A
+  `WIRE_ADDITIONS` row with a `value` on an array field matches when the
+  array includes that value, so `requiredReceiverCapabilities` returns the
+  flag for any offer that names either category.
+- **Agent message.** The sealed publish keeps `agentRef`, `sessionRef`,
+  `contract`, `messageId`, `cursor` and `contentType` in plaintext. The
+  opened content is `{"body": …}`. `contentHash` and `byteCount` are absent:
+  no plaintext digest or exact length of sealed content goes on the wire.
+  The content bound is
+  `sealedAgentMessageMaxContentLength(maxBytes) = 6 × maxBytes + 11`. The
+  canonical JSON writes a 1-byte control character as the 6-byte `\u00XX`,
+  and 11 is the length of `{"body":""}`. At `AGENT_MESSAGE_MAX_BYTES`
+  (262,144) the bound is 1,572,875 bytes, under the 2 MiB category limit, so
+  every legal body seals. The exact `byteCount ≤ maxBytes` is checked by the
+  device before sealing and by the member after opening. The ciphertext is
+  inline up to a padded length of 256 KiB and by `ciphertextRef` above, as in
+  v1.
+- **Disposition.** The sealed form of `agent.message.disposition` names the
+  message by the publish's `sealed.contentMac` in place of `contentHash`. A
+  disposition carries exactly one of the two.
+- **Memory evidence.** When `categories` includes `memory-projection`, the
+  sealed `task.complete`, `task.fail` and `task.cancelled` also move
+  `agentHomeMemoryChange` (`movedWith` in the split table). The Host rule for
+  task output then refuses a plaintext terminal that carries it:
+  `isSealedTaskPlainOutput(type, payload, categories)` takes the frozen
+  categories. Without the category, the v1 rule is unchanged.
+- **Memory projection.** The sealed mutation of
+  `POST /byok/agent-memory-projections` carries `sealed` in place of
+  `snapshot`, inline only: its padded length is at most 256 KiB, and the
+  schema refuses `ciphertextRef`. The sealed receipt carries `contentMac`,
+  `paddedLength` and `metering.acceptedPaddedBytes`, and no `redactedHash`.
+  The Host-issued projection grant gates this branch, not an envelope row.
+
+No package seals or admits v2 content yet, and none advertises
+`sealed-payload-v2`. The cloud refuses a sealed publish with
+`sealed_payload_unsupported`, and a sealed memory projection with 422.
+Device sealing, hosted message admission and hosted projection storage follow
+in later #1045 slices. The embedded `@byok-sdk/server` takes plaintext Agent
+messages and memory projections only.
 
 ### 2.6 E2EE member routes (#654 E2c-2)
 

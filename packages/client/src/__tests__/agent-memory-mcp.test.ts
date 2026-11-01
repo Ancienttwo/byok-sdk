@@ -322,6 +322,7 @@ describe('Agent memory MCP local authority', () => {
         grant: { grantRef: 'grant', writerEpoch: 1, policyRevision: 'policy-1' },
         redactor: { redact: () => new TextEncoder().encode('{"summary":"[redacted]"}') },
         port: { publish: async ({ mutation }) => {
+          if (mutation.sealed !== undefined) throw new Error("plaintext projection expected");
           networkCalls += 1;
           expect(Buffer.from(mutation.snapshot.redactedBytes, 'base64url').toString('utf8')).toContain('[redacted]');
           expect(JSON.stringify(mutation)).not.toContain('native file tool final value');

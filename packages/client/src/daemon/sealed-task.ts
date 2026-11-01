@@ -268,7 +268,7 @@ export class SealedTasks {
    */
   async sealRecovered(offer: Envelope, terminal: Envelope, sealable = true): Promise<Envelope> {
     const { sealing, agentRef } = offer.payload as { sealing?: TaskSealing; agentRef?: AgentRef };
-    if (offer.type !== 'task.offer' || sealing === undefined || !sealing.categories.includes('task-output') || isSealedTaskPlainOutput(terminal.type, terminal.payload)) {
+    if (offer.type !== 'task.offer' || sealing === undefined || !sealing.categories.includes('task-output') || isSealedTaskPlainOutput(terminal.type, terminal.payload, sealing.categories)) {
       return terminal;
     }
     if (!sealable) return this.unsealable(terminal)!;
@@ -285,7 +285,7 @@ export class SealedTasks {
 
   async #sealOutbound(task: SealedTask, envelope: Envelope): Promise<Envelope | undefined> {
     if (!SEALED_OUTPUT_TYPES.has(envelope.type) || isSealedPayload(envelope.type, envelope.payload)
-      || isSealedTaskPlainOutput(envelope.type, envelope.payload)) return envelope;
+      || isSealedTaskPlainOutput(envelope.type, envelope.payload, task.sealing.categories)) return envelope;
     const taskId = envelope.task_id!;
     const payload = envelope.payload as JsonObject;
     let sealed: Envelope | undefined;

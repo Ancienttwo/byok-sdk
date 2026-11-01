@@ -1,8 +1,8 @@
 import type { ByokCloud, ByokCloudOptions } from '../cloud';
 import { type TenantId } from '@byok-sdk/core';
 import {
-  AgentMemoryProjectionCommitRequestSchema,
-  type AgentMemoryProjectionCommitRequest,
+  AgentMemoryProjectionPlainMutationSchema,
+  type AgentMemoryProjectionPlainMutation,
   type AgentMemoryProjectionCommitResponse,
   type AgentMemoryProjectionEraseResult,
 } from '@byok-sdk/protocol';
@@ -18,15 +18,15 @@ interface Dependencies {
 export function createAgentMemoryApi({ options }: Dependencies): Pick<ByokCloud,
   'eraseAgentMemoryProjection'
 > & {
-  commitAgentMemoryProjectionFromStores: (stores: TenantStores, deviceId: string, mutationInput: AgentMemoryProjectionCommitRequest, redactedBytes: Uint8Array) => Promise<AgentMemoryProjectionCommitResponse>;
+  commitAgentMemoryProjectionFromStores: (stores: TenantStores, deviceId: string, mutationInput: AgentMemoryProjectionPlainMutation, redactedBytes: Uint8Array) => Promise<AgentMemoryProjectionCommitResponse>;
 } {
   async function commitAgentMemoryProjectionFromStores(
     stores: TenantStores,
     deviceId: string,
-    mutationInput: AgentMemoryProjectionCommitRequest,
+    mutationInput: AgentMemoryProjectionPlainMutation,
     redactedBytes: Uint8Array,
   ): Promise<AgentMemoryProjectionCommitResponse> {
-    const mutation = AgentMemoryProjectionCommitRequestSchema.parse(mutationInput);
+    const mutation = AgentMemoryProjectionPlainMutationSchema.parse(mutationInput);
     const attempt = await stores.tasks.get(mutation.taskId);
     if (
       attempt === undefined ||

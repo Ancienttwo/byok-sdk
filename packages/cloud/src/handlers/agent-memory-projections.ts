@@ -21,7 +21,7 @@ export interface AgentMemoryProjectionRouteDeps extends DeviceRouteDeps {
   readonly commit: (
     stores: TenantStores,
     deviceId: string,
-    mutation: import('@byok-sdk/protocol').AgentMemoryProjectionCommitRequest,
+    mutation: import('@byok-sdk/protocol').AgentMemoryProjectionPlainMutation,
     redactedBytes: Uint8Array,
   ) => Promise<AgentMemoryProjectionCommitResponse>;
 }
@@ -35,6 +35,8 @@ export function agentMemoryProjectionHandler(deps: AgentMemoryProjectionRouteDep
     if (body.tooLarge) return c.json({ error: 'Agent-memory projection request body too large' }, 413);
     const parsed = AgentMemoryProjectionCommitRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'invalid Agent-memory projection mutation' }, 422);
+    // This route stores plaintext snapshots only; a sealed snapshot is refused, never decoded.
+    if (parsed.data.sealed !== undefined) return c.json({ error: 'sealed Agent-memory projection unsupported' }, 422);
     // The schema rejects non-canonical encodings. Decode remains explicit so a
     // handler can never hand a different byte sequence to the hashing store.
     if (agentMemoryProjectionBase64UrlByteLength(parsed.data.snapshot.redactedBytes) === undefined) {

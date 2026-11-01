@@ -76,7 +76,7 @@ describe('required Agent message completion gate', () => {
       const message = sent.find(e => e.type === 'agent.message.publish');
       expect(message).toMatchObject({ payload: { body: 'Visible reply without actions.' } });
       expect(marker).toHaveBeenCalledWith(taskId, kind === 'missing' ? 'required-reply-result-missing' : 'required-reply-result-unreadable');
-      if (message?.type !== 'agent.message.publish') throw Error('missing reply');
+      if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw Error('missing reply');
       const { sessionRef, contract, messageId, cursor, contentHash } = message.payload;
       await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
         agentRef, sessionRef, contract, messageId, cursor, contentHash,
@@ -505,7 +505,7 @@ describe('required Agent message completion gate', () => {
       const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
       await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'immutable reply' });
       const message = sent.find((e) => e.type === 'agent.message.publish');
-      if (message?.type !== 'agent.message.publish') throw new Error('missing message');
+      if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message');
       const { sessionRef, contract, messageId, cursor, contentHash } = message.payload;
       const disposition = createEnvelope('agent.message.disposition', {
         agentRef, sessionRef, contract, messageId, cursor, contentHash,
@@ -650,7 +650,7 @@ describe('required Agent message completion gate', () => {
       .rejects.toThrow(/different immutable draft/);
     const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
     expect(message?.type).toBe('agent.message.publish');
-    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message publish');
     expect(message.payload).not.toHaveProperty('tenantId');
     expect(message.payload).not.toHaveProperty('deviceId');
     expect(message.payload).not.toHaveProperty('target');
@@ -688,7 +688,7 @@ describe('required Agent message completion gate', () => {
     const refusedToken = adapter.startCalls[1]?.ctx.mcpServers?.byokagentmessage?.env?.BYOK_AGENT_MESSAGE_CONTEXT;
     const refusedDraft = await runner.publishAgentMessage({ contextToken: refusedToken!, contentType: 'text/markdown', body: 'refuse me' });
     const refusedMessage = sent.find((envelope) => envelope.type === 'agent.message.publish' && envelope.payload.messageId === refusedDraft.messageId);
-    if (refusedMessage?.type !== 'agent.message.publish') throw new Error('missing refused message publish');
+    if (refusedMessage?.type !== 'agent.message.publish' || refusedMessage.payload.sealed !== undefined) throw new Error('missing refused message publish');
     const beforeRefusal = sent.filter((envelope) => envelope.type === 'agent.message.publish' && envelope.task_id === refusedTaskId).length;
     await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
       agentRef, sessionRef: refusedMessage.payload.sessionRef, contract: refusedMessage.payload.contract,
@@ -747,7 +747,7 @@ describe('required Agent message completion gate', () => {
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
     const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
-    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message publish');
     expect(message.payload.body).toBe('Hello from the runtime');
     expect(message.payload.contract).toBe('example.chat.v1');
     expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
@@ -884,7 +884,7 @@ describe('required Agent message completion gate', () => {
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
     const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
-    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message publish');
     expect(message.payload.body).toBe('the answer');
 
     // `task.complete.summary` is unchanged: still the WHOLE run's text.
@@ -910,7 +910,7 @@ describe('required Agent message completion gate', () => {
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
     const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
-    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message publish');
     expect(message.payload.body).toBe('first half. second half.');
   });
 
@@ -925,7 +925,7 @@ describe('required Agent message completion gate', () => {
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
     const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
-    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message publish');
     expect(message.payload.body).toBe('the answer');
   });
 
@@ -941,7 +941,7 @@ describe('required Agent message completion gate', () => {
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
     const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
-    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message publish');
     expect(message.payload.body).toBe('only text, no tools');
   });
 });

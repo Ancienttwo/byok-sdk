@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema } from './agent-egress';
 import { AgentRefSchema, RuntimeIdSchema } from './messages';
+import { SealedMemoryProjectionSchema } from './sealed-payload';
 
 /** One hosted projection is bounded before it enters the redaction or storage seam. */
 export const AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES = 512 * 1024;
@@ -78,26 +79,47 @@ export const AgentMemoryProjectionSnapshotSchema = z
   });
 export type AgentMemoryProjectionSnapshot = z.infer<typeof AgentMemoryProjectionSnapshotSchema>;
 
+/** The plaintext identity and ordering fields of every mutation branch. */
+const MUTATION_IDENTITY = {
+  taskId: z.string().min(1).max(512),
+  agentRef: AgentRefSchema,
+  sessionRef: AgentMemoryProjectionSessionRefSchema,
+  runtimeId: RuntimeIdSchema,
+  grantRef: AgentMemoryProjectionGrantRefSchema,
+  writerEpoch: AgentMemoryProjectionWriterEpochSchema,
+  sourceSeq: AgentMemoryProjectionSourceSeqSchema,
+  mutationId: z.uuid(),
+  policyRevision: AgentEgressPolicyRevisionSchema,
+};
+
 /**
  * Device -> hosted mutation for one redacted full snapshot. It intentionally
  * contains no tenant/device identity: authenticated transport supplies both.
  * The snapshot is a one-way copy of local `MEMORY.md` plus local `notes/`, not
  * a remote authoring, merge, import, history, or RAG contract.
  */
-export const AgentMemoryProjectionMutationSchema = z
-  .object({
-    taskId: z.string().min(1).max(512),
-    agentRef: AgentRefSchema,
-    sessionRef: AgentMemoryProjectionSessionRefSchema,
-    runtimeId: RuntimeIdSchema,
-    grantRef: AgentMemoryProjectionGrantRefSchema,
-    writerEpoch: AgentMemoryProjectionWriterEpochSchema,
-    sourceSeq: AgentMemoryProjectionSourceSeqSchema,
-    mutationId: z.uuid(),
-    policyRevision: AgentEgressPolicyRevisionSchema,
-    snapshot: AgentMemoryProjectionSnapshotSchema,
-  })
+export const AgentMemoryProjectionPlainMutationSchema = z
+  .object({ ...MUTATION_IDENTITY, snapshot: AgentMemoryProjectionSnapshotSchema, sealed: z.never().optional() })
   .strict();
+export type AgentMemoryProjectionPlainMutation = z.infer<typeof AgentMemoryProjectionPlainMutationSchema>;
+
+/**
+ * The mutation under a grant that names a sealing scope (#1045 C4). The
+ * redacted snapshot is sealed, inline only, under the Agent's memory scope;
+ * its plaintext hash and byte count are not carried. The AAD binds
+ * `{ agentId, writerEpoch, sourceSeq, mutationId }`, so the Host cannot move
+ * a snapshot to another Agent, epoch or position.
+ */
+export const AgentMemoryProjectionSealedMutationSchema = z
+  .object({ ...MUTATION_IDENTITY, sealed: SealedMemoryProjectionSchema, snapshot: z.never().optional() })
+  .strict();
+export type AgentMemoryProjectionSealedMutation = z.infer<typeof AgentMemoryProjectionSealedMutationSchema>;
+
+/** Narrow with `mutation.sealed !== undefined`. */
+export const AgentMemoryProjectionMutationSchema = z.union([
+  AgentMemoryProjectionPlainMutationSchema as typeof AgentMemoryProjectionPlainMutationSchema,
+  AgentMemoryProjectionSealedMutationSchema as typeof AgentMemoryProjectionSealedMutationSchema,
+]);
 export type AgentMemoryProjectionMutation = z.infer<typeof AgentMemoryProjectionMutationSchema>;
 
 /** Stable meter receipt for one accepted redacted snapshot; it never carries the snapshot body. */
@@ -110,26 +132,49 @@ export const AgentMemoryProjectionMeteringReceiptSchema = z
   .strict();
 export type AgentMemoryProjectionMeteringReceipt = z.infer<typeof AgentMemoryProjectionMeteringReceiptSchema>;
 
+const RECEIPT_IDENTITY = {
+  outcome: z.enum(['accepted', 'idempotent']),
+  tenantId: z.string().min(1),
+  deviceId: z.string().min(1),
+  ...MUTATION_IDENTITY,
+};
+
 /** Immutable commit readback. It repeats identity and redacted metadata, never redacted bytes. */
-export const AgentMemoryProjectionReceiptSchema = z
+export const AgentMemoryProjectionPlainReceiptSchema = z
   .object({
-    outcome: z.enum(['accepted', 'idempotent']),
-    tenantId: z.string().min(1),
-    deviceId: z.string().min(1),
-    taskId: z.string().min(1).max(512),
-    agentRef: AgentRefSchema,
-    sessionRef: AgentMemoryProjectionSessionRefSchema,
-    runtimeId: RuntimeIdSchema,
-    grantRef: AgentMemoryProjectionGrantRefSchema,
-    writerEpoch: AgentMemoryProjectionWriterEpochSchema,
-    sourceSeq: AgentMemoryProjectionSourceSeqSchema,
-    mutationId: z.uuid(),
-    policyRevision: AgentEgressPolicyRevisionSchema,
+    ...RECEIPT_IDENTITY,
     redactedHash: AgentEgressContentHashSchema,
     redactedByteCount: z.number().int().nonnegative().max(AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES),
     metering: AgentMemoryProjectionMeteringReceiptSchema,
   })
   .strict();
+export type AgentMemoryProjectionPlainReceipt = z.infer<typeof AgentMemoryProjectionPlainReceiptSchema>;
+
+/** Stable meter receipt for one accepted sealed snapshot: the Host meters the padded length it stores. */
+export const AgentMemoryProjectionSealedMeteringReceiptSchema = z
+  .object({
+    meteringReceiptId: z.uuid(),
+    acceptedPaddedBytes: SealedMemoryProjectionSchema.shape.paddedLength,
+    recordedAt: z.iso.datetime({ offset: true }),
+  })
+  .strict();
+export type AgentMemoryProjectionSealedMeteringReceipt = z.infer<typeof AgentMemoryProjectionSealedMeteringReceiptSchema>;
+
+/** Immutable commit readback of a sealed snapshot: identity and the sealed member's `contentMac` and padded length. */
+export const AgentMemoryProjectionSealedReceiptSchema = z
+  .object({
+    ...RECEIPT_IDENTITY,
+    contentMac: SealedMemoryProjectionSchema.shape.contentMac,
+    paddedLength: SealedMemoryProjectionSchema.shape.paddedLength,
+    metering: AgentMemoryProjectionSealedMeteringReceiptSchema,
+  })
+  .strict();
+export type AgentMemoryProjectionSealedReceipt = z.infer<typeof AgentMemoryProjectionSealedReceiptSchema>;
+
+export const AgentMemoryProjectionReceiptSchema = z.union([
+  AgentMemoryProjectionPlainReceiptSchema as typeof AgentMemoryProjectionPlainReceiptSchema,
+  AgentMemoryProjectionSealedReceiptSchema as typeof AgentMemoryProjectionSealedReceiptSchema,
+]);
 export type AgentMemoryProjectionReceipt = z.infer<typeof AgentMemoryProjectionReceiptSchema>;
 
 /**

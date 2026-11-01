@@ -5,6 +5,7 @@ import { BlobRefSchema } from './blob';
 import {
   SEALED_DECLINE_CODES,
   SealedTaskInputSchema,
+  SealedAgentMessageSchema,
   SealedTaskOutputSchema,
   RoutineRefSchema,
   TaskSealingSchema,
@@ -598,17 +599,24 @@ export const AgentMessageDraftPayloadSchema = z.object({
 }).strict();
 export type AgentMessageDraftPayload = z.infer<typeof AgentMessageDraftPayloadSchema>;
 
-export const AgentMessagePublishPayloadSchema = z
+/** The fields of an Agent message that every branch carries in plaintext. */
+const AGENT_MESSAGE_IDENTITY = {
+  agentRef: AgentRefSchema,
+  sessionRef: EGRESS_SESSION_REF,
+  contract: AgentMessageContractSchema,
+  messageId: z.uuid(),
+  cursor: z.number().int().positive(),
+};
+
+/** Daemon -> server: one Agent message in plaintext. */
+export const AgentMessagePublishPlainPayloadSchema = z
   .object({
-    agentRef: AgentRefSchema,
-    sessionRef: EGRESS_SESSION_REF,
-    contract: AgentMessageContractSchema,
-    messageId: z.uuid(),
-    cursor: z.number().int().positive(),
+    ...AGENT_MESSAGE_IDENTITY,
     contentType: AgentMessageContentTypeSchema,
     body: AGENT_MESSAGE_BODY,
     contentHash: AgentEgressContentHashSchema,
     byteCount: z.number().int().positive().max(AGENT_MESSAGE_MAX_BYTES),
+    ...NO_SEALED_MEMBER,
   })
   .strict()
   .superRefine((value, context) => {
@@ -617,21 +625,58 @@ export const AgentMessagePublishPayloadSchema = z
       context.addIssue({ code: 'custom', path: ['byteCount'], message: 'byteCount must equal UTF-8 body bytes' });
     }
   });
+export type AgentMessagePublishPlainPayload = z.infer<typeof AgentMessagePublishPlainPayloadSchema>;
+
+/**
+ * Daemon -> server: one Agent message of a task whose `sealing` lists
+ * `agent-message` (#1045 C2). `body` is sealed; `contentHash` and
+ * `byteCount` are not carried, and `messageId` and `cursor` name the write in
+ * the AAD and the content MAC. Gated on `sealed-payload-v2`.
+ */
+export const AgentMessagePublishSealedPayloadSchema = z
+  .object({ ...AGENT_MESSAGE_IDENTITY, contentType: AgentMessageContentTypeSchema, sealed: SealedAgentMessageSchema })
+  .strict();
+export type AgentMessagePublishSealedPayload = z.infer<typeof AgentMessagePublishSealedPayloadSchema>;
+
+/** Narrow with `payload.sealed !== undefined`; the plaintext branch's `sealed` is `never`. */
+export const AgentMessagePublishPayloadSchema = z.union([
+  AgentMessagePublishPlainPayloadSchema as typeof AgentMessagePublishPlainPayloadSchema,
+  AgentMessagePublishSealedPayloadSchema as typeof AgentMessagePublishSealedPayloadSchema,
+]);
 export type AgentMessagePublishPayload = z.infer<typeof AgentMessagePublishPayloadSchema>;
 
-export const AgentMessageDispositionPayloadSchema = z
+const AGENT_MESSAGE_DISPOSITION = {
+  ...AGENT_MESSAGE_IDENTITY,
+  outcome: z.enum(['accepted', 'held', 'refused']),
+  receiptId: z.uuid(),
+  reasonCode: z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional(),
+};
+
+/** Server -> daemon: the disposition of a plaintext message, naming its `contentHash`. */
+export const AgentMessageDispositionPlainPayloadSchema = z
+  .object({ ...AGENT_MESSAGE_DISPOSITION, contentHash: AgentEgressContentHashSchema, contentMac: z.never().optional() })
+  .strict();
+export type AgentMessageDispositionPlainPayload = z.infer<typeof AgentMessageDispositionPlainPayloadSchema>;
+
+/**
+ * Server -> daemon: the disposition of a sealed message (#1045 C2). It names
+ * the message by its sealed member's `contentMac`, because the sealed message
+ * carries no `contentHash`. Gated on `sealed-payload-v2`.
+ */
+export const AgentMessageDispositionSealedPayloadSchema = z
   .object({
-    agentRef: AgentRefSchema,
-    sessionRef: EGRESS_SESSION_REF,
-    contract: AgentMessageContractSchema,
-    messageId: z.uuid(),
-    cursor: z.number().int().positive(),
-    contentHash: AgentEgressContentHashSchema,
-    outcome: z.enum(['accepted', 'held', 'refused']),
-    receiptId: z.uuid(),
-    reasonCode: z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional(),
+    ...AGENT_MESSAGE_DISPOSITION,
+    contentMac: SealedAgentMessageSchema.shape.contentMac,
+    contentHash: z.never().optional(),
   })
   .strict();
+export type AgentMessageDispositionSealedPayload = z.infer<typeof AgentMessageDispositionSealedPayloadSchema>;
+
+/** Narrow with `payload.contentMac !== undefined`. */
+export const AgentMessageDispositionPayloadSchema = z.union([
+  AgentMessageDispositionPlainPayloadSchema as typeof AgentMessageDispositionPlainPayloadSchema,
+  AgentMessageDispositionSealedPayloadSchema as typeof AgentMessageDispositionSealedPayloadSchema,
+]);
 export type AgentMessageDispositionPayload = z.infer<typeof AgentMessageDispositionPayloadSchema>;
 
 const AGENT_CONTENT_TARGET = z

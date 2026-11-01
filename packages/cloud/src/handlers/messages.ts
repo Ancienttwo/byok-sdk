@@ -35,8 +35,8 @@ import {
   MESSAGES_SEND_MAX_BODY_BYTES,
   MessagesSendRequestSchema,
   type AgentContentReceiptPayload,
-  type AgentMessageDispositionPayload,
-  type AgentMessagePublishPayload,
+  type AgentMessageDispositionPlainPayload,
+  type AgentMessagePublishPlainPayload,
   type MessagesSendResponse,
 } from '@byok-sdk/protocol';
 import { handleInboundEnvelope, readAgentMessageDisposition, type ByokCloudObserver, type InboundRefusalReason } from '../inbound';
@@ -116,14 +116,14 @@ export interface MessagesRouteDeps extends DeviceRouteDeps {
       readonly deviceId: string;
       readonly taskId: string;
       readonly context: import('@byok-sdk/protocol').AgentMessageServerContext;
-      readonly payload: AgentMessagePublishPayload;
+      readonly payload: AgentMessagePublishPlainPayload;
     }): Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>;
   };
   readonly appendAgentMessageDisposition: (
     stores: TenantStores,
     deviceId: string,
     taskId: string,
-    payload: AgentMessageDispositionPayload,
+    payload: AgentMessageDispositionPlainPayload,
   ) => Promise<void>;
   /**
    * Post-commit relay. Batch order IS notification order: the loop below

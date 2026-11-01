@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { createByokServer } from '@byok-sdk/server';
-import type { AgentMessagePublishPayload } from '@byok-sdk/protocol';
+import type { AgentMessagePublishPlainPayload } from '@byok-sdk/protocol';
 import { startServer, stopServer } from '../../../server/src/__tests__/test-support';
 import { AgentHomeManager, createDaemonWithAdapters } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialStore } from './fixtures/device-credentials';
@@ -15,7 +15,7 @@ import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
 
 it('runs two recurring executions through real HTTP and TaskRunner with distinct fresh sessions', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-execution-submit-integration-'));
-  const accepted: Array<{ taskId: string; payload: AgentMessagePublishPayload }> = [];
+  const accepted: Array<{ taskId: string; payload: AgentMessagePublishPlainPayload }> = [];
   const sdk = createByokServer({ productId: 'execution-submit-integration', longPollHoldMs: 50,
     agentMessage: { consume: async ({ taskId, payload }) => { accepted.push({ taskId, payload }); return { outcome: 'accepted' }; } } });
   const http = await startServer(sdk);

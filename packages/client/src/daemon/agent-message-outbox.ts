@@ -3,11 +3,11 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   AgentMessageDispositionPayloadSchema,
-  AgentMessagePublishPayloadSchema,
+  AgentMessagePublishPlainPayloadSchema,
   type AgentMessageContentType,
   type AgentMessageDispositionPayload,
   type AgentMessageEgressRequirement,
-  type AgentMessagePublishPayload,
+  type AgentMessagePublishPlainPayload,
 } from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home';
 import { atomicWriteFile } from '../util/atomic-write';
@@ -230,9 +230,9 @@ export class AgentMessageOutbox {
     return this.revokedTasks.has(taskId) || this.dispositionByTask.get(taskId)?.outcome === 'refused';
   }
 
-  publishPayload(record: AgentMessageOutboxRecord): AgentMessagePublishPayload {
+  publishPayload(record: AgentMessageOutboxRecord): AgentMessagePublishPlainPayload {
     if (record.sessionRef === undefined) throw new AgentMessageOutboxError('message draft is not bound to a durable session');
-    return AgentMessagePublishPayloadSchema.parse({
+    return AgentMessagePublishPlainPayloadSchema.parse({
       agentRef: record.agentRef,
       sessionRef: record.sessionRef,
       contract: record.contract,

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { createEnvelope, decodeEnvelope, type AgentRef } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, type AgentMessagePublishPlainPayload, type AgentRef } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { handleAgentMessagePublish } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
@@ -189,7 +189,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
 
     const terminalBody = 'new terminal side effect';
     const newMessage = createEnvelope('agent.message.publish', {
-      ...first.payload,
+      ...(first.payload as AgentMessagePublishPlainPayload),
       messageId: '10000000-0000-4000-8000-000000001122',
       body: terminalBody,
       byteCount: new TextEncoder().encode(terminalBody).length,
@@ -366,7 +366,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
 
       const conflictingBody = 'changed after reservation';
       const conflicting = createEnvelope('agent.message.publish', {
-        ...original.payload,
+        ...(original.payload as AgentMessagePublishPlainPayload),
         body: conflictingBody,
         byteCount: new TextEncoder().encode(conflictingBody).length,
         contentHash: `sha256:${createHash('sha256').update(conflictingBody).digest('hex')}`,

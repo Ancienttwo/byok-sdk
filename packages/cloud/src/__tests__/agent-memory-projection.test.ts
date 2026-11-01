@@ -2,7 +2,7 @@ import { createMutableClock } from '@byok-sdk/core';
 import {
   AGENT_MEMORY_PROJECTION_CAPABILITY,
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
-  type AgentMemoryProjectionCommitRequest,
+  type AgentMemoryProjectionPlainMutation,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import {
@@ -48,8 +48,8 @@ function memoryHarness() {
 
 async function mutation(
   crypto: ReturnType<typeof createWebCrypto>,
-  overrides: Partial<AgentMemoryProjectionCommitRequest> = {},
-): Promise<AgentMemoryProjectionCommitRequest> {
+  overrides: Partial<AgentMemoryProjectionPlainMutation> = {},
+): Promise<AgentMemoryProjectionPlainMutation> {
   const bytes = new TextEncoder().encode('redacted MEMORY.md and notes snapshot');
   return {
     taskId: TASK_ID,
@@ -99,7 +99,7 @@ async function prepareTask() {
 async function post(
   harness: Awaited<ReturnType<typeof prepareTask>>['harness'],
   authorization: Record<string, string>,
-  body: AgentMemoryProjectionCommitRequest,
+  body: AgentMemoryProjectionPlainMutation,
 ) {
   return harness.request(BYOK_AGENT_MEMORY_PROJECTIONS_PATH, {
     method: 'POST',

@@ -383,7 +383,7 @@ function carries(line: CorpusLine, entry: WireAddition): boolean {
   if (entry.field === undefined) return true;
   const value = fieldValues(line.payload, entry.field).find(value => value !== undefined);
   if (value === undefined) return false;
-  return entry.rule !== 'gated' || entry.value === undefined || value === entry.value;
+  return entry.rule !== 'gated' || entry.value === undefined || (Array.isArray(value) ? value.includes(entry.value) : value === entry.value);
 }
 
 /** The four Agent offer lanes of `task.offer`, by payload. */

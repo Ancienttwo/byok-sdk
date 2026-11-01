@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
-  AgentRefSchema, AgentMessageEgressRequirementSchema, AgentMessageServerContextSchema, AgentMessagePublishPayloadSchema,
-  type AgentRef, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload,
+  AgentRefSchema, AgentMessageEgressRequirementSchema, AgentMessageServerContextSchema, AgentMessagePublishPlainPayloadSchema,
+  type AgentRef, type AgentMessagePublishPlainPayload, type AgentMessageServerContext, type AgentMessageDispositionPayload,
 } from '@byok-sdk/protocol';
 import type { TenantStores } from './tenant-stores';
 import { parseAgentMessageDisposition } from './agent-message-disposition';
@@ -9,7 +9,7 @@ import { assertTaskContentPresent } from './task-redaction';
 
 /** SDK transmission evidence; payload remains untrusted and never authors a Host product message. */
 export interface TaskAgentMessage {
-  readonly payload: AgentMessagePublishPayload;
+  readonly payload: AgentMessagePublishPlainPayload;
   readonly context: AgentMessageServerContext;
   /** Absent while the exact first-message reservation remains pending. */
   readonly disposition?: AgentMessageDispositionPayload;
@@ -40,7 +40,7 @@ export async function readTaskAgentMessage(
   assertTaskContentPresent(taskId, binding.body);
   let body: unknown, frozenBody: unknown;
   try { body = JSON.parse(admission.payloadBody); frozenBody = JSON.parse(binding.body); } catch { throw invalid(); }
-  const parsed = AgentMessagePublishPayloadSchema.safeParse(body);
+  const parsed = AgentMessagePublishPlainPayloadSchema.safeParse(body);
   const frozen = FrozenMessageBinding.safeParse(frozenBody);
   if (!parsed.success || !frozen.success) throw invalid();
   const payload = parsed.data;

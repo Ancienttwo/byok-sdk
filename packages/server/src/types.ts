@@ -8,7 +8,7 @@ import type {
   AgentEgressReliablePayload,
   AgentMessageEgressRequirement,
   AgentMessageServerContext,
-  AgentMessagePublishPayload,
+  AgentMessagePublishPlainPayload,
   AgentRef,
   BlobRef,
   DispatchSelection,
@@ -124,7 +124,7 @@ export interface CreateByokServerOptions {
       readonly deviceId: string;
       readonly taskId: string;
       readonly context: AgentMessageServerContext;
-      readonly payload: AgentMessagePublishPayload;
+      readonly payload: AgentMessagePublishPlainPayload;
     }): Promise<{
       readonly outcome: 'accepted' | 'held' | 'refused';
       readonly reasonCode?: string;
