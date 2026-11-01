@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { runCommand, type CommandRunner } from './command-runner';
+import { runCommand, windowsPowerShellExecutable, type CommandRunner } from './command-runner';
 import { configurationPendingError, withConfigurationLock } from './custody';
 import { ByokKeysError } from './errors';
 import { PI_PREPARED_COMPAT_KEYS } from './pi-model-config';
@@ -463,12 +463,10 @@ export async function assertWindowsPiProjectionAcl(
   directory: string,
   options: { systemRoot?: string; run?: CommandRunner } = {},
 ): Promise<void> {
-  const systemRoot = options.systemRoot ?? process.env.SystemRoot;
-  if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot) || /[\u0000\r\n]/u.test(systemRoot)) {
-    throw new Error('Windows SystemRoot must be an absolute path');
-  }
+  const powershell = windowsPowerShellExecutable(options.systemRoot ?? process.env.SystemRoot);
+  if (powershell === undefined) throw new Error('Windows SystemRoot must be an absolute path');
   const result = await (options.run ?? runCommand)(
-    path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    powershell,
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROJECTION_ACL_SCRIPT, 'utf16le').toString('base64')],
     JSON.stringify({ path: directory }),
   );

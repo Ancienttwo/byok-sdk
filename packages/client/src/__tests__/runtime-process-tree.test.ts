@@ -89,6 +89,22 @@ describe('bundled runtime process-tree disposal', () => {
     // Pi gives shutdown hooks a 10 s SIGTERM grace before SIGKILL.
   }, 20_000);
 
+  // #1304: taskkill starts from %SystemRoot%\System32 whatever the host's PATH holds.
+  it.runIf(process.platform === 'win32')('win32 dispose ends the tree under an empty PATH', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], withOwnedProcessTree({ stdio: 'ignore' }));
+    let closed = false;
+    const closeReceipt = new Promise<void>((resolve) => child.once('close', () => { closed = true; resolve(); }));
+    await new Promise((resolve) => child.once('spawn', resolve));
+    vi.stubEnv('PATH', '');
+    try {
+      await disposeOwnedProcessTree({ child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'win32 fixture' });
+      expect(processExists(child.pid!)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      reapAll([child.pid!]);
+    }
+  });
+
   it('Pi close resolves only after its real root, descendant and grandchild are all gone', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-process-tree-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');

@@ -107,7 +107,8 @@ describe('the embedded agent-memory entry module graph', () => {
     // agent-memory layer importing the bin entry; `util/exec-runner.ts` carries
     // the shared `execFile` primitive under the same slice. #1244 moves the
     // stdio server itself into `agent-memory/mcp-server.ts`, so the entry no
-    // longer reaches `bin/` at all.
+    // longer reaches `bin/` at all. #1304: `util/exec-runner.ts` starts system
+    // tools from `util/system-tool.ts`, which imports only `node:fs` and `node:path`.
     expect(GRAPH.modules).toEqual([
       'agent-home-readers.ts',
       'agent-home.ts',
@@ -129,6 +130,7 @@ describe('the embedded agent-memory entry module graph', () => {
       'util/exec-runner.ts',
       'util/path-mutation-gate.ts',
       'util/secure-dir.ts',
+      'util/system-tool.ts',
     ]);
   });
 

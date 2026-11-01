@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2132455,
+      "budgetBytes": 2134813,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -110,7 +110,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 399249,
+      "budgetBytes": 401403,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -215,7 +215,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 125619,
+      "budgetBytes": 127396,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -425,7 +425,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 386869,
+      "budgetBytes": 389023,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -588,7 +588,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 496745,
+      "budgetBytes": 498794,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -861,7 +861,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 455075,
+      "budgetBytes": 457124,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1701,7 +1701,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 241235,
+      "budgetBytes": 241694,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2338,7 +2338,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2090915,
+      "budgetBytes": 2093226,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2666,7 +2666,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 181196,
+      "budgetBytes": 181655,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

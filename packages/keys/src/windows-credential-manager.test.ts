@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CommandResult } from './command-runner';
 import { DEFAULT_SECRET_SERVICE_PREFIX } from './secret-store';
 import { WindowsCredentialManagerSecretStore } from './windows-credential-manager';
 
 const CANARY = 'sk-canary-windows-0001';
+const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const NUL = String.fromCodePoint(0);
 
 interface Invocation {
@@ -57,6 +58,11 @@ const store = (
 
 beforeEach(() => {
   runner = new FakeCommandRunner();
+  vi.stubEnv('SystemRoot', 'C:\\Windows');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('WindowsCredentialManagerSecretStore.available', () => {
@@ -69,7 +75,7 @@ describe('WindowsCredentialManagerSecretStore.available', () => {
     runner.queue({ exitCode: 0 });
     await expect(store().available()).resolves.toBe(true);
     expect(runner.invocations[0]).toEqual({
-      executable: 'powershell.exe',
+      executable: POWERSHELL,
       args: [
         '-NoLogo',
         '-NoProfile',
@@ -85,6 +91,13 @@ describe('WindowsCredentialManagerSecretStore.available', () => {
     runner.queue({ exitCode: 1 });
     await expect(store().available()).resolves.toBe(false);
   });
+
+  it('never takes PowerShell from PATH: a relative SystemRoot is unavailable, unspawned (#1304)', async () => {
+    vi.stubEnv('SystemRoot', 'Windows');
+    await expect(store().available()).resolves.toBe(false);
+    await expect(store().get('model-openai-api-key')).rejects.toMatchObject({ code: 'CREDENTIAL_MANAGER_UNAVAILABLE' });
+    expect(runner.invocations).toHaveLength(0);
+  });
 });
 
 describe('WindowsCredentialManagerSecretStore.get', () => {
@@ -92,7 +105,7 @@ describe('WindowsCredentialManagerSecretStore.get', () => {
     runner.queue({ exitCode: 0, stdout: base64(CANARY) });
     await expect(store().get('model-openai-api-key')).resolves.toBe(CANARY);
     const invocation = runner.invocations[0];
-    expect(invocation?.executable).toBe('powershell.exe');
+    expect(invocation?.executable).toBe(POWERSHELL);
     expect(invocation?.args.slice(0, 4)).toEqual([
       '-NoLogo',
       '-NoProfile',

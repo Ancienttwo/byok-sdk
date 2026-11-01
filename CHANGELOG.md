@@ -98,6 +98,20 @@ These changes need 0.34.0, the next MINOR.
   `tool_result` event got an empty result; error status and details were not
   affected.
 
+- **Fix (client, keys; #1304)** — the system tools the SDK starts no longer
+  resolve through the daemon's `PATH`. macOS runs `/bin/launchctl` and
+  `/usr/sbin/ioreg`; Linux runs `systemctl` and `secret-tool` from the first of
+  `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin` that holds them; Windows runs
+  `taskkill`, `sc.exe`, `reg` and `icacls` from `%SystemRoot%\System32`, where
+  `SystemRoot` must be a drive-qualified absolute path. A tool that is not at
+  its location starts nothing and fails with the new exported
+  `SystemToolUnavailableError`; Windows runtime disposal reports it as a
+  `RuntimeDisposalFailure` (`stage: 'signal'`), and the Linux device credential
+  store as `DeviceCredentialStoreUnavailableError`. The keys Windows Credential
+  Manager store starts `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`
+  and is unavailable (`CREDENTIAL_MANAGER_UNAVAILABLE`) without an absolute
+  `SystemRoot`.
+
 ## 0.33.0 — 2026-11-01 (published)
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

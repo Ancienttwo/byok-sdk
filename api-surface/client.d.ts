@@ -9640,6 +9640,7 @@ export type { RuntimeObservation, RuntimeVersionChange, RuntimeVersionChangeDire
 export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './login-shell-environment';
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
+export { SystemToolUnavailableError } from './util/system-tool';
 export { PiAdapter } from './adapters/pi/pi-adapter';
 export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
@@ -13992,6 +13993,10 @@ export type Runner = (command: string, args: string[]) => Promise<RunResult>;
  * {@link RunResult} (letting callers decide whether a given non-zero exit
  * matters) and rejects only the second (a real inability to run the
  * command at all, which every caller should hear about).
+ *
+ * A bare `command` is a system tool and starts from its trusted location,
+ * never from `PATH`; one that has none rejects with
+ * `SystemToolUnavailableError` (`./system-tool.ts`, #1304).
  */
 export declare const defaultRunner: Runner;
 /**
@@ -14334,6 +14339,26 @@ export declare function openJournalDatabase(path: string, busyTimeoutMs: number,
  * sibling that does not exist yet is skipped rather than treated as an error.
  */
 export declare function secureJournalFilePermissions(dbPath: string): void;
+// ==== @byok-sdk/client dist/util/system-tool.d.ts ====
+/** A system tool has no trusted location on this platform, or is not at it. Nothing was started. */
+export declare class SystemToolUnavailableError extends Error {
+    readonly tool: string;
+    constructor(tool: string, detail: string);
+}
+/** What resolution reads from the host. Tests supply their own. */
+export interface SystemToolHost {
+    readonly platform: NodeJS.Platform;
+    readonly systemRoot: string | undefined;
+    isFile(file: string): boolean;
+}
+/** The absolute path of `tool` at its trusted location ({@link SYSTEM_TOOLS}); throws {@link SystemToolUnavailableError}. */
+export declare function resolveSystemTool(tool: string, host?: SystemToolHost): string;
+/**
+ * The file a real runner starts for `command`: an absolute path the caller
+ * owns (a WinSW wrapper, a compiled bridge) as given, any other name as a
+ * system tool from its trusted location. A bare name never reaches `PATH`.
+ */
+export declare function systemExecutable(command: string): string;
 // ==== @byok-sdk/client dist/util/team-tmux-view.d.ts ====
 export type TmuxRunner = (file: string, args: readonly string[]) => Promise<{
     stdout?: string;

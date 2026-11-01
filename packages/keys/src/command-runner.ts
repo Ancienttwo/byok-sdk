@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 /** A finished child process, ported from `aip-main-open@c6a5385` `index.ts:284-288`. */
 export interface CommandResult {
@@ -17,6 +18,15 @@ export type CommandRunner = (
   args: string[],
   stdin?: string,
 ) => Promise<CommandResult>;
+
+/**
+ * Windows PowerShell from the system directory, never from `PATH` (#1304);
+ * `undefined` when `systemRoot` is not an absolute path.
+ */
+export function windowsPowerShellExecutable(systemRoot: string | undefined): string | undefined {
+  if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot) || /[\u0000\r\n]/u.test(systemRoot)) return undefined;
+  return path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
 
 /**
  * Spawn `executable`, feed it `stdin`, and collect its output

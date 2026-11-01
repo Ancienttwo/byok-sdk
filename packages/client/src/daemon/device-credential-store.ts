@@ -1,4 +1,5 @@
 import { createPrivateSystemTempDir } from '../util/secure-dir';
+import { systemExecutable } from '../util/system-tool';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
@@ -574,7 +575,15 @@ export async function runDeviceCommand(
 ): Promise<DeviceCommandResult> {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, [...args], { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    // A system tool without its trusted location is as unavailable as one that cannot spawn (#1304).
+    let file: string;
+    try {
+      file = systemExecutable(executable);
+    } catch {
+      resolve({ exitCode: 127, stdout: '', stderr: 'command unavailable' });
+      return;
+    }
+    const child = spawn(file, [...args], { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let settled = false;

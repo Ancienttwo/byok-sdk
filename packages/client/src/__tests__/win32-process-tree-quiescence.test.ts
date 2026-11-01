@@ -1,5 +1,5 @@
 import { spawn as realSpawn, type spawn, type ChildProcess } from 'node:child_process';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { disposeOwnedProcessTree, requestOwnedProcessTreeTermination, type OwnedProcessTreeOptions } from '../adapters/process-tree';
 import { isRuntimeDisposalFailure } from '../runtime-failure';
 
@@ -85,7 +85,8 @@ function taskkillStub(plan: (invocation: number, targetPid: number) => TaskkillS
 
 interface SeamOptions {
   child: ChildProcess;
-  spawnFn: typeof spawn;
+  /** Omitted: the production seam, which starts taskkill from `%SystemRoot%\System32`. */
+  spawnFn?: typeof spawn;
   killGraceMs: number;
   /** Left permanently false where the test needs the "exited, but close not yet observed" window. */
   isClosed?: () => boolean;
@@ -134,6 +135,19 @@ describe('win32 measured process-tree quiescence', () => {
     expect(isRuntimeDisposalFailure(failure)).toBe(true);
     expect((failure as { stage: string }).stage).toBe('signal');
     expect(processExists(root.pid!)).toBe(true);
+  });
+
+  it('reports stage:signal, starting nothing, when taskkill has no trusted location (#1304)', async () => {
+    const root = spawnIdle();
+    vi.stubEnv('SystemRoot', 'Windows');
+    try {
+      const failure = await disposeOwnedProcessTree(win32Options({ child: root, killGraceMs: 400 }))
+        .then(() => undefined, (error: unknown) => error);
+      expect(failure).toMatchObject({ name: 'RuntimeDisposalFailure', stage: 'signal', cause: { name: 'SystemToolUnavailableError', tool: 'taskkill' } });
+      expect(processExists(root.pid!)).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('fails with stage:quiescence naming how many walked pids were still alive', async () => {
