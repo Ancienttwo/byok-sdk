@@ -562,7 +562,7 @@ for await (const { cursor, event } of byok.tasks.events(taskId, { ...start, sign
   `from` together, `ByokCloudError` `task_not_found` for an unknown task, and
   `TaskEventsUnavailableError` with `reason: 'cursor_unknown'` for a cursor
   this server did not hand out for this task (another task's, malformed, or
-  from an SDK before 0.32.0). After `cursor_unknown`, read again with
+  from an earlier SDK). After `cursor_unknown`, read again with
   `from: 'state'`.
 - A sealed approval request moves the state to `AwaitApproval` without an
   `await_approval` entry. A task whose Host cancellation was accepted counts
