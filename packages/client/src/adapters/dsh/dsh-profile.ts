@@ -25,6 +25,8 @@ export function assertDshModelSelection(value: DshModelSelection, label: string)
     try { url = typeof value.baseUrl === 'string' ? new URL(value.baseUrl) : undefined; } catch { url = undefined; }
     if (url === undefined || (url.protocol !== 'http:' && url.protocol !== 'https:')) throw new TypeError(`${label}.baseUrl must be an http(s) URL`);
     if (url.username !== '' || url.password !== '') throw new TypeError(`${label}.baseUrl must not carry credentials`);
+    // The key belongs in `keyEnv`; a key in the query string would be written into the patch file.
+    if (url.search !== '') throw new TypeError(`${label}.baseUrl must not carry a query string`);
   } else if (value.provider === 'custom') {
     throw new TypeError(`${label}.baseUrl is required for the custom provider`);
   }
