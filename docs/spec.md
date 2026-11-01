@@ -1019,6 +1019,26 @@ file's `runtimeEnvironment` policy and no names; the same file's static
 are validated and reported as effective values, so a CLI task selects its
 runtime and `auto`/`all` mode from that file without embedded adapters.
 
+### dsh runtime (#1258)
+
+The dsh adapter builds the process environment from `runtimeEnvironment()`
+and then owns dsh's bootstrap names: it drops every inherited `DSH_*` and sets
+`DSH_HOME` to the Host's `home`, `DSH_AGENTS_HOME` to an empty directory in
+it, `DSH_PERMISSION_MODE` to the `sandbox` option and
+`DSH_TELEMETRY_MODE=DISABLED`. dsh reads its key in this order: stored
+`$DSH_HOME/.credentials.yaml`, the launch environment, `.env` in the invoking
+directory, `$DSH_HOME/.env`. The process starts in the execution scratch
+directory, so a workspace `.env` never applies. A Host must not leave stored
+credentials or a `.env` in the dsh root, or dsh uses them before the key in
+the environment.
+
+Sessions persist under `<home>/sessions/<encoded cwd>/<session id>/`; resume
+needs them, and the SDK removes none. The DeepSeek route sends `GET
+https://api.deepseek.com/models` at boot when a key is present. dsh reports
+context occupancy (`usage_update`) and no provider cost counters, so a dsh
+task has no cost usage. The `keyEnv` rules are in
+[adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
+
 ### Local runtime probe observation
 
 `RuntimeDetectResult` has one required `kind`: `available`, `not-found`,
@@ -1059,7 +1079,7 @@ Runtime version policy is one pure data object on an adapter descriptor
 constructor option and `DaemonConfig.runtimes.<id>.versionPolicy` are complete
 objects that replace one another wholesale through one resolver; fields are
 never merged. The default policy preserves today's behavior exactly: Codex,
-Grok and Hermes warn on an unqualified version, Claude and Pi do not warn, and
+Grok, Hermes and dsh warn on an unqualified version, Claude and Pi do not warn, and
 no default policy blocks. Only a Host layer may configure a block; a descriptor
 default that carries one is rejected as `invalid_version_policy`
 (`block_requires_host`). A block is enforced locally before claim and produces
@@ -1659,9 +1679,9 @@ makes itself `unknown`. The class never changes `retry`.
 | Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status` |
 | Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
-| Pi, Hermes | no structured field: `unknown` |
+| Pi, Hermes, dsh | no structured field: `unknown` |
 
-Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes) and Hermes report a
+Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes), Hermes and dsh report a
 runtime process that ends on its own before its terminal, during start or a turn,
 as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
 Pi's durable lane recovers a worker that ends on its own during a run (within its
@@ -3656,6 +3676,8 @@ its cumulative `total` remains the provider cost authority. Claude reports
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
+dsh reports ACP `usage_update` (`used` against `size`) as `provider` context
+usage, and no cost counters.
 Historical v1 envelopes remain readable and unchanged; older consumers ignore
 these optional fields.
 
@@ -4067,6 +4089,7 @@ it never runs ungated, and no third mode exists. Current coverage:
 | Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |
 | Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
 | Hermes | Declined before claim | No pre-execution hook |
+| dsh | Declined before claim | No pre-execution hook; every ACP permission request is answered `cancelled` |
 
 Classification is one function (`classifyToolCall`) used by both modes. The
 precedence is **Always Ask > sensitive-path floor > Allow without Asking >

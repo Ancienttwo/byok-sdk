@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Feature (client; #1258)** — `DshAdapter` runs DeepSeek Harness
+  (`@deepseek-ai/dsh`, qualified 0.2.1-rc.5) over ACP on the custom-harness
+  path (`harnessId: 'dsh'`). It runs on macOS and Linux, in a Host-owned
+  `DSH_HOME`. The Host's `model` option names the provider route, model and key
+  variable, which go into a per-execution `--patch` overlay; the key stays in
+  the environment. It supports resume and MCP toolsets. Drafts, steer, `auto`
+  and prepared lanes are unsupported, and `auto` is declined before claim. The
+  Hermes ACP connection moved to a shared runtime module with no behavior
+  change, and the runtime contract suite and nightly matrix gain a dsh leg.
+
 - **Security (build and test toolchain; #1122)** — clears the ten remaining
   lockfile advisories: `glob` 13.0.6 → 14.0.2 (GHSA-3g3m-2fjr-6pw4),
   `minimatch` 10.2.6 → 11.0.1 (GHSA-g3hv-75wg-m249) and `undici` 8.10.2 →
