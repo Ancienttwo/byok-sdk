@@ -165,7 +165,7 @@ Message text must not select a Bot.
 Group mentions come only from the platform's mention entities.
 The adapter maps each entity to a Bot id.
 The Host never scans text for `@` names: I10 in [platform PRD section 5](researches/2026-10-13_bot-platform-prd.md)
-and G1 in [product PRD section 3](plans/2026-10-18-bot-mode-product-prd.md).
+and G1 in [product PRD section 3](adr/ADR-039-bot-mode-product-prd.md).
 Text such as "@Bot" without a mention entity selects no seat.
 
 Each group has a Host setting `memberMentions` with the value `execute` or `ignore`.

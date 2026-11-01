@@ -73,7 +73,7 @@ Octop 的行号对应 §7 的固定提交。byok-sdk 的行号对应 `main` @ `6
 
 **2. IM 收发契约**
 
-- 归属：Host adapter。平台 PRD 没有 IM 章节。产品 PRD 把外部事件触发（邮件、Slack、webhook）列为 v1 非目标，并写明 SDK 不接收外部事件（[产品 PRD](../plans/2026-10-18-bot-mode-product-prd.md) 78、99、279 行）。本条只定义 Host adapter 的契约。
+- 归属：Host adapter。平台 PRD 没有 IM 章节。产品 PRD 把外部事件触发（邮件、Slack、webhook）列为 v1 非目标，并写明 SDK 不接收外部事件（[产品 PRD](../adr/ADR-039-bot-mode-product-prd.md) 78、99、279 行）。本条只定义 Host adapter 的契约。
 - 规则：
   - 回复路由和主动推送分开。只属于单次入站的回复凭据不能用于长期推送，例如消息 id、`response_url`、`context_token` 和 `webhook_url`。Octop 的对应实现见 `G/push_routing.py:7-18`。
   - 每条输入带真实的发送者。审批和管理动作检查这个发送者（见 §4 第 1 条）。
@@ -273,8 +273,8 @@ Octop 的行号对应 §7 的固定提交。byok-sdk 的行号对应 `main` @ `6
 byok-sdk 侧对照文件：
 
 - [ADR-036](../architecture/adr-2026-10-03-cloud-generic-agent.md)、[ADR-037](../architecture/adr-2026-10-07-minimal-guardrails.md)、[ADR-038](../architecture/adr-2026-10-13-bot-platform.md)
-- [平台 PRD](2026-10-13_bot-platform-prd.md)、[产品 PRD](../plans/2026-10-18-bot-mode-product-prd.md)、[K4 指南](../host-execution-core.md)
-- [spec](../spec.md)、[安全文档](../security.md)、[SDK 架构](../architecture/sdk-architecture.md)、[Host 运行时隔离矩阵](../host-runtime-isolation-matrix.md)、[最小 guardrail 验收记录](../notes/2026-10-08-minimal-guardrails-acceptance.md)、[#412 retention 调研](2026-10-14-cloud-retention.md)
+- [平台 PRD](2026-10-13_bot-platform-prd.md)、[产品 PRD](../adr/ADR-039-bot-mode-product-prd.md)、[K4 指南](../host-execution-core.md)
+- [spec](../spec.md)、[安全文档](../security.md)、[SDK 架构](../architecture/sdk-architecture.md)、[Host 运行时隔离矩阵](../host-runtime-isolation-matrix.md)、[最小 guardrail 验收记录](2026-10-08-minimal-guardrails-acceptance.md)、[#412 retention 调研](2026-10-14-cloud-retention.md)
 - `packages/client/src/daemon/`：`task-runner.ts`、`owned-process-ledger.ts`、`create-daemon.ts`、`daemon-record.ts`
 - `packages/client/src/adapters/`：`process-tree.ts`，以及 `pi/`、`claude/`、`codex/` 的事件映射
 - `packages/client/src/lifecycle/systemd.ts`、`packages/client/src/native-interactions.ts`、`packages/protocol/src/messages.ts`
@@ -359,7 +359,7 @@ byok-sdk 侧对照文件：
   - 三个平台都要验收：合盖、用户主动睡眠、拔掉电源、Host 进程异常退出。
 - **需要 owner 确认的问题**：
   1. 是否采用选项 B 和上面的规则？
-  2. 三个平台的验收矩阵怎么安排？产品 PRD 对记忆证明已经裁定「不接受 Linux-only」（[产品 PRD](../plans/2026-10-18-bot-mode-product-prd.md) 239 行）。
+  2. 三个平台的验收矩阵怎么安排？产品 PRD 对记忆证明已经裁定「不接受 Linux-only」（[产品 PRD](../adr/ADR-039-bot-mode-product-prd.md) 239 行）。
 
 ### 9.3 进程树收容
 
@@ -372,7 +372,7 @@ byok-sdk 侧对照文件：
   - 仍然覆盖不到的残留：父进程已经退出、被 init 收养的进程。例如 Claude 和 Pi 在独立 session 中执行 `cmd &` 留下的后台进程（`packages/client/src/adapters/process-tree.ts:707-711`；[ADR-037](../architecture/adr-2026-10-07-minimal-guardrails.md) 72 行）。
   - 时长和输出上限都在 daemon 侧执行，不是 kernel、cgroup 或 rlimit 级别（[安全文档](../security.md) 877–880 行；[SDK 架构](../architecture/sdk-architecture.md) 946 行）。
   - Linux 的 systemd 用户服务单元没有设置 `KillMode` 或 `Delegate=`（`packages/client/src/lifecycle/systemd.ts:170-186`）。
-  - [最小 guardrail 验收记录](../notes/2026-10-08-minimal-guardrails-acceptance.md) 166–167 行已经提出，Linux 可以加 cgroup 或 child subreaper 作为更强的兜底。
+  - [最小 guardrail 验收记录](2026-10-08-minimal-guardrails-acceptance.md) 166–167 行已经提出，Linux 可以加 cgroup 或 child subreaper 作为更强的兜底。
 - **选项**：
   - A. 不做，保持 ADR-037 的现状。
   - B. Linux 上可选的 cgroup v2 scope。

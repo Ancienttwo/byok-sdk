@@ -350,7 +350,7 @@ on any failed gate; a package pin alone does not establish acceptance.
    ([#1030](https://github.com/Ancienttwo/byok-sdk/issues/1030); fixed in
    0.31.0). On a store path that is not an alias, the recorded Windows
    evidence decides the result. The Windows runs are in
-   [the #978 `taskkill` note](../notes/2026-10-27-978-windows-taskkill.md).
+   [the #978 `taskkill` note](../researches/2026-10-27-978-windows-taskkill.md).
    Use a harmless test runtime and isolated stores for the
    forced kill. This embedded L flow does not test sealing: `createByokServer`
    does not declare E2EE. A Host enabling sealing separately verifies the

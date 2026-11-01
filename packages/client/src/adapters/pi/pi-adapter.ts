@@ -225,7 +225,7 @@ export class PiAdapter implements RuntimeAdapter {
     // authority on what a toolset contains. Claude and Codex list the tools
     // themselves, so pi is the one bundled adapter that needs this.
     requiresMcpToolsetToolObservation: true,
-    // Octop T0 (`docs/notes/2026-10-20-octop-t0-pi-trajectory.md`): Pi 1.3.0
+    // Octop T0 (`docs/researches/2026-10-20-octop-t0-pi-trajectory.md`): Pi 1.3.0
     // pairs `tool_execution_start`/`_end` by `toolCallId` over RPC, and
     // `PiSession` turns only a non-aborted `agent_settled` into `turn_end`.
     trajectoryEvidence: 'event-stream',

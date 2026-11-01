@@ -134,8 +134,8 @@ loads, whether the user's own MCP servers reach a task, the runtime's own
 memory, and the per-process switch the CLI accepts, at the version each probe
 used. The isolation rows of the [capability matrix](#capability-matrix) say
 which of these the SDK keeps out, as checked by the runtime contract suite. The
-[#634 evidence note](notes/2026-10-22-634-runtime-user-config.md) and the
-[#871/#873 evidence note](notes/2026-10-24-871-873-claude-agent-user-context.md)
+[#634 evidence note](researches/2026-10-22-634-runtime-user-config.md) and the
+[#871/#873 evidence note](researches/2026-10-24-871-873-claude-agent-user-context.md)
 give the source lines, help output and probes. The SDK option is an adapter option: it applies
 to every session that the adapter starts. A choice per task would need a new
 wire field. The default is unchanged, and the option is not an isolation
@@ -247,7 +247,7 @@ option on its own `ClaudeAdapter` through `createDaemonWithAdapters`.
 A custom provider selects model routing, not all Codex network destinations.
 Even with plugins disabled, eligible ChatGPT authentication can trigger a
 separate authenticated cloud-config request. See [custom-provider background
-services and evidence limits](notes/2026-10-28-codex-custom-provider-background-services.md).
+services and evidence limits](researches/2026-10-28-codex-custom-provider-background-services.md).
 
 The [Codex adapter](../packages/client/src/adapters/codex/codex-adapter.ts)
 starts the user's app server with the supplied environment. Native config remains
@@ -329,7 +329,7 @@ other app-server error does.
 
 ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
 does not provide a hidden-terminal mode; see the [qualified observation and
-limits](notes/2026-10-28-grok-terminal-capability-boundary.md).
+limits](researches/2026-10-28-grok-terminal-capability-boundary.md).
 
 The [vendored launch profile](../packages/client/vendor/oar/ddec7e5/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
@@ -584,10 +584,10 @@ four variables reach the agent process only with
 `pi-rpc-host.test.ts` (user resources beside SDK extensions),
 `pi-prepared-tools.test.ts` (frozen tool surface), and
 `hermes-home.test.ts` (profile contents). The
-[evidence note](notes/2026-10-22-634-runtime-user-config.md) records the
+[evidence note](researches/2026-10-22-634-runtime-user-config.md) records the
 pinned-version sources, the Claude loader reading, a local Claude probe
 against a fake endpoint, and the `grok inspect` probe. The
-[#871/#873 evidence note](notes/2026-10-24-871-873-claude-agent-user-context.md)
+[#871/#873 evidence note](researches/2026-10-24-871-873-claude-agent-user-context.md)
 records a probe of Claude 2.1.302 with the `agentUserContext` flags in a
 synthetic home: user markers and auto memory absent, Agent-home files present,
 the user MCP server gone, and the deny rule and hook still in effect. These fixtures check
@@ -731,17 +731,17 @@ Platform notes:
 Evidence: `hermes-adapter.test.ts` and `hermes-custody.test.ts` (synthetic
 `fake-hermes.mjs`, offline), `hermes-gateway-control.test.ts` (pipe name
 against Hermes's own hash, ownership walk), and the
-[S0 note](notes/2026-10-20-519-hermes-acp-s0.md), which records one real Hermes
+[S0 note](researches/2026-10-20-519-hermes-acp-s0.md), which records one real Hermes
 `0.22.2+2364.g0b10b9f` turn with a fake model endpoint on macOS. On Windows
 the fake suites run behind a compiled `hermes.exe` that starts Node as a child,
 the same process shape as a venv console script; the
-[Windows note](notes/2026-10-22-608-hermes-windows.md) records the runs.
+[Windows note](researches/2026-10-22-608-hermes-windows.md) records the runs.
 `hermes-real.test.ts` runs the adapter against the real qualified Hermes on
 `windows-latest` (CI job `hermes-real-windows`), with a fake model endpoint
 and the custody launcher: `detect()`, `prepare()`, one turn through the owned
 gateway to `turn_end`, the pipe client against the real Hermes pipe server,
 and the key only in the Hermes child; the
-[real-run note](notes/2026-10-26-608-hermes-windows-real.md) records it. No
+[real-run note](researches/2026-10-26-608-hermes-windows-real.md) records it. No
 live-provider run or Linux run is part of this evidence.
 The descriptor declares `platforms: ['darwin', 'linux', 'win32']`.
 
@@ -811,7 +811,7 @@ Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
 [runtime contract suite](runtime-contract.md) against the real qualified dsh.
 Locally on macOS with dsh 0.2.1-rc.5, every case passes, `dsh.close`
 included; `dsh.sigkill` runs in CI. The design and probes are in
-[the dsh adapter plan](plans/2026-11-01-dsh-adapter.md).
+[the dsh adapter plan](researches/2026-11-01-dsh-adapter.md).
 
 ## Selection and platforms
 
@@ -974,7 +974,7 @@ the [downstream diagnostics guide](agent-diagnostics-integration.md).
   respawn path. `PiSession.evidence()` counts stdout lines that are not a JSON
   object, an unterminated last line, and unmapped frame types. It reports no
   synthetic results. The evidence is the
-  [Octop T0 note](notes/2026-10-20-octop-t0-pi-trajectory.md) and
+  [Octop T0 note](researches/2026-10-20-octop-t0-pi-trajectory.md) and
   `pi-execution-record.test.ts`. T0 read the emit path of the pinned Pi 1.3.0,
   ran its core with a synthetic model stream, and replayed synthetic RPC
   records. No live Pi run or provider call is part of this evidence. A killed

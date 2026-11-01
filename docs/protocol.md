@@ -153,7 +153,7 @@ unproven (see the evidence list below).
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
   and an `approvalId` on every approval request and decision. `golden/v4.releases.json` registers the published 0.31.0 corpus,
-  the published 0.32.0 corpus and the 0.33.0 corpus, a source candidate until it is published, and has no `floor`. Each registered v4 entry pins both corpus
+  the published 0.32.0 corpus and the published 0.33.0 corpus, and has no `floor`. Each registered v4 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.30.2 registry tarball, the last v3 release. It rejects every v4
@@ -1205,7 +1205,7 @@ It excludes SMB, synced directories and other file systems. Windows B stays
 false until the ledger, memory replace/delete, metadata, name changes and new
 parent directories meet the full recovery contract. A successful file flush,
 process kill test or readback does not grant B. Sections 3 and 7 of
-`docs/plans/2026-10-19-windows-ntfs-ledger-barrier-decision.md` define that
+`docs/adr/ADR-042-windows-ntfs-ledger-barrier.md` define that
 contract and its fallible acceptance. The Windows requirement of Q14 stays
 open. A notice that reaches a daemon without
 the capability fails `transport_unconfigured` or `filesystem_unavailable`
@@ -1237,7 +1237,7 @@ completion and readback are Host authority on Host routes.
 
 Sealed payload v1 lets a member seal task input and task output, so that the
 Host stores only ciphertext for these categories. The design is
-[docs/plans/2026-10-22-654-hosted-wire-e2ee.md](plans/2026-10-22-654-hosted-wire-e2ee.md).
+[docs/adr/ADR-045-hosted-wire-e2ee.md](adr/ADR-045-hosted-wire-e2ee.md).
 `@byok-sdk/core/sealed-payload` seals and opens the bytes.
 `packages/protocol/src/sealed-payload.ts` and `sealed-split-table.ts` hold the
 wire rules. This section states the wire rules.
@@ -1590,7 +1590,7 @@ instruction and the output in plaintext.
 
 **Sealed payload v2 (#1045, gated addition).** v2 adds two categories on the
 v1 suite, keys and binding rules. The design is
-[docs/plans/2026-10-28-1045-e2ee-v2.md](plans/2026-10-28-1045-e2ee-v2.md).
+[2026-10-28-1045-e2ee-v2.md, approved in PR #1279](https://github.com/Ancienttwo/byok-sdk/blob/6d70942c4113e910c483a951cbf0dc613546a6f3/docs/plans/2026-10-28-1045-e2ee-v2.md).
 `SEALED_CATEGORY_CAPABILITY` maps each category to its flag:
 
 | Category | Flag | What it seals |

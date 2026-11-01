@@ -4,15 +4,17 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The current stable release is 0.32.0, in the nine-package release set,
+The current stable release is 0.33.0, in the nine-package release set,
 published on npm `latest`. From 0.28.2, keys carries the same version. The npm
-registry readback of 2026-11-01 (UTC) lists 0.32.0 as `latest` for all nine
-packages. See the [release notes](../../docs/releases/v0.32.0.md).
-The earlier stable releases were 0.31.0 (published 2026-10-29, UTC), 0.30.2
+registry readback of 2026-11-01 (UTC) lists 0.33.0 as `latest` for all nine
+packages. See the [release notes](../../docs/releases/v0.33.0.md).
+The earlier stable releases were 0.32.0 (published 2026-11-01, UTC), 0.31.0
+(published 2026-10-29, UTC), 0.30.2
 (published 2026-10-26, UTC), 0.30.1 and 0.30.0 (published 2026-10-24, UTC),
 0.29.0 (published 2026-10-23, UTC), 0.28.3 and 0.28.2 (published
 2026-10-22, UTC), 0.28.1 / keys 0.13.1 (published 2026-10-21, UTC) and
 0.28.0 / keys 0.13.0 (published 2026-10-20, UTC); see the
+[0.32.0 release notes](../../docs/releases/v0.32.0.md), the
 [0.31.0 release notes](../../docs/releases/v0.31.0.md), the
 [0.30.2 release notes](../../docs/releases/v0.30.2.md), the
 [0.30.1 release notes](../../docs/releases/v0.30.1.md), the
@@ -44,8 +46,7 @@ The package needs Node 24.22.1 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the unpublished 0.33.0 source candidate.
-Use 0.32.0 until publication is confirmed.
+The following install example names the current stable release, 0.33.0.
 Use an installed package to verify the consumer path.
 
 ~~~sh

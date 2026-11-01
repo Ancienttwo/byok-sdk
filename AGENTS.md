@@ -6,7 +6,7 @@ This is the root routing contract for Claude Code and Codex. Load this before ta
 
 - Use first principles, one source of truth, and no steady-state compatibility paths.
 - Treat `docs/spec.md` as product truth; `tasks/current.md` is derived state and `tasks/todos.md` is the deferred-goal ledger.
-- Record durable progress in contracts, reviews, notes, workstreams, and handoff artifacts.
+- Put pre-implementation design in the issue body. Record a one-time decision as a decision comment on its issue or PR, a durable decision as an ADR in `docs/adr/` that links its issue or PR, and research and runtime evidence in `docs/researches/`.
 - Read `.ai/context/capabilities.json` and `.ai/context/context-map.json` before adding scoped agent context.
 - Keep `_ref/` ignored external reference material and `_ops/` ignored local operations state.
 

@@ -1,6 +1,6 @@
 # K8b Cross-Bot acceptance
 
-Issue: #540. Approved plan: [Cross-Bot](../../docs/plans/2026-10-19-k8b-cross-bot.md).
+Issue: #540. Approved plan: [Cross-Bot](../../docs/adr/ADR-041-k8b-cross-bot.md).
 Implementation base: `b5a456f0`. X5 source: `208a91bc`.
 X5 and this X6 documentation are in Draft PR
 [#578](https://github.com/Ancienttwo/byok-sdk/pull/578).
@@ -87,7 +87,7 @@ the chain only when the successor Turn is actually committed.
 
 The integration tests use real SDK transport and SQLite. The device tests
 also use real enrollment and two daemons. The runtime adapter is synthetic.
-See the [X5 record](../../docs/plans/2026-10-20-k8b-x5-VALIDATION.md) for its
+See the [X5 record](https://github.com/Ancienttwo/byok-sdk/pull/578) for its
 clock, cleanup, machine identity, review and failure history.
 
 ## P3 decisions and bounds
@@ -164,7 +164,7 @@ Small follow-up fixes have local evidence and no third independent verdict.
 | Hosted `submitAgentExecution` cross-device path | OPEN | Downstream hosted Host adapter and execution evidence |
 | Two Topology L Host processes | OPEN | Not in the first release (#606 O4). Implemented service relay and durable request/verdict recovery tests |
 | Two physical computers | OPEN | A run on separate machines; synthetic machine identity does not prove this |
-| `submit_result` cell: Pi 1.4.0, `zai/glm-5.3-flash`, darwin-arm64, `submit-result-v1` @ `v0.30.2` | OPEN | Run reported in [#977](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6433620715); sanitized manifest and trial records not attached. [Method](../../docs/submit-result-measurement.md), [#977 gate record](../../docs/plans/2026-10-27-977-pi-product-gate.md) |
+| `submit_result` cell: Pi 1.4.0, `zai/glm-5.3-flash`, darwin-arm64, `submit-result-v1` @ `v0.30.2` | OPEN | Run reported in [#977](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6433620715); sanitized manifest and trial records not attached. [Method](../../docs/submit-result-measurement.md), [#977 gate record](../../docs/researches/2026-10-27-977-pi-product-gate.md) |
 | `submit_result` cell: Pi 1.4.0, proxy `zai/glm-5.3-flash`, darwin-arm64, reply cell, AiphaBee `aiphabee-bot-chat-ask-user.v1` @ 0.30.2 | OPEN | Downstream counted run reported in [#977](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6428287503); proxy cell, not native provider; sanitized export not attached. Not product conditions: the runner placed the bot's Agent home inside the AiphaBee repository, so every Pi request carried that repository's `AGENTS.md` and `CLAUDE.md` coding-agent instructions; a product bot's Agent home is not in any repository. See the [correction](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6450158833) |
 | `submit_result` cell: Pi 1.4.0, native `zai/glm-5.3-flash`, darwin-arm64, same AiphaBee reply cell | OPEN | Uncounted calibration only; counted run needs an owner-authorized paid run. The calibration also ran with the AiphaBee repository instructions in Pi's context, so it does not represent product conditions either; see the [correction](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6450158833) |
 | `submit_result` cell: Pi, win32-x64, same AiphaBee reply cell | NOT RUN | Windows device run. On 0.30.2, a daemon restarted from an aliased store path (an 8.3 short name) hits [#1030](https://github.com/Ancienttwo/byok-sdk/issues/1030), unrelated to `submit_result` |

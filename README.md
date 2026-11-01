@@ -7,38 +7,39 @@ composition over Postgres and R2.
 
 ## Release status
 
-The source candidate is **0.33.0** for all nine packages. It is not
-published. See the [candidate notes](docs/releases/v0.33.0.md). A Host that
-moves to 0.33.0 from 0.30.2, 0.31.0 or 0.32.0 follows the
+The current stable release is **0.33.0** for all nine packages, published on
+2026-11-01 (UTC). From 0.28.2, keys uses the release train version instead of
+its own version line. See the [release notes](docs/releases/v0.33.0.md) and
+[release process](docs/releases/README.md). A Host that moves to 0.33.0 from
+0.30.2, 0.31.0 or 0.32.0 follows the
 [Host upgrade checklist](docs/releases/host-upgrade-0.33.0.md). The notes do
 not say that 0.33.0, or a Host on it, is ready for production.
 
-The current stable release is **0.32.0** for all nine packages, published on
-2026-11-01 (UTC). From 0.28.2, keys uses the release train version instead of
-its own version line. See the [release notes](docs/releases/v0.32.0.md) and
-[release process](docs/releases/README.md). A Host that moves to 0.32.0 from
-0.30.2 follows the
+The previous stable release is **0.32.0** for all nine packages, published on
+2026-11-01 (UTC). See the [release notes](docs/releases/v0.32.0.md). A Host
+that moves to 0.32.0 from 0.30.2 follows the
 [Host upgrade checklist](docs/releases/host-upgrade-0.32.0.md). The notes do
 not say that 0.32.0, or a Host on it, is ready for production.
 
-The previous stable release is **0.31.0** for all nine packages, published on
+An earlier stable release is **0.31.0** for all nine packages, published on
 2026-10-29 (UTC). See the [release notes](docs/releases/v0.31.0.md). It moves
 the wire to v4. A Host that moves to 0.31.0 from 0.30.2 follows the
 [Host upgrade checklist](docs/releases/host-upgrade-0.31.0.md). The notes do
 not say that 0.31.0, or a Host on it, is ready for production.
 
-An earlier stable release is **0.30.2** for all nine packages. See the
+Another earlier stable release is **0.30.2** for all nine packages. See the
 [release notes](docs/releases/v0.30.2.md). A Host that moves to 0.30.2 from
 0.29.x, 0.30.0 or 0.30.1 follows the
 [Host upgrade checklist](docs/releases/host-upgrade-0.30.2.md). The release
 notes do not say that 0.30.2, or a Host on it, is ready for production; the
 owner fixed 0.33.0 as the revision for the product loop gate (#977).
 
-The 0.32.0 registry readback passed for all nine packages with `latest`
-**0.32.0**. The registry lists 0.31.0 (2026-10-29, UTC), 0.30.2 (2026-10-26,
-UTC), 0.30.1 and 0.30.0 (2026-10-24, UTC), 0.29.0 (2026-10-23, UTC), 0.28.3
-and 0.28.2 (2026-10-22, UTC), 0.28.1 / keys 0.13.1 (2026-10-21, UTC) and
-0.28.0 / keys 0.13.0 (2026-10-20, UTC) as the earlier published versions.
+The 0.33.0 registry readback passed for all nine packages with `latest`
+**0.33.0**. The registry lists 0.32.0 (2026-11-01, UTC), 0.31.0 (2026-10-29,
+UTC), 0.30.2 (2026-10-26, UTC), 0.30.1 and 0.30.0 (2026-10-24, UTC), 0.29.0
+(2026-10-23, UTC), 0.28.3 and 0.28.2 (2026-10-22, UTC), 0.28.1 / keys 0.13.1
+(2026-10-21, UTC) and 0.28.0 / keys 0.13.0 (2026-10-20, UTC) as the earlier
+published versions.
 This read confirms registry availability, not isolated-install qualification.
 
 Historically, all nine **0.27.0** / keys **0.12.0** packages were published from
@@ -53,8 +54,7 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the unpublished source candidate.
-Use the stable 0.32.0 until this candidate is published.
+Versioned install examples below name the current stable release, 0.33.0.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 

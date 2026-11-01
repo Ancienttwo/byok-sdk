@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Fake DeepSeek Harness CLI for offline adapter tests. It calls no model and
 // reads no credential. Frame shapes follow the dsh 0.2.1-rc.5 ACP server as
-// probed in docs/plans/2026-11-01-dsh-adapter.md §2.
+// probed in docs/researches/2026-11-01-dsh-adapter.md §2.
 //
 // argv: `--version` prints FAKE_DSH_VERSION (default 0.2.1-rc.5).
 // `--profile acp --help` writes $DSH_HOME/profiles/acp and exits 0

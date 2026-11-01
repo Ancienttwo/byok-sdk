@@ -149,7 +149,7 @@ export const HOST_TOOLSET_CONTEXT_ENV = 'BYOK_HOST_TOOLSET_CONTEXT';
  * Promise, Session, lease, outbox or clock. Every timestamp / id / generation
  * arrives on the event; the reducer only decides the next frozen snapshot and
  * an ordered list of effect descriptions for the IO host (S3+) to execute.
- * See docs/plans/2026-10-31-1099-task-runner-reducer.md §4–§8.
+ * See https://github.com/Ancienttwo/byok-sdk/pull/1215 §4–§8.
  * ------------------------------------------------------------------------- */
 
 /** Internal task lifecycle phase. Not the wire TaskState (protocol/task-state.ts). */

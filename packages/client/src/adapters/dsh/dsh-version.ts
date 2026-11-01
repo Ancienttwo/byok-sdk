@@ -5,7 +5,7 @@ import type { RuntimeVersionPolicy } from '../../types';
  * ships only prereleases and warns of breaking changes, so the qualified
  * build is one exact version: the npm `latest` release the ACP launch, patch
  * overlay, sandbox switch and session contracts were checked against
- * (`docs/plans/2026-11-01-dsh-adapter.md` §2). Another version is an
+ * (`docs/researches/2026-11-01-dsh-adapter.md` §2). Another version is an
  * advisory, as for the other runtimes; a block is Host-only.
  */
 export const QUALIFIED_DSH_VERSION = '0.2.1-rc.5';
