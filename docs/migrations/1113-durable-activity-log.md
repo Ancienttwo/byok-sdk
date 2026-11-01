@@ -107,6 +107,10 @@ other rows are kept; no re-enrollment or new state directory is needed. A v8
 file missing either table is refused as `SQLITE_SCHEMA_INVALID`, never
 recreated, and builds before schema 8 cannot open the upgraded file.
 
+The upgrade is one-way: SDK 0.32.0 and earlier refuse a schema 8 file, so the
+only way back is a copy taken before the upgrade. Stop the server and back up
+the database file before the first open with this release.
+
 After a restart the same generation and revisions are served, so a cursor
 taken before the restart resumes after it. Malformed persisted rows fail closed.
 The terminal-task archive now removes activity content inside its transaction
@@ -182,6 +186,14 @@ Postgres approval adapter reads the `terminal_at` column 0035 adds, and an
 older adapter's idle deadline on an open row violates 0035's
 `approval_timeline_tail_closed` constraint, so each fails against the other's
 schema.
+
+Apply 0035 only through `deploy/scripts/migrate`, which runs each file in one
+transaction. Its backfill table is `ON COMMIT DROP`, so under psql autocommit
+it is gone after the statement that creates it. That one transaction scans the
+whole `task` table and rewrites `approval_timeline_tail`, the trigger it
+creates blocks writes to `task` until it commits, and the
+`approval_timeline_tail_closed` constraint is validated in place rather than
+added `NOT VALID`. On a large tenant, run it in a maintenance window.
 
 ## Task events wake (A4)
 

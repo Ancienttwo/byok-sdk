@@ -29,8 +29,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..', '..');
 const indexFile = path.join(here, 'index.json');
 
-/** Released builds kept as fixtures: the previous MINOR's last PATCH and the latest release. */
-export const RELEASES = ['0.30.2', '0.31.0'];
+/** Released builds kept as fixtures: the previous MINOR's last PATCH, the latest release, and 0.30.2 while AiphaBee upgrades from it. */
+export const RELEASES = ['0.30.2', '0.31.0', '0.32.0'];
 
 /** Where each store lives inside a fixture directory. */
 export const FIXTURE_LAYOUT = {

@@ -33,8 +33,24 @@
         "keys-profile-store": "accepted"
       }
     },
+    "0.32.0": {
+      "source": "npm @byok-sdk/{server,client,keys}@0.32.0",
+      "piDurable": "1.4.0",
+      "stores": {
+        "server-sqlite": "0.32.0/server-sqlite.db",
+        "client-journal": "0.32.0/daemon-store/daemon.db",
+        "pi-durable": "0.32.0/daemon-store/durable-replicas/fixture/durable-fixture.sqlite",
+        "keys-profile-store": "0.32.0/keys-profile-store.db"
+      },
+      "expected": {
+        "server-sqlite": "accepted",
+        "client-journal": "accepted",
+        "pi-durable": "accepted",
+        "keys-profile-store": "accepted"
+      }
+    },
     "main": {
-      "source": "workspace at 1d770bbe4b2f0063890bfb380f4cf45b97a2d5f2",
+      "source": "workspace at 332d54dd2b89c841abb1358f94d62b4f92c83e30",
       "piDurable": "1.4.0",
       "stores": {
         "server-sqlite": "main/server-sqlite.db",
