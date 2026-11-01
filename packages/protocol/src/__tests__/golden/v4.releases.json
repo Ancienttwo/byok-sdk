@@ -21,17 +21,6 @@
         "lines": 30,
         "sha256": "d43f16848d9f5ce4c90e62f3134b0bdf56796043f9c9de5fa5a8960f2f6778bc"
       }
-    },
-    {
-      "version": "0.33.0",
-      "envelopes": {
-        "lines": 342,
-        "sha256": "d6c25dfac976b70e6198e17acb923068af44d6d3920d5866aab484412b81dfa9"
-      },
-      "http": {
-        "lines": 30,
-        "sha256": "d43f16848d9f5ce4c90e62f3134b0bdf56796043f9c9de5fa5a8960f2f6778bc"
-      }
     }
   ]
 }

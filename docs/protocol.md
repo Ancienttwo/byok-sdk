@@ -37,7 +37,7 @@ journal (`DaemonJournalProtocolUnsupportedError`). Retained `acked` and
 terminal receipt stored by a v4 build no longer decodes, so a result read of
 a task that ended before the cut fails with `terminal_receipt_unreadable`. The
 Host steps are in [the wire v5 migration](migrations/wire-v5-durable-lane.md).
-0.33.0 is the last v4 release.
+0.32.0 is the last v4 release and 0.33.0 is the first v5 release.
 
 History: v4 completed the Agent-only cutover (ADR-034) and removed the
 approval paths kept for peers that predate approval ids:
@@ -173,7 +173,7 @@ unproven (see the evidence list below).
   `approvalId` required.
 - **Retired v4 evidence (negative oracle).** `golden/v4.envelopes.ndjson`,
   `golden/v4.http.ndjson` and the v4 registry `golden/v4.releases.json`
-  (0.31.0 through 0.33.0) are byte-identical to what the last v4 release
+  (0.31.0 and 0.32.0) are byte-identical to what the last v4 release
   shipped and read-only. The current decoder rejects every v4 envelope line at the
   version boundary, and the v4 HTTP lines that carry envelopes too. Rewriting
   only the version is not an upgrade: v5 renamed `durablePi`.
@@ -182,15 +182,14 @@ unproven (see the evidence list below).
   rewritten, and are append-only. The current decoder reads every
   line back to the committed JSON, and the current HTTP decoders read every
   literal body to its independently authored value (messages responses must
-  account for their `batchLength`). The v4 corpus carries every message type,
+  account for their `batchLength`). The v5 corpus carries every message type,
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
-  and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers no release yet: 0.33.0 is
-  the last v4 release, and the first v5 release is the next MINOR. It has no `floor`. Each registered v5 entry pins both corpus
+  and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers 0.33.0, the first v5
+  release, and has no `floor`. Each registered v5 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
-  published 0.32.0 registry tarball, a v4 release (it moves to 0.33.0, the
-  last v4 release, once that is published). It rejects every v5
+  published 0.32.0 registry tarball, the last v4 release. It rejects every v5
   corpus line and a v5 `conn.hello`: a v4 peer cannot read v5 bytes. Nothing it
   produces is v5 evidence, and it never enters the v5 registry. Its
   `requiredReceiverCapabilities` derives, for every v4 `task.offer` line that

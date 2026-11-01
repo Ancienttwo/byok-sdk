@@ -34,8 +34,7 @@ const v5Offers = readFileSync(new URL('golden/v5.envelopes.ndjson', import.meta.
   .map((line) => line.payload);
 /**
  * The v4 offer lines the oracle's release shipped: the corpus prefix its
- * `golden/v4.releases.json` entry pins. Later v4 lines may carry gates that
- * release does not know.
+ * `golden/v4.releases.json` entry pins.
  */
 const oracleVersion = (JSON.parse(readFileSync(createRequire(import.meta.url).resolve('byok-protocol-previous/package.json'), 'utf8')) as { version: string }).version;
 const oracleLines = (JSON.parse(readFileSync(new URL('golden/v4.releases.json', import.meta.url), 'utf8')) as {

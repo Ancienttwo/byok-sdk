@@ -25,9 +25,9 @@ A release ships `packages/client/upgrade-manifest.json` with one entry per Host-
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility
 from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 5: v5 renames the runtime
-capability `durablePi` to `durableLane`. 0.33.0 is the last v4 release and
-the first v5 release is the next MINOR, so `golden/v5.releases.json` registers
-no release yet and has no floor. No published v5 decoder exists yet, so cross-release gates stay
+capability `durablePi` to `durableLane`. 0.32.0 is the last v4 release and
+0.33.0 is the first v5 release, so `golden/v5.releases.json` registers 0.33.0
+and has no floor. No published v5 decoder exists yet, so cross-release gates stay
 unproven until one is pinned.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
@@ -41,7 +41,7 @@ Retired v3 evidence. `golden/v3.envelopes.ndjson`, `golden/v3.http.ndjson` and
 whole-file hash. The current decoder rejects every v3 envelope.
 
 Retired v4 evidence. `golden/v4.envelopes.ndjson`, `golden/v4.http.ndjson` and
-`golden/v4.releases.json` (0.31.0 through 0.33.0) are read-only and pinned by
+`golden/v4.releases.json` (0.31.0 and 0.32.0) are read-only and pinned by
 whole-file hash. The current decoder rejects every v4 envelope.
 
 v5 evidence. `golden/v5.envelopes.ndjson` and `golden/v5.http.ndjson` are
@@ -54,8 +54,7 @@ line counts and SHA-256 prefixes; each entry pins both `envelopes` and `http`.
 Prereleases are not registered and are outside the guarantee.
 
 Rejection oracle. The `devDependencies` alias `byok-protocol-previous` in
-`packages/protocol/package.json` pins 0.32.0, a published v4 release; move it
-to 0.33.0, the last v4 release, once that is published. The suite uses it to
+`packages/protocol/package.json` pins 0.32.0, the last v4 release. The suite uses it to
 prove that a v4 decoder rejects every v5 corpus line and a v5 `conn.hello`, and
 that it derives the same `task.offer` gates as the current table for every v4
 offer line it shipped. Aliases are registry tarball URLs
