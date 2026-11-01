@@ -2013,6 +2013,14 @@ approval reports are refused with `task_settled_by_cloud`, a pending request
 can no longer be decided, both expire ten minutes after that instant, and no
 read, replay or later terminal renews them (#1113 A3).
 
+A task events wake hints that a task's state, activity log or approval
+timeline changed, after the commit and with no content: it names only the
+tenant and task, and a reader re-reads the sources. In-memory and embedded
+SQLite stores signal their own `taskEventsWake`; Postgres signals through
+migration 0036's triggers to `createPostgresTaskEventsWake`, so commits on any
+instance wake readers on every instance. A reader no hint reaches re-reads
+within `fallbackMs` (5 seconds by default) (#1113 A4).
+
 Unknown event types retain their original event index and render as neutral
 placeholders. Known but malformed variants fail closed. Each `progress.text`
 remains an ordered fragment. The fold may group adjacent fragments for view

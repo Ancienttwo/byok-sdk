@@ -1,5 +1,8 @@
 import { assertCollectExpiredInput, InMemoryStorageLedger, type ObjectCollectExpiredInput, CollectExpiredFailure } from '@byok-sdk/core';
-import { REQUEST_RECEIPT_PREFIXES, createInMemoryBlobBytes, type ReceiptCollectExpiredInput } from '@byok-sdk/cloud';
+import {
+  REQUEST_RECEIPT_PREFIXES, createInMemoryBlobBytes, createInProcessTaskEventsWake,
+  type ReceiptCollectExpiredInput, type TaskEventsWake,
+} from '@byok-sdk/cloud';
 import {
   ByokCoreError,
   MailboxStreamClosedError,
@@ -262,13 +265,36 @@ export interface SqliteEmbeddedStores {
   readonly blobContentProxy: BlobContentProxy;
   /** Prunes the used device-proof request ids that `cloud.proofReceipts` records. */
   readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
+  /**
+   * Hints after each commit that changed a task's state, activity log or
+   * approval timeline (#1113 A4). The file has one owner process, so this
+   * in-process wake hears every writer.
+   */
+  readonly taskEventsWake: TaskEventsWake;
   wakes(tenant: TenantId): WakeStore;
   close(): Promise<void>;
 }
 
+const TASK_CHANGED_FUNCTION = 'byok_task_changed';
+
+/**
+ * Connection-local triggers, never written to the file: every write to a
+ * task's state, activity head or approval timeline names the task, and the
+ * coordinator reports it after the commit (#1113 A4).
+ */
+const TASK_EVENTS_WAKE_TRIGGERS = ['task_attempt', 'activity_log_head', 'approval_timeline_tail'].flatMap((table) =>
+  (['INSERT', 'UPDATE', 'DELETE'] as const).map((event) => {
+    const row = event === 'DELETE' ? 'OLD' : 'NEW';
+    return `CREATE TEMP TRIGGER byok_task_events_wake_${table}_${event.toLowerCase()} AFTER ${event} ON main.${table}
+      BEGIN SELECT ${TASK_CHANGED_FUNCTION}(${row}.tenant_id, ${row}.task_id); END;`;
+  })).join('\n');
+
 /** One serialized owner for the synchronous SQLite handle and every transaction on it. */
 class SqliteCoordinator {
   readonly db: DatabaseSync;
+  readonly taskEventsWake = createInProcessTaskEventsWake();
+  /** Tasks the open transaction changed, reported once it commits. */
+  readonly #changedTasks = new Map<string, readonly [TenantId, string]>();
   #tail: Promise<void> = Promise.resolve();
   #closing = false;
   #closePromise: Promise<void> | undefined;
@@ -407,6 +433,11 @@ class SqliteCoordinator {
         this.db.exec('ROLLBACK');
         throw error;
       }
+      this.db.function(TASK_CHANGED_FUNCTION, (tenant, taskId) => {
+        this.#changedTasks.set(JSON.stringify([tenant, taskId]), [tenant as TenantId, taskId as string]);
+        return null;
+      });
+      this.db.exec(TASK_EVENTS_WAKE_TRIGGERS);
       secureSqliteFilePermissions(path);
     } catch (error) {
       closeSqliteDatabaseAfterInitializationFailure(
@@ -418,9 +449,15 @@ class SqliteCoordinator {
 
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
     if (this.#closing) return Promise.reject(new Error('SQLite embedded composition is closed'));
-    const result = this.#tail.then(() => operation(this.db));
+    // A rollback has already dropped its changes, so only committed ones are reported.
+    const result = this.#tail.then(() => operation(this.db)).finally(() => this.#reportChangedTasks());
     this.#tail = result.then(() => undefined, () => undefined);
     return result;
+  }
+
+  #reportChangedTasks(): void {
+    for (const [tenant, taskId] of this.#changedTasks.values()) this.taskEventsWake.changed(tenant, taskId);
+    this.#changedTasks.clear();
   }
 
   transaction<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
@@ -431,6 +468,7 @@ class SqliteCoordinator {
         db.exec('COMMIT');
         return result;
       } catch (error) {
+        this.#changedTasks.clear();
         try {
           db.exec('ROLLBACK');
         } catch {
@@ -446,7 +484,7 @@ class SqliteCoordinator {
       db.exec('BEGIN IMMEDIATE');
       let result: T;
       try { result = body(db); db.exec('COMMIT'); }
-      catch (cause) { try { db.exec('ROLLBACK'); } catch {} throw cause; }
+      catch (cause) { this.#changedTasks.clear(); try { db.exec('ROLLBACK'); } catch {} throw cause; }
       // No await splits the committed SQL state from its process-local ledger.
       afterCommit(result);
       return result;
@@ -1588,6 +1626,7 @@ export function createSqliteEmbeddedStores(
     cloud,
     blobContentProxy,
     proofReceiptAuthority: new SqliteProofReceiptRetentionAuthority(coordinator),
+    taskEventsWake: coordinator.taskEventsWake,
     wakes: tenant => new SqliteWakeStore(coordinator, tenant),
     close: () => coordinator.close(),
   };

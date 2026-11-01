@@ -3301,8 +3301,9 @@ export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } fr
 export type { ReceiptRetentionClass } from './receipt-retention';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
-export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
-export type { InProcessMailboxWakeOptions } from './stores/in-memory/mailbox-wake';
+export type { TaskEventsWake, TaskEventsWakeSubscription } from './task-events-wake';
+export { createInProcessMailboxWake, createInProcessTaskEventsWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS, DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS, } from './stores/in-memory/mailbox-wake';
+export type { InProcessMailboxWakeOptions, InProcessTaskEventsWakeOptions } from './stores/in-memory/mailbox-wake';
 export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft';
 // ==== @byok-sdk/cloud dist/input-preparations.d.ts ====
 /**
@@ -3614,6 +3615,7 @@ export declare class SteerRejectedError extends Error {
 // ==== @byok-sdk/cloud dist/stores/in-memory/activity.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
 import { type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail } from '../../activity';
+import { type TaskChanged } from './task-change-map';
 /** Remove content, retaining a fence against resurrection and a cursor gap. */
 export declare function deleteActivityTail(store: InMemoryActivityStore, tenant: TenantId, taskId: string): number;
 /**
@@ -3624,7 +3626,7 @@ export declare function closeActivityLog(store: InMemoryActivityStore, tenant: T
 export declare class InMemoryActivityStore implements ActivityStore {
     #private;
     private readonly clock;
-    constructor(clock: Clock);
+    constructor(clock: Clock, changed?: TaskChanged);
     append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
     settle(tenant: TenantId, taskId: string, terminalAt: string): Promise<ActivityTail>;
     read(tenant: TenantId, taskId: string, options?: ActivityReadOptions): Promise<ActivityTail | undefined>;
@@ -3691,6 +3693,7 @@ export declare class InMemoryAgentMessageDraftStore implements AgentMessageDraft
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '../../approval-timeline';
+import { type TaskChanged } from './task-change-map';
 /**
  * Removes the task's observations for the Host task archive (#1120) and keeps
  * the closed tail as a fence, so no later observation recreates it. Returns
@@ -3705,7 +3708,7 @@ export declare function closeApprovalTimeline(store: InMemoryApprovalTimelineSto
 export declare class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
     #private;
     private readonly clock;
-    constructor(clock: Clock);
+    constructor(clock: Clock, changed?: TaskChanged);
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
     resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
     read(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
@@ -3954,6 +3957,7 @@ import type { ProofReceiptRetentionAuthority } from '../../maintenance';
 import type { TaskArchiveStore } from '../../task-archive';
 import type { BlobContentProxy, CloudStores } from '../ports';
 import { type InMemoryBlobBytes } from './blobs';
+import type { TaskEventsWake } from '../../task-events-wake';
 export { AllowAllRateLimiter } from './rate-limiter';
 export { BLOB_URL_TTL_MS, InMemoryBlobContentProxy, InMemoryCloudBlobStore, createInMemoryBlobs, createInMemoryBlobBytes, InMemoryBlobBytes, } from './blobs';
 export type { InMemoryBlobs, InMemoryBlobStoreOptions } from './blobs';
@@ -3982,6 +3986,8 @@ export interface InMemoryCloudComposition {
     readonly blobContentProxy: BlobContentProxy;
     /** The owner of the used proof `requestId`s in `stores.proofReceipts`, for `proofReceiptRetention`. */
     readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
+    /** Hints after every write to a task's state, activity log or approval timeline in these stores (#1113 A4). */
+    readonly taskEventsWake: TaskEventsWake;
 }
 /** Deletes a task's ephemeral rows from the in-memory stores that `createInMemoryCloudStores` built; each returns the rows removed. */
 export interface InMemoryEphemeralTaskRows {
@@ -4000,13 +4006,26 @@ export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCry
 taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
 // ==== @byok-sdk/cloud dist/stores/in-memory/mailbox-wake.d.ts ====
 import type { MailboxWake } from '../../mailbox-wake';
+import type { TaskEventsWake } from '../../task-events-wake';
 export declare const DEFAULT_MAILBOX_WAKE_FALLBACK_MS = 5000;
+/** How long a task event reader no hint reached waits before it re-reads (#1113 A4). */
+export declare const DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS = 5000;
 export interface InProcessMailboxWakeOptions {
     /** Bounds delivery latency when all hints are lost. Defaults to 5 seconds. */
     readonly fallbackMs?: number;
 }
+export interface InProcessTaskEventsWakeOptions {
+    /** Bounds read latency when all hints are lost. Defaults to 5 seconds. */
+    readonly fallbackMs?: number;
+}
 /** Request-local subscriptions behind a port; losing the table only delays reads. */
 export declare function createInProcessMailboxWake(options?: InProcessMailboxWakeOptions): MailboxWake;
+/**
+ * Hints for task event readers in this process. It covers only writers in the
+ * same process: a composition whose writers span processes needs a transport
+ * that observes their commits, such as the Postgres task events wake.
+ */
+export declare function createInProcessTaskEventsWake(options?: InProcessTaskEventsWakeOptions): TaskEventsWake;
 // ==== @byok-sdk/cloud dist/stores/in-memory/nonces.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
@@ -4139,6 +4158,7 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
  * unfalsifiable.
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
+import { type TaskChanged } from './task-change-map';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
 interface StoredAgentMessageAdmission extends AgentMessageAdmission {
@@ -4212,8 +4232,11 @@ export declare class InMemoryTaskAttemptState {
     readonly messageAdmissions: Map<string, StoredAgentMessageAdmission>;
     /** `archive_settled_at` of archived tasks (#1120), by tenant/task key. */
     readonly archiveSettled: Map<string, string>;
-    /** `outputClosed` runs synchronously in the write that first closes a task's output. */
-    constructor(clock: Clock, outputClosed?: (tenant: TenantId, taskId: string, at: string) => void);
+    /**
+     * `outputClosed` runs synchronously in the write that first closes a task's
+     * output; `changed` after every attempt write.
+     */
+    constructor(clock: Clock, outputClosed?: (tenant: TenantId, taskId: string, at: string) => void, changed?: TaskChanged);
     now(): string;
     /**
      * Serialize every state-changing operation for one tenant/task key. It also
@@ -4241,6 +4264,22 @@ export declare class InMemoryTaskCancellationStore implements TaskCancellationSt
     constructor(state: InMemoryTaskAttemptState, mailbox: MailboxStore, devices: Pick<DeviceDirectory, 'get'>);
     request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
     abandon(tenant: TenantId, input: TaskAbandonRequest): Promise<TaskAttempt | undefined>;
+}
+// ==== @byok-sdk/cloud dist/stores/in-memory/task-change-map.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+/** Called after a write to a task's in-memory state, in the writer's synchronous step. */
+export type TaskChanged = (tenant: TenantId, taskId: string) => void;
+/**
+ * A per-task state map that reports each write, so a task events wake hears
+ * every writer of the map, module helpers included (#1113 A4).
+ */
+export declare class TaskChangeMap<V> extends Map<string, V> {
+    #private;
+    constructor(identify: (value: V) => {
+        readonly tenantId: TenantId;
+        readonly taskId: string;
+    }, changed: TaskChanged | undefined);
+    set(key: string, value: V): this;
 }
 // ==== @byok-sdk/cloud dist/stores/ports-contract.d.ts ====
 /**
@@ -5163,6 +5202,25 @@ export declare function archiveTerminalTasks(ports: {
 }, tenant: TenantId, input: TaskArchiveListInput & {
     readonly now: string;
 }): Promise<TaskArchiveStepCounts>;
+// ==== @byok-sdk/cloud dist/task-events-wake.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+/**
+ * A lossy hint that a task's activity log, approval timeline or state may have
+ * changed (#1113 A4). It names only the tenant and task, never content, and it
+ * is never a cursor or event authority: a woken reader re-reads those sources.
+ * One hint can cause an extra read, never a new event.
+ */
+export interface TaskEventsWake {
+    /** Called after a commit that changed the task. Synchronous and non-throwing. */
+    changed(tenant: TenantId, taskId: string): void;
+    /** Subscribe before reading so a commit between the read and next() is retained. */
+    subscribe(tenant: TenantId, taskId: string, signal: AbortSignal): TaskEventsWakeSubscription;
+}
+export interface TaskEventsWakeSubscription {
+    /** Resolves on a hint, the fallback interval, maxWaitMs, abort, or close. */
+    next(maxWaitMs: number): Promise<void>;
+    close(): void;
+}
 // ==== @byok-sdk/cloud dist/task-redaction.d.ts ====
 /**
  * Scoped row-delete for plaintext task content (#654 E5a).

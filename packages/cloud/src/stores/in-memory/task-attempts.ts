@@ -30,6 +30,7 @@ import {
   type TaskAttemptStatus,
   type TaskAttemptStore,
 } from '../ports';
+import { TaskChangeMap, type TaskChanged } from './task-change-map';
 
 function sameAgentRef(left: AgentRef | undefined, right: AgentRef | undefined): boolean {
   return left?.agentId === right?.agentId && left?.profileRevision === right?.profileRevision;
@@ -330,18 +331,18 @@ function outputClosedAt(attempt: TaskAttempt): string | undefined {
  * task's output also closes its logs, in the same synchronous step: the
  * in-memory stand-in for the SQL stores' trigger (#1113 A3).
  */
-class AttemptMap extends Map<string, TaskAttempt> {
+class AttemptMap extends TaskChangeMap<TaskAttempt> {
   readonly #closed: ((tenant: TenantId, taskId: string, at: string) => void) | undefined;
-  constructor(closed: ((tenant: TenantId, taskId: string, at: string) => void) | undefined) {
-    super();
+  constructor(closed: ((tenant: TenantId, taskId: string, at: string) => void) | undefined, changed: TaskChanged | undefined) {
+    super((attempt) => attempt, changed);
     this.#closed = closed;
   }
   override set(key: string, attempt: TaskAttempt): this {
     const before = this.get(key);
-    super.set(key, attempt);
     const at = outputClosedAt(attempt);
+    // The close lands before the change is reported, so a woken reader sees it.
     if (at !== undefined && (before === undefined || outputClosedAt(before) === undefined)) this.#closed?.(attempt.tenantId, attempt.taskId, at);
-    return this;
+    return super.set(key, attempt);
   }
 }
 
@@ -356,10 +357,13 @@ export class InMemoryTaskAttemptState {
   /** Settles when the exclusive section in progress (or queued last) ends. */
   #exclusiveTail: Promise<void> = Promise.resolve();
 
-  /** `outputClosed` runs synchronously in the write that first closes a task's output. */
-  constructor(clock: Clock, outputClosed?: (tenant: TenantId, taskId: string, at: string) => void) {
+  /**
+   * `outputClosed` runs synchronously in the write that first closes a task's
+   * output; `changed` after every attempt write.
+   */
+  constructor(clock: Clock, outputClosed?: (tenant: TenantId, taskId: string, at: string) => void, changed?: TaskChanged) {
     this.#clock = clock;
-    this.attempts = new AttemptMap(outputClosed);
+    this.attempts = new AttemptMap(outputClosed, changed);
   }
 
   now(): string {

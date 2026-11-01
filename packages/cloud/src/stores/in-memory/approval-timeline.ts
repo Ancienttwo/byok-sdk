@@ -17,6 +17,7 @@ import {
   type ApprovalTimelineStore,
   type ApprovalTimelineTail,
 } from '../../approval-timeline';
+import { TaskChangeMap, type TaskChanged } from './task-change-map';
 
 const TAILS = new WeakMap<InMemoryApprovalTimelineStore, Map<string, ApprovalTimelineTail>>();
 
@@ -51,9 +52,10 @@ export function closeApprovalTimeline(store: InMemoryApprovalTimelineStore, tena
 }
 
 export class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
-  readonly #tails = new Map<string, ApprovalTimelineTail>();
+  readonly #tails: Map<string, ApprovalTimelineTail>;
 
-  constructor(private readonly clock: Clock) {
+  constructor(private readonly clock: Clock, changed?: TaskChanged) {
+    this.#tails = new TaskChangeMap<ApprovalTimelineTail>((tail) => ({ tenantId: tail.tenantId, taskId: tail.taskId }), changed);
     TAILS.set(this, this.#tails);
   }
 

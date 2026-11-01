@@ -5,6 +5,7 @@ import {
   ACTIVITY_TERMINAL_TTL_MS, DEFAULT_ACTIVITY_CAPACITY, MAX_ACTIVITY_BYTES,
   type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail,
 } from '../../activity';
+import { TaskChangeMap, type TaskChanged } from './task-change-map';
 
 interface TaskLog { tail: ActivityTail; ttlMs: number; fences: Map<string, string>; removed: boolean }
 const LOGS = new WeakMap<InMemoryActivityStore, Map<string, TaskLog>>();
@@ -46,8 +47,11 @@ function newLog(tenant: TenantId, taskId: string): TaskLog {
 }
 
 export class InMemoryActivityStore implements ActivityStore {
-  readonly #logs = new Map<string, TaskLog>();
-  constructor(private readonly clock: Clock) { LOGS.set(this, this.#logs); }
+  readonly #logs: Map<string, TaskLog>;
+  constructor(private readonly clock: Clock, changed?: TaskChanged) {
+    this.#logs = new TaskChangeMap<TaskLog>((log) => log.tail, changed);
+    LOGS.set(this, this.#logs);
+  }
 
   async append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail> {
     const capacity = validateActivityAppend(input);

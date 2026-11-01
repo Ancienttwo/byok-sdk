@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "791e8c34c2721d802c26b7bbb7e30547920d1e829ca20d80040337726eea7f81"
+    "snapshotSha256": "7f10117306f53bc8868cc4fcf04606c9910b6f8cce3eb84a5b42301704fda48e"
   },
   "configFields": {
     "status": "tracked",
@@ -72,6 +72,24 @@
         "export:@byok-sdk/cloud#validateApprovalTimelineResolve",
         "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore"
+      ]
+    },
+    {
+      "id": "task-events-wake",
+      "impact": "additive",
+      "summary": "A content-free task events wake (#1113 A4): TaskEventsWake hints that a task's state, activity log or approval timeline changed, naming only the tenant and task, so a reader re-reads those sources instead of polling. createInMemoryCloudStores and the embedded SQLite composition expose taskEventsWake, which every write to those stores signals after it commits; a rollback signals nothing. createPostgresTaskEventsWake listens on a session-mode DSN for the triggers migration 0036 adds on task, activity_log_head and approval_timeline_tail, so commits on any instance, maintenance included, wake readers on every instance. A lost hint delays a reader by at most fallbackMs (DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS, 5 seconds) and a listener reconnect wakes every subscription. createInProcessTaskEventsWake covers writers in one process only. The Postgres listener options are now the shared PostgresWakeOptions, which PostgresMailboxWakeOptions names unchanged.",
+      "migration": "docs/migrations/1113-durable-activity-log.md#task-events-wake-a4",
+      "items": [
+        "export:@byok-sdk/cloud#DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS",
+        "export:@byok-sdk/cloud#InProcessTaskEventsWakeOptions",
+        "export:@byok-sdk/cloud#TaskEventsWake",
+        "export:@byok-sdk/cloud#TaskEventsWakeSubscription",
+        "export:@byok-sdk/cloud#createInProcessTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake"
       ]
     },
     {
@@ -439,7 +457,7 @@
     {
       "id": "dead-letter-retention",
       "impact": "breaking",
-      "summary": "Automatic maintenance now reaps mailbox dead letters once mailboxDeadLetterRetentionMs (default 30 days) has passed after they expired, but keeps each device's highest-seq dead letter as the recoverableFrom floor. RetentionPolicy gains mailboxDeadLetterRetentionMs, so a Host that passes a complete policy must add it. A custom MailboxStore receives the new required reapDeadLettersBefore input in collectExpired and must reap the same way. discardDeadLetter refuses the floor row with cleanup_dead_letter_is_recovery_floor. Migration 0031 adds the tenant_retention_policy column with the 30-day default and replaces outbox_tenant_bytes_idx with a pending-only partial index. Migration 0034 replaces activity_tail with an empty durable activity log in place: stop old writers/readers, explicitly accept loss of bounded pre-cutover activity history, reject old cursors with a gap, and drop the old table; no row conversion or dual read. TENANT_ERASURE_TABLES replaces activity_tail with activity_log_entry/activity_log_head, affecting Hosts that iterate the table list. Migration 0035 adds a trigger on task that closes a task's activity log and approval timeline in the same transaction as its first terminal or accepted Host cancellation (#1113 A3): later task.progress, task.artifact and task.await_approval are refused with task_settled_by_cloud, also on a redacted or archived task, a request pending at the close can no longer be decided, and both expire ten minutes after that instant without renewal. An open approval timeline no longer idle-expires: 0035 drops the idle deadline of every open row and adds approval_timeline_tail.terminal_at with a constraint that only a closed row has expires_at. 0035 closes already-closed tasks at their original deadline. Deploy 0035 and the code together: each fails against the other's approval schema.",
+      "summary": "Automatic maintenance now reaps mailbox dead letters once mailboxDeadLetterRetentionMs (default 30 days) has passed after they expired, but keeps each device's highest-seq dead letter as the recoverableFrom floor. RetentionPolicy gains mailboxDeadLetterRetentionMs, so a Host that passes a complete policy must add it. A custom MailboxStore receives the new required reapDeadLettersBefore input in collectExpired and must reap the same way. discardDeadLetter refuses the floor row with cleanup_dead_letter_is_recovery_floor. Migration 0031 adds the tenant_retention_policy column with the 30-day default and replaces outbox_tenant_bytes_idx with a pending-only partial index. Migration 0034 replaces activity_tail with an empty durable activity log in place: stop old writers/readers, explicitly accept loss of bounded pre-cutover activity history, reject old cursors with a gap, and drop the old table; no row conversion or dual read. TENANT_ERASURE_TABLES replaces activity_tail with activity_log_entry/activity_log_head, affecting Hosts that iterate the table list. Migration 0035 adds a trigger on task that closes a task's activity log and approval timeline in the same transaction as its first terminal or accepted Host cancellation (#1113 A3): later task.progress, task.artifact and task.await_approval are refused with task_settled_by_cloud, also on a redacted or archived task, a request pending at the close can no longer be decided, and both expire ten minutes after that instant without renewal. An open approval timeline no longer idle-expires: 0035 drops the idle deadline of every open row and adds approval_timeline_tail.terminal_at with a constraint that only a closed row has expires_at. 0035 closes already-closed tasks at their original deadline. Deploy 0035 and the code together: each fails against the other's approval schema. Migration 0036 adds content-free task events wake triggers on task, activity_log_head and approval_timeline_tail (#1113 A4); either deployment order is safe, and code before 0036 reads at its fallback interval.",
       "migration": "deploy/runbooks/activity-tail-cutover.md#one-shot-cutover",
       "acceptance": "accept",
       "items": [
@@ -2422,6 +2440,11 @@
       "entry": "activity-log-read-contract"
     },
     {
+      "item": "export:@byok-sdk/cloud#DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
       "item": "export:@byok-sdk/cloud#DeviceRetiredError",
       "change": "added",
       "entry": "retired-device-stream-closed"
@@ -2465,6 +2488,11 @@
       "item": "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
       "change": "changed",
       "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InProcessTaskEventsWakeOptions",
+      "change": "added",
+      "entry": "task-events-wake"
     },
     {
       "item": "export:@byok-sdk/cloud#InboundOutcome",
@@ -2602,6 +2630,16 @@
       "entry": "device-retirement-settles-tasks"
     },
     {
+      "item": "export:@byok-sdk/cloud#TaskEventsWake",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskEventsWakeSubscription",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
       "item": "export:@byok-sdk/cloud#TenantBoundActivity",
       "change": "changed",
       "entry": "activity-log-read-contract"
@@ -2660,6 +2698,11 @@
       "item": "export:@byok-sdk/cloud#createInMemoryCloudStores",
       "change": "changed",
       "entry": "terminal-task-archive"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#createInProcessTaskEventsWake",
+      "change": "added",
+      "entry": "task-events-wake"
     },
     {
       "item": "export:@byok-sdk/cloud#parseTimelineEvents",
@@ -2747,9 +2790,34 @@
       "entry": "device-retirement-settles-tasks"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
       "change": "changed",
       "entry": "dead-letter-retention"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
+      "change": "added",
+      "entry": "task-events-wake"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#CLOUD_CLEANUP_ERROR_CODES",
@@ -3791,7 +3859,7 @@
       "item": "store:cloud-dataplane-postgres",
       "change": "changed",
       "before": "migrations=30 last=0030_task_attempt_phase_times.sql sha256=54b7d0730b8041fe",
-      "after": "migrations=35 last=0035_task_output_closure.sql sha256=d423be13e488d6f1",
+      "after": "migrations=36 last=0036_task_events_wake.sql sha256=a19ee4a174cd329c",
       "entry": "dead-letter-retention"
     },
     {

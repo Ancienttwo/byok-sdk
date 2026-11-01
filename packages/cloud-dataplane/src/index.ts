@@ -92,3 +92,6 @@ export type {
 // Resident Node session listener; deliberately excluded from ./runtime.
 export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake';
 export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
+export { createPostgresTaskEventsWake, TaskEventsWakeProbeMissedError } from './task-events-wake';
+export type { PostgresTaskEventsWake, PostgresTaskEventsWakeOptions } from './task-events-wake';
+export type { PostgresWakeOptions } from './postgres-wake';

@@ -182,3 +182,51 @@ Postgres approval adapter reads the `terminal_at` column 0035 adds, and an
 older adapter's idle deadline on an open row violates 0035's
 `approval_timeline_tail_closed` constraint, so each fails against the other's
 schema.
+
+## Task events wake (A4)
+
+A `TaskEventsWake` tells a reader that a task's state, activity log or
+approval timeline may have changed. It names only the tenant and task, never
+content, and it is not a cursor: a woken reader re-reads those sources, and a
+hint can cause an extra read, never a new event. Subscribe before the first
+read, so a commit between the read and `next()` is kept.
+
+Which wake a composition uses:
+- **In-memory:** `createInMemoryCloudStores(...).taskEventsWake`. Every write to
+  the task, activity and approval maps signals it, module helpers included.
+- **Embedded SQLite:** `SqliteEmbeddedStores.taskEventsWake`. Connection-local
+  temp triggers on `task_attempt`, `activity_log_head` and
+  `approval_timeline_tail` collect the tasks each transaction changed; they are
+  reported after the commit and dropped on rollback. Nothing is written to the
+  file. The file has one owner process, so this in-process wake hears every
+  writer.
+- **Postgres:** `createPostgresTaskEventsWake({ connectionString })`. Migration
+  0036 adds triggers on `task`, `activity_log_head` and
+  `approval_timeline_tail` that `pg_notify` the channel `byok_task_events_wake`
+  with `md5(tenant || '\n' || task)` at commit. Every writer signals through
+  them: any instance, any process, maintenance included. There is no
+  application NOTIFY.
+
+`createInProcessTaskEventsWake` covers writers in one process only. Do not
+hand it to readers of a store whose writers run elsewhere.
+
+The Postgres wake keeps one resident listener per process, apart from the
+request pool, and shares the mailbox wake's listener machinery:
+- It needs a session-mode DSN. Hyperdrive and transaction-mode poolers cannot
+  carry LISTEN, and the self-NOTIFY probe reports that through `onError` as
+  `TaskEventsWakeProbeMissedError`.
+- A periodic probe retires a half-open connection. The listener reconnects
+  with backoff, and a reconnect wakes every subscription so its reader rescans.
+- `close()` is the Host's, like `pool.end()`, and closes every subscription.
+  Aborting a subscription's signal or calling its `close()` releases it.
+
+Liveness bound: a reader no hint reaches re-reads within `fallbackMs`
+(`DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS`, 5 seconds). The bound covers a lost
+notification, a listener outage and code deployed before 0036.
+
+Each commit that notifies takes PostgreSQL's notification queue lock, so at
+high write rates these commits serialize on it, alongside the mailbox wake's.
+That lock is the first thing to watch under load.
+
+Upgrade: 0036 is additive, and either deployment order is safe. Before it
+runs, the Postgres wake hears nothing and readers fall back to `fallbackMs`.
