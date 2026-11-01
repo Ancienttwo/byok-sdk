@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { isSqliteAvailable } from '../sqlite-support';
-import { rewindToV7 } from './sqlite-v7-fixture';
+import { rewindToV7 } from './test-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;

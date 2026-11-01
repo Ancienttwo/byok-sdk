@@ -11,7 +11,7 @@ import { isSqliteAvailable, SqliteSchemaError } from '../sqlite-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { ACTIVITY_LOG_SCHEMA } from '../stores/sqlite/activity';
 import { APPROVAL_TIMELINE_V7_REBUILD } from '../stores/sqlite/approval-timeline';
-import { rewindToV7 } from './sqlite-v7-fixture';
+import { rewindToV7 } from './test-support';
 
 /**
  * The in-place SQLite upgrades: schema 6 to 7 (#1160) over the store the
