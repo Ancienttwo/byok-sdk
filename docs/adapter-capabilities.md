@@ -21,8 +21,7 @@ is unknown, not `no`.
 [runtime contract suite](runtime-contract.md) checks: it refuses to skip a case
 the descriptor declares. `no` means the SDK makes no such guarantee; the
 [isolation section](#user-level-configuration-and-session-isolation) says what
-the runtime does instead. `auto` never applies to a prepared offer, whatever the
-`toolAuthorizationAuto` row says: the daemon declines it before claim.
+the runtime does instead.
 
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durableLane`) |
@@ -33,7 +32,7 @@ the runtime does instead. `auto` never applies to a prepared offer, whatever the
 | Display-only message draft | `messageDraft` | yes | yes | no | yes | yes | yes | yes |
 | Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes |
 | Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no |
-| Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | no | yes | no |
+| Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | no | yes | yes |
 | Prepared lane | `preparedLane` | no | no | no | no | no | yes | no |
 | Durable worker lane | `durableLane` | no | no | no | no | no | no | yes |
 | Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | yes | yes | yes | no |
@@ -57,9 +56,10 @@ second registry.
   Codex `item/agentMessage/delta`, Grok ACP `text_delta` and Pi `text_delta`
   progress.
 - Tool authorization `auto`: Claude gates through the SDK `PreToolUse`
-  callback, confirmed by `hooks_applied`; Pi gates on the ordinary RPC lane and
-  its native subagents. Every other case, Grok's partial hosted-terminal
-  coverage included, is declined before claim.
+  callback, confirmed by `hooks_applied`; Pi gates on the ordinary RPC lane
+  with its native subagents, on the prepared lane and on the durable lane.
+  Every other case, Grok's partial hosted-terminal coverage included, is
+  declined before claim.
 - No bundled adapter offers native session fork or rollback (the SDK `Session`
   has no such operation), the legacy boolean interactive approval, native
   approval or structured-question replies under default construction, or
@@ -97,9 +97,9 @@ classifier in both modes: Always Ask upgrades a call to approval (`auto`) or a
 reminder (`all`); Allow without Asking suppresses both, except for the
 non-overridable credential/login-persistence sensitive-path floor. The resolver
 accepts either a mode or `{ mode, rules }`, validates/copies/freezes it before
-claim and re-resolves it on a resume offer. Pi ordinary RPC/native children and
-Claude use their existing gates; Codex, Grok, Hermes, dsh and Pi
-prepared/durable still decline `auto` before claim. Rules and audit metadata remain local; the
+claim and re-resolves it on a resume offer. Pi (ordinary RPC with native
+children, prepared and durable) and Claude use their existing gates; Codex,
+Grok, Hermes and dsh still decline `auto` before claim. Rules and audit metadata remain local; the
 server wire protocol, Pi launch v8 and digest format are unchanged. No reviewer
 model, natural-language matching, deny rule or new dependency is introduced.
 The shared matcher has bounded wildcard syntax and identical Node/Bun results;
@@ -1012,8 +1012,7 @@ built-in runtime name does not inherit them.
   A scoped offer on any other lane, or on an adapter without the declaration,
   declines before claim with `file_scope_unsupported`. Memory-reader offers
   and platforms other than darwin and linux still decline. `PiAdapter`
-  declares `['rpc']`, also with `durableLane: true`, where the durable lane
-  stays undeclared.
+  declares `['rpc', 'prepared']`, and `['durable']` with `durableLane: true`.
 - `RuntimeAdapterDescriptor.providerProfileBinding: true`: the adapter runs an
   exact `byok-profile` dispatch selection. The daemon advertises
   `provider-profile-binding` only when such an adapter also opts into dispatch
