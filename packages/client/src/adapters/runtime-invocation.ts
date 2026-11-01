@@ -5,6 +5,8 @@ import path from 'node:path';
 export interface RuntimeInvocation {
   readonly command: string;
   readonly args: readonly string[];
+  /** The runtime file this resolution chose: the found `.exe`/`.cmd` on win32, else `command` as given. */
+  readonly executable: string;
 }
 
 export interface RuntimeInvocationHost {
@@ -45,19 +47,19 @@ const BATCH = new Set(['.bat', '.cmd']);
  * Other platforms are unchanged.
  */
 export function resolveRuntimeInvocation(command: string, host: RuntimeInvocationHost): RuntimeInvocation {
-  if (host.platform !== 'win32') return { command, args: [] };
+  if (host.platform !== 'win32') return { command, args: [], executable: command };
   const file = findWindowsCommand(command, host, runnableExtensions(host.env));
   if (file === undefined) throw spawnError('ENOENT', 'the runtime command was not found');
   const extension = path.win32.extname(file).toLowerCase();
-  if (NATIVE.has(extension)) return { command: file, args: [] };
-  if (!BATCH.has(extension)) return { command, args: [] };
+  if (NATIVE.has(extension)) return { command: file, args: [], executable: file };
+  if (!BATCH.has(extension)) return { command, args: [], executable: command };
   const entry = extension === '.cmd' ? npmNodeShimEntry(readShim(host, file)) : undefined;
   if (entry === undefined) throw spawnError('ENOEXEC', 'the runtime command is a batch file that is not an npm node shim; only cmd.exe can run it');
   const shimDir = path.win32.dirname(file);
   const localNode = path.win32.join(shimDir, 'node.exe');
   const node = host.isFile(localNode) ? localNode : findWindowsCommand('node', host, ['.com', '.exe']);
   if (node === undefined) throw spawnError('ENOENT', 'node was not found for the runtime command npm shim');
-  return { command: node, args: [path.win32.join(shimDir, entry)] };
+  return { command: node, args: [path.win32.join(shimDir, entry)], executable: file };
 }
 
 function envValue(env: RuntimeInvocationHost['env'], name: string): string | undefined {

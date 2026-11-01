@@ -40,6 +40,7 @@ import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
 import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities';
 import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
@@ -169,7 +170,8 @@ export class CodexAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const { env } = await this.runtimeEnvironment();
-      const { command, args } = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command, runtimeInvocationHost(env));
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin);
+      const { command, args, executable } = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env, args);
       if (version.kind !== 'available') return version;
       const text = version.stdout.trim() || version.stderr.trim();
@@ -196,6 +198,7 @@ export class CodexAdapter implements RuntimeAdapter {
         kind: 'available',
         version: text,
         authPresent,
+        ...runtimeExecutableFields(resolved, executable),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, codexVersionToken(text)),
       };
     } catch (error) {

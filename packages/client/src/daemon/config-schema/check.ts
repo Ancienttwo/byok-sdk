@@ -1,5 +1,5 @@
 import type { LocalAgentReleaseIdentity } from '../../release-identity';
-import { FileScopePolicyError } from '../../tool-authorization';
+import { DaemonConfigInvalidError } from './errors';
 import type { RuntimeAdapter } from '../../types';
 import { AgentEgressPolicyError, resolveAgentEgressPolicy } from '../agent-egress-policy';
 import { resolveDaemonConfig } from '../create-daemon/config';
@@ -76,10 +76,8 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
         severity: 'error', code: 'invalid_value', path: ['agentEgress', 'policy', ...path].join('.'), message,
       }))] };
     }
+    if (error instanceof DaemonConfigInvalidError) return { ok: false, issues: [...issues, ...error.issues] };
     const message = error instanceof Error ? error.message : String(error);
-    if (error instanceof FileScopePolicyError) {
-      return { ok: false, issues: [...issues, { severity: 'error', code: error.code, path: 'toolAuthorization.fileScope', message }] };
-    }
     const path = error instanceof ScratchRootPathError ? 'storage.scratchRoot' : '';
     return { ok: false, issues: [...issues, { severity: 'error', code: 'invalid_value', path, message }] };
   }

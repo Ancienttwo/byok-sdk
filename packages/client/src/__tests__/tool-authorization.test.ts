@@ -251,6 +251,31 @@ describe('deterministic tool rules in the single classifier', () => {
     }
   });
 
+  // #1091 F4: an ask also matches the real path; an allow stays lexical.
+  it.runIf(process.platform === 'darwin')('F4: darwin /tmp asks under a /private/tmp rule; the allow stays lexical', () => {
+    const call = { toolName: 'Write', input: { path: '/tmp/byok-f4-probe/x.txt' }, cwd: WORKSPACE };
+    expect(classifyToolCall(call, WORKSPACE, HOME, { alwaysAsk: [{ id: 'private-tmp', match: { pathGlob: '/private/tmp/**' } }] }))
+      .toMatchObject({ level: 'high', authorization: { source: 'rule', ruleIds: ['private-tmp'] } });
+    expect(classifyToolCall(call, WORKSPACE, HOME, { allowWithoutAsking: [{ id: 'private-tmp', match: { pathGlob: '/private/tmp/**' } }] }))
+      .toMatchObject({ level: 'high', authorization: BUILT_IN, reasons: ['write-outside-workspace'] });
+  });
+
+  it('F4: a write through a workspace symlink asks under a rule on the protected directory', () => {
+    const protectedDir = join(ROOT, 'protected-f4');
+    const link = join(WORKSPACE, 'protected-link');
+    mkdirSync(protectedDir);
+    symlinkSync(protectedDir, link, process.platform === 'win32' ? 'junction' : 'dir');
+    const call = { toolName: 'Write', input: { path: join(link, 'notes', 'new.md') }, cwd: WORKSPACE };
+    const ask = { id: 'protected', match: { pathGlob: join(protectedDir, '**') } };
+    expect(classifyToolCall(call, WORKSPACE, HOME, { alwaysAsk: [ask] }))
+      .toMatchObject({ level: 'high', authorization: { source: 'rule', ruleIds: ['protected'] } });
+    // The same glob as an allow does not grant the lexical workspace path, and
+    // an allow on the workspace still grants it: real paths never remove an allow.
+    expect(classifyToolCall(call, WORKSPACE, HOME, { allowWithoutAsking: [ask] })).toEqual({ level: 'normal', authorization: BUILT_IN });
+    expect(classifyToolCall(call, WORKSPACE, HOME, { allowWithoutAsking: [{ id: 'workspace', match: { pathGlob: join(WORKSPACE, '**') } }] }).authorization)
+      .toEqual({ source: 'rule', ruleIds: ['workspace'] });
+  });
+
   it('F5: path star stays in one segment while globstar spans dot-prefixed nested segments', () => {
     const call = { toolName: 'Write', input: { path: join(WORKSPACE, '.git', 'hooks', 'pre-commit') }, cwd: WORKSPACE };
     expect(classifyToolCall(call, WORKSPACE, HOME, { alwaysAsk: [{ id: 'one-level', match: { pathGlob: join(WORKSPACE, '*') } }] }).authorization).toEqual(BUILT_IN);
