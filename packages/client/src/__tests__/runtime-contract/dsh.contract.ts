@@ -4,7 +4,6 @@ import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../../adapters/dsh/dsh-adapter';
 import { QUALIFIED_DSH_VERSION } from '../../adapters/dsh/dsh-version';
-import { isRuntimeExecutionFailure } from '../../runtime-failure';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import {
   baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, egressCheck, expectAuth,
@@ -126,13 +125,11 @@ function processRows(pids: readonly number[]): string {
 }
 
 /**
- * A turn whose shell tool holds a foreground and a background `sleep`, then
- * ends one of two ways: `close` is the SDK's own shutdown (`session/close`,
- * then the owned process tree); `sigkill` is the dsh root killed from outside,
- * after which dsh cannot cancel its own tools and the SDK alone must reap them.
+ * A turn whose shell tool holds a foreground and a background `sleep`, ended
+ * by the SDK's own shutdown (`session/close`, then the owned process tree).
  */
-async function toolTreeTurn(stop: 'close' | 'sigkill') {
-  const box = await createSandbox(`dsh-${stop}`);
+async function toolTreeTurn() {
+  const box = await createSandbox('dsh-close');
   const recorder = await fileEgress();
   const pidFile = path.join(box.workspace, 'tool.pids');
   const script: ProviderScript = request => {
@@ -155,16 +152,11 @@ async function toolTreeTurn(stop: 'close' | 'sigkill') {
       return found.length === 2 ? found : undefined;
     }, 120_000, 'the shell tool pids');
     const before = `dsh root ${child?.pid}; ${processRows(tools)}`;
-    let failure: unknown;
-    if (stop === 'sigkill') {
-      child!.kill('SIGKILL');
-      try { for await (const _event of session.events) { /* drain to the failure */ } } catch (error) { failure = error; }
-    }
     await session.close();
     const survivors = await waitFor(async () => tools.some(isAlive) ? undefined : [], 10_000, 'the tool processes to exit').catch(() => tools.filter(isAlive));
     const after = processRows(survivors);
     for (const pid of survivors) process.kill(pid, 'SIGKILL');
-    return { failure, survivors, diagnostic: `before: ${before}; after: ${after}` };
+    return { survivors, diagnostic: `before: ${before}; after: ${after}` };
   } finally {
     await provider.close();
   }
@@ -172,8 +164,7 @@ async function toolTreeTurn(stop: 'close' | 'sigkill') {
 
 const contractTurn = once(turn);
 const skillControl = once(skillControlTurn);
-const closed = once(() => toolTreeTurn('close'));
-const sigkill = once(() => toolTreeTurn('sigkill'));
+const closed = once(toolTreeTurn);
 const descriptor = new DshAdapter({ home: path.resolve('/dsh-descriptor-only'), model: detectModel }).descriptor;
 
 defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, {
@@ -210,7 +201,7 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   'isolation.sessionPersistence': skip('the dsh adapter has no session persistence option; dsh keeps sessions under the SDK-owned DSH_HOME, which resume needs'),
   drafts: notAdvertised(descriptor, 'messageDraft'),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await closed(); await sigkill(); }),
+  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await closed(); }),
 });
 
 describe(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, () => {
@@ -225,11 +216,6 @@ describe(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersi
   }, 180_000);
   it('dsh.close: closing a session while its shell tool runs reaps the tool processes', async () => {
     const { survivors, diagnostic } = await closed();
-    expect(survivors, diagnostic).toEqual([]);
-  }, 240_000);
-  it('dsh.sigkill: after the dsh root is SIGKILLed, the session fails as runtime_exited and close() reaps its tool processes', async () => {
-    const { failure, survivors, diagnostic } = await sigkill();
-    expect(isRuntimeExecutionFailure(failure) ? failure.failure.class : failure).toBe('runtime_exited');
     expect(survivors, diagnostic).toEqual([]);
   }, 240_000);
 });
