@@ -311,9 +311,9 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.31.0`; publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.32.0`; publication requires separate
 release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.31.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.32.0`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -323,6 +323,11 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.32.0 is a MINOR under the general policy above, with no exception. The
+upgrade manifest from 0.31.0 holds 28 breaking entries, and the release adds
+Postgres migrations 0031 to 0034 and server SQLite schema 7. See the
+[0.32.0 release notes](releases/v0.32.0.md).
 
 0.31.0 is a MINOR under the general policy above, with no exception. It adds
 public API and Postgres migration 0030, and it has pre-1.0 breaking cuts: the
@@ -369,19 +374,22 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry readback of 2026-10-29 (UTC) reports `latest` 0.31.0 for all nine
-packages. The earlier published versions are 0.30.2, 0.30.1, 0.30.0, 0.29.0,
-0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for
+The registry readback of 2026-11-01 (UTC) reports `latest` 0.32.0 for all nine
+packages. The earlier published versions are 0.31.0, 0.30.2, 0.30.1, 0.30.0,
+0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for
 0.28.0 / keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22
 (UTC) for 0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, 2026-10-24 (UTC)
-for 0.30.0 and 0.30.1, 2026-10-26 (UTC) for 0.30.2, and 2026-10-29 (UTC) for
-0.31.0. The tag `v0.31.0` and its GitHub Release point to `982aa2d7`, the
-release commit on the branch `release/0.31`, which is not on main. The tag
+for 0.30.0 and 0.30.1, 2026-10-26 (UTC) for 0.30.2, 2026-10-29 (UTC) for
+0.31.0, and 2026-11-01 (UTC) for 0.32.0. The tag `v0.32.0` and its GitHub
+Release point to `5f975955`, the squash merge of #1250 on main. The tag
+`v0.31.0` points to `982aa2d7`, the release commit on the branch
+`release/0.31`, which is not on main. The tag
 `v0.30.2` points to `b1469e5a`, the merge of #1006. The tag `v0.30.1` points
-to `142acbe2`, the merge of #916. The 0.28.0 to 0.31.0
+to `142acbe2`, the merge of #916. The 0.28.0 to 0.32.0
 source-candidate notes are preparation history. They are not publication
-records, except that the [0.31.0 notes](releases/v0.31.0.md) also hold the
-0.31.0 publication record. This read confirms registry
+records, except that the [0.31.0 notes](releases/v0.31.0.md) and the
+[0.32.0 notes](releases/v0.32.0.md) also hold the 0.31.0 and 0.32.0
+publication records. This read confirms registry
 availability. It does not establish isolated-install qualification. A later
 release needs the accepted final-commit CI artifact and separate owner
 authorization.

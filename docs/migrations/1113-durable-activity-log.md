@@ -107,6 +107,10 @@ other rows are kept; no re-enrollment or new state directory is needed. A v8
 file missing either table is refused as `SQLITE_SCHEMA_INVALID`, never
 recreated, and builds before schema 8 cannot open the upgraded file.
 
+The upgrade is one-way: SDK 0.32.0 and earlier refuse a schema 8 file, so the
+only way back is a copy taken before the upgrade. Stop the server and back up
+the database file before the first open with this release.
+
 After a restart the same generation and revisions are served, so a cursor
 taken before the restart resumes after it. Malformed persisted rows fail closed.
 The terminal-task archive now removes activity content inside its transaction

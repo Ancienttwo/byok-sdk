@@ -7,27 +7,33 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current stable release is **0.31.0** for all nine packages, published on
-2026-10-29 (UTC). From 0.28.2, keys uses the release train version instead of
-its own version line. See the [release notes](docs/releases/v0.31.0.md) and
-[release process](docs/releases/README.md). It moves the wire to v4. A Host
-that moves to 0.31.0 from 0.30.2 follows the
+The current stable release is **0.32.0** for all nine packages, published on
+2026-11-01 (UTC). From 0.28.2, keys uses the release train version instead of
+its own version line. See the [release notes](docs/releases/v0.32.0.md) and
+[release process](docs/releases/README.md). A Host that moves to 0.32.0 from
+0.30.2 follows the
+[Host upgrade checklist](docs/releases/host-upgrade-0.32.0.md). The notes do
+not say that 0.32.0, or a Host on it, is ready for production.
+
+The previous stable release is **0.31.0** for all nine packages, published on
+2026-10-29 (UTC). See the [release notes](docs/releases/v0.31.0.md). It moves
+the wire to v4. A Host that moves to 0.31.0 from 0.30.2 follows the
 [Host upgrade checklist](docs/releases/host-upgrade-0.31.0.md). The notes do
 not say that 0.31.0, or a Host on it, is ready for production.
 
-The previous stable release is **0.30.2** for all nine packages. See the
+An earlier stable release is **0.30.2** for all nine packages. See the
 [release notes](docs/releases/v0.30.2.md). A Host that moves to 0.30.2 from
 0.29.x, 0.30.0 or 0.30.1 follows the
 [Host upgrade checklist](docs/releases/host-upgrade-0.30.2.md). The release
 notes do not say that 0.30.2, or a Host on it, is ready for production; the
-product loop gate (#977) is evaluated after release.
+owner fixed 0.33.0 as the revision for the product loop gate (#977).
 
-The 0.31.0 registry readback passed for all nine packages with `latest`
-**0.31.0**. The registry lists 0.30.2 (2026-10-26, UTC), 0.30.1 and 0.30.0
-(2026-10-24, UTC), 0.29.0 (2026-10-23, UTC), 0.28.3 and 0.28.2 (2026-10-22, UTC),
-0.28.1 / keys 0.13.1 (2026-10-21, UTC) and 0.28.0 / keys 0.13.0 (2026-10-20,
-UTC) as the earlier published versions. This read confirms registry
-availability, not isolated-install qualification.
+The 0.32.0 registry readback passed for all nine packages with `latest`
+**0.32.0**. The registry lists 0.31.0 (2026-10-29, UTC), 0.30.2 (2026-10-26,
+UTC), 0.30.1 and 0.30.0 (2026-10-24, UTC), 0.29.0 (2026-10-23, UTC), 0.28.3
+and 0.28.2 (2026-10-22, UTC), 0.28.1 / keys 0.13.1 (2026-10-21, UTC) and
+0.28.0 / keys 0.13.0 (2026-10-20, UTC) as the earlier published versions.
+This read confirms registry availability, not isolated-install qualification.
 
 Historically, all nine **0.27.0** / keys **0.12.0** packages were published from
 `v0.27.0` (`cd977261`), and complete registry readback and isolated installation
@@ -41,7 +47,7 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the current stable release, 0.31.0.
+Versioned install examples below name the current stable release, 0.32.0.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
@@ -157,7 +163,7 @@ Hono/HTTP façade over the shared `cloud` kernel, `client` is the local
 daemon, and `keys` keeps provider credentials on the device.
 
 ```sh
-npm install @byok-sdk/client@0.31.0 @byok-sdk/server@0.31.0 @byok-sdk/keys@0.31.0
+npm install @byok-sdk/client@0.32.0 @byok-sdk/server@0.32.0 @byok-sdk/keys@0.32.0
 ```
 
 Also installed: `@byok-sdk/cloud`, `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -175,7 +181,7 @@ Durable Objects, and `ui-runtime` for the Live Activity Timeline. On a
 Node/VPS host without Durable Objects, leave out `@byok-sdk/cloud-do`.
 
 ```sh
-npm install @byok-sdk/cloud@0.31.0 @byok-sdk/cloud-dataplane@0.31.0 @byok-sdk/cloud-do@0.31.0 @byok-sdk/ui-runtime@0.31.0
+npm install @byok-sdk/cloud@0.32.0 @byok-sdk/cloud-dataplane@0.32.0 @byok-sdk/cloud-do@0.32.0 @byok-sdk/ui-runtime@0.32.0
 ```
 
 Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -188,7 +194,7 @@ Objects (no `nodejs_compat`): `cloud-do` for the session runtime and
 [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ```sh
-npm install @byok-sdk/cloud-do@0.31.0 @byok-sdk/protocol@0.31.0
+npm install @byok-sdk/cloud-do@0.32.0 @byok-sdk/protocol@0.32.0
 npm install --save-dev @cloudflare/workers-types
 ```
 
@@ -358,7 +364,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.31.0
+npm install @byok-sdk/keys@0.32.0
 ```
 
 ## Host connector composition
@@ -374,7 +380,7 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.31.0`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.32.0`
 require Node.js 24.22.1 or newer. MIT licensed.
 
 ## Entry dependencies
