@@ -1051,10 +1051,9 @@ task has no cost usage. The `keyEnv` rules are in
 [adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
 
 dsh starts each shell tool in its own process group. `close()` on a live dsh
-root reaps them. A dsh root killed from outside (SIGKILL, OOM) leaves those
-tool processes running: the owned process tree reaches neither their groups
-nor, once they are reparented, the processes themselves. This is a known 0.33
-limitation ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
+root reaps them. After a dsh root is killed from outside (SIGKILL, OOM),
+disposal ends the tool processes the owned process tree observed while the
+root ran ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 
 ### Local runtime probe observation
 
@@ -1796,11 +1795,17 @@ Bundled adapters create an owned POSIX process group and terminate the group
 with TERM-to-KILL escalation; Windows uses `taskkill /T /F`. On POSIX, disposal
 and the host-exit sweep also SIGKILL the descendants that left the group, read
 from the process table before TERM and before KILL and checked by start time,
-as OAR 0.37.0 does. This reaches only processes still below the runtime root at
-that read. A process whose parent exited before the read is re-parented to init
-and is not ended. For example, Claude and Pi run each shell command in a session
-of its own, so a background job (`cmd &`) outlives `close()` and
-`daemon.stop()`. OAR has the same limit. TaskRunner records
+as OAR 0.37.0 does. Disposal also ends the descendants observed while the root
+ran: the table is read once a second for every running owned root, and an entry
+stays remembered while the same process (same start time) lives. This covers a
+root that died from an outside SIGKILL or OOM kill, whose tools in groups of
+their own are re-parented away from it (#1269). Only a process some read saw
+below the root is reached. A process re-parented before any read, or started
+within one second of the root's death, is not ended. For example, Claude and Pi
+run each shell command in a session of its own, so a background job (`cmd &`)
+from a shell that exits at once can outlive `close()` and `daemon.stop()`. The
+host-exit sweep reads the table once at exit and does not use the observations.
+TaskRunner records
 the semantic terminal once, but retains its active entry and Agent home
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without

@@ -78,9 +78,10 @@ second registry.
   field, and live Grok evidence is pending (#633).
 - Trajectory evidence: only ordinary Pi declares `event-stream`, and Pi with
   `durablePi: true` does not; Claude and Codex records are `unknown`.
-- Process tree: after a dsh root is killed from outside, its tool processes
-  in their own process groups survive; `close()` on a live root reaps them (0.33,
-  [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
+- Process tree (POSIX): disposal ends a runtime's tool processes in process
+  groups of their own after the root was killed from outside, if one of the
+  once-a-second observations saw them while the root ran
+  ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 
 By default Claude and Codex run YOLO
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude with
@@ -791,11 +792,12 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
   answer, bounded by `interruptTimeoutMs`. `close()` sends `session/close`,
   then disposes the owned process tree. Steering throws
   `SteerUnsupportedError`.
-- Known limitation (0.33, [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)): dsh runs each shell tool in its own
-  process group. When the dsh root is killed from outside (SIGKILL, OOM), the
-  SDK's owned process tree reaches neither that group nor its reparented
-  processes, so those tool processes outlive the session. Closing the session
-  through the SDK does reap them (`dsh.close`).
+- Process tree: dsh runs each shell tool in its own process group. Closing
+  the session reaps them (`dsh.close`). When the dsh root is killed from
+  outside (SIGKILL, OOM), disposal ends the tool processes the owned process
+  tree observed while the root ran (`dsh.sigkill`,
+  [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)); a tool started
+  within one second of that kill is not seen.
 - Detection: `dsh --version` (advisory when it is not the qualified
   `0.2.1-rc.5`), then `dsh --profile acp --help`, which also writes the acp
   profile into a new root (else `refused: acp_unavailable`). `authPresent`
@@ -808,7 +810,7 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
 Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
 [runtime contract suite](runtime-contract.md) against the real qualified dsh.
 Locally on macOS with dsh 0.2.1-rc.5, every case passes, `dsh.close`
-included; `dsh.sigkill` is skipped as the limitation above. The design and probes are in
+included; `dsh.sigkill` runs in CI. The design and probes are in
 [the dsh adapter plan](plans/2026-11-01-dsh-adapter.md).
 
 ## Selection and platforms
