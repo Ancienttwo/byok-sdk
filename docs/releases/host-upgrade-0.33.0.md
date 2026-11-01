@@ -92,25 +92,12 @@ interoperate. The changes are in [the wire v4 note](925-wire-v4.md). There is
 no v3 migration: a store a v3 build wrote is not supported, and the Host
 starts v4 on a new store ([0.31.0 checklist](host-upgrade-0.31.0.md#stored-v3-state)).
 
-0.33.0 moves the wire from v4 to v5 (`PROTOCOL_VERSION = 5`). The runtime
-capability `durablePi` on `conn.hello` runtimes and harnesses, `task.claim`
-and presence is renamed `durableLane`; every other v4 shape is unchanged. A
-v4 envelope is rejected, there is no v4 reader and no negotiation, so a 0.32.0
-server and a 0.33.0 daemon, or the other way round, do not interoperate.
-Drain the 0.32.0 deployment first (pending mailbox rows acknowledged,
-executions terminal, daemon pending terminals acknowledged), then start the
-0.33.0 server side and the daemons together. The stores need not be new: a
-pending v4 row stops startup and is left unchanged, retained rows open. A
-hosted terminal receipt a v4 build wrote no longer decodes, so a result read
-of a task that ended before the cut fails with `terminal_receipt_unreadable`
-([protocol](../protocol.md#sqlite-startup-check-for-wire-major-upgrades)).
-
-On top of the rename, 0.33.0 adds one gated field: a `quota`
+0.33.0 keeps wire v4 and adds one gated field: a `quota`
 `task.fail.failure` may carry `scope` (`task-fail-quota-scope`, #1271). A
 daemon sends it only to a server that advertises the new
 `runtime-quota-scope` capability flag, which the 0.33.0 reference server and
-hosted cloud do. The v5 corpus starts from the v4 corpus (332 envelope lines
-at 0.32.0) and stays at 30 HTTP lines. The 0.32.0 ordering
+hosted cloud do, so either upgrade order works. The corpus grows from 332 to
+336 envelope lines and stays at 30 HTTP lines. The 0.32.0 ordering
 rules still apply to a Host coming from 0.30.2 or 0.31.0
 ([0.32.0 checklist](host-upgrade-0.32.0.md#wire-protocol)): upgrade the Host
 before its devices (`token-expires-in`), and check the operator inventory for
@@ -286,8 +273,6 @@ full note; each entry links its migration section.
 | cloud, cloud-dataplane | `approval-timeline-closes-with-task` | An open approval timeline no longer expires when idle; its observations are kept until the task's output closes, at most 50 and 1 MiB, never evicting the pending request. It closes with the task's first terminal or accepted cancellation and expires ten minutes later. `ApprovalTimelineAppendInput.ttlMs` is removed; `ApprovalTimelineTail` gains `terminalAt` and its `expiresAt` is present only once closed; an append on a closed timeline throws `approval_timeline_settled` (#1113 A3). | Drop `ttlMs` from appends and read `terminalAt`. Decide a pending approval before the task ends: a request pending at the close can no longer be decided. A custom `ApprovalTimelineStore` closes with its task, refuses appends once closed and retains through `retainApprovalObservations`. |
 | cloud, cloud-dataplane | `task-output-closes-at-terminal` | A task's activity log and approval timeline close in the same transaction as its first terminal or accepted Host cancellation; later `task.progress`, `task.artifact` and `task.await_approval` are refused with `task_settled_by_cloud`, also on a redacted or archived task; `CLOUD_ERROR_CODES` gains `approval_timeline_settled`; Postgres migration 0035 (#1113 A3). | Apply 0035 with the code as in [Postgres migrations](#postgres-migrations). Expect `task_settled_by_cloud` for late output, cancellation included. A custom composition closes both logs in the same commit as its first terminal or accepted cancellation, for example with `ActivityStore.settle`. |
 | server | `task-events-durable-cursor` | `tasks.events` and `TaskHandle.events()` read the durable activity log, task state and approval timeline. Cursors resume across a restart; cursors from 0.32.0 and earlier return `TaskEventsUnavailableError` `cursor_unknown`; state is coalesced, not replayed; `feed_expired` is gone; `taskEventBufferLimit`, `taskEventRetentionMs`, `DEFAULT_TASK_EVENT_BUFFER_LIMIT` and `DEFAULT_TASK_EVENT_RETENTION_MS` are removed (#1113). | Remove the two options and exports. Discard stored cursors and start a fresh read (no `after`, or `from: 'state'`). A Host that waited for an intermediate state waits for that state or a later one, or reads `tasks.get`; one that needs every transition reads `events.subscribe()` (`task.state`). |
-| protocol, core, client, server, cloud, cloud-dataplane | `wire-v5-durable-lane` | Wire v5: the runtime capability `durablePi` is `durableLane` on `conn.hello`, `task.claim` and presence; a v4 envelope is rejected and there is no v4 reader. | Drain the 0.32.0 deployment, then start the 0.33.0 server side and daemons together ([Wire protocol](#wire-protocol)). Read hosted results of tasks that ended before the cut first. A Host that reads `durablePi` from presence or `RuntimeCapabilities` reads `durableLane`. |
-| client | `runtime-generic-names` | `DaemonConfig.durablePi` is removed; `PiAdapterOptions` and `RuntimeCapabilities` use `durableLane`; launch resources are `RuntimeLaunchResources`. | Move `durablePi: true` to `runtimes.pi.durableLane: true`. A Host on `createDaemonWithAdapters` passes `PiAdapter({ durableLane: true })` and drops any daemon option. A custom adapter types `runtimeLaunch` as `RuntimeLaunchResources`. |
 
 Additions a Host may configure in 0.33.0:
 
@@ -385,8 +370,8 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
    when its task's output closes can no longer be decided. Then stop the Host,
    every daemon, every CLI and every App that embeds the SDK on each machine
    that shares a store, Agent home root, skill-pack store or Pi session
-   directory. This is the v4 drain: a pending v4 row stops a 0.33.0 (v5)
-   start. From 0.30.2 it is also the v3 drain. From 0.30.2 or 0.31.0 this is also the stop the path-mutation gate
+   directory. From 0.30.2 this is also the v3 drain: a pending v3 row stops a
+   v4 start. From 0.30.2 or 0.31.0 this is also the stop the path-mutation gate
    needs: 0.31.0 and earlier gates do not exclude the 0.32.0 and later OS lock.
 3. **Precheck the stores.** With 0.33.0 installed beside the old build, run
    `byok-agent upgrade check --store --json` for each `storeDir`, and
@@ -398,8 +383,7 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
    the 0.33.0 CLI on each daemon config. Fix every error; review the effective
    `toolAuthorization`, `runtimeEnvironment` and, where Grok runs,
    `runtimes.grok` values. Remove `taskEventBufferLimit` and
-   `taskEventRetentionMs` from the server options. Replace a top-level `durablePi` with
-   `runtimes.pi.durableLane`; the check reports the removed field.
+   `taskEventRetentionMs` from the server options.
 5. **Dry run.** Restore the backup into a disposable, isolated database. This
    rehearsal **writes to the scratch database**; the runner has no
    `--dry-run`. Use the installed-package command below, which runs

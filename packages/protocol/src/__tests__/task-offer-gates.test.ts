@@ -1,10 +1,11 @@
 /**
  * The gates of the one `task.offer` (#925 stage 2): a daemon whose decoder
  * does not know a gated field or value stops on it instead of stripping it,
- * the v5 gates of every v4 offer equal the gates the last v4 release
- * derived for it, and the table names each gate once.
+ * the v5 gates of every v4 offer the oracle release shipped equal the gates
+ * it derived, and the table names each gate once.
  */
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -31,9 +32,19 @@ const v5Offers = readFileSync(new URL('golden/v5.envelopes.ndjson', import.meta.
   .map((raw) => JSON.parse(raw) as { type: string; payload: Json })
   .filter((line) => line.type === 'task.offer')
   .map((line) => line.payload);
+/**
+ * The v4 offer lines the oracle's release shipped: the corpus prefix its
+ * `golden/v4.releases.json` entry pins. Later v4 lines may carry gates that
+ * release does not know.
+ */
+const oracleVersion = (JSON.parse(readFileSync(createRequire(import.meta.url).resolve('byok-protocol-previous/package.json'), 'utf8')) as { version: string }).version;
+const oracleLines = (JSON.parse(readFileSync(new URL('golden/v4.releases.json', import.meta.url), 'utf8')) as {
+  releases: { version: string; envelopes: { lines: number } }[];
+}).releases.find((entry) => entry.version === oracleVersion)!.envelopes.lines;
 const v4Offers = readFileSync(new URL('golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
+  .slice(0, oracleLines)
   .map((raw) => JSON.parse(raw) as { type: string; payload: Json })
   .filter((line) => line.type === 'task.offer')
   .map((line) => line.payload);
@@ -83,8 +94,8 @@ describe('task.offer gates: an unknown gated field stops the daemon (Q4)', () =>
   );
 });
 
-describe('task.offer gates: equal to the last v4 release (Q2)', () => {
-  it('needs exactly the flags the last v4 release derived for every v4 offer line', () => {
+describe('task.offer gates: equal to the published v4 oracle (Q2)', () => {
+  it('needs exactly the flags the oracle release derived for every v4 offer line it shipped', () => {
     expect(v4Offers.length).toBeGreaterThan(0);
     for (const payload of v4Offers) {
       expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(payload).success).toBe(true);
