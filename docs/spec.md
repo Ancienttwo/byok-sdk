@@ -4040,7 +4040,7 @@ it never runs ungated, and no third mode exists. Current coverage:
 
 | Runtime | `auto` | How |
 | --- | --- | --- |
-| Pi, ordinary RPC lane | Supported | Digest-bound loopback gate in the v8 launch; a Pi `tool_call` hook registered after every other extension judges the final input; every native pi-subagents child loads the same gate as a required child extension; pi-subagents refuses external-cli, external-job and machine runners while it is present |
+| Pi, ordinary RPC lane | Supported | Digest-bound loopback gate in the v9 launch; a Pi `tool_call` hook registered after every other extension judges the final input; every native pi-subagents child loads the same gate as a required child extension; pi-subagents refuses external-cli, external-job and machine runners while it is present. A file-scoped session also passes its grant through that child gate config: the child re-resolves the roots and registers the same six SDK scoped tools, and the gate refuses them if it did not |
 | Pi, prepared and durable lanes | Declined before claim | No native tools (prepared) / unverified worker (durable) |
 | Claude | Supported | SDK `PreToolUse` callback hook registered at `initialize`; the prompt is sent only after the CLI confirms `hooks_applied`. It covers native tools, MCP tools and native subagents and is not skipped by bypass mode, allow rules or `disableAllHooks` (qualified with Claude 2.1.312 against a loopback provider) |
 | Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |
@@ -4173,11 +4173,22 @@ opt-out: an exact `toolName`, a `commandGlob` over the whole shell command, or t
 `tool-authorization` decision records the closed reason `outside-file-scope`;
 the approval summary names the concrete tool and, when present, the shell
 command/path and trusted MCP server/tool. This is a file-tool boundary for
-those six tools, not an OS sandbox: `bash`, MCP servers, user extensions
-and (in this slice) subagents are not covered, the guard is canonical
-check-then-open using Node built-ins, and it is not race-free against
-same-user processes. The loopback gate token is inherited by SDK child
-sessions and does not isolate against same-user code.
+those six tools, not an OS sandbox: `bash`, MCP servers and user extensions
+are not covered, the guard is canonical check-then-open using Node built-ins,
+and it is not race-free against same-user processes.
+
+A scoped session may offer native pi-subagents children only with the same
+boundary. The host writes the serialized grant and digest into the child gate
+config and marks the child scope-required; the required child scope extension
+re-resolves every root, compares the recomputed digest with the parent's and
+registers the same six SDK scoped tools before any file call. A child whose
+grant is missing, mismatched, replaced or no longer supported registers none
+of them, and the child gate refuses all six, so a child never falls back to
+the native file tools; pi-subagents still refuses external-cli, external-job
+and machine runners. The child's `bash`/MCP/extension calls keep the ordinary
+per-call approval floor, so a child cannot widen the parent's scope. The
+loopback gate token is inherited by SDK child sessions and does not isolate
+against same-user code.
 
 ## Daemon configuration contract (#1094)
 

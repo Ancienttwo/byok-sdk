@@ -4,11 +4,15 @@
  * session requires it for (`adapters/pi/subagents.ts`); the parent host puts
  * the gate in the environment (`setToolAuthorizationGateEnv`). A child with no
  * gate fails to bind its extensions, and pi-subagents rejects the launch.
+ *
+ * A file-scoped parent also marks this gate config with `fileScopeRequired`
+ * and the serialized grant, so the gate itself refuses the six file tools
+ * unless the child's scope extension registered the SDK scoped tools.
  */
-import { createPiToolAuthorizationHook } from '../adapters/pi/tool-authorization-hook';
+import { createPiSubagentGateExtension } from '../adapters/pi/subagent-gate';
 import { readToolAuthorizationGateEnv } from '../tool-authorization-ipc';
 
 const gate = readToolAuthorizationGateEnv();
 if (gate === undefined) throw new Error('tool_authorization_unavailable: a Pi subagent child has no tool authorization gate');
 
-export default createPiToolAuthorizationHook(gate, { subagentChild: true });
+export default createPiSubagentGateExtension(gate);

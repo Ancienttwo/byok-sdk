@@ -24,6 +24,7 @@ export default defineConfig({
     'src/bin/byok-pi-rpc.ts',
     'src/bin/pi-runtime-host.ts',
     'src/bin/pi-subagent-gate.ts',
+    'src/bin/pi-subagent-file-scope.ts',
     'src/runtime/acp-session-runtime.js',
     'src/bin/byok-agent-message-mcp.ts',
     'src/bin/byok-agent-result-mcp.ts',

@@ -4,6 +4,7 @@ import type { IncomingMessage } from 'node:http';
 import { isAbsolute } from 'node:path';
 import type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationVerdict, ToolCall } from './tool-authorization';
 import type { FileScopeGrant } from './file-scope-guard';
+import { parseSerializedFileScopeGrant, type SerializedFileScopeGrant } from './file-scope-serialization';
 import {
   FILE_SCOPE_GUARD_CODES, FILE_SCOPE_GUARD_REASONS, SCOPED_FILE_TOOL_NAMES,
   type FileScopeGuardCode, type FileScopeGuardReason,
@@ -20,6 +21,19 @@ export interface ToolAuthorizationIpcConfig {
   readonly url: string;
   readonly token: string;
   readonly timeoutMs: number;
+  /**
+   * Set only by the host for a file-scoped parent. A native Pi subagent child
+   * then refuses every scoped file tool unless the SDK scoped tools registered,
+   * so a child that could not load or verify the grant never falls back to the
+   * native file tools.
+   */
+  readonly fileScopeRequired?: true;
+  /**
+   * The parent's serialized file-scope grant. The child re-resolves every root
+   * and compares the recomputed digest before it registers a file tool; the
+   * parent's label is never trusted on its own.
+   */
+  readonly fileScope?: SerializedFileScopeGrant;
 }
 /** Inherited only by SDK-owned native child sessions; the root comes from the digest-bound launch. */
 export const TOOL_AUTHORIZATION_GATE_ENV = 'BYOK_TOOL_AUTHORIZATION_GATE';
@@ -36,11 +50,18 @@ const unavailable = (reason = 'tool authorization is unavailable'): ToolAuthoriz
 export function parseToolAuthorizationIpcConfig(value: unknown): ToolAuthorizationIpcConfig {
   if (!record(value) || !text(value.url) || typeof value.token !== 'string' || !/^[a-f0-9]{64}$/.test(value.token)
     || !Number.isSafeInteger(value.timeoutMs) || (value.timeoutMs as number) < 1 || (value.timeoutMs as number) > MAX_TIMEOUT_MS
-    || Object.keys(value).some(key => !['url', 'token', 'timeoutMs'].includes(key))) throw new Error('invalid tool authorization gate config');
+    || Object.keys(value).some(key => !['url', 'token', 'timeoutMs', 'fileScopeRequired', 'fileScope'].includes(key))) throw new Error('invalid tool authorization gate config');
   const url = new URL(value.url);
   if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.pathname !== '/authorize-tool'
     || url.username || url.password || url.search || url.hash) throw new Error('tool authorization gate must use SDK loopback IPC');
-  return Object.freeze({ url: value.url, token: value.token, timeoutMs: value.timeoutMs as number });
+  if (value.fileScopeRequired !== undefined && value.fileScopeRequired !== true) throw new Error('invalid tool authorization gate config');
+  const fileScope = value.fileScope === undefined ? undefined
+    : parseSerializedFileScopeGrant(value.fileScope, (message) => { throw new Error('invalid tool authorization gate config: ' + message); });
+  return Object.freeze({
+    url: value.url, token: value.token, timeoutMs: value.timeoutMs as number,
+    ...(value.fileScopeRequired === undefined ? {} : { fileScopeRequired: true as const }),
+    ...(fileScope === undefined ? {} : { fileScope }),
+  });
 }
 
 export function setToolAuthorizationGateEnv(config: ToolAuthorizationIpcConfig | null, filePath: string): void {
