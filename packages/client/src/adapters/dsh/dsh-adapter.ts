@@ -70,8 +70,6 @@ const PROFILE_PROBE_TIMEOUT_MS = 30_000;
 const DEFAULT_RETAINED_BYTES = 16 * 1024 * 1024;
 const DEFAULT_INTERRUPT_MS = 1_000;
 const PATCH_FILE = 'dsh.patch.yml';
-/** dsh answers an unknown session and another workspace alike: JSON-RPC invalid params, with text only. */
-const INVALID_PARAMS = -32_602;
 
 export interface DshAdapterOptions {
   /**
@@ -250,6 +248,7 @@ export class DshAdapter implements RuntimeAdapter {
     );
     // The ACP stack and its protocol SDK load only when a dsh session starts.
     const acp = await import('#byok-acp-runtime');
+    let opened = false;
     try {
       // dsh compares the canonical workspace on resume.
       const workspace = await fs.realpath(cwd);
@@ -283,6 +282,7 @@ export class DshAdapter implements RuntimeAdapter {
           onRecord: (record) => session.record(record),
         },
       );
+      opened = true;
       session.bind(raw);
       // The patch is the only model authority: a session on any other route means the overlay did not apply.
       if (session.openedModel !== JSON.stringify([dshRoute(this.options.model), this.options.model.model]))
@@ -298,9 +298,10 @@ export class DshAdapter implements RuntimeAdapter {
       }
       // A failed record stream is the cause; the open or prompt error is its consequence.
       const error = session.halted ?? thrown;
-      // An unknown session and another workspace both answer invalid params: neither can succeed on retry.
-      if (resume !== undefined && rpcErrorCode(error) === INVALID_PARAMS)
-        throw authority(`dsh could not resume session ${resume}: ${error instanceof Error ? error.message : 'invalid params'}`);
+      // dsh refuses a resume with a JSON-RPC error that names no reason in its code (an unknown session and another
+      // workspace both answer -32602), so any refusal is authority. A failure without an answer is not a refusal.
+      if (resume !== undefined && !opened && rpcErrorCode(error) !== undefined)
+        throw authority(`dsh could not resume session ${resume}: ${error instanceof Error ? error.message : 'refused'}`);
       if (error instanceof acp.RuntimeFailureError) throw authority(error.message);
       throw new RuntimeExecutionFailure({
         phase: 'start',
@@ -383,9 +384,10 @@ class DshSession implements Session {
       this.fail(new RuntimeExecutionFailure({
         phase: 'run',
         category: 'semantic',
-        retry: turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
+        // dsh fails a turn with text only; a class OAR took from that text is not structured evidence (#1258 O6),
+        // so it neither names the class nor makes the failure retryable.
+        retry: !turn.fromText && turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
         reason: turn.reason,
-        // dsh fails a turn with text only; a class OAR took from that text is not structured evidence (#1258 O6).
         failure: { class: turn.fromText ? 'unknown' : turn.failure },
       }));
   }
