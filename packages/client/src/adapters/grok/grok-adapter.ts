@@ -31,6 +31,7 @@ import { grokAgentPersona } from './agent-persona';
 import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-user-mcp-servers';
 import { GrokProjection, type GrokTurnOutcome } from './projection';
 import { resolveGrokBin } from './resolve-bin';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
 import { GROK_RUNTIME_CAPABILITIES } from './grok-capabilities';
 import { GROK_VERSION_POLICY, grokVersionToken } from './grok-version';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy';
@@ -141,7 +142,8 @@ export class GrokAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const { env } = await this.runtimeEnvironment();
-      const command = (this.options.resolveBin ?? resolveGrokBin)().command;
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin);
+      const command = resolved.bin.command;
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env);
       if (version.kind !== 'available') return version;
       const text = version.stdout.trim() || version.stderr.trim();
@@ -158,6 +160,7 @@ export class GrokAdapter implements RuntimeAdapter {
         kind: 'available',
         version: text,
         authPresent: grokAuthPresent(env),
+        ...runtimeExecutableFields(resolved, command),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, grokVersionToken(text)),
       };
     } catch (error) {
