@@ -804,7 +804,7 @@ their source contract rather than being assigned invented release versions:
   local approval is intended. Rejection is unaffected; see the manifest entry.
 
 <!-- generated:migrations:start -->
-Manifest transition: **0.31.0 → 0.32.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
+Manifest transition: **0.31.0 → 0.31.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
