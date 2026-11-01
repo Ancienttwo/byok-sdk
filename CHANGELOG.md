@@ -92,6 +92,12 @@ These changes need 0.34.0, the next MINOR.
   gateway's descendants before it sends `session/cancel`, so on POSIX a gateway
   tool that left its process group and was orphaned by the cancel ends at close.
 
+- **Fix (client; #1303)** — on the durable Pi lane, the model now sees the text
+  a task MCP tool or SDK reserved MCP tool returns. The worker passed MCP
+  results to the harness in a field it does not read, so the model and the
+  `tool_result` event got an empty result; error status and details were not
+  affected.
+
 - **Fix (client, keys; #1304)** — the system tools the SDK starts no longer
   resolve through the daemon's `PATH`. macOS runs `/bin/launchctl` and
   `/usr/sbin/ioreg`; Linux runs `systemctl` and `secret-tool` from the first of
