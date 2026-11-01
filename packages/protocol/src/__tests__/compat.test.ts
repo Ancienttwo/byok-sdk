@@ -49,9 +49,8 @@ import {
  *    `golden/v5.http.ndjson` are append-only and the current decoder reads
  *    them exactly. `golden/v5.releases.json` registers no release yet (the
  *    first v5 release is the next MINOR after 0.33.0) and has no floor.
- * 5. Published rejection oracle. `byok-protocol-previous` (0.32.0, a
- *    published v4 release; it moves to 0.33.0 once that is published)
- *    rejects every v5 corpus line and a v5
+ * 5. Published rejection oracle. `byok-protocol-previous` (0.33.0, the
+ *    last v4 release) rejects every v5 corpus line and a v5
  *    `conn.hello`: a v4 peer cannot read v5 bytes. None of its bytes is v5
  *    evidence.
  */
@@ -652,10 +651,10 @@ describe('compat v5: HTTP corpus (self-consistency; no published v5 decoder yet)
 // 5. Published rejection oracle: a published v4 decoder cannot read v5 bytes
 // ---------------------------------------------------------------------------
 
-describe('compat: published 0.32.0 (byok-protocol-previous) is the v5 rejection oracle', () => {
+describe('compat: published 0.33.0 (byok-protocol-previous) is the v5 rejection oracle', () => {
   it('the alias pins a registered v4 release and never enters the v5 registry', () => {
     const version = packageVersion('byok-protocol-previous');
-    expect(version).toBe('0.32.0');
+    expect(version).toBe('0.33.0');
     expect(v4Registry.releases.some((entry) => entry.version === version)).toBe(true);
     expect(v5Registry.releases.some((entry) => entry.version === version)).toBe(false);
     expect(v4Release.PROTOCOL_VERSION).toBe(4);
@@ -667,7 +666,7 @@ describe('compat: published 0.32.0 (byok-protocol-previous) is the v5 rejection 
       if ((v4Release.MESSAGE_TYPES as readonly string[]).includes(line.type)) {
         expect(() => v4Release.decodeEnvelope(line.raw)).toThrow(v4Release.EnvelopeValidationError);
       } else {
-        // A type added after 0.32.0 is unknown to it before its version is read.
+        // A type added after 0.33.0 is unknown to it before its version is read.
         expect(() => v4Release.decodeEnvelope(line.raw)).toThrow(v4Release.UnknownMessageTypeError);
       }
     },

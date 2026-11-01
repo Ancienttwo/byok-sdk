@@ -189,8 +189,7 @@ unproven (see the evidence list below).
   the last v4 release, and the first v5 release is the next MINOR. It has no `floor`. Each registered v5 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
-  published 0.32.0 registry tarball, a v4 release (it moves to 0.33.0, the
-  last v4 release, once that is published). It rejects every v5
+  published 0.33.0 registry tarball, the last v4 release. It rejects every v5
   corpus line and a v5 `conn.hello`: a v4 peer cannot read v5 bytes. Nothing it
   produces is v5 evidence, and it never enters the v5 registry. Its
   `requiredReceiverCapabilities` derives, for every v4 `task.offer` line that

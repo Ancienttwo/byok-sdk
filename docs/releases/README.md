@@ -54,8 +54,7 @@ line counts and SHA-256 prefixes; each entry pins both `envelopes` and `http`.
 Prereleases are not registered and are outside the guarantee.
 
 Rejection oracle. The `devDependencies` alias `byok-protocol-previous` in
-`packages/protocol/package.json` pins 0.32.0, a published v4 release; move it
-to 0.33.0, the last v4 release, once that is published. The suite uses it to
+`packages/protocol/package.json` pins 0.33.0, the last v4 release. The suite uses it to
 prove that a v4 decoder rejects every v5 corpus line and a v5 `conn.hello`, and
 that it derives the same `task.offer` gates as the current table for every v4
 offer line it shipped. Aliases are registry tarball URLs
@@ -87,4 +86,4 @@ by its registry tarball URL, and a published-compatibility test then checks
 that the released JSON Schema shape is not narrowed, that the released
 decoder reads current bytes, and that gated and strip-safe `WIRE_ADDITIONS`
 rows are proven against it. No v4 decoder was pinned this way before the v5
-cut; 0.32.0 serves only as the rejection oracle above.
+cut; 0.33.0 serves only as the rejection oracle above.
