@@ -494,6 +494,63 @@ describe('SDK ordinary Pi RPC entry', () => {
     }
   }, 25_000);
 
+  // #1295: user installs of pi-web-access / rpiv-todo register the bundled names.
+  it('lets user extensions with the bundled web_search and todo names replace the bundled ones', () => {
+    const f = fixture();
+    mkdirSync(join(f.root, 'agent', 'extensions'), { recursive: true });
+    for (const name of ['web_search', 'todo']) {
+      writeFileSync(join(f.root, 'agent', 'extensions', `user-${name}.ts`), `export default function (pi) { pi.registerTool({ name: ${JSON.stringify(name)}, label: 'user', description: 'user', parameters: { type: 'object', properties: {} }, execute: async () => ({ content: [], details: {} }) }); }\n`);
+    }
+    const result = spawnSync(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'], {
+      cwd: f.sealed, env: f.env, encoding: 'utf8', timeout: 20_000, input: JSON.stringify({ id: 'state', type: 'get_state' }) + '\n',
+    });
+    expect(result.stdout).toContain('"command":"get_state","success":true');
+    expect(result.stderr).not.toContain('conflicts with');
+    for (const name of ['byok-web-access', 'byok-todo']) expect(result.stderr).toContain(`so Pi did not load ${name}`);
+  }, 25_000);
+
+  // #1296: settings name P; Q, listed first, also has a key.
+  it.each([
+    { auth: 'P has a key', requests: { P: 1, Q: 0 } },
+    { auth: 'P has no key', requests: { P: 0, Q: 0 } },
+  ])('excluded keeps the settings default model and never falls back to another provider: $auth', async ({ auth, requests }) => {
+    const f = fixture();
+    const agentDir = join(f.root, 'agent');
+    mkdirSync(agentDir, { recursive: true });
+    const seen = { P: 0, Q: 0 };
+    const servers = (['P', 'Q'] as const).map(label => createServer(async (request, response) => {
+      for await (const _ of request);
+      seen[label] += 1;
+      const frame = (choice: object) => 'data: ' + JSON.stringify({ id: label, object: 'chat.completion.chunk', choices: [{ index: 0, ...choice }] }) + '\n\n';
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end(frame({ delta: { role: 'assistant', content: label }, finish_reason: null }) + frame({ delta: {}, finish_reason: 'stop' }) + 'data: [DONE]\n\n');
+    }));
+    const ports = await Promise.all(servers.map(server => new Promise<number>(done => server.listen(0, '127.0.0.1', () => done((server.address() as { port: number }).port)))));
+    const provider = (port: number, id: string) => ({ baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-completions', apiKey: 'synthetic',
+      models: [{ id, name: id, contextWindow: 4096, maxTokens: 64, input: ['text'], reasoning: false }] });
+    const { apiKey: _, ...keylessP } = provider(ports[0]!, 'p-model');
+    writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: {
+      'loopback-q': provider(ports[1]!, 'q-model'), 'loopback-p': auth === 'P has a key' ? provider(ports[0]!, 'p-model') : keylessP,
+    } }));
+    writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback-p', defaultModel: 'p-model' }));
+    const serialized = serializePiHostConfig({ ...f.config, agentUserContext: 'excluded' });
+    writeFileSync(f.configPath, serialized.bytes);
+    const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env, args: [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc'] });
+    try {
+      const run = async () => {
+        expect((await client.send({ type: 'get_state' })).data).toMatchObject({ model: { provider: 'loopback-p', id: 'p-model' } });
+        await client.send({ type: 'prompt', message: 'hello' });
+        while (seen.P === 0) await new Promise(done => setTimeout(done, 50));
+      };
+      if (requests.P === 1) await run();
+      else await expect(run()).rejects.toThrow('excluded user context starts a new session only on the defaultProvider and defaultModel of Pi settings');
+      expect(seen).toEqual(requests);
+    } finally {
+      await client.dispose();
+      await Promise.all(servers.map(server => new Promise<void>(done => server.close(() => done()))));
+    }
+  }, 30_000);
+
   it('lets a user extension finish an async session_shutdown hook on dispose, as OAR', async () => {
     const f = fixture();
     const marker = join(f.root, 'shutdown-done');

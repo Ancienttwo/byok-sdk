@@ -164,8 +164,11 @@ export async function runPiSessionRuntime(options: {
       await (replacementContext.getStore()?.releaseDiscovery() ?? releaseInitialDiscovery());
     }
     // The excluded resource loader has no user/global/project settings. Its
-    // model runtime independently opens only Pi's model/auth stores.
+    // model runtime independently opens only Pi's model/auth stores, and it
+    // keeps the user's global model selection (#1296).
     const isolated = options.resourceAgentDir !== undefined;
+    const selection = isolated ? SettingsManager.create(options.cwd, credentialAgentDir, { projectTrusted: false }) : undefined;
+    const newSession = sessionManager.buildSessionContext().messages.length === 0;
     const modelRuntime = isolated ? await ModelRuntime.create({
       authPath: join(credentialAgentDir, 'auth.json'),
       modelsPath: join(credentialAgentDir, 'models.json'),
@@ -179,16 +182,26 @@ export async function runPiSessionRuntime(options: {
     const services = await createAgentSessionServices({
       cwd: options.cwd, agentDir, modelRuntimeSignal: AbortSignal.timeout(15_000),
       ...(modelRuntime === undefined ? {} : { modelRuntime }),
-      settingsManager: isolated
-        ? SettingsManager.inMemory({}, { projectTrusted: false })
+      settingsManager: selection !== undefined
+        ? SettingsManager.inMemory({
+          defaultProvider: selection.getDefaultProvider(), defaultModel: selection.getDefaultModel(),
+          defaultThinkingLevel: selection.getDefaultThinkingLevel(),
+        }, { projectTrusted: false })
         : SettingsManager.create(options.cwd, agentDir, { projectTrusted: true }),
       resourceLoaderOptions: options.resourceLoaderOptions,
     });
+    const extensions = services.resourceLoader.getExtensions();
     const errors = [
       ...services.diagnostics.filter(diagnostic => diagnostic.type === 'error').map(diagnostic => diagnostic.message),
-      ...services.resourceLoader.getExtensions().errors.map(({ path, error }) => `${path}: ${error}`),
+      ...extensions.errors.map(({ path, error }) => `${path}: ${error}`),
     ];
     if (errors.length > 0) options.reject(errors.join('\n'));
+    const loaded = new Set(extensions.extensions.map(extension => extension.path));
+    for (const input of options.resourceLoaderOptions?.extensionFactories ?? []) {
+      if (typeof input !== 'function' && input.replaceable === true && !loaded.has(`<inline:${input.name}>`)) {
+        process.stderr.write(`${options.label}: another extension registers a name of bundled ${input.name}, so Pi did not load ${input.name}\n`);
+      }
+    }
     if (options.providerApiKey !== undefined) {
       const { provider, apiKey } = options.providerApiKey;
       // A fixed refusal: a foreign error from this call may carry the key.
@@ -217,6 +230,14 @@ export async function runPiSessionRuntime(options: {
         created.session.dispose();
         throw error;
       }
+    }
+    // Without the settings default Pi would take the first provider that has
+    // any key, including one only the environment supplies. A resumed session
+    // keeps its recorded model, or Pi reports a fallback below.
+    if (selection !== undefined && options.model === undefined && newSession
+      && (created.session.model?.provider !== selection.getDefaultProvider() || created.session.model?.id !== selection.getDefaultModel())) {
+      await created.session.dispose();
+      options.reject('excluded user context starts a new session only on the defaultProvider and defaultModel of Pi settings, which must name a model with configured auth, or on an explicit model');
     }
     if (created.modelFallbackMessage && options.initialModel === 'required') {
       await created.session.dispose();

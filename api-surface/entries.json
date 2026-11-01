@@ -588,7 +588,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 492379,
+      "budgetBytes": 493632,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -811,12 +811,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 32,
+          "line": 33,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 32,
+          "line": 33,
           "rule": "opaque import()"
         },
         {
@@ -861,7 +861,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 450709,
+      "budgetBytes": 451962,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
