@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.32.0",
-    "snapshotSha256": "850a07d32a41405ac248ac2a15f36caef9f55100e6b7c0b37b1eae18134ece8f"
+    "snapshotSha256": "0a5ae02cfb3b9e2b534dd607045538ab0e5ac837d68cf4322f598e0879f5142c"
   },
   "configFields": {
     "status": "tracked",
@@ -115,6 +115,25 @@
         "export:@byok-sdk/client/adapters#DshModelSelection",
         "export:@byok-sdk/client/adapters#DshSandboxMode",
         "export:@byok-sdk/client/testing#FakeRuntimeAdapterId"
+      ]
+    },
+    {
+      "id": "task-fail-quota-scope",
+      "impact": "additive",
+      "summary": "A quota task.fail.failure may carry scope: 'account' or 'model' (#1271), and TaskResult.failure and TerminalResult.failure copy it. The Claude adapter sets it from rate_limit_info.rateLimitType: five_hour and seven_day are account, seven_day_opus and seven_day_sonnet are model, so another model of the same runtime may still run; any other value or none gives no scope, and other runtimes never set it. A daemon sends scope only to a server that advertises the new runtime-quota-scope flag, which the reference server and hosted cloud do; to an older server it sends class and resetsAt without it. @byok-sdk/protocol adds RUNTIME_QUOTA_SCOPE_CAPABILITY, RUNTIME_QUOTA_SCOPES and the RuntimeQuotaScope type, and TaskFailureReading gains scope. A Host that reads failure.class needs no change; one that switches models on a model-scoped quota reads scope and treats it as absent when missing.",
+      "migration": "docs/spec.md#post-admission-runtime-failure-authority",
+      "items": [
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPES",
+        "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+        "export:@byok-sdk/protocol#RuntimeQuotaScope",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailureReading",
+        "export:@byok-sdk/protocol#TaskFailureSchema",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPES",
+        "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPE_CAPABILITY"
       ]
     },
     {
@@ -354,6 +373,61 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore",
       "change": "changed",
       "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPES",
+      "change": "added",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+      "change": "added",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeQuotaScope",
+      "change": "added",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+      "change": "changed",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "changed",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureReading",
+      "change": "changed",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailureSchema",
+      "change": "changed",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPES",
+      "change": "added",
+      "entry": "task-fail-quota-scope"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPE_CAPABILITY",
+      "change": "added",
+      "entry": "task-fail-quota-scope"
     },
     {
       "item": "export:@byok-sdk/server#CreateByokServerOptions",

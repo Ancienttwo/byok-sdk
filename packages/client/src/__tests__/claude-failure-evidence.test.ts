@@ -19,7 +19,9 @@ function classify(evidence: ClaudeFailureEvidence, frames: readonly ClaudeStream
 
 describe('ClaudeFailureEvidence (#869)', () => {
   it.each([
-    ['a rejected limit with a reset time', [rateLimit({ status: 'rejected', resetsAt: RESETS_AT_SECONDS, rateLimitType: 'five_hour' }), assistantError('rate_limit'), failedResult(429)], { class: 'quota', resetsAt: RESETS_AT }],
+    ['a rejected account limit with a reset time', [rateLimit({ status: 'rejected', resetsAt: RESETS_AT_SECONDS, rateLimitType: 'five_hour' }), assistantError('rate_limit'), failedResult(429)], { class: 'quota', resetsAt: RESETS_AT, scope: 'account' }],
+    ['a rejected per-model weekly limit (#1271)', [rateLimit({ status: 'rejected', resetsAt: RESETS_AT_SECONDS, rateLimitType: 'seven_day_opus' }), assistantError('rate_limit'), failedResult(429)], { class: 'quota', resetsAt: RESETS_AT, scope: 'model' }],
+    ['a rejected limit whose type names no scope (#1271)', [rateLimit({ status: 'rejected', resetsAt: RESETS_AT_SECONDS, rateLimitType: 'overage' }), assistantError('rate_limit'), failedResult(429)], { class: 'quota', resetsAt: RESETS_AT }],
     ['a rejected limit without a reset time', [rateLimit({ status: 'rejected' }), assistantError('rate_limit'), failedResult()], { class: 'quota' }],
     ['a rejected limit whose reset time is out of range', [rateLimit({ status: 'rejected', resetsAt: 1e16 }), assistantError('rate_limit'), failedResult()], { class: 'quota' }],
     ['a rejected limit whose reset time is in milliseconds', [rateLimit({ status: 'rejected', resetsAt: 1.79e12 }), assistantError('rate_limit'), failedResult()], { class: 'quota' }],

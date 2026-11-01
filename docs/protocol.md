@@ -457,6 +457,17 @@ field. `failure` stays plaintext on a sealed `task.fail`. The reference server
 and the hosted cloud advertise the flag and project the field as
 `TaskResult.failure` and `TerminalResult.failure`.
 
+**Landed additive minor: `task.fail.failure.scope` (#1271).** The `quota`
+branch gains an OPTIONAL `scope: 'account' | 'model'`, set only from structured
+runtime evidence: `account` when the whole account is limited, `model` when
+only the model's own limit is used up, so another model of the same runtime
+may still run. It is gated on the server's new `runtime-quota-scope` flag
+(`failure.scope` in `WIRE_ADDITIONS`), because the `quota` branch is strict. A
+daemon talking to a server without the flag drops `scope` and sends `class`
+and `resetsAt` unchanged; the sealed branch does the same. The reference
+server and the hosted cloud advertise the flag and project `scope` with the
+rest of the failure.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -597,7 +608,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId` (required — §5.3) | A session or the control socket requested approval (§5) |
 | `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2) | Runtime reached `turn_end` |
-| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag |
+| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag, and its quota `scope` on `runtime-quota-scope` |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2); baseline, no capability gate |
 | `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; server-advertised `agent-message-draft` gate |

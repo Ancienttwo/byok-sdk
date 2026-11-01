@@ -90,6 +90,8 @@ describe('RuntimeExecutionFailure', () => {
       { class: 'quota', resetsAt: 'tomorrow' },
       { class: 'quota', resetsAt: '+055840-11-08T22:13:20.000Z' },
       { class: 'quota', resetsAt: '-000001-01-01T00:00:00.000Z' },
+      { class: 'auth', scope: 'account' },
+      { class: 'quota', scope: 'opus' },
       { class: 'unknown', status: 401 },
     ]) {
       expect(() => new RuntimeExecutionFailure({ ...base, failure: failure as never }), JSON.stringify(failure)).toThrow(/invalid RuntimeExecutionFailure input/);

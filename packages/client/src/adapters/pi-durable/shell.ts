@@ -29,7 +29,8 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
     if(context.abortSignal?.aborted)return err(new ExecutionError('aborted','Command aborted'));
     let child: ChildProcess;
     const gate='IFS= read -r permit || exit 78; [ "$permit" = byok-durable-shell ] || exit 78; exec "$1" -c "$2" </dev/null';
-    try { child = spawn(shell, ['-c',gate,'byok-durable-shell',shell,command], { cwd: options?.cwd ?? env.cwd, env: shellEnv, detached: true, stdio: ['pipe','pipe','pipe'] }); }
+    // bash may source ~/.bashrc when stdin is a socket; nothing may run before own(). dash rejects --norc.
+    try { child = spawn(shell, [...(shell==='/bin/bash'?['--norc']:[]),'-c',gate,'byok-durable-shell',shell,command], { cwd: options?.cwd ?? env.cwd, env: shellEnv, detached: true, stdio: ['pipe','pipe','pipe'] }); }
     catch (cause) { return err(new ExecutionError('spawn_error', 'Unable to spawn durable shell', cause as Error)); }
     let closed = false, quiesced = false;
     const state: {failure?:ExecutionError}={};

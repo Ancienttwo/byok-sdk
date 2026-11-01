@@ -8,6 +8,8 @@ import { descendantsOf, killEntries, readProcessTable, type ProcessEntry, type P
 const DEFAULT_TERM_GRACE_MS = 750;
 const DEFAULT_KILL_GRACE_MS = 2_000;
 const POLL_MS = 20;
+/** POSIX: how often a running owned root's descendants are read. A process started and orphaned inside one period is not seen. */
+export const OWNED_TREE_OBSERVE_MS = 1_000;
 
 export type KillFn = (pid: number, signal: NodeJS.Signals | number) => void;
 
@@ -16,7 +18,7 @@ interface OwnedTerminationState {
   requested: boolean;
   /** win32 only: the process ids `taskkill /T /F` reported walking. This set — not taskkill's exit status — is what disposal measures for quiescence. */
   acceptedPids: Set<number>;
-  /** POSIX only: the root's descendants read just before the SIGTERM, those that left its group included, until they have had their SIGKILL. */
+  /** POSIX only: the root's descendants seen while it ran (each observation, and the read just before the SIGTERM), those that left its group or its tree included, until they have had their SIGKILL. */
   descendants: readonly ProcessEntry[];
 }
 
@@ -59,6 +61,41 @@ export function withOwnedProcessTree<T extends SpawnOptions>(options: T): T {
     ...options,
     ...(process.platform === 'win32' ? { windowsHide: true } : { detached: true }),
   };
+}
+
+/**
+ * POSIX: the running owned roots whose descendants are observed, by child.
+ * A runtime may start a tool in a session of its own (dsh, Claude and Pi do).
+ * Once the root dies from an outside SIGKILL, that tool is re-parented and no
+ * read from the root finds it, so its entry has to be taken while the root
+ * runs. One table read per period serves every root.
+ */
+const observedRoots = new Map<ChildProcess, number>();
+let observer: NodeJS.Timeout | undefined;
+
+function observeOwnedRoots(): void {
+  let table: ProcessTable;
+  try {
+    table = readProcessTable();
+  } catch {
+    // A timer has no caller to fail. The previous observation stands, and
+    // disposal reads the table again before it signals anything.
+    return;
+  }
+  for (const [child, pid] of observedRoots) rememberDescendants(child, pid, table);
+}
+
+function observeOwnedRoot(child: ChildProcess, pid: number): void {
+  observedRoots.set(child, pid);
+  observer ??= setInterval(observeOwnedRoots, OWNED_TREE_OBSERVE_MS).unref();
+  const stop = (): void => {
+    observedRoots.delete(child);
+    if (observedRoots.size > 0 || observer === undefined) return;
+    clearInterval(observer);
+    observer = undefined;
+  };
+  child.once('close', stop);
+  child.once('exit', stop);
 }
 
 /** One live owned tree the host-exit backstop is responsible for, frozen at adoption time. */
@@ -321,6 +358,7 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
   options.child.once('exit', forget);
 
   if (platform !== 'win32') {
+    observeOwnedRoot(options.child, pid);
     await recordOwnedGroup(options.child, pid, options.label, options.readProcessTableFn ?? readProcessTable);
     return;
   }
@@ -500,13 +538,21 @@ function isRunning(child: ChildProcess): boolean {
 }
 
 /**
- * POSIX, just before the SIGTERM: remember the root's descendants, those that
- * left its process group included (OAR 0.37.0 `spawnLineProcess().kill()`,
- * 6d1589d). Read while the root runs: once it is gone, what left its group is
- * re-parented and no longer found below it.
+ * POSIX, at each observation and just before the SIGTERM: remember the root's
+ * descendants, those that left its process group included (OAR 0.37.0
+ * `spawnLineProcess().kill()`, 6d1589d). Read while the root runs: once it is
+ * gone, what left its group is re-parented and no longer found below it. An
+ * entry seen before stays while `table` shows the same process (same start
+ * time), so one whose parent exited is still remembered.
  */
-function rememberDescendants(child: ChildProcess, pid: number): void {
-  if (isRunning(child)) stateFor(child).descendants = descendantsOf(readProcessTable(), pid);
+function rememberDescendants(child: ChildProcess, pid: number, table?: ProcessTable): void {
+  if (!isRunning(child)) return;
+  const current = table ?? readProcessTable();
+  const state = stateFor(child);
+  const remembered = new Map<number, ProcessEntry>();
+  for (const entry of state.descendants) if (current.get(entry.pid)?.start === entry.start) remembered.set(entry.pid, entry);
+  for (const entry of descendantsOf(current, pid)) remembered.set(entry.pid, entry);
+  state.descendants = [...remembered.values()];
 }
 
 /**
@@ -699,17 +745,19 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
  * Resolve only after the adapter-owned root and descendants are quiescent.
  *
  * POSIX measures the owned process GROUP, then SIGKILLs the descendants that
- * left the group (read before the SIGTERM and again before the SIGKILL, each
- * pid checked by start time) and waits until they are gone. Only ends that
- * this module starts do this: a root that exited by itself leaves its
- * descendants alone. A process that started after the first read and
- * outlives the root is not reached.
+ * left the group (observed every {@link OWNED_TREE_OBSERVE_MS} while the root
+ * ran, read before the SIGTERM and again before the SIGKILL, each pid checked
+ * by start time) and waits until they are gone. That holds however the root
+ * ended, an outside SIGKILL included (#1269): the group signal never reaches a
+ * tool in a group of its own, and once the root is gone only the remembered
+ * entry leads to it.
  *
- * POSIX residual, as in OAR: the tree walk finds a process only while its
- * parent chain still leads to the root. A process whose parent exited before
- * the read is re-parented to init and is not reached. Real Claude and Pi run
- * each shell command in a session of its own, so `cmd &` makes exactly this:
- * the shell exits at once and the background job outlives `close()`.
+ * POSIX residual: the tree walk finds a process only while its parent chain
+ * still leads to the root. A process that is re-parented, or whose root dies,
+ * before any observation or read saw it is not reached: within one observation
+ * period, a root SIGKILLed right after starting a tool, or `cmd &` from a
+ * shell that exits at once (real Claude and Pi run each shell command in a
+ * session of its own).
  *
  * win32 measures the pid set taskkill
  * reported walking (`stage:'quiescence'` names how many of those were still
