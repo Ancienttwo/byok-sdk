@@ -822,6 +822,7 @@ Manifest transition: **0.32.0 → 0.32.0**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| daemon-config-runtimes-grok | additive | DaemonConfig.runtimes.grok takes compatInstructions, agentUserMcpServers and versionPolicy, and createDaemon builds the Grok adapter from configuration when runtimeAllowlist lists grok (#1094). Without grok in the allowlist nothing changes; a Host that assembles GrokAdapter itself can move those options into DaemonConfig. [Migration](../docs/device-setup.md#runtime-isolation-and-tool-authorization) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

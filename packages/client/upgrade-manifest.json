@@ -7,13 +7,37 @@
   },
   "to": {
     "version": "0.32.0",
-    "snapshotSha256": "2af2ccd6b46db035d3e4d7151f8369b3779fdf8e56bb43c0d2fbcc189e0f96e3"
+    "snapshotSha256": "6c24eec9c1c8d685254c4f69a149f69d6fa56a9355f27e31602f75ce25febd09"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "daemon-config-runtimes-grok",
+      "impact": "additive",
+      "summary": "DaemonConfig.runtimes.grok takes compatInstructions, agentUserMcpServers and versionPolicy, and createDaemon builds the Grok adapter from configuration when runtimeAllowlist lists grok (#1094). Without grok in the allowlist nothing changes; a Host that assembles GrokAdapter itself can move those options into DaemonConfig.",
+      "migration": "docs/device-setup.md#runtime-isolation-and-tool-authorization",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#DaemonConfig"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=a433ba0fb0c2e2f1",
+      "after": "optional schema-sha256=278bbd8285f89b7a",
+      "entry": "daemon-config-runtimes-grok"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfig",
+      "change": "changed",
+      "entry": "daemon-config-runtimes-grok"
+    }
+  ]
 }
