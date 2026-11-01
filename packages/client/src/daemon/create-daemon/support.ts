@@ -13,6 +13,7 @@ import { ClaudeAdapter } from '../../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../../adapters/codex/codex-adapter';
 import { DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_MAX_TTL_MS } from '@byok-sdk/core';
 import type { AgentContentReadConfig, DaemonConfig, DeviceAssertionConfig } from '../create-daemon';
+import { resolvePiByokLauncher } from './config';
 
 /**
  * Module-scope helpers of the daemon composition (#926): constants, adapter
@@ -389,6 +390,11 @@ export function buildDefaultAdapters(config: DaemonConfig, piByokLauncher: Daemo
     ? ALL_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
     : ALL_RUNTIME_IDS;
   return ids.map((id) => buildAdapter(id, config, piByokLauncher));
+}
+
+/** The bundled adapter set `createDaemon` builds, for callers holding only the config: `byok-agent runtimes` and offline doctor. */
+export function buildConfiguredRuntimeAdapters(config: DaemonConfig): RuntimeAdapter[] {
+  return buildDefaultAdapters(config, resolvePiByokLauncher(config));
 }
 
 /**
