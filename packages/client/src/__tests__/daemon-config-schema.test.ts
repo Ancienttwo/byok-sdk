@@ -249,7 +249,7 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     ['an invalid fileScope', { default: 'auto', fileScope: { mode: 'workspaces' } }, 'toolAuthorization.fileScope', 'invalid_file_scope'],
   ])('rejects %s at construction with DaemonConfigInvalidError', async (_label, policy, issuePath, code) => {
     const config = await bundled({ agentHome: testAgentHomeConfig(), toolAuthorization: policy as DaemonConfig['toolAuthorization'] });
-    const adapters = [new StubRuntimeAdapter('pi', undefined, { toolAuthorizationAuto: true })];
+    const adapters = [new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, toolAuthorizationAuto: true })];
     const issues = constructionIssues(() => createDaemonWithAdapters(config, adapters));
     expect(issues).toEqual([expect.objectContaining({ severity: 'error', code, path: issuePath })]);
     const check = checkDaemonConfig(config, { source: 'embedded', adapters });
