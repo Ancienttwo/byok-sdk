@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2097398,
+      "budgetBytes": 2115394,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -110,7 +110,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 377477,
+      "budgetBytes": 395397,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -425,7 +425,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 364929,
+      "budgetBytes": 383017,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -483,8 +483,8 @@
   "@byok-sdk/client#byok-acp-runtime": {
     "kind": "imports",
     "policy": {
-      "purpose": "Private ACP runtime stack (Grok)",
-      "budgetBytes": 80400,
+      "purpose": "Private ACP runtime stack (Grok, dsh)",
+      "budgetBytes": 80556,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
