@@ -57,6 +57,7 @@ import {
 } from '../provider-credential-environment';
 import { probePiAuthPresent } from './auth-presence';
 import { startToolAuthorizationIpc } from '../../tool-authorization-ipc';
+import type { ToolAuthorizationGate } from '../../tool-authorization';
 import { serializeFileScopeGrant } from '../../file-scope-serialization';
 import { acquirePiSessionRetention, type PiSessionRetentionLease } from '../../util/pi-session-retention';
 
@@ -230,9 +231,10 @@ export class PiAdapter implements RuntimeAdapter {
     // `PiSession` turns only a non-aborted `agent_settled` into `turn_end`.
     trajectoryEvidence: 'event-stream',
     platforms: ['darwin', 'linux', 'win32'],
-    // #1061 slice 1: the digest-bound launch carries the resolved scope and
-    // the scoped file tools enforce it on the ordinary RPC lane only.
-    fileScope: { lanes: ['rpc'] },
+    // #1061: the digest-bound RPC launch carries the resolved scope and the
+    // scoped file tools enforce it. The prepared session has no native file
+    // tools; its gate's scope floor asks for every counted tool call.
+    fileScope: { lanes: ['rpc', 'prepared'] },
     // An exact `byok-profile` selection runs through the BYOK launcher.
     providerProfileBinding: true,
     capabilities: PI_RUNTIME_CAPABILITIES,
@@ -263,7 +265,9 @@ export class PiAdapter implements RuntimeAdapter {
     // T0 verified the RPC lanes only. The durable worker's own frames and
     // respawn path are unverified, so it declares no trajectory evidence.
     // Windows waits for validated parent-death Job Object recovery.
-    if (options.durableLane === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
+    // The durable worker re-resolves the scope on every spawn and swaps its
+    // native file tools for the SDK scoped ones.
+    if (options.durableLane === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], fileScope: { lanes: ['durable'] }, capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
@@ -486,12 +490,6 @@ export class PiAdapter implements RuntimeAdapter {
           if ((resources.userContext === 'excluded' || resources.skillPaths.length > 0 || resources.extensionPaths.length > 0) && runtimeLaunch.kind !== 'pi-rpc') {
             throw authorityFailure('Pi Agent resources are supported only by the ordinary RPC lane');
           }
-          if (startInput.toolAuthorization !== undefined && runtimeLaunch.kind !== 'pi-rpc') {
-            throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'semantic', retry: 'non-retryable',
-              reason: 'tool_authorization_unsupported: only the ordinary Pi RPC lane gates tool calls before execution',
-            });
-          }
           parsePiMcpEnvironment(startInput.mcpEnv);
           const mcpEnv = startInput.mcpEnv!; // Preserve the daemon admission object through serialization.
           const manifestSelection = startInput.manifest.dispatchSelection;
@@ -557,6 +555,7 @@ export class PiAdapter implements RuntimeAdapter {
               }),
               ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
               ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
+              ...(startInput.toolAuthorization === undefined ? {} : { toolAuthorization: startInput.toolAuthorization }),
               nativeAssetRoot: this.options.nativeAssetRoot,
               ...(this.options.spawnFn === undefined ? {} : { spawnFn: this.options.spawnFn }),
             });
@@ -777,6 +776,12 @@ interface PreparedPiLaunchInput {
   };
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   readonly mcpToolsetTools?: McpToolsetToolObservation;
+  /**
+   * The task's `auto` gate. The prepared session has no native file tools, so
+   * a file-scoped task needs only the gate: its scope floor asks for every
+   * counted tool call. The grant never enters the prepared launch.
+   */
+  readonly toolAuthorization?: ToolAuthorizationGate;
   readonly spawnFn?: SpawnFn;
 }
 
@@ -917,13 +922,19 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
   let configDir: string | undefined;
   let configPath: string;
   let configDigest: string;
+  let scratch = input.scratch;
   try {
+    const gate = input.toolAuthorization === undefined ? undefined : await startToolAuthorizationIpc(input.toolAuthorization);
+    if (gate !== undefined) scratch = Object.freeze({ ...scratch, release: async () => {
+      await gate.close();
+      await input.scratch.release();
+    } });
     configDir = input.scratch.sdkDir;
     await fs.chmod(configDir, 0o700).catch(() => {});
     configPath = path.join(configDir, 'prepared-launch.json');
     const serialized = serializePiHostConfig({
         format: 'byok.pi.prepared-launch',
-        version: 6,
+        version: 7,
         // The host's single branch switch. It is not a second opinion about
         // the launch: it is `resolvePiRuntimeLaunch`'s own decision carried to
         // the process that must act on it, and it travels inside the
@@ -940,6 +951,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
         memoryCall: memoryServer.memoryCall,
         terminalProjection: preparation.terminalProjection ?? null,
         resultCall: memoryServer.resultCall,
+        toolAuthorization: gate?.config ?? null,
         // The SAME task-scoped MCP shape the ordinary extension reads, written
         // by the same adapter from the same resources. The prepared host parses
         // it with the same parser and reaches the servers through the same pool.
@@ -953,7 +965,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     configDigest = serialized.digest;
     await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 });
   } catch (cause) {
-    await input.scratch.release();
+    await scratch.release();
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
       reason: 'pi prepared launch configuration could not be created',
@@ -975,7 +987,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
       ...(input.spawnFn === undefined ? {} : { spawnFn: input.spawnFn }),
     });
   } catch (cause) {
-    await disposePiStartup(undefined, input.scratch, cause);
+    await disposePiStartup(undefined, scratch, cause);
     if (cause instanceof RuntimeExecutionFailure) throw cause;
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
@@ -992,14 +1004,14 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     response = await rpc.send(buildPreparedPromptCommand(envelope, preparation.expected, PREPARED_PROMPT_COMMAND_ID));
   } catch (cause) {
     const failure = startupExit(rpc);
-    await disposePiStartup(rpc, input.scratch);
+    await disposePiStartup(rpc, scratch);
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
       reason: `pi prepared request transport failed: ${errorMessage(cause)}`, failure,
     }, { cause });
   }
   if (response.success === false) {
-    await disposePiStartup(rpc, input.scratch);
+    await disposePiStartup(rpc, scratch);
     // The native code is reported verbatim. Every one of them is terminal for
     // this artifact — nothing here retries, and nothing here may re-send a
     // DIFFERENT input under the same accounting.
@@ -1012,11 +1024,11 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 
   const data = response.data as { sessionId?: unknown; preparedDigest?: unknown } | undefined;
   if (typeof data?.sessionId !== 'string' || data.sessionId.length === 0) {
-    await disposePiStartup(rpc, input.scratch);
+    await disposePiStartup(rpc, scratch);
     throw authorityFailure('pi admitted the prepared request without reporting an authoritative session id');
   }
   if (data.preparedDigest !== preparation.expected.envelopeDigest) {
-    await disposePiStartup(rpc, input.scratch);
+    await disposePiStartup(rpc, scratch);
     throw authorityFailure('pi admitted a prepared request whose digest is not the one this operation counted');
   }
   const sessionRef = data.sessionId;
@@ -1026,7 +1038,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     state = await rpc.send({ type: 'get_state' });
   } catch (cause) {
     const failure = startupExit(rpc);
-    await disposePiStartup(rpc, input.scratch);
+    await disposePiStartup(rpc, scratch);
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
       reason: `pi transport ended before confirming the prepared session id: ${errorMessage(cause)}`, failure,
@@ -1034,11 +1046,11 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
   }
   const stateData = state.data as { sessionId?: unknown } | undefined;
   if (state.success === false || stateData?.sessionId !== sessionRef) {
-    await disposePiStartup(rpc, input.scratch);
+    await disposePiStartup(rpc, scratch);
     throw authorityFailure('pi reported a different session id than the one that admitted the prepared request');
   }
 
-  return new PiSession(sessionRef, rpc, input.manifestSelection, input.scratch, preparation.expected.model.contextWindow, mcpEventIdentities(input.mcpToolsetTools));
+  return new PiSession(sessionRef, rpc, input.manifestSelection, scratch, preparation.expected.model.contextWindow, mcpEventIdentities(input.mcpToolsetTools));
 }
 
 /**

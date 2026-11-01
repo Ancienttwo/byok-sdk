@@ -66,9 +66,9 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     ...(agentBinding.resolution.agentRef === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
   }));
   const effectiveToolAuthorization = toolAuthorizationMode(toolAuthorization, pick.descriptor.id);
-  if (effectiveToolAuthorization === 'auto' && (pick.descriptor.capabilities.toolAuthorizationAuto !== true || preparation !== undefined)) {
+  if (effectiveToolAuthorization === 'auto' && pick.descriptor.capabilities.toolAuthorizationAuto !== true) {
     if (!admissionWithdrawn()) {
-      decline(`tool_authorization_unsupported: runtime ${pick.descriptor.id} cannot gate ${preparation === undefined ? '' : 'prepared '}tool calls before execution, so auto mode cannot run`, false);
+      decline(`tool_authorization_unsupported: runtime ${pick.descriptor.id} cannot gate tool calls before execution, so auto mode cannot run`, false);
     }
     return;
   }

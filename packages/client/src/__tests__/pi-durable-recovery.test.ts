@@ -22,7 +22,7 @@ describe('durable parent recovery authority', () => {
     expect(new PiAdapter({ durableLane: false }).descriptor.capabilities.durableLane).toBeUndefined();
     expect(() => new PiAdapter({ durableLane: { replicaRoot: '/removed' } as never })).toThrow(/must be boolean/);
     const adapter = new PiAdapter({ durableLane: true });
-    expect(adapter.descriptor.capabilities).toMatchObject({ durableLane: true, steer: false, resume: false, toolAuthorizationAuto: false, preparedLane: false });
+    expect(adapter.descriptor.capabilities).toMatchObject({ durableLane: true, steer: false, resume: false, toolAuthorizationAuto: true, preparedLane: false });
     // #1197: the durable worker refuses excluded user context, so neither its
     // descriptor nor the wire projection may claim the capability. The
     // ordinary RPC lane still provides it.

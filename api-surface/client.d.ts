@@ -13383,9 +13383,9 @@ export interface RuntimeIsolationCapabilities {
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /**
-     * Enforces the `auto` tool authorization gate before every native tool call
-     * of an ordinary instruction start. Omission means `auto` tasks are declined
-     * for this adapter before claim; `all` needs no adapter support.
+     * Enforces the `auto` tool authorization gate before every tool call on each
+     * lane the adapter runs. Omission means `auto` tasks are declined for this
+     * adapter before claim; `all` needs no adapter support.
      */
     readonly toolAuthorizationAuto?: boolean;
     /** Supports display-only Agent message drafts. Omission means unsupported. */
@@ -13394,10 +13394,7 @@ export interface RuntimeCapabilities {
     readonly nativeInteractions?: NativeInteractionCapabilities;
     /** The durable worker lane (Pi today). Omission means an ordinary adapter. */
     readonly durableLane?: boolean;
-    /**
-     * Accepts a prepared offer (the prepared lane). Omission means unsupported.
-     * `auto` never applies to a prepared offer, whatever `toolAuthorizationAuto` says.
-     */
+    /** Accepts a prepared offer (the prepared lane). Omission means unsupported. */
     readonly preparedLane?: boolean;
     /** Which user-level sources the adapter keeps out of a Bot session. Omission means none. */
     readonly isolation?: RuntimeIsolationCapabilities;

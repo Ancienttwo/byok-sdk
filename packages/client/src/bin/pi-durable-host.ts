@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createModels, createProvider } from '@earendil-works/pi-ai/models';
-import type { Model, ProviderStreams, TSchema } from '@earendil-works/pi-ai';
+import type { Model, ProviderStreams, ToolCall, TSchema } from '@earendil-works/pi-ai';
 import { type ToolRegistration } from '@earendil-works/pi-durable';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { receiveLauncherCredential } from '../adapters/pi/launcher-credential';
@@ -17,6 +17,10 @@ import { projectMcpTools, type McpToolProjection } from '../mcp/projection';
 import { isReservedMcpServerName } from '../sdk-reserved-mcp';
 import { RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
 import { readJsonlLines } from '../util/jsonl-lines';
+import { parseToolAuthorizationIpcConfig, requestToolAuthorization } from '../tool-authorization-ipc';
+import { formatToolAuthorizationDenial } from '../tool-authorization';
+import { parseSerializedFileScopeGrant, verifySerializedFileScopeGrant } from '../file-scope-launch';
+import { createPiFileScopeGuard } from '../adapters/pi/file-scope-extension';
 
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('durable config requires an object');
@@ -44,11 +48,20 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   if (args.length !== 2 || args[0] !== '--config' || !path.isAbsolute(args[1]!)) throw new Error('durable accepts only --config <absolute path>');
   if (process.platform === 'win32') throw new Error('durable Pi requires validated parent-death process-tree recovery; Windows is unavailable');
   const config = object(readPiHostConfig(args[1]!, digest));
-  if (config.format !== 'byok.pi.durable-launch' || config.version !== 2) throw new Error('unsupported durable launch config');
+  if (config.format !== 'byok.pi.durable-launch' || config.version !== 3) throw new Error('unsupported durable launch config');
   const replica = object(config.replica);
   const agent = object(replica.agentRef);
   const authority: DurableReplicaBinding = { agentRef: { tenantId: string(agent.tenantId), agentId: string(agent.agentId), profileRevision: string(agent.profileRevision) }, taskId: string(replica.taskId), leaseId: string(replica.leaseId), canonicalHome: string(replica.canonicalHome) };
   const root = string(config.replicaRoot);
+  const gate = config.toolAuthorization === null ? null : parseToolAuthorizationIpcConfig(config.toolAuthorization);
+  // #1061: every spawn, the first and each respawn, re-resolves the roots
+  // before a tool exists; a replaced or missing root fails the worker.
+  const scope = config.fileScope === null ? undefined : await (async () => {
+    if (gate === null) throw new Error('durable file scope requires the auto tool-authorization gate');
+    const grant = await verifySerializedFileScopeGrant(parseSerializedFileScopeGrant(config.fileScope, message => { throw new Error(`invalid durable file scope: ${message}`); }));
+    if (grant.home.path !== authority.canonicalHome) throw new Error('durable file scope home differs from the replica binding');
+    return createPiFileScopeGuard({ grant, gate });
+  })();
   const file = await admitReplica(root, authority);
   if (typeof config.instruction !== 'string' || config.instruction.length === 0) throw new Error('durable instruction missing');
   const instruction = config.instruction;
@@ -82,6 +95,20 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
       return { content: result.content, details: { ...result.details }, isError: result.details.isError };
     } });
   }
+  const fileTools: ToolRegistration[] | undefined = scope?.tools.map(tool => ({
+    name: tool.name, description: tool.description, parameters: tool.parameters as TSchema,
+    execute: async (parameters, toolApi, ctx) => {
+      const result = await tool.execute(`durable:${authority.taskId}:${toolApi.taskId}`, parameters as never, ctx.abortSignal, undefined, { cwd: authority.canonicalHome } as never);
+      return { output: result.content };
+    },
+  }));
+  const authorize = gate === null ? undefined : async (toolCallId: string, call: ToolCall): Promise<string | undefined> => {
+    const input = call.arguments as Record<string, unknown>;
+    const outOfScope = await scope?.precheck({ toolCallId, toolName: call.name, input, cwd: authority.canonicalHome });
+    if (outOfScope !== undefined) return outOfScope;
+    const verdict = await requestToolAuthorization(gate, { toolCallId, toolName: call.name, input, cwd: authority.canonicalHome });
+    return verdict.decision === 'deny' ? formatToolAuthorizationDenial(verdict) : undefined;
+  };
   const write = (frame: unknown) => process.stdout.write(`${JSON.stringify(frame)}\n`);
   const admitted = new Set<string>();
   const toolIds = new Map<string, string>();
@@ -109,6 +136,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
       if (command.resume === true && command.projectionDigest !== projectionDigest) throw new Error('durable provider projection drift on recovery');
       started = true;
       engine = await openDurableEngine({ file, replicaRoot: root, binding: authority, models, model: { provider: expectedProvider, modelId: expectedModel }, instruction, resume: command.resume, ambient: process.env, tools,
+        ...(fileTools === undefined ? {} : { fileTools }), ...(authorize === undefined ? {} : { authorize }),
         shellOwnership:{own:pid=>new Promise<void>((resolve,reject)=>{pendingShells.set(pid,{resolve,reject});write({type:'tool_process',pid});}),released:pid=>write({type:'tool_process_closed',pid})},
         beforeTool: (nativeId, toolCallId, call) => new Promise<void>((resolve, reject) => {
           toolIds.set(nativeId, toolCallId);

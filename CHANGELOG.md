@@ -52,6 +52,20 @@ These changes need 0.34.0, the next MINOR.
   executable manager; the SDK process-tree authority keeps owning cleanup. All
   sixteen BYOK deltas are preserved and API surface is unchanged.
 
+- **Feature (client; #1061)** — `auto` tool authorization and
+  `toolAuthorization.fileScope` now run on Pi's prepared and durable lanes
+  (darwin/linux) with the ordinary lane's contract; they no longer decline
+  before claim. The prepared session asks the gate before every counted tool
+  call; it has no native file tools, so a scoped prepared task asks for every
+  call. The durable worker asks after it records the tool intent, swaps its
+  `read`/`write`/`edit` for the six SDK scoped file tools (`find`, `grep` and
+  `ls` included) and re-verifies the scope on every spawn; a crash while an
+  approval is pending ends the execution like any in-flight tool. `PiAdapter`
+  with `durableLane: true` now reports `toolAuthorizationAuto: true` on
+  `conn.hello` and presence. Windows, memory-reader offers and other adapters
+  still decline before claim. See
+  [Tool authorization](docs/spec.md#tool-authorization-auto-and-all-1061).
+
 ## 0.33.0 — 2026-11-01 (published)
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

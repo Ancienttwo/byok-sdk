@@ -202,7 +202,7 @@ export interface StubAdapterDeclarations {
 
 /** What the bundled Pi adapter declares, for a stub that stands in for it. */
 export const PI_STUB_DECLARATIONS: StubAdapterDeclarations = Object.freeze({
-  fileScope: Object.freeze({ lanes: Object.freeze(['rpc' as const]) }),
+  fileScope: Object.freeze({ lanes: Object.freeze(['rpc' as const, 'prepared' as const]) }),
   providerProfileBinding: true,
   projectMcpEnvironment: projectPiMcpEnvironment,
 });
