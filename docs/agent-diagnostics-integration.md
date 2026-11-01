@@ -257,7 +257,7 @@ await daemon.start();
 
 取消正在运行的工具时，记录是 `unpaired_tool_call` 加 `no_turn_end`。进程被杀时，记录通常是 `unpaired_tool_call`、`decode_dropped` 和 `stream_ended_early`。这两种记录都不能区分「工具没有运行」和「工具运行了但结束事件丢失」。
 
-当前只有默认的 `PiAdapter`（RPC 模式）声明证据来源。`durablePi: true` 的 Pi、Claude 和 Codex 不声明，它们的记录都是 `unknown`（`source_not_declared`）。见 [adapter 能力文档](adapter-capabilities.md#trajectory-evidence)。
+当前只有默认的 `PiAdapter`（RPC 模式）声明证据来源。`durableLane: true` 的 Pi、Claude 和 Codex 不声明，它们的记录都是 `unknown`（`source_not_declared`）。见 [adapter 能力文档](adapter-capabilities.md#trajectory-evidence)。
 
 ## 8. P3：SDK 后续能力缺口与实施边界
 

@@ -592,7 +592,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 
   // #654: each sealable type round-trips its first sealed-branch golden line,
   // which carries real ciphertext under a fixed test scope key.
-  const goldenLines = readFileSync(new URL('./golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
+  const goldenLines = readFileSync(new URL('./golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
     .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope);
   it.each(Object.keys(SEALED_SPLIT_TABLE) as Array<keyof typeof SEALED_SPLIT_TABLE>)('sealed branch of %s', (type) => {
     testedTypes.push(type);
@@ -609,7 +609,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 describe('createEnvelope defaults', () => {
   it('fills v, id, ts when not supplied', () => {
     const envelope = createEnvelope('task.steer', { text: 'hi' }, { taskId: 'task-1', seq: 1 });
-    expect(envelope.v).toBe(4);
+    expect(envelope.v).toBe(5);
     expect(envelope.id).toMatch(UUID_RE);
     expect(() => new Date(envelope.ts).toISOString()).not.toThrow();
     expect(Number.isNaN(new Date(envelope.ts).getTime())).toBe(false);
@@ -619,7 +619,7 @@ describe('createEnvelope defaults', () => {
     const envelope = createEnvelope(
       'task.steer',
       { text: 'hi' },
-      { v: 4, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
+      { v: 5, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
     );
     expect(envelope.id).toBe('11111111-1111-4111-8111-111111111111');
     expect(envelope.ts).toBe('2026-07-16T00:00:00.000Z');

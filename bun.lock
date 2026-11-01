@@ -331,7 +331,7 @@
         "zod": "^4.6.6",
       },
       "devDependencies": {
-        "byok-protocol-previous": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.30.2.tgz",
+        "byok-protocol-previous": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.33.0.tgz",
       },
     },
     "packages/server": {
@@ -957,7 +957,7 @@
 
     "bundle-require": ["bundle-require@5.1.0", "", { "dependencies": { "load-tsconfig": "^0.2.3" }, "peerDependencies": { "esbuild": ">=0.18" } }, "sha512-3WrrOuZiyaaZPWiEt4G3+IffISVC9HYlWueJEBWED4ZH4aIAC2PnkdnuRrR94M+w6yGWn4AglWtJtBI8YqvgoA=="],
 
-    "byok-protocol-previous": ["@byok-sdk/protocol@https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.30.2.tgz", { "dependencies": { "@cfworker/json-schema": "4.1.1", "zod": "^4.4.3" } }, "sha512-K3efRUJqxXo0F/reaZQU0LyOn3AsUwwh7zP4xkMda7J/NwfnRjPHX3EyWdVhFn504z21QqLWKwac2Tw/Rk5VZQ=="],
+    "byok-protocol-previous": ["@byok-sdk/protocol@https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.33.0.tgz", { "dependencies": { "@cfworker/json-schema": "4.1.1", "zod": "^4.6.6" } }, "sha512-y/RjN4muZQ6YzE6uxNGCNpeMCq4z1FIUNI0XsUq6jEVtbuedR9+K3AH6z8cpISp0DGCDVfRBnFqA8eq73vUQ6A=="],
 
     "bytes": ["bytes@3.1.2", "", {}, "sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg=="],
 

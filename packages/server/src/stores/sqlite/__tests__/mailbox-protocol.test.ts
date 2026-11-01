@@ -13,7 +13,7 @@ import { isSqliteAvailable, SqliteSchemaError } from '../../../sqlite-support';
 const directories: string[] = [];
 afterEach(() => { for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 const open = (path: string) => createSqliteEmbeddedStores({ path }, { clock: createMutableClock(), crypto: createWebCrypto() });
-// Historical v1 golden from 9c6df0fc^; the task.cancel payload is unchanged in v2, v3 and v4.
+// Historical v1 golden from 9c6df0fc^; the task.cancel payload is unchanged in v2, v3, v4 and v5.
 const legacyEnvelope = {"v": 1, "id": "00000000-0000-4000-8000-000000000006", "ts": "2026-01-01T00:00:05.000Z", "type": "task.cancel", "task_id": "task-golden-1", "seq": 4, "payload": {"reason": "user cancelled"}};
 const envelope = (v: unknown) => JSON.stringify({ ...legacyEnvelope, v });
 
@@ -51,11 +51,11 @@ function rows(path: string): unknown[] {
 }
 
 ((isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip)('SQLite mailbox protocol preflight', () => {
-  it('fences on wire v4', () => {
-    expect(PROTOCOL_VERSION).toBe(4);
+  it('fences on wire v5', () => {
+    expect(PROTOCOL_VERSION).toBe(5);
   });
 
-  it.each([envelope(1), envelope(2), envelope(3), envelope(5), envelope('4'), envelope(undefined), 'broken json', 'null'])('rejects unsupported pending authority without changing it: %s', async (body) => {
+  it.each([envelope(1), envelope(2), envelope(3), envelope(4), envelope(6), envelope('5'), envelope(undefined), 'broken json', 'null'])('rejects unsupported pending authority without changing it: %s', async (body) => {
     const { path } = await seed(body, 'pending');
     expect(() => open(path)).toThrow(SqliteSchemaError);
     expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED' }));
@@ -64,8 +64,8 @@ function rows(path: string): unknown[] {
     db.close();
   });
 
-  it('refuses to open with an undrained pending v3 row and leaves the database byte- and row-identical', async () => {
-    const body = envelope(3);
+  it('refuses to open with an undrained pending v4 row and leaves the database byte- and row-identical', async () => {
+    const body = envelope(4);
     const { dir, path } = await seed(body, 'pending');
     const bytesBefore = footprint(dir);
     const rowsBefore = rows(path);
@@ -89,12 +89,12 @@ function rows(path: string): unknown[] {
     expect(footprint(dir)).toEqual(bytesBefore);
   });
 
-  it.each([[1, 'acked'], [1, 'expired'], [2, 'acked'], [2, 'expired'], [3, 'acked'], [3, 'expired']])('permits retained v%i history in state %s', async (v, state) => {
+  it.each([[1, 'acked'], [1, 'expired'], [2, 'acked'], [2, 'expired'], [3, 'acked'], [3, 'expired'], [4, 'acked'], [4, 'expired']])('permits retained v%i history in state %s', async (v, state) => {
     const { path } = await seed(envelope(v), state);
     await open(path).close();
   });
 
-  it('opens pending v4 messages', async () => {
+  it('opens pending v5 messages', async () => {
     const { path } = await seed(envelope(PROTOCOL_VERSION), 'pending');
     await open(path).close();
   });

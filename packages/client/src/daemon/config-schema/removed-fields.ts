@@ -35,5 +35,6 @@ export const REMOVED_DAEMON_CONFIG_FIELDS: readonly RemovedDaemonConfigField[] =
   removed('workspaceRoot', 'DaemonConfig.workspaceRoot was removed: since wire v4 every offer runs in its SDK-owned Agent home, never in a workspaceRoot/<taskId> directory; configure agentHome'),
   removed('resultDocument', 'DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool'),
   removed('maxConcurrentMutableSessionsPerAgentHome', 'DaemonConfig.maxConcurrentMutableSessionsPerAgentHome was removed. A home has one writer Attempt; send concurrent tasks as homeAccess: \'memory-reader\' offers and set maxConcurrentReaderAttemptsPerAgentHome to limit them.'),
+  removed('durablePi', 'DaemonConfig.durablePi was removed: set runtimes.pi.durableLane, or with createDaemonWithAdapters construct PiAdapter({ durableLane: true }); the daemon wires the durable journal from the adapter\'s durableLane capability'),
   removed('agentMemoryFilesystem', 'DaemonConfig.agentMemoryFilesystem is removed; an arbitrary helper is not admitted on this platform. Use the SDK release artifact.'),
 ]);

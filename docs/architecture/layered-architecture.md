@@ -44,7 +44,7 @@ flowchart TB
 
   subgraph L1["L1 契约"]
     direction LR
-    Protocol["protocol 7.3k<br/>wire v4 · codec · http-api"]:::contract
+    Protocol["protocol 7.3k<br/>wire v5 · codec · http-api"]:::contract
     Core["core 9.6k<br/>tenant · store ports<br/>device proof · sealed payload"]:::contract
   end
 
@@ -86,7 +86,7 @@ flowchart TB
 
 | 层 | package | 规模（非测试 `.ts` 行数 / 文件数） | 主要入口 |
 | --- | --- | --- | --- |
-| L1 | `@byok-sdk/protocol` | 7.3k / 28 | `PROTOCOL_VERSION = 4`（`packages/protocol/src/version.ts:46`）；`parseMessage` / `decodeEnvelope` / `encodeEnvelope`（`packages/protocol/src/codec.ts:20,46,58`）；`BYOK_*_PATH`（`packages/protocol/src/http-api.ts:463-550`）；子路径 `./constants` |
+| L1 | `@byok-sdk/protocol` | 7.3k / 28 | `PROTOCOL_VERSION = 5`（`packages/protocol/src/version.ts:52`）；`parseMessage` / `decodeEnvelope` / `encodeEnvelope`（`packages/protocol/src/codec.ts:20,46,58`）；`BYOK_*_PATH`（`packages/protocol/src/http-api.ts:463-550`）；子路径 `./constants` |
 | L1 | `@byok-sdk/core` | 9.6k / 48 | store ports `CoreStores`（`packages/core/src/stores.ts`）；`createInMemoryCoreStores`（`packages/core/src/in-memory/index.ts:45`）；子路径 `./sealed-payload` |
 | L2 | `@byok-sdk/cloud` | 15.3k / 83 | `createByokCloud`（`packages/cloud/src/cloud.ts:1021`）；`createInMemoryByokCloud`（`packages/cloud/src/composition/in-memory.ts:106`） |
 | L3 | `@byok-sdk/server` | 6.3k / 20 | `createByokServer`（`packages/server/src/index.ts:365`）；`listenLoopback`（`packages/server/src/loopback.ts:84`） |

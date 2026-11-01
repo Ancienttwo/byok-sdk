@@ -27,7 +27,7 @@ let daemon: Daemon | undefined;
 
 const agentRef = { agentId: 'self-check-agent', profileRevision: 'profile-r1' } as const;
 
-const corpusOffers = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
+const corpusOffers = readFileSync(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: string; payload: Json })

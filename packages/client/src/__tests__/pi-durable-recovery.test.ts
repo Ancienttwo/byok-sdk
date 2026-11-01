@@ -13,16 +13,16 @@ afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).
 describe('durable parent recovery authority', () => {
   it('Windows admission is refused before durable resources or custody can be opened', async () => {
     vi.spyOn(process,'platform','get').mockReturnValue('win32');
-    const adapter=new PiAdapter({durablePi:true});
+    const adapter=new PiAdapter({durableLane:true});
     const result=await adapter.prepare({offer:{}} as never);
     expect(result).toMatchObject({kind:'reject',retryable:false});if(result.kind==='reject')expect(result.reason).toContain('Windows');
   });
   it('feature defaults off and enabled adapter advertises only the capabilities it provides', async () => {
-    expect(new PiAdapter().descriptor.capabilities.durablePi).toBeUndefined();
-    expect(new PiAdapter({ durablePi: false }).descriptor.capabilities.durablePi).toBeUndefined();
-    expect(() => new PiAdapter({ durablePi: { replicaRoot: '/removed' } as never })).toThrow(/must be boolean/);
-    const adapter = new PiAdapter({ durablePi: true });
-    expect(adapter.descriptor.capabilities).toMatchObject({ durablePi: true, steer: false, resume: false, toolAuthorizationAuto: false, preparedLane: false });
+    expect(new PiAdapter().descriptor.capabilities.durableLane).toBeUndefined();
+    expect(new PiAdapter({ durableLane: false }).descriptor.capabilities.durableLane).toBeUndefined();
+    expect(() => new PiAdapter({ durableLane: { replicaRoot: '/removed' } as never })).toThrow(/must be boolean/);
+    const adapter = new PiAdapter({ durableLane: true });
+    expect(adapter.descriptor.capabilities).toMatchObject({ durableLane: true, steer: false, resume: false, toolAuthorizationAuto: false, preparedLane: false });
     // #1197: the durable worker refuses excluded user context, so neither its
     // descriptor nor the wire projection may claim the capability. The
     // ordinary RPC lane still provides it.
@@ -39,7 +39,7 @@ describe('durable parent recovery authority', () => {
     const home = path.join(root, 'home'); await mkdir(home);
     const spawnFn = vi.fn(() => { throw new Error('must not spawn'); });
     const adapter = new PiAdapter({
-      durablePi: true, agentUserContext: 'excluded',
+      durableLane: true, agentUserContext: 'excluded',
       resolveBin: () => ({ command: process.execPath, source: 'env' }),
       spawnFn: spawnFn as never,
       byokLauncher: { command: path.join(root, 'unused-launcher'), profileDbPath: path.join(root, 'unused-profiles'), sessionDir: path.join(root, 'sessions') },

@@ -27,7 +27,7 @@ export const COLUMNS = [
   ['Grok', GROK_RUNTIME_CAPABILITIES, QUALIFIED_GROK_VERSION],
   ['Hermes', HERMES_RUNTIME_CAPABILITIES, QUALIFIED_HERMES_VERSION],
   ['Pi', PI_RUNTIME_CAPABILITIES, piPin],
-  ['Pi (`durablePi`)', PI_DURABLE_RUNTIME_CAPABILITIES, piPin],
+  ['Pi (`durableLane`)', PI_DURABLE_RUNTIME_CAPABILITIES, piPin],
 ];
 
 export const ROWS = [
@@ -38,7 +38,7 @@ export const ROWS = [
   ['Interactive approval channel', 'approvalInteractive', (c) => c.approvalInteractive],
   ['Tool authorization `auto`', 'toolAuthorizationAuto', (c) => c.toolAuthorizationAuto],
   ['Prepared lane', 'preparedLane', (c) => c.preparedLane],
-  ['Durable Pi worker', 'durablePi', (c) => c.durablePi],
+  ['Durable worker lane', 'durableLane', (c) => c.durableLane],
   ['Keeps user-level instructions out', 'isolation.userContext', (c) => c.isolation?.userContext],
   ['Keeps user MCP servers out', 'isolation.userMcpServers', (c) => c.isolation?.userMcpServers],
   ['Turns off the transcript store', 'isolation.sessionPersistence', (c) => c.isolation?.sessionPersistence],

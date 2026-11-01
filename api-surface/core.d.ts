@@ -1804,7 +1804,7 @@ export interface PresenceRuntimeCapabilities {
     readonly mcpToolsets?: boolean;
     readonly messageDraft?: boolean;
     readonly toolAuthorizationAuto?: boolean;
-    readonly durablePi?: boolean;
+    readonly durableLane?: boolean;
     readonly preparedLane?: boolean;
     readonly isolation?: {
         readonly userContext?: boolean;

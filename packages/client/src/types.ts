@@ -5,7 +5,6 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
-import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type {
   AgentEgressPolicy,
   AgentEvent,
@@ -140,8 +139,8 @@ export interface RuntimeCapabilities {
   readonly messageDraft?: boolean;
   /** Local native interaction support only; omission is unsupported. Not the approval channel. */
   readonly nativeInteractions?: NativeInteractionCapabilities;
-  /** The durable Pi worker. Omission means an ordinary adapter. */
-  readonly durablePi?: boolean;
+  /** The durable worker lane (Pi today). Omission means an ordinary adapter. */
+  readonly durableLane?: boolean;
   /**
    * Accepts a prepared offer (the prepared lane). Omission means unsupported.
    * `auto` never applies to a prepared offer, whatever `toolAuthorizationAuto` says.
@@ -546,6 +545,17 @@ export interface DurableLifecycle {
   ownsLease(): boolean;
 }
 
+/**
+ * What an adapter's `resolveRuntimeLaunch` resolved before claim. The daemon
+ * only passes it back to the same operation's `start`; its fields beyond these
+ * are the adapter's own.
+ */
+export interface RuntimeLaunchResources {
+  readonly scratch: ExecutionScratch;
+  /** A single cleanup authority, idempotent across declined, start and terminal paths. */
+  release(): Promise<void>;
+}
+
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
   readonly scratch: ExecutionScratch;
@@ -554,7 +564,8 @@ interface RuntimeOperationStartBase {
   /** Trusted parent-only recovery authority; never serialized into the worker. */
   readonly durableContext?: { readonly tenantId: string; readonly lifecycle: DurableLifecycle; readonly replicaRoot: string };
 
-  readonly runtimeLaunch?: PiRuntimeLaunchResources;
+  /** The resources this operation's `resolveRuntimeLaunch` returned, by identity. */
+  readonly runtimeLaunch?: RuntimeLaunchResources;
   /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
   readonly mcpEnv?: Readonly<Record<string, string>>;
   /** Startup cancellation only; rejection must preserve unresolved process ownership. */
@@ -631,7 +642,7 @@ export interface PreparedRuntimeOperation {
   resolveRuntimeLaunch?(input: {
     kind: 'instruction' | 'prepared'; cwd: string; env: Readonly<Record<string, string | undefined>>;
     scratch: ExecutionScratch;
-  }): Promise<PiRuntimeLaunchResources>;
+  }): Promise<RuntimeLaunchResources>;
   start(input: RuntimeOperationStartInput): Promise<Session>;
 }
 
@@ -678,7 +689,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     ...(descriptor.versionPolicy === undefined ? {} : { versionPolicy: freezeRuntimeVersionPolicy(descriptor.versionPolicy) }),
     capabilities: Object.freeze({
       ...(descriptor.capabilities.toolAuthorizationAuto === undefined ? {} : { toolAuthorizationAuto: descriptor.capabilities.toolAuthorizationAuto === true }),
-      ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
+      ...(descriptor.capabilities.durableLane === undefined ? {} : { durableLane: descriptor.capabilities.durableLane === true }),
       ...(descriptor.capabilities.preparedLane === undefined ? {} : { preparedLane: descriptor.capabilities.preparedLane === true }),
       ...(descriptor.capabilities.isolation === undefined ? {} : {
         isolation: Object.freeze({

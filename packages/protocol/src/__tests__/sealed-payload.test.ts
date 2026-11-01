@@ -35,7 +35,7 @@ import {
 
 type Json = { [key: string]: unknown };
 
-const corpus = readFileSync(new URL('golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; ts: string; payload: Json });

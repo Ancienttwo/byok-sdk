@@ -9,6 +9,7 @@ export type {
   RuntimeSessionLease,
   RuntimeOperationManifest,
   RuntimeOperationStartInput,
+  RuntimeLaunchResources,
   RuntimeCapabilities,
   RuntimeDetectResult,
   RuntimeDetectionAdvisory,
