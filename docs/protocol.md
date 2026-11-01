@@ -35,7 +35,9 @@ hosted data plane (`POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`) and the daemon
 journal (`DaemonJournalProtocolUnsupportedError`). Retained `acked` and
 `expired` rows do not block startup. Nothing rewrites v4 bytes: a hosted
 terminal receipt stored by a v4 build no longer decodes, so a result read of
-a task that ended before the cut fails with `terminal_receipt_unreadable`.
+a task that ended before the cut fails with `terminal_receipt_unreadable`. The
+Host steps are in [the wire v5 migration](migrations/wire-v5-durable-lane.md).
+0.33.0 is the last v4 release.
 
 History: v4 completed the Agent-only cutover (ADR-034) and removed the
 approval paths kept for peers that predate approval ids:
@@ -171,9 +173,8 @@ unproven (see the evidence list below).
   `approvalId` required.
 - **Retired v4 evidence (negative oracle).** `golden/v4.envelopes.ndjson`,
   `golden/v4.http.ndjson` and the v4 registry `golden/v4.releases.json`
-  (0.31.0 and 0.32.0) are read-only and end at what the last v4 release
-  shipped: the v4 lines appended after 0.32.0 were never published and moved
-  into the v5 corpus. The current decoder rejects every v4 envelope line at the
+  (0.31.0 through 0.33.0) are byte-identical to what the last v4 release
+  shipped and read-only. The current decoder rejects every v4 envelope line at the
   version boundary, and the v4 HTTP lines that carry envelopes too. Rewriting
   only the version is not an upgrade: v5 renamed `durablePi`.
 - **v5 self-consistency.** `golden/v5.envelopes.ndjson` and
@@ -184,15 +185,16 @@ unproven (see the evidence list below).
   account for their `batchLength`). The v4 corpus carries every message type,
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
-  and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers the 0.33.0 corpus, a source
-  candidate until it is published, and has no `floor`. Each registered v5 entry pins both corpus
+  and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers no release yet: 0.33.0 is
+  the last v4 release, and the first v5 release is the next MINOR. It has no `floor`. Each registered v5 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
-  published 0.32.0 registry tarball, the last v4 release. It rejects every v5
+  published 0.32.0 registry tarball, a v4 release (it moves to 0.33.0, the
+  last v4 release, once that is published). It rejects every v5
   corpus line and a v5 `conn.hello`: a v4 peer cannot read v5 bytes. Nothing it
   produces is v5 evidence, and it never enters the v5 registry. Its
-  `requiredReceiverCapabilities` derives, for every v4 `task.offer` line, the
-  same flags as the current table (`task-offer-gates.test.ts`).
+  `requiredReceiverCapabilities` derives, for every v4 `task.offer` line that
+  release shipped, the same flags as the current table (`task-offer-gates.test.ts`).
 
 No published release reads v5, so no test proves the gated and strip-safe
 declarations against a released v5 decoder yet. That evidence starts with the
