@@ -1,6 +1,7 @@
-import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnOptions, type SpawnSyncOptions } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { RuntimeDisposalFailure } from '../runtime-failure';
+import { resolveSystemTool } from '../util/system-tool';
 import { walkTaskkillPidSet } from './taskkill-pid-set';
 // OAR 0.37.0 `shared/executable/process-tree.ts`, vendored with upstream bytes.
 import { descendantsOf, killEntries, readProcessTable, type ProcessEntry, type ProcessTable } from '../runtime/oar-process-tree.js';
@@ -41,7 +42,7 @@ export interface OwnedProcessTreeOptions {
   killGraceMs?: number;
   /** DI seam — defaults to `process.platform`. Lets the win32 branch be exercised from POSIX CI, mirroring `util/secure-dir.ts`'s identical convention. */
   platform?: NodeJS.Platform;
-  /** DI seam for the win32 `taskkill` sweep — defaults to `node:child_process`'s `spawn`. */
+  /** DI seam for the win32 `taskkill` sweep — defaults to `spawn` of the tool from `%SystemRoot%\System32`. */
   spawnFn?: typeof spawn;
   /** DI seam for liveness probing — defaults to `process.kill`. */
   killFn?: KillFn;
@@ -52,6 +53,13 @@ export interface OwnedProcessTreeOptions {
 function defaultKill(pid: number, signal: NodeJS.Signals | number): void {
   process.kill(pid, signal);
 }
+
+// The real win32 sweeps start `taskkill` from its trusted location, never from
+// `PATH` (#1304). A tool with none throws before anything starts.
+const spawnSystemTool = ((command: string, args: readonly string[], options: SpawnOptions) =>
+  spawn(resolveSystemTool(command), args, options)) as typeof spawn;
+const spawnSyncSystemTool = ((command: string, args: readonly string[], options: SpawnSyncOptions) =>
+  spawnSync(resolveSystemTool(command), args, options)) as typeof spawnSync;
 
 /**
  * Every bundled runtime root is an owned process-group leader on POSIX. Pipes
@@ -270,7 +278,7 @@ export interface AdoptOwnedProcessTreeOptions {
   jobObject?: { assign(pid: number): Promise<{ release(): void }> };
   /** DI seam for the POSIX host-exit sweep — defaults to `process.kill`. */
   killFn?: KillFn;
-  /** DI seam for the win32 host-exit sweep — defaults to `node:child_process`'s `spawnSync`. */
+  /** DI seam for the win32 host-exit sweep — defaults to `spawnSync` of the tool from `%SystemRoot%\System32`. */
   spawnSyncFn?: typeof spawnSync;
   /** DI seam for the POSIX ledger record's process-table read — defaults to the vendored `readProcessTable`. */
   readProcessTableFn?: () => ProcessTable;
@@ -349,7 +357,7 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
     label: options.label,
     platform,
     kill: options.killFn ?? defaultKill,
-    spawnSyncFn: options.spawnSyncFn ?? spawnSync,
+    spawnSyncFn: options.spawnSyncFn ?? spawnSyncSystemTool,
   });
   const forget = (): void => {
     hostExitTargets.delete(options.child);
@@ -652,15 +660,16 @@ function signalGroup(pid: number, signal: NodeJS.Signals, label: string, kill: K
  *
  * The exit status is deliberately never read: taskkill reports non-zero for a
  * root that already exited, which is quiescence rather than a failed request.
- * Only a taskkill that could not be SPAWNED is a `stage:'signal'` failure —
- * everything else is decided by measuring the walked pid set afterwards.
+ * Only a taskkill that could not be SPAWNED — or has no trusted location to
+ * spawn from — is a `stage:'signal'` failure; everything else is decided by
+ * measuring the walked pid set afterwards.
  *
  * Output is captured as raw bytes and decoded latin1; see
  * `./taskkill-pid-set.ts` for why that is the byte-safe choice under every
  * console OEM codepage.
  */
 async function runTaskkill(pid: number, options: OwnedProcessTreeOptions): Promise<string> {
-  const spawnFn = options.spawnFn ?? spawn;
+  const spawnFn = options.spawnFn ?? spawnSystemTool;
   return new Promise<string>((resolve, reject) => {
     const signalFailure = (cause: unknown): void => {
       reject(new RuntimeDisposalFailure({

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { systemExecutable } from './system-tool';
 
 /**
  * Result of running an external command, regardless of its exit code.
@@ -53,10 +54,22 @@ export type Runner = (command: string, args: string[]) => Promise<RunResult>;
  * {@link RunResult} (letting callers decide whether a given non-zero exit
  * matters) and rejects only the second (a real inability to run the
  * command at all, which every caller should hear about).
+ *
+ * A bare `command` is a system tool and starts from its trusted location,
+ * never from `PATH`; one that has none rejects with
+ * `SystemToolUnavailableError` (`./system-tool.ts`, #1304).
  */
 export const defaultRunner: Runner = (command, args) =>
   new Promise((resolve, reject) => {
-    execFile(command, args, (error, stdout, stderr) => {
+    // A system tool runs from its trusted location; one with none rejects typed, unstarted.
+    let executable: string;
+    try {
+      executable = systemExecutable(command);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    execFile(executable, args, (error, stdout, stderr) => {
       if (error && typeof error.code !== 'number') {
         reject(error);
         return;

@@ -1,4 +1,4 @@
-import { type CommandResult, type CommandRunner, runCommand } from './command-runner';
+import { type CommandResult, type CommandRunner, runCommand, windowsPowerShellExecutable } from './command-runner';
 import { ByokKeysError } from './errors';
 import { assertSecretName, assertSecretNamespace } from './secret-name';
 import {
@@ -194,7 +194,9 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
 
   async available(): Promise<boolean> {
     if (this.#platform !== 'win32') return false;
-    const result = await this.#commandRunner('powershell.exe', [
+    const powershell = windowsPowerShellExecutable(process.env.SystemRoot);
+    if (powershell === undefined) return false;
+    const result = await this.#commandRunner(powershell, [
       '-NoLogo',
       '-NoProfile',
       '-NonInteractive',
@@ -317,8 +319,12 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
     target: string;
     username: string;
   }): Promise<CommandResult> {
+    const powershell = windowsPowerShellExecutable(process.env.SystemRoot);
+    if (powershell === undefined) {
+      throw new ByokKeysError('CREDENTIAL_MANAGER_UNAVAILABLE', 'Windows SystemRoot must be an absolute path; PowerShell is never taken from PATH');
+    }
     return this.#commandRunner(
-      'powershell.exe',
+      powershell,
       [
         '-NoLogo',
         '-NoProfile',

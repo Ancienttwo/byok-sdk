@@ -50,6 +50,11 @@ export interface CommandResult {
  */
 export type CommandRunner = (executable: string, args: string[], stdin?: string) => Promise<CommandResult>;
 /**
+ * Windows PowerShell from the system directory, never from `PATH` (#1304);
+ * `undefined` when `systemRoot` is not an absolute path.
+ */
+export declare function windowsPowerShellExecutable(systemRoot: string | undefined): string | undefined;
+/**
  * Spawn `executable`, feed it `stdin`, and collect its output
  * (`index.ts:2498-2527`).
  *
