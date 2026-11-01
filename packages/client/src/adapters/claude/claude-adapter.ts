@@ -1,4 +1,3 @@
-import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import type { RuntimeTaskInput } from '../../types';
 import { createClaudeMcpIdentityResolver } from './mcp-identity';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities';
@@ -29,6 +28,7 @@ import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposal
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
 import { createClaudeControlChannel } from './control-channel';
 import { ClaudeToolAuthorizationBridge } from './tool-authorization';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
@@ -203,13 +203,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const { env } = await this.runtimeEnvironment();
-      const invocation = resolveRuntimeInvocation(this.resolveBin().command, runtimeInvocationHost(env));
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin);
+      const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim();
       const authPresent = await this.probeAuthPresent(invocation, env);
       return {
         kind: 'available', version, authPresent,
+        ...runtimeExecutableFields(resolved, invocation.executable),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, claudeVersionToken(version)),
       };
     } catch (error) {
@@ -400,8 +402,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ];
 
       throwIfCancelled();
-      const mcpIdentity = createClaudeMcpIdentityResolver(() => control.mcpStatus(),
-        new Map(Object.entries(taskMcpServers).filter(([name]) => !isReservedMcpServerName(name))));
+      const mcpIdentity = createClaudeMcpIdentityResolver(() => control.mcpStatus(), new Map(Object.entries(taskMcpServers)));
       gate = startInput.toolAuthorization === undefined ? undefined
         : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => client?.abortStartup(error), mcpIdentity.resolve);
       const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000, gate?.hooks);
