@@ -44,9 +44,8 @@ export function validateCatalog(entries = catalog, codes = declaredCodes()) {
   }
 }
 
-export function generateGuide(current) {
+export function generateGuide(current, manifest = JSON.parse(read('packages/client/upgrade-manifest.json'))) {
   validateCatalog();
-  const manifest = JSON.parse(read('packages/client/upgrade-manifest.json'));
   const sections = {
     fields: table('| Field | Tier | Shape |', fields(schema.properties, schema.required)),
     errors: table('| Code / halt reason | Retryable unchanged | Next step | Guide |', Object.entries(catalog).sort(([a], [b]) => a.localeCompare(b)).map(([code, entry]) => [`\`${code}\``, entry.retryable ? 'yes' : 'no', entry.nextStep, `[guide](${entry.anchor})`])),

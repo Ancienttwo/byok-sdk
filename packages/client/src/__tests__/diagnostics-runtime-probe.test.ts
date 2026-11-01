@@ -1,25 +1,36 @@
 import { describe, expect, it, vi } from 'vitest';
-import { defaultRuntimeAdapters, probeRuntimes } from '../diagnostics/runtime-probe';
+import { probeRuntimes } from '../diagnostics/runtime-probe';
+import { buildConfiguredRuntimeAdapters } from '../daemon/create-daemon/support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import type { DaemonConfig } from '../daemon/create-daemon';
 
-describe('diagnostics/runtime-probe: defaultRuntimeAdapters', () => {
+/** The required `DaemonConfig` fields; none of them reaches adapter construction. */
+const BASE_CONFIG: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: 'ws://127.0.0.1:1' };
+
+describe('daemon/create-daemon/support: buildConfiguredRuntimeAdapters', () => {
   it('with no allowlist, returns all three bundled runtimes in canonical order', () => {
-    const adapters = defaultRuntimeAdapters({});
+    const adapters = buildConfiguredRuntimeAdapters(BASE_CONFIG);
     expect(adapters.map((a) => a.descriptor.id)).toEqual(['pi', 'claude', 'codex']);
   });
 
   it('with an allowlist, returns exactly (and only) those runtimes', () => {
-    const adapters = defaultRuntimeAdapters({ runtimeAllowlist: ['claude', 'codex'] });
+    const adapters = buildConfiguredRuntimeAdapters({ ...BASE_CONFIG, runtimeAllowlist: ['claude', 'codex'] });
     expect(adapters.map((a) => a.descriptor.id).sort()).toEqual(['claude', 'codex']);
   });
 
   it('silently ignores an unknown id in the allowlist', () => {
-    const adapters = defaultRuntimeAdapters({ runtimeAllowlist: ['pi', 'not-a-real-runtime'] });
+    const adapters = buildConfiguredRuntimeAdapters({ ...BASE_CONFIG, runtimeAllowlist: ['pi', 'not-a-real-runtime'] });
     expect(adapters.map((a) => a.descriptor.id)).toEqual(['pi']);
   });
 
   it('an empty allowlist yields no adapters at all', () => {
-    expect(defaultRuntimeAdapters({ runtimeAllowlist: [] })).toEqual([]);
+    expect(buildConfiguredRuntimeAdapters({ ...BASE_CONFIG, runtimeAllowlist: [] })).toEqual([]);
+  });
+
+  it('builds the claude adapter with the configured runtimes.claude.versionPolicy, as createDaemon does', () => {
+    const versionPolicy = { qualifiedVersion: '2.1.312', unqualified: 'block', allow: [{ kind: 'exact', version: '2.1.313' }] } as const;
+    const [claude] = buildConfiguredRuntimeAdapters({ ...BASE_CONFIG, runtimeAllowlist: ['claude'], runtimes: { claude: { versionPolicy } } });
+    expect(claude?.descriptor.versionPolicy).toEqual(versionPolicy);
   });
 });
 

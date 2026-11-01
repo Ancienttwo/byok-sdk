@@ -11,9 +11,10 @@
   and prepared lanes are unsupported, and `auto` is declined before claim. The
   ACP session runs on the vendored OAR ACP stack in the lazy private
   `#byok-acp-runtime` entry, beside Grok. The runtime contract suite and
-  nightly matrix gain a dsh leg.
+  nightly matrix gain a dsh leg. Known limitation: after the dsh root is
+  killed from outside, its shell tools keep running (#1269).
 
-## 0.32.0 — source candidate
+## 0.32.0 — 2026-11-01 (published)
 
 0.32.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
@@ -26,7 +27,7 @@ a SQLite schema 6 file to schema 7 in place. Migration 0034 drops
 `activity_tail` and starts an empty activity log with no pre-cutover history
 ([cutover runbook](deploy/runbooks/activity-tail-cutover.md)); 0.32.0 carries
 the A1+A2a part of #1113, and A2b and A3 to A5 move to 0.33 (see the [0.32.0
-candidate notes](docs/releases/v0.32.0.md)). The breaking changes by package:
+release notes](docs/releases/v0.32.0.md)). The breaking changes by package:
 protocol bounds and redacts `task.fail` reasons (#1124), opens the device
 vocabularies a newer device may extend and makes `MessagesSendRequestSchema`
 validate the frame only (#1121), removes `BYOK_ACTIVITY_PATH` (#1113), and
@@ -51,7 +52,11 @@ settles a retired device's tasks (#1119) and closes its mailbox stream
 `@byok-sdk/server/execution-core` (#1106), drops `SQLITE_MIGRATION_REFUSED`
 (#1096) and writes SQLite schema 7, which an earlier build cannot open
 (#1160); ui-runtime orders `TimelineOrderKey` by store revision and offset
-(#1113).
+(#1113). The npm registry lists all nine public packages at 0.32.0 as
+`latest`, published on 2026-11-01 (UTC), and the registry readback of all
+nine passed. The release commit is `5f975955` on `main`, and the annotated tag
+`v0.32.0` and its GitHub Release point to it. This release does not say that
+0.32.0, or a Host on it, is ready for production.
 
 - **Security (build and test toolchain; #1122)** — clears the ten remaining
   lockfile advisories: `glob` 13.0.6 → 14.0.2 (GHSA-3g3m-2fjr-6pw4),

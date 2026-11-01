@@ -1,6 +1,7 @@
 import { type DaemonConfig, type RuntimeAdapter } from '../../index';
 import { formatRuntimeLines } from '../../diagnostics/format';
-import { defaultRuntimeAdapters, probeRuntimes } from '../../diagnostics/runtime-probe';
+import { probeRuntimes } from '../../diagnostics/runtime-probe';
+import { buildConfiguredRuntimeAdapters } from '../../daemon/create-daemon/support';
 
 export interface RuntimesDeps {
   log?: (line: string) => void;
@@ -10,7 +11,7 @@ export interface RuntimesDeps {
 
 export async function runRuntimesCommand(config: DaemonConfig, deps: RuntimesDeps = {}): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
-  const adapters = deps.adapters ?? defaultRuntimeAdapters(config);
+  const adapters = deps.adapters ?? buildConfiguredRuntimeAdapters(config);
   const runtimes = await probeRuntimes(adapters);
   for (const line of formatRuntimeLines(runtimes)) log(line);
 }
