@@ -2,6 +2,7 @@ import {
   MAILBOX_READ_AHEAD_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
   RUNTIME_FAILURE_CLASS_CAPABILITY,
+  RUNTIME_QUOTA_SCOPE_CAPABILITY,
   SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
 } from '@byok-sdk/protocol';
@@ -96,6 +97,8 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
   // The inbound gate parses `task.fail.failure` on both branches,
   // and `projectTerminalResult` copies it (#869).
   RUNTIME_FAILURE_CLASS_CAPABILITY,
+  // ... with a quota failure's `scope` (#1271).
+  RUNTIME_QUOTA_SCOPE_CAPABILITY,
 ];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {

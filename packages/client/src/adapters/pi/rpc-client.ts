@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AsyncQueue } from '../../util/async-queue';
+import { createJsonlLineDecoder } from '../../util/jsonl-lines';
 import { observePiRpcSettlement, closePiRpcSettlement } from './interrupt-settlement';
 import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
 
@@ -58,9 +59,10 @@ const DIALOG_UI_METHODS = new Set(['select', 'confirm', 'input', 'editor']);
  * JSONL request/response + event-stream client for `pi --mode rpc`.
  *
  * Framing per pi's own docs/rpc.md: strict JSONL, LF (`\n`) as the only
- * record delimiter (a trailing `\r` is stripped; this deliberately does NOT
- * use `node:readline`, which pi's docs call out as non-compliant because it
- * also splits on U+2028/U+2029 — valid inside JSON strings).
+ * record delimiter, a trailing `\r` stripped. It is the SDK's one line
+ * framing (`../../util/jsonl-lines.ts`), never `node:readline`, which pi's
+ * docs call out as non-compliant because it also splits on U+2028/U+2029 —
+ * valid inside JSON strings.
  *
  * Responses are correlated by `id`, never by arrival order: empirically,
  * pi's responses do not preserve request order (an immediate parse-failure
@@ -68,7 +70,7 @@ const DIALOG_UI_METHODS = new Set(['select', 'confirm', 'input', 'editor']);
  */
 export class PiRpcClient {
   private readonly child: ChildProcessWithoutNullStreams;
-  private buffer = '';
+  private readonly lines = createJsonlLineDecoder({ onLine: (line) => this.onLine(line) });
   private nextId = 1;
   private readonly pending = new Map<
     string,
@@ -107,8 +109,7 @@ export class PiRpcClient {
     // constructed and then abandoned from raising an unhandled rejection.
     this.adopted.catch(() => {});
 
-    this.child.stdout.setEncoding('utf8');
-    this.child.stdout.on('data', (chunk: string) => this.onData(chunk));
+    this.child.stdout.on('data', (chunk: Buffer | string) => this.lines.push(chunk));
 
     this.child.stderr.setEncoding('utf8');
     this.child.stderr.on('data', (chunk: string) => this.onStderr(chunk));
@@ -268,18 +269,6 @@ export class PiRpcClient {
     }
   }
 
-  private onData(chunk: string): void {
-    this.buffer += chunk;
-    let newlineIndex = this.buffer.indexOf('\n');
-    while (newlineIndex !== -1) {
-      let line = this.buffer.slice(0, newlineIndex);
-      this.buffer = this.buffer.slice(newlineIndex + 1);
-      if (line.endsWith('\r')) line = line.slice(0, -1);
-      if (line.length > 0) this.onLine(line);
-      newlineIndex = this.buffer.indexOf('\n');
-    }
-  }
-
   private onLine(line: string): void {
     let parsed: unknown;
     try {
@@ -376,10 +365,8 @@ export class PiRpcClient {
     this.closed = true;
     // `close` delivers every stdout byte first, so a non-empty buffer here is
     // a frame the process never finished writing.
-    if (this.buffer.length > 0) {
-      this.decodeDroppedLines += 1;
-      this.buffer = '';
-    }
+    if (this.lines.pendingBytes > 0) this.decodeDroppedLines += 1;
+    this.lines.stop();
     // An adoption failure outranks the exit status of the termination it
     // itself requested: reporting `exit code=null, signal=SIGKILL` would bury
     // the only reason anyone can act on.

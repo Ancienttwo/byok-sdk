@@ -135,6 +135,44 @@ describe('supported platforms', () => {
   });
 });
 
+describe('adapter-declared facts the daemon reads instead of the runtime id', () => {
+  it('only Pi declares a file scope and provider profile binding, also as the durable worker', async () => {
+    const adapters = builtIns(await tempDir());
+    expect(Object.fromEntries(Object.entries(adapters).map(([id, adapter]) => [id, {
+      fileScope: adapter.descriptor.fileScope, providerProfileBinding: adapter.descriptor.providerProfileBinding,
+    }]))).toEqual({
+      claude: { fileScope: undefined, providerProfileBinding: undefined },
+      codex: { fileScope: undefined, providerProfileBinding: undefined },
+      pi: { fileScope: { lanes: ['rpc'] }, providerProfileBinding: true },
+      grok: { fileScope: undefined, providerProfileBinding: undefined },
+      hermes: { fileScope: undefined, providerProfileBinding: undefined },
+      dsh: { fileScope: undefined, providerProfileBinding: undefined },
+    });
+    const durable = new PiAdapter({ durablePi: true }).descriptor;
+    expect(durable.fileScope).toEqual({ lanes: ['rpc'] });
+    expect(durable.providerProfileBinding).toBe(true);
+    expect(Object.isFrozen(adapters.pi.descriptor.fileScope!.lanes)).toBe(true);
+  });
+
+  it('only Pi projects the MCP environment, keeping its private names from MCP servers', async () => {
+    const adapters = builtIns(await tempDir());
+    expect(Object.entries(adapters).filter(([, adapter]) => adapter.projectMcpEnvironment !== undefined).map(([id]) => id)).toEqual(['pi']);
+    expect(adapters.pi.projectMcpEnvironment!({ PATH: '/bin', PI_CODING_AGENT_DIR: '/x', BYOK_PI_LAUNCH: '1', ANTHROPIC_API_KEY: 'k' }))
+      .toEqual({ PATH: '/bin' });
+  });
+
+  it('a custom descriptor keeps its declarations through freezing', () => {
+    const descriptor = freezeRuntimeAdapterDescriptor({
+      id: 'acme', supportsDispatchSelection: true, fileScope: { lanes: ['rpc', 'prepared'] }, providerProfileBinding: true,
+      capabilities: { steer: false, resume: false, approvalInteractive: false },
+    });
+    expect(descriptor.fileScope).toEqual({ lanes: ['rpc', 'prepared'] });
+    expect(descriptor.providerProfileBinding).toBe(true);
+    expect(freezeRuntimeAdapterDescriptor({ id: 'bare', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false } }))
+      .not.toHaveProperty('fileScope');
+  });
+});
+
 describe('daemon detection authority', () => {
   /** A real adapter descriptor narrowed to a platform this host is not. */
   function unsupportedHere(): RuntimeAdapter & { detect: ReturnType<typeof vi.fn> } {

@@ -284,19 +284,23 @@ describe('fileScope static validation and effective report', () => {
 });
 
 describe('fileScope admission support matrix (#1061 slice 1)', () => {
+  const pi = { id: 'pi', fileScope: { lanes: ['rpc' as const] } };
+  const claude = { id: 'claude' };
   it.each([
-    ['ordinary Pi RPC on darwin', { runtimeId: 'pi', lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }],
-    ['ordinary Pi RPC on linux', { runtimeId: 'pi', lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }],
+    ['ordinary Pi RPC on darwin', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }],
+    ['ordinary Pi RPC on linux', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }],
+    ['any runtime that declares the lane', { descriptor: { id: 'acme', fileScope: { lanes: ['rpc' as const] } }, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }],
   ])('admits %s', (_label, facts) => {
     expect(fileScopeAdmission(facts)).toEqual({ supported: true });
   });
 
   it.each([
-    ['another runtime', { runtimeId: 'claude', lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /runtime claude/],
-    ['the prepared lane', { runtimeId: 'pi', lane: 'prepared' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /prepared lane/],
-    ['the durable lane', { runtimeId: 'pi', lane: 'durable' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }, /durable Pi worker/],
-    ['a memory-reader offer', { runtimeId: 'pi', lane: 'rpc' as const, homeAccess: 'memory-reader' as const, platform: 'darwin' as NodeJS.Platform }, /memory-reader/],
-    ['Windows', { runtimeId: 'pi', lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'win32' as NodeJS.Platform }, /not supported on win32/],
+    ['another runtime', { descriptor: claude, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /runtime claude/],
+    ['a runtime named pi that declares no scope', { descriptor: { id: 'pi' }, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /runtime pi cannot enforce/],
+    ['the prepared lane', { descriptor: pi, lane: 'prepared' as const, homeAccess: 'writer' as const, platform: 'darwin' as NodeJS.Platform }, /prepared lane/],
+    ['the durable lane', { descriptor: pi, lane: 'durable' as const, homeAccess: 'writer' as const, platform: 'linux' as NodeJS.Platform }, /durable Pi worker/],
+    ['a memory-reader offer', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'memory-reader' as const, platform: 'darwin' as NodeJS.Platform }, /memory-reader/],
+    ['Windows', { descriptor: pi, lane: 'rpc' as const, homeAccess: 'writer' as const, platform: 'win32' as NodeJS.Platform }, /not supported on win32/],
   ])('refuses %s', (_label, facts, reason) => {
     const admission = fileScopeAdmission(facts);
     expect(admission.supported).toBe(false);

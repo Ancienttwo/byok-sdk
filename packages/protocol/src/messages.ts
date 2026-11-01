@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
-import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type RuntimeUnavailableCause } from './constants';
+import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type RuntimeUnavailableCause } from './constants';
 import { BlobRefSchema } from './blob';
 import {
   SEALED_DECLINE_CODES,
@@ -1391,10 +1391,15 @@ const TaskCompletePlainPayloadSchema = z.object({
 export const RuntimeFailureClassSchema = z.enum(RUNTIME_FAILURE_CLASSES);
 export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
 
+/** Whether a `quota` limit covers the whole account or one model (#1271). */
+export const RuntimeQuotaScopeSchema = z.enum(RUNTIME_QUOTA_SCOPES);
+export type RuntimeQuotaScope = z.infer<typeof RuntimeQuotaScopeSchema>;
+
 /**
  * The machine-readable failure of a `task.fail` (#869); `reason` stays display
- * text. `resetsAt` (ISO 8601 UTC) exists only on `quota`, and only when the
- * runtime reported when the limit resets.
+ * text. `resetsAt` (ISO 8601 UTC) and `scope` exist only on `quota`, and only
+ * when the runtime reported them. `scope` is gated on the server's
+ * `runtime-quota-scope` flag (#1271).
  *
  * The class is open (#1121): a well-formed class this version does not know,
  * with whatever fields a newer device put beside it, is accepted and kept
@@ -1402,7 +1407,7 @@ export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
  * typed reading.
  */
 export const TaskFailureSchema = z.union([
-  z.object({ class: z.literal('quota'), resetsAt: z.iso.datetime().optional() }).strict(),
+  z.object({ class: z.literal('quota'), resetsAt: z.iso.datetime().optional(), scope: RuntimeQuotaScopeSchema.optional() }).strict(),
   z.object({ class: RuntimeFailureClassSchema.exclude(['quota']) }).strict(),
   z.looseObject({ class: unrecognizedToken(RUNTIME_FAILURE_CLASSES) }),
 ]);
@@ -1410,7 +1415,7 @@ export type TaskFailure = z.infer<typeof TaskFailureSchema>;
 
 /** A {@link TaskFailure} as this version understands it: a class it does not know reads as `unknown`, its raw token kept. */
 export type TaskFailureReading =
-  | { readonly class: 'quota'; readonly resetsAt?: string }
+  | { readonly class: 'quota'; readonly resetsAt?: string; readonly scope?: RuntimeQuotaScope }
   | { readonly class: Exclude<RuntimeFailureClass, 'quota' | 'unknown'> }
   | { readonly class: 'unknown'; readonly reportedClass?: string };
 

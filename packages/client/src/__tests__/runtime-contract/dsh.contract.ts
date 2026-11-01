@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { beforeAll, expect } from 'vitest';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../../adapters/dsh/dsh-adapter';
+import { OWNED_TREE_OBSERVE_MS } from '../../adapters/process-tree';
 import { dshEnvironment } from '../../adapters/dsh/dsh-profile';
 import { QUALIFIED_DSH_VERSION } from '../../adapters/dsh/dsh-version';
 import { setLoginShellSnapshotSource } from '../../login-shell-environment';
@@ -146,11 +147,13 @@ function processRows(pids: readonly number[]): string {
 }
 
 /**
- * A turn whose shell tool holds a foreground and a background `sleep`, ended
- * by the SDK's own shutdown (`session/close`, then the owned process tree).
+ * A turn whose shell tool holds a foreground and a background `sleep`, then
+ * ends one of two ways: `close` is the SDK's own shutdown (`session/close`,
+ * then the owned process tree); `sigkill` is the dsh root killed from outside,
+ * after which dsh cannot cancel its own tools and the SDK alone must reap them.
  */
-async function toolTreeTurn() {
-  const box = await createSandbox('dsh-close');
+async function toolTreeTurn(stop: 'close' | 'sigkill') {
+  const box = await createSandbox(`dsh-${stop}`);
   const recorder = await fileEgress();
   const pidFile = path.join(box.workspace, 'tool.pids');
   const script: ProviderScript = request => {
@@ -173,6 +176,12 @@ async function toolTreeTurn() {
       return found.length === 2 ? found : undefined;
     }, 120_000, 'the shell tool pids');
     const before = `dsh root ${child?.pid}; ${processRows(tools)}`;
+    if (stop === 'sigkill') {
+      // The tools run in a group of their own: only an observation taken while the root ran leads to them.
+      await new Promise(resolve => setTimeout(resolve, 2 * OWNED_TREE_OBSERVE_MS));
+      child!.kill('SIGKILL');
+      try { for await (const _event of session.events) { /* drain to the root's exit */ } } catch { /* the session fails with the root */ }
+    }
     await session.close();
     const survivors = await waitFor(async () => tools.some(isAlive) ? undefined : [], 10_000, 'the tool processes to exit').catch(() => tools.filter(isAlive));
     const after = processRows(survivors);
@@ -185,7 +194,8 @@ async function toolTreeTurn() {
 
 const contractTurn = once(turn);
 const skillControl = once(skillControlTurn);
-const closed = once(toolTreeTurn);
+const closed = once(() => toolTreeTurn('close'));
+const sigkilled = once(() => toolTreeTurn('sigkill'));
 const descriptor = new DshAdapter({ home: path.resolve('/dsh-descriptor-only'), model: detectModel }).descriptor;
 
 defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, {
@@ -222,7 +232,7 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   'isolation.sessionPersistence': skip('the dsh adapter has no session persistence option; dsh keeps sessions under the SDK-owned DSH_HOME, which resume needs'),
   drafts: notAdvertised(descriptor, 'messageDraft'),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await closed(); }),
+  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await closed(); await sigkilled(); }),
 });
 
 defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, {
@@ -240,5 +250,8 @@ defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.exp
     expect(survivors, diagnostic).toEqual([]);
   }, 240_000)],
   'dsh.sigkill': ['after the dsh root is SIGKILLed from outside, close() reaps its tool processes',
-    skip('known 0.33 limitation (#1269): dsh runs each shell tool in its own process group, which the owned process tree cannot reach once the root is killed from outside')],
+    check(async () => {
+      const { survivors, diagnostic } = await sigkilled();
+      expect(survivors, diagnostic).toEqual([]);
+    }, 240_000)],
 });

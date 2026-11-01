@@ -200,7 +200,7 @@ export function computeCapabilities(
   }
   if (
     providerProfileBindingConfigured &&
-    adapters.some((adapter) => adapter.descriptor.id === 'pi' && adapter.descriptor.supportsDispatchSelection)
+    adapters.some((adapter) => adapter.descriptor.providerProfileBinding === true && adapter.descriptor.supportsDispatchSelection)
   ) {
     flags.push(PROVIDER_PROFILE_BINDING_CAPABILITY);
   }

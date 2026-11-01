@@ -108,6 +108,8 @@ async function start(options: {
   ciphertextRef?: boolean;
   /** The server also takes a failed task's runtime failure class (`runtime-failure-class`). */
   failureClass?: boolean;
+  /** The server also takes a quota failure's scope (`runtime-quota-scope`). */
+  quotaScope?: boolean;
   /** A short shutdown: the grace deadline, and how long a task's interrupt may take. */
   shutdown?: { readonly graceMs: number; readonly taskInterruptTimeoutMs: number };
   /** The categories of the device scope's policy. */
@@ -124,7 +126,7 @@ async function start(options: {
   dirs.push(root);
   server ??= await TestServer.start();
   if (options.serverFlag !== false) {
-    server.setAckCapabilities(['sealed-payload-v1', ...(options.ciphertextRef === true ? ['sealed-output-ciphertext-ref'] : []), ...(options.failureClass === true ? ['runtime-failure-class'] : [])]);
+    server.setAckCapabilities(['sealed-payload-v1', ...(options.ciphertextRef === true ? ['sealed-output-ciphertext-ref'] : []), ...(options.failureClass === true ? ['runtime-failure-class'] : []), ...(options.quotaScope === true ? ['runtime-quota-scope'] : [])]);
   }
   const adapter = new StubRuntimeAdapter('pi');
   const storeDir = path.join(root, 'store');
@@ -668,6 +670,21 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(new TextEncoder().encode(reason).length).toBeLessThanOrEqual(TASK_FAIL_REASON_MAX_BYTES);
     // No unsealable replacement happened: the runtime's own class is kept.
     expect(failed.payload).toMatchObject({ failure: { class: 'auth' } });
+  }, 30_000);
+
+  it.each([
+    [true, { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' }],
+    [false, { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' }],
+  ])('keeps a quota scope on the sealed branch only for a server that advertises runtime-quota-scope (#1271, flag %s)', async (quotaScope, expected) => {
+    const { server, adapter, deviceId, member } = await start({ failureClass: true, quotaScope });
+    server.send(await sealedOffer(member, 'sealed-scope', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
+      phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'weekly limit',
+      failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' },
+    }));
+    const failed = await server.waitFor((envelope) => wireForm(envelope) === 'task.fail_sealed' && envelope.task_id === 'sealed-scope');
+    expect((failed.payload as { failure?: unknown }).failure).toEqual(expected);
   }, 30_000);
 
   it.each([

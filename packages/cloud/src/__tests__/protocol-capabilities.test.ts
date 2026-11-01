@@ -37,6 +37,7 @@ const EXPECTED_CAPABILITIES = [
   'sealed-payload-v1',
   'sealed-output-ciphertext-ref',
   'runtime-failure-class',
+  'runtime-quota-scope',
 ];
 
 describe('GET /byok/events protocol capability advertisement', () => {

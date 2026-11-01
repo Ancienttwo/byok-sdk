@@ -1,4 +1,5 @@
 import { testRuntimeEnvironment } from './runtime-env';
+import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 import type { RuntimeEnvironment } from '../../runtime/environment';
 import type { RuntimeTaskInput } from '../../types';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -192,9 +193,24 @@ const DEFAULT_STUB_CAPABILITIES: RuntimeCapabilities = {
   mcpToolsets: true,
 };
 
+/** Adapter-declared facts a stub may carry; see the `declarations` constructor param. */
+export interface StubAdapterDeclarations {
+  readonly fileScope?: RuntimeAdapterDescriptor['fileScope'];
+  readonly providerProfileBinding?: boolean;
+  readonly projectMcpEnvironment?: RuntimeAdapter['projectMcpEnvironment'];
+}
+
+/** What the bundled Pi adapter declares, for a stub that stands in for it. */
+export const PI_STUB_DECLARATIONS: StubAdapterDeclarations = Object.freeze({
+  fileScope: Object.freeze({ lanes: Object.freeze(['rpc' as const]) }),
+  providerProfileBinding: true,
+  projectMcpEnvironment: projectPiMcpEnvironment,
+});
+
 /** In-memory RuntimeAdapter double: records every start() call and its resulting session. */
 export class StubRuntimeAdapter implements RuntimeAdapter {
   readonly descriptor;
+  projectMcpEnvironment?: RuntimeAdapter['projectMcpEnvironment'];
   readonly startCalls: Array<{
     task: RuntimeTaskInput;
     ctx: {
@@ -242,6 +258,11 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
    * `trajectoryEvidence` (5th param) defaults to absent, like a custom
    * adapter that declares no evidence source: its execution records are
    * `unknown`.
+   *
+   * `declarations` (6th param) are the adapter-declared facts the daemon
+   * reads instead of the runtime id. A `pi` stub declares the Pi shape by
+   * default (file scope on the ordinary lane, provider profile binding and
+   * the Pi MCP environment projection); every other id declares none.
    */
   constructor(
     id = 'pi',
@@ -249,6 +270,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
     requiresMcpToolsetToolObservation = true,
     trajectoryEvidence?: RuntimeAdapterDescriptor['trajectoryEvidence'],
+    declarations: StubAdapterDeclarations = id === 'pi' ? PI_STUB_DECLARATIONS : {},
   ) {
     this.detectResult = detectResult;
     this.descriptor = freezeRuntimeAdapterDescriptor({
@@ -257,7 +279,10 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       requiresMcpToolsetToolObservation,
       trajectoryEvidence,
       capabilities,
+      ...(declarations.fileScope === undefined ? {} : { fileScope: declarations.fileScope }),
+      ...(declarations.providerProfileBinding === true ? { providerProfileBinding: true } : {}),
     });
+    if (declarations.projectMcpEnvironment !== undefined) this.projectMcpEnvironment = declarations.projectMcpEnvironment;
   }
 
   async runtimeEnvironment(): Promise<RuntimeEnvironment> {

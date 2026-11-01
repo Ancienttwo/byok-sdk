@@ -1,5 +1,5 @@
 import type { RuntimeFailureClass, TaskFailure } from '@byok-sdk/protocol';
-import { RUNTIME_FAILURE_CLASSES } from '@byok-sdk/protocol/constants';
+import { RUNTIME_FAILURE_CLASSES, RUNTIME_QUOTA_SCOPES } from '@byok-sdk/protocol/constants';
 
 /** Closed lifecycle phases for failures after an offer has been admitted. */
 export type RuntimeFailurePhase = 'start' | 'run';
@@ -121,11 +121,12 @@ const WIRE_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 /** The wire's strict `TaskFailureSchema`, without zod: adapter bundles carry none. */
 function isTaskFailure(value: unknown): value is TaskFailure {
   if (typeof value !== 'object' || value === null) return false;
-  const { class: failureClass, resetsAt, ...rest } = value as Record<string, unknown>;
+  const { class: failureClass, resetsAt, scope, ...rest } = value as Record<string, unknown>;
   return Object.keys(rest).length === 0
     && runtimeFailureClassOf(failureClass) === failureClass
     && (resetsAt === undefined || (failureClass === 'quota' && typeof resetsAt === 'string'
-      && WIRE_DATETIME.test(resetsAt) && !Number.isNaN(Date.parse(resetsAt)) && new Date(resetsAt).toISOString() === resetsAt));
+      && WIRE_DATETIME.test(resetsAt) && !Number.isNaN(Date.parse(resetsAt)) && new Date(resetsAt).toISOString() === resetsAt))
+    && (scope === undefined || (failureClass === 'quota' && (RUNTIME_QUOTA_SCOPES as readonly unknown[]).includes(scope)));
 }
 
 function isRuntimeFailurePhase(value: unknown): value is RuntimeFailurePhase {
