@@ -175,13 +175,15 @@ State is in memory by default. `storage: { kind: 'sqlite', path }` persists:
 - task attempts and their Agent message admission records;
 - cancellations;
 - approval timelines, bounded by their existing TTL and capacity;
+- each task's activity log (progress and plaintext artifacts), bounded at 1,000
+  entries and 4 MiB per task, so a `readActivity` or `tasks.events` cursor
+  resumes after a restart;
 - objects and blobs.
 
 Everything else stays in the process and is lost on restart, in SQLite mode as
-well: device presence, `TaskHandle` promises and the task-event relay (so
-`tasks.events` cursors), the
+well: device presence, `TaskHandle` promises and the task-event wake-ups, the
 inbound dedup, nonces, Agent egress receipt readback
-(`egress.get`), activity, unredeemed pairing codes, storage quota accounting,
+(`egress.get`), unredeemed pairing codes, storage quota accounting,
 and the token signing key when you do not pass `tokenSigner`.
 
 A SQLite file has one owner at a time; see
@@ -209,7 +211,7 @@ A second owner gets an error instead of a shared file:
   the server is open. Close the owner before you inspect or back up the file.
 
 Token signing keys (unless you pass `tokenSigner`), presence, the task-event
-relay and the other in-process state listed under [Storage](#storage) live in
+wake-ups and the other in-process state listed under [Storage](#storage) live in
 the owning process, so a second process on the same file would split them. To
 run several instances, use external stores (`@byok-sdk/cloud` with
 `@byok-sdk/cloud-dataplane`) and one shared `tokenSigner`.
@@ -250,9 +252,6 @@ What a restart does not keep:
   devices; recover server coordination after restart with `tasks.offer(taskId)`
   and `tasks.get(taskId)` (see
   [Persistent host request identity](#persistent-host-request-identity));
-- task event history and cursors. `tasks.events` refuses a cursor from before
-  the restart, and starts a task that is still live at its current state (see
-  [Task event feed](#task-event-feed));
 - with memory storage, everything, including enrollment: devices must pair
   again.
 
@@ -443,15 +442,18 @@ fake timers.
 
 ## SQLite schema version
 
-The current schema is v7. It includes a durable approval timeline alongside the
-existing task, enrollment, receipt and wake authorities, and the retired-device
-stream tombstone on `mailbox_cursor` (#1160). A new database, a v7 file and a
-v6 file can open. A v6 file is upgraded in place once, in the open transaction:
-the two tombstone columns are added, and the stream of every device the
-directory no longer holds is closed as `device_revoked` with its pending rows
-expired. Its pairings and other rows are kept, so no re-enrollment is needed.
-Versions 1–5 and unknown versions are rejected; there is no migration selector
-or other automatic adoption path.
+The current schema is v8. It includes a durable approval timeline alongside the
+existing task, enrollment, receipt and wake authorities, the retired-device
+stream tombstone on `mailbox_cursor` (#1160) and the durable task activity log
+(`activity_log_head`, `activity_log_entry`; #1113). A new database and a v8, v7
+or v6 file can open. An older file is upgraded in place once, in the open
+transaction, one step at a time. From v6 to v7 the two tombstone columns are
+added, and the stream of every device the directory no longer holds is closed
+as `device_revoked` with its pending rows expired. From v7 to v8 the activity
+log tables are created empty: earlier builds kept activity only in process
+memory, so no pre-upgrade history exists to carry over. Pairings and other rows
+are kept, so no re-enrollment is needed. Versions 1–5 and unknown versions are
+rejected; there is no migration selector or other automatic adoption path.
 
 Preserve existing databases. For a file older than v6, stop the previous owner
 and explicitly select a new state path and enrollment. Do not delete history or
@@ -464,11 +466,11 @@ Open failures use `SqliteSchemaError` with `foundVersion` and `requiredVersion`:
 - `SQLITE_SCHEMA_INVALID`: a required authority is missing or malformed.
 - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox bytes are not wire v4.
 
-A declared v7 file missing its approval table fails closed instead of silently
-recreating an empty authority. Existing database contents are not adopted,
-rewritten or deleted on a version refusal. New files create their schema and
-version marker in one transaction. Older builds cannot open v7, so a store
-cannot roll back past this release once it has been opened.
+A declared v8 file missing its approval or activity log tables fails closed
+instead of silently recreating an empty authority. Existing database contents
+are not adopted, rewritten or deleted on a version refusal. New files create
+their schema and version marker in one transaction. Older builds cannot open
+v8, so a store cannot roll back past this release once it has been opened.
 
 ## Persistent host request identity
 
@@ -514,18 +516,20 @@ agentMessageContext is not part of this executable-offer projection; callers
 must preserve its original binding and its separate consumer authority.
 
 `await server.tasks.cancel(taskId, reason)` uses the same kernel cancellation
-and relay notification as a live handle; it does not require a connected device.
+and wake-up as a live handle; it does not require a connected device.
 Missing tasks reject. A host must separately persist cancellation intent if it
 can crash before this call, and prevent dispatch of a cancelled prepared request.
 
 ## Task event feed
 
-`tasks.events(taskId, { after?, from?, signal? })` follows one task's notifications:
-state changes, Agent progress, artifacts (inline, or a `blobRef` for
-`blobs.getDownloadUrl`) and approval requests, whose `approvalId`
-`tasks.approve` and `tasks.reject` take. It works for a task
-`executions.submit` created; `TaskHandle.events()` reads the same feed without
-cursors.
+`tasks.events(taskId, { after?, from?, signal? })` follows one task: its state,
+Agent progress, artifacts (inline, or a `blobRef` for `blobs.getDownloadUrl`)
+and approval requests, whose `approvalId` `tasks.approve` and `tasks.reject`
+take. It works for a task `executions.submit` created; `TaskHandle.events()`
+reads the same feed without cursors. The feed holds nothing of its own: it
+reads task state and the approval timeline the way `tasks.get` does, and the
+task's durable activity log, and the stores' task events wake only wakes it
+when something was committed.
 
 ```ts
 const start = lastCursor === undefined ? { from: 'state' as const } : { after: lastCursor };
@@ -534,35 +538,35 @@ for await (const { cursor, event } of byok.tasks.events(taskId, { ...start, sign
 }
 ```
 
-- Without `after`, a read starts at the oldest retained entry. With
-  `from: 'state'` it starts at the task's current state: its latest `state`
-  entry, after the pending `await_approval` request while it awaits approval.
-  Those entries are kept even after the buffer dropped them, so a reader that
-  just needs "now, then live" always gets them first. Give `after` or `from`,
-  not both.
-
-- Order is this instance's arrival order. Progress, artifacts and approvals
+- Without `after`, a read starts at the task's current state, then all
+  retained activity. With `from: 'state'` it starts at the current state,
+  after the pending `await_approval` request while it awaits approval, then
+  only activity logged from then on. Give `after` or `from`, not both.
+- State is the current fact, not a replay of transitions: a reader that was
+  not reading while the task moved on sees where it is now. Use
+  `events.subscribe()` for each transition this instance observed.
+- Each read yields the pending request when it is new, the state when it
+  changed, then the activity log in order. Progress, artifacts and approvals
   have no protocol-level total order, so do not infer causality from adjacent
   entries.
-- The feed ends after the terminal state, when `signal` aborts, or on
-  `close()`. Read the terminal result with `tasks.get`.
-- A cursor is valid only for this instance's current feed of the task. Each
-  feed holds at most `taskEventBufferLimit` entries (default 1000); a reader
-  that resumes behind the oldest one first gets one
-  `{ kind: 'error', reason: 'events_truncated' }`. A terminal task's feed is
-  kept for `taskEventRetentionMs` (default 5 minutes).
+- The feed ends after the terminal state, which comes after the activity
+  logged before it, when `signal` aborts, or on `close()`. A terminal task
+  stays readable while its activity is retained. Read the terminal result with
+  `tasks.get`.
+- A cursor survives a restart over the same SQLite file, including inside a
+  progress batch. Activity dropped before a reader reached it (the log keeps
+  at most 1,000 entries or 4 MiB per task; archive removes it) is replaced by
+  one `{ kind: 'error', reason: 'events_truncated' }` entry, whose cursor
+  resumes at the start of what is retained.
 - The first `next()` throws, before any entry: a `TypeError` for `after` and
-  `from` together, `ByokCloudError` `task_not_found` for an unknown task, `TaskEventsUnavailableError` with
-  `reason: 'cursor_unknown'` for a cursor this feed never handed out (after a
-  restart, another task's, malformed), or `reason: 'feed_expired'` for a
-  terminal task whose feed is gone. After `cursor_unknown`, read again with
-  `from: 'state'`; after `feed_expired`, `tasks.get` has the final state.
-- After a restart, a task that is still live gets a feed that starts with its
-  current state read back from the stores, after the pending plaintext
-  approval request while it awaits one; earlier events are not reconstructed,
-  and those entries can appear twice. A sealed approval request is not
-  announced, as on a live feed. A task whose Host cancellation was accepted
-  counts as terminal here, as in `tasks.get`.
+  `from` together, `ByokCloudError` `task_not_found` for an unknown task, and
+  `TaskEventsUnavailableError` with `reason: 'cursor_unknown'` for a cursor
+  this server did not hand out for this task (another task's, malformed, or
+  from an earlier SDK). After `cursor_unknown`, read again with
+  `from: 'state'`.
+- A sealed approval request moves the state to `AwaitApproval` without an
+  `await_approval` entry. A task whose Host cancellation was accepted counts
+  as terminal here, as in `tasks.get`.
 - Authorization is the Host's: the feed carries raw tool input and output, so
   authenticate the user and redact before forwarding it to a browser.
 

@@ -56,7 +56,7 @@ afterEach(async () => {
 
 describe('tasks.messageDraft through real HTTP inbound', () => {
   it('wakes readers and emits ordered byte appends, then ended', async () => {
-    const wake = vi.spyOn(TaskEventRelay.prototype, 'onAgentMessageDraft');
+    const wake = vi.spyOn(TaskEventRelay.prototype, 'wake');
     const iterator = stream();
     const first = iterator.next();
     await send(frame('你好'));
@@ -170,7 +170,7 @@ describe('tasks.messageDraft through real HTTP inbound', () => {
     }
   });
   it('polls when relay wakes are lost and supports abort while waiting', async () => {
-    vi.spyOn(TaskEventRelay.prototype, 'onAgentMessageDraft').mockImplementation(() => {});
+    vi.spyOn(TaskEventRelay.prototype, 'wake').mockImplementation(() => {});
     const iterator = stream();
     const next = iterator.next();
     await send(frame('polled'));

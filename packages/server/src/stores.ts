@@ -12,6 +12,7 @@ import {
   createInMemoryBlobBytes,
   createInProcessMailboxWake,
   type MailboxWake,
+  type TaskEventsWake,
   createWebCrypto,
   type BlobContentProxy,
   type ProofReceiptRetentionAuthority,
@@ -84,6 +85,8 @@ export interface FacadeCounters {
 
 export interface FacadeStoreComposition {
   readonly mailboxWake: MailboxWake;
+  /** The stores' commit hints for task event readers (#1113 A4). */
+  readonly taskEventsWake: TaskEventsWake;
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
@@ -160,6 +163,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
 
   return {
     mailboxWake: createInProcessMailboxWake(),
+    taskEventsWake: sqlite?.taskEventsWake ?? inMemoryCloud!.taskEventsWake,
     core: { ...core, presence, mailbox: observingMailbox(core.mailbox, presence) },
     cloud: {
       ...stores,

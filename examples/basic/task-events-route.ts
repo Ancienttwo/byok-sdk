@@ -1,9 +1,9 @@
 // `GET /api/tasks/:taskId/events`: one task's event feed as server-sent events.
 // Each entry's cursor is the SSE `id`, so a browser `EventSource` that
-// reconnects sends it back as `Last-Event-ID` and the feed resumes after it.
-// A new stream, or one whose cursor this server cannot resume, starts at the
-// task's current state: its latest state, after the pending approval request
-// while it awaits one.
+// reconnects sends it back as `Last-Event-ID` and the feed resumes after it,
+// also across a server restart over the same storage. A new stream, or one
+// whose cursor this server did not hand out, starts at the task's current
+// state: the pending approval request while it awaits one, then its state.
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { TaskEventsUnavailableError, type ByokServer } from '@byok-sdk/server';
@@ -25,13 +25,7 @@ export function taskEventsRoute(byok: { tasks: Pick<ByokServer['tasks'], 'get' |
         await follow(lastEventId === undefined ? { from: 'state' } : { after: lastEventId });
       } catch (error) {
         if (!(error instanceof TaskEventsUnavailableError)) throw error;
-        if (error.reason === 'cursor_unknown') {
-          await follow({ from: 'state' });
-          return;
-        }
-        // A finished task whose feed is gone: nothing follows its final state.
-        const snapshot = await byok.tasks.get(taskId);
-        if (snapshot !== undefined) await stream.writeSSE({ data: JSON.stringify({ kind: 'state', state: snapshot.state, at: snapshot.updatedAt }) });
+        await follow({ from: 'state' });
       }
     });
   };

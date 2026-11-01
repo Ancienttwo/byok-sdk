@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.32.0",
-    "snapshotSha256": "6c24eec9c1c8d685254c4f69a149f69d6fa56a9355f27e31602f75ce25febd09"
+    "snapshotSha256": "b53aa5f5f88715312589dc5814cf19291dfa5a3f56e953a6e9739f63a84d5b14"
   },
   "configFields": {
     "status": "tracked",
@@ -24,6 +24,81 @@
         "config:runtimes",
         "export:@byok-sdk/client#DaemonConfig"
       ]
+    },
+    {
+      "id": "server-sqlite-v8",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "The embedded server's SQLite file is now schema 8 (#1113 A2b): the activity log is persisted in the database instead of process memory, so task activity and its cursors survive a restart, and the terminal-task archive removes it in its own transaction. A schema 6 or 7 file is upgraded in place when it opens, inside the open transaction, keeping its pairings, tasks, approvals and other rows; 7 to 8 adds activity_log_head and activity_log_entry empty, since no activity history was persisted before. The upgrade is one-way: 0.32.0 and earlier refuse a schema 8 file, so stop the server and back up the database file before the first open with this release. Schema 8 also closes a task's activity log and approval timeline in the same transaction as its first terminal or accepted Host cancellation (#1113 A3); the 7 to 8 upgrade rebuilds approval_timeline_tail without the idle deadline, keeping every observation, and closes already-closed tasks at their original deadline. A v8 file missing either activity table or the closure trigger is refused as SQLITE_SCHEMA_INVALID.",
+      "migration": "docs/migrations/1113-durable-activity-log.md#sqlite-a2b",
+      "items": [
+        "store:server-sqlite"
+      ]
+    },
+    {
+      "id": "approval-timeline-closes-with-task",
+      "impact": "breaking",
+      "summary": "An approval timeline no longer idle-expires (#1113 A3). It closes in the same transaction as its task's first terminal or accepted Host cancellation and expires ten minutes after that instant; reads and replays never renew it. ApprovalTimelineAppendInput loses ttlMs, and ApprovalTimelineTail gains terminalAt while its expiresAt becomes optional, present only once closed. On a closed timeline ApprovalTimelineStore.append throws the new approval_timeline_settled code and resolvePending returns absent, so a request pending at the close can no longer be decided; ByokCloud refuses a late task.await_approval with task_settled_by_cloud. A timeline keeps at most 50 observations and MAX_APPROVAL_TIMELINE_BYTES (1 MiB) of serialized observations, evicting the oldest first and never the pending request; one event is at most MAX_APPROVAL_EVENT_BYTES and capacity must be 2 to 50, else coordination_input_invalid. Archive, redaction and expiry clear a closed timeline's entries and keep its row as the fence. A custom ApprovalTimelineStore must close with its task, refuse appends once closed, and retain through retainApprovalObservations or the same bounds; pendingApprovalObservation is the shared pending fold.",
+      "migration": "docs/migrations/1113-durable-activity-log.md#task-output-closure-a3",
+      "items": [
+        "export:@byok-sdk/cloud#ApprovalTimelineAppendInput",
+        "export:@byok-sdk/cloud#ApprovalTimelineTail",
+        "export:@byok-sdk/cloud#MAX_APPROVAL_EVENT_BYTES",
+        "export:@byok-sdk/cloud#MAX_APPROVAL_TIMELINE_BYTES",
+        "export:@byok-sdk/cloud#pendingApprovalObservation",
+        "export:@byok-sdk/cloud#retainApprovalObservations",
+        "export:@byok-sdk/cloud#validateApprovalTimelineAppend",
+        "export:@byok-sdk/cloud#validateApprovalTimelineResolve",
+        "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore"
+      ]
+    },
+    {
+      "id": "task-output-closes-at-terminal",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "A task's activity log and approval timeline close in the same transaction as its first terminal or accepted Host cancellation, in every built-in composition (#1113 A3). Later task.progress, task.artifact and task.await_approval are refused with task_settled_by_cloud, also on a redacted or archived task, and both expire ten minutes after the closing instant without renewal. CLOUD_ERROR_CODES gains approval_timeline_settled. The in-memory InMemoryTaskAttemptStore, InMemoryTaskCancellationStore and InMemoryDeviceDirectory close them through the attempt state, and a custom composition must close both in the same commit as its first terminal or accepted cancellation. Postgres migration 0035 adds the closing trigger on task and approval_timeline_tail.terminal_at with a constraint that only a closed row has expires_at, drops the idle deadline of every open timeline, and closes already-closed tasks at their original deadline. Deploy 0035 and the code together: each fails against the other's approval schema. Apply 0035 only through deploy/scripts/migrate, and on a large tenant in a maintenance window: it scans task and rewrites approval_timeline_tail in one transaction that blocks writes to task.",
+      "migration": "docs/migrations/1113-durable-activity-log.md#task-output-closure-a3",
+      "items": [
+        "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+        "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+        "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+        "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
+        "store:cloud-dataplane-postgres"
+      ]
+    },
+    {
+      "id": "task-events-wake",
+      "impact": "additive",
+      "summary": "A content-free task events wake (#1113 A4): TaskEventsWake hints that a task's state, activity log or approval timeline changed, naming only the tenant and task, so a reader re-reads those sources instead of polling. createInMemoryCloudStores and the embedded SQLite composition expose taskEventsWake, which every write to those stores signals after it commits; a rollback signals nothing. createPostgresTaskEventsWake listens on a session-mode DSN for the triggers migration 0036 adds on task, activity_log_head and approval_timeline_tail (additive; either deployment order is safe, and code before 0036 reads at its fallback interval), so commits on any instance, maintenance included, wake readers on every instance. A lost hint delays a reader by at most fallbackMs (DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS, 5 seconds) and a listener reconnect wakes every subscription. createInProcessTaskEventsWake covers writers in one process only. The Postgres listener options are now the shared PostgresWakeOptions, which PostgresMailboxWakeOptions names unchanged.",
+      "migration": "docs/migrations/1113-durable-activity-log.md#task-events-wake-a4",
+      "items": [
+        "export:@byok-sdk/cloud#DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS",
+        "export:@byok-sdk/cloud#InMemoryActivityStore",
+        "export:@byok-sdk/cloud#InMemoryCloudComposition",
+        "export:@byok-sdk/cloud#InProcessTaskEventsWakeOptions",
+        "export:@byok-sdk/cloud#TaskEventsWake",
+        "export:@byok-sdk/cloud#TaskEventsWakeSubscription",
+        "export:@byok-sdk/cloud#createInProcessTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake"
+      ]
+    },
+    {
+      "id": "task-events-durable-cursor",
+      "impact": "breaking",
+      "summary": "ByokServer.tasks.events and TaskHandle.events() read the durable activity log, task state and the approval timeline instead of an in-process relay buffer (#1113). Cursors resume across a restart over the same SQLite file, including inside a progress batch; cursors from 0.32.0 and earlier are refused as TaskEventsUnavailableError cursor_unknown. State is the current fact, coalesced, not a replay of every transition. A terminal task stays readable while its activity is retained, so the feed_expired reason is gone; events_truncated now marks activity the log dropped before the reader reached it, also for a cursor taken before the task had any activity. Readers wait on the stores' task events wake, with its five-second fallback. CreateByokServerOptions.taskEventBufferLimit and taskEventRetentionMs and the DEFAULT_TASK_EVENT_BUFFER_LIMIT and DEFAULT_TASK_EVENT_RETENTION_MS exports are removed. events.subscribe() announces task.state only for tasks this instance dispatched.",
+      "migration": "docs/migrations/1113-task-events-durable-cursor.md#tasksevents-reads-the-durable-activity-log",
+      "items": [
+        "export:@byok-sdk/server#CreateByokServerOptions",
+        "export:@byok-sdk/server#DEFAULT_TASK_EVENT_BUFFER_LIMIT",
+        "export:@byok-sdk/server#DEFAULT_TASK_EVENT_RETENTION_MS",
+        "export:@byok-sdk/server#TaskEventsUnavailableError"
+      ]
     }
   ],
   "changes": [
@@ -38,6 +113,175 @@
       "item": "export:@byok-sdk/client#DaemonConfig",
       "change": "changed",
       "entry": "daemon-config-runtimes-grok"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ApprovalTimelineAppendInput",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ApprovalTimelineTail",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+      "change": "changed",
+      "entry": "task-output-closes-at-terminal"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryActivityStore",
+      "change": "changed",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryCloudComposition",
+      "change": "changed",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryDeviceDirectory",
+      "change": "changed",
+      "entry": "task-output-closes-at-terminal"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+      "change": "changed",
+      "entry": "task-output-closes-at-terminal"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskCancellationStore",
+      "change": "changed",
+      "entry": "task-output-closes-at-terminal"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InProcessTaskEventsWakeOptions",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MAX_APPROVAL_EVENT_BYTES",
+      "change": "added",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#MAX_APPROVAL_TIMELINE_BYTES",
+      "change": "added",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskEventsWake",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskEventsWakeSubscription",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#createInProcessTaskEventsWake",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#pendingApprovalObservation",
+      "change": "added",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#retainApprovalObservations",
+      "change": "added",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#validateApprovalTimelineAppend",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#validateApprovalTimelineResolve",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresApprovalTimelineStore",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+      "change": "changed",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
+      "change": "added",
+      "entry": "task-events-wake"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresApprovalTimelineStore",
+      "change": "changed",
+      "entry": "approval-timeline-closes-with-task"
+    },
+    {
+      "item": "export:@byok-sdk/server#CreateByokServerOptions",
+      "change": "changed",
+      "entry": "task-events-durable-cursor"
+    },
+    {
+      "item": "export:@byok-sdk/server#DEFAULT_TASK_EVENT_BUFFER_LIMIT",
+      "change": "removed",
+      "entry": "task-events-durable-cursor"
+    },
+    {
+      "item": "export:@byok-sdk/server#DEFAULT_TASK_EVENT_RETENTION_MS",
+      "change": "removed",
+      "entry": "task-events-durable-cursor"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskEventsUnavailableError",
+      "change": "changed",
+      "entry": "task-events-durable-cursor"
+    },
+    {
+      "item": "store:cloud-dataplane-postgres",
+      "change": "changed",
+      "before": "migrations=34 last=0034_activity_log.sql sha256=4c4c6101f62a0fd8",
+      "after": "migrations=36 last=0036_task_events_wake.sql sha256=a19ee4a174cd329c",
+      "entry": "task-output-closes-at-terminal"
+    },
+    {
+      "item": "store:server-sqlite",
+      "change": "changed",
+      "before": "schema_version=7",
+      "after": "schema_version=8",
+      "entry": "server-sqlite-v8"
     }
   ]
 }

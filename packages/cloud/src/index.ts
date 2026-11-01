@@ -227,8 +227,12 @@ export {
   APPROVAL_SUMMARY_MAX_BYTES,
   DEFAULT_APPROVAL_TIMELINE_CAPACITY,
   DEFAULT_APPROVAL_TIMELINE_TTL_MS,
+  MAX_APPROVAL_EVENT_BYTES,
+  MAX_APPROVAL_TIMELINE_BYTES,
   approvalTimelineCursor,
   parseApprovalObservations,
+  pendingApprovalObservation,
+  retainApprovalObservations,
   sameApprovalTimelineEvent,
   validateApprovalTimelineAppend,
   validateApprovalTimelineResolve,
@@ -443,7 +447,13 @@ export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } fr
 export type { ReceiptRetentionClass } from './receipt-retention';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
-export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
-export type { InProcessMailboxWakeOptions } from './stores/in-memory/mailbox-wake';
+export type { TaskEventsWake, TaskEventsWakeSubscription } from './task-events-wake';
+export {
+  createInProcessMailboxWake,
+  createInProcessTaskEventsWake,
+  DEFAULT_MAILBOX_WAKE_FALLBACK_MS,
+  DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS,
+} from './stores/in-memory/mailbox-wake';
+export type { InProcessMailboxWakeOptions, InProcessTaskEventsWakeOptions } from './stores/in-memory/mailbox-wake';
 
 export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft';

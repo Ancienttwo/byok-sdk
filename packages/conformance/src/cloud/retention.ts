@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { REQUEST_RECEIPT_PREFIXES } from '@byok-sdk/cloud';
+import { DEFAULT_APPROVAL_TIMELINE_TTL_MS, REQUEST_RECEIPT_PREFIXES } from '@byok-sdk/cloud';
 import { TENANT_A, TENANT_B, registration } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 const IDENTITY_KEYS = [
@@ -66,14 +66,23 @@ export function runCloudRetentionConformance(name: string, factory: CloudComposi
       await withCloudComposition(factory, async handle => {
         const seed = async (tenant: typeof TENANT_A, n: number) => kind === 'activity'
           ? handle.stores.activity.append(tenant, { taskId: `tail-${n}`, sourceEnvelopeId: `source-${n}`, batchSeq: 1, events: [{ type: 'progress', text: 'one' }], dropped: 0, ttlMs: 1000 })
-          : handle.stores.approvals.append(tenant, { taskId: `tail-${n}`, sourceEnvelopeId: `source-${n}`, event: { type: 'approval_requested', summary: 'Approve', approvalId: String(n) }, ttlMs: 1000 });
+          : handle.stores.approvals.append(tenant, { taskId: `tail-${n}`, sourceEnvelopeId: `source-${n}`, event: { type: 'approval_requested', summary: 'Approve', approvalId: String(n) } });
         for (let n = 1; n <= 3; n++) await seed(TENANT_A, n);
         await seed(TENANT_B, 4);
         if (kind === 'activity') {
           for (let n = 1; n <= 3; n++) await handle.stores.activity.settle(TENANT_A, `tail-${n}`, handle.now());
           await handle.stores.activity.settle(TENANT_B, 'tail-4', handle.now());
+        } else {
+          // An approval timeline expires only after its task's output closes (#1113 A3).
+          const close = async (tenant: typeof TENANT_A, taskId: string) => {
+            await handle.stores.tasks.open(tenant, { taskId, deviceId: 'device-1' });
+            await handle.stores.tasks.claim(tenant, { taskId, deviceId: 'device-1' });
+            await handle.stores.tasks.recordStatus(tenant, { taskId, status: 'complete' });
+          };
+          for (let n = 1; n <= 3; n++) await close(TENANT_A, `tail-${n}`);
+          await close(TENANT_B, 'tail-4');
         }
-        await handle.advanceTime(1000);
+        await handle.advanceTime(kind === 'activity' ? 1000 : DEFAULT_APPROVAL_TIMELINE_TTL_MS);
         const store = handle.stores[kind];
         const input = { now: handle.now(), limit: 2 };
         expect(await store.collectExpired(TENANT_A, input)).toEqual({ removed: 2, expired: 0, releasedBytes: 0n, more: true });

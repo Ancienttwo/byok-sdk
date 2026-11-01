@@ -5,6 +5,7 @@ import {
   ACTIVITY_TERMINAL_TTL_MS, DEFAULT_ACTIVITY_CAPACITY, MAX_ACTIVITY_BYTES,
   type ActivityAppendInput, type ActivityReadOptions, type ActivityStore, type ActivityTail,
 } from '../../activity';
+import { TaskChangeMap, type TaskChanged } from './task-change-map';
 
 interface TaskLog { tail: ActivityTail; ttlMs: number; fences: Map<string, string>; removed: boolean }
 const LOGS = new WeakMap<InMemoryActivityStore, Map<string, TaskLog>>();
@@ -14,11 +15,24 @@ export function deleteActivityTail(store: InMemoryActivityStore, tenant: TenantI
   const logs = LOGS.get(store)!;
   const key = activityTailKey(tenant, taskId);
   const log = logs.get(key) ?? newLog(tenant, taskId);
-  const existed = logs.has(key) && !log.removed;
+  // A log closed with nothing appended held no history.
+  const existed = logs.has(key) && !log.removed && log.tail.cursor.revision > 0;
   log.tail = { ...log.tail, entries: [], retainedBytes: 0, floor: log.tail.cursor.revision };
   log.removed = true;
   logs.set(key, log);
   return existed ? 1 : 0;
+}
+/**
+ * Close admission and freeze the terminal deadline in the caller's synchronous
+ * step. The first close wins; removed content stays removed.
+ */
+export function closeActivityLog(store: InMemoryActivityStore, tenant: TenantId, taskId: string, terminalAt: string): void {
+  const logs = LOGS.get(store)!;
+  const key = activityTailKey(tenant, taskId);
+  const log = logs.get(key) ?? newLog(tenant, taskId);
+  if (log.removed || log.tail.terminalAt !== undefined) return;
+  log.tail = { ...log.tail, terminalAt, expiresAt: new Date(Date.parse(terminalAt) + log.ttlMs).toISOString() };
+  logs.set(key, log);
 }
 function newLog(tenant: TenantId, taskId: string): TaskLog {
   return {
@@ -33,8 +47,11 @@ function newLog(tenant: TenantId, taskId: string): TaskLog {
 }
 
 export class InMemoryActivityStore implements ActivityStore {
-  readonly #logs = new Map<string, TaskLog>();
-  constructor(private readonly clock: Clock) { LOGS.set(this, this.#logs); }
+  readonly #logs: Map<string, TaskLog>;
+  constructor(private readonly clock: Clock, changed?: TaskChanged) {
+    this.#logs = new TaskChangeMap<TaskLog>((log) => log.tail, changed);
+    LOGS.set(this, this.#logs);
+  }
 
   async append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail> {
     const capacity = validateActivityAppend(input);
@@ -89,13 +106,9 @@ export class InMemoryActivityStore implements ActivityStore {
       throw new ByokCloudError('coordination_input_invalid', 'Activity terminal time must be canonical ISO.');
     }
     const key = activityTailKey(tenant, taskId);
-    const log = this.#logs.get(key) ?? newLog(tenant, taskId);
-    if (log.removed) throw new ByokCloudError('activity_history_gap', 'Activity content was removed.');
-    if (log.tail.terminalAt === undefined) {
-      log.tail = { ...log.tail, terminalAt, expiresAt: new Date(terminalMs + log.ttlMs).toISOString() };
-      this.#logs.set(key, log);
-    }
-    return structuredClone(this.#expire(log));
+    if (this.#logs.get(key)?.removed === true) throw new ByokCloudError('activity_history_gap', 'Activity content was removed.');
+    closeActivityLog(this, tenant, taskId, terminalAt);
+    return structuredClone(this.#expire(this.#logs.get(key)!));
   }
 
   #expire(log: TaskLog): ActivityTail {

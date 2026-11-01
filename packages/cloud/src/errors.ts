@@ -16,6 +16,8 @@ export const CLOUD_ERROR_CODES = {
   activity_history_gap: 'activity_history_gap',
   activity_cursor_invalid: 'activity_cursor_invalid',
   activity_task_settled: 'activity_task_settled',
+  /** The task's output closed: its approval timeline admits no further observation (#1113 A3). */
+  approval_timeline_settled: 'approval_timeline_settled',
   activity_store_unavailable: 'activity_store_unavailable',
   maintenance_invalid_input: 'maintenance_invalid_input',
   maintenance_result_invalid: 'maintenance_result_invalid',

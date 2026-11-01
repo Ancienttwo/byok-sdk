@@ -57,7 +57,8 @@ import {
 import { TaskEventRelay } from './relay';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
-import { approvePendingApproval, createTaskHandle, noteAbandoned, readTaskEvents, rejectPendingApproval } from './task-handle';
+import { approvePendingApproval, createTaskHandle, noteAbandoned, rejectPendingApproval } from './task-handle';
+import { readTaskEvents, type TaskEventDeps, type TaskEventFacts, type TaskEventSources } from './task-events';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -129,7 +130,6 @@ export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from 
 export type { SqliteSchemaErrorCode } from './sqlite-support';
 export { inspectSqliteStore } from './store-compatibility';
 export type { RateLimiterOptions } from './rate-limiter';
-export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 
 /** `GET /byok/events` hold duration (§8): ~50s unless overridden (e.g. for tests). */
 const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
@@ -245,32 +245,29 @@ export interface ByokServer {
     /** Reject the task's pending approval; the same decision and refusals as {@link TaskHandle.reject}. */
     reject(taskId: string, reason?: string, opts?: { approvalId?: string }): Promise<void>;
     /**
-     * Follow one task's notifications (state, Agent progress, artifacts,
-     * approval requests) in this instance's arrival order. It starts after the
-     * entry `after` names; with `from: 'state'`, at the entries where the
-     * task's current state began (its latest `state` entry, preceded by the
-     * pending `await_approval` request while it awaits approval), which are
-     * kept even after the buffer dropped them; otherwise at the start of what
-     * is retained. An `events_truncated` entry stands for entries dropped
-     * before the reader reached them. Ends after the terminal state, when
-     * `signal` aborts, or when the server closes. A notification stream, not a
-     * record: read task facts with {@link tasks.get}.
+     * Follow one task: its state, the pending approval request, and its Agent
+     * progress and artifacts, read from the durable stores — the same reads as
+     * {@link tasks.get} and `ByokCloud.readActivity` — and woken by commits in
+     * this instance. A cursor survives a server restart on SQLite storage.
      *
-     * A live task this instance did not dispatch (after a restart) gets a feed
-     * that starts with its current state read back from the stores, after the
-     * pending approval request while it awaits a plaintext one, and no earlier
-     * events. Those entries can appear twice when the read saw a commit the
-     * feed had not received yet. Once attached, the feed stays until the
-     * task's terminal plus `taskEventRetentionMs` however its readers leave,
-     * so a reconnecting reader resumes with its cursor, unless the read that
-     * attached it finds the task gone or finished; a read stopped before its
-     * first store read completed attaches nothing.
+     * Each read window yields the pending approval request when it is new, the
+     * state when it changed, then the activity log in revision order. State is
+     * the current fact, coalesced: a reader that was not reading while a task
+     * moved through several states sees only where it is now. A terminal state
+     * comes last, after the log was read past it, and ends the feed.
+     *
+     * The read starts after `after`; with `from: 'state'`, at the pending
+     * request and current state, followed only by activity logged from then
+     * on; otherwise at the current state followed by all retained activity. An
+     * `events_truncated` entry stands for activity that was dropped before the
+     * reader reached it (log bounds, removal); its cursor resumes at the start
+     * of what is retained. Ends at the terminal, when `signal` aborts, or when
+     * the server closes.
      *
      * The first `next()` throws, before any entry: a `TypeError` when both
      * `after` and `from` are given, `ByokCloudError` `task_not_found` for an
-     * unknown task, or {@link TaskEventsUnavailableError} when `after` is
-     * unknown to this instance's feed or the terminal task's feed is no longer
-     * retained.
+     * unknown task, or {@link TaskEventsUnavailableError} `cursor_unknown` for
+     * a cursor this server did not hand out for this task.
      */
     events(taskId: string, options?: { after?: string; from?: 'state'; signal?: AbortSignal }): AsyncIterable<TaskEventEntry>;
     /**
@@ -319,8 +316,8 @@ export interface ByokServer {
   };
   maintenance: { runNow(): Promise<MaintenanceReport> };
   /**
-   * Release what this instance holds: the relay's per-task feeds and their
-   * reclamation timers, and the connection observations. Call it on shutdown so
+   * Release what this instance holds: open task event and draft reads, the
+   * relay's wake-ups, and the connection observations. Call it on shutdown so
    * nothing keeps the process alive or leaks a handle in tests; safe to call
    * more than once. Drain pending store calls before releasing the selected
    * storage authority; await this before opening the SQLite file again.
@@ -384,10 +381,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   }
 
   const inboundRefusals = Object.fromEntries(INBOUND_REFUSAL_REASONS.map((reason) => [reason, 0])) as Record<InboundRefusalReason, number>;
-  const relay = new TaskEventRelay({
-    ...(opts.taskEventBufferLimit === undefined ? {} : { taskEventBufferLimit: opts.taskEventBufferLimit }),
-    ...(opts.taskEventRetentionMs === undefined ? {} : { taskEventRetentionMs: opts.taskEventRetentionMs }),
-  });
+  const relay = new TaskEventRelay();
 
   const composition = composeFacadeStores({
     tenant,
@@ -460,13 +454,18 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     return cloud.readTaskResult(tenant, taskId);
   }
 
-  async function projectTask(attempt: TaskAttempt): Promise<TaskSnapshot> {
-    const [pending, terminal, offer] = await Promise.all([
-      readPending(attempt.taskId),
+  async function projectTaskReads(attempt: TaskAttempt) {
+    const [timeline, terminal, offer] = await Promise.all([
+      cloud.readApprovalTimeline(tenant, attempt.taskId),
       readTerminal(attempt.taskId),
       cloud.readTaskOffer(tenant, attempt.taskId),
     ]);
-    return toTaskSnapshot(attempt, pending, terminal, offer);
+    const pending = pendingApproval(timeline);
+    return { snapshot: toTaskSnapshot(attempt, pending, terminal, offer), timeline, pending };
+  }
+
+  async function projectTask(attempt: TaskAttempt): Promise<TaskSnapshot> {
+    return (await projectTaskReads(attempt)).snapshot;
   }
 
   /**
@@ -483,13 +482,21 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     return { state, at: updatedAt };
   }
 
-  async function readApprovalRequest(taskId: string): Promise<ServerTaskEvent | undefined> {
-    const timeline = await cloud.readApprovalTimeline(tenant, taskId);
-    const pending = pendingApproval(timeline);
-    const event = timeline?.entries.find((entry) => entry.revision === pending?.revision)?.event;
-    return event?.type === 'approval_requested' && 'summary' in event && event.approvalId !== undefined
+  /**
+   * The state `tasks.get` would report and the pending approval it read, with
+   * the request as an `await_approval` event when it is a plaintext one with an
+   * `approvalId`; a sealed request has no event.
+   */
+  async function readEventFacts(taskId: string): Promise<TaskEventFacts | undefined> {
+    const attempt = await cloud.readTaskAttempt(tenant, taskId);
+    if (attempt === undefined) return undefined;
+    const { snapshot, timeline, pending } = await projectTaskReads(attempt);
+    if (pending === undefined) return { state: snapshot.state, at: snapshot.updatedAt };
+    const event = timeline?.entries.find((entry) => entry.revision === pending.revision)?.event;
+    const request: ServerTaskEvent | undefined = event?.type === 'approval_requested' && 'summary' in event && event.approvalId !== undefined
       ? { kind: 'await_approval', summary: event.summary, approvalId: event.approvalId }
       : undefined;
+    return { state: snapshot.state, at: snapshot.updatedAt, approval: { revision: pending.revision, ...(request === undefined ? {} : { request }) } };
   }
 
   async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {
@@ -655,13 +662,28 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     return handleFor(enqueued.taskId);
   }
 
+  // Store reads started by host readers; close() waits for them before it
+  // releases the storage they read.
+  const readShutdown = new AbortController();
+  const liveReads = new Set<Promise<unknown>>();
+  function track<T>(reading: Promise<T>): Promise<T> {
+    liveReads.add(reading);
+    return reading.finally(() => { liveReads.delete(reading); });
+  }
+  const eventSources: TaskEventSources = {
+    readFacts: (taskId) => track(readEventFacts(taskId)),
+    readActivity: (taskId, after) => track(cloud.readActivity(tenant, taskId, after === undefined ? {} : {
+      after: { version: 1, tenantId: tenant, taskId, generation: after.generation, revision: after.revision },
+    })),
+  };
+  const eventDeps: TaskEventDeps = { relay, tenant, sources: eventSources, wake: composition.taskEventsWake, shutdown: readShutdown.signal };
+
   function handleFor(taskId: string): TaskHandle {
     return createTaskHandle(taskId, {
+      ...eventDeps,
       tenant,
       cloud,
-      relay,
       readState: readTaskState,
-      readApprovalRequest,
       readResult: async (id) => toTaskResult(await readTerminal(id)),
     });
   }
@@ -692,15 +714,13 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     });
   }
 
-  const draftShutdown = new AbortController();
-  const draftReads = new Set<Promise<unknown>>();
   let closePromise: Promise<void> | undefined;
   function close(): Promise<void> {
-    draftShutdown.abort();
+    readShutdown.abort();
     projectionWaiters.stop();
     return closePromise ??= Promise.all([scheduler.close(), wakes.close()])
       .finally(async () => {
-        await Promise.allSettled(draftReads);
+        await Promise.allSettled(liveReads);
         await projectionWaiters.drain();
         relay.stop();
         await composition.close();
@@ -789,20 +809,18 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       deviceTerminal(taskId) { return cloud.readDeviceTerminal(tenant, taskId); },
       offer(taskId) { return cloud.readTaskOffer(tenant, taskId); },
       async *messageDraft(taskId, deviceId, agentRef, options = {}) {
-        const signal = options.signal === undefined ? draftShutdown.signal : AbortSignal.any([options.signal, draftShutdown.signal]);
+        const signal = options.signal === undefined ? readShutdown.signal : AbortSignal.any([options.signal, readShutdown.signal]);
         let cursor = options.after;
         const observed: { gap?: number; overflow?: number } = {};
         while (!signal.aborted) {
           let wake!: () => void;
           const changed = new Promise<void>(resolve => { wake = resolve; });
           // Subscribe before the read to close the read-to-wait race.
-          const unsubscribe = relay.watchAgentMessageDraft(taskId, wake);
+          const unsubscribe = relay.watch(taskId, wake);
           signal.addEventListener('abort', wake, { once: true });
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
-            const reading = cloud.readTaskAgentMessageDraft(tenant, deviceId, taskId, agentRef, cursor);
-            draftReads.add(reading);
-            const draft = await reading.finally(() => { draftReads.delete(reading); });
+            const draft = await track(cloud.readTaskAgentMessageDraft(tenant, deviceId, taskId, agentRef, cursor));
             if (draft === undefined || signal.aborted) return;
             if (draft.text !== '') yield { kind: 'append', revision: draft.revision, offset: draft.offset, text: draft.text };
             if (signal.aborted) return;
@@ -840,7 +858,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       },
       approve(taskId, opts) { return approvePendingApproval({ tenant, cloud, relay }, taskId, opts); },
       reject(taskId, reason, opts) { return rejectPendingApproval({ tenant, cloud, relay }, taskId, reason, opts); },
-      events(taskId, options) { return readTaskEvents({ relay, readState: readTaskState, readApprovalRequest }, taskId, options); },
+      events(taskId, options) { return readTaskEvents(eventDeps, taskId, options); },
       async get(taskId: string): Promise<TaskSnapshot | undefined> {
         const attempt = await cloud.readTaskAttempt(tenant, taskId);
         return attempt === undefined ? undefined : projectTask(attempt);

@@ -1,64 +1,3 @@
-// ==== @byok-sdk/server dist/event-queue.d.ts ====
-/**
- * A tiny append-only, multi-reader async queue. `push` never blocks; `close`
- * marks the queue done. Every pushed entry gets a sequence number, strictly
- * increasing within the queue. `entries(after)` returns a fresh async iterator
- * that starts after that sequence, or at the beginning of the queue when none
- * is given, and follows new pushes until the queue closes.
- *
- * Bounded, deliberately (WP3B §3): this queue is a NOTIFICATION relay, not a
- * record of what happened — the durable facts live in the cloud stores a
- * `ByokServer` reads back (`tasks.get`, `TaskHandle.result()`). A consumer that
- * stops iterating must therefore cost bounded memory, not unbounded growth. On
- * overflow the OLDEST entries are dropped. A subscriber whose next wanted entry
- * was dropped receives the caller-supplied `truncationMarker` once for that gap,
- * so a reader can tell a complete feed from a clipped one instead of silently
- * seeing a gap. The marker is not a buffered entry: each subscriber derives it
- * from its own position, so all retained capacity remains available to real
- * events, and it takes the position just before the oldest retained entry.
- *
- * `isPosition` accepts exactly the positions the queue handed out. `subscribe`
- * yields the values only, from the beginning. Both iterators' `return()` also
- * releases a pending `next()`. Members carry no block docs because comments on
- * class members ship in the bundle, which has an exact size budget.
- *
- * Framework-agnostic on purpose (no Node/WS/Hono types here) so it can be
- * unit-tested and reused regardless of transport.
- */
-export interface AsyncEventQueueOptions<T> {
-    /**
-     * Maximum entries retained before drop-oldest engages. Omitted means
-     * unbounded — only appropriate for a queue whose producer is itself bounded.
-     */
-    readonly maxBuffered?: number;
-    /**
-     * Yielded to a subscriber in place of each run of entries dropped before it
-     * read them, so the truncation is observable. Omitted means a bounded queue
-     * that drops silently.
-     */
-    readonly truncationMarker?: T;
-}
-/** One queue position: a pushed value, or the truncation marker standing just before the oldest retained entry. */
-export interface QueueEntry<T> {
-    readonly sequence: number;
-    readonly value: T;
-}
-export declare class AsyncEventQueue<T> {
-    private readonly buffer;
-    private nextSequence;
-    private closed;
-    private waiters;
-    private readonly maxBuffered;
-    private readonly truncationMarker;
-    constructor(options?: AsyncEventQueueOptions<T>);
-    isPosition(sequence: number): boolean;
-    push(value: T): QueueEntry<T> | undefined;
-    close(): void;
-    private enforceBound;
-    private wake;
-    subscribe(): AsyncIterable<T>;
-    entries(after?: number): AsyncIterable<QueueEntry<T>>;
-}
 // ==== @byok-sdk/server dist/execution-core/canonical.d.ts ====
 /**
  * Canonical JSON and its SHA-256 (#884). This entry imports only `node:crypto`, so K8 `rules/` can load it where
@@ -1050,7 +989,6 @@ export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from 
 export type { SqliteSchemaErrorCode } from './sqlite-support';
 export { inspectSqliteStore } from './store-compatibility';
 export type { RateLimiterOptions } from './rate-limiter';
-export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 /** Page size `tasks.list()` uses when the caller names none. */
 export declare const DEFAULT_TASK_PAGE_LIMIT = 100;
 /** Input to {@link ByokServer.pairing.createPairingCode}. */
@@ -1154,32 +1092,29 @@ export interface ByokServer {
             approvalId?: string;
         }): Promise<void>;
         /**
-         * Follow one task's notifications (state, Agent progress, artifacts,
-         * approval requests) in this instance's arrival order. It starts after the
-         * entry `after` names; with `from: 'state'`, at the entries where the
-         * task's current state began (its latest `state` entry, preceded by the
-         * pending `await_approval` request while it awaits approval), which are
-         * kept even after the buffer dropped them; otherwise at the start of what
-         * is retained. An `events_truncated` entry stands for entries dropped
-         * before the reader reached them. Ends after the terminal state, when
-         * `signal` aborts, or when the server closes. A notification stream, not a
-         * record: read task facts with {@link tasks.get}.
+         * Follow one task: its state, the pending approval request, and its Agent
+         * progress and artifacts, read from the durable stores — the same reads as
+         * {@link tasks.get} and `ByokCloud.readActivity` — and woken by commits in
+         * this instance. A cursor survives a server restart on SQLite storage.
          *
-         * A live task this instance did not dispatch (after a restart) gets a feed
-         * that starts with its current state read back from the stores, after the
-         * pending approval request while it awaits a plaintext one, and no earlier
-         * events. Those entries can appear twice when the read saw a commit the
-         * feed had not received yet. Once attached, the feed stays until the
-         * task's terminal plus `taskEventRetentionMs` however its readers leave,
-         * so a reconnecting reader resumes with its cursor, unless the read that
-         * attached it finds the task gone or finished; a read stopped before its
-         * first store read completed attaches nothing.
+         * Each read window yields the pending approval request when it is new, the
+         * state when it changed, then the activity log in revision order. State is
+         * the current fact, coalesced: a reader that was not reading while a task
+         * moved through several states sees only where it is now. A terminal state
+         * comes last, after the log was read past it, and ends the feed.
+         *
+         * The read starts after `after`; with `from: 'state'`, at the pending
+         * request and current state, followed only by activity logged from then
+         * on; otherwise at the current state followed by all retained activity. An
+         * `events_truncated` entry stands for activity that was dropped before the
+         * reader reached it (log bounds, removal); its cursor resumes at the start
+         * of what is retained. Ends at the terminal, when `signal` aborts, or when
+         * the server closes.
          *
          * The first `next()` throws, before any entry: a `TypeError` when both
          * `after` and `from` are given, `ByokCloudError` `task_not_found` for an
-         * unknown task, or {@link TaskEventsUnavailableError} when `after` is
-         * unknown to this instance's feed or the terminal task's feed is no longer
-         * retained.
+         * unknown task, or {@link TaskEventsUnavailableError} `cursor_unknown` for
+         * a cursor this server did not hand out for this task.
          */
         events(taskId: string, options?: {
             after?: string;
@@ -1234,8 +1169,8 @@ export interface ByokServer {
         runNow(): Promise<MaintenanceReport>;
     };
     /**
-     * Release what this instance holds: the relay's per-task feeds and their
-     * reclamation timers, and the connection observations. Call it on shutdown so
+     * Release what this instance holds: open task event and draft reads, the
+     * relay's wake-ups, and the connection observations. Call it on shutdown so
      * nothing keeps the process alive or leaks a handle in tests; safe to call
      * more than once. Drain pending store calls before releasing the selected
      * storage authority; await this before opening the SQLite file again.
@@ -1459,135 +1394,44 @@ export interface CountingInboundRateLimiter {
 export declare function createCountingInboundRateLimiter(limiter: RateLimiter, onRateLimited: (deviceId: string, at: string) => void): CountingInboundRateLimiter;
 // ==== @byok-sdk/server dist/relay.d.ts ====
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
-import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
-import { AsyncEventQueue, type QueueEntry } from './event-queue';
-import { type ByokServerEvent, type ServerTaskEvent } from './types';
-/** Per-task {@link ServerTaskEvent} retention before drop-oldest engages. */
-export declare const DEFAULT_TASK_EVENT_BUFFER_LIMIT = 1000;
-/** How long a terminal task's relay state is retained before reclamation, ms. */
-export declare const DEFAULT_TASK_EVENT_RETENTION_MS: number;
+import type { TaskState } from '@byok-sdk/protocol';
+import type { ByokServerEvent } from './types';
 /**
- * Where a feed stands with this instance's dispatch of its task. A dispatch
- * either opens a feed (`dispatching`) or finds one a host event read attached
- * to a task this instance did not dispatch, after a restart
- * (`attached-dispatching`). Until the offer is accepted, both buffer every
- * delivery, so `Offered` is the first entry of a `dispatched` feed. A refused
- * dispatch drops the feed it opened and returns an attached feed to
- * `attached`, delivering what it buffered.
- */
-export type TaskFeedPhase = 'dispatching' | 'attached-dispatching' | 'attached' | 'dispatched';
-/**
- * One task's delivery plumbing. `current` holds the entries where the task's
- * present state began in this feed: its latest `state` entry, preceded by the
- * pending `await_approval` request while it awaits approval. They are kept
- * apart from the bounded queue, so a reader starting there gets them even after
- * drop-oldest discarded them from the queue.
- */
-export interface TaskFeed {
-    /** Random per feed, so a cursor from a previous instance or a reclaimed feed is recognizably unknown. */
-    readonly feedId: string;
-    readonly queue: AsyncEventQueue<ServerTaskEvent>;
-    readonly terminal: Promise<void>;
-    settleTerminal: () => void;
-    terminalSettled: boolean;
-    phase: TaskFeedPhase;
-    current: ReadonlyArray<QueueEntry<ServerTaskEvent>>;
-    readonly early: Array<() => void>;
-    claimedRuntime?: RuntimeId;
-    claimedHarnessId?: string;
-    reclaimTimer?: ReturnType<typeof setTimeout>;
-}
-export interface TaskEventRelayOptions {
-    readonly taskEventBufferLimit?: number;
-    readonly taskEventRetentionMs?: number;
-}
-/**
- * Post-commit fan-out: cloud kernel envelopes -> `ServerTaskEvent` /
- * `ByokServerEvent`.
+ * Post-commit wake-ups and the cross-task `ByokServerEvent` feed.
  *
- * The invariant this file exists to keep (WP3B §3): **the relay holds
- * notifications, never state**. It never answers "what is this task", "what did
- * it produce" or "who owns it" — every one of those is read back from the
- * kernel's durable stores on demand. What it owns is per-task delivery
- * plumbing: a bounded replayable queue, and one promise that settles when the
- * task reaches a terminal so `TaskHandle.result()` has something to await
- * before it reads the answer back.
+ * The relay holds no task content and no history (#1113). Task event readers
+ * (`tasks.events`, `TaskHandle.events()`, `TaskHandle.result()`,
+ * `tasks.messageDraft`) read the durable stores and use {@link watch} only to
+ * learn that something may have changed; a wake may cause an extra read, never
+ * a new event. Every committed envelope that names a task, and every Host
+ * transition, wakes that task's watchers.
  *
- * The two small facts it does carry are delivery bookkeeping, not a read model:
- * `terminalSettled` (so the FIRST terminal is the one that settles the promise,
- * matching the store's own first-terminal-wins rule, and a later stale terminal
- * is not announced as a second one) and `claimedRuntime` (echoed onto the
- * `task.state` event stream because the pre-fold feed carried it there; the
- * authoritative copy is `TaskAttempt.claimedRuntime`).
- *
- * Dispatch first {@link provision}s a known task id, then activates it with
- * {@link noteDispatched} after the kernel has accepted its offer, or undoes it
- * with {@link abort}. Deliveries in that interval are buffered, not dropped
- * ({@link TaskFeedPhase}). An envelope
- * naming a task with no feed is folded for nobody and allocates nothing —
- * otherwise a device could grow this map without bound by guessing task ids,
- * and the kernel's gate deliberately treats such an envelope as a harmless
- * store no-op rather than a rejection.
- *
- * Host event reads (`readTaskEvents`) use the rest. `feed` returns the task's
- * current feed and never creates one; `stopped` turns true at {@link stop}.
- * `attach` starts delivering a live task this instance did not dispatch (after
- * a restart) from now on, without reconstructing earlier events; only a host
- * read creates such a feed. Attaching to a feed a dispatch opened for a task
- * that is already stored makes it `attached-dispatching`, so a refused
- * dispatch hands it back to its reader instead of dropping it. `seed` gives an
- * attached feed that no transition has reached yet its starting entries, read
- * back from the durable stores and pushed by the same `#begin` that records a
- * live state's start; once a transition arrived, the feed already says more
- * than they would. A seed waits behind an in-flight dispatch like any
- * delivery, so `Offered` still comes first. `detach` drops an `attached` feed
- * that turned out to have nothing to deliver, and never one a dispatch owns.
- * `entries` reads a feed after a cursor, or from the start of what is
- * retained, and refuses a cursor that names no position of the feed with
- * `cursor_unknown`. Members carry no block docs here because comments on class
- * members ship in the bundle, which has an exact size budget.
+ * A dispatch first {@link provision}s its task id, then {@link noteDispatched}
+ * after the kernel accepted its offer, or {@link abort}s. An envelope naming a
+ * task this instance did not dispatch allocates nothing.
  *
  * `onInboundCommitted` runs inline on the kernel's request path and must stay
  * synchronous and cheap.
  */
 export declare class TaskEventRelay implements ByokCloudObserver {
     #private;
-    constructor(options: TaskEventRelayOptions);
-    /** The cross-task embedder feed backing `ByokServer.events.subscribe()`. */
     serverEvents(): AsyncIterable<ByokServerEvent>;
-    /** Publish one cross-task event (rate-limit episodes, host-side transitions). */
     emitServerEvent(event: ByokServerEvent): void;
-    /** Pre-register a task id before its offer enqueue can become observable. */
-    provision(taskId: string): void;
-    /** Forget an enqueue that failed before it produced an offer. */
-    abort(taskId: string): void;
-    /**
-     * Open the relay for a task this server just dispatched, and publish its
-     * `Offered` origin on both feeds. `at` is the offer envelope's own timestamp,
-     * so the feed preserves the original delivery time.
-     */
-    noteDispatched(taskId: string, at: string): void;
     get stopped(): boolean;
-    feed(taskId: string): TaskFeed | undefined;
-    attach(taskId: string): TaskFeed | undefined;
-    seed(feed: TaskFeed, next: TaskState, at: string, request?: ServerTaskEvent): void;
-    detach(taskId: string, feed: TaskFeed): void;
-    entries(taskId: string, feed: TaskFeed, after?: string): AsyncIterable<QueueEntry<ServerTaskEvent>>;
-    /** Settles when this task first reaches a terminal — the barrier `TaskHandle.result()` awaits. */
-    terminal(taskId: string): Promise<void>;
+    watch(taskId: string, wake: () => void): () => void;
+    wake(taskId: string): void;
+    provision(taskId: string): void;
+    abort(taskId: string): void;
+    /** `at` is the offer envelope's own timestamp. */
+    noteDispatched(taskId: string, at: string): void;
     /**
-     * Host-side transitions the wire never carries: an accepted cancellation, and
-     * an approval the operator resolved through `TaskHandle.approve`/`reject`.
-     * Published here so the two feeds report the same task history whichever side
-     * moved it, and (for a terminal) so `result()` is not left waiting on a device
-     * message that a cancelled task will never send.
+     * Host-side transitions the wire never carries: an accepted cancellation or
+     * abandonment, and an approval the Host resolved. The decision is already
+     * committed; this only announces it.
      */
     noteHostTransition(taskId: string, state: TaskState, at: string): void;
-    /** A wake carries no content and creates no task event queue. */
-    onAgentMessageDraft(taskId: string): void;
-    watchAgentMessageDraft(taskId: string, wake: () => void): () => void;
     onInboundCommitted(input: InboundCommitted): void;
-    /** Close every feed and drop every timer. Safe to call more than once. */
+    /** Wake every watcher and close the server feed. Safe to call more than once. */
     stop(): void;
 }
 // ==== @byok-sdk/server dist/sqlite-support.d.ts ====
@@ -1759,11 +1603,66 @@ import type { StoreCompatibility } from '@byok-sdk/core';
  * file, or data this build refuses to adopt is `rejected`.
  */
 export declare function inspectSqliteStore(path: string): Promise<StoreCompatibility>;
+// ==== @byok-sdk/server dist/task-events.d.ts ====
+import { type ActivityTail, type TaskEventsWake, type TenantId } from '@byok-sdk/cloud';
+import { type TaskState } from '@byok-sdk/protocol';
+import type { TaskEventRelay } from './relay';
+import { type ServerTaskEvent, type TaskEventEntry } from './types';
+/** One task's current facts, from the same reads `tasks.get` answers with. */
+export interface TaskEventFacts {
+    readonly state: TaskState;
+    readonly at: string;
+    /** The unresolved approval, with its request as an `await_approval` event when it is a plaintext one. */
+    readonly approval?: {
+        readonly revision: number;
+        readonly request?: ServerTaskEvent;
+    };
+}
+/** A position in one generation of a task's activity log. */
+export interface ActivityLogPosition {
+    readonly generation: string;
+    readonly revision: number;
+}
+/** The durable sources a task event read projects. */
+export interface TaskEventSources {
+    /** Undefined when the task's attempt does not exist. */
+    readFacts(taskId: string): Promise<TaskEventFacts | undefined>;
+    /** `ByokCloud.readActivity`, after `after` when given. */
+    readActivity(taskId: string, after?: ActivityLogPosition): Promise<ActivityTail | undefined>;
+}
+export interface TaskEventDeps {
+    readonly relay: TaskEventRelay;
+    readonly tenant: TenantId;
+    readonly sources: TaskEventSources;
+    /**
+     * The stores' own commit hints (#1113 A4). Every writer of a task's state,
+     * activity log or approval timeline signals it, retirement and maintenance
+     * included; a reader no hint reaches re-reads within its fallback.
+     */
+    readonly wake: TaskEventsWake;
+    /** Ends every read when the server closes. */
+    readonly shutdown: AbortSignal;
+}
+/** Where a task event read starts, and what stops it; see `ByokServer.tasks.events`. */
+export interface TaskEventReadOptions {
+    readonly after?: string;
+    readonly from?: 'state';
+    readonly signal?: AbortSignal;
+}
+/**
+ * One task's event feed, shared by `ByokServer.tasks.events` and
+ * `TaskHandle.events()`. Every refusal is thrown by the first `next()`, before
+ * any entry. `return()` also releases a pending `next()`: an async generator
+ * would queue it behind the outstanding `next()`, so a reader stopping an idle
+ * feed would hang. `project` shapes each entry.
+ */
+export declare function readTaskEvents<T = TaskEventEntry>(deps: TaskEventDeps, taskId: string, options?: TaskEventReadOptions, project?: (entry: TaskEventEntry) => T): AsyncIterable<T>;
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
-import { type ByokCloud, type SteerRejectionCode, type TaskAbandonCause, type TaskAttempt, type TenantId } from '@byok-sdk/cloud';
+import { type ByokCloud, type SteerRejectionCode, type TaskAbandonCause, type TaskAttempt } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay';
-import { type ServerTaskEvent, type TaskEventEntry, type TaskHandle, type TaskResult } from './types';
+import { type TaskEventDeps } from './task-events';
+import type { TaskHandle, TaskResult } from './types';
 /**
  * Thrown by {@link TaskHandle.steer} when the kernel refuses the steer.
  *
@@ -1798,10 +1697,8 @@ export declare class SteerRejectedError extends Error {
     readonly runtime: RuntimeId | undefined;
     constructor(taskId: string, code: SteerRejectionCode, state: TaskState, runtime: RuntimeId | undefined);
 }
-export interface TaskHandleDeps {
-    readonly tenant: TenantId;
+export interface TaskHandleDeps extends TaskEventDeps {
     readonly cloud: ByokCloud;
-    readonly relay: TaskEventRelay;
     /**
      * The task's current `TaskSnapshot.state` and `updatedAt`, or `undefined`
      * when the attempt is gone. The snapshot projection itself — never a second
@@ -1811,36 +1708,10 @@ export interface TaskHandleDeps {
         readonly state: TaskState;
         readonly at: string;
     } | undefined>;
-    /**
-     * The pending approval request as the relay would have announced it: a
-     * plaintext request with an `approvalId`. A sealed request, which the relay
-     * never announces, reads as none.
-     */
-    readonly readApprovalRequest: (taskId: string) => Promise<ServerTaskEvent | undefined>;
     /** The read-back this handle's `result()` answers with. */
     readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
 type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
-type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState' | 'readApprovalRequest'>;
-/** Where a task event read starts, and what stops it; see `ByokServer.tasks.events`. */
-export interface TaskEventReadOptions {
-    readonly after?: string;
-    readonly from?: 'state';
-    readonly signal?: AbortSignal;
-}
-/**
- * One task's event feed from the relay, shared by `ByokServer.tasks.events`
- * and {@link TaskHandle.events}. Every refusal is thrown by the first `next()`,
- * before any entry; once entries flow, the read only ends (terminal, `signal`,
- * `return()`, server close).
- *
- * `return()` also releases a pending `next()`, as the relay queue's own
- * iterator does. An async generator cannot: it queues `return()` behind the
- * outstanding `next()`, so a reader stopping an idle feed would hang. Here
- * `return()` aborts the read's own signal first, which wakes the queue.
- * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
- */
-export declare function readTaskEvents<T = TaskEventEntry>(deps: EventDeps, taskId: string, options?: TaskEventReadOptions, project?: (entry: TaskEventEntry) => T): AsyncIterable<T>;
 /**
  * The host's approval decision, shared by {@link TaskHandle.approve} and
  * `ByokServer.tasks.approve`. Cloud atomically records it in the one approval
@@ -1855,22 +1726,21 @@ export declare function rejectPendingApproval(deps: ApprovalDeps, taskId: string
     approvalId?: string;
 }): Promise<void>;
 /**
- * One in-flight task's control surface.
- *
- * The §3 invariant it exists to keep: **the handle is not a second authority.**
- * Every mutation is a kernel call, and `result()` is a READ-BACK — it waits for
- * the relay's terminal barrier and then asks the store what the terminal was,
- * so `handle.result()` and `byok.tasks.get(taskId).result` are physically the
- * same fact rather than two copies that can disagree. Nothing about the task is
- * cached here.
- */
-/**
  * Announces the `Cancelled` transition an abandonment recorded. An attempt that
  * was already terminal comes back with its own terminal, so only one settled
  * under this cause is announced; a cancelled task already announced it when
  * its tombstone was written, and the relay keeps the first terminal anyway.
  */
 export declare function noteAbandoned(relay: TaskEventRelay, attempt: TaskAttempt, cause: TaskAbandonCause): void;
+/**
+ * One in-flight task's control surface.
+ *
+ * The §3 invariant it exists to keep: **the handle is not a second authority.**
+ * Every mutation is a kernel call, and `result()` is a READ-BACK of the store,
+ * repeated when a wake says the task may have changed, so `handle.result()` and
+ * `byok.tasks.get(taskId).result` are physically the same fact rather than two
+ * copies that can disagree. Nothing about the task is cached here.
+ */
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
 export {};
 // ==== @byok-sdk/server dist/types.d.ts ====
@@ -1926,33 +1796,6 @@ export interface CreateByokServerOptions {
     maxBlobSizeBytes?: number;
     /** Override the reference {@link TokenSigner} (e.g. an org-wide/KMS-backed signer). */
     tokenSigner?: TokenSigner;
-    /**
-     * How many {@link ServerTaskEvent}s one task's event feed (`tasks.events`,
-     * `TaskHandle.events()`) retains before the OLDEST are dropped. A reader
-     * whose next entry was dropped receives one
-     * `{ kind: 'error', reason: 'events_truncated' }` marker in its place. The
-     * feed is a notification relay, not a second record of what happened — the
-     * durable facts stay in the cloud stores (`tasks.get`, `result()`) — so a
-     * consumer that stops reading costs bounded memory rather than unbounded
-     * growth. Default 1000.
-     */
-    taskEventBufferLimit?: number;
-    /**
-     * How long after a task reaches a terminal its relay buffer and terminal
-     * promise are RETAINED before being reclaimed, ms. A late event reader
-     * within this window still replays the retained feed; past it, new event
-     * reads throw {@link TaskEventsUnavailableError} (`feed_expired`). Use the
-     * durable read model (`tasks.get`, `result()`) for terminal facts after
-     * expiry. Default 5 minutes.
-     *
-     * Retention never decides when a feed ENDS: an event read completes at the
-     * terminal event itself, whenever that happens, so a `for await` over it is
-     * never left waiting on this timer.
-     *
-     * A positive integer of at most `2_147_483_647` (the largest delay one
-     * timer can hold, ~24.8 days); a larger value is refused at construction.
-     */
-    taskEventRetentionMs?: number;
     /**
      * M4 Phase 4 (part A): the one per-device token bucket. The cloud kernel
      * charges a `POST /byok/messages` batch one token per envelope before the
@@ -2184,46 +2027,38 @@ export type ServerTaskEvent = {
     retryable?: boolean;
 };
 /**
- * One notification of a task's event feed, and the position to resume after
- * it. The feed is a notification stream, not a record: task facts stay with
+ * One entry of a task's event feed, and the position to resume after it. The
+ * feed projects the durable stores; task facts stay with
  * `ByokServer.tasks.get` and `TaskHandle.result()`.
  */
 export interface TaskEventEntry {
     /**
-     * Opaque. Pass it as `after` to resume after this entry. Valid only for this
-     * server instance's current feed of this task: a restart or a reclaimed feed
-     * makes it unknown.
+     * Opaque. Pass it as `after` to resume after this entry, in this or a later
+     * server process over the same storage. It names a position in each source
+     * the feed reads, so resuming inside an activity batch yields the rest of it.
      */
     readonly cursor: string;
     readonly event: ServerTaskEvent;
 }
 /**
  * Thrown by the first `next()` of `ByokServer.tasks.events` or
- * {@link TaskHandle.events}, before any entry, when the read cannot continue
- * from where the caller asked. Read the task's current facts with
- * `ByokServer.tasks.get` instead.
- *
- * - `cursor_unknown`: `after` names no position in this instance's current
- *   feed of the task (a restart, another task's cursor, or a malformed one).
- * - `feed_expired`: the task is terminal and this instance retains no feed for
- *   it, because retention reclaimed it or the task ended before this instance
- *   started.
+ * {@link TaskHandle.events}, before any entry, when `after` is not a cursor
+ * this server handed out for that task: another task's, a malformed one, or
+ * one from an SDK version before the durable feed. Start a new read without
+ * `after`, or with `from: 'state'`.
  */
 export declare class TaskEventsUnavailableError extends Error {
     readonly taskId: string;
-    readonly reason: 'cursor_unknown' | 'feed_expired';
-    constructor(taskId: string, reason: 'cursor_unknown' | 'feed_expired');
+    readonly reason: 'cursor_unknown';
+    constructor(taskId: string, reason: 'cursor_unknown');
 }
 /** Handle returned by {@link ByokServer.dispatch} for one in-flight task. */
 export interface TaskHandle {
     readonly taskId: string;
     /**
-     * Replay retained notifications and follow live updates until terminal: the
-     * events of `ByokServer.tasks.events(taskId)`, without cursors. A read after
-     * terminal retention expires throws {@link TaskEventsUnavailableError}
-     * (`feed_expired`) on its first `next()`; a read after the server stops
-     * completes empty. Durable terminal facts remain available through
-     * `result()` and `ByokServer.tasks.get`.
+     * The events of `ByokServer.tasks.events(taskId)`, without cursors: the
+     * current state, retained activity, then live updates until terminal. A read
+     * after the server stops completes empty.
      */
     events(): AsyncIterable<ServerTaskEvent>;
     cancel(reason?: string): Promise<void>;

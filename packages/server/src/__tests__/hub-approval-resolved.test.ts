@@ -222,8 +222,8 @@ describe('task.approval_resolved handling', () => {
     await daemon.send(
       createEnvelope('task.await_approval', { summary: 'second (B) resent', approvalId: 'appr-B' }, { taskId: handle.taskId }),
     );
+    // A new read starts at the pending request, which is the latest observation.
     const iter = handle.events()[Symbol.asyncIterator]();
-    for (let i = 0; i < 5; i++) await iter.next();
     expect((await iter.next()).value).toMatchObject({ kind: 'await_approval', approvalId: 'appr-B', summary: 'second (B) resent' });
     expect((await iter.next()).value).toMatchObject({ kind: 'state', state: 'AwaitApproval' });
     expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B');

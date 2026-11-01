@@ -1,5 +1,8 @@
 import { assertCollectExpiredInput, InMemoryStorageLedger, type ObjectCollectExpiredInput, CollectExpiredFailure } from '@byok-sdk/core';
-import { REQUEST_RECEIPT_PREFIXES, createInMemoryBlobBytes, type ReceiptCollectExpiredInput } from '@byok-sdk/cloud';
+import {
+  REQUEST_RECEIPT_PREFIXES, createInMemoryBlobBytes, createInProcessTaskEventsWake,
+  type ReceiptCollectExpiredInput, type TaskEventsWake,
+} from '@byok-sdk/cloud';
 import {
   ByokCoreError,
   MailboxStreamClosedError,
@@ -82,15 +85,15 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '7';
-/** The one older version this build upgrades in place; every other one is refused. */
-const SQLITE_UPGRADABLE_SCHEMA_VERSION = '6';
+const SQLITE_SCHEMA_VERSION = '8';
 const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'] as const;
 /** Host retention instants (#1120): when a terminal task may be archived, when it was, and when its board item went. */
 const TASK_ARCHIVE_COLUMNS = ['archive_after', 'archived_at', 'archive_settled_at'] as const;
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
-import { APPROVAL_TIMELINE_SCHEMA, SqliteApprovalTimelineStore } from './approval-timeline';
+import { APPROVAL_TIMELINE_SCHEMA, APPROVAL_TIMELINE_V7_REBUILD, SqliteApprovalTimelineStore } from './approval-timeline';
+import { ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore } from './activity';
+import { OUTPUT_CLOSURE_BACKFILL, OUTPUT_CLOSURE_TRIGGER, OUTPUT_CLOSURE_TRIGGER_NAME } from './output-closure';
 import type { WakeStore } from '../../wakes/store';
 import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
@@ -123,7 +126,7 @@ const MAILBOX_CURSOR_CLOSED_CAUSE = "closed_cause TEXT CHECK ((closed_cause IS N
   "(closed_cause IN ('device_revoked', 'device_superseded') AND closed_at IS NOT NULL))";
 
 /**
- * The one in-place upgrade, v6 to v7, run inside the open transaction. It adds
+ * The in-place upgrade from v6 to v7, run inside the open transaction. It adds
  * the stream tombstone and closes the stream of every device the directory no
  * longer holds, which was retired before the upgrade, expiring its pending
  * rows as a retirement does. Revoke and supersede were not told apart then, so
@@ -137,8 +140,25 @@ function upgradeSchemaFromV6(db: DatabaseSync): void {
       WHERE d.tenant_id = mailbox_cursor.tenant_id AND d.device_id = mailbox_cursor.device_id)`);
   db.exec(`UPDATE mailbox_message SET state = 'expired' WHERE state = 'pending' AND EXISTS (SELECT 1 FROM mailbox_cursor c
     WHERE c.tenant_id = mailbox_message.tenant_id AND c.device_id = mailbox_message.device_id AND c.closed_cause IS NOT NULL)`);
-  db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(SQLITE_SCHEMA_VERSION);
+  db.prepare("UPDATE byok_sqlite_meta SET value = '7' WHERE key = 'schema_version'").run();
 }
+
+/**
+ * The in-place upgrade from v7 to v8 (#1113): the durable activity log starts
+ * empty. Earlier builds kept activity only in process memory, so there is no
+ * history to carry over.
+ */
+function upgradeSchemaFromV7(db: DatabaseSync): void {
+  db.exec(ACTIVITY_LOG_SCHEMA);
+  db.exec(APPROVAL_TIMELINE_V7_REBUILD);
+  db.prepare("UPDATE byok_sqlite_meta SET value = '8' WHERE key = 'schema_version'").run();
+}
+
+/** Older versions this build upgrades in place, oldest first; a file runs every step from its own version. */
+const SCHEMA_UPGRADES: readonly (readonly [from: string, step: (db: DatabaseSync) => void])[] = [
+  ['6', upgradeSchemaFromV6],
+  ['7', upgradeSchemaFromV7],
+];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS byok_sqlite_meta (
@@ -245,13 +265,36 @@ export interface SqliteEmbeddedStores {
   readonly blobContentProxy: BlobContentProxy;
   /** Prunes the used device-proof request ids that `cloud.proofReceipts` records. */
   readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
+  /**
+   * Hints after each commit that changed a task's state, activity log or
+   * approval timeline (#1113 A4). The file has one owner process, so this
+   * in-process wake hears every writer.
+   */
+  readonly taskEventsWake: TaskEventsWake;
   wakes(tenant: TenantId): WakeStore;
   close(): Promise<void>;
 }
 
+const TASK_CHANGED_FUNCTION = 'byok_task_changed';
+
+/**
+ * Connection-local triggers, never written to the file: every write to a
+ * task's state, activity head or approval timeline names the task, and the
+ * coordinator reports it after the commit (#1113 A4).
+ */
+const TASK_EVENTS_WAKE_TRIGGERS = ['task_attempt', 'activity_log_head', 'approval_timeline_tail'].flatMap((table) =>
+  (['INSERT', 'UPDATE', 'DELETE'] as const).map((event) => {
+    const row = event === 'DELETE' ? 'OLD' : 'NEW';
+    return `CREATE TEMP TRIGGER byok_task_events_wake_${table}_${event.toLowerCase()} AFTER ${event} ON main.${table}
+      BEGIN SELECT ${TASK_CHANGED_FUNCTION}(${row}.tenant_id, ${row}.task_id); END;`;
+  })).join('\n');
+
 /** One serialized owner for the synchronous SQLite handle and every transaction on it. */
 class SqliteCoordinator {
   readonly db: DatabaseSync;
+  readonly taskEventsWake = createInProcessTaskEventsWake();
+  /** Tasks the open transaction changed, reported once it commits. */
+  readonly #changedTasks = new Map<string, readonly [TenantId, string]>();
   #tail: Promise<void> = Promise.resolve();
   #closing = false;
   #closePromise: Promise<void> | undefined;
@@ -273,6 +316,8 @@ class SqliteCoordinator {
       // openSqliteDatabase holds EXCLUSIVE ownership before this schema transaction.
       this.db.exec('BEGIN IMMEDIATE');
       try {
+        // Set when this open created the v8 logs, so the output closure is installed once with them.
+        let createdOutputLogs = false;
         const hasMetadata = this.db
           .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
           .get();
@@ -280,11 +325,13 @@ class SqliteCoordinator {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
           foundVersion = version?.value;
-          if (version?.value === SQLITE_UPGRADABLE_SCHEMA_VERSION) {
-            upgradeSchemaFromV6(this.db);
+          const firstStep = SCHEMA_UPGRADES.findIndex(([from]) => from === version?.value);
+          if (firstStep >= 0) {
+            for (const [, step] of SCHEMA_UPGRADES.slice(firstStep)) step(this.db);
+            createdOutputLogs = true;
           } else if (version?.value !== SQLITE_SCHEMA_VERSION) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SQLITE_UPGRADABLE_SCHEMA_VERSION} in place. ` +
+              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SCHEMA_UPGRADES.map(([from]) => from).join(' and ')} in place. ` +
               'An older file is not adopted: start on a new database. A newer file needs a newer build.');
           }
           for (const projection of [
@@ -306,14 +353,17 @@ class SqliteCoordinator {
           this.db.exec(DEVICE_SCHEMA);
           this.db.exec(WAKE_SCHEMA);
           this.db.exec(APPROVAL_TIMELINE_SCHEMA);
+          this.db.exec(ACTIVITY_LOG_SCHEMA);
+          createdOutputLogs = true;
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         assertProjection('claimed_harness_id FROM task_attempt');
-        assertProjection('tenant_id, task_id, entries_json, next_revision, dropped, capacity, expires_at FROM approval_timeline_tail');
+        assertProjection('tenant_id, task_id, entries_json, next_revision, dropped, capacity, terminal_at, expires_at FROM approval_timeline_tail');
+        for (const projection of ACTIVITY_LOG_PROJECTIONS) assertProjection(projection);
         const approvalColumns = this.db.prepare('PRAGMA table_info(approval_timeline_tail)').all();
-        const approvalNames = ['tenant_id', 'task_id', 'entries_json', 'next_revision', 'dropped', 'capacity', 'expires_at'];
+        const approvalNames = ['tenant_id', 'task_id', 'entries_json', 'next_revision', 'dropped', 'capacity', 'terminal_at', 'expires_at'];
         if (approvalColumns.length !== approvalNames.length || approvalColumns.some((column, index) =>
-          column.name !== approvalNames[index] || column.notnull !== 1 ||
+          column.name !== approvalNames[index] || column.notnull !== (index < 6 ? 1 : 0) ||
           column.type !== (index >= 3 && index <= 5 ? 'INTEGER' : 'TEXT') ||
           column.pk !== (index < 2 ? index + 1 : 0))) {
           throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite approval timeline schema');
@@ -340,6 +390,15 @@ class SqliteCoordinator {
             WHERE archive_after IS NULL AND status IN ('complete', 'failed', 'cancelled')`);
         }
         assertProjection(`${TASK_ARCHIVE_COLUMNS.join(', ')} FROM task_attempt`);
+        // The closure reads the phase columns, so it follows them. An upgraded
+        // file's already-closed tasks keep their original deadline.
+        if (createdOutputLogs) {
+          this.db.exec(OUTPUT_CLOSURE_TRIGGER);
+          this.db.exec(OUTPUT_CLOSURE_BACKFILL);
+        }
+        if (this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(OUTPUT_CLOSURE_TRIGGER_NAME) === undefined) {
+          throw schemaError('SQLITE_SCHEMA_INVALID', 'Missing BYOK SQLite task output closure');
+        }
         assertProjection('tenant_id, wake_id, dedup_key, available_at, payload, state, due_at, retry_at, deliveries, last_error, done_at FROM wake');
         if (wake === undefined && this.db.prepare("SELECT 1 FROM wake WHERE state = 'queued' LIMIT 1").get() !== undefined) {
           throw new WakeHookMissingError();
@@ -374,6 +433,11 @@ class SqliteCoordinator {
         this.db.exec('ROLLBACK');
         throw error;
       }
+      this.db.function(TASK_CHANGED_FUNCTION, (tenant, taskId) => {
+        this.#changedTasks.set(JSON.stringify([tenant, taskId]), [tenant as TenantId, taskId as string]);
+        return null;
+      });
+      this.db.exec(TASK_EVENTS_WAKE_TRIGGERS);
       secureSqliteFilePermissions(path);
     } catch (error) {
       closeSqliteDatabaseAfterInitializationFailure(
@@ -385,9 +449,15 @@ class SqliteCoordinator {
 
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
     if (this.#closing) return Promise.reject(new Error('SQLite embedded composition is closed'));
-    const result = this.#tail.then(() => operation(this.db));
+    // A rollback has already dropped its changes, so only committed ones are reported.
+    const result = this.#tail.then(() => operation(this.db)).finally(() => this.#reportChangedTasks());
     this.#tail = result.then(() => undefined, () => undefined);
     return result;
+  }
+
+  #reportChangedTasks(): void {
+    for (const [tenant, taskId] of this.#changedTasks.values()) this.taskEventsWake.changed(tenant, taskId);
+    this.#changedTasks.clear();
   }
 
   transaction<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
@@ -398,6 +468,7 @@ class SqliteCoordinator {
         db.exec('COMMIT');
         return result;
       } catch (error) {
+        this.#changedTasks.clear();
         try {
           db.exec('ROLLBACK');
         } catch {
@@ -413,7 +484,7 @@ class SqliteCoordinator {
       db.exec('BEGIN IMMEDIATE');
       let result: T;
       try { result = body(db); db.exec('COMMIT'); }
-      catch (cause) { try { db.exec('ROLLBACK'); } catch {} throw cause; }
+      catch (cause) { this.#changedTasks.clear(); try { db.exec('ROLLBACK'); } catch {} throw cause; }
       // No await splits the committed SQL state from its process-local ledger.
       afterCommit(result);
       return result;
@@ -1526,7 +1597,7 @@ export function createSqliteEmbeddedStores(
     objects,
     quota,
   };
-  // Activity and Agent message drafts remain ephemeral in this composition.
+  // Agent message drafts remain ephemeral in this composition; activity is durable below.
   const inMemoryCloud = createInMemoryCloudStores(
     dependencies.clock,
     dependencies.crypto,
@@ -1539,6 +1610,7 @@ export function createSqliteEmbeddedStores(
   const pairing = new InMemoryPairingCodeStore(dependencies.clock, devices);
   const cloud: CloudStores = {
     ...inMemoryCloud.stores,
+    activity: new SqliteActivityStore(coordinator, dependencies.clock),
     approvals: new SqliteApprovalTimelineStore(coordinator, dependencies.clock),
     devices,
     pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },
@@ -1554,6 +1626,7 @@ export function createSqliteEmbeddedStores(
     cloud,
     blobContentProxy,
     proofReceiptAuthority: new SqliteProofReceiptRetentionAuthority(coordinator),
+    taskEventsWake: coordinator.taskEventsWake,
     wakes: tenant => new SqliteWakeStore(coordinator, tenant),
     close: () => coordinator.close(),
   };

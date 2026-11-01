@@ -74,7 +74,8 @@ describe('redelivery across a real receive outage (finding F2, real @byok-sdk/se
       deviceId: record.deviceId,
       instruction: 'do a thing that needs approval',
     });
-    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
+    // State is read, not replayed: a daemon that claims and starts at once may already be Running.
+    await waitForTaskEvent(handle, (e) => e.kind === 'state' && (e.state === 'Claimed' || e.state === 'Running'));
 
     void session.requestApproval('about to do the risky thing');
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
