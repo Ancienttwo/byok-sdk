@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams, type ChildProcess, type Spa
 import {
   adoptOwnedProcessTree, disposeOwnedProcessTree, withOwnedProcessTree,
 } from '../adapters/process-tree';
+import { createJsonlLineDecoder } from '../util/jsonl-lines';
 
 const MAX_LINE_BYTES = 1024 * 1024;
 const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
@@ -32,7 +33,6 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     const exitHandlers: Array<(code: number | null) => void> = [];
     const held: string[] = [];
     let heldBytes = 0;
-    let buffer = Buffer.alloc(0);
     let closed = false;
     let released = false;
     let adopted = false;
@@ -65,10 +65,15 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     const fail = (error: Error): void => {
       failure ??= error;
       for (const reject of [...pendingWrites]) reject(error);
-      buffer = Buffer.alloc(0); held.length = 0; heldBytes = 0;
+      lines.stop(); held.length = 0; heldBytes = 0;
       rejectSpawn(error);
       kill();
     };
+    const lines = createJsonlLineDecoder({
+      maxLineBytes: MAX_LINE_BYTES,
+      onLine: line => deliver(line),
+      onOverflow: () => fail(new Error('owned line process frame exceeded its byte budget')),
+    });
     const deliver = (line: string): void => {
       if (failure !== undefined) return;
       if (!adopted || lineHandlers.length === 0) {
@@ -91,20 +96,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       const ready = held.splice(0); heldBytes = 0;
       for (const line of ready) deliver(line);
     };
-    child.stdout.on('data', (chunk: Buffer) => {
-      if (failure !== undefined) return;
-      let offset = 0;
-      while (offset < chunk.length) {
-        const newline = chunk.indexOf(10, offset);
-        const end = newline === -1 ? chunk.length : newline;
-        if (buffer.length + end - offset > MAX_LINE_BYTES) { fail(new Error('owned line process frame exceeded its byte budget')); return; }
-        buffer = Buffer.concat([buffer, chunk.subarray(offset, end)]);
-        if (newline === -1) return;
-        const line = buffer.toString('utf8').replace(/\r$/, ''); buffer = Buffer.alloc(0);
-        if (line.length > 0) deliver(line);
-        offset = newline + 1;
-      }
-    });
+    child.stdout.on('data', (chunk: Buffer) => { if (failure === undefined) lines.push(chunk); });
     // Drain stderr without retaining unbounded output or inheriting daemon stdio.
     child.stderr.on('data', (chunk: Buffer) => { stderrTail = Buffer.concat([stderrTail,chunk]).subarray(-64*1024); });
     child.stdin.on('error', fail);

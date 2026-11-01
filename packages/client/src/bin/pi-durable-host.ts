@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { createInterface } from 'node:readline';
 import { createModels, createProvider } from '@earendil-works/pi-ai/models';
 import type { Model, ProviderStreams, TSchema } from '@earendil-works/pi-ai';
 import { type ToolRegistration } from '@earendil-works/pi-durable';
@@ -17,6 +16,7 @@ import { mcpEventIdentities } from '../mcp/event-identity';
 import { projectMcpTools, type McpToolProjection } from '../mcp/projection';
 import { isReservedMcpServerName } from '../sdk-reserved-mcp';
 import { RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
+import { readJsonlLines } from '../util/jsonl-lines';
 
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('durable config requires an object');
@@ -88,11 +88,11 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const pending = new Map<string, { resolve(): void; reject(error: Error): void }>();
   let engine: Awaited<ReturnType<typeof openDurableEngine>> | undefined;
   let started = false;
-  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
   const rejectPending = () => { for (const promise of pending.values()) promise.reject(new Error('durable transport closed')); pending.clear(); };
   const pendingShells=new Map<number,{resolve():void;reject(error:Error):void}>();
   const cleanup = async () => { for(const waiter of pendingShells.values())waiter.reject(new Error('durable shell custody ended'));pendingShells.clear();rejectPending(); if (engine) await engine.close(); await pool.close(); };
-  lines.on('line', raw => {
+  // LF-only framing: `readline` would split a frame at a raw U+2028/U+2029 inside a JSON string.
+  const lines = readJsonlLines(process.stdin, raw => {
     void (async () => {
       if (Buffer.byteLength(raw) > RPC_MAX_FRAME_BYTES) throw new Error('durable RPC frame exceeds limit');
       const command = object(JSON.parse(raw));
@@ -130,6 +130,6 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
       void engine.run().catch(() => { write({ type: 'durable_failed' }); });
     })().catch(() => { write({ type: 'durable_failed' }); process.exitCode = 1; lines.close(); void cleanup(); });
   });
-  await new Promise<void>(resolve => lines.once('close', resolve));
+  await lines.closed;
   await cleanup();
 }
