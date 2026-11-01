@@ -159,6 +159,23 @@ describe('TaskRunner typed runtime failure projection', () => {
       expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'usage limit', retryable: false, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } });
     });
 
+    it.each([
+      [['runtime-failure-class', 'runtime-quota-scope'], { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' }],
+      [['runtime-failure-class'], { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' }],
+    ])('sends a quota scope only to a server that advertises runtime-quota-scope (#1271, flags %j)', async (flags, expected) => {
+      server.setAckCapabilities(flags);
+      const adapter = new StubRuntimeAdapter('pi');
+      await start(adapter);
+      await offer('scope-run');
+      await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'scope-run');
+      adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
+        phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'weekly limit',
+        failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' },
+      }));
+      const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'scope-run');
+      expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'weekly limit', retryable: false, failure: expected });
+    });
+
     it('sends unknown for a start failure with no class and for a failure the daemon makes', async () => {
       server.setAckCapabilities(['runtime-failure-class']);
       const adapter = new StubRuntimeAdapter('pi');

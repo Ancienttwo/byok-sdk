@@ -84,6 +84,9 @@ export const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY = 'sealed-output-ciphertext
  */
 export const RUNTIME_FAILURE_CLASS_CAPABILITY = 'runtime-failure-class' as const;
 
+/** A server advertises it before a device may send `task.fail.failure.scope` (#1271). */
+export const RUNTIME_QUOTA_SCOPE_CAPABILITY = 'runtime-quota-scope' as const;
+
 /**
  * The connection understands the typed pre-claim runtime-unavailable cause
  * (#1103 D8): `task.decline.runtimeUnavailable`, `conn.hello.runtimeUnavailable`
@@ -103,6 +106,9 @@ export const RUNTIME_FAILURE_CLASSES = [
   'auth', 'quota', 'rate_limited', 'billing', 'model_unavailable', 'input_too_large', 'invalid_request',
   'overloaded', 'provider', 'runtime_exited', 'limit_reached', 'output_schema', 'unknown',
 ] as const;
+
+/** The values of a `quota` failure's `scope` (#1271), shared by schema and schema-free consumers. */
+export const RUNTIME_QUOTA_SCOPES = ['account', 'model'] as const;
 
 /** Single value authority shared by schema validation and schema-free consumers. */
 export const PREPARED_AGENT_MEMORY_MODES = ['none', 'read', 'read-write'] as const;

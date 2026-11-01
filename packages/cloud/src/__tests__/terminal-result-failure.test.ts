@@ -12,8 +12,8 @@ const sealedQuota = readFileSync(new URL('../../../protocol/src/__tests__/golden
   .find((line) => line.type === 'task.fail' && (line.payload as { sealed?: unknown }).sealed !== undefined && (line.payload as { failure?: { class: string } }).failure?.class === 'quota')!;
 
 describe('projectTerminalResult: the runtime failure class (#869)', () => {
-  it('copies task.fail.failure verbatim', () => {
-    const failure = { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } as const;
+  it('copies task.fail.failure verbatim, with a quota scope (#1271)', () => {
+    const failure = { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z', scope: 'model' } as const;
     const projected = projectTerminalResult('task-1', receipt(createEnvelope('task.fail', { reason: 'limit', retryable: false, failure }, { taskId: 'task-1' })));
     expect(projected).toMatchObject({ state: 'failed', reason: 'limit', retryable: false, failure });
   });

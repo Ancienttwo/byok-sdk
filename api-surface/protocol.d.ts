@@ -1746,6 +1746,8 @@ export declare const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY: 'sealed-output-cip
  * machine-readable runtime failure class (#869).
  */
 export declare const RUNTIME_FAILURE_CLASS_CAPABILITY: 'runtime-failure-class';
+/** A server advertises it before a device may send `task.fail.failure.scope` (#1271). */
+export declare const RUNTIME_QUOTA_SCOPE_CAPABILITY: 'runtime-quota-scope';
 /**
  * The connection understands the typed pre-claim runtime-unavailable cause
  * (#1103 D8): `task.decline.runtimeUnavailable`, `conn.hello.runtimeUnavailable`
@@ -1762,6 +1764,8 @@ export declare const RUNTIME_UNAVAILABLE_CAUSE_CAPABILITY: 'runtime-unavailable-
  * schema-free consumers.
  */
 export declare const RUNTIME_FAILURE_CLASSES: readonly ['auth', 'quota', 'rate_limited', 'billing', 'model_unavailable', 'input_too_large', 'invalid_request', 'overloaded', 'provider', 'runtime_exited', 'limit_reached', 'output_schema', 'unknown'];
+/** The values of a `quota` failure's `scope` (#1271), shared by schema and schema-free consumers. */
+export declare const RUNTIME_QUOTA_SCOPES: readonly ['account', 'model'];
 /** Single value authority shared by schema validation and schema-free consumers. */
 export declare const PREPARED_AGENT_MEMORY_MODES: readonly ['none', 'read', 'read-write'];
 export declare function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number];
@@ -3086,7 +3090,7 @@ export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, Resul
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
 export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, RuntimeUnavailableEntrySchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskSteerSealedPayloadSchema, TaskClaimPayloadSchema, OfferAdmissionTimingsSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, readRuntimeUnavailableCause, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, RuntimeUnavailableCauseReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, OfferAdmissionTimings, TaskStartedPayload, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, RuntimeUnavailableCauseReading, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, RuntimeQuotaScope, TaskFailure, TaskFailureReading, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -5616,10 +5620,17 @@ export declare const RuntimeFailureClassSchema: z.ZodEnum<{
     unknown: "unknown";
 }>;
 export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
+/** Whether a `quota` limit covers the whole account or one model (#1271). */
+export declare const RuntimeQuotaScopeSchema: z.ZodEnum<{
+    account: "account";
+    model: "model";
+}>;
+export type RuntimeQuotaScope = z.infer<typeof RuntimeQuotaScopeSchema>;
 /**
  * The machine-readable failure of a `task.fail` (#869); `reason` stays display
- * text. `resetsAt` (ISO 8601 UTC) exists only on `quota`, and only when the
- * runtime reported when the limit resets.
+ * text. `resetsAt` (ISO 8601 UTC) and `scope` exist only on `quota`, and only
+ * when the runtime reported them. `scope` is gated on the server's
+ * `runtime-quota-scope` flag (#1271).
  *
  * The class is open (#1121): a well-formed class this version does not know,
  * with whatever fields a newer device put beside it, is accepted and kept
@@ -5629,6 +5640,10 @@ export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
 export declare const TaskFailureSchema: z.ZodUnion<readonly [z.ZodObject<{
     class: z.ZodLiteral<"quota">;
     resetsAt: z.ZodOptional<z.ZodISODateTime>;
+    scope: z.ZodOptional<z.ZodEnum<{
+        account: "account";
+        model: "model";
+    }>>;
 }, z.core.$strict>, z.ZodObject<{
     class: z.ZodEnum<{
         auth: "auth";
@@ -5652,6 +5667,7 @@ export type TaskFailure = z.infer<typeof TaskFailureSchema>;
 export type TaskFailureReading = {
     readonly class: 'quota';
     readonly resetsAt?: string;
+    readonly scope?: RuntimeQuotaScope;
 } | {
     readonly class: Exclude<RuntimeFailureClass, 'quota' | 'unknown'>;
 } | {
@@ -5810,6 +5826,10 @@ export declare const TaskFailSealedPayloadSchema: z.ZodObject<{
     failure: z.ZodOptional<z.ZodUnion<readonly [z.ZodObject<{
         class: z.ZodLiteral<"quota">;
         resetsAt: z.ZodOptional<z.ZodISODateTime>;
+        scope: z.ZodOptional<z.ZodEnum<{
+            account: "account";
+            model: "model";
+        }>>;
     }, z.core.$strict>, z.ZodObject<{
         class: z.ZodEnum<{
             auth: "auth";
@@ -6595,6 +6615,10 @@ export declare const TaskFailPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
     failure: z.ZodOptional<z.ZodUnion<readonly [z.ZodObject<{
         class: z.ZodLiteral<"quota">;
         resetsAt: z.ZodOptional<z.ZodISODateTime>;
+        scope: z.ZodOptional<z.ZodEnum<{
+            account: "account";
+            model: "model";
+        }>>;
     }, z.core.$strict>, z.ZodObject<{
         class: z.ZodEnum<{
             auth: "auth";
@@ -6662,6 +6686,10 @@ export declare const TaskFailPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
     failure: z.ZodOptional<z.ZodUnion<readonly [z.ZodObject<{
         class: z.ZodLiteral<"quota">;
         resetsAt: z.ZodOptional<z.ZodISODateTime>;
+        scope: z.ZodOptional<z.ZodEnum<{
+            account: "account";
+            model: "model";
+        }>>;
     }, z.core.$strict>, z.ZodObject<{
         class: z.ZodEnum<{
             auth: "auth";
@@ -7981,7 +8009,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * MCP configuration.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-unavailable-cause"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-output-ciphertext-ref", "runtime-failure-class", "runtime-quota-scope", "runtime-unavailable-cause"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**
