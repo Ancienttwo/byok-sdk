@@ -5,10 +5,12 @@ This page lists what a Host must do to move from 0.30.2, or from 0.31.0, to
 covers both releases in one pass. The owner fixed 0.32.0 as the revision for
 #978 and #977 on 2026-11-01.
 
-Its fixed source is the final commit of the 0.32.0 release PR, recorded below
-when the release is cut, not moving `main` or Unreleased. Until then this page
-describes the candidate at main `996c2f0b9` plus the version commit, and it
-has not been walked through. The behavior authorities are the upgrade
+Its fixed source is the release PR's final merged SHA, recorded below when
+the release is cut, not moving `main` or Unreleased. Until then this page
+describes the draft prepared on main `996c2f0b9`, a preparation base that
+moves before the cut; more PRs land first, and the rows and migration list
+below are recounted from the final upgrade manifest then. It has not been
+walked through. The behavior authorities are the upgrade
 manifest that `@byok-sdk/client` ships (`upgrade-manifest.json`, 0.31.0 to
 0.32.0) and the CHANGELOG 0.32.0 and 0.31.0 sections at that commit. When
 this page and them disagree, they win. Source paths and API names below refer
@@ -18,9 +20,8 @@ This page is an upgrade checklist. It does not say that 0.32.0, or a Host on
 it, is ready for production. The product loop gate is #977.
 
 0.32.0 is not published. The candidate notes are
-[`docs/releases/v0.32.0.md`](v0.32.0.md). They list an open owner decision on
-the #1113 activity log slices in this candidate; the
-[migration 0034](#postgres-migrations) row below depends on it.
+[`docs/releases/v0.32.0.md`](v0.32.0.md). For #1113, 0.32.0 carries #1172,
+#1176 and two PRs planned before the cut; A2b and A3 to A5 move to 0.33.
 
 ## Version policy
 
@@ -48,8 +49,8 @@ All nine public packages move together. Pin each one to exactly 0.32.0.
 | Release field | Value |
 | --- | --- |
 | Git tag | `v0.32.0` (not created) |
-| Release commit SHA | the final commit of the 0.32.0 release PR, recorded at release (not yet) |
-| Preparation base | main `996c2f0b94a76c6f6b882e696e108724f7adb0d6` |
+| Release commit SHA | the release PR's final merged SHA, recorded at release (not yet) |
+| Draft preparation base | main `996c2f0b9` (moves before the cut; not the release SHA) |
 
 When the release is cut, verify a source checkout with
 `git rev-parse 'v0.32.0^{commit}'`; the result must equal the release commit
@@ -158,8 +159,9 @@ application would reject or whose window sum exceeds
 
 0034 is the one-shot activity log cutover
 ([runbook](../../deploy/runbooks/activity-tail-cutover.md#one-shot-cutover)).
-The runbook asks for final #1113 acceptance first, and that acceptance is not
-part of this candidate (see the candidate notes). Before 0034, stop every old
+0.32.0 ships it with the A1+A2a part of #1113 (#1176); the runbook still asks
+for final A1 to A5 acceptance, which moves to 0.33 (see the candidate notes).
+Before 0034, stop every old
 activity reader and writer and explicitly accept the loss of the bounded
 pre-cutover activity history. There is no application-only rollback after
 `activity_tail` is dropped. A Host that iterates `TENANT_ERASURE_TABLES` reads
@@ -308,8 +310,9 @@ on any failed gate; a package pin alone does not establish acceptance.
    SQLite from 0.30.2 there is nothing to rehearse on the old file: confirm the
    refusal and plan the new path. From 0.31.0, open a copy with the 0.32.0
    server and see it reach schema 7.
-6. **Upgrade the Host, then the devices.** After the rehearsal, the #1113
-   decision on migration 0034 and the deployment owner's authorization,
+6. **Upgrade the Host, then the devices.** After the rehearsal, the explicit
+   acceptance of the activity history loss at migration 0034 and the
+   deployment owner's authorization,
    migrate the live database and deploy the Host on 0.32.0 (from 0.30.2, on a
    new store). Then move every daemon on the machine to 0.32.0 together. Replace
    each service unit from an earlier release once with
@@ -392,8 +395,8 @@ does not prove that a restored existing store upgrades.
 
 ### Walkthrough evidence
 
-This checklist is anchored to the final commit of the 0.32.0 release PR. No
-one has walked it through.
+This checklist is anchored to the release PR's final merged SHA. No one has
+walked it through.
 
 - [ ] **[unverified] Release commit recorded** in the fixed revisions table,
   and the tag `v0.32.0` points to it.
