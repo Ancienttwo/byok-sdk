@@ -94,9 +94,9 @@ async function failedTask(runtime: keyof typeof ADAPTERS, options: { oldServer?:
 }
 
 describe('the runtime failure class through the real embedded server (#869)', () => {
-  it('reads a Claude quota failure with the time the runtime said it resets', async () => {
+  it('reads a Claude quota failure with the time the runtime said it resets and its scope', async () => {
     const result = await failedTask('claude');
-    expect(result.failure).toEqual({ class: 'quota', resetsAt: new Date(RESETS_AT_SECONDS * 1000).toISOString() });
+    expect(result.failure).toEqual({ class: 'quota', resetsAt: new Date(RESETS_AT_SECONDS * 1000).toISOString(), scope: 'account' });
     expect(result.reason).toBe('claude reported terminal task failure');
   }, 30_000);
 

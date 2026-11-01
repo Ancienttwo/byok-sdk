@@ -1684,16 +1684,17 @@ event variants do not change. Interruption/close evidence is a separate
 teardown lifecycle and cannot rewrite an already established semantic result.
 
 A `RuntimeExecutionFailure` also carries `failure`, a closed runtime failure
-class with an optional quota `resetsAt` (#869). An adapter sets it from
+class with an optional quota `resetsAt` (#869) and quota `scope` (#1271). An adapter sets it from
 structured runtime fields only, never from prose; without one the class is
 `unknown`. A class the vendored OAR derives from error text is marked, and the
 adapter sends it as `unknown`. TaskRunner copies it to `task.fail.failure`
 when the server advertises `runtime-failure-class`, and gives a failure it
-makes itself `unknown`. The class never changes `retry`.
+makes itself `unknown`. It keeps `scope` only when the server also advertises
+`runtime-quota-scope`. The class never changes `retry`.
 
 | Runtime | Evidence |
 |---|---|
-| Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status` |
+| Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status`. A `quota` takes `scope` from `rate_limit_info.rateLimitType`: `five_hour` and `seven_day` are `account`, `seven_day_opus` and `seven_day_sonnet` are `model`, any other value or none gives no `scope` |
 | Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
 | Pi, Hermes, dsh | no structured field: `unknown` |

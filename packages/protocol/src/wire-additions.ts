@@ -145,6 +145,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   // Daemon to server.
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure', capability: 'runtime-failure-class', advertisedBy: 'server' },
+  { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure.scope', capability: 'runtime-quota-scope', advertisedBy: 'server' },
   // Typed pre-claim runtime-unavailable cause (#1103 B2a). An older server
   // drops the nested field and still records the open `runtime_unavailable`
   // code; the cause never changes what the receiver executes.
