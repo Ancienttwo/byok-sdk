@@ -6,11 +6,9 @@ covers both releases in one pass. The owner fixed 0.32.0 as the revision for
 #978 and #977 on 2026-11-01.
 
 Its fixed source is the release PR's final merged SHA, recorded below when
-the release is cut, not moving `main` or Unreleased. Until then this page
-describes the draft prepared on main `996c2f0b9`, a preparation base that
-moves before the cut; more PRs land first, and the rows and migration list
-below are recounted from the final upgrade manifest then. It has not been
-walked through. The behavior authorities are the upgrade
+the release is cut, not moving `main` or Unreleased. The release PR is based
+on main `ccf8b2e4d`, and the rows and migration list below are counted from
+the upgrade manifest at that base. It has not been walked through. The behavior authorities are the upgrade
 manifest that `@byok-sdk/client` ships (`upgrade-manifest.json`, 0.31.0 to
 0.32.0) and the CHANGELOG 0.32.0 and 0.31.0 sections at that commit. When
 this page and them disagree, they win. Source paths and API names below refer
@@ -20,13 +18,13 @@ This page is an upgrade checklist. It does not say that 0.32.0, or a Host on
 it, is ready for production. The product loop gate is #977.
 
 0.32.0 is not published. The candidate notes are
-[`docs/releases/v0.32.0.md`](v0.32.0.md). For #1113, 0.32.0 carries #1172,
-#1176 and two PRs planned before the cut; A2b and A3 to A5 move to 0.33.
+[`docs/releases/v0.32.0.md`](v0.32.0.md). For #1113, 0.32.0 carries #1172
+and #1176; A2b and A3 to A5 move to 0.33.
 
 ## Version policy
 
 0.32.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception,
-as 0.31.0 was. The upgrade manifest from 0.31.0 holds 28 breaking and 18
+as 0.31.0 was. The upgrade manifest from 0.31.0 holds 28 breaking and 19
 additive entries, and the release adds Postgres migrations 0031 to 0034 and
 server SQLite schema 7 ([version policy](../spec.md#pre-10-package-version-policy)).
 
@@ -50,7 +48,7 @@ All nine public packages move together. Pin each one to exactly 0.32.0.
 | --- | --- |
 | Git tag | `v0.32.0` (not created) |
 | Release commit SHA | the release PR's final merged SHA, recorded at release (not yet) |
-| Draft preparation base | main `996c2f0b9` (moves before the cut; not the release SHA) |
+| Release PR base | main `ccf8b2e4d057e06bb5dc98aa9ddd2b8834fd556b` (not the release SHA) |
 
 When the release is cut, verify a source checkout with
 `git rev-parse 'v0.32.0^{commit}'`; the result must equal the release commit
@@ -220,7 +218,7 @@ full note; each entry links its migration section.
 | Package | Entry | Change | What the Host does |
 | --- | --- | --- | --- |
 | client | `local-tool-approval-host-only` | Tool-authorization approvals are Host-only (#1101); the control socket and `byok-agent approve` can no longer approve them. | Approve from the Host. Set `DaemonConfig.localToolApproval: 'allow'` only to keep local approval. |
-| client | `tool-authorization-policy-unification` | `toolAuthorization` is one policy document `{ default, byRuntime?, rules? }`; the function form, `StaticToolAuthorization`, `staticToolAuthorizationMode`, `staticToolAuthorizationResolver`, `ToolAuthorizationResolver` and the `{ mode }` spelling are removed (#1061). | Replace a resolver function with the policy object; per-runtime modes move to `byRuntime`. |
+| client | `tool-authorization-policy-unification` | `toolAuthorization` is one policy document `{ default, byRuntime?, rules? }`; the function form, `StaticToolAuthorization`, `staticToolAuthorizationMode`, `staticToolAuthorizationResolver`, `ToolAuthorizationResolver` and the `{ mode }` spelling are removed (#1061). | Replace a resolver function with the policy object; per-runtime modes move to `byRuntime`. An invalid policy now throws `DaemonConfigInvalidError` at construction (#1251): catch it where the Host caught a `TypeError`. |
 | client | `daemon-config-validation` | Construction validates `DaemonConfig` against its schema and throws `DaemonConfigInvalidError`; `DaemonConfigFieldRemovedError` takes a required `migration` (#1094). | Run `byok-agent config check --strict` on every config and fix the reported fields. |
 | client | `device-store-default-dir-removed` | `DeviceStore.defaultDir(productId)` is removed; the default `storeDir` is unchanged (#1094). | Use `resolveHostLayout({ productId, productName }).storeDir`. |
 | client | `device-store-pairing-binding` | A `storeDir` uses only the enrollment its own `device.json` names; a mismatch throws `DeviceStoreBindingMismatchError` and start halts `store_not_bound`; pairing refuses over another store's enrollment (#1094). | Handle `store_not_bound`. Re-pair a moved store with `byok-agent pair --replace-other-store` or `Daemon.pair(code, { replaceOtherStore: true })`. An injected `DeviceCredentialBackend` keeps the staging contract. |
@@ -254,7 +252,8 @@ and `resolveHostLayout` (#1094), versioned service installs and
 policies (#1103), the `@byok-sdk/client/packaging` helper (#1104), the
 config-file `toolAuthorization` and `runtimes` (#1094), and the optional
 `toolAuthorization.fileScope` (#1061; ordinary Pi RPC on darwin and linux
-only).
+only), and the local `executablePath` and `executableSource` in status and
+doctor (#1252).
 
 ## Notes by starting version
 
