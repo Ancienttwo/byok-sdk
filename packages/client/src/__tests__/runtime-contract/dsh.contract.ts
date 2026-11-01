@@ -5,6 +5,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../../adapters/dsh/dsh-adapter';
 import { dshEnvironment } from '../../adapters/dsh/dsh-profile';
 import { QUALIFIED_DSH_VERSION } from '../../adapters/dsh/dsh-version';
+import { setLoginShellSnapshotSource } from '../../login-shell-environment';
+import { TEST_LOGIN_SHELL_SNAPSHOT } from '../fixtures/runtime-env';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import {
   baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, egressCheck, expectAuth,
@@ -50,6 +52,9 @@ async function directVersion(runtime: DshAdapter, home: string): Promise<string>
 }
 
 beforeAll(async () => {
+  // The suite setup installs the test snapshot before each test, after this hook. Without it, detect() would see the
+  // machine's real login shell, whose PATH may lack the `node` that dsh's launcher needs (the GitHub ubuntu runner's does).
+  setLoginShellSnapshotSource(async () => TEST_LOGIN_SHELL_SNAPSHOT);
   const box = await createSandbox('dsh-init');
   const runtime = await adapter(detectModel);
   const result = await detectWith(runtime, baseEnv(box.home));
