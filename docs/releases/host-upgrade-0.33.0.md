@@ -7,9 +7,9 @@ three releases in one pass. 0.33.0 is the fixed revision for #978 and #977
 to 0.33.0 by this page, and the owner's grokbot walks it on macOS and Windows
 after 0.33.0 is published.
 
-Its fixed source is the release commit, the squash merge of the 0.33.0
-release PR on `main`, not moving `main` or Unreleased. The release commit is
-not known yet; it is filled in at publication. The rows and migration list
+Its fixed source is the release commit `fdf39b10a`, the squash merge of the
+release PR #1287 on `main`, not moving `main` or Unreleased. 0.33.0 is
+published on npm `latest` for all nine packages. The rows and migration list
 below are counted from the upgrade manifest at the freeze base `f6e5b1f08`.
 It has not been walked through.
 The behavior authorities are the upgrade manifest that `@byok-sdk/client`
@@ -49,8 +49,8 @@ All nine public packages move together. Pin each one to exactly 0.33.0.
 | Release field | Value |
 | --- | --- |
 | Git tag | `v0.33.0` |
-| Release commit SHA | not known yet (filled in at publication) |
-| Release PR base | not known yet (the scope is frozen at main `f6e5b1f08`) |
+| Release commit SHA | `fdf39b10a795464c9d91d26611d74547382e1ceb` |
+| Release PR base | main `f6e5b1f08` (#1287) |
 
 Verify a source checkout with
 `git rev-parse 'v0.33.0^{commit}'`; the result must equal the release commit
@@ -589,12 +589,12 @@ restored existing store upgrades.
 
 ### Walkthrough evidence
 
-This checklist is anchored to the 0.33.0 release commit, which is not known
-yet. No one has walked it through. The owner's grokbot walks it for #978 on
+This checklist is anchored to the release commit `fdf39b10a`. No one has
+walked it through. The owner's grokbot walks it for #978 on
 macOS and Windows after 0.33.0 is published.
 
-- [ ] **[unverified] Release commit recorded** in the fixed revisions table,
-  and the tag `v0.33.0` points to it.
+- [x] **Release commit recorded** in the fixed revisions table, and the tag
+  `v0.33.0` points to it.
 - [ ] **[unverified] Maintainer walked the complete checklist** in a clean
   environment, on macOS and on Windows (AiphaBee, 0.30.2 → 0.33.0).
 - [ ] **[unverified]** Backup restored; the SQLite copy taken before the

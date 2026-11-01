@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.33.0 — source candidate
+## 0.33.0 — 2026-11-01 (published)
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
@@ -15,7 +15,7 @@ the sealed payload v2 categories and sealed forms behind `sealed-payload-v2`
 server upgrades a SQLite schema 6 or 7 file to schema 8 in place, one-way.
 0.33.0 completes #1113 (A2b to A5) and ships the first batch of #1045 E2EE v2,
 sealed Agent messages and memory projections, opt-in and hosted only (see the
-[0.33.0 candidate notes](docs/releases/v0.33.0.md) and the
+[0.33.0 release notes](docs/releases/v0.33.0.md) and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.33.0.md)). The
 breaking changes by package: server writes SQLite schema 8, which 0.32.0 and
 earlier cannot open (#1113 A2b, A3), and serves `tasks.events` from durable
@@ -30,7 +30,12 @@ category exports (#1045 S1); cloud takes `agentMessage` as an
 `AgentMessageConsumers` object, and cloud and cloud-dataplane make the
 projection commit input a union, with Postgres migration 0037 (#1045 S3,
 S4). On POSIX, disposal now also ends the observed descendants of a runtime
-root that exited by itself or was killed from outside (#1269).
+root that exited by itself or was killed from outside (#1269). The npm
+registry lists all nine public packages at 0.33.0 as `latest`, published on
+2026-11-01 (UTC), and the registry readback passed. The release commit is
+`fdf39b10a` on `main`, and the annotated tag `v0.33.0` and its GitHub Release
+point to it. This release does not say that 0.33.0, or a Host on it, is ready
+for production.
 
 - **Feature (client; #1258)** — `DshAdapter` runs DeepSeek Harness
   (`@deepseek-ai/dsh`, qualified 0.2.1-rc.5) over ACP on the custom-harness
