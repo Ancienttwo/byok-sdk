@@ -18,6 +18,7 @@ export type {
   RuntimeDetectResult,
   RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,
+  RuntimeExecutableSource,
   Session,
   MessageDraftDelta,
   SessionEvidence,

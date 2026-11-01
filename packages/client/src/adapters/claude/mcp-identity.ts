@@ -1,3 +1,4 @@
+import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity';
 import type { McpStdioServerConfig } from '../../types';
 
@@ -24,25 +25,24 @@ function isConfiguredServer(reported: unknown, configured: McpStdioServerConfig 
 /**
  * MCP identities from Claude's own `mcp_status` control response: every
  * connected server Claude reports, with the original tool names it read from
- * that server's `tools/list`. Only `toolsetServers` (the task-projected toolset
- * servers the SDK wrote into `--mcp-config`) receive an identity, and only when
- * Claude reports the same command and args: a same-named server from the
- * user's own configuration is not the task's server. Every other reported
- * server (the user's own configuration, SDK-reserved helpers) still counts for
- * collisions: a runtime name two reported tools share is ambiguous and gets no
- * identity. A malformed response yields no identities. Under
+ * that server's `tools/list`. Only `configuredServers` (the servers the SDK
+ * wrote into `--mcp-config`) receive an identity, and only when Claude reports
+ * the same command and args: a same-named server from the user's own
+ * configuration is not the task's server. Every other reported server still
+ * counts for collisions: a runtime name two reported tools share is ambiguous
+ * and gets no identity. A malformed response yields no identities. Under
  * `agentUserContext: 'excluded'` an Agent task's Claude reports no user servers.
  */
 export function claudeMcpEventIdentities(
   response: unknown,
-  toolsetServers: ReadonlyMap<string, McpStdioServerConfig>,
+  configuredServers: ReadonlyMap<string, McpStdioServerConfig>,
 ): McpEventIdentities {
   const servers = (response as { mcpServers?: unknown } | undefined)?.mcpServers;
   if (!Array.isArray(servers)) return new Map();
   const byName = new Map<string, McpEventIdentity | null>();
   for (const server of servers as { name?: unknown; tools?: unknown; config?: unknown }[]) {
     if (typeof server?.name !== 'string' || server.name.length === 0 || !Array.isArray(server.tools)) continue;
-    const configured = isConfiguredServer(server.config, toolsetServers.get(server.name));
+    const configured = isConfiguredServer(server.config, configuredServers.get(server.name));
     for (const tool of server.tools as { name?: unknown }[]) {
       if (typeof tool?.name !== 'string' || tool.name.length === 0) continue;
       const name = `mcp__${claudeNamePart(server.name)}__${claudeNamePart(tool.name)}`;
@@ -54,28 +54,39 @@ export function claudeMcpEventIdentities(
   return new Map([...byName].filter((entry): entry is [string, McpEventIdentity] => entry[1] !== null));
 }
 
-/** One runtime observation shared by the first authorization hook and event reporting. */
+/**
+ * One runtime observation shared by the first authorization hook and event
+ * reporting. The gate resolves every SDK-written server, so a Host MCP rule
+ * cannot lock out the SDK helpers by leaving them without identity. Events
+ * carry only the task toolset servers: whether helper calls carry `mcp` is an
+ * open owner decision (#633).
+ */
 export function createClaudeMcpIdentityResolver(
   status: () => Promise<unknown>,
-  toolsetServers: ReadonlyMap<string, McpStdioServerConfig>,
+  configuredServers: ReadonlyMap<string, McpStdioServerConfig>,
 ) {
+  const authorized = new Map<string, McpEventIdentity>();
   const identities = new Map<string, McpEventIdentity>();
+  const hasToolsetServers = [...configuredServers.keys()].some(name => !isReservedMcpServerName(name));
   let pending: Promise<void> | undefined;
   const observe = (): Promise<void> => {
     pending ??= status().then(response => {
-      for (const [name, identity] of claudeMcpEventIdentities(response, toolsetServers)) identities.set(name, identity);
+      for (const [name, identity] of claudeMcpEventIdentities(response, configuredServers)) {
+        authorized.set(name, identity);
+        if (!isReservedMcpServerName(identity.server)) identities.set(name, identity);
+      }
     });
     return pending;
   };
   return {
     identities: identities as McpEventIdentities,
     async resolve(name: string): Promise<McpEventIdentity | undefined> {
-      if (toolsetServers.size === 0 || !name.startsWith('mcp__')) return undefined;
+      if (configuredServers.size === 0 || !name.startsWith('mcp__')) return undefined;
       await observe();
-      return identities.get(name);
+      return authorized.get(name);
     },
     async observe() {
-      if (toolsetServers.size > 0) await observe();
+      if (hasToolsetServers) await observe();
     },
   };
 }

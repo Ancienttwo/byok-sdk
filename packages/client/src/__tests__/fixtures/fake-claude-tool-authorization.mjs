@@ -18,7 +18,8 @@ async function handle(frame) {
     if (process.env.FAKE_MCP_STATUS_NO_ACK) return;
     const config = JSON.parse(readFileSync(process.argv[process.argv.indexOf('--mcp-config') + 1], 'utf8'));
     const response = process.env.FAKE_MCP_STATUS ? JSON.parse(process.env.FAKE_MCP_STATUS) : {
-      mcpServers: Object.entries(config.mcpServers).map(([name, config]) => ({ name, config, tools: [{ name: 'delete.ticket' }] })),
+      mcpServers: Object.entries(config.mcpServers).map(([name, config]) => ({ name, config,
+        tools: (process.env.FAKE_MCP_TOOLS ? JSON.parse(process.env.FAKE_MCP_TOOLS)[name] ?? [] : ['delete.ticket']).map(tool => ({ name: tool })) })),
     };
     emit({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response } });
     return;

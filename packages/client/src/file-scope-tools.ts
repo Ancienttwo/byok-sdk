@@ -28,6 +28,12 @@ const DEFAULT_GREP_LIMIT = 100;
 const DEFAULT_LS_LIMIT = 500;
 const MAX_RESULT_LIMIT = 10_000;
 const MAX_GREP_LINE_CHARS = 500;
+/**
+ * Lines of context each side of a match. One window this wide (2,001 lines)
+ * of short lines with their path prefix already fills MAX_OUTPUT_BYTES, so a
+ * larger value could only be cut by the output budget.
+ */
+const MAX_GREP_CONTEXT = 1_000;
 const MAX_GREP_FILE_BYTES = 10_000_000;
 
 /** One per-call denial the scoped tools report; allow is never reported (D12). */
@@ -601,34 +607,60 @@ export function createScopedFileTools(options: ScopedFileToolOptions): ToolDefin
         const requested = String(scopedPath('grep', path));
         if (!search.exists) throw new Error('Path not found: ' + requested);
         const effectiveLimit = boundedLimit(limit, DEFAULT_GREP_LIMIT);
-        const contextLines = typeof context === 'number' && Number.isFinite(context) && context > 0 ? Math.trunc(context) : 0;
+        const contextLines = typeof context === 'number' && Number.isFinite(context) && context > 0 ? Math.min(MAX_GREP_CONTEXT, Math.trunc(context)) : 0;
         const outputLines: string[] = [];
+        let outputBytes = 0;
+        let outputTruncated = false;
         let matchCount = 0;
         let lineTruncated = false;
         let resultLimitReached = false;
 
+        // The byte budget is enforced as lines are collected, so a dense file
+        // with a wide context cannot build more output than the tool returns.
+        const emit = (displayPath: string, lineNumber: number, separator: ':' | '-', value: string): boolean => {
+          const line = truncateMatchLine(value);
+          const text = displayPath + separator + lineNumber + separator + ' ' + line.text;
+          const cost = Buffer.byteLength(text, 'utf8') + (outputLines.length === 0 ? 0 : 1);
+          if (outputBytes + cost > MAX_OUTPUT_BYTES) {
+            outputTruncated = true;
+            return false;
+          }
+          if (line.truncated) lineTruncated = true;
+          outputLines.push(text);
+          outputBytes += cost;
+          return true;
+        };
+
+        /**
+         * Emits each line at most once per file: before-context starts after
+         * the last emitted line, and after-context is emitted as the scan
+         * reaches it, so a match inside an earlier window keeps its ':' label.
+         */
         const searchFile = async (target: FileScopeTargetGrant, displayPath: string): Promise<boolean> => {
           const file = await readTextFile(target, signal);
           if (file === undefined) return true;
           const lines = file.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n').split('\n');
+          let lastEmitted = -1;
+          let afterContextEnd = -1;
           for (let index = 0; index < lines.length; index += 1) {
-            if (!expression.test(lines[index]!)) continue;
-            matchCount += 1;
-            const start = contextLines > 0 ? Math.max(1, index + 1 - contextLines) : index + 1;
-            const end = contextLines > 0 ? Math.min(lines.length, index + 1 + contextLines) : index + 1;
-            for (let current = start; current <= end; current += 1) {
-              const line = truncateMatchLine(lines[current - 1] ?? '');
-              if (line.truncated) lineTruncated = true;
-              outputLines.push(current === index + 1
-                ? displayPath + ':' + current + ': ' + line.text
-                : displayPath + '-' + current + '- ' + line.text);
-            }
-            if (matchCount >= effectiveLimit) {
-              resultLimitReached = true;
+            if (signal !== undefined && signal.aborted) throw new Error('Operation aborted');
+            if (!resultLimitReached && expression.test(lines[index]!)) {
+              matchCount += 1;
+              for (let current = Math.max(lastEmitted + 1, index - contextLines); current < index; current += 1) {
+                if (!emit(displayPath, current + 1, '-', lines[current]!)) return false;
+              }
+              if (!emit(displayPath, index + 1, ':', lines[index]!)) return false;
+              lastEmitted = index;
+              afterContextEnd = index + contextLines;
+              if (matchCount >= effectiveLimit) resultLimitReached = true;
+            } else if (index <= afterContextEnd) {
+              if (!emit(displayPath, index + 1, '-', lines[index]!)) return false;
+              lastEmitted = index;
+            } else if (resultLimitReached) {
               return false;
             }
           }
-          return true;
+          return !resultLimitReached;
         };
 
         if (search.kind === 'file') {
@@ -656,13 +688,12 @@ export function createScopedFileTools(options: ScopedFileToolOptions): ToolDefin
         if (matchCount === 0) {
           return { content: [{ type: 'text' as const, text: 'No matches found' }], details: {} };
         }
-        const truncated = truncateOutput(outputLines.join('\n'));
         const notices: string[] = [];
         if (resultLimitReached) notices.push(effectiveLimit + ' matches limit reached');
-        if (truncated.truncated) notices.push('50KB limit reached');
+        if (outputTruncated) notices.push('50KB limit reached');
         if (lineTruncated) notices.push('Some lines truncated to ' + MAX_GREP_LINE_CHARS + ' chars');
         return {
-          content: [{ type: 'text' as const, text: withNotices(truncated.text, notices) }],
+          content: [{ type: 'text' as const, text: withNotices(outputLines.join('\n'), notices) }],
           details: {},
         };
       });

@@ -42,12 +42,14 @@ cwd 的证据差异保持可见：auto 使用 hook 提供的 call cwd；all 的�
 | --- | --- | --- | --- |
 | [x] D1 | SDK 确定性结构化匹配；description 仅展示；不加 reviewer 回调 | 零模型调用、无 BYOK 需求、结果可重放，动作中的自然语言不能操纵 reviewer | 选自然语言必须另定模型、凭据、账单、超时、注入与隐私合同；不能暗中把 description 变成可执行政策 |
 | [x] D2 | `Always Ask > sensitive-path floor > Allow > built-in`；不加 deny | 普通动作可升级审批；可信 allow 能覆盖 push/publish 等 classifier 风险，凭据与登录持久化路径仍需人批 | allow 优先会压掉用户明确 ask；classifier 总优先会让 allow 无法减少打扰；加 deny 会扩展产品动作及 all 语义 |
-| [x] D3 | resolver 接受 mode 字符串或 policy 对象，每 offer 校验、复制冻结；resume 重取；wire/Pi launch/digest 不改 | 扩展现有任务 authority；同一 Agent 可按 task 使用不同规则，无 adapter 级双 authority | Agent 固定规则会耦合不同任务；热更新会改变已批准任务的行为；改 launch 会把本地策略复制给 runtime |
+| [x] D3 | 每个 daemon 一份 policy 文档 `{ default, byRuntime?, rules?, fileScope? }`，构造时校验、复制冻结；内部 resolver 按 runtime 投影，每 offer 取一次快照；resume 重取；wire/Pi launch/digest 不改 | 一个本地 authority，config 文件与嵌入 Host 同一形态，无 adapter 级双 authority | 按 task 选规则需要 Host 函数入口，会恢复第二种输入形态；热更新会改变已批准任务的行为；改 launch 会把本地策略复制给 runtime |
 | [x] D4 | all 中 allow 压掉 reminder，ask 增加 reminder；floor 不被 allow 压掉 | 两个模式消费相同风险结果，同时 all 保持从不拦截 | 完全忽略规则会造成 Auto 与 all 提醒不一致；让 all 等审批则破坏其合同 |
 | [x] D5 | gate verdict、本地 decision event 和 reminder 携带 source/命中 rule IDs；不把规则写进 wire | Host 可解释“为什么问/为什么直接执行”，并审计被 allow 压掉的提示 | 只记录 reminder 会丢失自动放行依据；外发原始规则/命令会扩大隐私面 |
 | [x] D6 | Pi/Claude 复用 gate；Codex/Grok/Hermes 继续 auto pre-claim decline | UI 和部分终端 hook 不代表全量 pre-tool coverage | 冒充支持会让不经 gate 的文件工具绕过 ask |
 | [x] D7 | 使用无依赖、受测试约束的单次扫描 matcher（F3/F5 裁定细化） | 固定 grammar 和状态上限，消除 brace 展开/回溯及 Node/Bun 语义差异 | 使用宿主 glob 会恢复 DoS 和 dot/case 差异；增加依赖没有收益 |
 | [x] D8 | 0.31.0，同一个 ready PR 交设计、实现、验证；不合并 | owner 后续明确指令优先 | 保持 0.32.0 或单独 Draft 设计会遗漏已授权交付 |
+
+D3 已由 owner 于 2026-11-01 修订为单一 daemon 级 policy，按 task 选规则不再提供（见 [#1091](https://github.com/Ancienttwo/byok-sdk/issues/1091)）。
 
 ## 规则语言的精确定义
 
@@ -68,11 +70,11 @@ export interface ToolAuthorizationRules {
   readonly allowWithoutAsking?: readonly ToolRule[];
 }
 export interface ToolAuthorizationPolicy {
-  readonly mode: ToolAuthorizationMode; // 'auto' | 'all'
+  readonly default: ToolAuthorizationMode; // 'auto' | 'all'
+  readonly byRuntime?: Readonly<Record<string, ToolAuthorizationMode>>;
   readonly rules?: ToolAuthorizationRules;
+  readonly fileScope?: ToolFileScope;
 }
-export type ToolAuthorizationResolver =
-  (task: ToolAuthorizationTask) => ToolAuthorizationMode | ToolAuthorizationPolicy;
 export interface ToolAuthorizationReason {
   readonly source: 'rule' | 'built-in' | 'floor';
   readonly ruleIds: readonly string[];
@@ -85,15 +87,15 @@ export interface ToolAuthorizationReason {
 使用例（remote 是 raw command 的字面匹配，不证明 Git 最终发往哪个仓库）：
 
 ```ts
-toolAuthorization: task => ({
-  mode: 'auto',
+toolAuthorization: {
+  default: 'auto',
   rules: {
     alwaysAsk: [{ id: 'review-merges', description: 'Merge 前请主人确认',
       match: { toolName: 'Bash', commandGlob: 'gh pr merge **' } }],
     allowWithoutAsking: [{ id: 'push-origin', description: 'Allow push to origin',
       match: { toolName: 'Bash', commandGlob: 'git push origin *' } }],
   },
-})
+}
 ```
 
 `toolName` 精确、区分大小写，保持 runtime 原名（Pi `bash` / Claude `Bash`）；其他 selector 使用同一个 SDK matcher。description 不影响匹配。每条规则的已给字段 **AND**；同一列表各条规则 **OR**；没有已定义 selector 永远不命中，并在所有公开入口拒绝。缺少被要求的动作事实不视作通配。
@@ -108,9 +110,9 @@ toolAuthorization: task => ({
 
 ### admission 校验及冻结
 
-保留原字符串返回值，是 D3 明确要求的两种公开输入形态；两者在 admission 后立即投影为唯一的 policy 对象，不保留两条执行路径。未配置 resolver 等价 `{ mode: 'all' }`。旧 mode parser 的 `auto | all` 校验仍严格，不加 legacy wording。
+`DaemonConfig.toolAuthorization` 只接受一个 policy 对象，config 文件和嵌入 Host 相同；mode 字符串、函数和 `{ mode }` 写法都会被拒绝。未配置 policy 等价 `{ default: 'all' }`。mode parser 的 `auto | all` 校验仍严格，不加 legacy wording。
 
-policy/rules/rule/match 都拒绝未知 key、错误类型、空或全空白 id、空 selector、缺 selector、非 array 列表及两个列表间重复 id。可选 description 必须 string；不存在就不生成值。拒绝 NUL 和超长输入；总规则数最多 128，id 最多 128 字符，description 和每个 selector 最多 4096 字符；不截断规则。pattern 在 admission 按受限 grammar 校验，不吞错后放行。resolver throw、校验失败统一用固定 wire reason `tool_authorization_unresolved: local tool authorization policy could not be resolved` pre-claim decline；rule id 和细节只写本地日志，运行时不启动。
+policy/rules/rule/match 都拒绝未知 key、错误类型、空或全空白 id、空 selector、缺 selector、非 array 列表及两个列表间重复 id。可选 description 必须 string；不存在就不生成值。拒绝 NUL 和超长输入；总规则数最多 128，id 最多 128 字符，description 和每个 selector 最多 4096 字符；不截断规则。pattern 在 admission 按受限 grammar 校验，不吞错后放行。校验失败在 daemon 构造时抛 `DaemonConfigInvalidError`（issue path `toolAuthorization` 或 `toolAuthorization.fileScope`），`checkDaemonConfig` 报告同一 issue；offer 永远拿不到非法 policy，也就没有 per-offer decline。rule id 和细节只出现在这个本地错误里。
 
 把用户数组、rule、match 逐层复制并冻结，task 内只读这个快照；Host 后续修改原对象不会改变正在运行的任务。公开 `classifyToolCall` 和 `createAutoToolAuthorizationGate` 同样先经过 parser；gate 保留复制冻结的 snapshot。SDK 自己已解析、逐层冻结的 rules 可复用验证标记，Host 提供的对象不能靠 frozen 状态绕过校验。规则不写到 Agent home、native settings 或 MCP/LLM prompt。没有磁盘规则自动发现、远端 rules、模型生成 rules 或持久 remembered grant；存储、UI 增删改和跨 daemon 分发由 Host 拥有。
 
@@ -134,7 +136,7 @@ ask 的 summary 要区分 custom rule、floor 和 built-in，不把普通动作�
 
 ## scope、resume、launch 与 wire
 
-Host 可按 resolver 的 taskId/runtimeId/agentRef 选择规则，同一 Agent 的研究、聊天、发布任务互不强制共享。规则编辑只影响下一个 offer；运行中任务、其 followUp 和原生子代理沿用快照。新 resume offer 重新调用 resolver、校验并冻结当时的规则；不恢复历史 allow，也不偷偷沿用旧 rules。
+规则对 daemon 的所有 runtime 和任务相同；`byRuntime` 只改变 mode。Host 换规则要用新 policy 重建 daemon，只影响之后的 offer；运行中任务、其 followUp 和原生子代理沿用快照。新 resume offer 重新取 daemon 当时的 policy 快照；不恢复历史 allow，也不偷偷沿用旧 rules。
 
 规则只在 daemon 内存 gate closure / ActiveTask 中存在。Pi launch 继续 v8，`ToolAuthorizationIpcConfig` 的 url/token/timeoutMs 及 digest 字段均不变，子代理通过原 gate 回连；不能把未传递的 rules 说成被 native session digest 承诺。新的 resume launch 使用本次 gate，runtime 旧 sessionRef 不拥有授权 authority。
 

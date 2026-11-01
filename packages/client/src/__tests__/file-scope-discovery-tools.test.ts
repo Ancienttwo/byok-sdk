@@ -52,15 +52,15 @@ async function fixture(access: 'read' | 'write' = 'write'): Promise<Fixture> {
   return { home, root, outside, grant };
 }
 
-type Run = (id: string, params: unknown, cwd: string) => Promise<{ content: { type: string; text: string }[] }>;
+type Run = (id: string, params: unknown, cwd: string, signal?: AbortSignal) => Promise<{ content: { type: string; text: string }[] }>;
 
 function toolByName(tools: readonly ToolDefinition[], name: string): Run {
   const tool = tools.find((candidate) => candidate.name === name);
   if (tool === undefined) throw new Error('missing tool ' + name);
   const execute = tool.execute as unknown as (
-    id: string, params: unknown, signal: undefined, onUpdate: undefined, ctx: { cwd: string },
+    id: string, params: unknown, signal: AbortSignal | undefined, onUpdate: undefined, ctx: { cwd: string },
   ) => Promise<{ content: { type: string; text: string }[] }>;
-  return (id, params, cwd) => execute.call(tool, id, params, undefined, undefined, { cwd });
+  return (id, params, cwd, signal) => execute.call(tool, id, params, signal, undefined, { cwd });
 }
 
 async function textOf(run: Promise<{ content: { type: string; text: string }[] }>): Promise<string> {
@@ -228,5 +228,75 @@ describe('scoped find/grep/ls tools (#1061 slice 5)', () => {
     expect(limitedLs).toContain('1 entries limit reached');
     const limitedGrep = await textOf(toolByName(tools, 'grep')('grep-limit', { pattern: 'a', path: root, limit: 1 }, root));
     expect(limitedGrep).toContain('1 matches limit reached');
+  });
+});
+
+/** Line numbers of grep output lines, e.g. `f.txt:12: x` or `f.txt-13- x`. */
+function grepLineNumbers(text: string, displayPath: string): number[] {
+  const body = text.split('\n\n[')[0]!;
+  return body.split('\n').map((line) => {
+    const match = /^(.+?)[:-](\d+)[:-] /u.exec(line);
+    if (match === null || match[1] !== displayPath) throw new Error('unexpected grep line: ' + line);
+    return Number(match[2]);
+  });
+}
+
+describe('scoped grep output bound (#1245 review)', () => {
+  it('bounds a dense file with a huge context while collecting and emits each line once', async () => {
+    const { root, grant } = await fixture();
+    const file = path.join(root, 'dense.txt');
+    await fs.writeFile(file, 'x\n'.repeat(1_000_000));
+    const grep = toolByName(createScopedFileTools({ grant }), 'grep');
+
+    const started = performance.now();
+    const text = await textOf(grep('grep-dense', { pattern: 'x', path: file, context: 1_000_000, limit: 10_000 }, root));
+    const elapsed = performance.now() - started;
+
+    expect(elapsed).toBeLessThan(3_000);
+    expect(text.endsWith('[50KB limit reached]')).toBe(true);
+    const body = text.slice(0, text.lastIndexOf('\n\n['));
+    expect(Buffer.byteLength(body, 'utf8')).toBeLessThanOrEqual(50 * 1024);
+    const numbers = grepLineNumbers(text, 'dense.txt');
+    // Every line of the dense file matches, so the windows overlap completely;
+    // each line still appears once, in order, until the budget is spent.
+    expect(numbers).toEqual(numbers.map((_, index) => index + 1));
+    expect(numbers.length).toBeGreaterThan(1_000);
+  });
+
+  it('merges overlapping context windows and keeps the match label', async () => {
+    const { root, grant } = await fixture();
+    const file = path.join(root, 'overlap.txt');
+    await fs.writeFile(file, 'a\nhit 1\nb\nhit 2\nc\nd\ne\nhit 3\n');
+    const grep = toolByName(createScopedFileTools({ grant }), 'grep');
+    const text = await textOf(grep('grep-overlap', { pattern: 'hit', path: file, context: 1 }, root));
+    expect(text).toBe([
+      'overlap.txt-1- a', 'overlap.txt:2: hit 1', 'overlap.txt-3- b', 'overlap.txt:4: hit 2', 'overlap.txt-5- c',
+      'overlap.txt-7- e', 'overlap.txt:8: hit 3', 'overlap.txt-9- ',
+    ].join('\n'));
+  });
+
+  it('caps context at 1,000 lines each side', async () => {
+    const { root, grant } = await fixture();
+    const file = path.join(root, 'wide.txt');
+    await fs.writeFile(file, 'y\n'.repeat(2_999) + 'needle\n' + 'y\n'.repeat(3_000));
+    const grep = toolByName(createScopedFileTools({ grant }), 'grep');
+    const numbers = grepLineNumbers(await textOf(grep('grep-wide', { pattern: 'needle', path: file, context: 1_000_000 }, root)), 'wide.txt');
+    expect(numbers[0]).toBe(2_000);
+    expect(numbers.at(-1)).toBe(4_000);
+    expect(numbers).toHaveLength(2_001);
+  });
+
+  it('checks the abort signal inside the per-file line loop', async () => {
+    const { root, grant } = await fixture();
+    const file = path.join(root, 'dense.txt');
+    await fs.writeFile(file, 'x\n'.repeat(1_000_000));
+    const grep = toolByName(createScopedFileTools({ grant }), 'grep');
+    // The scan loop is synchronous, so a real abort cannot land inside it;
+    // this signal reports aborted from its 1,000th read on, which is past the
+    // few reads made before the file's lines are scanned.
+    let reads = 0;
+    const signal = { get aborted() { reads += 1; return reads >= 1_000; } } as unknown as AbortSignal;
+    expect(await failureOf(grep('grep-abort', { pattern: 'needle', path: file }, root, signal))).toBe('Operation aborted');
+    expect(reads).toBe(1_000);
   });
 });

@@ -1,4 +1,4 @@
-import { assertDaemonConfigValid, removedFieldError } from '../config-schema/errors';
+import { assertDaemonConfigValid, DaemonConfigInvalidError, removedFieldError } from '../config-schema/errors';
 import type { DaemonMemoryHelperResolution } from '../config-schema/effective';
 import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release';
 import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
@@ -16,8 +16,22 @@ import type { DaemonStatus } from '../create-daemon';
 import type { DaemonInputs } from './scope';
 import { foldNameAliases } from '../../util/fold-name-aliases';
 import {
-  parseToolAuthorizationPolicy, toolAuthorizationResolver as deriveToolAuthorizationResolver, type ToolAuthorizationResolver,
+  FileScopePolicyError, parseToolAuthorizationPolicy, toolAuthorizationResolver as deriveToolAuthorizationResolver,
+  type ToolAuthorizationPolicy, type ToolAuthorizationResolver,
 } from '../../tool-authorization';
+
+function admitToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy {
+  try {
+    return parseToolAuthorizationPolicy(value);
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    const fileScope = error instanceof FileScopePolicyError;
+    throw new DaemonConfigInvalidError([{
+      severity: 'error', code: fileScope ? error.code : 'invalid_value',
+      path: fileScope ? 'toolAuthorization.fileScope' : 'toolAuthorization', message: error.message,
+    }]);
+  }
+}
 
 /**
  * The first stage of `buildDaemonWithAdapters` (#926): validates
@@ -34,9 +48,10 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (Object.hasOwn(overrides, 'hostedJournal')) throw removedFieldError('hostedJournal');
   if (Object.hasOwn(overrides, 'gitWorkspace')) throw removedFieldError('gitWorkspace');
   // The one parser admits both a config file's object and an embedded Host's
-  // object; the task runner receives only the derived resolver.
+  // object at construction; the task runner receives only the derived
+  // resolver, so no offer can see an invalid policy.
   const toolAuthorization = config.toolAuthorization === undefined
-    ? undefined : parseToolAuthorizationPolicy(config.toolAuthorization);
+    ? undefined : admitToolAuthorizationPolicy(config.toolAuthorization);
   const toolAuthorizationResolver: ToolAuthorizationResolver | undefined = toolAuthorization === undefined
     ? undefined : deriveToolAuthorizationResolver(toolAuthorization);
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
