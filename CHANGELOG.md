@@ -11,8 +11,13 @@
   and prepared lanes are unsupported, and `auto` is declined before claim. The
   ACP session runs on the vendored OAR ACP stack in the lazy private
   `#byok-acp-runtime` entry, beside Grok. The runtime contract suite and
-  nightly matrix gain a dsh leg. Known limitation: after the dsh root is
-  killed from outside, its shell tools keep running (#1269).
+  nightly matrix gain a dsh leg.
+- On POSIX the owned process tree observes each running runtime root's
+  descendants once a second. When a root dies from an outside SIGKILL or an
+  OOM kill, disposal now ends the tools it started in groups of their own,
+  such as dsh shell tools, which the group signal and a read after the root's
+  death cannot reach (#1269). A tool started and orphaned within one second is
+  not seen.
 
 ## 0.32.0 — 2026-11-01 (published)
 

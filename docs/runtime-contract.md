@@ -52,10 +52,9 @@ dsh adds three cases of its own in `dsh.contract.ts`:
   the adapter's own `DSH_AGENTS_HOME` reaches the model.
 - `dsh.close`: closing a session while a shell tool runs reaps the tool's
   processes.
-
-A fourth, `dsh.sigkill`, is registered as skipped: a dsh root killed from
-outside leaves its tool processes running, which is a known 0.33 limitation
-([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269), see the [dsh adapter](adapter-capabilities.md#dsh-adapter-custom-harness)).
+- `dsh.sigkill`: after the dsh root is SIGKILLed from outside, `close()` reaps
+  the tool's processes, which run in a process group of their own
+  ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 
 dsh publishes only prereleases, so the installer accepts an exact semver
 prerelease (`0.2.1-rc.5`) as an exact version.
