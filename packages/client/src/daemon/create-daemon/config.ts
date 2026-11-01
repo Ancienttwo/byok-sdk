@@ -12,7 +12,7 @@ import { validatePiByokLauncherConfig } from '../../adapters/pi/pi-adapter';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME, DEFAULT_MAX_CONCURRENT_TASKS } from '../task-runner';
 import { MIN_MAX_INLINE_EVENT_BYTES, DEFAULT_MAX_INLINE_EVENT_BYTES } from '../event-spill';
 import { validateProgressBatcherOptions } from '../progress-batcher';
-import type { DaemonStatus } from '../create-daemon';
+import type { DaemonConfig, DaemonStatus } from '../create-daemon';
 import type { DaemonInputs } from './scope';
 import { foldNameAliases } from '../../util/fold-name-aliases';
 import {
@@ -31,6 +31,14 @@ function admitToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy {
       path: fileScope ? 'toolAuthorization.fileScope' : 'toolAuthorization', message: error.message,
     }]);
   }
+}
+
+/** Validates `DaemonConfig.piByokLauncher` and folds its `sessionDir`; `createDaemon` and the runtime probes build Pi from this one value. */
+export function resolvePiByokLauncher(config: Pick<DaemonConfig, 'piByokLauncher'>) {
+  validatePiByokLauncherConfig(config.piByokLauncher);
+  // The launcher writes sessions here and retention sweeps it; both use this spelling.
+  return config.piByokLauncher === undefined ? undefined
+    : Object.freeze({ ...config.piByokLauncher, sessionDir: foldNameAliases(config.piByokLauncher.sessionDir) });
 }
 
 /**
@@ -125,10 +133,7 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   const suppliedJournal = overrides.journal;
   if (suppliedJournal !== undefined && (typeof suppliedJournal.listPrunableConfirmedTasks !== 'function' || typeof suppliedJournal.pruneConfirmedJournalTask !== 'function')) throw new LocalStorageConfigError('config', 'requires the journal confirmed-retention ports');
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
-  validatePiByokLauncherConfig(config.piByokLauncher);
-  // The launcher writes sessions here and retention sweeps it; both use this spelling.
-  const piByokLauncher = config.piByokLauncher === undefined ? undefined
-    : Object.freeze({ ...config.piByokLauncher, sessionDir: foldNameAliases(config.piByokLauncher.sessionDir) });
+  const piByokLauncher = resolvePiByokLauncher(config);
   if (config.durablePi === true && (!config.agentHome || !config.piByokLauncher)) throw new Error('durablePi requires Agent home and Pi custody launcher');
   if (config.durablePi === true && process.platform === 'win32') throw new Error('durablePi is unavailable on Windows until parent-death Job Object recovery is validated');
   // M5 batch-3 (workstream 2): validated synchronously, up front — see

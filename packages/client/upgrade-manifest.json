@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.32.0",
-    "snapshotSha256": "6c24eec9c1c8d685254c4f69a149f69d6fa56a9355f27e31602f75ce25febd09"
+    "snapshotSha256": "2af2ccd6b46db035d3e4d7151f8369b3779fdf8e56bb43c0d2fbcc189e0f96e3"
   },
   "configFields": {
     "status": "tracked",
@@ -1163,7 +1163,7 @@
     {
       "item": "config:runtimes",
       "change": "added",
-      "after": "optional schema-sha256=278bbd8285f89b7a",
+      "after": "optional schema-sha256=a433ba0fb0c2e2f1",
       "entry": "config-file-static-tool-authorization"
     },
     {
