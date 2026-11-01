@@ -53,8 +53,8 @@ dsh adds three cases of its own in `dsh.contract.ts`:
 - `dsh.close`: closing a session while a shell tool runs reaps the tool's
   processes.
 
-No case covers a dsh root killed from outside: its tool processes survive,
-which is a known 0.33 limitation
+A fourth, `dsh.sigkill`, is registered as skipped: a dsh root killed from
+outside leaves its tool processes running, which is a known 0.33 limitation
 ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269), see the [dsh adapter](adapter-capabilities.md#dsh-adapter-custom-harness)).
 
 dsh publishes only prereleases, so the installer accepts an exact semver

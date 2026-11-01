@@ -805,7 +805,7 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
 Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
 [runtime contract suite](runtime-contract.md) against the real qualified dsh.
 Locally on macOS with dsh 0.2.1-rc.5, every case passes, `dsh.close`
-included. No case covers the limitation above. The design and probes are in
+included; `dsh.sigkill` is skipped as the limitation above. The design and probes are in
 [the dsh adapter plan](https://github.com/Ancienttwo/byok-sdk/pull/1256).
 
 ## Selection and platforms
