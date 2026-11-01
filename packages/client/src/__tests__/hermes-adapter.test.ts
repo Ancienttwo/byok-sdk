@@ -9,6 +9,7 @@ import { HermesAdapter, type HermesAdapterOptions } from '../adapters/hermes/her
 import { hermesProfileConfig } from '../adapters/hermes/hermes-home';
 import { sealRuntimeOperationManifest, SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
 import { RuntimeExecutionFailure } from '../runtime-failure';
+import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { fakeHermesCommand } from './fixtures/fake-hermes-command';
@@ -119,7 +120,7 @@ async function cleanupFixtures(): Promise<void> {
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 }
 
-afterEach(cleanupFixtures);
+afterEach(async () => { vi.useRealTimers(); vi.restoreAllMocks(); await cleanupFixtures(); });
 
 describe('HermesAdapter construction and descriptor', () => {
   it('requires an absolute SDK-owned root that is not the user\'s ~/.hermes', () => {
@@ -397,6 +398,29 @@ describe('HermesAdapter session', { timeout: 30_000 }, () => {
     expect((await iterator.next()).value).toEqual({ type: 'usage', inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     expect((await iterator.next()).value).toEqual({ type: 'turn_end' });
     expect((await entries()).find((entry) => entry.method === 'session/cancel')!.params).toEqual({ sessionId: 'fake-hermes-session-1' });
+  });
+
+  // #1305: tools run under the gateway, and the cancel the viewer relays can orphan one that left its group.
+  it.skipIf(windows)('close ends a setsid gateway tool that the native cancel orphaned', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] }); // Only the read before the cancel may see the tool.
+    const treeFile = path.join(await tempDir('bt-'), 'tool.json');
+    const session = await (await setup({ FAKE_HERMES_HANG: '1', FAKE_HERMES_TOOL_TREE: treeFile })).open();
+    const tree = async () => JSON.parse(await fs.readFile(treeFile, 'utf8').catch(() => '{}')) as { descendantPid: number; grandchildPid: number };
+    await expect.poll(async () => (await tree()).grandchildPid).toBeGreaterThan(0);
+    const { descendantPid, grandchildPid } = await tree();
+    await session.interrupt();
+    await expect.poll(() => alive(descendantPid)).toBe(false);
+    expect(alive(grandchildPid)).toBe(true);
+    await session.close();
+    expect(alive(grandchildPid)).toBe(false);
+  });
+
+  it('refuses the interrupt and sends no session/cancel when the gateway\'s descendants cannot be read first', async () => {
+    vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
+    const { open, entries } = await setup({ FAKE_HERMES_HANG: '1' });
+    const session = await open();
+    await expect(session.interrupt()).rejects.toMatchObject({ category: 'infrastructure', message: 'hermes interrupt refused: Process table ps: timeout after 5000 ms' });
+    expect((await entries()).some((entry) => entry.method === 'session/cancel')).toBe(false);
   });
 
   it('disposes idempotently while a turn is still active, without a turn failure', async () => {

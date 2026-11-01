@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../adapters/dsh/dsh-adapter';
 import { dshPatch } from '../adapters/dsh/dsh-profile';
@@ -10,6 +10,7 @@ import { DSH_RUNTIME_CAPABILITIES } from '../adapters/dsh/dsh-capabilities';
 import { QUALIFIED_DSH_VERSION } from '../adapters/dsh/dsh-version';
 import { SteerUnsupportedError, type MessageDraftDelta, type RuntimeTaskInput, type Session } from '../types';
 import { RuntimeExecutionFailure } from '../runtime-failure';
+import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url));
@@ -33,6 +34,7 @@ afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.close().catch(() => {})));
   for (const name of ambient.splice(0)) delete process.env[name];
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 async function setup(options: Partial<DshAdapterOptions> = {}, env: NodeJS.ProcessEnv = {}) {
@@ -246,6 +248,15 @@ describe('DshAdapter sessions', () => {
     await session.interrupt();
     expect((await events).at(-1)).toEqual({ type: 'turn_end' });
     expect((await facts()).some((fact) => fact.method === 'session/cancel')).toBe(true);
+  });
+
+  it('refuses the interrupt and sends no native cancel when the agent\'s descendants cannot be read first', async () => {
+    vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
+    const { open, facts } = await setup();
+    const session = await open({ instruction: 'hang' });
+    await expect.poll(async () => (await facts()).some((fact) => fact.method === 'session/prompt')).toBe(true);
+    await expect(session.interrupt()).rejects.toMatchObject({ category: 'infrastructure', message: 'dsh interrupt refused: Process table ps: timeout after 5000 ms' });
+    expect((await facts()).some((fact) => fact.method === 'session/cancel')).toBe(false);
   });
 
   it('closes the native session before disposing the process', async () => {
