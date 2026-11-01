@@ -242,12 +242,12 @@ describe('GrokAdapter sessions', () => {
     }
   });
 
-  it('sends no native cancel when the agent\'s descendants cannot be read first', async () => {
+  it('refuses the interrupt and sends no native cancel when the agent\'s descendants cannot be read first', async () => {
     vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
     const resources = await ctx();
     const s = await open(adapter(), { instruction: 'hold' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
-    await s.interrupt();
+    await expect(s.interrupt()).rejects.toMatchObject({ category: 'infrastructure', message: 'grok interrupt refused: Process table ps: timeout after 5000 ms' });
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(false);
   });
 

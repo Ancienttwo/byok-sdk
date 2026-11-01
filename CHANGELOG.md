@@ -83,6 +83,15 @@ These changes need 0.34.0, the next MINOR.
   prepared starts. See
   [Tool authorization](docs/spec.md#tool-authorization-auto-and-all-1061).
 
+- **Fix (client; #1305)** — a refused native cancel is no longer silent.
+  Grok, dsh and Hermes `session.interrupt()` reject with a
+  `RuntimeExecutionFailure` (`category: 'infrastructure'`) whose reason starts
+  `<runtime> interrupt refused:` and names why no cancel went out, and the
+  session fails as it does when a cancel is not answered in time. An abort that
+  finds the turn already ended still returns normally. Hermes now records the
+  gateway's descendants before it sends `session/cancel`, so on POSIX a gateway
+  tool that left its process group and was orphaned by the cancel ends at close.
+
 - **Fix (client, keys; #1304)** — the system tools the SDK starts no longer
   resolve through the daemon's `PATH`. macOS runs `/bin/launchctl` and
   `/usr/sbin/ioreg`; Linux runs `systemctl` and `secret-tool` from the first of

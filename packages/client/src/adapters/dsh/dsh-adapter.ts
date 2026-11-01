@@ -443,7 +443,11 @@ class DshSession implements Session {
     try {
       await Promise.race([
         // session/cancel is a notification; the cancelled prompt answer carries the outcome.
-        this.raw.abort().then(async result => { if (result.response.body.kind === 'accepted') await turnSettled; }),
+        this.raw.abort().then(async ({ response: { body } }) => {
+          if (body.kind === 'accepted') await turnSettled;
+          // A turn that already ended is a normal race. Any other refusal sent no cancel: fail as an unanswered cancel does.
+          else if (body.kind === 'rejected' && body.code !== 'no_active_turn') throw infrastructure(`dsh interrupt refused: ${body.reason}`);
+        }),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(infrastructure('dsh interrupt timed out')), this.interruptMs);
         }),
