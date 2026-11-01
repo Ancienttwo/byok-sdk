@@ -239,4 +239,5 @@ describe(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersi
     const { survivors, diagnostic } = await closed();
     expect(survivors, diagnostic).toEqual([]);
   }, 240_000);
+  it.skip('dsh.sigkill: skipped: known 0.33 limitation (#1269): after the dsh root is SIGKILLed from outside, its shell tools, each in its own process group, outlive the session', () => {});
 });
