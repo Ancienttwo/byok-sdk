@@ -10,7 +10,7 @@ after 0.33.0 is published.
 Its fixed source is the release commit, the squash merge of the 0.33.0
 release PR on `main`, not moving `main` or Unreleased. The release commit is
 not known yet; it is filled in at publication. The rows and migration list
-below are counted from the upgrade manifest at the freeze base `394c1cb2b`.
+below are counted from the upgrade manifest at the freeze base `f6e5b1f08`.
 It has not been walked through.
 The behavior authorities are the upgrade manifest that `@byok-sdk/client`
 ships (`upgrade-manifest.json`, 0.32.0 to 0.33.0) and the CHANGELOG 0.33.0,
@@ -25,8 +25,9 @@ The release record is [`docs/releases/v0.33.0.md`](v0.33.0.md).
 ## Version policy
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
-The upgrade manifest from 0.32.0 holds 4 breaking and 5 additive entries, and
-the release adds Postgres migrations 0035 and 0036 and server SQLite schema 8
+The upgrade manifest from 0.32.0 holds 7 breaking and 6 additive entries, and
+the release adds Postgres migrations 0035, 0036 and 0037 and server SQLite
+schema 8
 ([version policy](../spec.md#pre-10-package-version-policy)).
 
 ## Fixed revisions
@@ -49,7 +50,7 @@ All nine public packages move together. Pin each one to exactly 0.33.0.
 | --- | --- |
 | Git tag | `v0.33.0` |
 | Release commit SHA | not known yet (filled in at publication) |
-| Release PR base | not known yet (the scope is frozen at main `394c1cb2b`) |
+| Release PR base | not known yet (the scope is frozen at main `f6e5b1f08`) |
 
 Verify a source checkout with
 `git rev-parse 'v0.33.0^{commit}'`; the result must equal the release commit
@@ -72,9 +73,11 @@ AiphaBee's `packages/byok-host` pins `@byok-sdk/client`, `core`, `keys`,
 2026-11-01; this preparation did not read or change the AiphaBee repository).
 Its upgrade is the 0.30.2 path below. AiphaBee runs only Topology L, an
 embedded server on SQLite, and has no `@byok-sdk/cloud*` dependency, so the
-Postgres steps (migrations 0030 to 0036, the 0035 maintenance window and
-rollback, the rehearsal command) and the session-mode DSN for
-`createPostgresTaskEventsWake` do not apply to it. Its SQLite file written by
+Postgres steps (migrations 0030 to 0037, the maintenance window and
+rollback, the rehearsal command), the session-mode DSN for
+`createPostgresTaskEventsWake` and the sealed payload v2 steps do not apply
+to it. Sealing v2 is hosted only, so AiphaBee is unaffected by it until it
+moves to a hosted Host. Its SQLite file written by
 0.30.2 is not opened by 0.33.0: it starts on a new path and re-pairs. This
 page changes no downstream package.
 
@@ -92,12 +95,17 @@ interoperate. The changes are in [the wire v4 note](925-wire-v4.md). There is
 no v3 migration: a store a v3 build wrote is not supported, and the Host
 starts v4 on a new store ([0.31.0 checklist](host-upgrade-0.31.0.md#stored-v3-state)).
 
-0.33.0 keeps wire v4 and adds one gated field: a `quota`
+0.33.0 keeps wire v4 and adds gated additions. A `quota`
 `task.fail.failure` may carry `scope` (`task-fail-quota-scope`, #1271). A
 daemon sends it only to a server that advertises the new
 `runtime-quota-scope` capability flag, which the 0.33.0 reference server and
-hosted cloud do, so either upgrade order works. The corpus grows from 332 to
-336 envelope lines and stays at 30 HTTP lines. The 0.32.0 ordering
+hosted cloud do, so either upgrade order works. Sealed payload v2 (#1045)
+adds the `agent-message` and `memory-projection` sealing categories and the
+sealed forms of `agent.message.publish`, `agent.message.disposition` and the
+projection mutation, behind the `sealed-payload-v2` flag
+(`sealed-payload-v2-protocol`); they appear only on a task or grant that asks
+for them ([sealed payload v2](#sealed-payload-v2-opt-in-hosted-only)). The
+corpus grows from 332 to 342 envelope lines and stays at 30 HTTP lines. The 0.32.0 ordering
 rules still apply to a Host coming from 0.30.2 or 0.31.0
 ([0.32.0 checklist](host-upgrade-0.32.0.md#wire-protocol)): upgrade the Host
 before its devices (`token-expires-in`), and check the operator inventory for
@@ -151,7 +159,7 @@ the closure trigger is refused as `SQLITE_SCHEMA_INVALID`.
 The migration files in `deploy/sql/` are the authority. The cloud-dataplane
 build copies them to the package's `dist/sql`, and `migrationsDir()` returns
 that directory. `git diff --name-status v0.30.2 <release commit> -- deploy/sql`
-lists seven added files and nothing else:
+lists eight added files and nothing else:
 
 | File | Adds | First release |
 | --- | --- | --- |
@@ -162,14 +170,15 @@ lists seven added files and nothing else:
 | `0034_activity_log.sql` | `activity_log_head` and `activity_log_entry`; drops `activity_tail` with no row conversion (#1113) | 0.32.0 |
 | `0035_task_output_closure.sql` | the closing trigger on `task`; `approval_timeline_tail.terminal_at` and the `approval_timeline_tail_closed` constraint; drops the idle deadline of every open timeline; closes already-closed tasks at their original deadline (#1113 A3) | 0.33.0 |
 | `0036_task_events_wake.sql` | triggers on `task`, `activity_log_head` and `approval_timeline_tail` that notify `byok_task_events_wake` at commit (#1113 A4) | 0.33.0 |
+| `0037_agent_memory_projection_sealed.sql` | `agent_memory_projection_head.sealed_member` and the receipt's `content_mac` and `padded_length`; drops NOT NULL on the redacted columns and adds one-form checks; rewrites no data (#1045 S4) | 0.33.0 |
 
 What each Host runs, in this order:
 
 | Host is on | Runs |
 | --- | --- |
-| 0.30.2 | 0030 to 0036 (or every file on the new v4 database) |
-| 0.31.0 | 0031 to 0036 |
-| 0.32.0 | 0035, 0036 |
+| 0.30.2 | 0030 to 0037 (or every file on the new v4 database) |
+| 0.31.0 | 0031 to 0037 |
+| 0.32.0 | 0035 to 0037 |
 
 Before 0032, stop every writer of tenant retention policies from before
 #1120, and count the terminal task rows: the backfill touches each of them
@@ -208,6 +217,23 @@ their cutover steps still apply.
 is additive, and either deployment order is safe: before it runs, a Postgres
 wake hears nothing and readers fall back to their 5-second re-read.
 
+**0037** ([sealed memory projections](../migrations/1045-e2ee-v2.md#postgres-migration-0037))
+runs whether or not the Host seals anything:
+
+- Apply it only through `deploy/scripts/migrate`, in the same runner run and
+  maintenance window as 0035 and 0036, before the 0.33.0 code serves
+  requests. Its checks are added without `NOT VALID`, so Postgres validates
+  every existing row of `agent_memory_projection_head` and
+  `agent_memory_projection_metering_receipt` while it holds `ACCESS
+  EXCLUSIVE` locks on both. Projection writes pause until it commits, longer
+  with more receipt rows (one per accepted mutation); time it in the dry run.
+- Every existing row is plaintext, so it rewrites no data and needs no
+  backfill. Rolling back only the code is safe for 0037 while no sealed row
+  exists; once one does, older code cannot read that Agent's projection,
+  which fails closed until the new code returns or
+  `eraseAgentMemoryProjection` clears it. After 0035, a code-only rollback is
+  already broken for approvals (step 9).
+
 The runner is forward-only: it takes an advisory lock, runs each file in its
 own transaction and records a checksum per file. It has no down migration and
 no dry-run flag; the checklist below gives the dry run. The embedded SQLite
@@ -224,6 +250,54 @@ archive removes sealed object references, and a scope-key notice skips a
 retired recipient. 0.33.0 adds that sealed progress after the task's output
 closes is refused with `task_settled_by_cloud`, like plaintext progress. The
 embedded server still refuses sealed dispatch.
+
+## Sealed payload v2 (opt-in, hosted only)
+
+0.33.0 adds two sealed categories (#1045): `agent-message` seals the body of
+`agent.message.publish`, and `memory-projection` seals the hosted memory
+projection snapshot and the memory evidence on a task terminal. Nothing is
+sealed unless the Host asks for it, and nothing falls back to plaintext. The
+full guide, with the bindings and error codes, is
+[docs/migrations/1045-e2ee-v2.md](../migrations/1045-e2ee-v2.md). The
+embedded server does not seal (O1), so a Topology L Host such as AiphaBee is
+unaffected until it moves to a hosted Host.
+
+Every hosted Host, sealing or not, applies the type changes of the
+`sealed-payload-v2-protocol`, `cloud-sealed-agent-message` and
+`cloud-sealed-memory-projection` rows below and runs migration 0037. A Host
+that turns sealing on also does the following, after the Host and devices run
+0.33.0 and step 7 shows the devices advertise `sealed-payload-v2`:
+
+1. **Sealed Agent messages.** Register `agentMessage.consumeSealed` on
+   `ByokCloudOptions.agentMessage` before offering a task whose
+   `sealing.categories` names `agent-message`: a submission that seals the
+   message with `messageEgress` is refused with
+   `agent_message_sealed_consumer_missing` while it is absent. The cloud never
+   sees the body. A product that must read it opens it on a member with
+   `openSealedContent` and the `agent.message.publish` binding
+   ([guide](../migrations/1045-e2ee-v2.md#sealed-agent-messages)). A product
+   whose backend must read bodies server-side keeps `agent-message` out of
+   `sealing`.
+2. **Sealed memory projections.** Create an Agent memory scope on the member
+   chain whose policy is exactly `['memory-projection']`, separate from task
+   scopes, and send the device its key package. Issue the device an
+   `AgentMemoryProjectionGrant` with `sealing: { scopeId, epoch }`, and return
+   the same `sealing` from the `AgentMemoryProjectionAuthorizer`. To change
+   the form, grant at a higher writer epoch; a mismatched snapshot gets 409
+   `agent_memory_projection_sealing_mismatch`. A sealed snapshot is inline
+   only, at most 262,140 bytes of opened content; a larger one is not sent
+   ([guide](../migrations/1045-e2ee-v2.md#sealed-memory-projections)).
+3. **Member-side decryption.** Sealed message bodies, projection snapshots
+   and, for a task that names `memory-projection`, the terminal's
+   `agentHomeMemoryChange` are readable only on a member. Move any Host code
+   that read them server-side to the member, or leave the category out.
+4. **Custom stores.** A custom `AgentMemoryProjectionStore` stores the sealed
+   commit input as received, meters its `paddedLength` and replays it as
+   `idempotent` only when form, `contentMac` and `paddedLength` match
+   ([guide](../migrations/1045-e2ee-v2.md#custom-projection-stores)).
+
+Drafts, `agent.egress.reliable` payloads and truth `memory` records stay
+plaintext (O3).
 
 ## Breaking changes that touch Host config
 
@@ -272,9 +346,21 @@ full note; each entry links its migration section.
 | server | `server-sqlite-v8` | The embedded server's SQLite file is schema 8: the activity log is persisted, so activity and its cursors survive a restart; 6→8 and 7→8 upgrade in place and are one-way (#1113 A2b, A3). | Stop the server and back up the SQLite file before 0.33.0 first opens it; 0.32.0 and earlier refuse a schema 8 file. |
 | cloud, cloud-dataplane | `approval-timeline-closes-with-task` | An open approval timeline no longer expires when idle; its observations are kept until the task's output closes, at most 50 and 1 MiB, never evicting the pending request. It closes with the task's first terminal or accepted cancellation and expires ten minutes later. `ApprovalTimelineAppendInput.ttlMs` is removed; `ApprovalTimelineTail` gains `terminalAt` and its `expiresAt` is present only once closed; an append on a closed timeline throws `approval_timeline_settled` (#1113 A3). | Drop `ttlMs` from appends and read `terminalAt`. Decide a pending approval before the task ends: a request pending at the close can no longer be decided. A custom `ApprovalTimelineStore` closes with its task, refuses appends once closed and retains through `retainApprovalObservations`. |
 | cloud, cloud-dataplane | `task-output-closes-at-terminal` | A task's activity log and approval timeline close in the same transaction as its first terminal or accepted Host cancellation; later `task.progress`, `task.artifact` and `task.await_approval` are refused with `task_settled_by_cloud`, also on a redacted or archived task; `CLOUD_ERROR_CODES` gains `approval_timeline_settled`; Postgres migration 0035 (#1113 A3). | Apply 0035 with the code as in [Postgres migrations](#postgres-migrations). Expect `task_settled_by_cloud` for late output, cancellation included. A custom composition closes both logs in the same commit as its first terminal or accepted cancellation, for example with `ActivityStore.settle`. |
+| protocol, cloud | `sealed-payload-v2-protocol` | The protocol defines sealed payload v2 (#1045 S1): `TaskSealingSchema` and `SealedAgentExecutionInputSchema` accept `agent-message` and `memory-projection` behind `sealed-payload-v2`. `agent.message.publish`, `agent.message.disposition` and the projection mutation and receipt are plaintext/sealed unions, with the plaintext branch under its own name. `SEALED_PAYLOAD_V1_CATEGORIES` and `SealedPayloadV1Category` are removed; `isSealedTaskPlainOutput` takes the task's categories. | Narrow the unions with `payload.sealed === undefined` or use the `…Plain…` names; import `SEALED_PAYLOAD_CATEGORIES` and `SealedPayloadCategory`; pass the categories to `isSealedTaskPlainOutput`. |
+| cloud | `cloud-sealed-agent-message` | `ByokCloudOptions.agentMessage` is an `AgentMessageConsumers` with optional `consume` and `consumeSealed`; `handleInboundEnvelope` takes that object in place of the `consume` function; a sealed disposition names the message by `contentMac` (#1045 S3). | Pass `agentMessage: { consume }` (and `consumeSealed` to seal messages), also to `handleInboundEnvelope`. |
+| cloud, cloud-dataplane | `cloud-sealed-memory-projection` | `AgentMemoryProjectionAuthorization` carries the grant's optional `sealing`; `AgentMemoryProjectionCommitInput` is a plaintext/sealed union; 409 `agent_memory_projection_sealing_mismatch`; Postgres migration 0037 (#1045 S4). | Apply 0037 as in [Postgres migrations](#postgres-migrations). A custom `AgentMemoryProjectionStore` handles the sealed input; an authorizer returns `sealing` only for grants that carry it. |
 | server | `task-events-durable-cursor` | `tasks.events` and `TaskHandle.events()` read the durable activity log, task state and approval timeline. Cursors resume across a restart; cursors from 0.32.0 and earlier return `TaskEventsUnavailableError` `cursor_unknown`; state is coalesced, not replayed; `feed_expired` is gone; `taskEventBufferLimit`, `taskEventRetentionMs`, `DEFAULT_TASK_EVENT_BUFFER_LIMIT` and `DEFAULT_TASK_EVENT_RETENTION_MS` are removed (#1113). | Remove the two options and exports. Discard stored cursors and start a fresh read (no `after`, or `from: 'state'`). A Host that waited for an intermediate state waits for that state or a later one, or reads `tasks.get`; one that needs every transition reads `events.subscribe()` (`task.state`). |
 
 Additions a Host may configure in 0.33.0:
+
+- **Sealed projection grants** (`agent-memory-projection-grant-sealing`,
+  #1045 S2): `AgentMemoryProjectionGrant` takes an optional
+  `sealing { scopeId, epoch }`; the daemon also seals the Agent messages and
+  memory evidence of a task that names the new categories. The sealing is
+  fixed for its writer epoch (#1288): a grant at the same writer epoch with
+  another form fails with `AgentMemoryError`, and an Agent whose outbox
+  0.32.0 wrote is bound plaintext, so sealing it takes a higher writer epoch.
+  A Host that issues no sealing sees no change ([sealed payload v2](#sealed-payload-v2-opt-in-hosted-only)).
 
 - **Grok through config** (`daemon-config-runtimes-grok`, #1094):
   `DaemonConfig.runtimes.grok` takes `compatInstructions`,
@@ -331,8 +417,8 @@ installs, runtime version policies, the packaging helper, config-file
 ## Notes by starting version
 
 **From 0.32.0.** The 0.33.0 sections above: back up the SQLite file before the
-first open, migrations 0035 and 0036, and the four breaking rows from 0.32.0
-to 0.33.0.
+first open, migrations 0035 to 0037, and the seven breaking rows from 0.32.0
+to 0.33.0. Sealing v2 is opt-in.
 
 **From 0.31.0.** Also the 0.32.0 changes: migrations 0031 to 0034, the 28
 breaking rows from 0.31.0 to 0.32.0, and the process-wide stop for the
@@ -341,7 +427,7 @@ path-mutation gate. The SQLite file goes from schema 6 to 8 in one open.
 **From 0.30.2.** Also the 0.31.0 changes: the wire v4 cutover on a new store,
 migration 0030, a new SQLite path and re-pairing, and the 0.31.0 breaking
 rows. A Topology L Host with no `@byok-sdk/cloud*` dependency, such as
-AiphaBee, skips the Postgres steps. A Windows daemon on an aliased store path restarts correctly from 0.31.0
+AiphaBee, skips the Postgres steps and sealing v2. A Windows daemon on an aliased store path restarts correctly from 0.31.0
 (#1030); restart it after the upgrade.
 
 **From 0.30.1 or earlier.** Apply the [0.30.2 checklist](host-upgrade-0.30.2.md)
@@ -390,13 +476,13 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
    `migrate(pool, migrationsDir())`, then `verifyMigrations(pool)`. Expect the
    files of the migration table for your starting version, with no checksum
    mismatch; run the 0032 policy and terminal-row checks first, and time 0035
-   on the restored copy to size the maintenance window. For SQLite from 0.30.2
+   and 0037 on the restored copy to size the maintenance window. For SQLite from 0.30.2
    there is nothing to rehearse on the old file: confirm the refusal and plan
    the new path. From 0.31.0 or 0.32.0, open a **copy** with the 0.33.0 server
    and see it reach schema 8 with its pairings, tasks and approvals kept.
 6. **Upgrade the Host, then the devices.** After the rehearsal, the explicit
    acceptance of the activity history loss at migration 0034 (from 0.30.2 or
-   0.31.0), a maintenance window for 0035 and the deployment owner's
+   0.31.0), a maintenance window for 0035 to 0037 and the deployment owner's
    authorization, migrate the live database through `deploy/scripts/migrate`
    and deploy the Host on 0.33.0 in the same window (from 0.30.2, on a new
    store). Then move every daemon on the machine to 0.33.0 together. Replace
@@ -408,8 +494,9 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
    `e2ee.member.kem-epoch` on a Host that runs sealed tasks and passes their
    ports, and neither on a Host that does not; construction does not fail with
    `capability_port_undeclared`. After a device reconnects,
-   `DeviceRecord.capabilities` holds `sealed-payload-v1` only for an
-   E2EE-paired device on such a Host, and presence `runtimes[].capabilities`
+   `DeviceRecord.capabilities` holds `sealed-payload-v1` and
+   `sealed-payload-v2` only for an E2EE-paired device on such a Host, and
+   `GET /byok/events` advertises `sealed-payload-v2` on a hosted cloud, and presence `runtimes[].capabilities`
    lists each runtime's matrix, including `grok` where the allowlist lists it.
 8. **Smoke one Topology L flow** (`docs/host-execution-core.md`): an embedded
    `createByokServer` on SQLite and one daemon on the device.
@@ -443,8 +530,9 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
    - From 0.30.2 the rollback is to the whole v3 deployment: restore the
      backup from step 1 and discard the v4 stores; a v3 build cannot read
      them.
-   - Postgres has no down migration. After 0035, rolling back only the code
-     breaks approval writes (the 0.32.0 adapter's idle deadline violates
+   - Postgres has no down migration. After 0037, older code cannot read a
+     sealed projection row; that Agent's projection fails closed until it is
+     erased. After 0035, rolling back only the code breaks approval writes (the 0.32.0 adapter's idle deadline violates
      `approval_timeline_tail_closed`), and after 0034 there is no
      application-only rollback at all: restore the database backup from
      step 1. An earlier `verifyMigrations` reports the newer ledger rows as
@@ -452,6 +540,12 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
    - 0.32.0 and earlier cannot open a schema 8 SQLite file; restore the copy
      from step 1. Activity, approvals and tasks written after the upgrade are
      lost with it.
+   - A 0.33.0 daemon moves an Agent's memory outbox state to version 3 on its
+     first write (#1288), and a 0.32.0 daemon refuses version 3. Before a
+     device goes back to 0.32.0, reset each such Agent's outbox, or have the
+     Host grant it a higher writer epoch so the old daemon starts a new one.
+     An Agent whose projection was sealed also needs its hosted projection
+     erased, as the 0037 rollback note says.
    - A service unit installed by 0.32.0 or later carries the SDK marker.
      Whether an earlier CLI replaces it is not verified here; remove it with
      the 0.33.0 CLI's `uninstall` before restoring the old unit.
@@ -505,12 +599,14 @@ macOS and Windows after 0.33.0 is published.
   environment, on macOS and on Windows (AiphaBee, 0.30.2 → 0.33.0).
 - [ ] **[unverified]** Backup restored; the SQLite copy taken before the
   first 0.33.0 open; store precheck verdicts recorded; for a Postgres Host,
-  migrations 0030 to 0036 (or 0031 to 0036, or 0035 and 0036) applied to the
-  restored copy and 0035 timed; rollback rehearsed on that recovery set.
+  migrations 0030 to 0037 (or 0031 to 0037, or 0035 to 0037) applied to the
+  restored copy and 0035 and 0037 timed; rollback rehearsed on that recovery set.
 - [ ] **[unverified]** Drain, process-wide stop and the v4 start on a new
   store (from 0.30.2).
 - [ ] **[unverified]** Host/daemon capability alignment and the applicable
-  sealed acceptance checks passed.
+  sealed acceptance checks passed; for a hosted Host that turns on sealing v2,
+  one sealed Agent message opened on a member and one sealed projection
+  stored under its grant.
 - [ ] **[unverified]** Topology L completion, `tasks.events` cursor resume
   across a server restart, Host-only approval, approval survival without idle
   expiry, `task_settled_by_cloud` after a cancel, and forced-kill recovery

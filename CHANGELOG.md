@@ -7,13 +7,16 @@
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
 (`packages/client/upgrade-manifest.json`, 0.32.0 to 0.33.0) lists every
-Host-visible change since 0.32.0: 4 breaking and 5 additive entries, each
-with a migration link. The envelope wire stays v4 and gains one gated field,
-`task.fail.failure.scope` behind the `runtime-quota-scope` flag (#1271). It
-adds Postgres migrations 0035 and 0036, and the embedded server upgrades a
-SQLite schema 6 or 7 file to schema 8 in place, one-way. 0.33.0 completes
-#1113 (A2b to A5; see the [0.33.0 candidate notes](docs/releases/v0.33.0.md)
-and the [Host upgrade checklist](docs/releases/host-upgrade-0.33.0.md)). The
+Host-visible change since 0.32.0: 7 breaking and 6 additive entries, each
+with a migration link. The envelope wire stays v4 and gains gated additions:
+`task.fail.failure.scope` behind the `runtime-quota-scope` flag (#1271), and
+the sealed payload v2 categories and sealed forms behind `sealed-payload-v2`
+(#1045). It adds Postgres migrations 0035, 0036 and 0037, and the embedded
+server upgrades a SQLite schema 6 or 7 file to schema 8 in place, one-way.
+0.33.0 completes #1113 (A2b to A5) and ships the first batch of #1045 E2EE v2,
+sealed Agent messages and memory projections, opt-in and hosted only (see the
+[0.33.0 candidate notes](docs/releases/v0.33.0.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.33.0.md)). The
 breaking changes by package: server writes SQLite schema 8, which 0.32.0 and
 earlier cannot open (#1113 A2b, A3), and serves `tasks.events` from durable
 cursors, refusing older cursors as `cursor_unknown` and removing the event
@@ -21,9 +24,13 @@ buffer options (#1113); cloud and cloud-dataplane close a task's activity log
 and approval timeline with its first terminal or accepted cancellation,
 refuse later output with `task_settled_by_cloud`, stop idle-expiring an open
 approval timeline and remove `ApprovalTimelineAppendInput.ttlMs`, with
-Postgres migration 0035 (#1113 A3). On POSIX, disposal now also ends the
-observed descendants of a runtime root that exited by itself or was killed
-from outside (#1269).
+Postgres migration 0035 (#1113 A3); protocol makes the Agent message and
+memory projection payloads plaintext/sealed unions and renames the v1
+category exports (#1045 S1); cloud takes `agentMessage` as an
+`AgentMessageConsumers` object, and cloud and cloud-dataplane make the
+projection commit input a union, with Postgres migration 0037 (#1045 S3,
+S4). On POSIX, disposal now also ends the observed descendants of a runtime
+root that exited by itself or was killed from outside (#1269).
 
 - **Feature (client; #1258)** — `DshAdapter` runs DeepSeek Harness
   (`@deepseek-ai/dsh`, qualified 0.2.1-rc.5) over ACP on the custom-harness
@@ -134,6 +141,17 @@ from outside (#1269).
   not match its grant gets 409 `agent_memory_projection_sealing_mismatch`.
   Drafts, egress payloads, truth `memory` records and input preparation stay
   plaintext. See [docs/migrations/1045-e2ee-v2.md](docs/migrations/1045-e2ee-v2.md).
+
+- **Breaking (protocol; #1045)** — `agent.message.publish`,
+  `agent.message.disposition` and the Agent memory projection mutation and
+  receipt are unions of a plaintext and a sealed branch; the plaintext branch
+  has its own name (`AgentMessagePublishPlainPayload`,
+  `AgentMessageDispositionPlainPayload`, `AgentMemoryProjectionPlainMutation`,
+  `AgentMemoryProjectionPlainReceipt` and their schemas).
+  `SEALED_PAYLOAD_V1_CATEGORIES` and `SealedPayloadV1Category` are removed in
+  favor of `SEALED_PAYLOAD_CATEGORIES` and `SealedPayloadCategory`, and
+  `isSealedTaskPlainOutput` takes the task's sealing categories as a third
+  argument.
 
 - **Breaking (cloud, cloud-dataplane; #1045)** — `ByokCloudOptions.agentMessage`
   is an `AgentMessageConsumers` with optional `consume` and `consumeSealed`,
