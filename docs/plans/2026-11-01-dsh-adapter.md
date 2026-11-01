@@ -29,7 +29,7 @@
 - O9：#1095 的运行时环境硬性删除 `BYOK_*`，`BYOK_DSH_PROVIDER_KEY` 到不了 dsh。改为 Host 在 `model.keyEnv` 里指定变量名，adapter 校验：名字含 `KEY`/`TOKEN`/`SECRET`/`PASSWORD`（dsh 会从工具子进程去掉），不以 `BYOK_` 或 `DSH_` 开头，不是 `DEEPSEEK_API_KEY`。批准时的两个目的（工具子进程拿不到 key、`web_search` 不用这把 key 计费）不变。
 - 用量：OAR 把 dsh 的 `usage_update` 投影成上下文用量，adapter 按 spec 已有的上下文用量字段发出，没有成本计数，O6 的“无 token 用量”仍成立。
 - #1252（运行时可执行文件上报）合入 main 后，dsh 的 `detect()` 同样上报 `executablePath`/`executableSource`。
-- §5 的 SIGKILL 用例在本机 macOS + dsh 0.2.1-rc.5 失败：dsh 给每个 shell 工具单独建进程组，dsh 根进程被外部 SIGKILL 后，SDK 的进程树清理够不到那个组，也找不到已被重新挂到 init 的进程。SDK 自己的关闭路径（`dsh.close`）能回收。修复在共享的 `adapters/process-tree.ts`，不在本切片范围，待 owner 决定。
+- §5 的 SIGKILL 用例在本机 macOS + dsh 0.2.1-rc.5 失败：dsh 给每个 shell 工具单独建进程组，dsh 根进程被外部 SIGKILL 后，SDK 的进程树清理够不到那个组，也找不到已被重新挂到 init 的进程。SDK 自己的关闭路径（`dsh.close`）能回收。owner 决定（2026-11-01）：作为 0.33 已知限制接受，dsh 切片不改共享的 `adapters/process-tree.ts`，后续见 [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)；契约套件删去 SIGKILL 用例，不加把泄漏写成预期的用例，保留关闭回收用例。
 
 阻塞项：做一个 `all` 模式、POSIX、无草稿的 dsh adapter 没有阻塞项。下列能力在 0.33 做不到，需要 dsh 上游变化或单独设计：`auto` 工具授权（无全量执行前门）、`fileScope`（只有一个 workspace 根）、消息草稿与 token 用量（ACP 只发已提交消息与上下文用量）、类型化失败分类、Windows。
 
@@ -221,7 +221,7 @@ DeepSeek 官方路由改写 `llm-deepseek` 项的 `apiKeyEnv`。`packages/keys` 
 | followUp | 同 session 再 `session/prompt` | 支持；一个 prompt 在途时拒绝 | — |
 | steer | 无注入 | `SteerUnsupportedError` | — |
 | interrupt | `session/cancel` → `cancelled` | 超时沿用 Grok 的 `interruptTimeoutMs` 结构 | — |
-| 取消与进程树 | SIGTERM 优雅；SIGKILL 留孤儿；POSIX 子进程独立进程组 | 关闭：`session/close` → 关 stdin → SDK process-tree（`packages/client/src/adapters/process-tree.ts` 按后代表 SIGTERM/SIGKILL，含离组后代） | Linux user-systemd scope 下的子进程可能不是 dsh 后代，S3 用例在 Linux 验证 |
+| 取消与进程树 | SIGTERM 优雅；SIGKILL 留孤儿；POSIX 子进程独立进程组 | 关闭：`session/close` → 关 stdin → SDK process-tree（`packages/client/src/adapters/process-tree.ts` 按后代表 SIGTERM/SIGKILL，含离组后代） | dsh 根进程被外部杀掉后，各自成组的工具进程存活：0.33 已知限制，[#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269) |
 | 失败分类 | prompt 错误是 `-32603` 文本；llm-retry 内部重试 5 次 | 一律 `class: 'unknown'`；不从文本推导 auth/rate-limit（spec runtime failure class） | 无类型化失败（O6） |
 | 用量 | 只有 `usage_update` 上下文用量 | 实施时按 spec 的上下文用量字段发 `usage`（`contextTokens`/`contextWindow`/`contextSource: provider`），不发成本计数，不推算 token | O6 |
 | BYOK 密钥托管 | key 在 dsh 进程环境；工具子进程被 scrub；同 UID 可读进程环境 | O4：0.33 先 env；launcher 托管为 S5 | 同其他 env 型 adapter |
@@ -233,7 +233,7 @@ DeepSeek 官方路由改写 `llm-deepseek` 项的 `apiKeyEnv`。`packages/keys` 
 - PR CI：`scripts/ci/runtime-contract-install.mjs` 安装 `@deepseek-ai/dsh@0.2.1-rc.5`（exact），跑 `dsh.contract.ts`。
 - nightly：`runtime-contract-nightly.yml` 矩阵加 `dsh`，安装 `@deepseek-ai/dsh@latest`；失败更新同一个跟踪 issue。不加 `alpha` leg：alpha 不是用户默认会装到的版本，噪声大于信号。
 - 升级节奏：nightly 失败时先读 `docs/upgrade-guide/<新版本>/`，再决定改 adapter 还是保持旧 pin。每次提升 `QUALIFIED_DSH_VERSION` 都要重跑整个 dsh 合同。
-- 合同用例在通用套件之外为 dsh 加三条：patch 生效（`configOptions` 只含 SDK 路由）、`DSH_AGENTS_HOME` 隔离（loopback 请求里无用户技能）、SIGKILL 后进程树回收（含 Linux）。
+- 合同用例在通用套件之外为 dsh 加三条：patch 生效（`configOptions` 只含 SDK 路由）、`DSH_AGENTS_HOME` 隔离（loopback 请求里无用户技能的正向对照）、`close()` 回收运行中的工具进程。外部 SIGKILL 后的回收不设用例，是 0.33 已知限制（[#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)）。
 - 版本 token 就是 `dsh --version` 的整行；`exact` 匹配，不引入 semver（#1103 D2）。
 
 ## 6. 0.33 范围外
@@ -268,7 +268,7 @@ DeepSeek 官方路由改写 `llm-deepseek` 项的 `apiKeyEnv`。`packages/keys` 
 | 切片 | 内容 | 依赖 | 验证 |
 | --- | --- | --- | --- |
 | S1 | `src/runtime/dsh-acp-session.js`（OAR `AcpSessionProfile`，经 `#byok-acp-runtime` 导出）；`adapters/dsh/`（对照 `adapters/grok/`）：`dsh-version.ts`、`dsh-capabilities.ts`、`resolve-bin.ts`、patch 与环境（纯函数）、`DshAdapter`（detect/prepare/start、`home`、`model`、`sandbox`、`runtimeEnvironment`、`versionPolicy`）、`projection.ts`；`adapters/index.ts` 导出；PROVENANCE 一句；`docs:capability-matrix` 重生成；api-surface 预算调整（需 owner 确认） | O1–O9 | fake dsh 单测：投影、resume 错误映射、cancel、patch 内容不含秘密；必跑检查 |
-| S2 | `__tests__/runtime-contract/dsh.contract.ts`（loopback 经 pi-ai 手写路由）+ §5 的 dsh 用例；安装脚本加 exact 版本；PR 与 nightly 矩阵加 `dsh` | S1 | GitHub PR CI 以 rc.5 运行；`dsh.sigkill` 的已知缺口见上方实施偏差 |
+| S2 | `__tests__/runtime-contract/dsh.contract.ts`（loopback 经 pi-ai 手写路由）+ §5 的 dsh 用例；安装脚本加 exact 版本；PR 与 nightly 矩阵加 `dsh` | S1 | GitHub PR CI 以 rc.5 运行；SIGKILL 限制见 §0 与 [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269) |
 | S3 | 文档：`docs/adapter-capabilities.md` 资格说明与隔离节、`docs/spec.md` runtime 节、`docs/runtime-contract.md`、CHANGELOG | S1 | docs 生成器校验 |
 | S4（可顺延 0.34） | keys launcher 托管：`runDshProviderLauncher`，adapter 选项 `byokLauncher`，与 `model` 互斥 | S1 | 同 Hermes custody 用例 |
 
