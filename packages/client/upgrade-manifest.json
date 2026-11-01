@@ -121,7 +121,7 @@
       "id": "sealed-payload-v2-protocol",
       "impact": "breaking",
       "summary": "The protocol defines sealed payload v2 (#1045 S1): TaskSealingSchema (and so the cloud's SealedAgentExecutionInputSchema) accepts the agent-message and memory-projection categories, gated by the new sealed-payload-v2 flag, and memory-projection needs task-output in the same policy. agent.message.publish, agent.message.disposition and the Agent-memory projection mutation and receipt are now unions of a plaintext and a sealed branch; the plaintext branch has its own name (AgentMessagePublishPlainPayload, AgentMessageDispositionPlainPayload, AgentMemoryProjectionPlainMutation, AgentMemoryProjectionPlainReceipt and their schemas), so narrow with payload.sealed === undefined or use the plaintext name. SEALED_PAYLOAD_V1_CATEGORIES and SealedPayloadV1Category are removed; use SEALED_PAYLOAD_CATEGORIES and SealedPayloadCategory. isSealedTaskPlainOutput takes the task's frozen sealing categories as a third argument. New: SEALED_PAYLOAD_V2_CAPABILITY, sealedMovedFields and sealedAgentMessageMaxContentLength. No package seals or admits v2 content yet.",
-      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "migration": "docs/migrations/1045-e2ee-v2.md#capabilities",
       "items": [
         "export:@byok-sdk/protocol#AgentMemoryProjectionCommitRequestSchema",
         "export:@byok-sdk/protocol#AgentMemoryProjectionCommitResponseSchema",
@@ -164,7 +164,7 @@
       "id": "cloud-sealed-memory-projection",
       "impact": "breaking",
       "summary": "The hosted memory projection stores a sealed snapshot under a grant that names a sealing scope (#1045 S4). AgentMemoryProjectionAuthorization's authorized result carries the grant's optional sealing { scopeId, epoch } (AgentMemoryProjectionSealing), and InMemoryAgentMemoryProjectionAuthorizer.grant takes it. The cloud refuses a snapshot whose form does not match its grant with 409 agent_memory_projection_sealing_mismatch. AgentMemoryProjectionCommitInput is a union: a plaintext mutation with its decoded redactedBytes, or a sealed mutation with none, which the store keeps as received and meters by padded length; a Host that implements its own AgentMemoryProjectionStore handles both. Postgres migration 0037 adds the sealed member to the head and contentMac and padded length to the receipt, with one-form checks, and rewrites no data.",
-      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "migration": "docs/migrations/1045-e2ee-v2.md#custom-projection-stores",
       "items": [
         "export:@byok-sdk/cloud#AgentMemoryProjectionAuthorization",
         "export:@byok-sdk/cloud#AgentMemoryProjectionCommitInput",
@@ -176,7 +176,7 @@
       "id": "cloud-sealed-agent-message",
       "impact": "breaking",
       "summary": "The cloud admits the sealed Agent message of a task whose sealing names agent-message, and advertises sealed-payload-v2 (#1045 S3). ByokCloudOptions.agentMessage is an AgentMessageConsumers: consume takes a plaintext message and consumeSealed a sealed one, which only a member can open; both are optional. A submission that seals agent-message with messageEgress is refused with agent_message_sealed_consumer_missing while consumeSealed is absent. TaskAgentMessage.payload and readAgentMessageDisposition return either form, as in 0.32.0; a sealed disposition names the message by contentMac. handleInboundEnvelope takes the AgentMessageConsumers object in place of the consume function.",
-      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "migration": "docs/migrations/1045-e2ee-v2.md#sealed-agent-messages",
       "items": [
         "export:@byok-sdk/cloud#AgentMessageConsumeInput",
         "export:@byok-sdk/cloud#AgentMessageConsumers",
@@ -189,7 +189,7 @@
       "id": "agent-memory-projection-grant-sealing",
       "impact": "additive",
       "summary": "AgentMemoryProjectionGrant takes an optional sealing { scopeId, epoch } (#1045 S2). With it, the daemon seals each memory projection snapshot under that Agent scope and never sends it in plaintext; without a usable key it sends nothing. A Host that issues no sealing sees no change. The daemon also seals the Agent messages and memory evidence of a task whose offer names agent-message or memory-projection, and advertises sealed-payload-v2 whenever it advertises sealed-payload-v1.",
-      "migration": "docs/protocol.md#25-sealed-payload-v1-654-gated-addition",
+      "migration": "docs/migrations/1045-e2ee-v2.md#sealed-memory-projections",
       "items": [
         "config:agentMemory",
         "export:@byok-sdk/client#AgentMemoryProjectionGrant"

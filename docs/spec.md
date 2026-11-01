@@ -1819,9 +1819,17 @@ next to them. It holds no scope key in plaintext, so it cannot open them.
 - A missing key, a member that does not open and a policy mismatch are
   refused. Nothing falls back to plaintext. A device that cannot open a sealed
   offer declines it with one of the four sealed decline codes.
-- v1 seals only `task-input` and `task-output`. Agent messages, memory
-  projections, input preparation and drafts stay plaintext. A sealed task
-  streams no draft.
+- v1 seals `task-input` and `task-output`. v2 (#1045) adds `agent-message`,
+  the body of the task's Agent message, which the cloud hands to
+  `agentMessage.consumeSealed`, and `memory-projection`, which moves the
+  terminal's memory evidence into the `task-output` ciphertext. A memory
+  projection grant with `sealing` seals the hosted snapshot under an Agent
+  memory scope. The form is frozen: a task or grant that seals a category
+  refuses its plaintext form, and one that does not refuses the sealed form.
+  Input preparation, drafts, egress payloads and truth `memory` records stay
+  plaintext. A sealed task streams no draft.
+  [docs/migrations/1045-e2ee-v2.md](./migrations/1045-e2ee-v2.md) lists what a
+  Host does to use v2.
 - `@byok-sdk/server` has no sealed dispatch: it refuses `sealing` and
   `sealed` with `coordination_input_invalid`. A sealed task must not go to
   `@byok-sdk/cloud-do`, which reads task content in plaintext.
