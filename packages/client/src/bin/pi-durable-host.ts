@@ -4,7 +4,7 @@ import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { createModels, createProvider } from '@earendil-works/pi-ai/models';
 import type { Model, ProviderStreams, ToolCall, TSchema } from '@earendil-works/pi-ai';
-import { type ToolRegistration } from '@earendil-works/pi-durable';
+import { type ToolExecutionResult, type ToolRegistration } from '@earendil-works/pi-durable';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { receiveLauncherCredential } from '../adapters/pi/launcher-credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
@@ -92,14 +92,16 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
     for (const tool of await pool.observe(server)) reserved.push({ toolsetId: server, serverName: server, toolName: tool.name, description: tool.description, inputSchema: tool.inputSchema });
   }
   for (const [rows, naming] of [[projected, 'qualified'], [reserved, 'bare']] as const) {
-    for (const tool of createPiMcpTools(rows, pool, naming)) tools.push({ name: tool.name, description: tool.description, parameters: tool.parameters as TSchema, replay: 'unsafe', execute: async (parameters, toolApi, ctx) => {
+    // The annotation makes the object literal an excess-property check: the
+    // harness reads the model's text from `output` only (#1303).
+    for (const tool of createPiMcpTools(rows, pool, naming)) tools.push({ name: tool.name, description: tool.description, parameters: tool.parameters as TSchema, replay: 'unsafe', execute: async (parameters, toolApi, ctx): Promise<ToolExecutionResult> => {
       const result = await tool.execute(toolApi.callId, parameters, ctx.abortSignal);
-      return { content: result.content, details: { ...result.details }, isError: result.details.isError };
+      return { output: result.content, details: { ...result.details }, isError: result.details.isError };
     } });
   }
   const fileTools: ToolRegistration[] | undefined = scope?.tools.map(tool => ({
     name: tool.name, description: tool.description, parameters: tool.parameters as TSchema,
-    execute: async (parameters, toolApi, ctx) => {
+    execute: async (parameters, toolApi, ctx): Promise<ToolExecutionResult> => {
       const result = await tool.execute(`durable:${authority.taskId}:${toolApi.taskId}`, parameters as never, ctx.abortSignal, undefined, { cwd: authority.canonicalHome } as never);
       return { output: result.content };
     },
