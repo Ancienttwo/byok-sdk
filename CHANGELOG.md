@@ -14,6 +14,54 @@
   nightly matrix gain a dsh leg. Known limitation: after the dsh root is
   killed from outside, its shell tools keep running (#1269).
 
+- **Breaking (server; #1113 A2b, A3)** — the embedded server's SQLite file is
+  schema 8 and persists the task activity log, so activity and its cursors
+  survive a restart. A schema 6 or 7 file is upgraded in place when it opens,
+  keeping pairings, tasks and approvals; 7→8 creates the activity log tables
+  empty, rebuilds `approval_timeline_tail` without the idle deadline and adds
+  the task output closure trigger. The upgrade is one-way: 0.32.0 and earlier
+  refuse a schema 8 file, so back up the file before the first open. A v8 file
+  missing an activity table or the trigger is refused as
+  `SQLITE_SCHEMA_INVALID`.
+
+- **Breaking (cloud, cloud-dataplane, server; #1113 A3)** — a task's activity
+  log and approval timeline close in the same transaction as its first
+  terminal or accepted Host cancellation, and expire ten minutes later without
+  renewal. Later `task.progress`, `task.artifact` and `task.await_approval` are
+  refused with `task_settled_by_cloud`, also on a redacted or archived task;
+  an append to a closed timeline throws the new `approval_timeline_settled`.
+  An open approval timeline no longer idle-expires: it keeps at most 50
+  observations and `MAX_APPROVAL_TIMELINE_BYTES` (1 MiB), never evicting the
+  pending request. `ApprovalTimelineAppendInput.ttlMs` is removed and
+  `ApprovalTimelineTail` gains `terminalAt`. Postgres migration 0035 adds the
+  closing trigger and backfill; apply it only through `deploy/scripts/migrate`,
+  together with the code, in a maintenance window.
+
+- **Feature (cloud, cloud-dataplane, server; #1113 A4)** — `TaskEventsWake`, a
+  content-free hint that a task's state, activity log or approval timeline
+  changed. The in-memory and SQLite compositions expose one;
+  `createPostgresTaskEventsWake` listens, on a session-mode DSN, for the
+  triggers migration 0036 adds, so commits on any instance wake readers on
+  every instance. A reader no hint reaches re-reads within 5 seconds.
+
+- **Breaking (server; #1113)** — `ByokServer.tasks.events` and
+  `TaskHandle.events()` read the durable activity log, task state and approval
+  timeline instead of an in-process buffer. Cursors resume across a restart;
+  cursors from 0.32.0 and earlier are refused as `cursor_unknown`. State is
+  coalesced, not replayed, and terminal tasks stay readable (`feed_expired` is
+  gone). `taskEventBufferLimit`, `taskEventRetentionMs`,
+  `DEFAULT_TASK_EVENT_BUFFER_LIMIT` and `DEFAULT_TASK_EVENT_RETENTION_MS` are
+  removed.
+
+- **Feature (client; #1094)** — `DaemonConfig.runtimes.grok` takes
+  `compatInstructions`, `agentUserMcpServers` and `versionPolicy`, and
+  `createDaemon` builds the Grok adapter when `runtimeAllowlist` lists `grok`.
+
+- **Fix (client; #1261)** — `byok-agent runtimes` and offline `doctor` build
+  their adapters with the daemon's factory, so a configured
+  `runtimes.<id>.versionPolicy` reaches their version verdict, and an invalid
+  `piByokLauncher` throws the same error as `createDaemon`.
+
 ## 0.32.0 — 2026-11-01 (published)
 
 0.32.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
