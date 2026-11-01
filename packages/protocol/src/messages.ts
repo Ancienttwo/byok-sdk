@@ -117,7 +117,8 @@ export const RuntimeCapabilitiesSchema = z.object({
   messageDraft: z.boolean().optional(),
   /** The capability matrix (#1103): what the runtime's adapter descriptor declares. Discovery data, not a gate. */
   toolAuthorizationAuto: z.boolean().optional(),
-  durablePi: z.boolean().optional(),
+  /** The durable worker lane (Pi today). */
+  durableLane: z.boolean().optional(),
   preparedLane: z.boolean().optional(),
   isolation: z.object({
     userContext: z.boolean().optional(),

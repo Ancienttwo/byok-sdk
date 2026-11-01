@@ -27,8 +27,6 @@ const MATRIX_FIELDS = [
   'preparedLane',
   'isolation',
 ] as const;
-/** Wire v4 still names the durable lane `durablePi`. */
-const WIRE_FIELD = { durableLane: 'durablePi' } as const;
 
 const adapters = (): ReadonlyArray<readonly [string, RuntimeAdapter]> => [
   ['pi', new PiAdapter()],
@@ -49,9 +47,8 @@ describe('runtime capability matrix projection to conn.hello / presence', () => 
         if (capabilities.isolation === undefined) expect('isolation' in wire, field).toBe(false);
         continue;
       }
-      const onWire = (WIRE_FIELD as Record<string, string>)[field] ?? field;
-      expect((wire as Record<string, unknown>)[onWire], field).toBe(capabilities[field]);
-      if (capabilities[field] === undefined) expect(onWire in wire, field).toBe(false);
+      expect(wire[field], field).toBe(capabilities[field]);
+      if (capabilities[field] === undefined) expect(field in wire, field).toBe(false);
     }
     // Native interactions are local runtime control, not a matrix capability:
     // they are never projected onto the wire.
@@ -61,7 +58,7 @@ describe('runtime capability matrix projection to conn.hello / presence', () => 
   it('omits every field the adapter does not declare instead of inventing false', () => {
     const wire = toRuntimeInfoCapabilities({ steer: false, resume: true, approvalInteractive: false });
     expect(wire).toEqual({ steer: false, resume: true, approvalInteractive: false });
-    for (const field of ['mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durablePi', 'preparedLane', 'isolation'] as const) {
+    for (const field of ['mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane', 'isolation'] as const) {
       expect(field in wire, field).toBe(false);
     }
   });
