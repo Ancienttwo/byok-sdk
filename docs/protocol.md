@@ -153,7 +153,7 @@ unproven (see the evidence list below).
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
   and an `approvalId` on every approval request and decision. `golden/v4.releases.json` registers the published 0.31.0 corpus
-  and has no `floor`. Each registered v4 entry pins both corpus
+  and the 0.32.0 corpus, a source candidate until it is published, and has no `floor`. Each registered v4 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.30.2 registry tarball, the last v3 release. It rejects every v4

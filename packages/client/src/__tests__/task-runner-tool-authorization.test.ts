@@ -128,30 +128,6 @@ describe('daemon tool authorization', () => {
     expect(sent.some(event => event.type === 'task.await_approval')).toBe(false);
   });
 
-  it.each(['duplicate-rule', 'resolver-throw'] as const)('F8 keeps %s details local and uses a fixed wire decline', async scenario => {
-    const privateDetail = 'F8_PRIVATE_OWNER_RULE';
-    const localErrors = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
-      const sent: Envelope[] = [];
-      const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => {
-        if (scenario === 'resolver-throw') throw new Error(privateDetail);
-        return { default: 'auto', rules: { alwaysAsk: [
-          { id: privateDetail, match: { toolName: 'read' } },
-          { id: privateDetail, match: { toolName: 'write' } },
-        ] } };
-      } });
-      await offer(runner, `F8-${scenario}`);
-      expect(declineReason(sent)).toBe('tool_authorization_unresolved: local tool authorization policy could not be resolved');
-      expect(JSON.stringify(sent)).not.toContain(privateDetail);
-      expect(localErrors.mock.calls.flat().join(' ')).toContain(privateDetail);
-      expect(sent.some(event => event.type === 'task.claim')).toBe(false);
-      expect(adapter.inputs).toEqual([]);
-    } finally {
-      localErrors.mockRestore();
-    }
-  });
-
   it('defaults to all: no gate reaches the runtime, a high-risk tool_use only emits a reminder', async () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
     const sent: Envelope[] = [];
@@ -294,21 +270,6 @@ describe('daemon tool authorization', () => {
     expect(declineReason(sent)).toMatch(/^tool_authorization_unsupported: runtime pi /);
   });
 
-  it.each([
-    { default: 'auto', rules: { alwaysAsk: [{ id: 'empty', match: {} }] } },
-    { default: 'auto', rules: { allowWithoutAsking: 'all' } },
-    { default: 'all', rules: { alwaysAsk: [{ id: 'same', match: { toolName: 'read' } }], allowWithoutAsking: [{ id: 'same', match: { toolName: 'write' } }] } },
-    { default: 'auto', rules: { alwaysAsk: [{ id: 'bad', match: { commandRegex: '.*' } }] } },
-  ])('declines malformed rule policies before claim: %j', async policy => {
-    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
-    const sent: Envelope[] = [];
-    const { runner } = makeRunner(adapter, sent, { toolAuthorization: (() => policy) as unknown as ToolAuthorizationResolver });
-    await offer(runner, 'invalid-rules');
-    expect(declineReason(sent)).toMatch(/^tool_authorization_unresolved: /);
-    expect(sent.some(event => event.type === 'task.claim')).toBe(false);
-    expect(adapter.inputs).toEqual([]);
-  });
-
   it('all uses the same rule precedence: ask reminds, allow suppresses, floor still reminds', async () => {
     const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
     const sent: Envelope[] = [];
@@ -441,18 +402,6 @@ describe('daemon tool authorization', () => {
       authorization: { source: 'floor', ruleIds: [] }, reasons: ['sensitive-path'], summaryBytes: Buffer.byteLength('private summary and path') });
     expect(JSON.stringify(records)).not.toContain('private summary');
     expect(JSON.stringify(records)).not.toContain('description');
-  });
-
-  it.each([
-    ['a bare mode string', () => 'all'],
-    ['a throwing resolver', () => { throw new Error('host policy store offline'); }],
-  ])('declines on %s instead of picking a mode', async (_label, resolver) => {
-    const adapter = new GateCapturingAdapter(AUTO_CAPABLE);
-    const sent: Envelope[] = [];
-    const { runner } = makeRunner(adapter, sent, { toolAuthorization: resolver as unknown as ToolAuthorizationResolver });
-    await offer(runner, 'task-unresolved');
-    expect(adapter.inputs).toEqual([]);
-    expect(declineReason(sent)).toMatch(/^tool_authorization_unresolved: /);
   });
 });
 

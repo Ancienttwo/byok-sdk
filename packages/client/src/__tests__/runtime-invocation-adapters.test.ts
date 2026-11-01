@@ -22,7 +22,7 @@ vi.mock('../adapters/runtime-invocation', () => ({
     if (command === 'unreadable-shim') throw Object.assign(new Error("EACCES: permission denied, open 'C:\\Users\\someone\\npm\\claude.cmd'"), { code: 'EACCES' });
     const runtime = /^npm-shim:(claude|codex)$/.exec(command)?.[1] as keyof typeof fixtures | undefined;
     if (runtime === undefined) throw new Error(`unexpected command ${command}`);
-    return { command: process.execPath, args: [fixtures[runtime]] };
+    return { command: process.execPath, args: [fixtures[runtime]], executable: fixtures[runtime] };
   }),
   runtimeInvocationHost: vi.fn(() => ({})),
 }));

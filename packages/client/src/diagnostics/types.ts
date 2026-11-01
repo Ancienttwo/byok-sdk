@@ -1,4 +1,4 @@
-import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeVersionVerdict } from '../types';
+import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types';
 import type { RuntimeVersionChange } from '../runtime-detection';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
@@ -34,6 +34,9 @@ export interface DiagnosticsSnapshot {
     versionVerdict?: RuntimeVersionVerdict;
     /** #1103 §2.6: the local restart comparison. Absent on a first run, an unchanged version or an older daemon. */
     versionChange?: RuntimeVersionChange;
+    /** #1103 O10: the executable detection ran and who chose it. Local-only; a support bundle drops both. */
+    executablePath?: string;
+    executableSource?: RuntimeExecutableSource;
     authPresent?: boolean;
     steer: boolean;
     resume: boolean;
