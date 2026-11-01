@@ -10,8 +10,8 @@ after 0.33.0 is published.
 Its fixed source is the release commit, the squash merge of the 0.33.0
 release PR on `main`, not moving `main` or Unreleased. The release commit is
 not known yet; it is filled in at publication. The rows and migration list
-below are counted from the upgrade manifest at the preparation base
-`cdd0f54c1` and recounted on the final base. It has not been walked through.
+below are counted from the upgrade manifest at the freeze base `394c1cb2b`.
+It has not been walked through.
 The behavior authorities are the upgrade manifest that `@byok-sdk/client`
 ships (`upgrade-manifest.json`, 0.32.0 to 0.33.0) and the CHANGELOG 0.33.0,
 0.32.0 and 0.31.0 sections at that commit. When this page and them disagree,
@@ -25,7 +25,7 @@ The release record is [`docs/releases/v0.33.0.md`](v0.33.0.md).
 ## Version policy
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
-The upgrade manifest from 0.32.0 holds 4 breaking and 3 additive entries, and
+The upgrade manifest from 0.32.0 holds 4 breaking and 5 additive entries, and
 the release adds Postgres migrations 0035 and 0036 and server SQLite schema 8
 ([version policy](../spec.md#pre-10-package-version-policy)).
 
@@ -49,7 +49,7 @@ All nine public packages move together. Pin each one to exactly 0.33.0.
 | --- | --- |
 | Git tag | `v0.33.0` |
 | Release commit SHA | not known yet (filled in at publication) |
-| Release PR base | not known yet (the preparation base is main `cdd0f54c1`) |
+| Release PR base | not known yet (the scope is frozen at main `394c1cb2b`) |
 
 Verify a source checkout with
 `git rev-parse 'v0.33.0^{commit}'`; the result must equal the release commit
@@ -67,10 +67,16 @@ graph on 0.33.0, and retain the lockfile.
 
 ### Downstream example
 
-AiphaBee's `packages/byok-host/package.json` pins `@byok-sdk/*` to 0.30.2
-(as reported to this preparation; the AiphaBee repository was not read or
-changed). Its upgrade is the 0.30.2 path below. This page changes no
-downstream package.
+AiphaBee's `packages/byok-host` pins `@byok-sdk/client`, `core`, `keys`,
+`protocol` and `server` to 0.30.2 (confirmed by the AiphaBee orchestrator on
+2026-11-01; this preparation did not read or change the AiphaBee repository).
+Its upgrade is the 0.30.2 path below. AiphaBee runs only Topology L, an
+embedded server on SQLite, and has no `@byok-sdk/cloud*` dependency, so the
+Postgres steps (migrations 0030 to 0036, the 0035 maintenance window and
+rollback, the rehearsal command) and the session-mode DSN for
+`createPostgresTaskEventsWake` do not apply to it. Its SQLite file written by
+0.30.2 is not opened by 0.33.0: it starts on a new path and re-pairs. This
+page changes no downstream package.
 
 The private `examples/` code is not part of this upgrade scope, with one
 exception: a Host that vendored the K4 Host execution core
@@ -86,8 +92,12 @@ interoperate. The changes are in [the wire v4 note](925-wire-v4.md). There is
 no v3 migration: a store a v3 build wrote is not supported, and the Host
 starts v4 on a new store ([0.31.0 checklist](host-upgrade-0.31.0.md#stored-v3-state)).
 
-0.33.0 keeps wire v4 and adds no corpus line: `packages/protocol/src` is
-unchanged since 0.32.0 (332 envelope and 30 HTTP lines). The 0.32.0 ordering
+0.33.0 keeps wire v4 and adds one gated field: a `quota`
+`task.fail.failure` may carry `scope` (`task-fail-quota-scope`, #1271). A
+daemon sends it only to a server that advertises the new
+`runtime-quota-scope` capability flag, which the 0.33.0 reference server and
+hosted cloud do, so either upgrade order works. The corpus grows from 332 to
+336 envelope lines and stays at 30 HTTP lines. The 0.32.0 ordering
 rules still apply to a Host coming from 0.30.2 or 0.31.0
 ([0.32.0 checklist](host-upgrade-0.32.0.md#wire-protocol)): upgrade the Host
 before its devices (`token-expires-in`), and check the operator inventory for
@@ -277,9 +287,22 @@ Additions a Host may configure in 0.33.0:
   on the custom-harness path (`harnessId: 'dsh'`), on macOS and Linux only.
   The Host constructs it with an SDK-owned home that is not `~/.dsh` and a
   provider, model and `keyEnv` selection. It declines `auto` and file-scope
-  tasks before claim. Known limitation: a dsh root killed from outside
-  (SIGKILL, OOM) leaves its shell tool processes running; `close()` on a live
-  root reaps them ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
+  tasks before claim. After a dsh root is killed from outside (SIGKILL, OOM),
+  disposal ends the shell tools the owned process tree observed
+  ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
+- **Quota scope** (`task-fail-quota-scope`, #1271): `TaskResult.failure`,
+  `TerminalResult.failure` and a `quota` `task.fail.failure` may carry
+  `scope: 'account' | 'model'`. The Claude adapter sets it from its rate-limit
+  type; other runtimes never do. A Host that reads only `failure.class` needs
+  no change. One that switches models on a model-scoped quota reads `scope`
+  and treats a missing scope as unknown.
+- **Adapter admission declarations** (`adapter-admission-declarations`,
+  #1278): `RuntimeAdapterDescriptor.fileScope` and `providerProfileBinding`
+  and `RuntimeAdapter.projectMcpEnvironment(env)` replace the daemon's checks
+  for the runtime id `pi`. `PiAdapter` declares all three, so a Host with
+  built-in adapters sees no change. A custom adapter that reused the id `pi`
+  without enforcing a file scope no longer admits scoped offers until it
+  declares `fileScope`.
 - **Task events wake** (`task-events-wake`, #1113 A4): the embedded server
   uses its stores' wake with no configuration. A hosted Host whose readers
   should wake on commits from other instances uses
@@ -288,6 +311,16 @@ Additions a Host may configure in 0.33.0:
   `LISTEN`, and the self-NOTIFY probe reports that through `onError` as
   `TaskEventsWakeProbeMissedError`. `close()` belongs to the Host, like
   `pool.end()`.
+
+Two client changes carry no manifest entry and need no Host code:
+
+- On POSIX, disposal now ends the descendants the owned process tree observed
+  while a runtime root ran (#1269), read once a second. This also covers a
+  root that exits by itself: its observed descendants, such as a background
+  process a runtime tool left, are ended at disposal. A process started and
+  orphaned within one second is not seen.
+- The pi-durable shell gate starts `/bin/bash` with `--norc` (#1273), so
+  `~/.bashrc` no longer runs before shell ownership is acknowledged.
 
 The 0.32.0 additions (store precheck, config check, versioned service
 installs, runtime version policies, the packaging helper, config-file
@@ -307,7 +340,8 @@ path-mutation gate. The SQLite file goes from schema 6 to 8 in one open.
 
 **From 0.30.2.** Also the 0.31.0 changes: the wire v4 cutover on a new store,
 migration 0030, a new SQLite path and re-pairing, and the 0.31.0 breaking
-rows. A Windows daemon on an aliased store path restarts correctly from 0.31.0
+rows. A Topology L Host with no `@byok-sdk/cloud*` dependency, such as
+AiphaBee, skips the Postgres steps. A Windows daemon on an aliased store path restarts correctly from 0.31.0
 (#1030); restart it after the upgrade.
 
 **From 0.30.1 or earlier.** Apply the [0.30.2 checklist](host-upgrade-0.30.2.md)
@@ -470,9 +504,9 @@ macOS and Windows after 0.33.0 is published.
 - [ ] **[unverified] Maintainer walked the complete checklist** in a clean
   environment, on macOS and on Windows (AiphaBee, 0.30.2 → 0.33.0).
 - [ ] **[unverified]** Backup restored; the SQLite copy taken before the
-  first 0.33.0 open; store precheck verdicts recorded; migrations 0030 to 0036
-  (or 0031 to 0036, or 0035 and 0036) applied to the restored copy; 0035 timed;
-  rollback rehearsed on that recovery set.
+  first 0.33.0 open; store precheck verdicts recorded; for a Postgres Host,
+  migrations 0030 to 0036 (or 0031 to 0036, or 0035 and 0036) applied to the
+  restored copy and 0035 timed; rollback rehearsed on that recovery set.
 - [ ] **[unverified]** Drain, process-wide stop and the v4 start on a new
   store (from 0.30.2).
 - [ ] **[unverified]** Host/daemon capability alignment and the applicable

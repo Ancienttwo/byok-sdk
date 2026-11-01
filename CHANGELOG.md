@@ -12,12 +12,40 @@
   ACP session runs on the vendored OAR ACP stack in the lazy private
   `#byok-acp-runtime` entry, beside Grok. The runtime contract suite and
   nightly matrix gain a dsh leg.
-- On POSIX the owned process tree observes each running runtime root's
-  descendants once a second. When a root dies from an outside SIGKILL or an
-  OOM kill, disposal now ends the tools it started in groups of their own,
-  such as dsh shell tools, which the group signal and a read after the root's
-  death cannot reach (#1269). A tool started and orphaned within one second is
-  not seen.
+
+- **Behavior change (client; #1269)** — on POSIX the owned process tree
+  observes each running runtime root's descendants once a second, and
+  disposal ends the ones it observed, also those in process groups of their
+  own that the group signal and a read after the root's death cannot reach.
+  This covers a root killed from outside (SIGKILL, OOM), such as a dsh root
+  whose shell tools would otherwise keep running, and a root that exits by
+  itself: its observed descendants are now ended at disposal too. A process
+  started and orphaned within one second is not seen. The contract case
+  `dsh.sigkill` runs again.
+
+- **Fix (client; #1273)** — the pi-durable shell gate starts `/bin/bash` with
+  `--norc`, so `~/.bashrc` can no longer run before shell ownership is
+  acknowledged (the 0.32.0 known limitation F16-2).
+
+- **Feature (protocol, client, cloud; #1271)** — a `quota`
+  `task.fail.failure` may carry `scope: 'account' | 'model'`, and
+  `TaskResult.failure` and `TerminalResult.failure` copy it. The Claude
+  adapter maps `five_hour` and `seven_day` limits to `account` and
+  `seven_day_opus` and `seven_day_sonnet` to `model`; other runtimes never set
+  it. A daemon sends `scope` only to a server that advertises the new
+  `runtime-quota-scope` flag, which the reference server and hosted cloud do.
+  `@byok-sdk/protocol` adds `RUNTIME_QUOTA_SCOPE_CAPABILITY`,
+  `RUNTIME_QUOTA_SCOPES` and `RuntimeQuotaScope`.
+
+- **Feature (client; #1278)** — `RuntimeAdapterDescriptor` gains optional
+  `fileScope` (`{ lanes }`) and `providerProfileBinding`, and `RuntimeAdapter`
+  gains an optional `projectMcpEnvironment(env)`. The daemon reads these
+  declarations instead of checking for the runtime id `pi`; `PiAdapter`
+  declares all three, so built-in behavior is unchanged. A custom adapter that
+  reused the id `pi` without enforcing a file scope no longer admits scoped
+  offers until it declares `fileScope`. Every SDK JSONL line transport now
+  uses one LF-only decoder, so the durable Pi host no longer splits a frame at
+  a raw U+2028 or U+2029 inside a JSON string.
 
 - **Breaking (server; #1113 A2b, A3)** — the embedded server's SQLite file is
   schema 8 and persists the task activity log, so activity and its cursors
