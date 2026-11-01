@@ -228,6 +228,8 @@ async function openAcpRuntimeSession(
           await terminalHost.dispose();
           return;
         }
+        // BYOK change: no prepareShutdown/markNativeStop; the SDK process-tree
+        // authority reads the descendants itself before it signals the tree.
         const state = turns.active();
         if (state !== null && !runtime.closed) {
           await turns.abort(state);

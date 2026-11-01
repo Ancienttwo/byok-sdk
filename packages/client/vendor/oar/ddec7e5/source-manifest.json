@@ -2,16 +2,16 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.80.1",
+  "packageVersion": "0.83.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "044633e9be0dfbae6d171591ef03ea31593e9fb5",
+  "commit": "ddec7e575a5f8e65ea35011e64c0d35eef08f6bd",
   "release": {
     "ecosystem": "npm",
     "name": "@botiverse/oar",
-    "version": "0.80.1",
-    "integrity": "sha512-PDTmr6fvEKyRs+NFGDpmRrvlxqh840FUs6Lyw5pI+aiWqlzq2Sf+VPCOznIPROJjd1ZA6XNamgu3zecAt/U0XA==",
-    "gitCommit": "044633e9be0dfbae6d171591ef03ea31593e9fb5",
-    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.80.1"
+    "version": "0.83.0",
+    "integrity": "sha512-NcuJljjWXegNwgeb8i91TOCC5N7+iL4nG1DyWiMur48p5l0ur3WACpOgMQf317+UYhTXv50Rv+eC0tLPbSv0aQ==",
+    "gitCommit": "ddec7e575a5f8e65ea35011e64c0d35eef08f6bd",
+    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.83.0"
   },
   "license": "Apache-2.0",
   "files": [
@@ -418,9 +418,9 @@
     {
       "path": "shared/acp/process.ts",
       "sourcePath": "packages/oar/src/shared/acp/process.ts",
-      "upstreamSha256": "a31898ee81c9f1857c788020defe802f844b7515929266d78b776d22024ca691",
-      "vendoredSha256": "66c608715c241defc33ed28636824da65b4b2d208d746efa3805b1a9b351360a",
-      "delta": "Caller-owned process: startAcpProcess takes an injected SpawnAcpLineProcess and passes exactly the explicit filtered env and cwd; no executable manager, killTree option, resources reader or native diagnostics. The owned process splits stdout into bounded lines; each line goes back to the official ndJsonStream with its newline, and each written message goes through the acknowledged stdin write, so the SDK keeps its own framing, parse-error answers and write order. Upstream incoming/outgoing filters and the draining-EOF input are retained around the injected streams."
+      "upstreamSha256": "88918784e4c127fa3eeffb709fc33daad833b5bf91900e5586e1edbc2df2418b",
+      "vendoredSha256": "8af37ffce50ae00a4a983ae7d280234545b971e3e284214e0e7a010a42b83e6f",
+      "delta": "Caller-owned process: startAcpProcess takes an injected SpawnAcpLineProcess and passes exactly the explicit filtered env and cwd; no executable manager, killTree option, resources reader or native diagnostics. The owned process splits stdout into bounded lines; each line goes back to the official ndJsonStream with its newline, and each written message goes through the acknowledged stdin write, so the SDK keeps its own framing, parse-error answers and write order. Upstream incoming/outgoing filters and the draining-EOF input are retained around the injected streams. No prepareShutdown, markNativeStop or observeCancellation members: the SDK process-tree authority reads the descendants itself."
     },
     {
       "path": "shared/acp/profile.ts",
@@ -437,8 +437,8 @@
     {
       "path": "shared/acp/records.ts",
       "sourcePath": "packages/oar/src/shared/acp/records.ts",
-      "upstreamSha256": "256f85081d1508ef8d6ae4c20c607bf3ab4f0e28dea24058f08ebdd123058658",
-      "vendoredSha256": "256f85081d1508ef8d6ae4c20c607bf3ab4f0e28dea24058f08ebdd123058658"
+      "upstreamSha256": "174fcf2fec24802fbc256eb54427ee26ee0264f21f0424ca19fe4aca3963628f",
+      "vendoredSha256": "174fcf2fec24802fbc256eb54427ee26ee0264f21f0424ca19fe4aca3963628f"
     },
     {
       "path": "shared/acp/resume-cwd.ts",
@@ -449,9 +449,9 @@
     {
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
-      "upstreamSha256": "2559746b2636d0e4c24df22ebff671385147de632ca6f7e5cfd8ddf72fd6133d",
-      "vendoredSha256": "6cd15b99707f43d41b6a3447b4034c734f56fc4b4ee3f8a59d4535f5894a76c4",
-      "delta": "Raw adapter for the SDK: acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader."
+      "upstreamSha256": "5deeb665d96c8da9fec95c66820201121229fbfd92d0af72e23a112bdb42d17b",
+      "vendoredSha256": "3257e4be1baf520ea56a3abf4b8c135622887a1e5f0576daa69ab50ef9e8279c",
+      "delta": "Raw adapter for the SDK: acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation."
     },
     {
       "path": "shared/acp/terminal.ts",
@@ -469,9 +469,9 @@
     {
       "path": "shared/acp/turns.ts",
       "sourcePath": "packages/oar/src/shared/acp/turns.ts",
-      "upstreamSha256": "c064e098b585bd24178acb855fe11d544b5f384a64a82ccaab47bf223d653d76",
-      "vendoredSha256": "fd46c2a9bbe5ad3c5d427b6b0c2ff1d33bdb1a365511c301e291a211e83c92a1",
-      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp."
+      "upstreamSha256": "befd7b527e0e8de3fa5e98d82cd9e137c11c9ee8bd47fcfad674f0ea01280aac",
+      "vendoredSha256": "aa30e8f8e2be89407b56c87bcb3c115f0debd4cd8934ff21ad78b6633bb437e5",
+      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp. abort sends the native cancel without the upstream process-table observation window (pendingCancellation is absent); the SDK process-tree authority owns tool cleanup."
     },
     {
       "path": "shared/acp/usage-wait.ts",
@@ -506,9 +506,9 @@
     {
       "path": "shared/executable/process-tree.ts",
       "sourcePath": "packages/oar/src/shared/executable/process-tree.ts",
-      "upstreamSha256": "495d9693bedce52786cee383f50ab579de6b2c7d34fb6596ae603485a05f15c6",
-      "vendoredSha256": "23b879ef13f2963d9bde3ec1bb5bf8c1c10cff99d6aac34974fdf75f08826591",
-      "delta": "Node strip-only TypeScript compatibility: InvalidProcessTableError declares its reason field explicitly instead of a constructor parameter property. Everything else keeps upstream 0.80.1 bytes, including the bounded observation and failure-shape APIs."
+      "upstreamSha256": "a73e3b60f5387a1d8bf6fc9c9394a7a509b960b9a6d06e5a97f46f9a59773d39",
+      "vendoredSha256": "e595b1c130f8b5d8dbc00bcc863edff385cb5f5a339c49fb1b28a60604b4b3a0",
+      "delta": "Node strip-only TypeScript compatibility: InvalidProcessTableError declares its reason field explicitly instead of a constructor parameter property. Everything else keeps upstream 0.83.0 bytes, including the bounded observation and failure-shape APIs."
     },
     {
       "path": "shared/failure-class.ts",

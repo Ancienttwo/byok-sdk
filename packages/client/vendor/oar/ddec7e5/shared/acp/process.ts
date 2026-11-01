@@ -75,7 +75,7 @@ export interface AcpProcess {
   readonly exitCode: number | null;
   readonly redact?: (text: string) => string;
   kill(): void;
-  // BYOK change: no `resources` reader or native diagnostics; the SDK process-tree authority owns the tree.
+  // BYOK change: no `resources` reader, native diagnostics or shutdown/cancellation observation; the SDK process-tree authority owns the tree.
 }
 
 /**

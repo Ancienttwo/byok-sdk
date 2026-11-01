@@ -22,7 +22,7 @@ import {
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
-import * as vendoredProjection from '../../vendor/oar/044633e/runtimes/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/ddec7e5/runtimes/codex/projection';
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-codex.mjs', import.meta.url),
 );

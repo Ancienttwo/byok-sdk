@@ -1,6 +1,6 @@
 # OAR 044633e private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.80.1, fixed commit `044633e9be0dfbae6d171591ef03ea31593e9fb5`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.83.0, fixed commit `ddec7e575a5f8e65ea35011e64c0d35eef08f6bd`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 92 source files plus LICENSE. Seventy-six source files keep upstream bytes. Sixteen source files contain BYOK changes. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, and the Codex goal-event projection. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
 
@@ -10,25 +10,25 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoritative release binding
 
-`@botiverse/oar@0.80.1` is the public npm release of this commit. Checked on
-2026-10-31:
+`@botiverse/oar@0.83.0` is the public npm release of this commit. Checked on
+2026-11-01:
 
-- The registry publishes `0.80.1` with tarball integrity
-  `sha512-PDTmr6fvEKyRs+NFGDpmRrvlxqh840FUs6Lyw5pI+aiWqlzq2Sf+VPCOznIPROJjd1ZA6XNamgu3zecAt/U0XA==`;
+- The registry publishes `0.83.0` with tarball integrity
+  `sha512-NcuJljjWXegNwgeb8i91TOCC5N7+iL4nG1DyWiMur48p5l0ur3WACpOgMQf317+UYhTXv50Rv+eC0tLPbSv0aQ==`;
   the downloaded tarball has sha512
-  `3c34e6afa7ef10ac91b3e345183a6646bbe5c6a87ce34154b3a2f2c39a48f9a896aa5cead927fe54f08ece720f44e263775640e9735a9a0bb7cde700b7f5345c`
-  and its `package.json` declares `"name": "@botiverse/oar"`, `"version": "0.80.1"`.
+  `35cb899638d65de80dc2079bf22f754ce082e4defe88be271b50f25a232eaf8f29e65d2eaf75800a93a03107f7d7bf946214d7bf9d11bfe782d2d2cf6d2bf469`
+  and its `package.json` declares `"name": "@botiverse/oar"`, `"version": "0.83.0"`.
 - Its SLSA v1 provenance attestation
-  (`https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.80.1`)
+  (`https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.83.0`)
   built `.github/workflows/release.yml` from
   `git+https://github.com/botiverse/oar@refs/heads/main` at
-  `044633e9be0dfbae6d171591ef03ea31593e9fb5`, the same commit recorded here.
-- The annotated tag `refs/tags/v0.80.1` dereferences to that commit, whose
-  message is `chore: release v0.80.1 (#565)`.
+  `ddec7e575a5f8e65ea35011e64c0d35eef08f6bd`, the same commit recorded here.
+- The annotated tag `refs/tags/v0.83.0` dereferences to that commit, whose
+  message is `chore: release v0.83.0 (#589)`.
 - All 93 `upstreamSha256` values in `source-manifest.json` match the files at
   that commit's tree.
 
-The scheduled advisory scan therefore queries `@botiverse/oar@0.80.1` as an
+The scheduled advisory scan therefore queries `@botiverse/oar@0.83.0` as an
 npm package-version, not the bare commit. `source-manifest.json` keeps the
 commit and records the release name, version, tarball integrity and provenance
 URL under `release`; the scanner refuses the release claim unless every field
@@ -45,11 +45,11 @@ Policy: follow upstream. A file is maintained only where the SDK's ownership of 
 - `runtimes/codex/open.ts`. Invariant: interaction is opt-in. `codexThreadOpen` accepts `approvalPolicy` `never` or `on-request` and sends it on `thread/start` and `thread/resume`. The default stays `never`. Upstream refusals for unsupported user configuration and appendSystemPrompt on resume remain enforced.
 - `runtimes/codex/session.ts`. Invariants: the caller owns the process and its environment, native facts are retained first, and no server request gets a permissive fallback. Spawn is injected and an explicit filtered env is required. `sandboxMode` comes from the caller (default `danger-full-access`; `inherit` passes no override); ambient `OAR_CODEX_SANDBOX` is ignored. Native goals are not exposed: `options.goals` is omitted from the BYOK signature, no goal tools are enabled, and no `goal` control is returned. The function returns the raw AdapterSession without `sealSession`, `withSessionCredentials` or observe. It builds one `sessionCredentialRedactor` per open, creates the upstream kernel with it as the `redact` hook, and redacts errors from the open path and every control. The `onRecord` hook is registered as a kernel observer before any record is appended, so it sees every record from seq 0. Each notification is retained as a `body.origin="byok-native"` frame before the fold, and a fold failure kills the process visibly. Server requests go to the caller-owned bounded native interaction lifecycle when configured; otherwise they are declined or rejected -32601 synchronously under a 1000ms dispatch deadline. An `on-request` policy must be confirmed in the open reply. Spawn and adoption settle before the first protocol write, and a failed initialization kills. Optional caller-owned `beforeOpen` and `afterOpen` hooks run on the same client: `beforeOpen` before the `thread/start` or `thread/resume` request, returning its params, and `afterOpen` after the open reply's read-back, before `onReady`. A hook that throws kills the process. Without the hooks the open is unchanged. Codex `steer` is a required member.
 - `runtimes/grok/session.ts`. Invariant: session-local persona injection does not grant folder trust or replace built-in instructions. Append-only rules travel in the documented session metadata, not initialize metadata. The upstream resume refusal remains intact. This is fixture-verified transport routing, not live Grok qualification.
-- `shared/acp/process.ts`. Invariant: the caller owns the ACP agent process. The injected line process receives exactly the explicit filtered environment and cwd. It bounds line and registration-buffer bytes. The official `ndJsonStream` still owns framing, parse-error answers and write order. Upstream's incoming/outgoing credential filters and draining-EOF input remain in place around the injected streams. No native diagnostics or resources reader enters the fork.
-- `shared/acp/session.ts`. Invariants: the caller owns every process and the environment, and the record consumer sees every record. `acpSession(profile)` returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit env. It returns the raw AdapterSession without `sealSession` or `withSessionCredentials`, and does not use the upstream shared-connection pool or session-lifecycle wrapper. It builds one `sessionCredentialRedactor` per open, creates the upstream kernel with it as the `redact` hook, and redacts errors from the open path and every control. The `onRecord` hook is registered as a kernel observer before the recorder binds.
+- `shared/acp/process.ts`. Invariant: the caller owns the ACP agent process. The injected line process receives exactly the explicit filtered environment and cwd. It bounds line and registration-buffer bytes. The official `ndJsonStream` still owns framing, parse-error answers and write order. Upstream's incoming/outgoing credential filters and draining-EOF input remain in place around the injected streams. No native diagnostics, resources reader or shutdown/cancellation observation (`prepareShutdown`, `markNativeStop`, `observeCancellation`) enters the fork.
+- `shared/acp/session.ts`. Invariants: the caller owns every process and the environment, and the record consumer sees every record. `acpSession(profile)` returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit env. It returns the raw AdapterSession without `sealSession` or `withSessionCredentials`, and does not use the upstream shared-connection pool or session-lifecycle wrapper. It builds one `sessionCredentialRedactor` per open, creates the upstream kernel with it as the `redact` hook, and redacts errors from the open path and every control. The `onRecord` hook is registered as a kernel observer before the recorder binds. Dispose does not call `prepareShutdown` or `markNativeStop`, and a control does not wait for a pending cancellation observation: the SDK process-tree authority reads the descendants itself before it signals the tree.
 - `shared/acp/terminal.ts`. Invariant: every process the SDK starts is inside its process-tree authority. Each `terminal/create` command is spawned, adopted and reaped by the injected terminal spawn, with the session env plus the request's env entries. A released or disposed terminal stays tracked until its tree is gone. One disposal serves concurrent callers, so the session's dispose waits for the reap that the exit observer started. A failed reap is reported, and a later dispose retries every tree still alive. A `terminal/create` after disposal began is refused.
 - `shared/acp/client-app.ts`. Invariant: no permission request gets a permissive fallback. Every `session/request_permission` is answered `cancelled`, and the request and answer stay recorded. Upstream's routed client app, terminal handlers and wire-phase notification routing are retained.
-- `shared/acp/turns.ts`. Invariant: a failed prompt reads its turn frames only after the notifications received before the failure are recorded. A rejected `session/prompt` yields one event-loop turn before it reads its frames and picks the failure outcome, as `promptAcp` already does after a successful answer. The yield is bounded by that one turn, because the official SDK dispatches a notification through promise handlers only, with no timers.
+- `shared/acp/turns.ts`. Invariant: a failed prompt reads its turn frames only after the notifications received before the failure are recorded. A rejected `session/prompt` yields one event-loop turn before it reads its frames and picks the failure outcome, as `promptAcp` already does after a successful answer. The yield is bounded by that one turn, because the official SDK dispatches a notification through promise handlers only, with no timers. `abort` sends the native cancel without upstream's process-table observation window, so `pendingCancellation` is absent; the SDK process-tree authority owns tool cleanup.
 - `shared/executable/process-tree.ts`. Invariant: Node 24 strip-only TypeScript can load the SDK's synchronous process-table reader. `InvalidProcessTableError` declares its `reason` field explicitly; the upstream observation, parsing, failure-shape and kill functions keep upstream bytes.
 - `shared/acp/errors.ts`. Invariant: process diagnostics stay SDK-owned. Upstream's optional native diagnostic bundle (and its executable-manager dependency) is not imported; `acpProcessExitedError(exitCode)` keeps the transport's bounded exit message.
 - `contracts/failure.ts`, `shared/failure-class.ts`, `runtimes/codex/failure.ts` and `shared/acp/failure.ts`. Invariant: a failure class that a text rule chose is marked, so the SDK sends it as `unknown`. Every `FailedTurn` variant and `Classified` take an optional `fromText: true`. `acpFailureOutcome` sets it on its `classifyFailure` fallback, and `failureFromErrorBody` sets it on a class from Anthropic's 400 wording (`anthropicLimitText`), which Codex `codexErrorInfo` `other` carries through. The class itself, and so every OAR consumer of `failure`, is unchanged.
@@ -557,3 +557,39 @@ Omitted:
 The maintained-file inventory gains `shared/acp/errors.ts`; all other BYOK
 deltas retain their documented invariants. Build assets copy this source to
 `dist/assets/provenance/oar/044633e/`.
+
+### 0.80.1 → 0.83.0 re-vendor
+
+The base changes from `044633e9be0dfbae6d171591ef03ea31593e9fb5` (v0.80.1)
+to `ddec7e575a5f8e65ea35011e64c0d35eef08f6bd` (v0.83.0). The vendor directory
+moves from `vendor/oar/044633e` to `vendor/oar/ddec7e5`. Upstream changed five
+of the 93 selected paths; the closure stays 92 source files plus LICENSE, with
+76 upstream-byte files and the same 16 maintained files.
+
+Adopted:
+
+- `shared/acp/records.ts` (upstream bytes): an attributed `session/update`
+  whose owner link the session did not accept keeps its native frame but
+  projects no events, so it cannot relabel another owner's child or reach the
+  root projection. Only upstream's shared session pool passes the
+  `associations` callback this branch reads; the vendored `acpSession` does
+  not, so the bundled private ACP entry is byte-identical to 0.80.1.
+- `shared/executable/process-tree.ts`: `descendantsOf` takes an optional table
+  source and, on Windows, uses a parent edge only when the child started no
+  earlier than that parent, because Windows keeps a dead parent's pid. The
+  POSIX walk is unchanged. The BYOK strip-only `reason` field delta is kept.
+
+Omitted:
+
+- The ACP cancellation observation (upstream #571, #572, #577): the
+  `AcpProcess` members `prepareShutdown`, `markNativeStop` and
+  `observeCancellation`, `shared/executable/process-cancellation.ts`, the
+  session dispose calls and the turn observation window. They are backed by
+  the upstream executable manager, which this fork does not vendor; the
+  injected line process has no such members. The SDK process-tree authority
+  reads the descendants before it signals the tree (POSIX), and a Windows
+  tree stays inside its kill-on-close job object. A POSIX tool that leaves the agent's process group
+  and is orphaned by a native user cancel before dispose is not covered by
+  that read.
+
+Build assets copy this source to `dist/assets/provenance/oar/ddec7e5/`.

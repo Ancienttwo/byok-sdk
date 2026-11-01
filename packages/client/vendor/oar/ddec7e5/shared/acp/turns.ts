@@ -226,6 +226,8 @@ export function createAcpTurns(deps: {
     },
     async abort(state, request) {
       if (!state.abortRequested) {
+        // BYOK change: no process-table observation before the native cancel;
+        // the SDK process-tree authority owns tool cleanup.
         state.abortRequested = true;
         try {
           await runtime.connection.agent.notify(methods.agent.session.cancel, { sessionId: rootId });
