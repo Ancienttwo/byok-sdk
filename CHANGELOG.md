@@ -2,7 +2,23 @@
 
 ## Unreleased
 
-These changes need 0.34.0, the next MINOR.
+## 0.34.0 — source candidate
+
+0.34.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.33.0 to 0.34.0) lists every
+Host-visible change since 0.33.0: 2 breaking entries and 1 additive entry,
+each with a migration link. The envelope wire moves from v4 to v5
+(`PROTOCOL_VERSION = 5`); 0.33.0 is the last v4 release, and a Host drains
+once before the cut. There is no new Postgres migration and no SQLite schema
+change. See the [0.34.0 candidate notes](docs/releases/v0.34.0.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.34.0.md). The breaking
+changes by package: protocol, core, client, server, cloud and
+cloud-dataplane speak wire v5 and rename the runtime capability `durablePi`
+to `durableLane`, refusing a pending v4 row at startup and a hosted terminal
+receipt a v4 build wrote (#1290); client removes `DaemonConfig.durablePi`,
+renames `PiAdapterOptions.durablePi` to `durableLane` and types the launch
+resources as `RuntimeLaunchResources` (#1290).
 
 - **Breaking (protocol, core, client, server, cloud, cloud-dataplane)** — wire
   v5 (`PROTOCOL_VERSION = 5`). The runtime capability `durablePi` is renamed
