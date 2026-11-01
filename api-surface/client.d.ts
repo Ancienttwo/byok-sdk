@@ -12433,7 +12433,7 @@ export interface RuntimeObservation {
      * or in a support bundle, because the path can name the local user. Absent
      * when detection did not run an executable it can name: an unavailable
      * runtime, a bare command the OS finds on PATH at spawn (source `path`
-     * only), the bundled Pi package, or an older daemon.
+     * only), a Pi lane that launches an SDK entry, or an older daemon.
      */
     executablePath?: string;
     executableSource?: RuntimeExecutableSource;
