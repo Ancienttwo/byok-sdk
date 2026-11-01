@@ -12,7 +12,7 @@
 
 | 功能域 | 职责与权威 | 源码入口 |
 | --- | --- | --- |
-| 契约 | wire v4 消息、codec、HTTP 路径常量；tenant、store ports、device proof、sealed payload。两者都是叶子 package | `packages/protocol/src/version.ts`、`codec.ts`、`http-api.ts`；`packages/core/src/stores.ts` |
+| 契约 | wire v5 消息、codec、HTTP 路径常量；tenant、store ports、device proof、sealed payload。两者都是叶子 package | `packages/protocol/src/version.ts`、`codec.ts`、`http-api.ts`；`packages/core/src/stores.ts` |
 | 协调内核与终态权威 | 认证、路由登记、设备上行闸门、mailbox、attempt 与终态裁决。不持有进程状态，事实全部在注入的 stores 里 | `packages/cloud/src/cloud.ts#createByokCloud`、`inbound.ts`、`router/registry.ts` |
 | Host 组合与部署 | Topology L 内嵌组合（SQLite 或 memory）；Topology H 的 Postgres + R2 与 mailbox wake；浏览器端 timeline 投影 | `packages/server/src/index.ts#createByokServer`；`packages/cloud-dataplane/src/runtime.ts`；`packages/ui-runtime/src/timeline.ts` |
 | 设备接入与会话 | 配对、token 续期、单会话 long-poll、cursor 落盘即 ack、outbox、SQLite journal | `packages/client/src/daemon/auth-manager.ts`、`connection-manager.ts`、`journal/` |

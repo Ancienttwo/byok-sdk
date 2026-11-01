@@ -182,7 +182,7 @@ unproven (see the evidence list below).
   rewritten, and are append-only. The current decoder reads every
   line back to the committed JSON, and the current HTTP decoders read every
   literal body to its independently authored value (messages responses must
-  account for their `batchLength`). The v4 corpus carries every message type,
+  account for their `batchLength`). The v5 corpus carries every message type,
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
   and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers no release yet: 0.33.0 is
