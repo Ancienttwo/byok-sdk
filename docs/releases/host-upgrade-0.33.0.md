@@ -10,7 +10,7 @@ after 0.33.0 is published.
 Its fixed source is the release commit, the squash merge of the 0.33.0
 release PR on `main`, not moving `main` or Unreleased. The release commit is
 not known yet; it is filled in at publication. The rows and migration list
-below are counted from the upgrade manifest at the freeze base `970ab899d`.
+below are counted from the upgrade manifest at the freeze base `f6e5b1f08`.
 It has not been walked through.
 The behavior authorities are the upgrade manifest that `@byok-sdk/client`
 ships (`upgrade-manifest.json`, 0.32.0 to 0.33.0) and the CHANGELOG 0.33.0,
@@ -50,7 +50,7 @@ All nine public packages move together. Pin each one to exactly 0.33.0.
 | --- | --- |
 | Git tag | `v0.33.0` |
 | Release commit SHA | not known yet (filled in at publication) |
-| Release PR base | not known yet (the scope is frozen at main `970ab899d`) |
+| Release PR base | not known yet (the scope is frozen at main `f6e5b1f08`) |
 
 Verify a source checkout with
 `git rev-parse 'v0.33.0^{commit}'`; the result must equal the release commit
@@ -356,8 +356,11 @@ Additions a Host may configure in 0.33.0:
 - **Sealed projection grants** (`agent-memory-projection-grant-sealing`,
   #1045 S2): `AgentMemoryProjectionGrant` takes an optional
   `sealing { scopeId, epoch }`; the daemon also seals the Agent messages and
-  memory evidence of a task that names the new categories. A Host that issues
-  no sealing sees no change ([sealed payload v2](#sealed-payload-v2-opt-in-hosted-only)).
+  memory evidence of a task that names the new categories. The sealing is
+  fixed for its writer epoch (#1288): a grant at the same writer epoch with
+  another form fails with `AgentMemoryError`, and an Agent whose outbox
+  0.32.0 wrote is bound plaintext, so sealing it takes a higher writer epoch.
+  A Host that issues no sealing sees no change ([sealed payload v2](#sealed-payload-v2-opt-in-hosted-only)).
 
 - **Grok through config** (`daemon-config-runtimes-grok`, #1094):
   `DaemonConfig.runtimes.grok` takes `compatInstructions`,
@@ -537,6 +540,12 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
    - 0.32.0 and earlier cannot open a schema 8 SQLite file; restore the copy
      from step 1. Activity, approvals and tasks written after the upgrade are
      lost with it.
+   - A 0.33.0 daemon moves an Agent's memory outbox state to version 3 on its
+     first write (#1288), and a 0.32.0 daemon refuses version 3. Before a
+     device goes back to 0.32.0, reset each such Agent's outbox, or have the
+     Host grant it a higher writer epoch so the old daemon starts a new one.
+     An Agent whose projection was sealed also needs its hosted projection
+     erased, as the 0037 rollback note says.
    - A service unit installed by 0.32.0 or later carries the SDK marker.
      Whether an earlier CLI replaces it is not verified here; remove it with
      the 0.33.0 CLI's `uninstall` before restoring the old unit.
