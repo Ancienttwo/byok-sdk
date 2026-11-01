@@ -3651,7 +3651,7 @@ or complete Windows/bundled-product support requested in #608.
 
 ### Durable Pi lane (experimental, flag-gated)
 
-The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and never requests one; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
+The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). Without an `auto` tool-authorization policy the lane runs YOLO, as every lane does since ADR-037: the `beforeTool` hook admits calls without Host approval and never requests one; a throwing hook blocks the call. Under `auto` (#1061) the hook asks the task's gate as described in Tool authorization; a file-scoped task also gets the six SDK scoped file tools. Without a file scope the structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
 
 ### Official Pi migration security and installation contract (2026-09-25 consolidation)
 
@@ -4139,7 +4139,8 @@ it never runs ungated, and no third mode exists. Current coverage:
 | Runtime | `auto` | How |
 | --- | --- | --- |
 | Pi, ordinary RPC lane | Supported | Digest-bound loopback gate in the v9 launch; a Pi `tool_call` hook registered after every other extension judges the final input; every native pi-subagents child loads the same gate as a required child extension; pi-subagents refuses external-cli, external-job and machine runners while it is present. A file-scoped session also passes its grant through that child gate config: the child re-resolves the roots and registers the same six SDK scoped tools, and the gate refuses them if it did not |
-| Pi, prepared and durable lanes | Declined before claim | No native tools (prepared) / unverified worker (durable) |
+| Pi, prepared lane | Supported | Digest-bound loopback gate in the v7 prepared launch; the same Pi `tool_call` hook asks before every counted tool call. The session has no native tools and no subagents |
+| Pi, durable lane | Supported | Digest-bound loopback gate in the v3 durable launch, shared by every worker of the execution; the harness `beforeTool` hook asks after the parent recorded the tool intent and before the tool runs. A pending approval is an in-flight tool, so a worker crash while it waits ends the execution without replay. No subagents |
 | Claude | Supported | SDK `PreToolUse` callback hook registered at `initialize`; the prompt is sent only after the CLI confirms `hooks_applied`. It covers native tools, MCP tools and native subagents and is not skipped by bypass mode, allow rules or `disableAllHooks` (qualified with Claude 2.1.312 against a loopback provider) |
 | Codex | Declined before claim | App-server approvals fire only for sandbox escalations, not before every call |
 | Grok | Declined before claim | Only client-hosted terminal commands pass through the SDK; Grok's own file tools do not |
@@ -4260,17 +4261,22 @@ encoded payloads, aliases) are not recognized. It is a tool gate, not an
 execution sandbox and not a file-scope boundary: an allowed shell command can
 still reach any file, network or local resource the OS user can. The optional
 `toolAuthorization.fileScope` policy (#1061) is enforced on the ordinary Pi
-RPC lane on darwin/linux by six SDK-owned scoped tools: `read`, `write`,
-`edit`, `find`, `grep` and `ls`. They shadow the native Pi tools of the
-same names; each call re-runs the internal canonical guard immediately before
+RPC and durable lanes on darwin/linux by six SDK-owned scoped tools: `read`,
+`write`, `edit`, `find`, `grep` and `ls`. They shadow the native Pi tools of
+the same names (on the durable lane they replace the harness `read`, `write`
+and `edit`, and every worker spawn, the first and each respawn, re-verifies the
+serialized roots before a tool exists); each call re-runs the internal canonical guard immediately before
 IO, and the host re-verifies every serialized root and refuses to open a
 session whose registered loadout drifts. `find`, `grep` and `ls` walk or
 list only guarded paths under the admitted roots, never follow a symlink
 entry, skip `.byok`, and are text-only: `grep` skips binary files rather than
 claiming image/binary support. Every configured root is also revalidated after
 claim and before the runtime starts. The session never falls back to an
-unscoped or native file tool; Windows, prepared/durable Pi and other adapters
-decline before claim. Inside that session the `auto` gate asks on every call
+unscoped or native file tool. The prepared lane has no native file tools and
+gets no scoped ones, because its counted tool manifest is MCP-only; a scoped
+prepared task gets the same gate and scope floor, so every counted tool call
+asks. Windows, memory-reader offers and other adapters decline before claim.
+Inside that session the `auto` gate asks on every call
 for any tool outside the six SDK file tools — `bash`, MCP tools, and SDK or
 user extension tools — regardless of the built-in risk level, so no risk
 heuristic can auto-allow one. An `allowWithoutAsking` rule is the only

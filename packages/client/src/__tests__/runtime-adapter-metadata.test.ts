@@ -143,13 +143,13 @@ describe('adapter-declared facts the daemon reads instead of the runtime id', ()
     }]))).toEqual({
       claude: { fileScope: undefined, providerProfileBinding: undefined },
       codex: { fileScope: undefined, providerProfileBinding: undefined },
-      pi: { fileScope: { lanes: ['rpc'] }, providerProfileBinding: true },
+      pi: { fileScope: { lanes: ['rpc', 'prepared'] }, providerProfileBinding: true },
       grok: { fileScope: undefined, providerProfileBinding: undefined },
       hermes: { fileScope: undefined, providerProfileBinding: undefined },
       dsh: { fileScope: undefined, providerProfileBinding: undefined },
     });
     const durable = new PiAdapter({ durableLane: true }).descriptor;
-    expect(durable.fileScope).toEqual({ lanes: ['rpc'] });
+    expect(durable.fileScope).toEqual({ lanes: ['durable'] });
     expect(durable.providerProfileBinding).toBe(true);
     expect(Object.isFrozen(adapters.pi.descriptor.fileScope!.lanes)).toBe(true);
   });

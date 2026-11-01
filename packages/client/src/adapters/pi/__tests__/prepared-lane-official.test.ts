@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { AgentSession, ModelRuntime, type ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { startToolAuthorizationIpc, type ToolAuthorizationIpcConfig } from '../../../tool-authorization-ipc';
 import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import type { InputPreparationCompiledSnapshotV1, InputPreparationModelV1 } from '../../../input-preparation';
 import {
@@ -114,7 +115,7 @@ interface Run {
   toolExecutions: number;
 }
 
-async function runPrepared(envelope: PreparedPiInputV1, respond: (sequence: number) => Response): Promise<Run> {
+async function runPrepared(envelope: PreparedPiInputV1, respond: (sequence: number) => Response, toolAuthorization?: ToolAuthorizationIpcConfig): Promise<Run> {
   const sends: string[] = [];
   const gate = createPreparedGate({
     transport: (async (_resource: unknown, init?: RequestInit) => {
@@ -146,6 +147,7 @@ async function runPrepared(envelope: PreparedPiInputV1, respond: (sequence: numb
     modelRuntime,
     tools: envelope.toolManifest.order.length === 0 ? [] : [{ name: TOOL_NAME, identity: TOOL_IDENTITY, tool }],
     sessionId: 'prepared-session-test',
+    ...(toolAuthorization === undefined ? {} : { toolAuthorization }),
   });
   try {
     await session.prompt(PREPARED_TRIGGER_TEXT);
@@ -260,6 +262,24 @@ describe('SDK prepared session on official Pi 1.0.4: byte gate', () => {
     expect(run.sends[1]).not.toBe(requestBody);
     expect(run.toolExecutions).toBe(1);
     expect(globalFetch.calls).toEqual([]);
+  }, TIMEOUT_MS);
+
+  test('the auto gate is asked before a counted tool call, and a denied call never executes (#1061)', async () => {
+    const { envelope } = await compile();
+    // The gate's loopback IPC is the one sanctioned use of the global transport here.
+    globalFetch.restore();
+    const asked: string[] = [];
+    const ipc = await startToolAuthorizationIpc({ timeoutMs: 5_000, authorize: async (call) => {
+      asked.push(call.toolName);
+      return { decision: 'deny', code: 'tool_authorization_denied', reason: 'synthetic denial' };
+    } });
+    try {
+      const run = await runPrepared(envelope, (sequence) => (sequence === 1 ? toolCallResponse() : textResponse('done', true)), ipc.config);
+      expect(asked).toEqual([TOOL_NAME]);
+      expect(run.toolExecutions).toBe(0);
+      expect(run.gate.state.admitted).toEqual([1, 2]);
+      expect(run.sends[1]).toContain('tool_authorization_denied: synthetic denial');
+    } finally { await ipc.close(); }
   }, TIMEOUT_MS);
 
   test('a body that is not D is refused before any send, with the typed reason written first', async () => {

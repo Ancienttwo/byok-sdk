@@ -12,21 +12,19 @@ export const PI_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   mcpToolsets: true,
   messageDraft: true,
   approvalInteractive: false,
-  // The ordinary RPC lane and its native Pi subagents; the daemon never
-  // offers `auto` to the prepared lane.
+  // The ordinary RPC lane with its native Pi subagents, and the prepared lane.
   toolAuthorizationAuto: true,
   preparedLane: true,
   // Pi has no user MCP configuration and no session persistence switch.
   isolation: Object.freeze({ userContext: true, userMcpServers: false, sessionPersistence: false }),
 });
 
-/** The durable Pi worker (`PiAdapterOptions.durableLane`): no steer, resume, `auto` or prepared lane. */
+/** The durable Pi worker (`PiAdapterOptions.durableLane`): no steer, resume or prepared lane. */
 export const PI_DURABLE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   ...PI_RUNTIME_CAPABILITIES,
   durableLane: true,
   steer: false,
   resume: false,
-  toolAuthorizationAuto: false,
   preparedLane: false,
   // Agent resources (including excluded user context) only run on the RPC
   // lane, so the durable worker must not inherit this capability from

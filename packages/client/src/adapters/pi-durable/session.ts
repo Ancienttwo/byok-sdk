@@ -6,6 +6,8 @@ import type { RuntimeOperationInstructionStartInput, Session } from '../../types
 import { piLaunchCommand, type PiRuntimeLaunchResources } from '../pi/runtime-launch';
 import type { PiByokLauncherConfig } from '../pi/pi-adapter';
 import { serializePiHostConfig } from '../pi/runtime-host-binding';
+import { startToolAuthorizationIpc } from '../../tool-authorization-ipc';
+import { serializeFileScopeGrant } from '../../file-scope-serialization';
 import { PiRpcClient, type SpawnFn } from '../pi/rpc-client';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { AsyncQueue } from '../../util/async-queue';
@@ -44,15 +46,28 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   const model = selection.lane === 'byok-profile' ? selection.providerProfile.modelId : selection.modelId;
   let serialized: ReturnType<typeof serializePiHostConfig>;
   let file: Awaited<ReturnType<typeof admitReplica>>;
+  // One gate serves every worker of this execution, so a respawn asks the same
+  // task's approvals. The worker re-resolves the scope on each spawn.
+  let gate: Awaited<ReturnType<typeof startToolAuthorizationIpc>> | undefined;
   try {
-    serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 2,
+    gate = input.toolAuthorization === undefined ? undefined : await startToolAuthorizationIpc(input.toolAuthorization);
+    if (gate?.fileScope !== undefined && gate.fileScope.home.path !== binding.canonicalHome) {
+      throw startFailure('authority', 'durable file scope home does not match the manifest lease');
+    }
+    serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 3,
       replica: binding, replicaRoot: options.replicaRoot,
       provider: `byok-sdk-${profileRef}`, model, instruction: input.instruction,
       mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
         launchCwd: binding.canonicalHome },
+      toolAuthorization: gate?.config ?? null,
+      fileScope: gate?.fileScope === undefined ? null : serializeFileScopeGrant(gate.fileScope),
     });
     file = await admitReplica(options.replicaRoot, binding);
-  } catch (error) { throw startFailure('infrastructure', undefined, false, error); }
+  } catch (error) {
+    await gate?.close();
+    if (error instanceof RuntimeExecutionFailure) throw error;
+    throw startFailure('infrastructure', undefined, false, error);
+  }
   const shellGroups = new Set<number>();
   let workerPid: number | undefined;
   const queue = new AsyncQueue<AgentEvent>();
@@ -88,9 +103,11 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     if (disposal) return disposal;
     closing = true; recovery.stop();
     const attempt = (async () => {
-      try { if (rpc) await rpc.dispose(); } finally { await disposeDurableShellGroups(shellGroups); }
-      if (pump) await pump; // owned tree receipt before replica cleanup or lease release
-      await resetReplica(file);
+      try {
+        try { if (rpc) await rpc.dispose(); } finally { await disposeDurableShellGroups(shellGroups); }
+        if (pump) await pump; // owned tree receipt before replica cleanup or lease release
+        await resetReplica(file);
+      } finally { await gate?.close(); } // a failed teardown never leaves the loopback gate listening
       await input.scratch.release();
       await runtimeLaunch.release(); queue.end();
     })();
