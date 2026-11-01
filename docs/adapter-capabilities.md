@@ -758,7 +758,8 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
   `--patch` overlay (mode 0600, in the execution scratch directory). `deepseek`
   uses the DeepSeek API route; `custom` is a hand-declared OpenAI-compatible
   route; any other provider id is a dsh pi-ai catalog route. The key itself is
-  only in the environment, under `keyEnv`. `keyEnv` must contain `KEY`,
+  only in the environment, under `keyEnv`; `baseUrl` refuses credentials and a
+  query string. `keyEnv` must contain `KEY`,
   `TOKEN`, `SECRET` or `PASSWORD`, which dsh strips from tool processes. It
   must not start with `BYOK_` (the runtime environment drops those) or `DSH_`,
   and it must not be `DEEPSEEK_API_KEY`, which dsh `web_search` also reads.
@@ -781,9 +782,11 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
   `usage_update` carries context occupancy only (`contextTokens`,
   `contextWindow`, `contextSource: 'provider'`), never cost counters.
 - Failures: a failed turn is a JSON-RPC error with text only, so it is a
-  non-retryable `semantic` failure with class `unknown`. A failed resume (an
-  unknown id or another workspace) is `authority`. A dsh process that ends on
-  its own is `runtime_exited`.
+  non-retryable `semantic` failure with class `unknown`, even when the text
+  names a rate limit. Any JSON-RPC error answering a resume is `authority`:
+  dsh answers an unknown id and another workspace alike (`-32602`). A dsh
+  process that ends on its own, before or after answering, is
+  `runtime_exited`.
 - Interrupt and close: `session/cancel`, then a wait for the cancelled prompt
   answer, bounded by `interruptTimeoutMs`. `close()` sends `session/close`,
   then disposes the owned process tree. Steering throws
@@ -806,7 +809,7 @@ Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
 [runtime contract suite](runtime-contract.md) against the real qualified dsh.
 Locally on macOS with dsh 0.2.1-rc.5, every case passes, `dsh.close`
 included; `dsh.sigkill` is skipped as the limitation above. The design and probes are in
-[the dsh adapter plan](https://github.com/Ancienttwo/byok-sdk/pull/1256).
+[the dsh adapter plan](plans/2026-11-01-dsh-adapter.md).
 
 ## Selection and platforms
 
