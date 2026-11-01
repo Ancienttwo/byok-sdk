@@ -335,11 +335,12 @@ describe('Agent memory MCP local authority', () => {
       const outbox = await AgentMemoryRedactedOutbox.open(context, { grantRef: 'grant', writerEpoch: 1, policyRevision: 'policy-1' });
       expect(outbox.pending()).toEqual([]);
       const rawOutbox = await fs.readFile(path.join(context.canonicalHome, '.byok', 'agent-memory-redacted-outbox-v2.json'), 'utf8');
-      expect(rawOutbox).toContain('"version":2');
+      expect(rawOutbox).toContain('"version":3');
       expect(rawOutbox).not.toContain('eyJzdW1tYXJ5IjoiW3JlZGFjdGVkXSJ9');
       expect(rawOutbox).not.toContain('native file tool final value');
       expect(JSON.parse(rawOutbox)).toMatchObject({
         currentWriterEpoch: 1,
+        sealing: null,
         highWater: [{ writerEpoch: 1, sourceSeq: 1 }],
         pending: [],
       });
