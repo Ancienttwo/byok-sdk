@@ -78,6 +78,9 @@ second registry.
   field, and live Grok evidence is pending (#633).
 - Trajectory evidence: only ordinary Pi declares `event-stream`, and Pi with
   `durablePi: true` does not; Claude and Codex records are `unknown`.
+- Process tree: after a dsh root is killed from outside, its tool processes
+  in their own process groups survive; `close()` on a live root reaps them (0.33,
+  [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 
 By default Claude and Codex run YOLO
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude with
@@ -785,6 +788,11 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
   answer, bounded by `interruptTimeoutMs`. `close()` sends `session/close`,
   then disposes the owned process tree. Steering throws
   `SteerUnsupportedError`.
+- Known limitation (0.33, [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)): dsh runs each shell tool in its own
+  process group. When the dsh root is killed from outside (SIGKILL, OOM), the
+  SDK's owned process tree reaches neither that group nor its reparented
+  processes, so those tool processes outlive the session. Closing the session
+  through the SDK does reap them (`dsh.close`).
 - Detection: `dsh --version` (advisory when it is not the qualified
   `0.2.1-rc.5`), then `dsh --profile acp --help`, which also writes the acp
   profile into a new root (else `refused: acp_unavailable`). `authPresent`
@@ -796,11 +804,8 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
 
 Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
 [runtime contract suite](runtime-contract.md) against the real qualified dsh.
-Locally on macOS with dsh 0.2.1-rc.5, every case passes except `dsh.sigkill`.
-dsh runs each shell tool in its own process group, and after the dsh root is
-killed from outside, the SDK's owned process tree reaches neither that group
-nor its reparented processes. Closing the session through the SDK does reap
-them (`dsh.close`). The design and probes are in
+Locally on macOS with dsh 0.2.1-rc.5, every case passes, `dsh.close`
+included. No case covers the limitation above. The design and probes are in
 [the dsh adapter plan](https://github.com/Ancienttwo/byok-sdk/pull/1256).
 
 ## Selection and platforms

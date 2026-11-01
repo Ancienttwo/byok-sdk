@@ -1044,6 +1044,12 @@ context occupancy (`usage_update`) and no provider cost counters, so a dsh
 task has no cost usage. The `keyEnv` rules are in
 [adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
 
+dsh starts each shell tool in its own process group. `close()` on a live dsh
+root reaps them. A dsh root killed from outside (SIGKILL, OOM) leaves those
+tool processes running: the owned process tree reaches neither their groups
+nor, once they are reparented, the processes themselves. This is a known 0.33
+limitation ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
+
 ### Local runtime probe observation
 
 `RuntimeDetectResult` has one required `kind`: `available`, `not-found`,

@@ -44,7 +44,7 @@ two:
 - Grok syncs its workspace and bundles with `cli-chat-proxy.grok.com` during a
   turn, whatever the model provider.
 
-dsh adds four cases of its own in `dsh.contract.ts`:
+dsh adds three cases of its own in `dsh.contract.ts`:
 
 - `dsh.patch`: every model request goes to the patch route and names the
   patch model.
@@ -52,11 +52,10 @@ dsh adds four cases of its own in `dsh.contract.ts`:
   the adapter's own `DSH_AGENTS_HOME` reaches the model.
 - `dsh.close`: closing a session while a shell tool runs reaps the tool's
   processes.
-- `dsh.sigkill`: after the dsh root is killed from outside, the session fails
-  as `runtime_exited` and `close()` reaps the tool's processes. This case fails
-  on dsh 0.2.1-rc.5 (macOS, measured locally): dsh puts each shell tool in its
-  own process group, which the owned process tree does not reach once the root
-  is gone.
+
+No case covers a dsh root killed from outside: its tool processes survive,
+which is a known 0.33 limitation
+([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269), see the [dsh adapter](adapter-capabilities.md#dsh-adapter-custom-harness)).
 
 dsh publishes only prereleases, so the installer accepts an exact semver
 prerelease (`0.2.1-rc.5`) as an exact version.
