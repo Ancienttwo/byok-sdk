@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.33.0 — source candidate
+
+0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.32.0 to 0.33.0) lists every
+Host-visible change since 0.32.0: 4 breaking and 5 additive entries, each
+with a migration link. The envelope wire stays v4 and gains one gated field,
+`task.fail.failure.scope` behind the `runtime-quota-scope` flag (#1271). It
+adds Postgres migrations 0035 and 0036, and the embedded server upgrades a
+SQLite schema 6 or 7 file to schema 8 in place, one-way. 0.33.0 completes
+#1113 (A2b to A5; see the [0.33.0 candidate notes](docs/releases/v0.33.0.md)
+and the [Host upgrade checklist](docs/releases/host-upgrade-0.33.0.md)). The
+breaking changes by package: server writes SQLite schema 8, which 0.32.0 and
+earlier cannot open (#1113 A2b, A3), and serves `tasks.events` from durable
+cursors, refusing older cursors as `cursor_unknown` and removing the event
+buffer options (#1113); cloud and cloud-dataplane close a task's activity log
+and approval timeline with its first terminal or accepted cancellation,
+refuse later output with `task_settled_by_cloud`, stop idle-expiring an open
+approval timeline and remove `ApprovalTimelineAppendInput.ttlMs`, with
+Postgres migration 0035 (#1113 A3). On POSIX, disposal now also ends the
+observed descendants of a runtime root that exited by itself or was killed
+from outside (#1269).
+
 - **Feature (client; #1258)** — `DshAdapter` runs DeepSeek Harness
   (`@deepseek-ai/dsh`, qualified 0.2.1-rc.5) over ACP on the custom-harness
   path (`harnessId: 'dsh'`). It runs on macOS and Linux, in a Host-owned
@@ -12,12 +35,88 @@
   ACP session runs on the vendored OAR ACP stack in the lazy private
   `#byok-acp-runtime` entry, beside Grok. The runtime contract suite and
   nightly matrix gain a dsh leg.
-- On POSIX the owned process tree observes each running runtime root's
-  descendants once a second. When a root dies from an outside SIGKILL or an
-  OOM kill, disposal now ends the tools it started in groups of their own,
-  such as dsh shell tools, which the group signal and a read after the root's
-  death cannot reach (#1269). A tool started and orphaned within one second is
-  not seen.
+
+- **Behavior change (client; #1269)** — on POSIX the owned process tree
+  observes each running runtime root's descendants once a second, and
+  disposal ends the ones it observed, also those in process groups of their
+  own that the group signal and a read after the root's death cannot reach.
+  This covers a root killed from outside (SIGKILL, OOM), such as a dsh root
+  whose shell tools would otherwise keep running, and a root that exits by
+  itself: its observed descendants are now ended at disposal too. A process
+  started and orphaned within one second is not seen. The contract case
+  `dsh.sigkill` runs again.
+
+- **Fix (client; #1273)** — the pi-durable shell gate starts `/bin/bash` with
+  `--norc`, so `~/.bashrc` can no longer run before shell ownership is
+  acknowledged (the 0.32.0 known limitation F16-2).
+
+- **Feature (protocol, client, cloud; #1271)** — a `quota`
+  `task.fail.failure` may carry `scope: 'account' | 'model'`, and
+  `TaskResult.failure` and `TerminalResult.failure` copy it. The Claude
+  adapter maps `five_hour` and `seven_day` limits to `account` and
+  `seven_day_opus` and `seven_day_sonnet` to `model`; other runtimes never set
+  it. A daemon sends `scope` only to a server that advertises the new
+  `runtime-quota-scope` flag, which the reference server and hosted cloud do.
+  `@byok-sdk/protocol` adds `RUNTIME_QUOTA_SCOPE_CAPABILITY`,
+  `RUNTIME_QUOTA_SCOPES` and `RuntimeQuotaScope`.
+
+- **Feature (client; #1278)** — `RuntimeAdapterDescriptor` gains optional
+  `fileScope` (`{ lanes }`) and `providerProfileBinding`, and `RuntimeAdapter`
+  gains an optional `projectMcpEnvironment(env)`. The daemon reads these
+  declarations instead of checking for the runtime id `pi`; `PiAdapter`
+  declares all three, so built-in behavior is unchanged. A custom adapter that
+  reused the id `pi` without enforcing a file scope no longer admits scoped
+  offers until it declares `fileScope`. Every SDK JSONL line transport now
+  uses one LF-only decoder, so the durable Pi host no longer splits a frame at
+  a raw U+2028 or U+2029 inside a JSON string.
+
+- **Breaking (server; #1113 A2b, A3)** — the embedded server's SQLite file is
+  schema 8 and persists the task activity log, so activity and its cursors
+  survive a restart. A schema 6 or 7 file is upgraded in place when it opens,
+  keeping pairings, tasks and approvals; 7→8 creates the activity log tables
+  empty, rebuilds `approval_timeline_tail` without the idle deadline and adds
+  the task output closure trigger. The upgrade is one-way: 0.32.0 and earlier
+  refuse a schema 8 file, so back up the file before the first open. A v8 file
+  missing an activity table or the trigger is refused as
+  `SQLITE_SCHEMA_INVALID`.
+
+- **Breaking (cloud, cloud-dataplane, server; #1113 A3)** — a task's activity
+  log and approval timeline close in the same transaction as its first
+  terminal or accepted Host cancellation, and expire ten minutes later without
+  renewal. Later `task.progress`, `task.artifact` and `task.await_approval` are
+  refused with `task_settled_by_cloud`, also on a redacted or archived task;
+  an append to a closed timeline throws the new `approval_timeline_settled`.
+  An open approval timeline no longer idle-expires: it keeps at most 50
+  observations and `MAX_APPROVAL_TIMELINE_BYTES` (1 MiB), never evicting the
+  pending request. `ApprovalTimelineAppendInput.ttlMs` is removed and
+  `ApprovalTimelineTail` gains `terminalAt`. Postgres migration 0035 adds the
+  closing trigger and backfill; apply it only through `deploy/scripts/migrate`,
+  together with the code, in a maintenance window.
+
+- **Feature (cloud, cloud-dataplane, server; #1113 A4)** — `TaskEventsWake`, a
+  content-free hint that a task's state, activity log or approval timeline
+  changed. The in-memory and SQLite compositions expose one;
+  `createPostgresTaskEventsWake` listens, on a session-mode DSN, for the
+  triggers migration 0036 adds, so commits on any instance wake readers on
+  every instance. A reader no hint reaches re-reads within 5 seconds.
+
+- **Breaking (server; #1113)** — `ByokServer.tasks.events` and
+  `TaskHandle.events()` read the durable activity log, task state and approval
+  timeline instead of an in-process buffer. Cursors resume across a restart;
+  cursors from 0.32.0 and earlier are refused as `cursor_unknown`. State is
+  coalesced, not replayed, and terminal tasks stay readable (`feed_expired` is
+  gone). `taskEventBufferLimit`, `taskEventRetentionMs`,
+  `DEFAULT_TASK_EVENT_BUFFER_LIMIT` and `DEFAULT_TASK_EVENT_RETENTION_MS` are
+  removed.
+
+- **Feature (client; #1094)** — `DaemonConfig.runtimes.grok` takes
+  `compatInstructions`, `agentUserMcpServers` and `versionPolicy`, and
+  `createDaemon` builds the Grok adapter when `runtimeAllowlist` lists `grok`.
+
+- **Fix (client; #1261)** — `byok-agent runtimes` and offline `doctor` build
+  their adapters with the daemon's factory, so a configured
+  `runtimes.<id>.versionPolicy` reaches their version verdict, and an invalid
+  `piByokLauncher` throws the same error as `createDaemon`.
 
 ## 0.32.0 — 2026-11-01 (published)
 
