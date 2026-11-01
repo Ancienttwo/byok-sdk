@@ -219,7 +219,7 @@
     {
       "id": "agent-memory-projection-grant-sealing",
       "impact": "additive",
-      "summary": "AgentMemoryProjectionGrant takes an optional sealing { scopeId, epoch } (#1045 S2). With it, the daemon seals each memory projection snapshot under that Agent scope and never sends it in plaintext; without a usable key it sends nothing. A Host that issues no sealing sees no change. The daemon also seals the Agent messages and memory evidence of a task whose offer names agent-message or memory-projection, and advertises sealed-payload-v2 whenever it advertises sealed-payload-v1.",
+      "summary": "AgentMemoryProjectionGrant takes an optional sealing { scopeId, epoch } (#1045 S2). With it, the daemon seals each memory projection snapshot under that Agent scope and never sends it in plaintext; without a usable key it sends nothing. The sealing is fixed for its writer epoch and survives a drained outbox: a grant at the same writer epoch with another sealing, plaintext included, fails with AgentMemoryError and sends nothing. An outbox written by 0.32.0 is bound plaintext, so sealing an existing Agent's projection takes a higher writer epoch. A Host that issues no sealing sees no change. The daemon also seals the Agent messages and memory evidence of a task whose offer names agent-message or memory-projection, and advertises sealed-payload-v2 whenever it advertises sealed-payload-v1.",
       "migration": "docs/migrations/1045-e2ee-v2.md#sealed-memory-projections",
       "items": [
         "config:agentMemory",
