@@ -66,6 +66,15 @@ These changes need 0.34.0, the next MINOR.
   `session/cancel`, and close kills the recorded tools that are still the same
   process. When that read fails, the cancel is refused and nothing is sent.
 
+- **Fix (client; #1305)** — a refused native cancel is no longer silent.
+  Grok, dsh and Hermes `session.interrupt()` reject with a
+  `RuntimeExecutionFailure` (`category: 'infrastructure'`) whose reason starts
+  `<runtime> interrupt refused:` and names why no cancel went out, and the
+  session fails as it does when a cancel is not answered in time. An abort that
+  finds the turn already ended still returns normally. Hermes now records the
+  gateway's descendants before it sends `session/cancel`, so on POSIX a gateway
+  tool that left its process group and was orphaned by the cancel ends at close.
+
 ## 0.33.0 — 2026-11-01 (published)
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.

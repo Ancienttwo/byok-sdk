@@ -206,6 +206,12 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
       if (!this.connection || !turn) return;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
+        // Tools run under the gateway, and the cancel can orphan one that left its group (#1297): remember them first.
+        try {
+          this.gateway?.observeDescendants();
+        } catch (error) {
+          throw infrastructure('run', `hermes interrupt refused: ${error instanceof Error ? error.message : String(error)}`);
+        }
         this.connection.notify('session/cancel', { sessionId: this.sessionRef });
         await Promise.race([
           turn,
