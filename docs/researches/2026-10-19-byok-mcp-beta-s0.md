@@ -1,7 +1,7 @@
 # byok MCP beta: S0 verification items 5–8 (B0)
 
 Date: 2026-10-19. Track: [#514](https://github.com/Ancienttwo/byok-sdk/issues/514).
-Source plan: [external-Bot beta §7/§8](../plans/2026-10-19-byok-mcp-server-external-bot-beta.md#7-s0-verification-items), [#536](https://github.com/Ancienttwo/byok-sdk/pull/536).
+Source plan: [external-Bot beta §7/§8](../adr/ADR-040-byok-mcp-server-external-bot-beta.md#7-s0-verification-items), [#536](https://github.com/Ancienttwo/byok-sdk/pull/536).
 Code baseline: `787d1fefff34db4dd2b53ca1b498b852726a9486`.
 Branch: `codex/beta-b0-s0-verification`.
 
@@ -17,7 +17,7 @@ Branch: `codex/beta-b0-s0-verification`.
 | 6. Pre-persisted task identity | VERIFIED — conflict and readback | A repeated call creates no second task. It throws a conflict. Read the exact original offer to recover. |
 | 7. Host cancellation and tree disposal | VERIFIED — local lifecycle | `tasks.cancel` reaches a real daemon and native Codex adapter. All three fixture PIDs exit before `daemon.stop()`. Existing tests also cover Claude, Codex and Pi. |
 | 8. Host memory-intent surface | VERIFIED — split surface and gap | Cloud notice API and Host reference logic exist. The embedded `ByokServer` has no memory-intent method. Beta writes stay out of scope. |
-| 9. Hermes | OWNED BY #539 | See [#539](https://github.com/Ancienttwo/byok-sdk/pull/539) and its [S0 list](../plans/2026-10-19-519-hermes-mcp-client.md#7-s0-hermes-items-536-7-item-9). No Hermes run here. |
+| 9. Hermes | OWNED BY #539 | See [#539](https://github.com/Ancienttwo/byok-sdk/pull/539) and its [S0 list](https://github.com/Ancienttwo/byok-sdk/pull/539). No Hermes run here. |
 
 This report closes the local evidence work for items 5–8. It does not close all S0 gates or authorize B1 to start. It does not prove remote Streamable HTTP conformance, Grok Bot compatibility, or live model behavior. Those claims remain UNVERIFIED.
 
@@ -147,7 +147,7 @@ One real path is `HostMemoryPage.approve` → durable Host ledger → `flushNoti
 
 Executed commands and outputs are in the ledger below. The cloud notice suite passes 30 tests. The Host memory suite passes 27 tests. Its six Linux-only end-to-end cases skip on this macOS host. Linux CAS, macOS helper execution and Windows memory writes are therefore UNVERIFIED by this run.
 
-**B5 implication:** the plan's cloud-surface uncertainty is resolved. The Host half is present as a copy-and-own reference, not as a method on the public embedded facade. There is no ready `ByokServer` call that can implement `byok_memory_propose` alone. Keep beta v1 read-only under [plan Q9](../plans/2026-10-19-byok-mcp-server-external-bot-beta.md#9-decisions-q1q11-decided). The reference code does not by itself establish P5 acceptance, platform proof or permission to enable beta writes.
+**B5 implication:** the plan's cloud-surface uncertainty is resolved. The Host half is present as a copy-and-own reference, not as a method on the public embedded facade. There is no ready `ByokServer` call that can implement `byok_memory_propose` alone. Keep beta v1 read-only under [plan Q9](../adr/ADR-040-byok-mcp-server-external-bot-beta.md#9-decisions-q1q11-decided). The reference code does not by itself establish P5 acceptance, platform proof or permission to enable beta writes.
 
 ## Existing tests and required checks
 

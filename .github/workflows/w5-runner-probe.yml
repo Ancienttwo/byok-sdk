@@ -3,7 +3,7 @@ name: W5 runner probe
 # #605 W5, owner approvals A2 and A3: reads what a GitHub-hosted ubuntu-latest
 # runner offers a QEMU/KVM power-cut run, before any W5 workflow exists. The
 # reads are listed under "Owner decisions (2026-10-26)" in
-# docs/plans/2026-10-19-wo09-windows-ledger-validation.md.
+# docs/researches/2026-10-19-wo09-windows-ledger-validation.md.
 #
 # Manual trigger only. It installs qemu-system-x86 and nbdkit from the Ubuntu
 # archive and nothing else, checks out no code, downloads no guest image and

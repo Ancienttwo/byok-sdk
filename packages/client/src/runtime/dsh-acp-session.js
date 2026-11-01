@@ -3,7 +3,7 @@
 import { acpSession } from '../../vendor/oar/044633e/shared/acp/session.js';
 
 /**
- * dsh 0.2.1-rc.5 ACP (docs/plans/2026-11-01-dsh-adapter.md §1). The adapter
+ * dsh 0.2.1-rc.5 ACP (docs/researches/2026-11-01-dsh-adapter.md §1). The adapter
  * appends `--patch <file>` through `SessionOptions.launchArgs`. No steer, no
  * vendor notifications. A failed resume is left to the adapter: dsh answers
  * an unknown session and another workspace alike with -32602.

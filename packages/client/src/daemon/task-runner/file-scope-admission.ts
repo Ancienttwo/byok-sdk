@@ -11,7 +11,7 @@ import type { RuntimeAdapterDescriptor } from '../../types';
  *
  * This is deliberately local admission, not a wire capability: v1 adds no
  * RuntimeCapabilities field and the Host cannot see the matrix before
- * dispatch (docs/plans/2026-10-31-1061-explicit-file-scope.md, section 4.1).
+ * dispatch (docs/adr/ADR-043-explicit-file-scope.md, section 4.1).
  */
 export interface FileScopeAdmissionFacts {
   readonly descriptor: Pick<RuntimeAdapterDescriptor, 'id' | 'fileScope'>;

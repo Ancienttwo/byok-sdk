@@ -884,7 +884,7 @@ also stays outside this history-window change.
 ## Cross-Bot delegation
 
 This section covers slices X1–X6 and X2M of the
-[approved plan](../../docs/plans/2026-10-19-k8b-cross-bot.md).
+[approved plan](../../docs/adr/ADR-041-k8b-cross-bot.md).
 See the [acceptance matrix](VALIDATION.md) for evidence and open rows.
 A Bot can delegate requests to other Bots of the same team. The `to` enum
 lists this Bot first, then each active team Bot after its first persona

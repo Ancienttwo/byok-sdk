@@ -4,8 +4,8 @@ This guide connects one Hermes Agent profile to the byok MCP beta server in this
 example. Hermes talks to the user. byok coding agents (Pi, Codex, Claude) do the
 coding work on a paired device. Hermes reaches them only through the `byok_*` tools.
 
-Sources: the [beta plan](../../../docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md)
-§4–§8 and the [Hermes client plan](../../../docs/plans/2026-10-19-519-hermes-mcp-client.md)
+Sources: the [beta plan](../../../docs/adr/ADR-040-byok-mcp-server-external-bot-beta.md)
+§4–§8 and the [Hermes client plan](https://github.com/Ancienttwo/byok-sdk/pull/539)
 §3–§9 (H1–H3, issue #593). Tool names, arguments and limits below come from the code
 in `src/`, cited as `file:line` at byok-sdk `6fad13af`. Paths are relative to
 `examples/byok-mcp-server/` unless they start with `packages/`. Hermes facts come from reading

@@ -2,7 +2,7 @@
 
 This guide connects a Grok Bot to a Host that serves the beta MCP endpoint from
 this example. It covers slice B6 of
-[the beta plan](../../../docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md)
+[the beta plan](../../../docs/adr/ADR-040-byok-mcp-server-external-bot-beta.md)
 (§6, §7 items 1–4, §8). It adds no code. Tool names, arguments and limits below
 are cited from the source at `6fad13af`. Anything that depends on Grok Bot's own
 behavior is marked UNVERIFIED until the owner checklist at the end records a live
