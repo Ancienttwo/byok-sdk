@@ -10,6 +10,7 @@ import {
   type StorageReservation,
   type TenantStorageEntitlementInput,
 } from '@byok-sdk/core';
+import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createSqliteEmbeddedStores } from '..';
@@ -127,7 +128,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
       proposedMessageId: 'cancel-restart',
       reason: 'restart proof',
       materialize: async (seq, messageId) => ({
-        body: JSON.stringify({ v: 4, id: messageId, seq, ts: '2026-01-01T00:00:00.000Z', type: 'task.cancel', task_id: 'task-restart', payload: { reason: 'restart proof' } }),
+        body: JSON.stringify({ v: PROTOCOL_VERSION, id: messageId, seq, ts: '2026-01-01T00:00:00.000Z', type: 'task.cancel', task_id: 'task-restart', payload: { reason: 'restart proof' } }),
         bodyHash: contentHash(`sha256:${'b'.repeat(64)}`),
         byteSize: 42n,
       }),
@@ -199,9 +200,9 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
       messageId,
       admission: 'limited' as const,
       // A pending row must be a protocol envelope to survive reopen; pad it to
-      // an exact byte size (`{"v":4,"p":""}` is 14 bytes).
+      // an exact byte size (`{"v":5,"p":""}` is 14 bytes).
       materialize: () => ({
-        body: JSON.stringify({ v: 4, p: 'x'.repeat(byteSize - 14) }),
+        body: JSON.stringify({ v: PROTOCOL_VERSION, p: 'x'.repeat(byteSize - 14) }),
         bodyHash: contentHash(`sha256:${'c'.repeat(64)}`),
         byteSize: BigInt(byteSize),
       }),

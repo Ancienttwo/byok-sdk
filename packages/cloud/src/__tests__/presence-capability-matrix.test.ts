@@ -12,7 +12,7 @@ import { createHarness, TENANT_A } from './support/harness';
 
 const MATRIX = {
   steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true,
-  toolAuthorizationAuto: true, durablePi: false, preparedLane: false,
+  toolAuthorizationAuto: true, durableLane: false, preparedLane: false,
   isolation: { userContext: true, userMcpServers: true, sessionPersistence: true },
 } as const;
 

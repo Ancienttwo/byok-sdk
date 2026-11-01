@@ -23,7 +23,7 @@ import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, type CloudHarness 
 import { SEALING, inlineMember } from './support/sealed';
 
 type CorpusLine = { type: MessageType; payload: Record<string, unknown> };
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as CorpusLine);

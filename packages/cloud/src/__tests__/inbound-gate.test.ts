@@ -344,7 +344,7 @@ describe('the inbound gate', () => {
 
 /** The first sealed golden line of each daemon type with a sealed branch (#654). */
 const sealedGoldenPayloads = new Map<string, unknown>();
-for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8').trimEnd().split('\n')) {
+for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v5.envelopes.ndjson', import.meta.url), 'utf8').trimEnd().split('\n')) {
   const line = JSON.parse(raw) as { type: string; payload: unknown };
   if ((DAEMON_TO_SERVER_TYPES as readonly string[]).includes(line.type) && isSealedPayload(line.type, line.payload)
     && !sealedGoldenPayloads.has(line.type)) sealedGoldenPayloads.set(line.type, line.payload);
