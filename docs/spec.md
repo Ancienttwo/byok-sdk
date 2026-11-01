@@ -4068,7 +4068,10 @@ must all match. A rule has a unique nonblank `id`, optional display-only
   rule for that call, including tool-name-only rules. Ask rules still match.
 - `pathGlob`: lexically resolved path; ask matches any extracted path, while
   allow requires every extracted path, including batch changes/move targets,
-  to match the same rule. It does not inspect arbitrary argument fields. In
+  to match the same rule. An ask also matches each path's real path through
+  its nearest existing parent (darwin `/tmp` under a `/private/tmp/**` rule,
+  a workspace symlink into a protected directory), so it can only add asks;
+  an allow stays lexical. It does not inspect arbitrary argument fields. In
   `auto` paths use the hook's call cwd; `all` has no per-call cwd in its event
   and resolves relative paths against the task workspace.
 - `mcpServer`, `mcpTool`: trusted MCP identity from the admitted task tool

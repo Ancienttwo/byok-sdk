@@ -534,12 +534,14 @@ export function classifyToolCall(
     }
   }
   const targets: string[] = [];
+  const physicalTargets: string[] = [];
   for (const { path: raw, mutating } of paths) {
     if (typeof raw !== 'string' || raw.length === 0) continue;
     const expanded = raw === '~' ? home : raw.startsWith('~/') ? `${home}${raw.slice(1)}` : raw;
     const target = resolve(call.cwd, expanded);
     targets.push(target);
     const physicalTarget = nearestRealPath(target);
+    if (physicalTarget !== undefined) physicalTargets.push(physicalTarget);
     if (physicalTarget === undefined) floorCertain = false;
     if (isProtected(target) || (physicalTarget !== undefined && isProtected(physicalTarget))) reasons.add('sensitive-path');
     if (mutating && !within(workspace, target)) reasons.add('write-outside-workspace');
@@ -556,9 +558,13 @@ export function classifyToolCall(
       if (match.mcpTool !== undefined && (call.mcp === undefined || !matchGlob(call.mcp.tool, match.mcpTool, false))) continue;
       if (match.pathGlob !== undefined) {
         const pattern = normalizedPath(match.pathGlob, platform);
+        const matches = (target: string) => matchGlob(normalizedPath(target, platform), pattern, true);
+        // An ask also matches the real path (`/tmp` vs `/private/tmp`, a
+        // symlink into a protected directory), which can only add asks. An
+        // allow stays lexical: a resolved alias never widens what it grants.
         if (targets.length === 0 || !(allow
-          ? targets.every(target => matchGlob(normalizedPath(target, platform), pattern, true))
-          : targets.some(target => matchGlob(normalizedPath(target, platform), pattern, true)))) continue;
+          ? targets.every(matches)
+          : targets.some(matches) || physicalTargets.some(matches))) continue;
       }
       ids.push(id);
     }
