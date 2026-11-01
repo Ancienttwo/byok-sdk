@@ -1,4 +1,3 @@
-import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
 import type { RuntimeTaskInput } from '../../types';
 import { createClaudeMcpIdentityResolver } from './mcp-identity';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities';
@@ -403,8 +402,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ];
 
       throwIfCancelled();
-      const mcpIdentity = createClaudeMcpIdentityResolver(() => control.mcpStatus(),
-        new Map(Object.entries(taskMcpServers).filter(([name]) => !isReservedMcpServerName(name))));
+      const mcpIdentity = createClaudeMcpIdentityResolver(() => control.mcpStatus(), new Map(Object.entries(taskMcpServers)));
       gate = startInput.toolAuthorization === undefined ? undefined
         : new ClaudeToolAuthorizationBridge(startInput.toolAuthorization, error => client?.abortStartup(error), mcpIdentity.resolve);
       const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000, gate?.hooks);
