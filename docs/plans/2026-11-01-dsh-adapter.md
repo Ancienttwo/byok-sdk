@@ -29,7 +29,7 @@
 - O9：#1095 的运行时环境硬性删除 `BYOK_*`，`BYOK_DSH_PROVIDER_KEY` 到不了 dsh。改为 Host 在 `model.keyEnv` 里指定变量名，adapter 校验：名字含 `KEY`/`TOKEN`/`SECRET`/`PASSWORD`（dsh 会从工具子进程去掉），不以 `BYOK_` 或 `DSH_` 开头，不是 `DEEPSEEK_API_KEY`。批准时的两个目的（工具子进程拿不到 key、`web_search` 不用这把 key 计费）不变。
 - 用量：OAR 把 dsh 的 `usage_update` 投影成上下文用量，adapter 按 spec 已有的上下文用量字段发出，没有成本计数，O6 的“无 token 用量”仍成立。
 - #1252（运行时可执行文件上报）合入 main 后，dsh 的 `detect()` 同样上报 `executablePath`/`executableSource`。
-- §5 的 SIGKILL 用例在本机 macOS + dsh 0.2.1-rc.5 失败：dsh 给每个 shell 工具单独建进程组，dsh 根进程被外部 SIGKILL 后，SDK 的进程树清理够不到那个组，也找不到已被重新挂到 init 的进程。SDK 自己的关闭路径（`dsh.close`）能回收。owner 决定（2026-11-01）：作为 0.33 已知限制接受，dsh 切片不改共享的 `adapters/process-tree.ts`，后续见 [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)；契约套件删去 SIGKILL 用例，不加把泄漏写成预期的用例，保留关闭回收用例。
+- §5 的 SIGKILL 用例在本机 macOS + dsh 0.2.1-rc.5 失败：dsh 给每个 shell 工具单独建进程组，dsh 根进程被外部 SIGKILL 后，SDK 的进程树清理够不到那个组，也找不到已被重新挂到 init 的进程。SDK 自己的关闭路径（`dsh.close`）能回收。owner 决定（2026-11-01）：作为 0.33 已知限制接受，dsh 切片不改共享的 `adapters/process-tree.ts`，后续见 [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)；契约套件里 `dsh.sigkill` 改为引用 #1269 的 skip，不加把泄漏写成预期的用例，保留关闭回收用例。
 
 阻塞项：做一个 `all` 模式、POSIX、无草稿的 dsh adapter 没有阻塞项。下列能力在 0.33 做不到，需要 dsh 上游变化或单独设计：`auto` 工具授权（无全量执行前门）、`fileScope`（只有一个 workspace 根）、消息草稿与 token 用量（ACP 只发已提交消息与上下文用量）、类型化失败分类、Windows。
 
@@ -233,7 +233,7 @@ DeepSeek 官方路由改写 `llm-deepseek` 项的 `apiKeyEnv`。`packages/keys` 
 - PR CI：`scripts/ci/runtime-contract-install.mjs` 安装 `@deepseek-ai/dsh@0.2.1-rc.5`（exact），跑 `dsh.contract.ts`。
 - nightly：`runtime-contract-nightly.yml` 矩阵加 `dsh`，安装 `@deepseek-ai/dsh@latest`；失败更新同一个跟踪 issue。不加 `alpha` leg：alpha 不是用户默认会装到的版本，噪声大于信号。
 - 升级节奏：nightly 失败时先读 `docs/upgrade-guide/<新版本>/`，再决定改 adapter 还是保持旧 pin。每次提升 `QUALIFIED_DSH_VERSION` 都要重跑整个 dsh 合同。
-- 合同用例在通用套件之外为 dsh 加三条：patch 生效（`configOptions` 只含 SDK 路由）、`DSH_AGENTS_HOME` 隔离（loopback 请求里无用户技能的正向对照）、`close()` 回收运行中的工具进程。外部 SIGKILL 后的回收不设用例，是 0.33 已知限制（[#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)）。
+- 合同用例在通用套件之外为 dsh 加三条：patch 生效（`configOptions` 只含 SDK 路由）、`DSH_AGENTS_HOME` 隔离（loopback 请求里无用户技能的正向对照）、`close()` 回收运行中的工具进程。外部 SIGKILL 后的回收以 `dsh.sigkill` skip 登记，是 0.33 已知限制（[#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)）。
 - 版本 token 就是 `dsh --version` 的整行；`exact` 匹配，不引入 semver（#1103 D2）。
 
 ## 6. 0.33 范围外
