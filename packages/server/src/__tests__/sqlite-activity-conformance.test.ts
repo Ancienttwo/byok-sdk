@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createMutableClock } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { runActivityConformance, type ActivityCompositionFactory } from '@byok-sdk/conformance';
-import { describe, it } from 'vitest';
+import { describe } from 'vitest';
 import { isSqliteAvailable } from '../sqlite-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
@@ -25,10 +25,8 @@ const factory: ActivityCompositionFactory = {
   },
 };
 
-if (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') {
+const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
+
+describeSqlite('server SQLite activity store', () => {
   runActivityConformance('server SQLite', factory);
-} else {
-  describe.skip('activity log conformance [server SQLite] — node:sqlite unavailable', () => {
-    it('needs node:sqlite', () => undefined);
-  });
-}
+});
