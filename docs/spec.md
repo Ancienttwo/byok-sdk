@@ -325,8 +325,7 @@ change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
 0.33.0 is a MINOR under the general policy above, with no exception. The
-upgrade manifest from 0.32.0 holds 9 breaking entries, the envelope wire moves
-from v4 to v5 (`durablePi` is renamed `durableLane`), and the release adds
+upgrade manifest from 0.32.0 holds 7 breaking entries, and the release adds
 Postgres migrations 0035, 0036 and 0037 and server SQLite schema 8. See the
 [0.33.0 candidate notes](releases/v0.33.0.md).
 
@@ -626,10 +625,7 @@ Offer and terminal receipts hold wire bytes, and a wire v4 build reads only v4
 bytes. There is no receipt migration: a store a wire v3 build wrote is not
 supported, and a v4 deployment starts from a new store (owner decision,
 2026-10-27: no deployment holds wire v3 data). See
-[the wire v4 upgrade note](releases/925-wire-v4.md). A wire v5 build opens
-the stores a drained v4 deployment left, but a hosted terminal receipt that a
-v4 build stored no longer decodes (`terminal_receipt_unreadable`); see
-[the wire v5 migration](migrations/wire-v5-durable-lane.md).
+[the wire v4 upgrade note](releases/925-wire-v4.md).
 
 ### Bot turn outcome fragments and routine time points
 

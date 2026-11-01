@@ -10,8 +10,7 @@ after 0.33.0 is published.
 Its fixed source is the release commit, the squash merge of the 0.33.0
 release PR on `main`, not moving `main` or Unreleased. The release commit is
 not known yet; it is filled in at publication. The rows and migration list
-below are counted from the upgrade manifest at the freeze base `fdf39b10a`
-with the release PR #1290.
+below are counted from the upgrade manifest at the freeze base `f6e5b1f08`.
 It has not been walked through.
 The behavior authorities are the upgrade manifest that `@byok-sdk/client`
 ships (`upgrade-manifest.json`, 0.32.0 to 0.33.0) and the CHANGELOG 0.33.0,
@@ -26,8 +25,8 @@ The release record is [`docs/releases/v0.33.0.md`](v0.33.0.md).
 ## Version policy
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
-The upgrade manifest from 0.32.0 holds 9 breaking and 6 additive entries, the
-envelope wire moves from v4 to v5, and the release adds Postgres migrations 0035, 0036 and 0037 and server SQLite
+The upgrade manifest from 0.32.0 holds 7 breaking and 6 additive entries, and
+the release adds Postgres migrations 0035, 0036 and 0037 and server SQLite
 schema 8
 ([version policy](../spec.md#pre-10-package-version-policy)).
 
@@ -51,7 +50,7 @@ All nine public packages move together. Pin each one to exactly 0.33.0.
 | --- | --- |
 | Git tag | `v0.33.0` |
 | Release commit SHA | not known yet (filled in at publication) |
-| Release PR base | not known yet (the scope is frozen at main `fdf39b10a`, plus #1290) |
+| Release PR base | not known yet (the scope is frozen at main `f6e5b1f08`) |
 
 Verify a source checkout with
 `git rev-parse 'v0.33.0^{commit}'`; the result must equal the release commit
@@ -96,33 +95,17 @@ interoperate. The changes are in [the wire v4 note](925-wire-v4.md). There is
 no v3 migration: a store a v3 build wrote is not supported, and the Host
 starts v4 on a new store ([0.31.0 checklist](host-upgrade-0.31.0.md#stored-v3-state)).
 
-0.33.0 moves the envelope wire from v4 to v5 (`PROTOCOL_VERSION = 5`,
-#1290, `wire-v5-durable-lane`). v5 renames one field: the runtime capability
-`durablePi` is `durableLane` on `conn.hello` runtimes and harnesses,
-`task.claim`, presence and `RuntimeCapabilities`. There is no v4 reader and no
-negotiation. A v4 envelope is rejected, a `conn.hello` whose
-`protocolVersions` omits `5` is refused with
-`hello_protocol_version_unsupported`, and a 0.33.0 daemon cannot use a 0.32.0
-or earlier server, so the server side and the daemons upgrade together after
-the drain (checklist step 2). Unlike the v3 cut, the stores carry over:
-retained rows open, and only a pending v4 mailbox row or daemon pending
-terminal stops startup. A hosted terminal receipt a v4 build stored no longer
-decodes (`terminal_receipt_unreadable`), so read the results you still need
-before the cut. The steps are in
-[the wire v5 migration](../migrations/wire-v5-durable-lane.md).
-
-v5 also carries gated additions. A `quota`
+0.33.0 keeps wire v4 and adds gated additions. A `quota`
 `task.fail.failure` may carry `scope` (`task-fail-quota-scope`, #1271). A
 daemon sends it only to a server that advertises the new
 `runtime-quota-scope` capability flag, which the 0.33.0 reference server and
-hosted cloud do. Sealed payload v2 (#1045)
+hosted cloud do, so either upgrade order works. Sealed payload v2 (#1045)
 adds the `agent-message` and `memory-projection` sealing categories and the
 sealed forms of `agent.message.publish`, `agent.message.disposition` and the
 projection mutation, behind the `sealed-payload-v2` flag
 (`sealed-payload-v2-protocol`); they appear only on a task or grant that asks
 for them ([sealed payload v2](#sealed-payload-v2-opt-in-hosted-only)). The
-v5 corpus has 342 envelope lines (the 332 that 0.32.0 shipped, rewritten, and
-ten for these additions) and 30 HTTP lines. The 0.32.0 ordering
+corpus grows from 332 to 342 envelope lines and stays at 30 HTTP lines. The 0.32.0 ordering
 rules still apply to a Host coming from 0.30.2 or 0.31.0
 ([0.32.0 checklist](host-upgrade-0.32.0.md#wire-protocol)): upgrade the Host
 before its devices (`token-expires-in`), and check the operator inventory for
@@ -154,7 +137,7 @@ keys tests check, pin the verdicts 0.33.0 gives a store written by 0.30.2,
 | `keys-profile-store` | `accepted` | `accepted` | `accepted` |
 
 A fixture is a store at its first open, not a store in use. A journal that
-still holds a pending v3 or v4 envelope stops a 0.33.0 start
+still holds a pending v3 envelope stops a v4 start
 (`DaemonJournalProtocolUnsupportedError`), so drain before the check. The
 0.30.2 SQLite file is not opened at all: keep it, choose a new state path and
 pair the devices again.
@@ -367,8 +350,6 @@ full note; each entry links its migration section.
 | cloud | `cloud-sealed-agent-message` | `ByokCloudOptions.agentMessage` is an `AgentMessageConsumers` with optional `consume` and `consumeSealed`; `handleInboundEnvelope` takes that object in place of the `consume` function; a sealed disposition names the message by `contentMac` (#1045 S3). | Pass `agentMessage: { consume }` (and `consumeSealed` to seal messages), also to `handleInboundEnvelope`. |
 | cloud, cloud-dataplane | `cloud-sealed-memory-projection` | `AgentMemoryProjectionAuthorization` carries the grant's optional `sealing`; `AgentMemoryProjectionCommitInput` is a plaintext/sealed union; 409 `agent_memory_projection_sealing_mismatch`; Postgres migration 0037 (#1045 S4). | Apply 0037 as in [Postgres migrations](#postgres-migrations). A custom `AgentMemoryProjectionStore` handles the sealed input; an authorizer returns `sealing` only for grants that carry it. |
 | server | `task-events-durable-cursor` | `tasks.events` and `TaskHandle.events()` read the durable activity log, task state and approval timeline. Cursors resume across a restart; cursors from 0.32.0 and earlier return `TaskEventsUnavailableError` `cursor_unknown`; state is coalesced, not replayed; `feed_expired` is gone; `taskEventBufferLimit`, `taskEventRetentionMs`, `DEFAULT_TASK_EVENT_BUFFER_LIMIT` and `DEFAULT_TASK_EVENT_RETENTION_MS` are removed (#1113). | Remove the two options and exports. Discard stored cursors and start a fresh read (no `after`, or `from: 'state'`). A Host that waited for an intermediate state waits for that state or a later one, or reads `tasks.get`; one that needs every transition reads `events.subscribe()` (`task.state`). |
-| protocol, core, client, server, cloud, cloud-dataplane | `wire-v5-durable-lane` | The envelope wire is v5 (`PROTOCOL_VERSION = 5`): the runtime capability `durablePi` is renamed `durableLane`; there is no v4 reader and no negotiation; a pending v4 mailbox row or daemon pending terminal stops startup; a hosted terminal receipt a v4 build stored no longer decodes (`terminal_receipt_unreadable`) (#1290). | Drain (checklist step 2), read the hosted results you still need, then start the server side and the daemons on 0.33.0 together; read `durableLane` from presence and `RuntimeCapabilities`. |
-| client | `runtime-generic-names` | `DaemonConfig.durablePi` is removed (`DaemonConfigFieldRemovedError`); `PiAdapterOptions.durablePi` and `RuntimeCapabilities.durablePi` are `durableLane`; the daemon wires the durable lane from the adapter's `capabilities.durableLane`; the launch seam is typed `RuntimeLaunchResources` (#1290). | Set `runtimes.pi.durableLane`, or build `PiAdapter({ durableLane: true })` for `createDaemonWithAdapters`; type a custom adapter's `runtimeLaunch` as `RuntimeLaunchResources`. |
 
 Additions a Host may configure in 0.33.0:
 
@@ -436,8 +417,8 @@ installs, runtime version policies, the packaging helper, config-file
 ## Notes by starting version
 
 **From 0.32.0.** The 0.33.0 sections above: back up the SQLite file before the
-first open, the wire v5 drain, migrations 0035 to 0037, and the nine breaking
-rows from 0.32.0 to 0.33.0. Sealing v2 is opt-in.
+first open, migrations 0035 to 0037, and the seven breaking rows from 0.32.0
+to 0.33.0. Sealing v2 is opt-in.
 
 **From 0.31.0.** Also the 0.32.0 changes: migrations 0031 to 0034, the 28
 breaking rows from 0.31.0 to 0.32.0, and the process-wide stop for the
@@ -475,10 +456,8 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
    when its task's output closes can no longer be decided. Then stop the Host,
    every daemon, every CLI and every App that embeds the SDK on each machine
    that shares a store, Agent home root, skill-pack store or Pi session
-   directory. This is the drain wire v5 needs: a pending v4 row stops a
-   0.33.0 start, and from 0.30.2 a pending v3 row does too. A hosted Host
-   first reads the results it still needs of tasks that ended before the cut,
-   since a terminal receipt a v4 build stored no longer decodes. From 0.30.2 or 0.31.0 this is also the stop the path-mutation gate
+   directory. From 0.30.2 this is also the v3 drain: a pending v3 row stops a
+   v4 start. From 0.30.2 or 0.31.0 this is also the stop the path-mutation gate
    needs: 0.31.0 and earlier gates do not exclude the 0.32.0 and later OS lock.
 3. **Precheck the stores.** With 0.33.0 installed beside the old build, run
    `byok-agent upgrade check --store --json` for each `storeDir`, and
@@ -489,8 +468,7 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
 4. **Check the configs.** Run `byok-agent config check --strict --json` with
    the 0.33.0 CLI on each daemon config. Fix every error; review the effective
    `toolAuthorization`, `runtimeEnvironment` and, where Grok runs,
-   `runtimes.grok` values. Replace `durablePi` with `runtimes.pi.durableLane`
-   (`DaemonConfigFieldRemovedError`). Remove `taskEventBufferLimit` and
+   `runtimes.grok` values. Remove `taskEventBufferLimit` and
    `taskEventRetentionMs` from the server options.
 5. **Dry run.** Restore the backup into a disposable, isolated database. This
    rehearsal **writes to the scratch database**; the runner has no
@@ -507,8 +485,7 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
    0.31.0), a maintenance window for 0035 to 0037 and the deployment owner's
    authorization, migrate the live database through `deploy/scripts/migrate`
    and deploy the Host on 0.33.0 in the same window (from 0.30.2, on a new
-   store). Then move every daemon on the machine to 0.33.0 together, before
-   any reconnects: a 0.32.0 or earlier daemon cannot use a wire v5 Host. Replace
+   store). Then move every daemon on the machine to 0.33.0 together. Replace
    each service unit from 0.31.0 or earlier once with
    `byok-agent install --replace-unmarked`. Re-pair devices against a new
    SQLite store (from 0.30.2). A hosted Host that uses

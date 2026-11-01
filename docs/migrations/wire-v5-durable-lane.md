@@ -1,10 +1,10 @@
 # Wire v5: `durableLane` and generic runtime names
 
-0.33.0 moves the envelope wire from v4 to v5
+The release after 0.33.0 moves the envelope wire from v4 to v5
 (`PROTOCOL_VERSION = 5`). It renames one field: the runtime capability
 `durablePi` is `durableLane`, the durable worker lane (Pi today). Every other
 v4 shape is unchanged. The same release gives the client's Pi-named runtime
-options and types generic names. 0.32.0 is the last v4 release.
+options and types generic names. 0.33.0 is the last v4 release.
 
 A rename narrows a shipped shape. A v4 reader would strip `durableLane` and a
 v5 reader would strip `durablePi`, so between mixed peers the durable lane

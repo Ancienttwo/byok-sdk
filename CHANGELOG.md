@@ -2,27 +2,52 @@
 
 ## Unreleased
 
+These changes need the next MINOR after 0.33.0.
+
+- **Breaking (protocol, core, client, server, cloud, cloud-dataplane)** — wire
+  v5 (`PROTOCOL_VERSION = 5`). The runtime capability `durablePi` is renamed
+  `durableLane` (the durable worker lane, Pi today) on `conn.hello` runtimes
+  and harnesses, `task.claim`, presence (`DevicePresenceEntry` runtime
+  capabilities) and `RuntimeCapabilities`. Nothing else on the wire changes.
+  There is no v4 reader: drain the v4 deployment (pending mailbox rows
+  acknowledged, executions terminal, daemon pending terminals acknowledged),
+  then start the server side and the daemons together. A pending v4 row stops
+  startup with `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`,
+  `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED` or
+  `DaemonJournalProtocolUnsupportedError` and is left unchanged; retained rows
+  open, so the stores need not be new. A hosted terminal receipt written by a
+  v4 build no longer decodes (`terminal_receipt_unreadable`). The v4 golden
+  corpora retire at 0.33.0, the last v4 release. See
+  [the wire v5 migration](docs/migrations/wire-v5-durable-lane.md).
+
+- **Breaking (client)** — runtime names are generic.
+  `DaemonConfig.durablePi` is removed (`DaemonConfigFieldRemovedError`): set
+  `runtimes.pi.durableLane`. `PiAdapterOptions.durablePi` is `durableLane`.
+  The daemon wires the durable journal and `durableContext` from an adapter's
+  `capabilities.durableLane`, so a Host that builds `PiAdapter({ durableLane:
+  true })` for `createDaemonWithAdapters` needs no daemon option, and such an
+  adapter without an Agent home refuses to start. The runtime launch resources
+  are the exported `RuntimeLaunchResources` (`scratch`, `release()`):
+  `RuntimeOperationStartBase.runtimeLaunch` and `resolveRuntimeLaunch` use it
+  instead of the Pi type, which now extends it. See
+  [runtime names](docs/migrations/wire-v5-durable-lane.md#runtime-names).
+
 ## 0.33.0 — source candidate
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
 (`packages/client/upgrade-manifest.json`, 0.32.0 to 0.33.0) lists every
-Host-visible change since 0.32.0: 9 breaking and 6 additive entries, each
-with a migration link. The envelope wire moves from v4 to v5, which renames
-the runtime capability `durablePi` to `durableLane` and has no v4 reader, so
-the server side and the daemons upgrade together after a drain (#1290). v5
-also carries the gated additions `task.fail.failure.scope` behind the
-`runtime-quota-scope` flag (#1271), and the sealed payload v2 categories and
-sealed forms behind `sealed-payload-v2` (#1045). It adds Postgres migrations 0035, 0036 and 0037, and the embedded
+Host-visible change since 0.32.0: 7 breaking and 6 additive entries, each
+with a migration link. The envelope wire stays v4 and gains gated additions:
+`task.fail.failure.scope` behind the `runtime-quota-scope` flag (#1271), and
+the sealed payload v2 categories and sealed forms behind `sealed-payload-v2`
+(#1045). It adds Postgres migrations 0035, 0036 and 0037, and the embedded
 server upgrades a SQLite schema 6 or 7 file to schema 8 in place, one-way.
 0.33.0 completes #1113 (A2b to A5) and ships the first batch of #1045 E2EE v2,
 sealed Agent messages and memory projections, opt-in and hosted only (see the
 [0.33.0 candidate notes](docs/releases/v0.33.0.md) and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.33.0.md)). The
-breaking changes by package: protocol, core, client, server, cloud and
-cloud-dataplane move to wire v5, and client removes `DaemonConfig.durablePi`
-for `runtimes.pi.durableLane` and types the runtime launch seam as
-`RuntimeLaunchResources` (#1290); server writes SQLite schema 8, which 0.32.0 and
+breaking changes by package: server writes SQLite schema 8, which 0.32.0 and
 earlier cannot open (#1113 A2b, A3), and serves `tasks.events` from durable
 cursors, refusing older cursors as `cursor_unknown` and removing the event
 buffer options (#1113); cloud and cloud-dataplane close a task's activity log
@@ -36,34 +61,6 @@ category exports (#1045 S1); cloud takes `agentMessage` as an
 projection commit input a union, with Postgres migration 0037 (#1045 S3,
 S4). On POSIX, disposal now also ends the observed descendants of a runtime
 root that exited by itself or was killed from outside (#1269).
-
-- **Breaking (protocol, core, client, server, cloud, cloud-dataplane; #1290)** — wire
-  v5 (`PROTOCOL_VERSION = 5`). The runtime capability `durablePi` is renamed
-  `durableLane` (the durable worker lane, Pi today) on `conn.hello` runtimes
-  and harnesses, `task.claim`, presence (`DevicePresenceEntry` runtime
-  capabilities) and `RuntimeCapabilities`. Nothing else on the wire changes.
-  There is no v4 reader: drain the v4 deployment (pending mailbox rows
-  acknowledged, executions terminal, daemon pending terminals acknowledged),
-  then start the server side and the daemons together. A pending v4 row stops
-  startup with `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`,
-  `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED` or
-  `DaemonJournalProtocolUnsupportedError` and is left unchanged; retained rows
-  open, so the stores need not be new. A hosted terminal receipt written by a
-  v4 build no longer decodes (`terminal_receipt_unreadable`). 0.32.0 is the
-  last v4 release and its golden corpora retire as published. See
-  [the wire v5 migration](docs/migrations/wire-v5-durable-lane.md).
-
-- **Breaking (client; #1290)** — runtime names are generic.
-  `DaemonConfig.durablePi` is removed (`DaemonConfigFieldRemovedError`): set
-  `runtimes.pi.durableLane`. `PiAdapterOptions.durablePi` is `durableLane`.
-  The daemon wires the durable journal and `durableContext` from an adapter's
-  `capabilities.durableLane`, so a Host that builds `PiAdapter({ durableLane:
-  true })` for `createDaemonWithAdapters` needs no daemon option, and such an
-  adapter without an Agent home refuses to start. The runtime launch resources
-  are the exported `RuntimeLaunchResources` (`scratch`, `release()`):
-  `RuntimeOperationStartBase.runtimeLaunch` and `resolveRuntimeLaunch` use it
-  instead of the Pi type, which now extends it. See
-  [runtime names](docs/migrations/wire-v5-durable-lane.md#runtime-names).
 
 - **Feature (client; #1258)** — `DshAdapter` runs DeepSeek Harness
   (`@deepseek-ai/dsh`, qualified 0.2.1-rc.5) over ACP on the custom-harness

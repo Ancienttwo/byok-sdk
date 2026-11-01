@@ -42,15 +42,16 @@ import {
  *    to what v3 shipped. The current decoder rejects every v3 envelope on its
  *    protocol version.
  * 3. Retired v4 evidence. `golden/v4.envelopes.ndjson`, `golden/v4.http.ndjson`
- *    and `golden/v4.releases.json` (0.31.0 and 0.32.0) are byte-identical
+ *    and `golden/v4.releases.json` (0.31.0 through 0.33.0) are byte-identical
  *    to what v4 shipped. The current decoder rejects every v4 envelope on its
  *    protocol version.
  * 4. v5 self-consistency. `golden/v5.envelopes.ndjson` and
  *    `golden/v5.http.ndjson` are append-only and the current decoder reads
- *    them exactly. `golden/v5.releases.json` registers each stable v5
- *    release from 0.33.0, the first v5 release, and has no floor.
- * 5. Published rejection oracle. `byok-protocol-previous` (0.32.0, the
- *    last v4 release) rejects every v5 corpus line and a v5
+ *    them exactly. `golden/v5.releases.json` registers no release yet (the
+ *    first v5 release is the next MINOR after 0.33.0) and has no floor.
+ * 5. Published rejection oracle. `byok-protocol-previous` (0.32.0, a
+ *    published v4 release; it moves to 0.33.0 once that is published)
+ *    rejects every v5 corpus line and a v5
  *    `conn.hello`: a v4 peer cannot read v5 bytes. None of its bytes is v5
  *    evidence.
  */
@@ -315,21 +316,21 @@ const v4HttpCorpus = httpCorpusOf(v4HttpLines);
 const v4Registry = JSON.parse(V4_REGISTRY) as { readonly releases: readonly ReleaseEntry[] };
 
 describe('compat: retired v4 evidence is frozen', () => {
-  it('the v4 corpora and the v4 release registry are byte-identical to the last v4 release (0.32.0)', () => {
+  it('the v4 corpora and the v4 release registry are byte-identical to the last v4 release (0.33.0)', () => {
     expect(sha256(V4_ENVELOPES), 'golden/v4.envelopes.ndjson is retired v4 evidence and read-only').toBe(
-      'c599214bd7be45384704978e4158d82c17e26618e25b15f89a523824a9074465',
+      'd6c25dfac976b70e6198e17acb923068af44d6d3920d5866aab484412b81dfa9',
     );
     expect(sha256(V4_HTTP), 'golden/v4.http.ndjson is retired v4 evidence and read-only').toBe(
       'd43f16848d9f5ce4c90e62f3134b0bdf56796043f9c9de5fa5a8960f2f6778bc',
     );
     expect(sha256(V4_REGISTRY), 'golden/v4.releases.json is the retired v4 registry and read-only').toBe(
-      '2711f7f2686977cadedd431bbd5c5455f1918f779a855bed2e77f5ed41d1d577',
+      'd7607330580d305b2ad4287b584ec12385ce263597a29ade2ad7157ecacdd632',
     );
   });
 
   it('the v4 registry still pins the prefixes v4 releases shipped with, and the corpora end at the last one', () => {
     expect(Object.keys(v4Registry)).toEqual(['releases']);
-    expect(v4Registry.releases.map((entry) => entry.version)).toEqual(['0.31.0', '0.32.0']);
+    expect(v4Registry.releases.map((entry) => entry.version)).toEqual(['0.31.0', '0.32.0', '0.33.0']);
     for (const entry of v4Registry.releases) {
       expect(prefixHash(v4Lines, entry.envelopes.lines), `v4 envelope lines shipped with ${entry.version}`).toEqual(entry.envelopes);
       expect(prefixHash(v4HttpLines, entry.http!.lines), `v4 HTTP lines shipped with ${entry.version}`).toEqual(entry.http);
