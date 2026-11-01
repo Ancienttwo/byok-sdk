@@ -8,6 +8,7 @@ import {
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
   AgentMemoryProjectionMutationSchema,
   type AgentMemoryProjectionMutation,
+  type AgentMemoryProjectionSealedMutation,
 } from '@byok-sdk/protocol';
 import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES as PROTOCOL_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES as PROTOCOL_MEMORY_MAX_SNAPSHOT_FILES } from '@byok-sdk/protocol/constants';
 import { AGENT_HOME_INTERNAL_DIRECTORY, type AgentHomeLease, type AgentRef } from '../agent-home';
@@ -90,6 +91,22 @@ export interface AgentMemoryProjectionGrant {
   readonly grantRef: AgentMemoryProjectionMutation['grantRef'];
   readonly writerEpoch: AgentMemoryProjectionMutation['writerEpoch'];
   readonly policyRevision: AgentMemoryProjectionMutation['policyRevision'];
+  /**
+   * The Agent scope this writer epoch seals its snapshots under (#1045 C4).
+   * It is fixed for the epoch: the Host issues a higher epoch to change it.
+   * With it, a snapshot is only ever sent sealed.
+   */
+  readonly sealing?: { readonly scopeId: string; readonly epoch: number };
+}
+
+/** Seals one projection snapshot under a grant's Agent scope; `undefined` when the scope or its key is not usable. */
+export interface AgentMemoryProjectionSealer {
+  sealMemoryProjection(input: {
+    readonly sealing: { readonly scopeId: string; readonly epoch: number };
+    readonly agentRef: AgentRef;
+    readonly identity: { readonly agentId: string; readonly writerEpoch: number; readonly sourceSeq: number; readonly mutationId: string };
+    readonly redactedBytes: string;
+  }): Promise<AgentMemoryProjectionSealedMutation['sealed'] | undefined>;
 }
 export interface AgentMemoryRedactedOutboxRecord {
   readonly version: 2;
@@ -801,9 +818,13 @@ function redactedBytes(raw: AgentMemorySnapshot, candidate: Uint8Array): Uint8Ar
 }
 
 interface OutboxHighWater { readonly writerEpoch: number; readonly sourceSeq: number; }
+/** The form the current writer epoch projects in: `null` is plaintext. */
+type OutboxSealing = { readonly scopeId: string; readonly epoch: number } | null;
 interface OutboxState {
-  readonly version: 2;
+  readonly version: 3;
   readonly currentWriterEpoch: number;
+  /** Fixed for the writer epoch and kept after its pending records drain. */
+  readonly sealing: OutboxSealing;
   /** Retained after compaction so a restart cannot reset the current epoch. */
   readonly highWater: readonly OutboxHighWater[];
   /** Redacted immutable mutations only, in source-sequence order. */
@@ -824,8 +845,24 @@ function freezeOutboxRecord(value: unknown): AgentMemoryRedactedOutboxRecord {
   if (!mutation.success) throw new AgentMemoryError('Agent memory outbox state is invalid');
   return Object.freeze({ version: 2 as const, mutation: Object.freeze(mutation.data), createdAt: value.createdAt });
 }
+function grantSealing(grant: AgentMemoryProjectionGrant): OutboxSealing {
+  return grant.sealing === undefined ? null : Object.freeze({ scopeId: grant.sealing.scopeId, epoch: grant.sealing.epoch });
+}
+function sameSealing(left: OutboxSealing, right: OutboxSealing): boolean {
+  return left === null || right === null ? left === right : left.scopeId === right.scopeId && left.epoch === right.epoch;
+}
+function freezeOutboxSealing(value: unknown): OutboxSealing {
+  if (value === null) return null;
+  if (!isPlainRecord(value) || !exactKeys(value, ['scopeId', 'epoch']) || typeof value.scopeId !== 'string' || value.scopeId.length === 0 || !validOrderingValue(value.epoch)) throw new AgentMemoryError('Agent memory outbox state is invalid');
+  return Object.freeze({ scopeId: value.scopeId, epoch: value.epoch });
+}
 function freezeOutboxState(value: unknown): OutboxState {
-  if (!isPlainRecord(value) || !exactKeys(value, ['version', 'currentWriterEpoch', 'highWater', 'pending']) || value.version !== 2 || !validOrderingValue(value.currentWriterEpoch) || !Array.isArray(value.highWater) || !Array.isArray(value.pending)) throw new AgentMemoryError('Agent memory outbox state is invalid');
+  // 0.32.0 wrote version 2 without a binding. It had no sealing grant, so
+  // every version 2 epoch is plaintext; turning sealing on takes a higher
+  // writer epoch, as for any change of form.
+  if (isPlainRecord(value) && value.version === 2 && !('sealing' in value)) return freezeOutboxState({ ...value, version: 3, sealing: null });
+  if (!isPlainRecord(value) || !exactKeys(value, ['version', 'currentWriterEpoch', 'sealing', 'highWater', 'pending']) || value.version !== 3 || !validOrderingValue(value.currentWriterEpoch) || !Array.isArray(value.highWater) || !Array.isArray(value.pending)) throw new AgentMemoryError('Agent memory outbox state is invalid');
+  const sealing = freezeOutboxSealing(value.sealing);
   if (value.highWater.length > 1 || value.pending.length > 1) throw new AgentMemoryError('Agent memory outbox state is invalid');
   const highWater = value.highWater.map((entry): OutboxHighWater => {
     if (!isPlainRecord(entry) || !exactKeys(entry, ['writerEpoch', 'sourceSeq']) || !validOrderingValue(entry.writerEpoch) || !validOrderingValue(entry.sourceSeq, true)) throw new AgentMemoryError('Agent memory outbox state is invalid');
@@ -843,15 +880,15 @@ function freezeOutboxState(value: unknown): OutboxState {
     if (record.mutation.writerEpoch !== value.currentWriterEpoch || mutationIds.has(record.mutation.mutationId) || sourceSeqs.has(record.mutation.sourceSeq) || record.mutation.sourceSeq > (highWaterByEpoch.get(record.mutation.writerEpoch) ?? 0)) throw new AgentMemoryError('Agent memory outbox state is invalid');
     mutationIds.add(record.mutation.mutationId); sourceSeqs.add(record.mutation.sourceSeq);
   }
-  return Object.freeze({ version: 2 as const, currentWriterEpoch: value.currentWriterEpoch, highWater: Object.freeze(highWater), pending: Object.freeze(pending) });
+  return Object.freeze({ version: 3 as const, currentWriterEpoch: value.currentWriterEpoch, sealing, highWater: Object.freeze(highWater), pending: Object.freeze(pending) });
 }
 function outboxStateJson(state: OutboxState): string {
-  return JSON.stringify({ version: state.version, currentWriterEpoch: state.currentWriterEpoch, highWater: state.highWater, pending: state.pending });
+  return JSON.stringify({ version: state.version, currentWriterEpoch: state.currentWriterEpoch, sealing: state.sealing, highWater: state.highWater, pending: state.pending });
 }
-function initialOutboxState(writerEpoch: number): OutboxState { return freezeOutboxState({ version: 2, currentWriterEpoch: writerEpoch, highWater: [], pending: [] }); }
+function initialOutboxState(grant: AgentMemoryProjectionGrant): OutboxState { return freezeOutboxState({ version: 3, currentWriterEpoch: grant.writerEpoch, sealing: grantSealing(grant), highWater: [], pending: [] }); }
 function stateWithHighWater(state: OutboxState, writerEpoch: number, sourceSeq: number, pending: readonly AgentMemoryRedactedOutboxRecord[]): OutboxState {
   if (writerEpoch !== state.currentWriterEpoch) throw new AgentMemoryError('Agent memory outbox state is invalid');
-  return freezeOutboxState({ version: 2, currentWriterEpoch: state.currentWriterEpoch, highWater: [Object.freeze({ writerEpoch, sourceSeq })], pending });
+  return freezeOutboxState({ version: 3, currentWriterEpoch: state.currentWriterEpoch, sealing: state.sealing, highWater: [Object.freeze({ writerEpoch, sourceSeq })], pending });
 }
 
 async function publishAgentMemoryProjection(port: AgentMemoryProjectionPort, mutation: AgentMemoryProjectionMutation): Promise<{ readonly accepted: boolean }> {
@@ -877,10 +914,15 @@ export class AgentMemoryRedactedOutbox {
   private state!: OutboxState;
   private fileRevision!: string;
   private writeTail: Promise<void> = Promise.resolve();
-  private constructor(private readonly context: AgentMemoryTaskContext, private readonly grant: AgentMemoryProjectionGrant, readonly filePath: string) {}
-  static async open(input: AgentMemoryTaskContext, grant: AgentMemoryProjectionGrant): Promise<AgentMemoryRedactedOutbox> {
+  private constructor(
+    private readonly context: AgentMemoryTaskContext,
+    private readonly grant: AgentMemoryProjectionGrant,
+    readonly filePath: string,
+    private readonly sealer: AgentMemoryProjectionSealer | undefined,
+  ) {}
+  static async open(input: AgentMemoryTaskContext, grant: AgentMemoryProjectionGrant, sealer?: AgentMemoryProjectionSealer): Promise<AgentMemoryRedactedOutbox> {
     const context = taskContext(input);
-    const outbox = new AgentMemoryRedactedOutbox(context, grant, path.join(context.canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY, AGENT_MEMORY_OUTBOX_FILENAME));
+    const outbox = new AgentMemoryRedactedOutbox(context, grant, path.join(context.canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY, AGENT_MEMORY_OUTBOX_FILENAME), sealer);
     await outbox.load(); await outbox.admitGrant();
     return outbox;
   }
@@ -891,17 +933,36 @@ export class AgentMemoryRedactedOutbox {
     const currentHighWater = this.state.highWater[0]?.sourceSeq ?? 0;
     if (currentHighWater >= AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE) throw new AgentMemoryError('Agent memory outbox source sequence is exhausted');
     const sourceSeq = currentHighWater + 1;
+    const mutationId = randomUUID();
+    const redacted = Buffer.from(bytes).toString('base64url');
     const mutation = AgentMemoryProjectionMutationSchema.parse({
       taskId: this.context.taskId, agentRef: this.context.agentRef, sessionRef: this.context.sessionRef, runtimeId: this.context.runtimeId,
-      grantRef: this.grant.grantRef, writerEpoch: this.grant.writerEpoch, sourceSeq, mutationId: randomUUID(), policyRevision: this.grant.policyRevision,
-      snapshot: { redactedHash: digestBytes(bytes), redactedByteCount: bytes.byteLength, redactedBytes: Buffer.from(bytes).toString('base64url') },
+      grantRef: this.grant.grantRef, writerEpoch: this.grant.writerEpoch, sourceSeq, mutationId, policyRevision: this.grant.policyRevision,
+      ...(this.grant.sealing === undefined
+        ? { snapshot: { redactedHash: digestBytes(bytes), redactedByteCount: bytes.byteLength, redactedBytes: redacted } }
+        : { sealed: await this.seal(this.grant.sealing, { agentId: this.context.agentRef.agentId, writerEpoch: this.grant.writerEpoch, sourceSeq, mutationId }, redacted) }),
     });
     const record: AgentMemoryRedactedOutboxRecord = Object.freeze({ version: 2, mutation: Object.freeze(mutation), createdAt: new Date().toISOString() });
     await this.persist(stateWithHighWater(this.state, mutation.writerEpoch, mutation.sourceSeq, [record]));
     return record;
   }); }
+  /** A grant with `sealing` gets a sealed snapshot or none; the snapshot never goes out in plaintext. */
+  private async seal(
+    sealing: NonNullable<AgentMemoryProjectionGrant['sealing']>,
+    identity: { readonly agentId: string; readonly writerEpoch: number; readonly sourceSeq: number; readonly mutationId: string },
+    redactedBytes: string,
+  ): Promise<AgentMemoryProjectionSealedMutation['sealed']> {
+    const sealed = await this.sealer?.sealMemoryProjection({ sealing, agentRef: this.context.agentRef, identity, redactedBytes });
+    if (sealed === undefined) throw new AgentMemoryError('Agent memory projection cannot be sealed under its grant');
+    return sealed;
+  }
   async replay(port: AgentMemoryProjectionPort): Promise<AgentMemoryProjectionReplayOutcome> { return this.exclusive(async () => {
     for (const record of this.pending()) {
+      // One writer epoch has one form. A pending record of another form stops the outbox unsent.
+      const { sealed } = record.mutation;
+      if (!sameSealing(sealed === undefined ? null : { scopeId: sealed.scope.id, epoch: sealed.scope.epoch }, this.state.sealing)) {
+        throw new AgentMemoryError('Agent memory outbox record does not match its grant sealing');
+      }
       if (!(await publishAgentMemoryProjection(port, record.mutation)).accepted) {
         return Object.freeze({
           status: 'pending' as const,
@@ -913,7 +974,7 @@ export class AgentMemoryRedactedOutbox {
       // An accepted mutation is compacted atomically, while the epoch's
       // high-water remains durable across restart.
       await this.persist(freezeOutboxState({
-        version: 2, currentWriterEpoch: this.state.currentWriterEpoch, highWater: this.state.highWater,
+        version: 3, currentWriterEpoch: this.state.currentWriterEpoch, sealing: this.state.sealing, highWater: this.state.highWater,
         pending: this.state.pending.filter((candidate) => candidate.mutation.mutationId !== record.mutation.mutationId),
       }));
     }
@@ -922,7 +983,7 @@ export class AgentMemoryRedactedOutbox {
   private async load(): Promise<void> {
     const current = await readInternalFile(this.context, AGENT_MEMORY_OUTBOX_FILENAME);
     this.fileRevision = current.revision;
-    this.state = current.exists ? this.loadBody(current.content) : initialOutboxState(this.grant.writerEpoch);
+    this.state = current.exists ? this.loadBody(current.content) : initialOutboxState(this.grant);
   }
   private loadBody(body: string): OutboxState {
     try { return freezeOutboxState(JSON.parse(body) as unknown); }
@@ -930,12 +991,15 @@ export class AgentMemoryRedactedOutbox {
   }
   private async admitGrant(): Promise<void> {
     if (this.grant.writerEpoch < this.state.currentWriterEpoch) throw new AgentMemoryError('Agent memory outbox writer epoch is stale');
-    if (this.grant.writerEpoch === this.state.currentWriterEpoch) return;
+    if (this.grant.writerEpoch === this.state.currentWriterEpoch) {
+      if (!sameSealing(grantSealing(this.grant), this.state.sealing)) throw new AgentMemoryError('Agent memory projection grant sealing does not match its writer epoch');
+      return;
+    }
     // A newer host-issued writer epoch explicitly supersedes an undelivered
     // prior epoch. One atomic replacement clears its pending body and all old
     // high-water; its first source sequence is one. Same-epoch opens cannot
     // reset either pending state or the current epoch's high-water.
-    await this.persist(freezeOutboxState({ version: 2, currentWriterEpoch: this.grant.writerEpoch, highWater: [], pending: [] }));
+    await this.persist(initialOutboxState(this.grant));
   }
   private async persist(next: OutboxState): Promise<void> {
     const replaced = await replaceInternalFile(this.context, AGENT_MEMORY_OUTBOX_FILENAME, this.fileRevision, outboxStateJson(next));
@@ -949,7 +1013,7 @@ export class AgentMemoryRedactedOutbox {
 }
 
 /** Missing capability, grant, redactor, or port has exactly zero network side effects. */
-export async function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined): Promise<void> {
+export async function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined, sealer?: AgentMemoryProjectionSealer): Promise<void> {
   if (projection?.capability !== AGENT_MEMORY_PROJECTION_CAPABILITY || !projection.grant || !projection.redactor || !projection.port) return;
   const context = taskContext(input);
   const { grant, redactor, port } = projection;
@@ -958,7 +1022,7 @@ export async function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContex
     // replay, snapshot/redaction, append, and trailing replay in one
     // transaction so independently closing sessions cannot load the same file
     // revision and lose the later projection to a revision conflict.
-    const outbox = await AgentMemoryRedactedOutbox.open(context, grant);
+    const outbox = await AgentMemoryRedactedOutbox.open(context, grant, sealer);
     // Pending redacted mutations retain their original task/session/runtime/grant
     // binding. Drain them before touching local source files or minting a newer
     // sequence, so an offline replay cannot create a source-sequence gap.

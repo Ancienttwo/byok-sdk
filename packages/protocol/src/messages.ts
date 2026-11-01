@@ -1,10 +1,11 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
-import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type RuntimeUnavailableCause } from './constants';
+import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type RuntimeUnavailableCause } from './constants';
 import { BlobRefSchema } from './blob';
 import {
   SEALED_DECLINE_CODES,
   SealedTaskInputSchema,
+  SealedAgentMessageSchema,
   SealedTaskOutputSchema,
   RoutineRefSchema,
   TaskSealingSchema,
@@ -598,17 +599,24 @@ export const AgentMessageDraftPayloadSchema = z.object({
 }).strict();
 export type AgentMessageDraftPayload = z.infer<typeof AgentMessageDraftPayloadSchema>;
 
-export const AgentMessagePublishPayloadSchema = z
+/** The fields of an Agent message that every branch carries in plaintext. */
+const AGENT_MESSAGE_IDENTITY = {
+  agentRef: AgentRefSchema,
+  sessionRef: EGRESS_SESSION_REF,
+  contract: AgentMessageContractSchema,
+  messageId: z.uuid(),
+  cursor: z.number().int().positive(),
+};
+
+/** Daemon -> server: one Agent message in plaintext. */
+export const AgentMessagePublishPlainPayloadSchema = z
   .object({
-    agentRef: AgentRefSchema,
-    sessionRef: EGRESS_SESSION_REF,
-    contract: AgentMessageContractSchema,
-    messageId: z.uuid(),
-    cursor: z.number().int().positive(),
+    ...AGENT_MESSAGE_IDENTITY,
     contentType: AgentMessageContentTypeSchema,
     body: AGENT_MESSAGE_BODY,
     contentHash: AgentEgressContentHashSchema,
     byteCount: z.number().int().positive().max(AGENT_MESSAGE_MAX_BYTES),
+    ...NO_SEALED_MEMBER,
   })
   .strict()
   .superRefine((value, context) => {
@@ -617,21 +625,58 @@ export const AgentMessagePublishPayloadSchema = z
       context.addIssue({ code: 'custom', path: ['byteCount'], message: 'byteCount must equal UTF-8 body bytes' });
     }
   });
+export type AgentMessagePublishPlainPayload = z.infer<typeof AgentMessagePublishPlainPayloadSchema>;
+
+/**
+ * Daemon -> server: one Agent message of a task whose `sealing` lists
+ * `agent-message` (#1045 C2). `body` is sealed; `contentHash` and
+ * `byteCount` are not carried, and `messageId` and `cursor` name the write in
+ * the AAD and the content MAC. Gated on `sealed-payload-v2`.
+ */
+export const AgentMessagePublishSealedPayloadSchema = z
+  .object({ ...AGENT_MESSAGE_IDENTITY, contentType: AgentMessageContentTypeSchema, sealed: SealedAgentMessageSchema })
+  .strict();
+export type AgentMessagePublishSealedPayload = z.infer<typeof AgentMessagePublishSealedPayloadSchema>;
+
+/** Narrow with `payload.sealed !== undefined`; the plaintext branch's `sealed` is `never`. */
+export const AgentMessagePublishPayloadSchema = z.union([
+  AgentMessagePublishPlainPayloadSchema as typeof AgentMessagePublishPlainPayloadSchema,
+  AgentMessagePublishSealedPayloadSchema as typeof AgentMessagePublishSealedPayloadSchema,
+]);
 export type AgentMessagePublishPayload = z.infer<typeof AgentMessagePublishPayloadSchema>;
 
-export const AgentMessageDispositionPayloadSchema = z
+const AGENT_MESSAGE_DISPOSITION = {
+  ...AGENT_MESSAGE_IDENTITY,
+  outcome: z.enum(['accepted', 'held', 'refused']),
+  receiptId: z.uuid(),
+  reasonCode: z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional(),
+};
+
+/** Server -> daemon: the disposition of a plaintext message, naming its `contentHash`. */
+export const AgentMessageDispositionPlainPayloadSchema = z
+  .object({ ...AGENT_MESSAGE_DISPOSITION, contentHash: AgentEgressContentHashSchema, contentMac: z.never().optional() })
+  .strict();
+export type AgentMessageDispositionPlainPayload = z.infer<typeof AgentMessageDispositionPlainPayloadSchema>;
+
+/**
+ * Server -> daemon: the disposition of a sealed message (#1045 C2). It names
+ * the message by its sealed member's `contentMac`, because the sealed message
+ * carries no `contentHash`. Gated on `sealed-payload-v2`.
+ */
+export const AgentMessageDispositionSealedPayloadSchema = z
   .object({
-    agentRef: AgentRefSchema,
-    sessionRef: EGRESS_SESSION_REF,
-    contract: AgentMessageContractSchema,
-    messageId: z.uuid(),
-    cursor: z.number().int().positive(),
-    contentHash: AgentEgressContentHashSchema,
-    outcome: z.enum(['accepted', 'held', 'refused']),
-    receiptId: z.uuid(),
-    reasonCode: z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional(),
+    ...AGENT_MESSAGE_DISPOSITION,
+    contentMac: SealedAgentMessageSchema.shape.contentMac,
+    contentHash: z.never().optional(),
   })
   .strict();
+export type AgentMessageDispositionSealedPayload = z.infer<typeof AgentMessageDispositionSealedPayloadSchema>;
+
+/** Narrow with `payload.contentMac !== undefined`. */
+export const AgentMessageDispositionPayloadSchema = z.union([
+  AgentMessageDispositionPlainPayloadSchema as typeof AgentMessageDispositionPlainPayloadSchema,
+  AgentMessageDispositionSealedPayloadSchema as typeof AgentMessageDispositionSealedPayloadSchema,
+]);
 export type AgentMessageDispositionPayload = z.infer<typeof AgentMessageDispositionPayloadSchema>;
 
 const AGENT_CONTENT_TARGET = z
@@ -1391,10 +1436,15 @@ const TaskCompletePlainPayloadSchema = z.object({
 export const RuntimeFailureClassSchema = z.enum(RUNTIME_FAILURE_CLASSES);
 export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
 
+/** Whether a `quota` limit covers the whole account or one model (#1271). */
+export const RuntimeQuotaScopeSchema = z.enum(RUNTIME_QUOTA_SCOPES);
+export type RuntimeQuotaScope = z.infer<typeof RuntimeQuotaScopeSchema>;
+
 /**
  * The machine-readable failure of a `task.fail` (#869); `reason` stays display
- * text. `resetsAt` (ISO 8601 UTC) exists only on `quota`, and only when the
- * runtime reported when the limit resets.
+ * text. `resetsAt` (ISO 8601 UTC) and `scope` exist only on `quota`, and only
+ * when the runtime reported them. `scope` is gated on the server's
+ * `runtime-quota-scope` flag (#1271).
  *
  * The class is open (#1121): a well-formed class this version does not know,
  * with whatever fields a newer device put beside it, is accepted and kept
@@ -1402,7 +1452,7 @@ export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
  * typed reading.
  */
 export const TaskFailureSchema = z.union([
-  z.object({ class: z.literal('quota'), resetsAt: z.iso.datetime().optional() }).strict(),
+  z.object({ class: z.literal('quota'), resetsAt: z.iso.datetime().optional(), scope: RuntimeQuotaScopeSchema.optional() }).strict(),
   z.object({ class: RuntimeFailureClassSchema.exclude(['quota']) }).strict(),
   z.looseObject({ class: unrecognizedToken(RUNTIME_FAILURE_CLASSES) }),
 ]);
@@ -1410,7 +1460,7 @@ export type TaskFailure = z.infer<typeof TaskFailureSchema>;
 
 /** A {@link TaskFailure} as this version understands it: a class it does not know reads as `unknown`, its raw token kept. */
 export type TaskFailureReading =
-  | { readonly class: 'quota'; readonly resetsAt?: string }
+  | { readonly class: 'quota'; readonly resetsAt?: string; readonly scope?: RuntimeQuotaScope }
   | { readonly class: Exclude<RuntimeFailureClass, 'quota' | 'unknown'> }
   | { readonly class: 'unknown'; readonly reportedClass?: string };
 

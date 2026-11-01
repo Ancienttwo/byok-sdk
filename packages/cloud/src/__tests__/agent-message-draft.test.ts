@@ -20,7 +20,7 @@ async function setup() {
     { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
   const frame = (text: string, offset = 0, revision = 1) => createEnvelope('agent.message.draft', { agentRef, revision, offset, text }, { taskId });
   const send = (message: Parameters<typeof handleInboundEnvelope>[2]) => handleInboundEnvelope(bound, device.deviceId, message, undefined,
-    async () => ({ outcome: 'accepted' }), undefined, clock.now().toISOString());
+    { consume: async () => ({ outcome: 'accepted' }) }, undefined, clock.now().toISOString());
   const read = (cursor?: { revision: number; offset: number }) => h.cloud.readTaskAgentMessageDraft(TENANT_A, device.deviceId, taskId, agentRef, cursor);
   return { h, clock, device, frame, send, read, bound };
 }

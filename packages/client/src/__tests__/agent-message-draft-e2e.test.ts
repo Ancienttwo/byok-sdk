@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentMessagePublishPayload, Envelope } from '@byok-sdk/protocol';
+import type { AgentMessagePublishPlainPayload, Envelope } from '@byok-sdk/protocol';
 import type { AgentMessageDraftEvent } from '@byok-sdk/server';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -48,7 +48,7 @@ async function setup(options: { adapter?: RuntimeAdapter; oldServer?: boolean; g
         ...(options.gateReply ? { FAKE_PI_REPLY_GATE: gate } : {}) },
     })) as typeof spawn,
   });
-  const accepted: AgentMessagePublishPayload[] = [];
+  const accepted: AgentMessagePublishPlainPayload[] = [];
   const sent: Envelope[] = [];
   const rejections: unknown[] = [];
   const advertisements: string[][] = [];

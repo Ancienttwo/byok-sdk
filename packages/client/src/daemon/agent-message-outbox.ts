@@ -8,6 +8,7 @@ import {
   type AgentMessageDispositionPayload,
   type AgentMessageEgressRequirement,
   type AgentMessagePublishPayload,
+  type AgentMessagePublishSealedPayload,
 } from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home';
 import { atomicWriteFile } from '../util/atomic-write';
@@ -33,13 +34,31 @@ export interface AgentMessageOutboxRecord {
   readonly sessionRef?: string;
   /** Inert binding: only a matching durable result-failure intent authorizes activation. */
   readonly recoverySessionRef?: string;
+  /** The body sealed once for a task that seals its Agent messages (#1045); every send carries it. */
+  readonly sealed?: AgentMessagePublishSealedPayload['sealed'];
 }
 
+/** Seals a draft's body before its first durable write; it throws rather than let the body go out in plaintext. */
+export type AgentMessageDraftSealer = (draft: {
+  readonly messageId: string;
+  readonly cursor: number;
+  readonly body: string;
+  readonly maxBytes: number;
+}) => Promise<AgentMessagePublishSealedPayload['sealed']>;
+
+/**
+ * A sealed draft's append entry is schema 2, so a daemon that cannot send it
+ * sealed refuses the whole log instead of replaying the body in plaintext.
+ */
 type OutboxEntry =
-  | Readonly<{ schema: 1; kind: 'append'; record: AgentMessageOutboxRecord }>
+  | Readonly<{ schema: 1 | 2; kind: 'append'; record: AgentMessageOutboxRecord }>
   | Readonly<{ schema: 1; kind: 'activate'; taskId: string; messageId: string; sessionRef: string }>
   | Readonly<{ schema: 1; kind: 'revoke'; taskId: string; messageId: string }>
   | Readonly<{ schema: 1; kind: 'disposition'; taskId: string; disposition: AgentMessageDispositionPayload }>;
+
+function appendEntryOf(record: AgentMessageOutboxRecord): OutboxEntry {
+  return { schema: record.sealed === undefined ? 1 : 2, kind: 'append', record };
+}
 
 export class AgentMessageOutboxError extends Error {
   constructor(message: string) {
@@ -62,11 +81,15 @@ function sameAgentRef(left: AgentRef, right: AgentRef): boolean {
   return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
+/** A sealed message is named by its `contentMac`, a plaintext one by its `contentHash`; never both. */
 function exactDisposition(record: AgentMessageOutboxRecord, value: AgentMessageDispositionPayload): boolean {
-  return value.messageId === record.messageId
+  const content = record.sealed === undefined
+    ? value.contentMac === undefined && value.contentHash === record.contentHash
+    : value.contentHash === undefined && value.contentMac === record.sealed.contentMac;
+  return content
+    && value.messageId === record.messageId
     && value.cursor === record.cursor
     && value.contract === record.contract
-    && value.contentHash === record.contentHash
     && value.sessionRef === record.sessionRef
     && sameAgentRef(value.agentRef, record.agentRef);
 }
@@ -157,6 +180,8 @@ export class AgentMessageOutbox {
     readonly recoverySessionRef?: string;
     readonly maxPendingEvents: number;
     readonly maxPendingBytes: number;
+    /** Present exactly when the task seals its Agent messages. */
+    readonly seal?: AgentMessageDraftSealer;
   }): Promise<AgentMessageOutboxRecord> {
     return this.exclusive(async () => {
       if (input.contentType !== input.requirement.contentType) throw new AgentMessageOutboxError('message contentType does not match the offer contract');
@@ -173,14 +198,18 @@ export class AgentMessageOutbox {
       if (sending.length >= input.maxPendingEvents) throw new AgentMessageOutboxError('message outbox event quota is exhausted');
       const pendingBytes = sending.reduce((sum, record) => sum + record.byteCount, 0);
       if (pendingBytes + byteCount > input.maxPendingBytes) throw new AgentMessageOutboxError('message outbox byte quota is exhausted');
+      const messageId = randomUUID();
+      const cursor = this.nextCursor;
+      const sealed = await input.seal?.({ messageId, cursor, body: input.body, maxBytes: input.requirement.maxBytes });
+      this.nextCursor += 1;
       const record: AgentMessageOutboxRecord = Object.freeze({
         schema: 1,
         taskId: input.taskId,
         tenantId: input.tenantId,
         agentRef: Object.freeze({ ...input.agentRef }),
         contract: input.requirement.contract,
-        messageId: randomUUID(),
-        cursor: this.nextCursor++,
+        messageId,
+        cursor,
         contentType: input.contentType,
         body: input.body,
         contentHash: hashBody(input.body),
@@ -188,8 +217,9 @@ export class AgentMessageOutbox {
         createdAt: new Date().toISOString(),
         ...(input.sessionRef === undefined ? {} : { sessionRef: input.sessionRef }),
         ...(input.recoverySessionRef === undefined ? {} : { recoverySessionRef: input.recoverySessionRef }),
+        ...(sealed === undefined ? {} : { sealed }),
       });
-      await this.appendEntry({ schema: 1, kind: 'append', record });
+      await this.appendEntry(appendEntryOf(record));
       this.pendingByTask.set(record.taskId, record);
       return record;
     });
@@ -232,17 +262,17 @@ export class AgentMessageOutbox {
 
   publishPayload(record: AgentMessageOutboxRecord): AgentMessagePublishPayload {
     if (record.sessionRef === undefined) throw new AgentMessageOutboxError('message draft is not bound to a durable session');
-    return AgentMessagePublishPayloadSchema.parse({
+    const identity = {
       agentRef: record.agentRef,
       sessionRef: record.sessionRef,
       contract: record.contract,
       messageId: record.messageId,
       cursor: record.cursor,
       contentType: record.contentType,
-      body: record.body,
-      contentHash: record.contentHash,
-      byteCount: record.byteCount,
-    });
+    };
+    return AgentMessagePublishPayloadSchema.parse(record.sealed === undefined
+      ? { ...identity, body: record.body, contentHash: record.contentHash, byteCount: record.byteCount }
+      : { ...identity, sealed: record.sealed });
   }
 
   async applyDisposition(taskId: string, input: unknown, beforeAccept?: () => Promise<void>): Promise<'accepted' | 'held' | 'refused' | 'mismatch' | 'unknown'> {
@@ -280,7 +310,10 @@ export class AgentMessageOutbox {
       if (line.length === 0) continue;
       const entry = JSON.parse(line) as OutboxEntry;
       this.logEntries += 1;
-      if (entry.schema !== 1) throw new AgentMessageOutboxError('message outbox schema is unsupported');
+      if (entry.schema !== 1 && !(entry.schema === 2 && entry.kind === 'append' && entry.record.sealed !== undefined)) {
+        throw new AgentMessageOutboxError('message outbox schema is unsupported');
+      }
+      if (entry.schema === 1 && entry.kind === 'append' && entry.record.sealed !== undefined) throw new AgentMessageOutboxError('message outbox schema is unsupported');
       if (entry.kind === 'append') {
         if (this.pendingByTask.has(entry.record.taskId)) throw new AgentMessageOutboxError('message outbox contains duplicate task draft');
         this.pendingByTask.set(entry.record.taskId, Object.freeze(entry.record));
@@ -343,7 +376,7 @@ export class AgentMessageOutbox {
 
   private snapshotEntries(records: readonly AgentMessageOutboxRecord[]): OutboxEntry[] {
     return records.flatMap((record): OutboxEntry[] => {
-      const append: OutboxEntry = { schema: 1, kind: 'append', record };
+      const append = appendEntryOf(record);
       const disposition = this.dispositionByTask.get(record.taskId);
       const entries: OutboxEntry[] = disposition === undefined ? [append] : [append, { schema: 1, kind: 'disposition', taskId: record.taskId, disposition }];
       if (this.revokedTasks.has(record.taskId)) entries.push({ schema: 1, kind: 'revoke', taskId: record.taskId, messageId: record.messageId });

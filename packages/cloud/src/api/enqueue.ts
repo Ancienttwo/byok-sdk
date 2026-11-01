@@ -413,12 +413,19 @@ export function createEnqueuePaths({ root, controlPlane, options }: Dependencies
       agentRef: AgentRef;
       session: SessionSelection;
       messageEgress?: TaskOfferPayload['messageEgress'];
+      sealing?: TaskOfferPayload['sealing'];
     },
     context: AgentMessageServerContext | undefined,
   ): ((stores: TenantStores, taskId: string) => Promise<void>) | undefined {
     if (payload.messageEgress === undefined) {
       if (context !== undefined) throw new Error('agentMessageContext requires messageEgress');
       return undefined;
+    }
+    if (payload.sealing?.categories.includes('agent-message') === true && typeof options.agentMessage?.consumeSealed !== 'function') {
+      throw new ByokCloudError(
+        'agent_message_sealed_consumer_missing',
+        'A task that seals its Agent message requires agentMessage.consumeSealed.',
+      );
     }
     const messageContext = AgentMessageServerContextSchema.parse(context);
     const body = JSON.stringify({

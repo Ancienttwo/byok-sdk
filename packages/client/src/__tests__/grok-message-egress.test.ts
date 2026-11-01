@@ -53,7 +53,7 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
 
   await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true), { timeout: 8000 });
   const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
-  if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+  if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message publish');
   // The text before the tool call is narration; the closing reply is the run after it.
   expect(message.payload.body).toBe('Found a.txt.');
   expect(message.payload.contract).toBe('example.chat.v1');

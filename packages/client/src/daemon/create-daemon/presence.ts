@@ -1,5 +1,5 @@
 import { declares, E2EE_MEMBER_CAPABILITY, E2EE_MEMBER_KEM_EPOCH_CAPABILITY, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from '../capabilities-client';
-import { HOST_MCP_TASK_CONTEXT_CAPABILITY, SEALED_PAYLOAD_CAPABILITY, PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import { HOST_MCP_TASK_CONTEXT_CAPABILITY, SEALED_PAYLOAD_CAPABILITY, SEALED_PAYLOAD_V2_CAPABILITY, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import type { CapabilityDeclaration } from '@byok-sdk/core';
 import type { CapabilityFlag } from '@byok-sdk/protocol';
 import { PresencePublisher } from '../presence-publisher';
@@ -59,7 +59,9 @@ export function applyCapabilityDeclaration(daemonScope: DaemonScope, declaration
   const kemEpoch = member && declares(declaration!, E2EE_MEMBER_KEM_EPOCH_CAPABILITY);
   if (member && !kemEpoch) logMember(`the Host does not declare ${E2EE_MEMBER_KEM_EPOCH_CAPABILITY}; E2EE stays off until the Host is upgraded`);
   const sealedPayload = setHelloCapability(SEALED_PAYLOAD_CAPABILITY, kemEpoch);
-  if (taskContext || sealedPayload) daemonState.connection?.refreshHello();
+  // #1045: the same member seals Agent messages and memory evidence, and matches a sealed disposition.
+  const sealedPayloadV2 = setHelloCapability(SEALED_PAYLOAD_V2_CAPABILITY, kemEpoch);
+  if (taskContext || sealedPayload || sealedPayloadV2) daemonState.connection?.refreshHello();
   if (kemEpoch) daemonState.deviceMember!.checkKemRotation();
 }
 

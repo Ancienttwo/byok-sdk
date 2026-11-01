@@ -635,6 +635,9 @@ linked JSON schema for full array/union shapes and descriptions.
 | `agentMemory.grant.grantRef` | required when parent is set | string |
 | `agentMemory.grant.writerEpoch` | required when parent is set | number |
 | `agentMemory.grant.policyRevision` | required when parent is set | string |
+| `agentMemory.grant.sealing` | advanced | object |
+| `agentMemory.grant.sealing.scopeId` | required when parent is set | string |
+| `agentMemory.grant.sealing.epoch` | required when parent is set | number |
 | `agentMemory.redactor` | embedded-only | embedded-only |
 | `agentMemory.port` | embedded-only | embedded-only |
 | `agentMemoryExport` | advanced | true |
@@ -818,11 +821,12 @@ their source contract rather than being assigned invented release versions:
   [the shared approval path](security.md#3-shared-approval-path).
 
 <!-- generated:migrations:start -->
-Manifest transition: **0.32.0 → 0.32.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
+Manifest transition: **0.32.0 → 0.33.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
 | daemon-config-runtimes-grok | additive | DaemonConfig.runtimes.grok takes compatInstructions, agentUserMcpServers and versionPolicy, and createDaemon builds the Grok adapter from configuration when runtimeAllowlist lists grok (#1094). Without grok in the allowlist nothing changes; a Host that assembles GrokAdapter itself can move those options into DaemonConfig. [Migration](../docs/device-setup.md#runtime-isolation-and-tool-authorization) |
+| agent-memory-projection-grant-sealing | additive | AgentMemoryProjectionGrant takes an optional sealing { scopeId, epoch } (#1045 S2). With it, the daemon seals each memory projection snapshot under that Agent scope and never sends it in plaintext; without a usable key it sends nothing. The sealing is fixed for its writer epoch and survives a drained outbox: a grant at the same writer epoch with another sealing, plaintext included, fails with AgentMemoryError and sends nothing. An outbox written by 0.32.0 is bound plaintext, so sealing an existing Agent's projection takes a higher writer epoch. A Host that issues no sealing sees no change. The daemon also seals the Agent messages and memory evidence of a task whose offer names agent-message or memory-projection, and advertises sealed-payload-v2 whenever it advertises sealed-payload-v1. [Migration](../docs/migrations/1045-e2ee-v2.md#sealed-memory-projections) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

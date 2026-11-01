@@ -8,9 +8,10 @@
  *
  * - `gated`: the sender must not emit the surface unless the receiver
  *   durably advertised `capability`. A field entry applies when the payload
- *   carries the field (and, with `value`, when the field equals it); a
- *   dotted field names a nested field, for example `sealed.ciphertextRef`. A type
- *   entry applies to every message of that type. Server-to-daemon surfaces
+ *   carries the field (and, with `value`, when the field equals it, or when
+ *   the field is an array that includes it); a dotted field names a nested
+ *   field, for example `sealed.ciphertextRef`. A type entry applies to every
+ *   message of that type. Server-to-daemon surfaces
  *   are gated by a device flag, daemon-to-server surfaces by a server flag.
  * - `strip-safe`: an optional field an older receiver drops without changing
  *   what it executes or acknowledges.
@@ -35,7 +36,7 @@
  * table, so it stays free of zod.
  */
 import type { MessageType } from './messages';
-import { SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table';
+import { SEALED_CATEGORY_CAPABILITY, SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table';
 import type { CapabilityFlag } from './version';
 
 type HttpWireSurface =
@@ -65,14 +66,15 @@ const offerRow = (field: string | undefined, capability: CapabilityFlag, value?:
 });
 
 /**
- * Sealed payload v1 (#654), one table entry at a time: the marker of each
- * sealed branch is gated on `sealed-payload-v1`, a server-to-daemon type on
- * the device flag, a daemon-to-server type on the server flag. The sealed
- * branch shares every other row of its type, and a field it moves or drops is
- * absent from it, so sealing never removes a gate that the same fields would
- * need. A sealed task output that may name its ciphertext blob is also gated
- * on that field. The four sealed failure codes on the plaintext
- * `task.decline` are value gates.
+ * Sealed payload (#654, #1045), one table entry at a time: the marker of each
+ * sealed branch is gated on its category's flag (`sealed-payload-v1` for task
+ * input and output, `sealed-payload-v2` for Agent messages), a
+ * server-to-daemon type on the device flag, a daemon-to-server type on the
+ * server flag. The sealed branch shares every other row of its type, and a
+ * field it moves or drops is absent from it, so sealing never removes a gate
+ * that the same fields would need. A daemon-to-server sealed type that may
+ * name its ciphertext blob is also gated on that field. The four sealed
+ * failure codes on the plaintext `task.decline` are value gates.
  */
 function sealedRows(): WireAddition[] {
   return (Object.keys(SEALED_SPLIT_TABLE) as SealableMessageType[]).flatMap((surface) => {
@@ -81,9 +83,21 @@ function sealedRows(): WireAddition[] {
     const byReference: WireAddition[] = advertisedBy === 'server' && entry.inlineOnly !== true
       ? [{ kind: 'envelope', rule: 'gated', surface, field: 'sealed.ciphertextRef', capability: 'sealed-output-ciphertext-ref', advertisedBy }]
       : [];
-    return [{ kind: 'envelope', rule: 'gated', surface, field: entry.marker, capability: 'sealed-payload-v1', advertisedBy }, ...byReference];
+    const capability = SEALED_CATEGORY_CAPABILITY[entry.category];
+    return [{ kind: 'envelope', rule: 'gated', surface, field: entry.marker, capability, advertisedBy }, ...byReference];
   });
 }
+
+/**
+ * Sealed payload v2 (#1045) outside the split table: an offer whose frozen
+ * `sealing` lists a v2 category, and the disposition of a sealed message,
+ * which names it by `contentMac`. Both go to a device.
+ */
+const SEALED_V2_ROWS: readonly WireAddition[] = [
+  offerRow('sealing.categories', 'sealed-payload-v2', 'agent-message'),
+  offerRow('sealing.categories', 'sealed-payload-v2', 'memory-projection'),
+  { kind: 'envelope', rule: 'gated', surface: 'agent.message.disposition', field: 'contentMac', capability: 'sealed-payload-v2', advertisedBy: 'device' },
+];
 const SEALED_DECLINE_CODE = (value: string): WireAddition =>
   ({ kind: 'envelope', rule: 'gated', surface: 'task.decline', field: 'code', value, capability: 'sealed-payload-v1', advertisedBy: 'server' });
 
@@ -145,6 +159,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   // Daemon to server.
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure', capability: 'runtime-failure-class', advertisedBy: 'server' },
+  { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure.scope', capability: 'runtime-quota-scope', advertisedBy: 'server' },
   // Typed pre-claim runtime-unavailable cause (#1103 B2a). An older server
   // drops the nested field and still records the open `runtime_unavailable`
   // code; the cause never changes what the receiver executes.
@@ -160,6 +175,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
 export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   ...PLAIN_ROWS,
   ...sealedRows(),
+  ...SEALED_V2_ROWS,
   SEALED_DECLINE_CODE('sealed_key_unavailable'),
   SEALED_DECLINE_CODE('sealed_open_failed'),
   SEALED_DECLINE_CODE('sealed_content_mac_mismatch'),
@@ -182,7 +198,7 @@ export function requiredReceiverCapabilities(type: MessageType, payload: unknown
         fields,
       );
       if (value === undefined) continue;
-      if (entry.value !== undefined && value !== entry.value) continue;
+      if (entry.value !== undefined && !(Array.isArray(value) ? value.includes(entry.value) : value === entry.value)) continue;
     }
     if (!required.includes(entry.capability)) required.push(entry.capability);
   }

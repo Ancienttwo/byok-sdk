@@ -38,6 +38,7 @@
 --   deploy/sql/0034_activity_log.sql (tenant-first durable activity head, envelope rows and source identity fences; replaces activity_tail)
 --   deploy/sql/0035_task_output_closure.sql (task trigger that closes the activity log and approval timeline at the task's output close; approval_timeline_tail.terminal_at and its closed-row check; no new table or key)
 --   deploy/sql/0036_task_events_wake.sql (content-free task events wake triggers on task, activity_log_head and approval_timeline_tail; no new table or key)
+--   deploy/sql/0037_agent_memory_projection_sealed.sql (sealed member on the memory projection head, contentMac and padded length on its receipt, one-form checks; no new table or key)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -732,6 +733,7 @@ BEGIN
         ('agent_memory_projection_head'::text, 'redacted_snapshot'::text, 'bytea'::regtype),
         ('agent_memory_projection_head'::text, 'redacted_byte_count'::text, 'integer'::regtype),
         ('agent_memory_projection_head'::text, 'committed_at'::text, 'timestamp with time zone'::regtype),
+        ('agent_memory_projection_head'::text, 'sealed_member'::text, 'jsonb'::regtype),
         ('agent_memory_projection_erase_fence'::text, 'tenant_id'::text, 'text'::regtype),
         ('agent_memory_projection_erase_fence'::text, 'agent_id'::text, 'text'::regtype),
         ('agent_memory_projection_erase_fence'::text, 'next_writer_epoch'::text, 'integer'::regtype),
@@ -751,7 +753,9 @@ BEGIN
         ('agent_memory_projection_metering_receipt'::text, 'redacted_hash'::text, 'text'::regtype),
         ('agent_memory_projection_metering_receipt'::text, 'redacted_byte_count'::text, 'integer'::regtype),
         ('agent_memory_projection_metering_receipt'::text, 'metering_receipt_id'::text, 'uuid'::regtype),
-        ('agent_memory_projection_metering_receipt'::text, 'recorded_at'::text, 'timestamp with time zone'::regtype)
+        ('agent_memory_projection_metering_receipt'::text, 'recorded_at'::text, 'timestamp with time zone'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'content_mac'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'padded_length'::text, 'integer'::regtype)
     ) AS required(table_name, column_name, type_oid)
    WHERE NOT EXISTS (
       SELECT 1
@@ -768,7 +772,7 @@ BEGIN
 
   IF missing_columns IS NOT NULL THEN
     RAISE EXCEPTION
-      'control-plane invariants ran without complete 0014_agent_memory_projection.sql: missing column(s): %',
+      'control-plane invariants ran without complete 0014_agent_memory_projection.sql and 0037_agent_memory_projection_sealed.sql: missing column(s): %',
       missing_columns;
   END IF;
 
@@ -875,12 +879,14 @@ BEGIN
        OR a.attname ILIKE '%snapshot%'
        OR a.attname ILIKE '%body%'
        OR a.attname ILIKE '%payload%'
+       OR a.attname ILIKE '%sealed%'
      )
-     AND NOT (t.relname = 'agent_memory_projection_head' AND a.attname = 'redacted_snapshot' AND a.atttypid = 'bytea'::regtype);
+     AND NOT (t.relname = 'agent_memory_projection_head' AND a.attname = 'redacted_snapshot' AND a.atttypid = 'bytea'::regtype)
+     AND NOT (t.relname = 'agent_memory_projection_head' AND a.attname = 'sealed_member' AND a.atttypid = 'jsonb'::regtype);
 
   IF body_columns_outside_head IS NOT NULL THEN
     RAISE EXCEPTION
-      'agent-memory projection body may exist only as agent_memory_projection_head.redacted_snapshot; forbidden body column(s): %',
+      'agent-memory projection body may exist only as agent_memory_projection_head.redacted_snapshot or .sealed_member; forbidden body column(s): %',
       body_columns_outside_head;
   END IF;
 END $$;

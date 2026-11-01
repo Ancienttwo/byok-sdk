@@ -72,6 +72,14 @@ export const AGENT_INPUT_PREPARATION_CAPABILITY =
 export const SEALED_PAYLOAD_CAPABILITY = 'sealed-payload-v1' as const;
 
 /**
+ * Sealed payload v2 (#1045): the `agent-message` and `memory-projection`
+ * categories. A device advertises it before a Host may send it an offer whose
+ * `sealing` names either category, or a sealed message disposition; a server
+ * advertises it before a device may send it a sealed `agent.message.publish`.
+ */
+export const SEALED_PAYLOAD_V2_CAPABILITY = 'sealed-payload-v2' as const;
+
+/**
  * A server advertises it before a device may send a sealed task output that
  * names its ciphertext blob (`sealed.ciphertextRef`) instead of carrying it
  * inline. The server then holds the blob for the life of the task.
@@ -83,6 +91,9 @@ export const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY = 'sealed-output-ciphertext
  * machine-readable runtime failure class (#869).
  */
 export const RUNTIME_FAILURE_CLASS_CAPABILITY = 'runtime-failure-class' as const;
+
+/** A server advertises it before a device may send `task.fail.failure.scope` (#1271). */
+export const RUNTIME_QUOTA_SCOPE_CAPABILITY = 'runtime-quota-scope' as const;
 
 /**
  * The connection understands the typed pre-claim runtime-unavailable cause
@@ -103,6 +114,9 @@ export const RUNTIME_FAILURE_CLASSES = [
   'auth', 'quota', 'rate_limited', 'billing', 'model_unavailable', 'input_too_large', 'invalid_request',
   'overloaded', 'provider', 'runtime_exited', 'limit_reached', 'output_schema', 'unknown',
 ] as const;
+
+/** The values of a `quota` failure's `scope` (#1271), shared by schema and schema-free consumers. */
+export const RUNTIME_QUOTA_SCOPES = ['account', 'model'] as const;
 
 /** Single value authority shared by schema validation and schema-free consumers. */
 export const PREPARED_AGENT_MEMORY_MODES = ['none', 'read', 'read-write'] as const;

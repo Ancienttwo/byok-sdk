@@ -314,7 +314,7 @@ describe('submit_result with a required Agent message (R10)', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(terminal(sent, taskId)).toBeUndefined();
     const message = sent.find((e) => e.type === 'agent.message.publish');
-    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message publish');
     await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
       agentRef: AGENT_REF, sessionRef: message.payload.sessionRef, contract: message.payload.contract,
       messageId: message.payload.messageId, cursor: message.payload.cursor, contentHash: message.payload.contentHash,
@@ -345,7 +345,7 @@ describe('submit_result with a required Agent message (R10)', () => {
     expect(recordFailure).toHaveBeenCalledWith(taskId, 'required-reply-result-missing');
     expect(terminal(sent, taskId)).toBeUndefined();
     const message = sent.find(e => e.type === 'agent.message.publish');
-    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    if (message?.type !== 'agent.message.publish' || message.payload.sealed !== undefined) throw new Error('missing message publish');
     expect(message.payload.body).toBe('reply text');
     await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
       agentRef: AGENT_REF, sessionRef: message.payload.sessionRef, contract: message.payload.contract,

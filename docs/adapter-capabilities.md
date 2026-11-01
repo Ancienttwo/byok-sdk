@@ -78,9 +78,10 @@ second registry.
   field, and live Grok evidence is pending (#633).
 - Trajectory evidence: only ordinary Pi declares `event-stream`, and Pi with
   `durablePi: true` does not; Claude and Codex records are `unknown`.
-- Process tree: after a dsh root is killed from outside, its tool processes
-  in their own process groups survive; `close()` on a live root reaps them (0.33,
-  [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
+- Process tree (POSIX): disposal ends a runtime's tool processes in process
+  groups of their own after the root was killed from outside, if one of the
+  once-a-second observations saw them while the root ran
+  ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 
 By default Claude and Codex run YOLO
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude with
@@ -791,11 +792,12 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
   answer, bounded by `interruptTimeoutMs`. `close()` sends `session/close`,
   then disposes the owned process tree. Steering throws
   `SteerUnsupportedError`.
-- Known limitation (0.33, [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)): dsh runs each shell tool in its own
-  process group. When the dsh root is killed from outside (SIGKILL, OOM), the
-  SDK's owned process tree reaches neither that group nor its reparented
-  processes, so those tool processes outlive the session. Closing the session
-  through the SDK does reap them (`dsh.close`).
+- Process tree: dsh runs each shell tool in its own process group. Closing
+  the session reaps them (`dsh.close`). When the dsh root is killed from
+  outside (SIGKILL, OOM), disposal ends the tool processes the owned process
+  tree observed while the root ran (`dsh.sigkill`,
+  [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)); a tool started
+  within one second of that kill is not seen.
 - Detection: `dsh --version` (advisory when it is not the qualified
   `0.2.1-rc.5`), then `dsh --profile acp --help`, which also writes the acp
   profile into a new root (else `refused: acp_unavailable`). `authPresent`
@@ -808,7 +810,7 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
 Evidence: `dsh-adapter.test.ts` (synthetic `fake-dsh.mjs`, offline) and the
 [runtime contract suite](runtime-contract.md) against the real qualified dsh.
 Locally on macOS with dsh 0.2.1-rc.5, every case passes, `dsh.close`
-included; `dsh.sigkill` is skipped as the limitation above. The design and probes are in
+included; `dsh.sigkill` runs in CI. The design and probes are in
 [the dsh adapter plan](plans/2026-11-01-dsh-adapter.md).
 
 ## Selection and platforms
@@ -984,6 +986,29 @@ the [downstream diagnostics guide](agent-diagnostics-integration.md).
   Treat the runtime's routine bookkeeping frames as expected, not unmapped.
   If you do not, every normal run is `partial`. A shared runtime name does not
   inherit the Pi declaration.
+
+## Local admission declarations
+
+Three adapter declarations are local facts the daemon reads instead of the
+runtime id. None of them reaches the wire, and a custom adapter that shares a
+built-in runtime name does not inherit them.
+
+- `RuntimeAdapterDescriptor.fileScope: { lanes }`: the lanes on which the
+  adapter enforces an explicit `ToolAuthorizationPolicy.fileScope` (#1061).
+  A scoped offer on any other lane, or on an adapter without the declaration,
+  declines before claim with `file_scope_unsupported`. Memory-reader offers
+  and platforms other than darwin and linux still decline. `PiAdapter`
+  declares `['rpc']`, also with `durablePi: true`, where the durable lane
+  stays undeclared.
+- `RuntimeAdapterDescriptor.providerProfileBinding: true`: the adapter runs an
+  exact `byok-profile` dispatch selection. The daemon advertises
+  `provider-profile-binding` only when such an adapter also opts into dispatch
+  selection and the BYOK launcher is configured. `PiAdapter` declares it.
+- `RuntimeAdapter.projectMcpEnvironment(env)`: the environment the adapter's
+  task-scoped MCP servers receive. The admission-time MCP probes and helper
+  preflights use the same value. Without it, MCP servers receive the task's
+  runtime environment unchanged. `PiAdapter` keeps its directory selectors,
+  `BYOK_PI_*` names and provider credentials out.
 
 ## References and ownership
 

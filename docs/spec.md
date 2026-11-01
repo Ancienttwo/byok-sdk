@@ -311,9 +311,9 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.32.0`; publication requires separate
+A version bump does not authorize publish. The current aligned release is `0.33.0`; publication requires separate
 release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.32.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.33.0`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -323,6 +323,11 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.33.0 is a MINOR under the general policy above, with no exception. The
+upgrade manifest from 0.32.0 holds 7 breaking entries, and the release adds
+Postgres migrations 0035, 0036 and 0037 and server SQLite schema 8. See the
+[0.33.0 candidate notes](releases/v0.33.0.md).
 
 0.32.0 is a MINOR under the general policy above, with no exception. The
 upgrade manifest from 0.31.0 holds 28 breaking entries, and the release adds
@@ -1051,10 +1056,9 @@ task has no cost usage. The `keyEnv` rules are in
 [adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
 
 dsh starts each shell tool in its own process group. `close()` on a live dsh
-root reaps them. A dsh root killed from outside (SIGKILL, OOM) leaves those
-tool processes running: the owned process tree reaches neither their groups
-nor, once they are reparented, the processes themselves. This is a known 0.33
-limitation ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
+root reaps them. After a dsh root is killed from outside (SIGKILL, OOM),
+disposal ends the tool processes the owned process tree observed while the
+root ran ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 
 ### Local runtime probe observation
 
@@ -1684,16 +1688,17 @@ event variants do not change. Interruption/close evidence is a separate
 teardown lifecycle and cannot rewrite an already established semantic result.
 
 A `RuntimeExecutionFailure` also carries `failure`, a closed runtime failure
-class with an optional quota `resetsAt` (#869). An adapter sets it from
+class with an optional quota `resetsAt` (#869) and quota `scope` (#1271). An adapter sets it from
 structured runtime fields only, never from prose; without one the class is
 `unknown`. A class the vendored OAR derives from error text is marked, and the
 adapter sends it as `unknown`. TaskRunner copies it to `task.fail.failure`
 when the server advertises `runtime-failure-class`, and gives a failure it
-makes itself `unknown`. The class never changes `retry`.
+makes itself `unknown`. It keeps `scope` only when the server also advertises
+`runtime-quota-scope`. The class never changes `retry`.
 
 | Runtime | Evidence |
 |---|---|
-| Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status` |
+| Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status`. A `quota` takes `scope` from `rate_limit_info.rateLimitType`: `five_hour` and `seven_day` are `account`, `seven_day_opus` and `seven_day_sonnet` are `model`, any other value or none gives no `scope` |
 | Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
 | Pi, Hermes, dsh | no structured field: `unknown` |
@@ -1796,11 +1801,17 @@ Bundled adapters create an owned POSIX process group and terminate the group
 with TERM-to-KILL escalation; Windows uses `taskkill /T /F`. On POSIX, disposal
 and the host-exit sweep also SIGKILL the descendants that left the group, read
 from the process table before TERM and before KILL and checked by start time,
-as OAR 0.37.0 does. This reaches only processes still below the runtime root at
-that read. A process whose parent exited before the read is re-parented to init
-and is not ended. For example, Claude and Pi run each shell command in a session
-of its own, so a background job (`cmd &`) outlives `close()` and
-`daemon.stop()`. OAR has the same limit. TaskRunner records
+as OAR 0.37.0 does. Disposal also ends the descendants observed while the root
+ran: the table is read once a second for every running owned root, and an entry
+stays remembered while the same process (same start time) lives. This covers a
+root that died from an outside SIGKILL or OOM kill, whose tools in groups of
+their own are re-parented away from it (#1269). Only a process some read saw
+below the root is reached. A process re-parented before any read, or started
+within one second of the root's death, is not ended. For example, Claude and Pi
+run each shell command in a session of its own, so a background job (`cmd &`)
+from a shell that exits at once can outlive `close()` and `daemon.stop()`. The
+host-exit sweep reads the table once at exit and does not use the observations.
+TaskRunner records
 the semantic terminal once, but retains its active entry and Agent home
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
@@ -1819,9 +1830,17 @@ next to them. It holds no scope key in plaintext, so it cannot open them.
 - A missing key, a member that does not open and a policy mismatch are
   refused. Nothing falls back to plaintext. A device that cannot open a sealed
   offer declines it with one of the four sealed decline codes.
-- v1 seals only `task-input` and `task-output`. Agent messages, memory
-  projections, input preparation and drafts stay plaintext. A sealed task
-  streams no draft.
+- v1 seals `task-input` and `task-output`. v2 (#1045) adds `agent-message`,
+  the body of the task's Agent message, which the cloud hands to
+  `agentMessage.consumeSealed`, and `memory-projection`, which moves the
+  terminal's memory evidence into the `task-output` ciphertext. A memory
+  projection grant with `sealing` seals the hosted snapshot under an Agent
+  memory scope. The form is frozen: a task or grant that seals a category
+  refuses its plaintext form, and one that does not refuses the sealed form.
+  Input preparation, drafts, egress payloads and truth `memory` records stay
+  plaintext. A sealed task streams no draft.
+  [docs/migrations/1045-e2ee-v2.md](./migrations/1045-e2ee-v2.md) lists what a
+  Host does to use v2.
 - `@byok-sdk/server` has no sealed dispatch: it refuses `sealing` and
   `sealed` with `coordination_input_invalid`. A sealed task must not go to
   `@byok-sdk/cloud-do`, which reads task content in plaintext.

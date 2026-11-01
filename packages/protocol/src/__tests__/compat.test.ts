@@ -43,8 +43,8 @@ import {
  *    protocol version.
  * 3. v4 self-consistency. `golden/v4.envelopes.ndjson` and
  *    `golden/v4.http.ndjson` are append-only and the current decoder reads
- *    them exactly. `golden/v4.releases.json` registers 0.31.0 and 0.32.0 and
- *    has no floor yet.
+ *    them exactly. `golden/v4.releases.json` registers 0.31.0, 0.32.0 and
+ *    0.33.0 and has no floor yet.
  * 4. Published rejection oracle. `byok-protocol-previous` (0.30.2, the last
  *    v3 release) rejects every v4 corpus line and a v4 `conn.hello`: a v3
  *    peer cannot read v4 bytes. None of its bytes is v4 evidence.
@@ -383,7 +383,7 @@ function carries(line: CorpusLine, entry: WireAddition): boolean {
   if (entry.field === undefined) return true;
   const value = fieldValues(line.payload, entry.field).find(value => value !== undefined);
   if (value === undefined) return false;
-  return entry.rule !== 'gated' || entry.value === undefined || value === entry.value;
+  return entry.rule !== 'gated' || entry.value === undefined || (Array.isArray(value) ? value.includes(entry.value) : value === entry.value);
 }
 
 /** The four Agent offer lanes of `task.offer`, by payload. */

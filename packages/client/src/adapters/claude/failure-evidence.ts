@@ -1,4 +1,4 @@
-import type { RuntimeFailureClass, TaskFailure } from '@byok-sdk/protocol';
+import type { RuntimeFailureClass, RuntimeQuotaScope, TaskFailure } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { failureFromStatus } from '../../runtime/oar-failure-runtime';
 import type { ClaudeStreamMessage } from './events';
@@ -18,6 +18,14 @@ const ASSISTANT_ERROR_CLASSES: Readonly<Record<string, RuntimeFailureClass>> = {
   invalid_request: 'invalid_request',
   model_not_found: 'model_unavailable',
   server_error: 'provider',
+};
+
+/** Scopes of Claude Code 2.1.302 `rate_limit_info.rateLimitType` values (#1271); any other names none. */
+const RATE_LIMIT_SCOPES: Readonly<Record<string, RuntimeQuotaScope>> = {
+  five_hour: 'account',
+  seven_day: 'account',
+  seven_day_opus: 'model',
+  seven_day_sonnet: 'model',
 };
 
 /** 9999-12-31T23:59:59Z: the last second the wire's four-digit-year timestamp can carry. */
@@ -64,10 +72,13 @@ export class ClaudeFailureEvidence {
     if (error === 'rate_limit') {
       // A rejected limit is the subscription limit (OAR); otherwise it is throttling.
       if (this.#rateLimit?.status !== 'rejected') return { class: 'rate_limited' };
-      const resetsAt = this.#rateLimit.resetsAt;
-      return typeof resetsAt === 'number' && Number.isInteger(resetsAt) && resetsAt >= 0 && resetsAt <= MAX_RESETS_AT_SECONDS
-        ? { class: 'quota', resetsAt: new Date(resetsAt * 1000).toISOString() }
-        : { class: 'quota' };
+      const { resetsAt, rateLimitType } = this.#rateLimit;
+      return {
+        class: 'quota',
+        ...(typeof resetsAt === 'number' && Number.isInteger(resetsAt) && resetsAt >= 0 && resetsAt <= MAX_RESETS_AT_SECONDS
+          ? { resetsAt: new Date(resetsAt * 1000).toISOString() } : {}),
+        ...(typeof rateLimitType === 'string' && Object.hasOwn(RATE_LIMIT_SCOPES, rateLimitType) ? { scope: RATE_LIMIT_SCOPES[rateLimitType]! } : {}),
+      };
     }
     if (error !== undefined) return { class: Object.hasOwn(ASSISTANT_ERROR_CLASSES, error) ? ASSISTANT_ERROR_CLASSES[error]! : 'unknown' };
     return { class: typeof status === 'number' && Number.isInteger(status) ? failureFromStatus(status) : 'unknown' };

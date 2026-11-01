@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { createByokServer } from '@byok-sdk/server';
-import type { AgentMessagePublishPayload } from '@byok-sdk/protocol';
+import type { AgentMessagePublishPlainPayload } from '@byok-sdk/protocol';
 import { startServer, stopServer } from '../../../server/src/__tests__/test-support';
 import { createDaemonWithAdapters } from '@byok-sdk/client';
 import { testDeviceCredentials } from './fixtures/device-credentials';
@@ -103,7 +103,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
   const accepted: Array<{ taskId: string; body: string }> = [];
   const options = { productId: 'summary-boundary', longPollHoldMs: 50,
     storage: { kind: 'sqlite' as const, path: path.join(root, 'server.sqlite') },
-    agentMessage: { consume: async ({ taskId, payload }: { taskId: string; payload: AgentMessagePublishPayload }) => {
+    agentMessage: { consume: async ({ taskId, payload }: { taskId: string; payload: AgentMessagePublishPlainPayload }) => {
       accepted.push({ taskId, body: payload.body }); return { outcome: 'accepted' as const };
     } } };
   let sdk = createByokServer(options);

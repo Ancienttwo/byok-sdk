@@ -40,7 +40,7 @@ describe('task attempt phase instants (#980)', () => {
       { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake });
     const draft = (text: string, revision: number) => handleInboundEnvelope(stores, device.deviceId,
       createEnvelope('agent.message.draft', { agentRef, revision, offset: 0, text }, { taskId }), undefined,
-      async () => ({ outcome: 'accepted' }), undefined, clock.now().toISOString());
+      { consume: async () => ({ outcome: 'accepted' }) }, undefined, clock.now().toISOString());
     const attempt = () => harness.cloud.readTaskAttempt(TENANT_A, taskId);
 
     const stored = () => harness.stores.agentMessageDraft.read(TENANT_A, taskId);
@@ -84,7 +84,7 @@ describe('task attempt phase instants (#980)', () => {
     } } };
     expect(await handleInboundEnvelope(racing, device.deviceId,
       createEnvelope('agent.message.draft', { agentRef, revision: 1, offset: 0, text: 'early' }, { taskId }), undefined,
-      async () => ({ outcome: 'accepted' }), undefined, harness.clock.now().toISOString())).toEqual({ outcome: 'accepted' });
+      { consume: async () => ({ outcome: 'accepted' }) }, undefined, harness.clock.now().toISOString())).toEqual({ outcome: 'accepted' });
     expect(await harness.stores.agentMessageDraft.read(TENANT_A, taskId)).toMatchObject({ revision: 1, text: 'early' });
     const attempt = await harness.cloud.readTaskAttempt(TENANT_A, taskId);
     expect(attempt).toMatchObject({ ownerDeviceId: device.deviceId, claimedAt: expect.any(String) });

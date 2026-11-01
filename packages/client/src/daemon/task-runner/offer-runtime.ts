@@ -1,6 +1,5 @@
 // `TaskRunner` members that select the runtime adapter and prepare its
 // operation for an offer (see ./support.ts for how a member module runs).
-import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 import { awaitAdmission } from '../admission-wait';
 import { observeRuntimeDetection } from '../../runtime-detection';
 import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable';
@@ -90,7 +89,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   }
   if (admissionWithdrawn()) return undefined;
   const env = { ...runtimeEnv, ...scratch.env };
-  const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
+  const mcpEnv = pick.adapter.projectMcpEnvironment?.(env) ?? env;
   if (resolvedMcp?.ok && this['deps'].prepareHostTaskContext) {
     await this['deps'].prepareHostTaskContext(taskId, blobAbort.signal);
     if (admissionWithdrawn()) return undefined;

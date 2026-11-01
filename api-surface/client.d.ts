@@ -933,6 +933,8 @@ export declare class PiAdapter implements RuntimeAdapter {
     private readonly effectiveVersionPolicy;
     constructor(options?: PiAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
+    /** Pi's directory selectors and provider credentials stay with Pi; its MCP servers never inherit them. */
+    projectMcpEnvironment(env: Readonly<Record<string, string>>): Readonly<Record<string, string>>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private resolveBin;
@@ -1047,9 +1049,10 @@ export interface PiRpcClientOptions {
  * JSONL request/response + event-stream client for `pi --mode rpc`.
  *
  * Framing per pi's own docs/rpc.md: strict JSONL, LF (`\n`) as the only
- * record delimiter (a trailing `\r` is stripped; this deliberately does NOT
- * use `node:readline`, which pi's docs call out as non-compliant because it
- * also splits on U+2028/U+2029 — valid inside JSON strings).
+ * record delimiter, a trailing `\r` stripped. It is the SDK's one line
+ * framing (`../../util/jsonl-lines.ts`), never `node:readline`, which pi's
+ * docs call out as non-compliant because it also splits on U+2028/U+2029 —
+ * valid inside JSON strings.
  *
  * Responses are correlated by `id`, never by arrival order: empirically,
  * pi's responses do not preserve request order (an immediate parse-failure
@@ -1058,7 +1061,7 @@ export interface PiRpcClientOptions {
 export declare class PiRpcClient {
     private readonly options;
     private readonly child;
-    private buffer;
+    private readonly lines;
     private nextId;
     private readonly pending;
     private readonly eventQueue;
@@ -1137,7 +1140,6 @@ export declare class PiRpcClient {
      * adoption failure, not a terminator's own complaint, is the reason to report.
      */
     private adoptOwnedTree;
-    private onData;
     private onLine;
     /** Write an explicit host-owned response; completion is a transport receipt only. */
     respondExtensionUi(response: {
@@ -2608,7 +2610,7 @@ export declare function parseAgentMemoryIntentLedger(content: string): readonly 
  */
 export declare function createAgentMemoryIntentProcessor(options: AgentMemoryIntentProcessorOptions): (payload: AgentMemoryIntentAvailablePayload) => Promise<AgentMemoryIntentProcessResult>;
 // ==== @byok-sdk/client dist/daemon/agent-memory.d.ts ====
-import { AGENT_MEMORY_PROJECTION_CAPABILITY, type AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_PROJECTION_CAPABILITY, type AgentMemoryProjectionMutation, type AgentMemoryProjectionSealedMutation } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentRef } from '../agent-home';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
 import { AgentMemoryError, AgentMemoryValidationError, type AgentMemoryProjectionPort, type AgentMemorySnapshot } from '@byok-sdk/protocol/agent-memory';
@@ -2675,6 +2677,32 @@ export interface AgentMemoryProjectionGrant {
     readonly grantRef: AgentMemoryProjectionMutation['grantRef'];
     readonly writerEpoch: AgentMemoryProjectionMutation['writerEpoch'];
     readonly policyRevision: AgentMemoryProjectionMutation['policyRevision'];
+    /**
+     * The Agent scope this writer epoch seals its snapshots under (#1045 C4).
+     * It is fixed for the epoch: the Host issues a higher epoch to change it.
+     * With it, a snapshot is only ever sent sealed.
+     */
+    readonly sealing?: {
+        readonly scopeId: string;
+        readonly epoch: number;
+    };
+}
+/** Seals one projection snapshot under a grant's Agent scope; `undefined` when the scope or its key is not usable. */
+export interface AgentMemoryProjectionSealer {
+    sealMemoryProjection(input: {
+        readonly sealing: {
+            readonly scopeId: string;
+            readonly epoch: number;
+        };
+        readonly agentRef: AgentRef;
+        readonly identity: {
+            readonly agentId: string;
+            readonly writerEpoch: number;
+            readonly sourceSeq: number;
+            readonly mutationId: string;
+        };
+        readonly redactedBytes: string;
+    }): Promise<AgentMemoryProjectionSealedMutation['sealed'] | undefined>;
 }
 export interface AgentMemoryRedactedOutboxRecord {
     readonly version: 2;
@@ -2827,13 +2855,16 @@ export declare class AgentMemoryRedactedOutbox {
     private readonly context;
     private readonly grant;
     readonly filePath: string;
+    private readonly sealer;
     private state;
     private fileRevision;
     private writeTail;
     private constructor();
-    static open(input: AgentMemoryTaskContext, grant: AgentMemoryProjectionGrant): Promise<AgentMemoryRedactedOutbox>;
+    static open(input: AgentMemoryTaskContext, grant: AgentMemoryProjectionGrant, sealer?: AgentMemoryProjectionSealer): Promise<AgentMemoryRedactedOutbox>;
     pending(): readonly AgentMemoryRedactedOutboxRecord[];
     append(bytes: Uint8Array): Promise<AgentMemoryRedactedOutboxRecord>;
+    /** A grant with `sealing` gets a sealed snapshot or none; the snapshot never goes out in plaintext. */
+    private seal;
     replay(port: AgentMemoryProjectionPort): Promise<AgentMemoryProjectionReplayOutcome>;
     private load;
     private loadBody;
@@ -2842,7 +2873,7 @@ export declare class AgentMemoryRedactedOutbox {
     private exclusive;
 }
 /** Missing capability, grant, redactor, or port has exactly zero network side effects. */
-export declare function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined): Promise<void>;
+export declare function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined, sealer?: AgentMemoryProjectionSealer): Promise<void>;
 // ==== @byok-sdk/client dist/daemon/agent-session-handoff-store.d.ts ====
 import { type AgentRef } from '../agent-home';
 export type AgentTerminalCause = 'complete' | 'failed' | 'cancelled';
@@ -13278,7 +13309,7 @@ import type { ServiceEnvironmentUnavailableCode } from './login-shell-environmen
 import type { RuntimeEnvironment } from './runtime/environment';
 import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
-import type { ToolAuthorizationGate } from './tool-authorization';
+import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
@@ -13629,6 +13660,21 @@ export interface RuntimeAdapterDescriptor {
      * probe. Absent: no platform restriction (a custom adapter's default).
      */
     readonly platforms?: readonly NodeJS.Platform[];
+    /**
+     * The execution lanes on which this adapter can enforce an explicit
+     * `ToolAuthorizationPolicy.fileScope` (#1061). Local admission only: it is
+     * never projected to the wire, so the Host cannot see it before dispatch.
+     * Absent: no lane can, and a scoped offer is declined before claim.
+     */
+    readonly fileScope?: {
+        readonly lanes: readonly ToolAuthorizationLane[];
+    };
+    /**
+     * Consumes an exact `byok-profile` dispatch selection, i.e. a local
+     * provider profile binding. The daemon advertises `provider-profile-binding`
+     * only when such an adapter is configured. Absent: unsupported.
+     */
+    readonly providerProfileBinding?: boolean;
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {
@@ -13890,6 +13936,13 @@ export interface RuntimeAdapter {
      * environment to build from; the daemon then refuses the runtime.
      */
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
+    /**
+     * The environment this runtime's task-scoped MCP servers receive, derived
+     * from the task's runtime child environment. The daemon's admission-time
+     * MCP probes and helper preflights use the same value, so probe and run see
+     * one projection. Absent: MCP servers receive that environment unchanged.
+     */
+    projectMcpEnvironment?(env: Readonly<Record<string, string>>): Readonly<Record<string, string>>;
 }
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */
 export declare function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescriptor): RuntimeAdapterDescriptor;

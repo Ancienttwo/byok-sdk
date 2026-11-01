@@ -10,11 +10,12 @@ import os from 'node:os';
 import path from 'node:path';
 import v8 from 'node:v8';
 import vm from 'node:vm';
-import { generateScopeKey } from '@byok-sdk/core/sealed-payload';
-import { createEnvelope, decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { generateScopeKey, openSealedContent, type SealedCategory } from '@byok-sdk/core/sealed-payload';
+import { createEnvelope, decodeEnvelope, encodeEnvelope, sealedAgentMessageMaxContentLength, type Envelope, type TaskSealing } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentHomeManager } from '../agent-home';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SealedTasks, type SealedScopeKeyring } from '../daemon/sealed-task';
@@ -31,11 +32,15 @@ const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT
 class GatedKeyring implements SealedScopeKeyring {
   readonly scopeKey = generateScopeKey();
   gate: Promise<void> = Promise.resolve();
-  async scopeCategories() { return []; }
+  /** The key is gone, as after a stale epoch. */
+  lost = false;
+  constructor(private readonly policy: readonly SealedCategory[] = []) {}
+  async scopeCategories() { return this.policy; }
   async openingKey() { return this.scopeKey; }
   async acceptHeader() { return true; }
   async sealingKey() {
     await this.gate;
+    if (this.lost) return undefined;
     return { scopeKey: this.scopeKey, epoch: 1, sender: 'm'.repeat(43), chainHead: { seq: 1, hash: `sha256:${'0'.repeat(64)}` } };
   }
 }
@@ -292,5 +297,108 @@ describe('a terminal built for a sealed task in a run that may not seal it (#866
     const plainOffer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
     const fail = createEnvelope('task.fail', { reason: 'plain reason', retryable: false }, { taskId: 'recovered' });
     expect(await tasks().sealRecovered(plainOffer, fail, false)).toBe(fail);
+  });
+});
+
+describe('sealed payload v2 on the device (#1045 S2)', () => {
+  const MESSAGE: TaskSealing = { scopeId: 'scope-a', epoch: 1, categories: ['agent-message', 'task-output', 'memory-projection'] };
+  const requirement = { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 1000 } as const;
+  const sealedTasks = (keyring: GatedKeyring) => new SealedTasks({
+    keyring, tenantId: 'tenant-test', deviceId: 'dev_1',
+    blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
+    serverCapabilities: () => [],
+  });
+  async function openTask(keyring: GatedKeyring, taskId: string) {
+    const tasks = sealedTasks(keyring);
+    const agentRef = freshTestAgentRef();
+    expect((await tasks.openOffer(createEnvelope('task.offer', {
+      agentRef, ...FRESH_OFFER, instruction: 'plain instruction', sealing: MESSAGE,
+    } as never, { taskId, seq: 1 }))).ok).toBe(true);
+    return { tasks, agentRef };
+  }
+  const dirs: string[] = [];
+  afterEach(async () => { for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true }); });
+  async function outbox() {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-message-'));
+    dirs.push(dir);
+    return AgentMessageOutbox.open(dir);
+  }
+
+  it('sends an Agent message only sealed, once, and matches its disposition by contentMac', async () => {
+    const keyring = new GatedKeyring();
+    const { tasks, agentRef } = await openTask(keyring, 'message');
+    expect(tasks.sealsMessages('message')).toBe(true);
+    const messages = await outbox();
+    const draft = await messages.appendDraft({
+      taskId: 'message', tenantId: 'tenant-test', agentRef, requirement, contentType: 'text/markdown', body: 'secret reply',
+      maxPendingEvents: 4, maxPendingBytes: 4096, seal: (input) => tasks.sealPublish('message', input),
+    });
+    const record = (await messages.activate('message', 'session-1'))!;
+    const payload = messages.publishPayload(record);
+    expect(payload).not.toHaveProperty('body');
+    expect(payload).not.toHaveProperty('contentHash');
+    expect(payload).not.toHaveProperty('byteCount');
+    expect(JSON.stringify(payload)).not.toContain('secret reply');
+    // The outbox keeps the sealed member, so a retry after a restart sends the same bytes.
+    expect((await AgentMessageOutbox.open(messages.homeDir)).publishPayload(record)).toEqual(payload);
+    if (payload.sealed === undefined) throw new Error('sealed publish expected');
+    const { ciphertext, ciphertextRef: _ref, ...header } = payload.sealed;
+    const opened = await openSealedContent({
+      header, ciphertext: Buffer.from(ciphertext!, 'base64url'), scopeKey: keyring.scopeKey,
+      binding: {
+        tenantId: 'tenant-test', family: 'agent.message.publish', direction: 'daemon-to-server',
+        identity: { taskId: 'message', messageId: draft.messageId, cursor: draft.cursor }, deviceId: 'dev_1', agentRef, categories: MESSAGE.categories, notAfter: null,
+      },
+      sealing: { scopeId: 'scope-a', epoch: 1 }, maxContentLength: sealedAgentMessageMaxContentLength(requirement.maxBytes),
+    });
+    expect(opened).toMatchObject({ ok: true, plaintext: { body: 'secret reply' } });
+    const exact = { agentRef, sessionRef: 'session-1', contract: requirement.contract, messageId: draft.messageId, cursor: draft.cursor, receiptId: '10000000-0000-4000-8000-000000000001' };
+    expect(await messages.applyDisposition('message', { ...exact, contentHash: draft.contentHash, outcome: 'accepted' })).toBe('mismatch');
+    expect(await messages.applyDisposition('message', { ...exact, contentMac: payload.sealed.contentMac, outcome: 'accepted' })).toBe('accepted');
+  });
+
+  it('sends no Agent message, and no plaintext, when the sealing key is gone', async () => {
+    const keyring = new GatedKeyring();
+    const { tasks, agentRef } = await openTask(keyring, 'no-key');
+    keyring.lost = true;
+    const messages = await outbox();
+    await expect(messages.appendDraft({
+      taskId: 'no-key', tenantId: 'tenant-test', agentRef, requirement, contentType: 'text/markdown', body: 'secret reply',
+      maxPendingEvents: 4, maxPendingBytes: 4096, seal: (input) => tasks.sealPublish('no-key', input),
+    })).rejects.toThrow(/no sealing key/);
+    expect(messages.records()).toEqual([]);
+    expect(await fs.readFile(path.join(messages.homeDir, '.byok', 'messages', 'outbox-v1.jsonl'), 'utf8').catch(() => '')).not.toContain('secret reply');
+  });
+
+  it('moves the memory evidence of a memory-projection task into the sealed terminal, and drops it from the closed plaintext form', async () => {
+    const keyring = new GatedKeyring();
+    const { tasks } = await openTask(keyring, 'memory');
+    const change = { outcome: 'reader-attributed', paths: ['notes/plan.md'] } as const;
+    const fail = createEnvelope('task.fail', { reason: 'sealed_key_unavailable', retryable: false, agentHomeMemoryChange: change } as never, { taskId: 'memory' });
+    const sealed = (await tasks.sealOutbound(fail))!;
+    expect(sealed.payload).toHaveProperty('sealed');
+    expect(sealed.payload).not.toHaveProperty('agentHomeMemoryChange');
+    expect(tasks.unsealable(fail, MESSAGE.categories)!.payload).not.toHaveProperty('agentHomeMemoryChange');
+    expect(tasks.unsealable(fail, ['task-output'])!.payload).toMatchObject({ agentHomeMemoryChange: change });
+  });
+
+  it.each([
+    ['seals a memory projection under an Agent scope whose policy is memory-projection', ['memory-projection'], true],
+    ['seals no memory projection under a scope whose policy names another category', ['task-output', 'memory-projection'], false],
+  ] as const)('%s', async (_label, policy, seals) => {
+    const keyring = new GatedKeyring(policy);
+    const agentRef = freshTestAgentRef();
+    const identity = { agentId: agentRef.agentId, writerEpoch: 2, sourceSeq: 1, mutationId: '10000000-0000-4000-8000-000000000002' };
+    const sealed = await sealedTasks(keyring).sealMemoryProjection({ sealing: { scopeId: 'scope-agent', epoch: 1 }, agentRef, identity, redactedBytes: 'cmVkYWN0ZWQ' });
+    if (!seals) return expect(sealed).toBeUndefined();
+    const { ciphertext, ...header } = sealed!;
+    expect(await openSealedContent({
+      header, ciphertext: Buffer.from(ciphertext!, 'base64url'), scopeKey: keyring.scopeKey,
+      binding: {
+        tenantId: 'tenant-test', family: 'agent.memory.projection', direction: 'daemon-to-server', identity,
+        deviceId: 'dev_1', agentRef, categories: ['memory-projection'], notAfter: null,
+      },
+      sealing: { scopeId: 'scope-agent', epoch: 1 }, maxContentLength: 262_140,
+    })).toMatchObject({ ok: true, plaintext: { redactedBytes: 'cmVkYWN0ZWQ' } });
   });
 });

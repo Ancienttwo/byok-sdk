@@ -5,10 +5,17 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AGENT_MEMORY_OUTBOX_FILENAME,
+  AgentMemoryProjectionReplayPendingError,
   AgentMemoryRedactedOutbox,
+  snapshotAndProjectAgentMemory,
+  type AgentMemoryProjectionGrant,
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
+import type { AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
+import { AgentMemoryError } from '@byok-sdk/protocol/agent-memory';
 import { AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES } from '@byok-sdk/protocol';
+import { generateScopeKey } from '@byok-sdk/core/sealed-payload';
+import { SealedTasks } from '../daemon/sealed-task';
 import type {
   AgentMemoryFilesystem,
   AgentMemoryFilesystemFileState,
@@ -71,6 +78,34 @@ function taskContext(filesystem: AgentMemoryFilesystem, taskId: string, sessionR
 }
 
 const grant = { grantRef: 'grant-memory', writerEpoch: 1, policyRevision: 'policy-r1' } as const;
+
+function memorySealer(lost: () => boolean = () => false): SealedTasks {
+  const scopeKey = generateScopeKey();
+  return new SealedTasks({
+    keyring: {
+      scopeCategories: async () => ['memory-projection'], openingKey: async () => scopeKey, acceptHeader: async () => true,
+      sealingKey: async () => (lost() ? undefined : { scopeKey, epoch: 1, sender: 'm'.repeat(43), chainHead: { seq: 1, hash: `sha256:${'0'.repeat(64)}` } }),
+    },
+    tenantId: 'tenant-memory', deviceId: 'device-memory',
+    blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
+    serverCapabilities: () => [],
+  });
+}
+
+function memoryHome(): InMemoryFilesystem { const filesystem = new InMemoryFilesystem(); filesystem.files.set('MEMORY.md', 'local authority'); return filesystem; }
+
+/** One task close through the public projection path: what reached the port, and what it threw. */
+async function project(filesystem: InMemoryFilesystem, projectionGrant: AgentMemoryProjectionGrant, accepted = true) {
+  const published: AgentMemoryProjectionMutation[] = [];
+  const error = await snapshotAndProjectAgentMemory(taskContext(filesystem, 'task-a', 'session-a'), {
+    capability: 'agent.memory.projection',
+    grant: projectionGrant,
+    redactor: { redact: () => encoder.encode('{"summary":"redacted"}') },
+    port: { publish: async ({ mutation }) => { published.push(mutation); return { accepted }; } },
+  }, memorySealer()).then(() => undefined, (cause: unknown) => cause);
+  return { published, error };
+}
+const refused = { published: [], error: expect.any(AgentMemoryError) };
 
 describe('Agent-memory projection outbox P1 regression', () => {
   it('replays a pending prior task/session mutation before assigning a later sequence', async () => {
@@ -148,5 +183,56 @@ describe('Agent-memory projection outbox P1 regression', () => {
 
     filesystem.files.set(filePath, 'x'.repeat(AGENT_MEMORY_MAX_LOCAL_LOG_BYTES + 1));
     await expect(AgentMemoryRedactedOutbox.open(taskContext(filesystem, 'task-a', 'session-a'), grant)).rejects.toThrow('size_limit');
+  });
+
+  it('sends a sealed grant\'s snapshot only sealed, appends none without a key, and stops on a pending record of the other form (#1045 C4)', async () => {
+    const filesystem = new InMemoryFilesystem();
+    let lost = true;
+    const sealer = memorySealer(() => lost);
+    const sealedGrant = { ...grant, sealing: { scopeId: 'scope-agent', epoch: 1 } } as const;
+    const outbox = await AgentMemoryRedactedOutbox.open(taskContext(filesystem, 'task-a', 'session-a'), sealedGrant, sealer);
+    await expect(outbox.append(encoder.encode('{"summary":"secret"}'))).rejects.toThrow('cannot be sealed');
+    expect(outbox.pending()).toEqual([]);
+
+    lost = false;
+    const record = await outbox.append(encoder.encode('{"summary":"secret"}'));
+    expect(record.mutation.sealed).toMatchObject({ category: 'memory-projection', scope: { id: 'scope-agent', epoch: 1 } });
+    expect(record.mutation).not.toHaveProperty('snapshot');
+    expect(filesystem.files.get(`.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`)).not.toContain(Buffer.from('{"summary":"secret"}').toString('base64url'));
+
+    await expect(AgentMemoryRedactedOutbox.open(taskContext(filesystem, 'task-b', 'session-b'), grant))
+      .rejects.toThrow('does not match its writer epoch');
+  });
+
+  describe('the sealing bound to a writer epoch (#1045 C4)', () => {
+    const sealedGrant = { ...grant, sealing: { scopeId: 'scope-agent', epoch: 1 } } as const;
+
+    it('refuses a same-epoch grant of another form after a sealed drain', async () => {
+      const filesystem = memoryHome();
+      const first = await project(filesystem, sealedGrant);
+      expect(first.error).toBeUndefined();
+      expect(first.published.map((mutation) => mutation.sealed?.scope.id)).toEqual(['scope-agent']);
+      expect(await project(filesystem, grant)).toEqual(refused);
+      expect(await project(filesystem, { ...grant, sealing: { scopeId: 'scope-other', epoch: 1 } })).toEqual(refused);
+    });
+
+    it('refuses a pending record sealed below the grant\'s scope epoch', async () => {
+      const filesystem = memoryHome();
+      expect((await project(filesystem, sealedGrant, false)).error).toBeInstanceOf(AgentMemoryProjectionReplayPendingError);
+      expect(await project(filesystem, { ...grant, sealing: { scopeId: 'scope-agent', epoch: 2 } })).toEqual(refused);
+    });
+
+    it('binds a 0.32.0 state plain, and lets only a higher writer epoch change the binding', async () => {
+      const filesystem = memoryHome();
+      filesystem.files.set(`.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`, JSON.stringify({
+        version: 2, currentWriterEpoch: 1, highWater: [{ writerEpoch: 1, sourceSeq: 1 }], pending: [],
+      }));
+      expect(await project(filesystem, sealedGrant)).toEqual(refused);
+      const superseding = await project(filesystem, { ...sealedGrant, writerEpoch: 2 });
+      expect(superseding.error).toBeUndefined();
+      expect(superseding.published.map(({ writerEpoch, sourceSeq, sealed }) => ({ writerEpoch, sourceSeq, scope: sealed?.scope.id })))
+        .toEqual([{ writerEpoch: 2, sourceSeq: 1, scope: 'scope-agent' }]);
+      expect(await project(filesystem, { ...grant, writerEpoch: 2 })).toEqual(refused);
+    });
   });
 });

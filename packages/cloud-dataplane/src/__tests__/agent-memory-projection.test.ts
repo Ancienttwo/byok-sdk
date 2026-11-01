@@ -1,11 +1,10 @@
 import { fileURLToPath } from 'node:url';
-import {
-  type AgentMemoryProjectionCommitInput,
-  createWebCrypto,
-} from '@byok-sdk/cloud';
+import { createWebCrypto } from '@byok-sdk/cloud';
+import { sealContent } from '@byok-sdk/core/sealed-payload';
 import {
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
-  type AgentMemoryProjectionMutation,
+  type AgentMemoryProjectionPlainMutation,
+  type AgentMemoryProjectionSealedMutation,
 } from '@byok-sdk/protocol';
 import { createMutableClock, tenantId, type TenantId } from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
@@ -32,10 +31,17 @@ interface InputOptions {
   readonly body?: string;
 }
 
-async function input(options: InputOptions = {}): Promise<AgentMemoryProjectionCommitInput> {
+interface PlainInput {
+  readonly tenantId: TenantId;
+  readonly deviceId: string;
+  readonly mutation: AgentMemoryProjectionPlainMutation;
+  readonly redactedBytes: Uint8Array;
+}
+
+async function input(options: InputOptions = {}): Promise<PlainInput> {
   const crypto = createWebCrypto();
   const bytes = new TextEncoder().encode(options.body ?? '# Memory\n\n- redacted fact\n');
-  const mutation: AgentMemoryProjectionMutation = {
+  const mutation: AgentMemoryProjectionPlainMutation = {
     taskId: options.taskId ?? 'task-memory',
     agentRef: { agentId: AGENT_ID, profileRevision: 'profile-1' },
     sessionRef: 'session-memory',
@@ -70,7 +76,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres Agent-memory projection — ${SKIP_REA
 
       const accepted = await store.commit(first);
       expect(accepted.outcome).toBe('accepted');
-      expect(accepted.metering.acceptedRedactedBytes).toBe(first.redactedBytes.byteLength);
+      expect(accepted.metering).toMatchObject({ acceptedRedactedBytes: first.redactedBytes.byteLength });
 
       clock.advance(1_000);
       const replay = await store.commit(first);
@@ -210,4 +216,82 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres Agent-memory projection — ${SKIP_REA
       await scope.dispose();
     }
   });
+
+  it('stores a sealed snapshot as received, in exactly one form, with no plaintext of it in any row (#1045 S4)', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const store = new PostgresAgentMemoryProjectionStore({ pool: scope.pool, clock: createMutableClock(), crypto: createWebCrypto() });
+      const canary = `sealed-canary-${'7'.repeat(16)}`;
+      const plain = await input({ body: `# Memory\n\n- ${canary}\n` });
+      const sealed = await sealedInput(plain);
+
+      const accepted = await store.commit(sealed);
+      expect(accepted).toMatchObject({
+        outcome: 'accepted', contentMac: sealed.mutation.sealed.contentMac, paddedLength: sealed.mutation.sealed.paddedLength,
+        metering: { acceptedPaddedBytes: sealed.mutation.sealed.paddedLength },
+      });
+      expect(await store.commit(sealed)).toEqual({ ...accepted, outcome: 'idempotent' });
+      // The plaintext form of the same position is a different mutation.
+      await expect(store.commit(plain)).rejects.toMatchObject({ code: 'agent_memory_projection_replay_mismatch' });
+
+      const rows = await scope.pool.query<{ readonly head: string; readonly receipt: string; readonly member: unknown }>(
+        `SELECT row_to_json(h)::text AS head, row_to_json(r)::text AS receipt, h.sealed_member AS member
+           FROM agent_memory_projection_head h
+           JOIN agent_memory_projection_metering_receipt r USING (tenant_id, agent_id)
+          WHERE h.tenant_id = $1`,
+        [TENANT],
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]!.member).toEqual(sealed.mutation.sealed);
+      expect(rows.rows[0]!.head).not.toContain(canary);
+      expect(rows.rows[0]!.receipt).not.toContain(canary);
+      expect(rows.rows[0]!.head).not.toContain(plain.mutation.snapshot.redactedHash);
+      expect(rows.rows[0]!.receipt).not.toContain(plain.mutation.snapshot.redactedHash);
+
+      // The checks hold one form per row.
+      await expect(scope.pool.query(
+        `UPDATE agent_memory_projection_head SET redacted_hash = $2, redacted_snapshot = '\\x00'::bytea, redacted_byte_count = 1 WHERE tenant_id = $1`,
+        [TENANT, plain.mutation.snapshot.redactedHash],
+      )).rejects.toMatchObject({ code: '23514' });
+      await expect(scope.pool.query(
+        'UPDATE agent_memory_projection_metering_receipt SET redacted_hash = $2, redacted_byte_count = 1 WHERE tenant_id = $1',
+        [TENANT, plain.mutation.snapshot.redactedHash],
+      )).rejects.toMatchObject({ code: '23514' });
+
+      await expect(store.erase({ tenantId: TENANT, agentId: AGENT_ID })).resolves.toEqual({ nextWriterEpoch: 2 });
+      await expect(store.commit(sealed)).rejects.toMatchObject({ code: 'agent_memory_projection_erased_epoch' });
+    } finally {
+      await scope.dispose();
+    }
+  });
 });
+
+/** `plain` with its snapshot sealed under an Agent memory scope, as the device seals it. */
+async function sealedInput(plain: PlainInput) {
+  const { snapshot, ...identity } = plain.mutation;
+  const content = await sealContent({
+    scopeKey: Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    scope: { id: 'scope-agent-memory', epoch: 1 },
+    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+    sender: 'A'.repeat(43),
+    category: 'memory-projection',
+    binding: {
+      tenantId: plain.tenantId,
+      family: 'agent.memory.projection',
+      direction: 'daemon-to-server',
+      identity: { agentId: identity.agentRef.agentId, writerEpoch: identity.writerEpoch, sourceSeq: identity.sourceSeq, mutationId: identity.mutationId },
+      deviceId: plain.deviceId,
+      agentRef: identity.agentRef,
+      categories: ['memory-projection'],
+      notAfter: null,
+    },
+    plaintext: { redactedBytes: snapshot.redactedBytes },
+    maxContentLength: 262140,
+  });
+  const mutation = {
+    ...identity,
+    sealed: { ...content.header, category: 'memory-projection', ciphertext: Buffer.from(content.ciphertext).toString('base64url') },
+  } as AgentMemoryProjectionSealedMutation;
+  return { tenantId: plain.tenantId, deviceId: plain.deviceId, mutation };
+}

@@ -487,6 +487,59 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
     }
   }, 120_000);
 
+  it('a sealed Agent message whose task is redacted before it retains its blob leaves no reference (#1045)', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const host = await composeRedactionHost(scope.pool, await createObjectStorageScope());
+      const device = await pairDevice(host, TENANT_1, ['sealed-payload-v1', 'sealed-payload-v2']);
+      const taskId = `task-sealed-message-${randomUUID()}`;
+      const sealing = { ...SEALING, categories: ['agent-message'] } as const;
+      const offer = executionInput(taskId, device.deviceId, 'answer');
+      await host.cloud.enqueueSealedAgentEgressOffer(TENANT_1, device.deviceId, {
+        ...offer,
+        payload: {
+          ...offer.payload, session: { mode: 'resume', sessionRef: 'session-task-redaction' },
+          messageEgress: { ...offer.payload.messageEgress, maxBytes: 262_144 }, sealing,
+        } as never,
+      });
+      await device.poll();
+      await sendAll(device, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, runtime: 'codex' }, { taskId })]);
+      await device.poll();
+      const messageId = randomUUID();
+      // The Host reads only the member's outer fields, so any sealed bytes of the right size serve.
+      const content = await sealFor(device.deviceId, 'task.offer', { taskId }, { body: 'x'.repeat(263_000) });
+      const blob = await uploadObject(device, content.ciphertext, 'application/octet-stream');
+      const hash = (blob.ref as { contentHash: ContentHash }).contentHash;
+      // A pending offer of another task names the hash, so redaction keeps the blob committed.
+      await host.cloud.submitAgentExecution(TENANT_1, executionInput(`task-other-${randomUUID()}`, device.deviceId, `keep ${hash}`));
+
+      // The Host abandons and redacts the task after the message reserved its admission and before it retains the blob.
+      const objects = host.core.objects;
+      const addReference = objects.addReference.bind(objects);
+      objects.addReference = async (tenant, input) => {
+        objects.addReference = addReference;
+        await host.cloud.abandonTask(TENANT_1, taskId, 'operator');
+        expect((await host.cloud.redactTasks(TENANT_1, { taskIds: [taskId] })).tasks)
+          .toMatchObject([{ taskId, outcome: 'redacted', counts: { objectsDeleted: 0 } }]);
+        return addReference(tenant, input);
+      };
+      const sent = await device.send(createEnvelope('agent.message.publish', {
+        agentRef: AGENT_REF, sessionRef: 'session-task-redaction', contract: 'task-redaction.turn.v1', contentType: 'text/markdown',
+        messageId, cursor: 1, sealed: { ...content.header, category: 'agent-message', ciphertextRef: blob.ref },
+      } as never, { taskId }));
+      // The hook ran, and the tombstoned admission refuses the message.
+      expect(objects.addReference).toBe(addReference);
+      expect(sent.body).toMatchObject({ accepted: 0, rejected: 1 });
+
+      expect((await objects.get(TENANT_1, hash))?.refCount).toBe(0);
+      const later = new Date(host.clock.now().getTime() + 1_000).toISOString();
+      expect(await objects.collectExpired(TENANT_1, { now: later, orphanBefore: later, limit: 10 })).toMatchObject({ removed: 1 });
+    } finally {
+      await scope.dispose();
+    }
+  }, 120_000);
+
   it('retries safely after a failure between the object step and the row step', async () => {
     const scope = await createDataplaneScope();
     try {

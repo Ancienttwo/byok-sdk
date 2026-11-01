@@ -82,7 +82,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       return;
     }
     const admissionOfScope = fileScopeAdmission({
-      runtimeId: pick.descriptor.id, lane, homeAccess, platform: process.platform,
+      descriptor: pick.descriptor, lane, homeAccess, platform: process.platform,
     });
     if (!admissionOfScope.supported) {
       if (!admissionWithdrawn()) decline(`file_scope_unsupported: ${admissionOfScope.reason}`, false);

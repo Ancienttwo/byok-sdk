@@ -5,6 +5,7 @@ import {
   RESULT_SCHEMA_MAX_BYTES,
   createEnvelope,
   type AgentEgressPolicy,
+  type AgentMessagePublishPlainPayload,
   type Envelope,
 } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer, type CreateByokServerOptions } from '../index';
@@ -159,7 +160,7 @@ describe('reference-server Agent egress contract', () => {
     // consumer: the offer's message contract is consumed once. The awaited send
     // is the barrier — `POST /byok/messages` runs the admission hook inline.
     await daemon.send(createEnvelope('agent.message.publish', {
-      ...publish.payload,
+      ...(publish.payload as AgentMessagePublishPlainPayload),
       messageId: '10000000-0000-4000-8000-000000000091',
       body: 'second',
       byteCount: 6,

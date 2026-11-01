@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
@@ -10,11 +10,12 @@ import { durableShell } from '../adapters/pi-durable/shell';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
-async function fixture() {
+async function fixture(shellEnv: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' }, ownDelayMs = 0) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'fix-pi-durable-shell-exit-')));
-  const env = new NodeExecutionEnv({ cwd: root, shellEnv: { PATH: '/usr/bin:/bin' } });
+  const env = new NodeExecutionEnv({ cwd: root, shellEnv });
   const owned: number[] = [], released: number[] = [];
-  const shell = durableShell(env, { PATH: '/usr/bin:/bin' }, async pid => { owned.push(pid); }, pid => { released.push(pid); });
+  const own = async (pid: number) => { owned.push(pid); if (ownDelayMs) await new Promise(resolve => setTimeout(resolve, ownDelayMs)); };
+  const shell = durableShell(env, shellEnv, own, pid => { released.push(pid); });
   cleanups.push(async () => { await shell.cleanup(); await env.cleanup(BACKGROUND_CONTEXT); await rm(root, { recursive: true, force: true }); });
   return { root, env, shell, owned, released };
 }
@@ -40,6 +41,21 @@ describe.skipIf(process.platform === 'win32')('F16-2 foreground exit releases ba
     const f = await fixture();
     let output = '';
     const result = await f.shell.exec(`sleep 60 ${redirected ? '>/dev/null 2>&1' : ''} & echo $! > background.pid; printf foreground-complete`,
+      { timeout: 0.5, onOutput: text => { output += text; } }, BACKGROUND_CONTEXT);
+    expect(result).toEqual({ ok: true, value: { exitCode: 0 } });
+    expect(output).toBe('foreground-complete');
+    await assertReleased(f);
+  });
+
+  it('does not run the user bashrc before ownership is acknowledged', async () => {
+    // bash 3.2 sources ~/.bashrc for `bash -c` when stdin is a socket and SHLVL < 2;
+    // a slow ownership ACK keeps the gate's stdin socket open while bash starts.
+    const home = await realpath(await mkdtemp(path.join(os.tmpdir(), 'fix-pi-durable-shell-home-')));
+    cleanups.push(() => rm(home, { recursive: true, force: true }));
+    await writeFile(path.join(home, '.bashrc'), 'printf rc-marker >&2\n');
+    const f = await fixture({ PATH: '/usr/bin:/bin', HOME: home }, 20);
+    let output = '';
+    const result = await f.shell.exec('sleep 60 & echo $! > background.pid; printf foreground-complete',
       { timeout: 0.5, onOutput: text => { output += text; } }, BACKGROUND_CONTEXT);
     expect(result).toEqual({ ok: true, value: { exitCode: 0 } });
     expect(output).toBe('foreground-complete');

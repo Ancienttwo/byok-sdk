@@ -114,6 +114,7 @@ export async function composeRedactionHost(
         consumed.push(input.payload.body);
         return { outcome: 'accepted' };
       },
+      consumeSealed: async () => ({ outcome: 'accepted' }),
     },
     taskRedactionStore: wrapStore(createPostgresTaskRedactionStore({ pool, clock, objectStorage: objectStorage.config })),
     proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },

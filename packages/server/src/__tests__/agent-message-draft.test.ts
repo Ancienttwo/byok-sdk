@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { InMemoryAgentMessageDraftStore } from '@byok-sdk/cloud';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, type AgentMessagePublishPlainPayload } from '@byok-sdk/protocol';
 import { createByokServer, createHmacTokenSigner, type ByokServer } from '../index';
 import { TaskEventRelay } from '../relay';
 import { connectFakeDaemonLongPoll, startServer, stopServer, type FakeLongPollDaemon } from './test-support';
@@ -73,7 +73,7 @@ describe('tasks.messageDraft through real HTTP inbound', () => {
   it('keeps the final suffix when publication races the first snapshot read', async () => {
     const body = 'hello world';
     const message = createEnvelope('agent.message.publish', {
-      ...publish().payload, body, byteCount: Buffer.byteLength(body),
+      ...(publish().payload as AgentMessagePublishPlainPayload), body, byteCount: Buffer.byteLength(body),
       contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`,
     }, { taskId });
     await send(frame('hello'));

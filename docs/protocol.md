@@ -152,8 +152,8 @@ unproven (see the evidence list below).
   account for their `batchLength`). The v4 corpus carries every message type,
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
-  and an `approvalId` on every approval request and decision. `golden/v4.releases.json` registers the published 0.31.0 corpus
-  and the published 0.32.0 corpus, and has no `floor`. Each registered v4 entry pins both corpus
+  and an `approvalId` on every approval request and decision. `golden/v4.releases.json` registers the published 0.31.0 corpus,
+  the published 0.32.0 corpus and the 0.33.0 corpus, a source candidate until it is published, and has no `floor`. Each registered v4 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.30.2 registry tarball, the last v3 release. It rejects every v4
@@ -457,6 +457,17 @@ field. `failure` stays plaintext on a sealed `task.fail`. The reference server
 and the hosted cloud advertise the flag and project the field as
 `TaskResult.failure` and `TerminalResult.failure`.
 
+**Landed additive minor: `task.fail.failure.scope` (#1271).** The `quota`
+branch gains an OPTIONAL `scope: 'account' | 'model'`, set only from structured
+runtime evidence: `account` when the whole account is limited, `model` when
+only the model's own limit is used up, so another model of the same runtime
+may still run. It is gated on the server's new `runtime-quota-scope` flag
+(`failure.scope` in `WIRE_ADDITIONS`), because the `quota` branch is strict. A
+daemon talking to a server without the flag drops `scope` and sends `class`
+and `resetsAt` unchanged; the sealed branch does the same. The reference
+server and the hosted cloud advertise the flag and project `scope` with the
+rest of the failure.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -597,7 +608,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId` (required — §5.3) | A session or the control socket requested approval (§5) |
 | `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2) | Runtime reached `turn_end` |
-| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag |
+| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag, and its quota `scope` on `runtime-quota-scope` |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2); baseline, no capability gate |
 | `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; server-advertised `agent-message-draft` gate |
@@ -1233,10 +1244,10 @@ wire rules. This section states the wire rules.
 The Host keeps each sealed member as it gets it and returns it from its read
 interfaces. What a sealed task still shows the Host, and what sealing does not
 protect, is in [security.md, Sealed tasks](security.md#sealed-tasks).
-`SEALED_PAYLOAD_CATEGORIES` also names `agent-message` and
-`memory-projection`, but they are reserved values: `TaskSealingSchema` accepts
-only `task-input` and `task-output` (`SEALED_PAYLOAD_V1_CATEGORIES`), so v1
-seals no Agent message and no memory projection.
+`TaskSealingSchema` accepts the four categories of
+`SEALED_PAYLOAD_CATEGORIES`. `task-input` and `task-output` are v1;
+`agent-message` and `memory-projection` are v2 (#1045, see "Sealed payload v2"
+at the end of this section).
 
 **Sealed branches.** Sealed is a branch of a message type's payload, not a
 message type. Each sealable type's payload schema is the union of a
@@ -1249,7 +1260,7 @@ content. In TypeScript, narrow with `payload.sealing !== undefined` on
 `isSealedPayload(type, payload)`. The `type` stays plaintext, so the Host
 moves the task lifecycle by `type` as before.
 
-| Type | Marker | Category | Identity | Moved into `sealed` | Dropped in v1 |
+| Type | Marker | Category | Identity | Moved into `sealed` | Dropped |
 | --- | --- | --- | --- | --- | --- |
 | `task.offer` | `sealing` | `task-input` | | `instruction` | `preparation` |
 | `task.steer` | `sealed` | `task-input` | `steerId` | `text` | |
@@ -1260,6 +1271,7 @@ moves the task lifecycle by `type` as before.
 | `task.progress` | `sealed` | `task-output` | `seq` | `events` | |
 | `task.artifact` | `sealed` | `task-output` | `artifactId` (UUID, required) | `inline` | `blobRef` |
 | `task.await_approval` | `sealed` | `task-output` | `approvalId` (required) | `summary` | |
+| `agent.message.publish` (v2) | `sealed` | `agent-message` | `messageId`, `cursor` | `body` | `contentHash`, `byteCount` |
 
 A sealed branch is its plaintext branch without the moved and dropped fields,
 plus `sealed` (and, on `task.offer`, `sealing` and `routineRef`). The
@@ -1291,8 +1303,8 @@ ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
 gate: they are always inline. A daemon that receives a sealed offer without
 advertising `sealed-payload-v1` declines it before opening it (Freeze rule).
 
-A prepared offer (`preparation`), input preparation, Agent messages, egress,
-drafts and memory projections are not sealed in v1. The split table forbids
+A prepared offer (`preparation`), input preparation, egress and drafts are
+not sealed. Agent messages and memory projections are sealed only under v2. The split table forbids
 `preparation` on the sealed `task.offer` branch.
 
 **Sealing policy.** A sealed offer carries `sealing: { scopeId, epoch,
@@ -1575,6 +1587,115 @@ refuses a draft for a task whose offer has any `sealing`, with
 `agent_message_draft_invalid`. A sealed task must not go to
 `@byok-sdk/cloud-do`: it runs the model with platform keys, so it reads the
 instruction and the output in plaintext.
+
+**Sealed payload v2 (#1045, gated addition).** v2 adds two categories on the
+v1 suite, keys and binding rules. The design is
+[docs/plans/2026-10-28-1045-e2ee-v2.md](plans/2026-10-28-1045-e2ee-v2.md).
+`SEALED_CATEGORY_CAPABILITY` maps each category to its flag:
+
+| Category | Flag | What it seals |
+| --- | --- | --- |
+| `agent-message` | `sealed-payload-v2` | the `body` of `agent.message.publish` |
+| `memory-projection` | `sealed-payload-v2` | the memory projection snapshot, and the terminal memory evidence |
+
+- **Policy.** `memory-projection` is legal only with `task-output` in the same
+  `categories`; `TaskSealingSchema` refuses it alone, because its evidence
+  rides on the task terminal.
+- **Capability.** The device advertises `sealed-payload-v2` before a Host may
+  send it an offer whose `sealing.categories` includes `agent-message` or
+  `memory-projection` (one value gate per category), or an
+  `agent.message.disposition` with `contentMac`. The server advertises it
+  before a device may send a sealed `agent.message.publish`; a sealed publish
+  by `ciphertextRef` also needs `sealed-output-ciphertext-ref`. A
+  `WIRE_ADDITIONS` row with a `value` on an array field matches when the
+  array includes that value, so `requiredReceiverCapabilities` returns the
+  flag for any offer that names either category.
+- **Agent message.** The sealed publish keeps `agentRef`, `sessionRef`,
+  `contract`, `messageId`, `cursor` and `contentType` in plaintext. The
+  opened content is `{"body": …}`. `contentHash` and `byteCount` are absent:
+  no plaintext digest or exact length of sealed content goes on the wire.
+  The content bound is
+  `sealedAgentMessageMaxContentLength(maxBytes) = 6 × maxBytes + 11`. The
+  canonical JSON writes a 1-byte control character as the 6-byte `\u00XX`,
+  and 11 is the length of `{"body":""}`. At `AGENT_MESSAGE_MAX_BYTES`
+  (262,144) the bound is 1,572,875 bytes, under the 2 MiB category limit, so
+  every legal body seals. The exact `byteCount ≤ maxBytes` is checked by the
+  device before sealing and by the member after opening. The ciphertext is
+  inline up to a padded length of 256 KiB and by `ciphertextRef` above, as in
+  v1.
+- **Disposition.** The sealed form of `agent.message.disposition` names the
+  message by the publish's `sealed.contentMac` in place of `contentHash`. A
+  disposition carries exactly one of the two.
+- **Memory evidence.** When `categories` includes `memory-projection`, the
+  sealed `task.complete`, `task.fail` and `task.cancelled` also move
+  `agentHomeMemoryChange` (`movedWith` in the split table). The Host rule for
+  task output then refuses a plaintext terminal that carries it:
+  `isSealedTaskPlainOutput(type, payload, categories)` takes the frozen
+  categories. Without the category, the v1 rule is unchanged.
+- **Memory projection.** The sealed mutation of
+  `POST /byok/agent-memory-projections` carries `sealed` in place of
+  `snapshot`, inline only: its padded length is at most 256 KiB, and the
+  schema refuses `ciphertextRef`. The sealed receipt carries `contentMac`,
+  `paddedLength` and `metering.acceptedPaddedBytes`, and no `redactedHash`.
+  The Host-issued projection grant gates this branch, not an envelope row.
+- **Device rules (#1045 S2).** The daemon advertises `sealed-payload-v2`
+  exactly when it advertises `sealed-payload-v1`. It declines an offer that
+  seals `agent-message` with `sealing_policy_mismatch` when the server does
+  not advertise the flags of a sealed publish, and it needs a sealing key
+  before such a task runs, as for `task-output`. It seals a message body once,
+  when the draft enters the Agent's message outbox, and every retry sends
+  those bytes; without a key the message tool fails and nothing is sent. It
+  matches a disposition by `contentMac` for a sealed message and by
+  `contentHash` for a plaintext one. A closed plaintext terminal of a task
+  that seals `memory-projection` drops `agentHomeMemoryChange`.
+- **Projection sealing.** A grant with `sealing: { scopeId, epoch }` names an
+  Agent scope of the member chain, separate from task scopes. Its policy must
+  be exactly `memory-projection`. The opened content is
+  `{"redactedBytes": "<base64url>"}`, at most 262,140 bytes, bound to family
+  `agent.memory.projection`, direction `daemon-to-server`, identity
+  `{ agentId, writerEpoch, sourceSeq, mutationId }`, the writing device, the
+  Agent and categories `['memory-projection']`. Without a usable key the
+  device appends no mutation. One writer epoch has one form: a pending record
+  whose form differs from its grant stops the outbox unsent.
+
+- **Cloud message admission (#1045 S3).** The cloud advertises
+  `sealed-payload-v2`. A submission whose `sealing` names `agent-message`
+  and that carries `messageEgress` is refused with
+  `agent_message_sealed_consumer_missing` before any write while
+  `agentMessage.consumeSealed` is absent. The task's frozen `sealing` allows
+  one form of its message: a sealed publish to a task that does not seal
+  `agent-message` is refused with `sealed_payload_unsupported` before any
+  other check, and a plaintext publish to a task that does is refused with
+  `sealed_output_required`. A sealed message fits the frozen `maxBytes` when
+  its `paddedLength` is at most
+  `sealedPayloadPaddedLength(4 + sealedAgentMessageMaxContentLength(maxBytes))`,
+  else `agent_message_too_large`. A `ciphertextRef` must name a committed
+  blob (`sealed_ciphertext_invalid`), which the task holds once the message
+  is reserved. Retries compare the exact payload bytes, so a sender that
+  sealed again is a different message. `consumeSealed` decides a sealed
+  message and `consume` a plaintext one; the disposition names the message
+  by `contentMac` or `contentHash`, and `readTaskAgentMessage` and
+  `readAgentMessageDisposition` return either form. Only a member can open
+  the body.
+
+- **Cloud projection storage (#1045 S4).** The Host's
+  `AgentMemoryProjectionAuthorizer` returns the `sealing` of the grant it
+  issued with an authorized result. A grant with `sealing` takes only a
+  snapshot sealed under exactly that scope and epoch, and a grant without it
+  only a plaintext snapshot; anything else is refused with 409
+  `agent_memory_projection_sealing_mismatch` before the store is called. The
+  route never decodes or opens a sealed snapshot. The store keeps the sealed
+  member as received in `agent_memory_projection_head.sealed_member` and the
+  receipt's `contentMac` and padded length (migration 0037); a row holds one
+  form, and neither table keeps a plaintext hash or byte count of sealed
+  content. A replay at the same writer epoch and source sequence is
+  idempotent when its form, `contentMac` and padded length match, and a
+  replay mismatch otherwise. Erase and its epoch fence are unchanged. The
+  Agent memory scope belongs to the member chain and is separate from task
+  scopes, so a task redaction's scope shred does not touch it.
+
+The embedded `@byok-sdk/server` dispatches no sealed task, so it takes
+plaintext Agent messages and memory projections only.
 
 ### 2.6 E2EE member routes (#654 E2c-2)
 
