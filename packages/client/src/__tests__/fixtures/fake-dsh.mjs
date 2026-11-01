@@ -51,6 +51,7 @@ const reverse = new Map();
 
 function prompt(id, sessionId, text) {
   if (text === 'fail') return error(id, -32603, 'Internal error: turn failed: 401: {"message":"invalid api key"}');
+  if (text === 'rate-limit') return error(id, -32603, 'Internal error: turn failed: 429: {"message":"rate limit exceeded"}');
   if (text === 'exit') process.exit(3);
   if (text === 'hang') { hanging = { id, sessionId }; return; }
   if (text === 'permission') {
@@ -90,6 +91,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     return result(id, { sessionId, configOptions: configOptions() });
   }
   if (method === 'session/resume') {
+    if (params.sessionId === 'corrupt-session') return error(id, -32603, 'Internal error: session file is corrupt');
     const file = path.join(sessions, params.sessionId);
     if (!existsSync(file)) return error(id, -32602, `Invalid params: session is not resumable: ${params.sessionId}`);
     if (readFileSync(file, 'utf8') !== params.cwd) return error(id, -32602, `Invalid params: session cwd does not match: ${params.cwd}`);

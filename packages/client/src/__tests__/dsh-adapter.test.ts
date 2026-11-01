@@ -77,6 +77,7 @@ describe('DshAdapter construction and descriptor', () => {
     expect(at({ provider: 'custom', baseUrl: undefined })).toThrow(/baseUrl is required/);
     expect(at({ provider: 'deepseek' })).toThrow(/not supported for the deepseek provider/);
     expect(at({ baseUrl: 'https://user:secret@example.test/v1' })).toThrow(/credentials/);
+    expect(at({ baseUrl: 'https://example.test/v1?api_key=secret' })).toThrow(/query string/);
     expect(at({ keyEnv: 'NOT A NAME' })).toThrow(/keyEnv/);
     expect(at({ keyEnv: 'PROVIDER_CREDENTIAL' })).toThrow(/KEY, TOKEN, SECRET or PASSWORD/);
     expect(at({ keyEnv: 'BYOK_DSH_PROVIDER_KEY' })).toThrow(/BYOK_ or DSH_/);
@@ -225,6 +226,12 @@ describe('DshAdapter sessions', () => {
     expect((error as Error).message).toMatch(/invalid api key/);
   });
 
+  it('keeps a rate limit dsh reports only in text non-retryable, with class unknown', async () => {
+    const { open } = await setup();
+    const error = await turn(await open({ instruction: 'rate-limit' })).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'unknown' } });
+  });
+
   it('fails the session when dsh exits during a turn', async () => {
     const { open } = await setup();
     const error = await turn(await open({ instruction: 'exit' })).catch((caught: unknown) => caught);
@@ -266,6 +273,7 @@ describe('DshAdapter sessions', () => {
   it('fails a resume dsh refuses as a non-retryable authority failure', async () => {
     const { open } = await setup();
     await expect(open({ instruction: 'x', sessionRef: 'unknown-session' })).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    await expect(open({ instruction: 'x', sessionRef: 'corrupt-session' })).rejects.toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
   });
 
   it('fails closed when the session does not run the configured route', async () => {
