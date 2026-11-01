@@ -6,8 +6,8 @@
     "snapshotSha256": "3e6071f71ac1a7c47fe7907ced28f9331e22238e23433be1cb3370cd8a56ad17"
   },
   "to": {
-    "version": "0.33.0",
-    "snapshotSha256": "3d7efc5c0ef1f6d99d0dbbffdbcc02d8ffd006bcc81feee68d9813386d4fe560"
+    "version": "0.34.0",
+    "snapshotSha256": "fee22954a2a80cb73c9e2d790d31e6e3b3618d535f0027c6942622bb80df981c"
   },
   "configFields": {
     "status": "tracked",
@@ -59,7 +59,7 @@
       "id": "system-tool-trusted-paths",
       "impact": "additive",
       "summary": "System tools no longer resolve through the daemon's PATH: macOS runs /bin/launchctl and /usr/sbin/ioreg, Linux runs systemctl and secret-tool from the first of /usr/bin, /bin, /usr/sbin, /sbin, and Windows runs taskkill, sc.exe, reg and icacls from %SystemRoot%\\System32 with a drive-qualified SystemRoot. A service-lifecycle or icacls step whose tool is not there rejects with the new SystemToolUnavailableError and starts nothing. No Host code change is needed unless a Host wants to catch it.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1304",
+      "migration": "docs/releases/host-upgrade-0.34.0.md#from-0330-to-0340",
       "items": [
         "export:@byok-sdk/client#SystemToolUnavailableError"
       ]

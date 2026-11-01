@@ -1,3 +1,15 @@
 {
-  "releases": []
+  "releases": [
+    {
+      "version": "0.34.0",
+      "envelopes": {
+        "lines": 342,
+        "sha256": "947f6a0440bb6e63f3f3d81b56c1ffd5770152cedbf9ce3c7795810ce3f7c8a3"
+      },
+      "http": {
+        "lines": 30,
+        "sha256": "5dec1f41cbc7ad90b2633bc7887149adf3ba54af72f83b166e6e5ecbe6124ca6"
+      }
+    }
+  ]
 }

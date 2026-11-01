@@ -351,7 +351,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4997,
+      "budgetBytes": 4996,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -379,7 +379,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
-      "budgetBytes": 25712,
+      "budgetBytes": 25653,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1125,7 +1125,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private pure todo runtime",
-      "budgetBytes": 398402,
+      "budgetBytes": 372345,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1512,7 +1512,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1631,
+      "budgetBytes": 1630,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2223,7 +2223,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1761,
+      "budgetBytes": 1760,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

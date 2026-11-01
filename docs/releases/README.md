@@ -25,9 +25,9 @@ A release ships `packages/client/upgrade-manifest.json` with one entry per Host-
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility
 from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 5: v5 renames the runtime
-capability `durablePi` to `durableLane`. 0.33.0 is the last v4 release and
-the first v5 release is the next MINOR, so `golden/v5.releases.json` registers
-no release yet and has no floor. No published v5 decoder exists yet, so cross-release gates stay
+capability `durablePi` to `durableLane`. 0.33.0 is the last v4 release, and
+`golden/v5.releases.json` registers the corpus of the 0.34.0 source
+candidate, the first v5 release, and has no floor. No published v5 decoder exists yet, so cross-release gates stay
 unproven until one is pinned.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`

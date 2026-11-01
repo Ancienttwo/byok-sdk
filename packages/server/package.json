@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/server",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "description": "BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, memory or single-process SQLite storage.",
   "type": "module",
   "license": "MIT",
