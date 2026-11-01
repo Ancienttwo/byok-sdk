@@ -6,8 +6,8 @@
     "snapshotSha256": "020368109c1258f38b768221367f2044e3115a1b88de8c19d10618ef7eed1427"
   },
   "to": {
-    "version": "0.31.0",
-    "snapshotSha256": "0d2a8ca77ab177b16e64129d22bc2d8c1ac9173cfafa667181fd37a27ddffb7c"
+    "version": "0.32.0",
+    "snapshotSha256": "f32c1d9463eedf8ea24d4f7ca32faf2f000c1fdebb3973423af0eed8b7a078c4"
   },
   "configFields": {
     "status": "tracked",
