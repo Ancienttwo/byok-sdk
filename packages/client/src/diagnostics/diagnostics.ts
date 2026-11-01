@@ -27,7 +27,8 @@ import { attachRuntimeExecutables, attachRuntimeVersionChanges, attachRuntimeVer
 import { connectControlClient } from '../daemon/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../diagnostics/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { defaultRuntimeAdapters, probeRuntimes } from './runtime-probe';
+import { probeRuntimes } from './runtime-probe';
+import { buildConfiguredRuntimeAdapters } from '../daemon/create-daemon/support';
 import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult, type ControlStatusResult } from '../daemon/control-protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment';
@@ -827,7 +828,7 @@ export async function collectDoctorDiagnostics(
   if (control.status === 'offline') {
     liveRuntimeEnvironment = undefined;
     runtimeEnvironmentUnknown = 'daemon-offline';
-    observations = await probeRuntimes(options.adapters ?? defaultRuntimeAdapters(config), { timeoutMs: options.runtimeProbeTimeoutMs });
+    observations = await probeRuntimes(options.adapters ?? buildConfiguredRuntimeAdapters(config), { timeoutMs: options.runtimeProbeTimeoutMs });
     runtimeSource = 'local-shell';
     environment = lastEnvironment ?? { status: 'unknown' };
   }
