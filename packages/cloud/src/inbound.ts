@@ -328,6 +328,12 @@ export async function handleAgentMessagePublish(
     payloadBody,
     terminalBody: JSON.stringify({ payload, disposition }),
   });
+  // Only a redaction or archive that tombstoned the exact reservation fails
+  // this CAS. Its reference release may have run before the retain above, so
+  // the retain is undone here; a removal that commits later releases it itself.
+  if (admission === undefined && ciphertextRef !== undefined) {
+    await releaseSealedCiphertext(stores.objects, taskId, ciphertextRef);
+  }
   const terminal = admission?.terminalBody === undefined
     ? undefined
     : parseAgentMessageDisposition(payload, admission.terminalBody);
