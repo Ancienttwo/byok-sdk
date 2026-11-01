@@ -353,7 +353,7 @@ flowchart TB
   Hono(["Hono HTTP routes<br/>auth, events, messages, blobs"]):::api
   Cloud(["@byok-sdk/cloud<br/>async domain kernel"]):::core
   Stores(["Cloud stores<br/>memory or atomic SQLite subset"]):::store
-  Relay(["TaskEventRelay<br/>bounded in-process live feed"]):::support
+  Relay(["TaskEventRelay<br/>in-process wake-ups, server events"]):::support
   Snapshot(["server projections<br/>tasks, machines, results"]):::support
 
   Factory --> Hono
@@ -407,7 +407,8 @@ after exact readback, never by error-code inference alone. Postgres generic rece
 | `index.ts` | Self-hosted façade, Hono routes, cloud-kernel composition, async public API |
 | `@byok-sdk/cloud` | Pairing/auth, capability admission, offer reservation, inbound ownership, cancellation, terminal authority, blobs, presence and mailbox handlers |
 | `stores.ts` / `stores/sqlite/` | Explicit memory or six-interface atomic SQLite composition |
-| `relay.ts` / `event-queue.ts` | Post-commit observer-fed, bounded in-process task event stream; not durable audit history |
+| `relay.ts` / `event-queue.ts` | Post-commit, content-free wake-ups for task readers and the bounded `events.subscribe()` feed; not durable audit history |
+| `task-events.ts` | `tasks.events` read-time projection of task state, approval timeline and the durable activity log, with a resumable cursor (#1113) |
 | `snapshot.ts` | Task result/snapshot and device-plus-presence projections |
 | `rate-limiter.ts` | Per-device inbound budget at the embedded edge |
 
@@ -451,9 +452,9 @@ than a 250 ms read loop per idle hold.
 - `events.subscribe()` is an in-process live stream fed after cloud commits. It
   is intentionally not a cross-process replay or audit stream; durable mailbox
   and task readbacks remain the recovery authorities. Dispatch provisions the
-  relay before mailbox publication, and `TaskHandle.result()` checks durable
-  terminal truth before waiting on notification, so relay timing is not a
-  terminal liveness authority.
+  relay before mailbox publication. `tasks.events` and `TaskHandle.result()`
+  read the stores and treat a relay wake only as a reason to read again, so
+  relay timing is not a liveness authority.
 - Claim-time runtime capabilities are persisted on the attempt and are the
   sole input to task-level `steer` admission. Connection or presence
   observations cannot authorize a task control.

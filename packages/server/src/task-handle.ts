@@ -1,5 +1,4 @@
 import {
-  ByokCloudError,
   SteerRejectedError as KernelSteerRejectedError,
   type ByokCloud,
   type SteerRejectionCode,
@@ -8,9 +7,9 @@ import {
   type TenantId,
 } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
-import type { QueueEntry } from './event-queue';
 import type { TaskEventRelay } from './relay';
-import { TaskEventsUnavailableError, type ServerTaskEvent, type TaskEventEntry, type TaskHandle, type TaskResult } from './types';
+import { readTaskEvents, type TaskEventDeps } from './task-events';
+import type { ServerTaskEvent, TaskHandle, TaskResult } from './types';
 
 function steerRejectionMessage(
   taskId: string,
@@ -97,139 +96,23 @@ function refusalCode(kernelCode: SteerRejectionCode, state: TaskState): SteerRej
   return TERMINAL_STATES.has(state) ? 'task_terminal' : kernelCode;
 }
 
-export interface TaskHandleDeps {
+export interface TaskHandleDeps extends TaskEventDeps {
   readonly tenant: TenantId;
   readonly cloud: ByokCloud;
-  readonly relay: TaskEventRelay;
   /**
    * The task's current `TaskSnapshot.state` and `updatedAt`, or `undefined`
    * when the attempt is gone. The snapshot projection itself — never a second
    * derivation.
    */
   readonly readState: (taskId: string) => Promise<{ readonly state: TaskState; readonly at: string } | undefined>;
-  /**
-   * The pending approval request as the relay would have announced it: a
-   * plaintext request with an `approvalId`. A sealed request, which the relay
-   * never announces, reads as none.
-   */
-  readonly readApprovalRequest: (taskId: string) => Promise<ServerTaskEvent | undefined>;
   /** The read-back this handle's `result()` answers with. */
   readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
 
 type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
-type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState' | 'readApprovalRequest'>;
 
-/** Where a task event read starts, and what stops it; see `ByokServer.tasks.events`. */
-export interface TaskEventReadOptions {
-  readonly after?: string;
-  readonly from?: 'state';
-  readonly signal?: AbortSignal;
-}
-
-/**
- * One task's event feed from the relay, shared by `ByokServer.tasks.events`
- * and {@link TaskHandle.events}. Every refusal is thrown by the first `next()`,
- * before any entry; once entries flow, the read only ends (terminal, `signal`,
- * `return()`, server close).
- *
- * `return()` also releases a pending `next()`, as the relay queue's own
- * iterator does. An async generator cannot: it queues `return()` behind the
- * outstanding `next()`, so a reader stopping an idle feed would hang. Here
- * `return()` aborts the read's own signal first, which wakes the queue.
- * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
- */
-export function readTaskEvents<T = TaskEventEntry>(
-  deps: EventDeps,
-  taskId: string,
-  options: TaskEventReadOptions = {},
-  project: (entry: TaskEventEntry) => T = (entry) => entry as T,
-): AsyncIterable<T> {
-  return {
-    [Symbol.asyncIterator](): AsyncIterator<T> {
-      const stop = new AbortController();
-      const entries = followTaskEvents(deps, taskId, options, AbortSignal.any([stop.signal, options.signal ?? stop.signal]));
-      return {
-        async next(): Promise<IteratorResult<T>> {
-          const next = await entries.next();
-          return next.done ? next : { value: project(next.value), done: false };
-        },
-        return(): Promise<IteratorResult<T>> {
-          stop.abort();
-          // A generator's return() always reports done.
-          return entries.return() as Promise<IteratorReturnResult<void>>;
-        },
-      };
-    },
-  };
-}
-
-/**
- * Liveness is judged by the projection `tasks.get` answers with, never by the
- * attempt status: an accepted host cancellation is terminal there at once
- * while the attempt still reads `cancel_requested`, and a feed attached on that
- * basis would wait for a device message that may never come.
- */
-async function* followTaskEvents(
-  deps: EventDeps,
-  taskId: string,
-  { after, from }: TaskEventReadOptions,
-  signal: AbortSignal,
-): AsyncGenerator<TaskEventEntry, void, undefined> {
-  if (after !== undefined && from !== undefined) throw new TypeError('tasks.events takes after or from, not both');
-  const { relay, readState } = deps;
-  if (relay.stopped || signal.aborted) return;
-  let feed = relay.feed(taskId);
-  let read = await readState(taskId);
-  // A feed a dispatch opened is the dispatch's until a read of the stored task attaches to it.
-  if (feed === undefined || feed.phase === 'dispatching') {
-    // Refuse before attaching, so a read of a reclaimed or unknown task never
-    // recreates relay state for it.
-    if (read === undefined) throw taskNotFound(taskId);
-    if (TERMINAL_STATES.has(read.state)) throw new TaskEventsUnavailableError(taskId, 'feed_expired');
-    // A reader stopped during that read must not leave a feed behind.
-    feed = signal.aborted ? undefined : relay.attach(taskId);
-    if (feed === undefined) return;
-    // A terminal committed between the read and the attach never reached the
-    // new feed, which would then never end: read again now that it listens.
-    // A live task's feed starts with what this read found.
-    read = await readState(taskId);
-    if (read !== undefined && !TERMINAL_STATES.has(read.state)) {
-      const request = read.state === 'AwaitApproval' ? await deps.readApprovalRequest(taskId) : undefined;
-      relay.seed(feed, read.state, read.at, request);
-    }
-  }
-  if (read === undefined) {
-    relay.detach(taskId, feed);
-    throw taskNotFound(taskId);
-  }
-  if (TERMINAL_STATES.has(read.state) && feed.phase !== 'dispatched' && !feed.terminalSettled) {
-    relay.detach(taskId, feed);
-    throw new TaskEventsUnavailableError(taskId, 'feed_expired');
-  }
-  // `from: 'state'` starts with the entries where the present state began,
-  // kept by the relay even when the queue dropped them, then reads on after them.
-  const start = from === 'state' ? feed.current : [];
-  const entries = (from === 'state' ? feed.queue.entries(start.at(-1)?.sequence) : relay.entries(taskId, feed, after))[Symbol.asyncIterator]();
-  const { feedId } = feed;
-  const entry = ({ sequence, value }: QueueEntry<ServerTaskEvent>): TaskEventEntry => ({ cursor: `${feedId}.${sequence}`, event: value });
-  // The queue's own return() also releases a pending next(), which this
-  // generator's return() could not do while it is suspended in one.
-  const stop = () => { void entries.return!(); };
-  signal.addEventListener('abort', stop, { once: true });
-  try {
-    if (signal.aborted) return;
-    for (const kept of start) yield entry(kept);
-    for (let next = await entries.next(); !next.done; next = await entries.next()) yield entry(next.value);
-  } finally {
-    signal.removeEventListener('abort', stop);
-    await entries.return!();
-  }
-}
-
-function taskNotFound(taskId: string): ByokCloudError {
-  return new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
-}
+/** How long `result()` waits on a wake before reading the store again. */
+const RESULT_RECHECK_MS = 1_000;
 
 /**
  * The host's approval decision, shared by {@link TaskHandle.approve} and
@@ -257,16 +140,6 @@ export async function rejectPendingApproval(
 }
 
 /**
- * One in-flight task's control surface.
- *
- * The §3 invariant it exists to keep: **the handle is not a second authority.**
- * Every mutation is a kernel call, and `result()` is a READ-BACK — it waits for
- * the relay's terminal barrier and then asks the store what the terminal was,
- * so `handle.result()` and `byok.tasks.get(taskId).result` are physically the
- * same fact rather than two copies that can disagree. Nothing about the task is
- * cached here.
- */
-/**
  * Announces the `Cancelled` transition an abandonment recorded. An attempt that
  * was already terminal comes back with its own terminal, so only one settled
  * under this cause is announced; a cancelled task already announced it when
@@ -278,12 +151,16 @@ export function noteAbandoned(relay: TaskEventRelay, attempt: TaskAttempt, cause
   relay.noteHostTransition(attempt.taskId, 'Cancelled', attempt.terminalAt);
 }
 
+/**
+ * One in-flight task's control surface.
+ *
+ * The §3 invariant it exists to keep: **the handle is not a second authority.**
+ * Every mutation is a kernel call, and `result()` is a READ-BACK of the store,
+ * repeated when a wake says the task may have changed, so `handle.result()` and
+ * `byok.tasks.get(taskId).result` are physically the same fact rather than two
+ * copies that can disagree. Nothing about the task is cached here.
+ */
 export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle {
-  // Captured once, at construction. Looking the barrier up later would resurrect
-  // relay state for a task whose terminal was already reclaimed, and then wait
-  // on a promise nothing is left to settle.
-  const terminal = deps.relay.terminal(taskId);
-
   return {
     taskId,
 
@@ -294,8 +171,8 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
     async cancel(reason?: string): Promise<void> {
       const attempt = await deps.cloud.cancelTask(deps.tenant, taskId, reason);
       // An already-terminal task comes back untouched: there was nothing to
-      // cancel, its terminal already settled the barrier, and announcing a
-      // `Cancelled` transition would contradict the recorded result.
+      // cancel, and announcing a `Cancelled` transition would contradict the
+      // recorded result.
       if (attempt.cancellation === undefined) return;
       deps.relay.noteHostTransition(taskId, 'Cancelled', attempt.cancellation.requestedAt);
     },
@@ -328,20 +205,23 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
     },
 
     async result(): Promise<TaskResult> {
-      // Notification delivery is not terminal liveness authority. A terminal
-      // can be durable before a TaskHandle is constructed (or after relay
-      // reclamation), so always ask the durable projection before waiting.
-      const alreadyRecorded = await deps.readResult(taskId);
-      if (alreadyRecorded !== undefined) return alreadyRecorded;
-      await terminal;
-      const result = await deps.readResult(taskId);
-      if (result === undefined) {
-        // The barrier only settles on a fact the store wrote, so an absent
-        // read-back means the store lost it. Fail loudly rather than inventing
-        // a terminal the task never reached.
-        throw new Error(`task ${taskId} reached a terminal with no recorded result`);
+      // The store is the only answer; a wake only says when to ask again.
+      for (;;) {
+        let wake!: () => void;
+        const changed = new Promise<void>((resolve) => { wake = resolve; });
+        const unwatch = deps.relay.watch(taskId, wake);
+        const timer = setTimeout(wake, RESULT_RECHECK_MS);
+        timer.unref?.();
+        try {
+          const result = await deps.readResult(taskId);
+          if (result !== undefined) return result;
+          if (deps.relay.stopped || deps.shutdown.aborted) throw new Error(`server closed before task ${taskId} reached a terminal`);
+          await changed;
+        } finally {
+          clearTimeout(timer);
+          unwatch();
+        }
       }
-      return result;
     },
   };
 }

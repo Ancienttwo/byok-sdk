@@ -1,92 +1,42 @@
 /**
- * A tiny append-only, multi-reader async queue. `push` never blocks; `close`
- * marks the queue done. Every pushed entry gets a sequence number, strictly
- * increasing within the queue. `entries(after)` returns a fresh async iterator
- * that starts after that sequence, or at the beginning of the queue when none
- * is given, and follows new pushes until the queue closes.
+ * A tiny append-only, multi-reader async queue backing the cross-task
+ * `ByokServer.events.subscribe()` feed. `push` never blocks; `close` marks the
+ * queue done. Each `subscribe()` replays what is retained and follows new
+ * pushes until the queue closes; its `return()` also releases a pending
+ * `next()`.
  *
- * Bounded, deliberately (WP3B §3): this queue is a NOTIFICATION relay, not a
- * record of what happened — the durable facts live in the cloud stores a
- * `ByokServer` reads back (`tasks.get`, `TaskHandle.result()`). A consumer that
- * stops iterating must therefore cost bounded memory, not unbounded growth. On
- * overflow the OLDEST entries are dropped. A subscriber whose next wanted entry
- * was dropped receives the caller-supplied `truncationMarker` once for that gap,
- * so a reader can tell a complete feed from a clipped one instead of silently
- * seeing a gap. The marker is not a buffered entry: each subscriber derives it
- * from its own position, so all retained capacity remains available to real
- * events, and it takes the position just before the oldest retained entry.
- *
- * `isPosition` accepts exactly the positions the queue handed out. `subscribe`
- * yields the values only, from the beginning. Both iterators' `return()` also
- * releases a pending `next()`. Members carry no block docs because comments on
- * class members ship in the bundle, which has an exact size budget.
- *
- * Framework-agnostic on purpose (no Node/WS/Hono types here) so it can be
- * unit-tested and reused regardless of transport.
+ * Bounded: the feed is a notification stream, not a record — the durable facts
+ * live in the cloud stores — so a subscriber that stops reading costs bounded
+ * memory. On overflow the OLDEST entries are dropped silently: no
+ * `ByokServerEvent` member could carry a truncation notice. Members carry no
+ * block docs because comments on class members ship in the bundle, which has
+ * an exact size budget.
  */
-export interface AsyncEventQueueOptions<T> {
-  /**
-   * Maximum entries retained before drop-oldest engages. Omitted means
-   * unbounded — only appropriate for a queue whose producer is itself bounded.
-   */
-  readonly maxBuffered?: number;
-  /**
-   * Yielded to a subscriber in place of each run of entries dropped before it
-   * read them, so the truncation is observable. Omitted means a bounded queue
-   * that drops silently.
-   */
-  readonly truncationMarker?: T;
-}
-
-/** One queue position: a pushed value, or the truncation marker standing just before the oldest retained entry. */
-export interface QueueEntry<T> {
-  readonly sequence: number;
-  readonly value: T;
-}
-
 export class AsyncEventQueue<T> {
-  private readonly buffer: QueueEntry<T>[] = [];
+  private readonly buffer: Array<{ readonly sequence: number; readonly value: T }> = [];
   private nextSequence = 0;
   private closed = false;
   private waiters = new Set<() => void>();
-  private readonly maxBuffered: number | undefined;
-  private readonly truncationMarker: T | undefined;
+  private readonly maxBuffered: number;
 
-  constructor(options: AsyncEventQueueOptions<T> = {}) {
-    if (options.maxBuffered !== undefined) {
-      if (!Number.isSafeInteger(options.maxBuffered) || options.maxBuffered <= 0) {
-        throw new TypeError(
-          `AsyncEventQueue: maxBuffered must be a positive safe integer, got ${String(options.maxBuffered)}`,
-        );
-      }
-      this.maxBuffered = options.maxBuffered;
+  constructor(options: { readonly maxBuffered: number }) {
+    if (!Number.isSafeInteger(options.maxBuffered) || options.maxBuffered <= 0) {
+      throw new TypeError(`AsyncEventQueue: maxBuffered must be a positive safe integer, got ${String(options.maxBuffered)}`);
     }
-    this.truncationMarker = options.truncationMarker;
+    this.maxBuffered = options.maxBuffered;
   }
 
-  isPosition(sequence: number): boolean {
-    return Number.isSafeInteger(sequence) && sequence >= 0 && sequence < this.nextSequence;
-  }
-
-  push(value: T): QueueEntry<T> | undefined {
-    if (this.closed) return undefined;
-    const entry = { sequence: this.nextSequence++, value };
-    this.buffer.push(entry);
-    this.enforceBound();
+  push(value: T): void {
+    if (this.closed) return;
+    this.buffer.push({ sequence: this.nextSequence++, value });
+    if (this.buffer.length > this.maxBuffered) this.buffer.splice(0, this.buffer.length - this.maxBuffered);
     this.wake();
-    return entry;
   }
 
   close(): void {
     if (this.closed) return;
     this.closed = true;
     this.wake();
-  }
-
-  private enforceBound(): void {
-    const limit = this.maxBuffered;
-    if (limit === undefined || this.buffer.length <= limit) return;
-    this.buffer.splice(0, this.buffer.length - limit);
   }
 
   private wake(): void {
@@ -99,55 +49,30 @@ export class AsyncEventQueue<T> {
     const queue = this;
     return {
       [Symbol.asyncIterator](): AsyncIterator<T> {
-        const entries = queue.entries()[Symbol.asyncIterator]();
-        return {
-          async next(): Promise<IteratorResult<T>> {
-            const next = await entries.next();
-            return next.done ? next : { value: next.value.value, done: false };
-          },
-          return: () => entries.return!() as Promise<IteratorResult<T>>,
-        };
-      },
-    };
-  }
-
-  entries(after?: number): AsyncIterable<QueueEntry<T>> {
-    const queue = this;
-    return {
-      [Symbol.asyncIterator](): AsyncIterator<QueueEntry<T>> {
-        let wanted = after === undefined ? 0 : after + 1;
+        let wanted = 0;
         let stopped = false;
         const localWaiters = new Set<() => void>();
         return {
-          async next(): Promise<IteratorResult<QueueEntry<T>>> {
+          async next(): Promise<IteratorResult<T>> {
             for (;;) {
               if (stopped) return { value: undefined, done: true };
               const oldest = queue.buffer[0]?.sequence;
               if (oldest !== undefined) {
-                if (wanted < oldest) {
-                  // Everything from `wanted` up to the oldest retained entry
-                  // was dropped before this subscriber read it.
-                  wanted = oldest;
-                  if (queue.truncationMarker !== undefined) {
-                    return { value: { sequence: oldest - 1, value: queue.truncationMarker }, done: false };
-                  }
-                }
+                wanted = Math.max(wanted, oldest);
                 const entry = queue.buffer[wanted - oldest];
                 if (entry !== undefined) {
                   wanted = entry.sequence + 1;
-                  return { value: entry, done: false };
+                  return { value: entry.value, done: false };
                 }
               }
-              if (queue.closed) {
-                return { value: undefined, done: true };
-              }
+              if (queue.closed) return { value: undefined, done: true };
               await new Promise<void>(resolve => {
                 const wake = () => { queue.waiters.delete(wake); localWaiters.delete(wake); resolve(); };
                 localWaiters.add(wake); queue.waiters.add(wake);
               });
             }
           },
-          async return(): Promise<IteratorResult<QueueEntry<T>>> {
+          async return(): Promise<IteratorResult<T>> {
             stopped = true;
             for (const wake of localWaiters) wake();
             return { value: undefined, done: true };

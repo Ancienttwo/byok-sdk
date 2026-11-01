@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "93e56045b723934ccaadd05ca734fa3c1d459db745583426bfa8fdd1057539df"
+    "snapshotSha256": "233e9fafe3dec472cdd2075d127dcb3d1c8e216a7521fc59a0fc0aa7f64c7132"
   },
   "configFields": {
     "status": "tracked",
@@ -63,6 +63,18 @@
       "migration": "docs/migrations/1113-activity-envelope-only.md#activity-progress-uses-task-envelopes-only",
       "items": [
         "export:@byok-sdk/protocol#BYOK_ACTIVITY_PATH"
+      ]
+    },
+    {
+      "id": "task-events-durable-cursor",
+      "impact": "breaking",
+      "summary": "ByokServer.tasks.events and TaskHandle.events() read the durable activity log, task state and the approval timeline instead of an in-process relay buffer (#1113). Cursors resume across a restart over the same SQLite file, including inside a progress batch; cursors from 0.31.0 and earlier are refused as TaskEventsUnavailableError cursor_unknown. State is the current fact, coalesced, not a replay of every transition. A terminal task stays readable while its activity is retained, so the feed_expired reason is gone; events_truncated now marks activity the log dropped before the reader reached it. CreateByokServerOptions.taskEventBufferLimit and taskEventRetentionMs and the DEFAULT_TASK_EVENT_BUFFER_LIMIT and DEFAULT_TASK_EVENT_RETENTION_MS exports are removed. events.subscribe() announces task.state only for tasks this instance dispatched.",
+      "migration": "docs/migrations/1113-task-events-durable-cursor.md#tasksevents-reads-the-durable-activity-log",
+      "items": [
+        "export:@byok-sdk/server#CreateByokServerOptions",
+        "export:@byok-sdk/server#DEFAULT_TASK_EVENT_BUFFER_LIMIT",
+        "export:@byok-sdk/server#DEFAULT_TASK_EVENT_RETENTION_MS",
+        "export:@byok-sdk/server#TaskEventsUnavailableError"
       ]
     },
     {
@@ -3080,9 +3092,29 @@
       "entry": "device-retirement-settles-tasks"
     },
     {
+      "item": "export:@byok-sdk/server#CreateByokServerOptions",
+      "change": "changed",
+      "entry": "task-events-durable-cursor"
+    },
+    {
+      "item": "export:@byok-sdk/server#DEFAULT_TASK_EVENT_BUFFER_LIMIT",
+      "change": "removed",
+      "entry": "task-events-durable-cursor"
+    },
+    {
+      "item": "export:@byok-sdk/server#DEFAULT_TASK_EVENT_RETENTION_MS",
+      "change": "removed",
+      "entry": "task-events-durable-cursor"
+    },
+    {
       "item": "export:@byok-sdk/server#SqliteSchemaErrorCode",
       "change": "changed",
       "entry": "capability-ports-two-way"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskEventsUnavailableError",
+      "change": "changed",
+      "entry": "task-events-durable-cursor"
     },
     {
       "item": "export:@byok-sdk/server#TaskHandle",

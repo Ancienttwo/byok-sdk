@@ -142,13 +142,14 @@ describe('issues #141-#144 server reliability regressions', () => {
   });
 
   it('#142 result() returns an already-durable terminal without waiting for a relay notification', async () => {
-    const relay = new TaskEventRelay({});
+    const relay = new TaskEventRelay();
     const handle = createTaskHandle('task-terminal-before-handle', {
       tenant: TENANT,
       cloud: {} as ByokCloud,
       relay,
+      sources: { readFacts: async () => undefined, readActivity: async () => undefined },
+      shutdown: new AbortController().signal,
       readState: async () => ({ state: 'Complete', at: '2026-09-05T00:00:00.000Z' }),
-      readApprovalRequest: async () => undefined,
       readResult: async () => ({ state: 'Complete', summary: 'durably complete' }),
     });
 
@@ -161,9 +162,10 @@ describe('issues #141-#144 server reliability regressions', () => {
     relay.stop();
   });
 
-  it('#142 buffers a terminal committed during provisional enqueue and replays it after offer activation', async () => {
-    const relay = new TaskEventRelay({});
+  it('#142 holds a terminal committed during provisional enqueue until the offer is activated', async () => {
+    const relay = new TaskEventRelay();
     const taskId = 'task-provisional-terminal';
+    const feed = relay.serverEvents()[Symbol.asyncIterator]();
     relay.provision(taskId);
     relay.onInboundCommitted({
       tenantId: TENANT,
@@ -176,14 +178,14 @@ describe('issues #141-#144 server reliability regressions', () => {
       outcome: 'accepted',
     });
     relay.noteDispatched(taskId, '2026-09-05T00:00:00.000Z');
+    relay.stop();
 
     const events: unknown[] = [];
-    for await (const entry of relay.entries(taskId, relay.feed(taskId)!)) events.push(entry.value);
+    for (let next = await feed.next(); !next.done; next = await feed.next()) events.push(next.value);
     expect(events).toMatchObject([
-      { kind: 'state', state: 'Offered' },
-      { kind: 'state', state: 'Complete' },
+      { kind: 'task.created', taskId },
+      { kind: 'task.state', taskId, state: 'Complete' },
     ]);
-    relay.stop();
   });
 
   it('#143 retries the same host rejection payload and does not enqueue another executable control', async () => {

@@ -2015,11 +2015,11 @@ authorization, and both tenant-scoped reads happen before a 304 response. The
 reference remains GET-only and does not define an approval action, SaaS identity
 provider, public browser route, SSE lifecycle, or `ThreadMessageLike` contract.
 
-The embedded server's `tasks.events` is a different thing: an in-process
-notification feed of one task, valid within one server instance, with no
-retention claim beyond its bounded relay buffer. It is not a second projection
-authority, and it is not a host read port for the hosted activity model (see
-[Embedded per-task event feed](#embedded-per-task-event-feed)).
+The embedded server's `tasks.events` reads this same activity log, so it is
+not a second projection authority: its Agent progress and artifacts are the
+log's entries, resumable by a cursor across a restart (see
+[Embedded per-task event feed](#embedded-per-task-event-feed)). A hosted Host
+reads one task's progress with `readActivity(tenant, taskId, { after })`.
 
 At 10x activity volume, the first expected pressure is whole-row JSONB tail
 updates, per-task hot-row contention, and host polling—not the bounded O(events)
@@ -3409,64 +3409,66 @@ the execution identity. This does not authorize a new execution after failure.
 
 ### Embedded per-task event feed
 
-Embedded `tasks.events(taskId, { after?, from?, signal? })` hands a Host the relay
-notifications of one task by taskId, so a submitted task without a TaskHandle
-has its state, Agent events, artifacts and approval requests (with the
-`approvalId` that `tasks.approve`/`reject` take). It reads the existing relay
-feed; it adds no wire message, store, SQL or Cloud port, and it is not a read
-model. Task facts stay with `tasks.get`, `tasks.attempt` and the terminal
-receipt. `TaskHandle.events()` reads the same feed without cursors.
+Embedded `tasks.events(taskId, { after?, from?, signal? })` hands a Host one
+task's state, Agent progress, artifacts and approval requests (with the
+`approvalId` that `tasks.approve`/`reject` take), so a submitted task without a
+TaskHandle can be followed. It is a read-time projection of three authorities
+(#1113): canonical task state and the approval timeline, read the way
+`tasks.get` reads them, and the durable activity log that `readActivity`
+serves. It adds no wire message, store or Cloud port, and holds no history of
+its own. `TaskHandle.events()` reads the same feed without cursors.
 
-- Each entry carries an opaque cursor `<feedId>.<seq>`. `feedId` is random per
-  feed and `seq` increases within it, so a cursor is valid only for one server
-  instance's current feed of the task. Order is that instance's arrival order;
-  progress, artifacts and approvals have no protocol total order.
-- A read starts after `after`, at the start of what is retained, or, with
-  `from: 'state'`, at the entries where the task's current state began: its
-  latest `state` entry, preceded by the pending `await_approval` request while
-  it awaits approval. The relay keeps those entries apart from the bounded
-  queue, so that start survives drop-oldest with its original cursors.
+- Each read window yields the pending approval request when it is new, the
+  state when it changed, then the activity log's entries in revision order:
+  each event of a progress batch as an `agent` entry and each plaintext
+  artifact as an `artifact` entry. Facts are read before the log, so a
+  terminal state is yielded after a log read that follows it, and ends the
+  feed. The window order is not a causal order across sources that never
+  shared one.
+- State is the current fact, coalesced, not a journal of transitions: a reader
+  that was not reading while a task moved through several states sees only its
+  present state. `ByokServer.events.subscribe()` still announces each
+  transition this instance observed.
+- Each entry carries an opaque cursor naming what the reader consumed of each
+  source: the activity log generation and revision with an offset inside a
+  batch, the approval revision and the last state. Resuming inside a progress
+  batch yields the rest of that batch. A cursor stays valid across a restart
+  over the same storage; with SQLite storage the log, the timeline and task
+  state all persist.
+- A read starts after `after`; with `from: 'state'`, at the pending request
+  and the current state, followed only by activity logged from then on;
+  otherwise at the current state followed by all retained activity.
+- Activity a reader had not reached when the log dropped it (the 1,000 entry /
+  4 MiB bounds, archive) is replaced by one `{ kind: 'error', reason:
+  'events_truncated' }` entry whose cursor resumes at the start of what is
+  retained. A terminal task stays readable for as long as its activity is
+  retained, then reads as its terminal state alone.
 - Refusals are thrown by the first `next()`, before any entry: `after` and
-  `from` together are a `TypeError`; an unknown task
-  is `task_not_found`; a cursor the feed never handed out is
-  `TaskEventsUnavailableError` `cursor_unknown`; a terminal task with no
-  retained feed is `feed_expired`. Terminal is judged by the `tasks.get`
-  projection, so an accepted Host cancellation is terminal even while the
-  attempt reads `cancel_requested`.
-- A live task with no feed in this instance (after a restart) gets one that
-  starts with its current state from the `tasks.get` projection (`state`,
-  `updatedAt`), unless a transition reached the feed first; earlier events are
-  not reconstructed. While it awaits approval, the pending request read from
-  the approval timeline comes first, in the relay's own `await_approval` form:
-  only a plaintext request with an `approvalId`, since the relay announces no
-  sealed request. A read of a stored task that finds a feed a dispatch just
-  opened (a resubmit) attaches to it the same way, so a refused dispatch hands
-  the feed to the reader instead of ending it. The kernel notifies the relay
-  after the write's own await, so those entries can appear twice. A read stopped
-  before its first store read completed creates nothing, a read never creates
-  relay state for an unknown or terminal task, and only a Host read can create
-  it: device envelopes for a task with no feed still allocate nothing.
-- Once a read attached a task's feed, the feed stays until the task's terminal
-  plus `taskEventRetentionMs`, however its readers leave (`return()`, abort,
-  disconnect), so a reader that reconnects resumes with its cursor, unless the
-  read that attached it finds the task gone or finished.
-- While this instance's dispatch of a task is in flight, its feed buffers every
-  delivery, device envelopes and Host transitions alike, including a feed a
-  Host read attached, so `Offered` is the first entry of a dispatched feed. A
-  refused dispatch drops a feed it opened and returns an attached feed to its
-  readers with what it buffered.
-- Each feed is bounded by `taskEventBufferLimit` and drops its oldest entries.
-  A reader whose resume position was dropped receives one `events_truncated`
-  marker for that gap, whose cursor stands just before the oldest retained
-  entry. A terminal feed ends at its terminal event and is reclaimed after
-  `taskEventRetentionMs`.
+  `from` together are a `TypeError`; an unknown task is `task_not_found`; a
+  cursor this server did not hand out for this task, including one from the
+  pre-#1113 relay, is `TaskEventsUnavailableError` `cursor_unknown`. Terminal
+  is judged by the `tasks.get` projection, so an accepted Host cancellation is
+  terminal even while the attempt reads `cancel_requested`.
+- The relay is a content-free wake-up: each committed envelope that names a
+  task, and each Host transition, wakes its readers, which then read the
+  stores. A wake may cause an extra read, never an event. A reader no wake
+  reached reads again within one second, so a transition with no envelope or
+  Host call behind it (retirement, abandonment by maintenance) is still seen.
+  Wakes are in-process; the embedded server has one storage owner.
+- The embedded server refuses sealed dispatch, so its log holds no sealed
+  progress; a sealed entry is refused rather than dropped. A sealed approval
+  request moves the state to `AwaitApproval` without an `await_approval`
+  entry. Hosted sealed progress stays opaque ciphertext in `readActivity`.
 - Authorization is by taskId within the server's one tenant, as for
   `tasks.get`, `approve`, `reject` and `cancel`. The feed carries raw tool input
   and output; the Host authenticates users and redacts before any browser sees
   it, as in the hosted boundary above.
 
-The hosted `ByokCloud` gains no stream. Hosted Hosts keep `readActivity`,
-`readApprovalTimeline` and `observer.onInboundCommitted`.
+Activity admission does not yet close at a task's terminal, and the log has no
+terminal-relative expiry until the lifecycle transactions settle it (#1113 A3);
+archive removes it. The hosted `ByokCloud` gains no stream: a hosted Host
+reads `readActivity(tenant, taskId, { after })` with the returned cursor,
+`readApprovalTimeline`, and `observer.onInboundCommitted`.
 
 Embedded `tasks.attempt(taskId)` returns the same canonical durable TaskAttempt
 as Cloud `readTaskAttempt(tenant, taskId)`, including the independent cancellation
