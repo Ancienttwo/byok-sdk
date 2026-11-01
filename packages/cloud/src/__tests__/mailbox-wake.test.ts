@@ -1,7 +1,9 @@
-import { createMutableClock, tenantId } from '@byok-sdk/core';
+import { createInMemoryCoreStores, createMutableClock, tenantId } from '@byok-sdk/core';
 import type { EventsPollResponse } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MailboxWake } from '../mailbox-wake';
+import { createWebCrypto } from '../crypto/web-crypto';
+import { createInMemoryBlobBytes, createInMemoryCloudStores } from '../stores/in-memory/index';
 import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake';
 import { TENANT_A, TENANT_B, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
@@ -207,5 +209,38 @@ describe('in-process subscription contract', () => {
 
   it.each([0, -1, NaN, Infinity, 0.5, 2_147_483_648])('rejects invalid fallbackMs %s', (fallbackMs) => {
     expect(() => createInProcessMailboxWake({ fallbackMs })).toThrow(RangeError);
+  });
+});
+
+describe('in-memory task events wake (#1113 A4)', () => {
+  it('wakes a reader after every write to the task, and only that task', async () => {
+    const clock = createMutableClock();
+    const crypto = createWebCrypto();
+    const objectBytes = createInMemoryBlobBytes(clock, crypto);
+    const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
+    const { stores, taskEventsWake } = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, objectBytes);
+    const reader = new AbortController();
+    const task = taskEventsWake.subscribe(TENANT_A, 'task', reader.signal);
+    const otherTenant = taskEventsWake.subscribe(TENANT_B, 'task', reader.signal);
+    // The wake is synchronous with the write, so the hint is pending before next().
+    const woken = async (write: () => Promise<unknown>) => {
+      await write();
+      const started = performance.now();
+      await task.next(60_000);
+      expect(performance.now() - started).toBeLessThan(100);
+    };
+    await woken(() => stores.tasks.open(TENANT_A, { taskId: 'task', deviceId: 'device' }));
+    await woken(() => stores.tasks.claim(TENANT_A, { taskId: 'task', deviceId: 'device' }));
+    await woken(() => stores.activity.append(TENANT_A, {
+      taskId: 'task', sourceEnvelopeId: 'progress', batchSeq: 1, events: [{ type: 'progress', text: 'one' }], dropped: 0, ttlMs: 600_000,
+    }));
+    await woken(() => stores.approvals.append(TENANT_A, {
+      taskId: 'task', sourceEnvelopeId: 'request', event: { type: 'approval_requested', summary: 'Allow', approvalId: 'approval' },
+    }));
+    await woken(() => stores.tasks.recordStatus(TENANT_A, { taskId: 'task', status: 'complete' }));
+    const started = performance.now();
+    await otherTenant.next(50);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(45);
+    reader.abort();
   });
 });

@@ -129,7 +129,9 @@ export class SqliteTaskArchiveStore implements TaskArchiveStore {
 
       // The in-memory draft row goes in `settle`: a rollback here could not restore it.
       const ephemeralRowsDeleted = removeActivityContent(db, tenant, taskId) + Number(
-        db.prepare('DELETE FROM approval_timeline_tail WHERE tenant_id = ? AND task_id = ?').run(tenant, taskId).changes,
+        // The closed row stays as the fence; only its observations go.
+        db.prepare("UPDATE approval_timeline_tail SET entries_json = '[]' WHERE tenant_id = ? AND task_id = ? AND entries_json <> '[]'")
+          .run(tenant, taskId).changes,
       );
 
       let referencesReleased = 0;

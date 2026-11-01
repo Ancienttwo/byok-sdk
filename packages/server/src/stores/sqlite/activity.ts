@@ -155,7 +155,7 @@ function tail(db: DatabaseSync, head: Head, after = 0): ActivityTail {
 /**
  * Removes a task's activity content inside the caller's transaction, keeping a
  * removed head so a later append cannot recreate history. Returns 1 when live
- * (not already removed) history existed.
+ * (not already removed) history existed; a head closed with nothing logged held none.
  */
 export function removeActivityContent(db: DatabaseSync, tenant: TenantId, taskId: string): number {
   const created = insertHead(db, tenant, taskId);
@@ -164,7 +164,7 @@ export function removeActivityContent(db: DatabaseSync, tenant: TenantId, taskId
     .run(tenant, taskId);
   db.prepare('UPDATE activity_log_head SET removed = 1, floor = revision, retained_bytes = 0 WHERE tenant_id = ? AND task_id = ?')
     .run(tenant, taskId);
-  return !created && !head.removed ? 1 : 0;
+  return !created && !head.removed && head.revision > 0 ? 1 : 0;
 }
 
 /** Every operation is one coordinator transaction on the task head; no process-local replay state. */

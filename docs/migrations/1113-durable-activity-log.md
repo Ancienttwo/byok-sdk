@@ -113,3 +113,120 @@ The terminal-task archive now removes activity content inside its transaction
 (a rollback restores it) and keeps a removed head, so a later read with a
 cursor reports `activity_history_gap` and a later append is refused. Canonical
 lifecycle atomicity remains A3 work, and cross-process invalidation A4.
+
+## Task output closure (A3)
+
+A task's activity log and approval timeline now close in the same commit as
+the attempt write that first closes the task's output. That write is either:
+- the task's first terminal (a device terminal, an abandonment, or a device
+  retirement);
+- an accepted Host cancellation, also for a claimed task still in
+  `cancel_requested`.
+
+From then on:
+
+- **Late output is refused.** A `task.progress`, `task.artifact` or
+  `task.await_approval` that arrives after the close is refused with
+  `task_settled_by_cloud`. A redacted or archived task gets the same answer,
+  so removing content no longer changes it. Before this, late output was
+  stored, or on a redacted task completed as received. `ApprovalTimelineStore`
+  `append` on a closed timeline throws the new `approval_timeline_settled`, and
+  `resolvePending` returns `absent`: a request still pending at the close can
+  no longer be decided.
+- **The deadline is frozen.** Both expire ten minutes after the closing
+  instant. Reads, replays and later terminals never renew it, and an active
+  task's log still never idle-expires.
+- **A task that logged nothing is closed too.** `readActivity` and
+  `readApprovalTimeline` return an empty closed tail carrying `terminalAt` and
+  `expiresAt` where they used to return `undefined`. Removal counts
+  (`ephemeralRowsDeleted`) count only a log or timeline that held history.
+  Archive, redaction and expiry clear a closed tail's entries and keep its row
+  as the fence, so a late observation never recreates it.
+
+The approval timeline's retention changes with it:
+- **No idle expiry.** An open timeline keeps its observations until its task's
+  output closes. `ApprovalTimelineAppendInput.ttlMs` is removed, and
+  `ApprovalTimelineTail` gains `terminalAt`; its `expiresAt` is now present only
+  once closed.
+- **Bounded by count and bytes.** At most 50 observations and
+  `MAX_APPROVAL_TIMELINE_BYTES` (1 MiB) of serialized observations are kept,
+  the oldest evicted first and counted in `dropped`. The pending request is
+  never evicted. One event is at most `MAX_APPROVAL_EVENT_BYTES`, and
+  `capacity` must be 2 to 50; either violation is refused as
+  `coordination_input_invalid`. `pendingApprovalObservation` and
+  `retainApprovalObservations` are exported for custom adapters.
+
+The built-in compositions do this at the storage boundary:
+- Postgres: the trigger that migration 0035 adds on `task`;
+- SQLite: the same trigger, created with the v8 schema;
+- in-memory: the attempt state.
+
+So every lifecycle path closes the log, bulk retirement included. Under that
+trigger, Postgres locks the task row before its head, the same order as
+redaction and the archive; append locks only the head. A custom composition
+must close its activity log and approval timeline in the same commit as its
+first terminal or accepted cancellation, for example with
+`ActivityStore.settle`.
+
+Upgrading closes the log and timeline of every task whose output had already
+closed, at its original deadline, never a new ten minutes. An open task's
+timeline loses its idle deadline and keeps every observation, including one
+the old deadline had already lapsed:
+- Postgres: 0035 runs a one-shot backfill;
+- SQLite: the open that creates the v8 log runs it.
+
+A terminal task from before `terminal_at` was recorded closes at its last
+update. A v8 SQLite file without the closure trigger is refused as
+`SQLITE_SCHEMA_INVALID`. Deploy 0035 and the code together: the new
+Postgres approval adapter reads the `terminal_at` column 0035 adds, and an
+older adapter's idle deadline on an open row violates 0035's
+`approval_timeline_tail_closed` constraint, so each fails against the other's
+schema.
+
+## Task events wake (A4)
+
+A `TaskEventsWake` tells a reader that a task's state, activity log or
+approval timeline may have changed. It names only the tenant and task, never
+content, and it is not a cursor: a woken reader re-reads those sources, and a
+hint can cause an extra read, never a new event. Subscribe before the first
+read, so a commit between the read and `next()` is kept.
+
+Which wake a composition uses:
+- **In-memory:** `createInMemoryCloudStores(...).taskEventsWake`. Every write to
+  the task, activity and approval maps signals it, module helpers included.
+- **Embedded SQLite:** `SqliteEmbeddedStores.taskEventsWake`. Connection-local
+  temp triggers on `task_attempt`, `activity_log_head` and
+  `approval_timeline_tail` collect the tasks each transaction changed; they are
+  reported after the commit and dropped on rollback. Nothing is written to the
+  file. The file has one owner process, so this in-process wake hears every
+  writer.
+- **Postgres:** `createPostgresTaskEventsWake({ connectionString })`. Migration
+  0036 adds triggers on `task`, `activity_log_head` and
+  `approval_timeline_tail` that `pg_notify` the channel `byok_task_events_wake`
+  with `md5(tenant || '\n' || task)` at commit. Every writer signals through
+  them: any instance, any process, maintenance included. There is no
+  application NOTIFY.
+
+`createInProcessTaskEventsWake` covers writers in one process only. Do not
+hand it to readers of a store whose writers run elsewhere.
+
+The Postgres wake keeps one resident listener per process, apart from the
+request pool, and shares the mailbox wake's listener machinery:
+- It needs a session-mode DSN. Hyperdrive and transaction-mode poolers cannot
+  carry LISTEN, and the self-NOTIFY probe reports that through `onError` as
+  `TaskEventsWakeProbeMissedError`.
+- A periodic probe retires a half-open connection. The listener reconnects
+  with backoff, and a reconnect wakes every subscription so its reader rescans.
+- `close()` is the Host's, like `pool.end()`, and closes every subscription.
+  Aborting a subscription's signal or calling its `close()` releases it.
+
+Liveness bound: a reader no hint reaches re-reads within `fallbackMs`
+(`DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS`, 5 seconds). The bound covers a lost
+notification, a listener outage and code deployed before 0036.
+
+Each commit that notifies takes PostgreSQL's notification queue lock, so at
+high write rates these commits serialize on it, alongside the mailbox wake's.
+That lock is the first thing to watch under load.
+
+Upgrade: 0036 is additive, and either deployment order is safe. Before it
+runs, the Postgres wake hears nothing and readers fall back to `fallbackMs`.

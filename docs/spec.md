@@ -592,12 +592,15 @@ or delete history to bypass the fence. Required approval columns and composite
 primary key are checked on open; missing authority is an error, not an empty tail.
 
 SQLite persists the existing `ApprovalTimelineStore` authority with the same
-capacity and absolute expiry (defaults: 50 observations, ten minutes). Requests,
-resolutions, source IDs, revisions and dropped count survive reopen. Reopen and
-exact replay do not renew TTL. Snapshots, statistics, host decisions and the
-`tasks.events` state seed read this same authority, without startup reconstruction
-or device resend. Expired tails remain absent; this is not indefinite pending
-approval retention or a durable audit log. Host resolve compares the observed
+bounds as every adapter: at most 50 observations and 1 MiB of serialized
+observations, the oldest evicted first and the pending request never. One
+event is at most `MAX_APPROVAL_EVENT_BYTES`. An open timeline does not expire;
+it closes with its task's output and expires ten minutes after that instant
+(#1113 A3). Requests, resolutions, source IDs, revisions and dropped count
+survive reopen. Reopen and exact replay do not renew the deadline. Snapshots,
+statistics, host decisions and the `tasks.events` state seed read this same
+authority, without startup reconstruction or device resend. Expired tails
+remain absent; this is not a durable audit log. Host resolve compares the observed
 source/revision and appends its decision within the same SQLite transaction.
 
 Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
@@ -2002,6 +2005,21 @@ parses historical `detail` strings. Because the tail is explicitly ephemeral,
 the deployment migration stops old writers and waits one full activity TTL
 before enabling the typed reader and writer; expired hints are discarded rather
 than translated into new semantics.
+
+A task's log and approval timeline close in the same commit as the attempt
+write that first closes the task's output: its first terminal, or an accepted
+Host cancellation, also of a claimed task. Later progress, artifacts and
+approval reports are refused with `task_settled_by_cloud`, a pending request
+can no longer be decided, both expire ten minutes after that instant, and no
+read, replay or later terminal renews them (#1113 A3).
+
+A task events wake hints that a task's state, activity log or approval
+timeline changed, after the commit and with no content: it names only the
+tenant and task, and a reader re-reads the sources. In-memory and embedded
+SQLite stores signal their own `taskEventsWake`; Postgres signals through
+migration 0036's triggers to `createPostgresTaskEventsWake`, so commits on any
+instance wake readers on every instance. A reader no hint reaches re-reads
+within `fallbackMs` (5 seconds by default) (#1113 A4).
 
 Unknown event types retain their original event index and render as neutral
 placeholders. Known but malformed variants fail closed. Each `progress.text`

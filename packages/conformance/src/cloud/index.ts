@@ -31,6 +31,7 @@ export type {
 
 export { runCloudRetentionConformance } from './retention';
 export { runTaskArchiveConformance } from './task-archive';
+export { runTaskOutputClosureConformance } from './task-output-closure';
 
 export { runAgentMessageDraftConformance } from './agent-message-draft';
 export type { AgentMessageDraftCompositionHandle, AgentMessageDraftCompositionFactory } from './agent-message-draft';

@@ -300,10 +300,11 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       );
       await scope.pool.query(
         `INSERT INTO approval_timeline_tail
-           (tenant_id, task_id, entries, next_revision, dropped, capacity, expires_at)
-         VALUES ($1, 'task-expired-approval', '[]'::jsonb, 1, 0, 50,
-                 '2026-01-01T00:00:00.500Z')`,
-        [TENANT],
+           (tenant_id, task_id, entries, next_revision, dropped, capacity, terminal_at, expires_at)
+         VALUES ($1, 'task-expired-approval', $2::jsonb, 2, 0, 50,
+                 '2025-12-31T23:50:00.500Z', '2026-01-01T00:00:00.500Z')`,
+        // A closed timeline past its deadline; collection clears what it holds.
+        [TENANT, JSON.stringify([{ taskId: 'task-expired-approval', sourceEnvelopeId: 'request', revision: 1, receivedAt: '2025-12-31T23:49:00.000Z', event: { type: 'approval_requested', summary: 'Allow' } }])],
       );
       clock.set('2026-01-01T00:00:02.000Z');
 

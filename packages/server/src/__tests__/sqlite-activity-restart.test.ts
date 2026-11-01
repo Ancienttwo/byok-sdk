@@ -168,4 +168,44 @@ describeSqlite('SQLite durable activity log across restarts (#1113)', () => {
       await reopened.close();
     }
   });
+  it('wakes a task event reader after each committed write to the task, retirement included, and never for a rollback (#1113 A4)', async () => {
+    const { open } = database();
+    const stores = open();
+    const reader = new AbortController();
+    try {
+      const wake = stores.taskEventsWake;
+      const task = wake.subscribe(TENANT, TASK, reader.signal);
+      const rolledBack = wake.subscribe(TENANT, 'rolled-back', reader.signal);
+      const woken = async (write: () => Promise<unknown>) => {
+        const started = performance.now();
+        const waiting = task.next(60_000);
+        await write();
+        await waiting;
+        expect(performance.now() - started).toBeLessThan(1_000);
+      };
+      const idle = async (subscription: typeof task) => {
+        const started = performance.now();
+        await subscription.next(50);
+        expect(performance.now() - started).toBeGreaterThanOrEqual(45);
+      };
+      await stores.cloud.devices.register(TENANT, {
+        deviceId: 'device', productId: 'product', deviceName: 'fixture', devicePublicKey: 'test-key', proofKeyId: 'proof-key', proofKeyEpoch: 1,
+      });
+      await woken(() => stores.cloud.tasks.open(TENANT, { taskId: TASK, deviceId: 'device' }));
+      await woken(() => stores.cloud.activity.append(TENANT, batch(1)));
+      await woken(() => stores.cloud.approvals.append(TENANT, {
+        taskId: TASK, sourceEnvelopeId: 'request', event: { type: 'approval_requested', summary: 'Allow', approvalId: 'approval' },
+      }));
+      // Retirement settles the task inside the device directory's own transaction.
+      await woken(() => stores.cloud.devices.revoke(TENANT, 'device'));
+      // The refused append inserted a head before it failed; the rollback drops its hint.
+      await expect(stores.cloud.activity.append(TENANT, {
+        ...batch(2), taskId: 'rolled-back', byteCapacity: 1_000, events: [{ type: 'progress', text: 'x'.repeat(2_000) }],
+      } as ActivityAppendInput)).rejects.toMatchObject({ code: 'activity_batch_too_large' });
+      await idle(rolledBack);
+    } finally {
+      reader.abort();
+      await stores.close();
+    }
+  });
 });

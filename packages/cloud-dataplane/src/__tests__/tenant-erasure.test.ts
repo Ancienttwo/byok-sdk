@@ -277,8 +277,8 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
     [tenant, hash],
   );
   await pool.query(
-    `INSERT INTO approval_timeline_tail (tenant_id, task_id, entries, next_revision, dropped, capacity, expires_at)
-     VALUES ($1, 'task', '[]'::jsonb, 1, 0, 1, $2)`,
+    `INSERT INTO approval_timeline_tail (tenant_id, task_id, entries, next_revision, dropped, capacity, terminal_at, expires_at)
+     VALUES ($1, 'task', '[]'::jsonb, 1, 0, 1, $2, $2)`,
     [tenant, now],
   );
   await pool.query(

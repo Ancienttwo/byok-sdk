@@ -26,9 +26,11 @@ import { InMemoryTaskArchiveStore } from './task-archive';
 import { archiveAccessOf, type InMemoryMailboxArchiveAccess, type InMemoryObjectArchiveAccess } from './core-access';
 import { InMemoryTaskAttemptState, InMemoryTaskAttemptStore } from './task-attempts';
 import { InMemoryTaskCancellationStore } from './task-cancellations';
-import { InMemoryActivityStore, deleteActivityTail } from './activity';
-import { InMemoryApprovalTimelineStore, deleteApprovalTimelineTail } from './approval-timeline';
+import { InMemoryActivityStore, closeActivityLog, deleteActivityTail } from './activity';
+import { InMemoryApprovalTimelineStore, closeApprovalTimeline, deleteApprovalTimelineTail } from './approval-timeline';
 import { InMemoryAgentEgressStore } from './agent-egress';
+import { createInProcessTaskEventsWake } from './mailbox-wake';
+import type { TaskEventsWake } from '../../task-events-wake';
 
 export { AllowAllRateLimiter } from './rate-limiter';
 export {
@@ -66,6 +68,8 @@ export interface InMemoryCloudComposition {
   readonly blobContentProxy: BlobContentProxy;
   /** The owner of the used proof `requestId`s in `stores.proofReceipts`, for `proofReceiptRetention`. */
   readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
+  /** Hints after every write to a task's state, activity log or approval timeline in these stores (#1113 A4). */
+  readonly taskEventsWake: TaskEventsWake;
 }
 
 /** Deletes a task's ephemeral rows from the in-memory stores that `createInMemoryCloudStores` built; each returns the rows removed. */
@@ -92,12 +96,16 @@ export function createInMemoryCloudStores(
   taskArchive?: InMemoryTaskArchiveFactory,
 ): InMemoryCloudComposition {
   const blobs = createInMemoryBlobs(objects, objectBytes);
-  const taskState = new InMemoryTaskAttemptState(clock);
+  const taskEventsWake = createInProcessTaskEventsWake();
+  const activity = new InMemoryActivityStore(clock, taskEventsWake.changed);
+  const approvals = new InMemoryApprovalTimelineStore(clock, taskEventsWake.changed);
+  const taskState = new InMemoryTaskAttemptState(clock, (tenant, taskId, at) => {
+    closeActivityLog(activity, tenant, taskId, at);
+    closeApprovalTimeline(approvals, tenant, taskId, at);
+  }, taskEventsWake.changed);
   const tasks = new InMemoryTaskAttemptStore(clock, taskState);
   const devices = new InMemoryDeviceDirectory(taskState, mailbox);
   const pairing = new InMemoryPairingCodeStore(clock, devices);
-  const activity = new InMemoryActivityStore(clock);
-  const approvals = new InMemoryApprovalTimelineStore(clock);
   const agentMessageDraft = new InMemoryAgentMessageDraftStore(clock);
   const receipts = new InMemoryRequestReceiptStore(clock);
   const proofReceipts = new InMemoryProofRequestReceiptStore(clock);
@@ -138,5 +146,6 @@ export function createInMemoryCloudStores(
     },
     blobContentProxy: blobs.contentProxy,
     proofReceiptAuthority: new InMemoryProofReceiptRetentionAuthority(proofReceipts),
+    taskEventsWake,
   };
 }

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { isSqliteAvailable } from '../sqlite-support';
+import { rewindToV7 } from './test-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
@@ -18,7 +19,7 @@ describeSqlite('SQLite task attempt phase instants (#980)', () => {
     for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
-  it('adds the phase columns on open to a file from before them, without backfill', async () => {
+  it('adds the phase columns on open to a v7 file from before them, without backfill', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'byok-sqlite-phases-'));
     directories.push(directory);
     const path = join(directory, 'server.sqlite');
@@ -28,9 +29,11 @@ describeSqlite('SQLite task attempt phase instants (#980)', () => {
     const first = open();
     await first.cloud.tasks.open(TENANT, { taskId: 'old', deviceId: 'device-1' });
     await first.close();
+    // v8's activity output closure reads the phase columns, so only an older
+    // file can lack them: rewind this one to v7, which had neither.
     const raw = new DatabaseSync(path);
+    raw.exec(rewindToV7('2026-10-27T00:10:00.000Z'));
     for (const column of PHASE_COLUMNS) raw.exec(`ALTER TABLE task_attempt DROP COLUMN ${column}`);
-    const version = raw.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get();
     raw.close();
 
     clock.advance(1_000);
@@ -46,7 +49,7 @@ describeSqlite('SQLite task attempt phase instants (#980)', () => {
       await reopened.close();
     }
     const check = new DatabaseSync(path);
-    expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual(version);
+    expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '8' });
     const columns = (check.prepare('PRAGMA table_info(task_attempt)').all() as { name: string }[]).map((column) => column.name);
     expect(columns).toEqual(expect.arrayContaining(PHASE_COLUMNS));
     check.close();

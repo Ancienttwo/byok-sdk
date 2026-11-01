@@ -36,7 +36,7 @@ import type { PostgresObjectStorageOptions } from './index';
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
 /** Tables whose rows exist only while a task runs. Each is keyed by `(tenant_id, task_id)`. */
-const EPHEMERAL_TABLES = ['approval_timeline_tail', 'agent_message_draft'] as const;
+const EPHEMERAL_TABLES = ['agent_message_draft'] as const;
 
 export interface PostgresTaskRedactionStoreOptions {
   readonly pool: ByokPool;
@@ -322,16 +322,22 @@ export async function rewriteTaskBodies(
     'INSERT INTO activity_log_head (tenant_id, task_id, removed) VALUES ($1, $2, true) ON CONFLICT DO NOTHING RETURNING task_id',
     [tenant, taskId],
   );
-  const head = await client.query<{ removed: boolean }>(
-    'SELECT removed FROM activity_log_head WHERE tenant_id = $1 AND task_id = $2 FOR UPDATE', [tenant, taskId],
+  const head = await client.query<{ removed: boolean; revision: bigint }>(
+    'SELECT removed, revision FROM activity_log_head WHERE tenant_id = $1 AND task_id = $2 FOR UPDATE', [tenant, taskId],
   );
-  let ephemeralRowsDeleted = createdHead.rowCount === 0 && head.rows[0]?.removed === false ? 1 : 0;
+  // A head closed with nothing logged held no history.
+  let ephemeralRowsDeleted = createdHead.rowCount === 0 && head.rows[0]?.removed === false && head.rows[0].revision > 0n ? 1 : 0;
   await client.query(
     'UPDATE activity_log_entry SET body = NULL, byte_size = 0 WHERE tenant_id = $1 AND task_id = $2 AND body IS NOT NULL', [tenant, taskId],
   );
   await client.query(
     'UPDATE activity_log_head SET removed = true, floor = revision, retained_bytes = 0 WHERE tenant_id = $1 AND task_id = $2', [tenant, taskId],
   );
+  // The closed approval row stays as the fence; only its observations go (#1113 A3).
+  const approvals = await client.query(
+    `UPDATE approval_timeline_tail SET entries = '[]'::jsonb WHERE tenant_id = $1 AND task_id = $2 AND entries <> '[]'::jsonb`, [tenant, taskId],
+  );
+  ephemeralRowsDeleted += approvals.rowCount ?? 0;
   for (const table of EPHEMERAL_TABLES) {
     const deleted = await client.query(`DELETE FROM ${table} WHERE tenant_id = $1 AND task_id = $2`, [tenant, taskId]);
     ephemeralRowsDeleted += deleted.rowCount ?? 0;

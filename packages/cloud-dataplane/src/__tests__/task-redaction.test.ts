@@ -266,7 +266,8 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
 
       // Device replays after the redaction keep no content and raise no error.
       expect(await device.send(completeEnvelope(taskA, canaryA.text))).toMatchObject({ status: 200, body: { accepted: 1 } });
-      expect(await device.send(progressEnvelope(taskA, 2, canaryA.text))).toMatchObject({ status: 200, body: { accepted: 1 } });
+      // The terminal closed A's output (#1113 A3): late progress is refused, as it was before the redaction.
+      expect(await device.send(progressEnvelope(taskA, 2, canaryA.text))).toMatchObject({ status: 200, body: { accepted: 0, rejected: 1 } });
       expect(await device.send(await publishEnvelope(taskA, canaryA.text, randomUUID())))
         .toMatchObject({ status: 200, body: { accepted: 0, rejected: 1 } });
       expect(await device.send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, runtime: 'codex' }, { taskId: taskA })))

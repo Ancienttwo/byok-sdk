@@ -7,9 +7,11 @@ import {
   ackAndCollectMailbox,
   conformanceMailbox,
   runActivityConformance,
+  runApprovalTimelineConformance,
   runCloudConformance,
   runCoreConformance,
   type ActivityCompositionFactory,
+  type ApprovalTimelineCompositionFactory,
   type CloudCompositionFactory,
   type CoreCompositionFactory,
 } from '@byok-sdk/conformance';
@@ -99,28 +101,30 @@ const cloudFactory: CloudCompositionFactory = {
   },
 };
 
-/** The shared activity log suite over the embedded composition's durable store, one temp file per case. */
-const activityFactory: ActivityCompositionFactory = {
-  create() {
-    const database = temporaryDatabase();
-    const clock = createMutableClock();
-    const composition = createSqliteEmbeddedStores(
-      { path: database.path },
-      { clock, crypto: createWebCrypto() },
-    );
-    return {
-      store: composition.cloud.activity,
-      advanceTime: (ms) => clock.advance(ms),
-      dispose: async () => {
-        await composition.close();
-        database.remove();
-      },
-    };
-  },
-};
+/** A durable store from a fresh embedded composition, one temp file per case. */
+function sqliteStore<T>(pick: (stores: ReturnType<typeof createSqliteEmbeddedStores>) => T) {
+  const database = temporaryDatabase();
+  const clock = createMutableClock();
+  const composition = createSqliteEmbeddedStores(
+    { path: database.path },
+    { clock, crypto: createWebCrypto() },
+  );
+  return {
+    store: pick(composition),
+    advanceTime: (ms: number) => clock.advance(ms),
+    dispose: async () => {
+      await composition.close();
+      database.remove();
+    },
+  };
+}
+
+const activityFactory: ActivityCompositionFactory = { create: () => sqliteStore((stores) => stores.cloud.activity) };
+const approvalFactory: ApprovalTimelineCompositionFactory = { create: () => sqliteStore((stores) => stores.cloud.approvals) };
 
 if (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') {
   runCoreConformance('server SQLite embedded', coreFactory);
   runCloudConformance('server SQLite embedded', cloudFactory);
   runActivityConformance('server SQLite embedded', activityFactory);
+  runApprovalTimelineConformance('server SQLite embedded', approvalFactory);
 }
