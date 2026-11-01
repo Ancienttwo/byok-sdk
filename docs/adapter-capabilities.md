@@ -440,6 +440,20 @@ an ordinary-Pi option for user instructions: Agent tasks accept
 `PiAdapterOptions.agentUserContext: 'excluded'` (see
 [Pi explicitly authorized resources](#pi-explicitly-authorized-resources)).
 
+The host bundles pi-web-access and rpiv-todo as replaceable extensions. When
+another loaded extension registers one of their tool, command or flag names,
+for example the user's own install of either package, Pi leaves the bundled
+one out instead of failing the launch on the name conflict, and the host writes
+a line to stderr naming it.
+
+`excluded` keeps the model selection of the user's global Pi settings
+(`defaultProvider`, `defaultModel`, `defaultThinkingLevel`; project settings are
+not read). A new session without an explicit model must start on exactly that
+default, which must name a model with configured auth. Otherwise the host exits
+before any provider request, instead of taking whichever provider has a key. A
+resumed session keeps the model its transcript recorded, and refuses to start
+when that model is no longer available.
+
 The [prepared Pi session](../packages/client/src/adapters/pi/prepared-session.ts)
 is different: it uses in-memory settings and disables discovered extensions,
 skills, prompt templates, themes and context files, supplying the sealed system

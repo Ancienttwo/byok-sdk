@@ -32,6 +32,19 @@ These changes need 0.34.0, the next MINOR.
   instead of the Pi type, which now extends it. See
   [runtime names](docs/migrations/wire-v5-durable-lane.md#runtime-names).
 
+- **Fix (client; #1295)** — an ordinary Pi task no longer exits at start when
+  the user's Pi has its own pi-web-access or rpiv-todo installed. The bundled
+  copies are now Pi replaceable extensions: an extension that registers one of
+  their tool, command or flag names takes their place, and the host reports the
+  bundled one it left out on stderr. Since 0.32.0 a Host's
+  `PI_CODING_AGENT_DIR` reaches Pi only through `runtimeEnvironment.pass`.
+
+- **Fix (client; #1296)** — `PiAdapterOptions.agentUserContext: 'excluded'`
+  keeps `defaultProvider`, `defaultModel` and `defaultThinkingLevel` from the
+  user's global Pi settings. A new session without an explicit model refuses to
+  start unless Pi selects exactly that default, so an own-login task never
+  falls back to whichever provider has a key in the environment.
+
 ## 0.33.0 — 2026-11-01 (published)
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
