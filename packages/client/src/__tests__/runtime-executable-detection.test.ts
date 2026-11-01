@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { DshAdapter } from '../adapters/dsh/dsh-adapter';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
@@ -45,6 +46,10 @@ const CASES: readonly Case[] = [
   {
     id: 'hermes', envName: 'BYOK_HERMES_BIN', fixture: fixture('fake-hermes.mjs'),
     create: async () => new HermesAdapter({ home: await tempDir('bh-'), runtimeEnvironment: { ...allowlist, pass: ['FAKE_HERMES_*'] } }),
+  },
+  {
+    id: 'dsh', envName: 'BYOK_DSH_BIN', fixture: fixture('fake-dsh.mjs'),
+    create: async () => new DshAdapter({ home: await tempDir('bd-'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'RC_DSH_KEY' }, runtimeEnvironment: allowlist }),
   },
 ];
 

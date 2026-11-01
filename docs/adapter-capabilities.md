@@ -25,20 +25,20 @@ the runtime does instead. `auto` never applies to a prepared offer, whatever the
 `toolAuthorizationAuto` row says: the daemon declines it before claim.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | Claude | Codex | Grok | Hermes | Pi | Pi (`durablePi`) |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.4.0` | `1.4.0` |
-| Resume a known native session | `resume` | yes | yes | yes | no | yes | no |
-| Redirect the active turn | `steer` | no | yes | no | no | yes | no |
-| Display-only message draft | `messageDraft` | yes | yes | yes | yes | yes | yes |
-| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes |
-| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no |
-| Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | yes | no |
-| Prepared lane | `preparedLane` | no | no | no | no | yes | no |
-| Durable Pi worker | `durablePi` | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | yes | yes | no |
-| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | no | no |
-| Turns off the transcript store | `isolation.sessionPersistence` | yes | no | no | no | no | no |
+| Capability | Wire field | Claude | Codex | dsh | Grok | Hermes | Pi | Pi (`durablePi`) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Qualified version (PR CI) | — | `2.1.312` | `0.160.0` | `0.2.1-rc.5` | `1.0.52` | `0.22.2+2364.g0b10b9f` | `1.4.0` | `1.4.0` |
+| Resume a known native session | `resume` | yes | yes | yes | yes | no | yes | no |
+| Redirect the active turn | `steer` | no | yes | no | no | no | yes | no |
+| Display-only message draft | `messageDraft` | yes | yes | no | yes | yes | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes |
+| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no |
+| Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | no | yes | no |
+| Prepared lane | `preparedLane` | no | no | no | no | no | yes | no |
+| Durable Pi worker | `durablePi` | no | no | no | no | no | no | yes |
+| Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | yes | yes | yes | no |
+| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | no | no |
+| Turns off the transcript store | `isolation.sessionPersistence` | yes | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
 
 ## Qualification notes
