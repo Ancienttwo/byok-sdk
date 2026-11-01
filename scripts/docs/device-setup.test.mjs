@@ -27,11 +27,20 @@ test('declared layout input errors require a catalog remedy', () => {
   assert.equal(host_layout_input_invalid.retryable, false);
   assert.throws(() => validateCatalog(withoutLayoutError), /coverage mismatch/);
 });
-test('layout migrations follow the current manifest into the guide', () => {
-  const manifest = JSON.parse(readFileSync(new URL('../../packages/client/upgrade-manifest.json', import.meta.url), 'utf8'));
+// A release rebaseline empties the live manifest, so the filter tests use a fixed manifest.
+const manifest = {
+  from: { version: '0.31.0' },
+  to: { version: '0.32.0' },
+  entries: [
+    { id: 'host-layout-helper', impact: 'additive', summary: 'resolveHostLayout returns the recommended storeDir.', migration: 'docs/spec.md#recommended-host-layout', items: [] },
+    { id: 'capability-ports-two-way', impact: 'breaking', summary: 'createByokCloud refuses a port passed without its capability declared.', migration: 'docs/architecture/process-namespace-topology.md#capability-ports-migration', items: [] },
+  ],
+};
+
+test('layout migrations follow the manifest into the guide', () => {
   const entries = manifest.entries.filter((entry) => entry.migration === 'docs/spec.md#recommended-host-layout');
   assert.ok(entries.length > 0);
-  const generated = generateGuide(guide);
+  const generated = generateGuide(guide, manifest);
   for (const entry of entries) {
     assert.ok(generated.includes(`| ${entry.id} | ${entry.impact} |`));
     assert.ok(generated.includes(entry.summary));
@@ -39,8 +48,7 @@ test('layout migrations follow the current manifest into the guide', () => {
 });
 
 test('the guide includes the breaking capability-port migration', () => {
-  const manifest = JSON.parse(readFileSync(new URL('../../packages/client/upgrade-manifest.json', import.meta.url), 'utf8'));
   const entry = manifest.entries.find((entry) => entry.id === 'capability-ports-two-way');
   assert.ok(entry);
-  assert.ok(generateGuide(guide).includes(`| ${entry.id} | breaking | ${entry.summary}`));
+  assert.ok(generateGuide(guide, manifest).includes(`| ${entry.id} | breaking | ${entry.summary}`));
 });

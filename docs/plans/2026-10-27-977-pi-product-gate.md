@@ -1,6 +1,6 @@
 # #977 Pi `submit_result` 产品门禁：证据清单
 
-状态：证据清单和复跑步骤。门禁结论待测量（pending measurement）。
+状态：证据清单和复跑步骤。门禁结论待测量（pending measurement）。门禁的固定 revision 是 0.33.0（owner，2026-11-01；当天先定 0.32.0 后改），AiphaBee 跳过 0.32.0、从 0.30.2 直接升到 0.33.0。下文的证据和复跑步骤仍以 `v0.30.2` 为基线，0.33.0 上的测量还没有做。
 
 日期：2026-10-27。基线 tag `v0.30.2`（`b1469e5a`），`@byok-sdk/*` 九包 0.30.2。
 依据：[#977](https://github.com/Ancienttwo/byok-sdk/issues/977)、[#610](https://github.com/Ancienttwo/byok-sdk/issues/610)、[测量方法](../submit-result-measurement.md)、[K8 validation 记录](../../examples/bot-collaboration/VALIDATION.md#open-acceptance-rows)。
