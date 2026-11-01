@@ -347,7 +347,7 @@ export function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonConfig, piByok
       return new PiAdapter({
         nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...environment,
         ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }),
-        ...(config.durablePi === true ? { durablePi: true } : {}),
+        ...(pi?.durableLane === true ? { durableLane: true } : {}),
         ...(pi?.agentUserContext === undefined ? {} : { agentUserContext: pi.agentUserContext }),
         ...(pi?.versionPolicy === undefined ? {} : { versionPolicy: pi.versionPolicy, versionPolicySource: 'daemon-config' as const }),
       });

@@ -321,7 +321,7 @@ describe('fileScope fail-closed admission through the task runner', () => {
   });
 
   it('declines the durable Pi worker before claim', async () => {
-    const adapter = new GateCapturingAdapter({ ...AUTO_CAPABLE, durablePi: true });
+    const adapter = new GateCapturingAdapter({ ...AUTO_CAPABLE, durableLane: true });
     const sent: Envelope[] = [];
     const seen: ToolAuthorizationTask[] = [];
     await offer(makeRunner(adapter, sent, (task) => { seen.push(task); return { default: 'auto', fileScope: { mode: 'home' } }; }), 'scope-durable');

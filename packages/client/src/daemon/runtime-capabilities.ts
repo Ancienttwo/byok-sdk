@@ -28,7 +28,8 @@ export function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRu
     ...(caps.mcpToolsets === undefined ? {} : { mcpToolsets: caps.mcpToolsets }),
     ...(caps.messageDraft === undefined ? {} : { messageDraft: caps.messageDraft }),
     ...(caps.toolAuthorizationAuto === undefined ? {} : { toolAuthorizationAuto: caps.toolAuthorizationAuto }),
-    ...(caps.durablePi === undefined ? {} : { durablePi: caps.durablePi }),
+    // Wire v4 still names the lane `durablePi`; the next protocol version renames it.
+    ...(caps.durableLane === undefined ? {} : { durablePi: caps.durableLane }),
     ...(caps.preparedLane === undefined ? {} : { preparedLane: caps.preparedLane }),
     ...(caps.isolation === undefined ? {} : { isolation: { ...caps.isolation } }),
   };

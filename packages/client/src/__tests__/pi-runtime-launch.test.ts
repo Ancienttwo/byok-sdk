@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { piLaunchCommand, resolvePiRuntimeLaunch } from '../adapters/pi/runtime-launch';
+import { piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map((root) => fs.rm(root,{recursive:true,force:true}))); });
@@ -34,7 +34,7 @@ describe('client runtime launch resources', () => {
     expect(prepared.kind).toBe('prepared');
     expect(resolveBin).not.toHaveBeenCalled();
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
-    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{},scratch:f.options.scratch});
+    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{},scratch:f.options.scratch}) as PiRuntimeLaunchResources;
     try {
       expect(resolveBin).toHaveBeenCalledOnce();
       expect(resources.kind).toBe(kind === 'prepared' ? 'pi-prepared' : 'pi-rpc');
@@ -128,7 +128,7 @@ describe('single-file re-entry (sdkHelperHost)', () => {
     const prepared = await adapter.prepare({offer:{instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     const assets = fileURLToPath(new URL('../../dist/assets/', import.meta.url));
-    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{PI_PACKAGE_DIR:assets},scratch:f.options.scratch});
+    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{PI_PACKAGE_DIR:assets},scratch:f.options.scratch}) as PiRuntimeLaunchResources;
     try {
       expect(resolveBin).not.toHaveBeenCalled();
       expect(resources).toMatchObject({ kind: entry, command: process.execPath, fixedArgs: ['__byok_sdk_helper', entry] });

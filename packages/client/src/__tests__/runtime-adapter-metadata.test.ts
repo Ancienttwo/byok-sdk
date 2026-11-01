@@ -88,7 +88,7 @@ describe('supported platforms', () => {
       hermes: ['darwin', 'linux', 'win32'],
       dsh: ['darwin', 'linux'],
     });
-    expect(new PiAdapter({ durablePi: true }).descriptor.platforms).toEqual(['darwin', 'linux']);
+    expect(new PiAdapter({ durableLane: true }).descriptor.platforms).toEqual(['darwin', 'linux']);
     expect(Object.isFrozen(adapters.grok.descriptor.platforms)).toBe(true);
   });
 
@@ -148,7 +148,7 @@ describe('adapter-declared facts the daemon reads instead of the runtime id', ()
       hermes: { fileScope: undefined, providerProfileBinding: undefined },
       dsh: { fileScope: undefined, providerProfileBinding: undefined },
     });
-    const durable = new PiAdapter({ durablePi: true }).descriptor;
+    const durable = new PiAdapter({ durableLane: true }).descriptor;
     expect(durable.fileScope).toEqual({ lanes: ['rpc'] });
     expect(durable.providerProfileBinding).toBe(true);
     expect(Object.isFrozen(adapters.pi.descriptor.fileScope!.lanes)).toBe(true);

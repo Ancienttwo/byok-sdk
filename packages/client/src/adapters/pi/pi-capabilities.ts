@@ -20,10 +20,10 @@ export const PI_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   isolation: Object.freeze({ userContext: true, userMcpServers: false, sessionPersistence: false }),
 });
 
-/** The durable Pi worker (`PiAdapterOptions.durablePi`): no steer, resume, `auto` or prepared lane. */
+/** The durable Pi worker (`PiAdapterOptions.durableLane`): no steer, resume, `auto` or prepared lane. */
 export const PI_DURABLE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   ...PI_RUNTIME_CAPABILITIES,
-  durablePi: true,
+  durableLane: true,
   steer: false,
   resume: false,
   toolAuthorizationAuto: false,

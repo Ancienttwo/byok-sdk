@@ -273,13 +273,13 @@ describe('submit_result: one document shape for every runtime lane', () => {
   // resolution, so the document is the staged canonical outcome either way.
   it('durable Pi and a CLI runtime produce the identical task.complete document', async () => {
     const documents: unknown[] = [];
-    for (const durablePi of [false, true]) {
+    for (const durableLane of [false, true]) {
       const { adapter, runner, sent } = await harness();
-      if (durablePi) {
+      if (durableLane) {
         Object.defineProperty(adapter, 'descriptor', { value: Object.freeze({ ...adapter.descriptor,
-          capabilities: Object.freeze({ ...adapter.descriptor.capabilities, durablePi: true }) }) });
+          capabilities: Object.freeze({ ...adapter.descriptor.capabilities, durableLane: true }) }) });
       }
-      const taskId = durablePi ? 'durable-shape' : 'cli-shape';
+      const taskId = durableLane ? 'durable-shape' : 'cli-shape';
       await offerResult(runner, taskId);
       expect(adapter.startCalls[0]!.ctx.mcpServers?.byokagentresult).toBeDefined();
       await runner.submitAgentResult({ contextToken: resultToken(adapter), outcome: { notes: ['a', 'b'], score: 5, verdict: 'pass' } });

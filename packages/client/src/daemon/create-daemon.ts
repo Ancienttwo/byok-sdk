@@ -276,6 +276,8 @@ export interface DaemonConfig {
       agentUserContext?: PiAdapterOptions['agentUserContext'];
       /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
       versionPolicy?: RuntimeVersionPolicy;
+      /** `PiAdapterOptions.durableLane`: the opt-in durable worker. Disabled by default. Requires `agentHome` and `piByokLauncher`; unavailable on Windows. */
+      durableLane?: PiAdapterOptions['durableLane'];
     };
     claude?: {
       /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
@@ -314,8 +316,6 @@ export interface DaemonConfig {
    * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
    * Pi tasks do not invoke it.
    */
-  /** Disabled by default. Requires Agent homes, journal and custody launcher. */
-  durablePi?: boolean;
   piByokLauncher?: import('../adapters/pi/pi-adapter').PiByokLauncherConfig;
   /**
    * M5 batch-3 (workstream 1): explicit auto-select priority order for
@@ -890,6 +890,9 @@ function buildDaemon(
   // Q4': an unknown field never stops the daemon; it is logged once and reported in status().config.
   for (const warning of configWarnings) console.warn(`[byok/client] ${warning.message}`);
   const adapters = buildAdapters(piByokLauncher);
+  // The durable worker's lease and journal barriers live in the Agent home.
+  const durable = adapters.find(adapter => adapter.descriptor.capabilities.durableLane === true);
+  if (durable !== undefined && !config.agentHome) throw new Error(`the ${durable.descriptor.id} durable lane requires Agent home`);
   const authorizationIssues = toolAuthorizationIssues(config, adapters, runtimeSource);
   if (authorizationIssues.length > 0) throw new DaemonConfigInvalidError(authorizationIssues);
   const {

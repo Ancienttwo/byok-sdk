@@ -352,6 +352,6 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
   }, 45_000);
 
   it('declares no auto support on the durable lane', () => {
-    expect(new PiAdapter({ durablePi: true }).descriptor.capabilities.toolAuthorizationAuto).toBe(false);
+    expect(new PiAdapter({ durableLane: true }).descriptor.capabilities.toolAuthorizationAuto).toBe(false);
   });
 });

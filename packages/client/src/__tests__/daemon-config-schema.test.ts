@@ -363,9 +363,18 @@ describe('removed workspaceRoot (#925) is a typed error with its migration note'
     expect(thrown).toMatchObject({ code: 'daemon_config_field_removed', field: 'workspaceRoot', migration });
   });
 
+  it('durablePi is removed in favour of the adapter-declared durable lane', () => {
+    let thrown: unknown;
+    try {
+      createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme', serverUrl: 'http://127.0.0.1:1', durablePi: true } as unknown as DaemonConfig, []);
+    } catch (error) { thrown = error; }
+    expect(thrown).toBeInstanceOf(DaemonConfigFieldRemovedError);
+    expect(thrown).toMatchObject({ code: 'daemon_config_field_removed', field: 'durablePi', migration });
+  });
+
   it('a wrong JSON type at construction is DaemonConfigInvalidError', () => {
-    expect(() => createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme', serverUrl: 'http://127.0.0.1:1', durablePi: 'yes' } as unknown as DaemonConfig, []))
-      .toThrow(new DaemonConfigInvalidError([{ severity: 'error', code: 'invalid_type', path: 'durablePi', message: 'DaemonConfig.durablePi must be boolean, got string' }]));
+    expect(() => createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme', serverUrl: 'http://127.0.0.1:1', dangerouslyAllowInsecureRemote: 'yes' } as unknown as DaemonConfig, []))
+      .toThrow(new DaemonConfigInvalidError([{ severity: 'error', code: 'invalid_type', path: 'dangerouslyAllowInsecureRemote', message: 'DaemonConfig.dangerouslyAllowInsecureRemote must be boolean, got string' }]));
   });
 });
 

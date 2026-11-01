@@ -863,6 +863,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "qualifiedVersion",
                 "unqualified"
               ]
+            },
+            "durableLane": {
+              "type": "boolean"
             }
           }
         },
@@ -1344,9 +1347,6 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         }
       ]
     },
-    "durablePi": {
-      "type": "boolean"
-    },
     "piByokLauncher": {
       "type": "object",
       "properties": {
@@ -1596,6 +1596,10 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
     },
     {
       "path": "maxConcurrentMutableSessionsPerAgentHome",
+      "migration": "docs/spec.md#removed-daemonconfig-fields"
+    },
+    {
+      "path": "durablePi",
       "migration": "docs/spec.md#removed-daemonconfig-fields"
     },
     {

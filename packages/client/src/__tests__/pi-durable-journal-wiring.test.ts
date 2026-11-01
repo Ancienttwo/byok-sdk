@@ -43,9 +43,10 @@ it.skipIf(process.platform === 'win32')('TaskRunner waits for the real durable j
       }};
     }
   }
-  const adapter = new Adapter('pi'); server = await TestServer.start();
+  // The daemon wires the durable journal from the declared lane, not from config.
+  const adapter = new Adapter('pi', undefined, { steer: false, resume: false, approvalInteractive: true, mcpToolsets: true, durableLane: true }); server = await TestServer.start();
   daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  localAgentRelease:{version:'0.0.0-test'},productName:'Test',productId:'durable-wiring',serverUrl:server.url,
-    storeDir, agentHome:{hostStorageRoot:path.join(root,'home')},agentEgress:FRESH_DAEMON_EGRESS,durablePi:true,
+    storeDir, agentHome:{hostStorageRoot:path.join(root,'home')},agentEgress:FRESH_DAEMON_EGRESS,
     piByokLauncher:{command:'unused-custody',profileDbPath:path.join(root,'profiles'),sessionDir:path.join(root,'sessions')},
   },[adapter],{journal});
   const record = await daemon.pair('pairing-code'); await daemon.start();

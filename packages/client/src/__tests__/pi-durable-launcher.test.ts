@@ -50,7 +50,7 @@ const __executionScratch = await testExecutionScratch();
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
   const profile = parseModelProviderProfile({ adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [], created_at: '2026-09-10T00:00:00.000Z', updated_at: '2026-09-10T00:00:00.000Z', display_name: 'Synthetic', enabled: true, kind: 'model', model: 'test', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, contextWindow: 4096, maxTokens: 64, reasoning: false, thinkingLevel: 'off' } });
   const children: ChildProcess[] = [];
-  const adapter = new PiAdapter({ durablePi: true, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
+  const adapter = new PiAdapter({ durableLane: true, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
     spawnFn: ((_cmd, args, options) => {
       const parsed = parsePiProviderLauncherOptions(args as string[]); expect(parsed.runtimeEntry).toBe('pi-durable');
       const delegated = buildPiPreparedArgs(parsed.piArgs);
