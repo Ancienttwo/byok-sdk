@@ -23,7 +23,7 @@ import path from 'node:path';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
 import { readLastLifecycleRecord, readLastEnvironmentRecord, parseEnvironmentRecord } from '../daemon/audit-log';
-import { attachRuntimeVersionChanges, attachRuntimeVersionVerdicts, parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection';
+import { attachRuntimeExecutables, attachRuntimeVersionChanges, attachRuntimeVersionVerdicts, parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection';
 import { connectControlClient } from '../daemon/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../diagnostics/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
@@ -792,7 +792,10 @@ export async function collectDoctorDiagnostics(
       const live = await controlConnection.client.request<ControlStatusResult>('status');
       const observed = parseRuntimeObservations(live.runtimes);
       if (observed !== undefined) {
-        observations = attachRuntimeVersionChanges(attachRuntimeVersionVerdicts(observed, live.runtimeVersionVerdicts), live.runtimeVersionChanges);
+        observations = attachRuntimeExecutables(
+          attachRuntimeVersionChanges(attachRuntimeVersionVerdicts(observed, live.runtimeVersionVerdicts), live.runtimeVersionChanges),
+          live.runtimeExecutables,
+        );
         runtimeSource = 'daemon';
       }
       if (live.environment !== undefined && live.environmentResolvedAt !== undefined) {
@@ -836,6 +839,8 @@ export async function collectDoctorDiagnostics(
     versionPresent: runtime.version !== undefined,
     ...(runtime.versionVerdict === undefined ? {} : { versionVerdict: { ...runtime.versionVerdict } }),
     ...(runtime.versionChange === undefined ? {} : { versionChange: { ...runtime.versionChange } }),
+    ...(runtime.executablePath === undefined ? {} : { executablePath: runtime.executablePath }),
+    ...(runtime.executableSource === undefined ? {} : { executableSource: runtime.executableSource }),
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
     steer: runtime.steer,
     resume: runtime.resume,

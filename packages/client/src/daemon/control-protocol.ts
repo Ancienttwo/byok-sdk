@@ -12,7 +12,7 @@ import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detect
 import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment';
 import type { RuntimeEnvironmentReport } from '../runtime/environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
-import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeVersionVerdict } from '../types';
+import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
 import type {
   InputPreparationAccountingPolicyRefV1,
@@ -455,6 +455,8 @@ export interface ControlStatusResult {
   runtimeVersionVerdicts?: Array<{ readonly id: string; readonly versionVerdict: RuntimeVersionVerdict }>;
   /** #1103 §2.6: this run's restart comparison, same side-channel rule; absent from a pre-#1103 daemon. */
   runtimeVersionChanges?: Array<{ readonly id: string; readonly versionChange: RuntimeVersionChange }>;
+  /** #1103 O10: the executable each runtime's detection ran, same side-channel rule; absent from an older daemon. */
+  runtimeExecutables?: Array<{ readonly id: string; readonly executablePath?: string; readonly executableSource: RuntimeExecutableSource }>;
   /** Absent for a pre-#392 control peer. */
   environment?: ServiceEnvironmentStatus;
   /** Timestamp of the same environment-resolved event; absent before startup resolves it. */

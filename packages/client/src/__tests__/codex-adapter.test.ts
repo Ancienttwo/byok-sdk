@@ -96,6 +96,8 @@ describe('Codex persistent app-server adapter', () => {
       kind: 'available',
       version: 'codex-cli 0.160.0',
       authPresent: true,
+      executablePath: fixture,
+      executableSource: 'config',
       versionVerdict: { state: 'allow', qualifiedVersion: '0.160.0' },
     });
   });

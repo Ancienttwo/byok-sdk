@@ -23,6 +23,12 @@ function quote(text: string): string {
   return JSON.stringify(text);
 }
 
+/** #1103 O10: who chose the executable, plus its quoted path when detection could name one. */
+export function formatRuntimeExecutable(runtime: Pick<RuntimeObservation, 'executablePath' | 'executableSource'>): string | undefined {
+  if (runtime.executableSource === undefined) return undefined;
+  return `executable=${runtime.executableSource}${runtime.executablePath === undefined ? '' : `(${quote(runtime.executablePath)})`}`;
+}
+
 /** Renders one `task.progress`-derived `AgentEvent` compactly — the inner payload of a `progress`-kind `DaemonEvent`. */
 export function formatAgentEvent(event: AgentEvent): string {
   switch (event.type) {
@@ -256,6 +262,7 @@ export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): str
       r.versionChange !== undefined
         ? `versionChange=${r.versionChange.direction}(${r.versionChange.fromVersion}->${r.versionChange.toVersion})`
         : undefined,
+      formatRuntimeExecutable(r),
       r.authPresent !== undefined ? `authPresent=${r.authPresent}` : undefined,
       `capabilities=${caps.length ? caps.join(',') : '(none)'}`,
     ].filter((part): part is string => Boolean(part));
@@ -367,7 +374,8 @@ function formatRuntimeObservations(runtimes: readonly RuntimeObservation[]): str
     const change = runtime.versionChange === undefined
       ? ''
       : `:versionChange=${runtime.versionChange.direction}(${runtime.versionChange.fromVersion}->${runtime.versionChange.toVersion})`;
-    return `${runtime.id}=${outcome}${runtime.versionVerdict?.state === 'block' ? ':blocked' : ''}${change}`;
+    const executable = formatRuntimeExecutable(runtime);
+    return `${runtime.id}=${outcome}${runtime.versionVerdict?.state === 'block' ? ':blocked' : ''}${change}${executable === undefined ? '' : `:${executable}`}`;
   }).join(' ') || '(none)';
 }
 
