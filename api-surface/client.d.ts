@@ -477,6 +477,102 @@ export interface ResolvedBin {
  * has no other seam to use.
  */
 export declare function resolveCodexBin(): ResolvedBin;
+// ==== @byok-sdk/client dist/adapters/dsh/dsh-adapter.d.ts ====
+import { type spawn as nodeSpawn } from 'node:child_process';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
+import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment';
+import type { ResolvedBin } from '../codex/resolve-bin';
+/**
+ * Provider and model for every dsh execution (#1258 O4). Credentials stay in
+ * the environment: `keyEnv` names the variable, its value never enters the
+ * patch file.
+ */
+export interface DshModelSelection {
+    /**
+     * `deepseek` routes through dsh's own DeepSeek API plugin
+     * (`deepseek-official`). `custom` is an OpenAI-compatible endpoint at
+     * `baseUrl`. Any other value is a pi-ai catalog provider id dsh ships, for
+     * example `openai`, `anthropic` or `openrouter`.
+     */
+    readonly provider: string;
+    readonly model: string;
+    /** Endpoint for `custom` (required) or a catalog provider (optional). Not allowed for `deepseek`. It must not carry credentials. */
+    readonly baseUrl?: string;
+    /**
+     * The environment variable that holds the provider key. Its name must
+     * contain `KEY`, `TOKEN`, `SECRET` or `PASSWORD`: dsh removes such names
+     * from every tool process it starts, so the key never reaches the model's
+     * shell. It must not be `DEEPSEEK_API_KEY`, which dsh's `web_search` tool
+     * also reads, nor start with `BYOK_` (the runtime environment drops those)
+     * or `DSH_` (the adapter owns them).
+     */
+    readonly keyEnv: string;
+}
+/** dsh's own sandbox modes (`DSH_PERMISSION_MODE`). `danger-full-access` also sets approval to `never`; the other two ask, and the adapter cancels every ask. */
+export type DshSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only';
+export interface DshAdapterOptions {
+    /**
+     * Absolute path of the dsh home (`DSH_HOME`) this SDK owns, for example
+     * under the Host's store directory. It must persist across executions:
+     * dsh keeps its sessions there, and resume reads them back. It must not be
+     * the user's dsh home (`~/.dsh`): dsh's stored credentials outrank the
+     * environment, and the user's profile patches and plugins would change the
+     * composition the SDK relies on.
+     */
+    home: string;
+    /** Provider, model and key variable of every execution. */
+    model: DshModelSelection;
+    /**
+     * dsh's sandbox for every session (`DSH_PERMISSION_MODE`). Default
+     * `danger-full-access`, as for Codex: no human answers a dsh approval, so
+     * every escalation the narrower modes ask for is cancelled.
+     */
+    sandbox?: DshSandboxMode;
+    /** Absolute product native asset directory; scoped to this adapter. */
+    nativeAssetRoot?: string;
+    /** The environment dsh and its MCP servers get (#1095). Default: the login-shell snapshot. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
+    /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+    /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
+    versionPolicySource?: 'adapter-option' | 'daemon-config';
+    resolveBin?: () => ResolvedBin;
+    spawnFn?: typeof nodeSpawn;
+    /** Deadline for a cancelled turn to settle before the session fails. Default 1 s. */
+    interruptTimeoutMs?: number;
+}
+/**
+ * DeepSeek Harness over ACP stdio (`dsh --profile acp`). Each session runs one
+ * dsh process in an SDK-owned `DSH_HOME`, with a per-execution `--patch`
+ * overlay that names the provider route, its key variable and the model. The
+ * process starts in the execution scratch directory, not the workspace, so
+ * dsh does not load a workspace `.env`; the workspace is the ACP session cwd.
+ *
+ * `dsh` is not a frozen wire runtime id, so a task reaches this adapter by the
+ * custom-harness identity (`harnessId: 'dsh'`).
+ */
+export declare class DshAdapter implements RuntimeAdapter {
+    private readonly root;
+    private readonly options;
+    private readonly sandbox;
+    private readonly environmentPolicy;
+    private readonly effectiveVersionPolicy;
+    get descriptor(): import("..").RuntimeAdapterDescriptor;
+    constructor(options: DshAdapterOptions);
+    private command;
+    runtimeEnvironment(): Promise<RuntimeEnvironment>;
+    private ensureRoot;
+    /**
+     * Prepares the SDK root, reads `dsh --version`, then resolves the acp
+     * profile (which writes it into a new root). `authPresent` is whether the
+     * runtime environment carries the `model.keyEnv` variable; the key is not
+     * checked against the provider.
+     */
+    detect(): Promise<RuntimeDetectResult>;
+    /** Cheap admission, as Hermes: the version probe only. The acp profile probe belongs to `detect()`. */
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    private start;
+}
 // ==== @byok-sdk/client dist/adapters/grok/grok-adapter.d.ts ====
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types';
@@ -676,6 +772,8 @@ export { GrokAdapter } from './grok/grok-adapter';
 export type { GrokAdapterOptions } from './grok/grok-adapter';
 export { HermesAdapter } from './hermes/hermes-adapter';
 export type { HermesAdapterOptions, HermesModelSelection, HermesByokLauncher } from './hermes/hermes-adapter';
+export { DshAdapter } from './dsh/dsh-adapter';
+export type { DshAdapterOptions, DshModelSelection, DshSandboxMode } from './dsh/dsh-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 export { buildRuntimeEnvironment, RuntimeEnvironmentUnavailableError } from '../runtime/environment';
@@ -9553,6 +9651,7 @@ export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
 export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
+export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
@@ -12878,7 +12977,7 @@ export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
 import { type RuntimeEnvironment } from '../runtime/environment';
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
 /** The built-in adapters a fake can stand in for. */
-export type FakeRuntimeAdapterId = 'claude' | 'codex' | 'grok' | 'hermes' | 'pi';
+export type FakeRuntimeAdapterId = 'claude' | 'codex' | 'dsh' | 'grok' | 'hermes' | 'pi';
 /** What the fake does. It never spawns a process. */
 export interface FakeRuntimeAdapterBehavior {
     /** Default: `{ kind: 'available' }`. A function is called on every probe. */

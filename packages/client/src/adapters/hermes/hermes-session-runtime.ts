@@ -10,7 +10,7 @@ import type { identifyHermesGateway, servesHermesHome } from './gateway-identity
 import type { ownsHermesGatewayPid } from './gateway-ownership';
 import type { removeHermesProfile } from './hermes-home';
 import { AsyncQueue } from '../../util/async-queue';
-import { HermesProjection } from './projection';
+import { AcpProjection } from '../../runtime/acp-projection';
 
 /** Windows-only gateway helpers. They load with this entry, so the root entries do not carry them. */
 export { exchangeHermesPipe, windowsLower } from './gateway-pipe-win32';
@@ -53,7 +53,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
     private gateway?: OwnedLineProcess;
     private viewer?: OwnedLineProcess;
     private connection?: AcpConnection;
-    private readonly projection = new HermesProjection();
+    private readonly projection = new AcpProjection();
     private readonly queue = new AsyncQueue<AgentEvent>();
     private failure?: RuntimeExecutionFailure;
     private turn?: Promise<void>;

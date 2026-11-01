@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "0d2a8ca77ab177b16e64129d22bc2d8c1ac9173cfafa667181fd37a27ddffb7c"
+    "snapshotSha256": "b9d4d0c71b315795ca964bd4842be459290af813e5c4998d0433a0f18e256367"
   },
   "configFields": {
     "status": "tracked",
@@ -932,6 +932,23 @@
         "export:@byok-sdk/core#MailboxStreamClosedError",
         "store:server-sqlite"
       ]
+    },
+    {
+      "id": "dsh-adapter",
+      "impact": "additive",
+      "summary": "Add DshAdapter, a DeepSeek Harness (dsh) runtime adapter over ACP (`dsh --profile acp`) reached by the custom harness id dsh (#1258). The Host constructs it with an SDK-owned persistent home that is not ~/.dsh and a provider, model and keyEnv selection; it resumes native sessions, attaches task MCP toolsets including result documents, declines auto and file-scope tasks before claim, and runs on darwin and linux. fakeRuntimeAdapter accepts 'dsh'. Nothing changes for a Host that does not construct it.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1258",
+      "items": [
+        "export:@byok-sdk/client#DshAdapter",
+        "export:@byok-sdk/client#DshAdapterOptions",
+        "export:@byok-sdk/client#DshModelSelection",
+        "export:@byok-sdk/client#DshSandboxMode",
+        "export:@byok-sdk/client/adapters#DshAdapter",
+        "export:@byok-sdk/client/adapters#DshAdapterOptions",
+        "export:@byok-sdk/client/adapters#DshModelSelection",
+        "export:@byok-sdk/client/adapters#DshSandboxMode",
+        "export:@byok-sdk/client/testing#FakeRuntimeAdapterId"
+      ]
     }
   ],
   "changes": [
@@ -1503,6 +1520,26 @@
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
       "change": "changed",
       "entry": "local-tool-approval-host-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshAdapter",
+      "change": "added",
+      "entry": "dsh-adapter"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshAdapterOptions",
+      "change": "added",
+      "entry": "dsh-adapter"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshModelSelection",
+      "change": "added",
+      "entry": "dsh-adapter"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshSandboxMode",
+      "change": "added",
+      "entry": "dsh-adapter"
     },
     {
       "item": "export:@byok-sdk/client#EXIT_CODE_CONTRACT",
@@ -2100,6 +2137,26 @@
       "entry": "runtime-environment-policy"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#DshAdapter",
+      "change": "added",
+      "entry": "dsh-adapter"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshAdapterOptions",
+      "change": "added",
+      "entry": "dsh-adapter"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshModelSelection",
+      "change": "added",
+      "entry": "dsh-adapter"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshSandboxMode",
+      "change": "added",
+      "entry": "dsh-adapter"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#GrokAdapter",
       "change": "changed",
       "entry": "runtime-environment-policy"
@@ -2298,6 +2355,11 @@
       "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterBehavior",
       "change": "changed",
       "entry": "runtime-environment-policy"
+    },
+    {
+      "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",
+      "change": "changed",
+      "entry": "dsh-adapter"
     },
     {
       "item": "export:@byok-sdk/cloud#ACTIVITY_TERMINAL_TTL_MS",

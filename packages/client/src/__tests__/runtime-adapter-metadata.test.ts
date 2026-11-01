@@ -7,7 +7,7 @@ import { createEnvelope, HarnessIdSchema, RuntimeIdSchema } from '@byok-sdk/prot
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  ClaudeAdapter, CodexAdapter, GrokAdapter, HermesAdapter, PiAdapter,
+  ClaudeAdapter, CodexAdapter, DshAdapter, GrokAdapter, HermesAdapter, PiAdapter,
   isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult,
 } from '../adapters/index';
 import { fakeRuntimeAdapter, type FakeRuntimeAdapterId } from '../testing/index';
@@ -42,6 +42,7 @@ function builtIns(home: string): Record<FakeRuntimeAdapterId, RuntimeAdapter> {
     pi: new PiAdapter(),
     grok: new GrokAdapter(),
     hermes: new HermesAdapter({ home }),
+    dsh: new DshAdapter({ home, model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' } }),
   };
 }
 
@@ -71,7 +72,7 @@ describe('selection target', () => {
       if (!wire) expect(HarnessIdSchema.parse(id)).toBe(id);
     }
     expect(Object.values(adapters).map(adapter => taskRuntimeTarget(adapter.descriptor))).toEqual([
-      { runtime: 'claude' }, { runtime: 'codex' }, { runtime: 'pi' }, { harnessId: 'grok' }, { harnessId: 'hermes' },
+      { runtime: 'claude' }, { runtime: 'codex' }, { runtime: 'pi' }, { harnessId: 'grok' }, { harnessId: 'hermes' }, { harnessId: 'dsh' },
     ]);
   });
 });
@@ -85,6 +86,7 @@ describe('supported platforms', () => {
       pi: ['darwin', 'linux', 'win32'],
       grok: ['darwin', 'linux'],
       hermes: ['darwin', 'linux', 'win32'],
+      dsh: ['darwin', 'linux'],
     });
     expect(new PiAdapter({ durablePi: true }).descriptor.platforms).toEqual(['darwin', 'linux']);
     expect(Object.isFrozen(adapters.grok.descriptor.platforms)).toBe(true);
@@ -104,6 +106,13 @@ describe('supported platforms', () => {
     expect(detect).not.toHaveBeenCalled();
     expect(resolveBin).not.toHaveBeenCalled();
     expect(projectRuntimeObservation(adapter.descriptor, detected)).toMatchObject({ id, present: false, outcome: 'refused', reason: 'platform_unsupported' });
+  });
+
+  it('Windows refuses dsh with platform_unsupported before any probe', async () => {
+    const resolveBin = vi.fn(() => { throw new Error('the probe must not run'); });
+    const adapter = new DshAdapter({ home: await tempDir(), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' }, resolveBin });
+    expect(await onPlatform('win32', () => observeRuntimeDetection(adapter))).toEqual({ kind: 'refused', reason: 'platform_unsupported' });
+    expect(resolveBin).not.toHaveBeenCalled();
   });
 
   it('Windows still probes an adapter that supports it', async () => {

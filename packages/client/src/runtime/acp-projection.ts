@@ -7,11 +7,12 @@ const count = (value: unknown): number | undefined =>
 
 /**
  * Maps one ACP session's `session/update` notifications and the
- * `session/prompt` answer to SDK events. Text arrives as deltas
- * (`agent_message_chunk`), so the descriptor leaves `progressEventsAreMessages`
- * unset and the daemon joins consecutive chunks into one reply.
+ * `session/prompt` answer to SDK events. Each `agent_message_chunk` becomes
+ * one `progress` event. Hermes sends text deltas, so its descriptor leaves
+ * `progressEventsAreMessages` unset and the daemon joins consecutive chunks
+ * into one reply; dsh sends each committed message whole and sets it.
  */
-export class HermesProjection {
+export class AcpProjection {
   private readonly tools = new Map<string, { tool: string; done: boolean }>();
   private context?: { contextTokens?: number; contextWindow?: number };
 

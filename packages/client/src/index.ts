@@ -573,6 +573,7 @@ export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from
 export { GrokAdapter, type GrokAdapterOptions } from './adapters/grok/grok-adapter';
 
 export { HermesAdapter, type HermesAdapterOptions, type HermesModelSelection, type HermesByokLauncher } from './adapters/hermes/hermes-adapter';
+export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter';
 
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor';
 export type {
