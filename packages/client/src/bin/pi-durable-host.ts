@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { createModels, createProvider } from '@earendil-works/pi-ai/models';
 import type { Model, ProviderStreams, ToolCall, TSchema } from '@earendil-works/pi-ai';
@@ -60,7 +61,8 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
     if (gate === null) throw new Error('durable file scope requires the auto tool-authorization gate');
     const grant = await verifySerializedFileScopeGrant(parseSerializedFileScopeGrant(config.fileScope, message => { throw new Error(`invalid durable file scope: ${message}`); }));
     if (grant.home.path !== authority.canonicalHome) throw new Error('durable file scope home differs from the replica binding');
-    return createPiFileScopeGuard({ grant, gate });
+    // The replica store may sit inside a granted root; the scoped walk prunes it.
+    return createPiFileScopeGuard({ grant, gate, excludedDirectories: [await realpath(root)] });
   })();
   const file = await admitReplica(root, authority);
   if (typeof config.instruction !== 'string' || config.instruction.length === 0) throw new Error('durable instruction missing');

@@ -15,6 +15,8 @@ export interface PiFileScopeExtensionOptions {
   readonly gate: ToolAuthorizationIpcConfig;
   /** Reported when a deny could not reach the daemon; the deny itself is already enforced. */
   readonly onTransportFailure?: (denial: ScopedFileDenial) => void;
+  /** Canonical directories the scoped find/grep never walk into. */
+  readonly excludedDirectories?: readonly string[];
 }
 
 /** The six SDK scoped file tools and the precheck that runs before the auto gate. */
@@ -41,7 +43,10 @@ export function createPiFileScopeGuard(options: PiFileScopeExtensionOptions): Pi
     }
   };
   return {
-    tools: createScopedFileTools({ grant: options.grant, onDenial }),
+    tools: createScopedFileTools({
+      grant: options.grant, onDenial,
+      ...(options.excludedDirectories === undefined ? {} : { excludedDirectories: options.excludedDirectories }),
+    }),
     async precheck({ toolCallId, toolName, input, cwd }) {
       if (!isScopedFileToolName(toolName)) return undefined;
       try {

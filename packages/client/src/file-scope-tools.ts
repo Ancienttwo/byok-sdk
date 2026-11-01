@@ -59,6 +59,11 @@ export interface ScopedFileToolOptions extends ScopedFileToolHooks {
   readonly platform?: NodeJS.Platform;
   /** Overrides os.homedir() for the tilde fixture. */
   readonly osHome?: string;
+  /**
+   * Canonical directories find/grep never walk into, even inside a granted
+   * root: the durable worker passes its replica store here.
+   */
+  readonly excludedDirectories?: readonly string[];
 }
 
 const REASON_TEXT: Readonly<Record<FileScopeGuardReason, string>> = Object.freeze({
@@ -343,6 +348,7 @@ async function walkScopedDirectory(
       throw error;
     }
     if (!directory.exists) continue;
+    if (options.excludedDirectories?.some((excluded) => directory.path === excluded || directory.path.startsWith(excluded + sep))) continue;
     let names: string[];
     try {
       names = await fs.readdir(directory.path);

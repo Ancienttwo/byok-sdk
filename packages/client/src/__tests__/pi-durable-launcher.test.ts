@@ -35,7 +35,7 @@ function finish(res: import('node:http').ServerResponse, content: string) {
     { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } } ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
 function tool(res: import('node:http').ServerResponse, command: string, name = 'bash') {
-  const args = name === 'bash' ? {command} : name === 'find' ? {pattern:'*',path:command} : name === 'edit' ? {path:command,edits:[{oldText:'ORIGINAL_DENIED_DATA',newText:'CHANGED'}]} : name === 'write' ? {path:command,content:'CHANGED'} : {path:command};
+  const args = name === 'bash' ? {command} : name === 'find' ? {pattern:'*',path:command} : name === 'grep' ? {pattern:'REPLICA_MARKER',path:command} : name === 'edit' ? {path:command,edits:[{oldText:'ORIGINAL_DENIED_DATA',newText:'CHANGED'}]} : name === 'write' ? {path:command,content:'CHANGED'} : {path:command};
   const base = { id: 'cmpl-tool', object: 'chat.completion.chunk', created: 0, model: 'test' };
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   res.end([
@@ -256,5 +256,18 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
     expect(result.isError).toBe(true); expect(JSON.stringify(result.output)).toContain('structured tool path inside replica store');
     expect(asked).toEqual([]); expect(denials).toEqual([]);
+  }, 30_000);
+  it.each(['find','grep'])('scoped %s started at a granted root that contains the store never walks into the replica store', async name => {
+    const asked: string[] = [], denials: ScopedFileDenial[] = [];
+    const f = await fixture((res,n,_body,paths) => {
+      if (n !== 1) { finish(res,'walked'); return; }
+      writeFileSync(path.join(paths.store,'durable-replicas','probe.txt'),'REPLICA_MARKER'); writeFileSync(path.join(paths.home,'visible.txt'),'REPLICA_MARKER');
+      tool(res,path.dirname(paths.home),name);
+    }, undefined, home => scopedGate(home, { mode: 'workspaces', roots: [{ id: 'all', path: path.dirname(home), access: 'read' }] }, asked, denials));
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
+    const result = events.find(event => event.type === 'tool_result');
+    expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
+    expect(result.isError).toBe(false); expect(asked).toEqual([name]);
+    expect(JSON.stringify(result.output)).toContain('visible.txt'); expect(JSON.stringify(result.output)).not.toContain('durable-replicas');
   }, 30_000);
 });
