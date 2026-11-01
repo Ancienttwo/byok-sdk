@@ -5,7 +5,8 @@ progress authority for the embedded server too. `ByokServer.tasks.events` and
 `TaskHandle.events()` no longer read an in-process relay buffer. Each read
 projects three stores: task state and the approval timeline, read the way
 `tasks.get` reads them, and the task's activity log, the same log that
-`ByokCloud.readActivity` serves. The relay only wakes readers after a commit.
+`ByokCloud.readActivity` serves. The stores' task events wake (#1113 A4) only
+wakes readers after a commit.
 It depends on the [SQLite activity log](1113-durable-activity-log.md#sqlite-a2b)
 so that a cursor survives a restart.
 
@@ -47,12 +48,12 @@ so that a cursor survives a restart.
   and `taskEventRetentionMs`, and the exports `DEFAULT_TASK_EVENT_BUFFER_LIMIT`
   and `DEFAULT_TASK_EVENT_RETENTION_MS`, are removed; the log's own bounds
   apply. `TaskEventsUnavailableError.reason` is `'cursor_unknown'` only.
-- **Wake-ups.** A commit in this process wakes its readers at once. A reader
-  no wake reached reads again within one second, so a transition with no
-  envelope or Host call behind it (a device retirement, an abandonment by
-  maintenance) is still seen. `TaskHandle.result()` reads the terminal result
-  the same way; after `close()` it rejects instead of reporting a missing
-  result.
+- **Wake-ups.** Every committed write of a task's state, activity log or
+  approval timeline wakes its readers, retirement and maintenance included,
+  because the stores signal their own task events wake. A reader no hint
+  reached reads again within the wake's five-second fallback.
+  `TaskHandle.result()` reads the terminal result the same way; after
+  `close()` it rejects instead of reporting a missing result.
 - **`ByokServer.events.subscribe()`** announces state for tasks this instance
   dispatched. A task this instance did not dispatch (after a restart) is no
   longer announced there because a `tasks.events` read began.
@@ -66,9 +67,7 @@ activity store persists (Postgres, SQLite).
 
 ## Not in this change
 
-Activity admission does not yet close at a task's terminal, and the log has no
-terminal-relative expiry until lifecycle transactions settle it (#1113 A3).
-Cross-process wake-ups (#1113 A4) are not needed by the embedded server, which
-has one storage owner. Sealed progress stays out of the embedded server, which
+Cross-process wake-ups are not needed by the embedded server, which has one
+storage owner; it uses the in-process wake of its memory or SQLite stores. Sealed progress stays out of the embedded server, which
 refuses sealed dispatch; a hosted Host reads it from `readActivity` as opaque
 ciphertext.

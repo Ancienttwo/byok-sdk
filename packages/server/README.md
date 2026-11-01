@@ -528,8 +528,8 @@ and approval requests, whose `approvalId` `tasks.approve` and `tasks.reject`
 take. It works for a task `executions.submit` created; `TaskHandle.events()`
 reads the same feed without cursors. The feed holds nothing of its own: it
 reads task state and the approval timeline the way `tasks.get` does, and the
-task's durable activity log, and the relay only wakes it when something was
-committed.
+task's durable activity log, and the stores' task events wake only wakes it
+when something was committed.
 
 ```ts
 const start = lastCursor === undefined ? { from: 'state' as const } : { after: lastCursor };

@@ -1604,7 +1604,7 @@ import type { StoreCompatibility } from '@byok-sdk/core';
  */
 export declare function inspectSqliteStore(path: string): Promise<StoreCompatibility>;
 // ==== @byok-sdk/server dist/task-events.d.ts ====
-import { type ActivityTail } from '@byok-sdk/cloud';
+import { type ActivityTail, type TaskEventsWake, type TenantId } from '@byok-sdk/cloud';
 import { type TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay';
 import { type ServerTaskEvent, type TaskEventEntry } from './types';
@@ -1632,7 +1632,14 @@ export interface TaskEventSources {
 }
 export interface TaskEventDeps {
     readonly relay: TaskEventRelay;
+    readonly tenant: TenantId;
     readonly sources: TaskEventSources;
+    /**
+     * The stores' own commit hints (#1113 A4). Every writer of a task's state,
+     * activity log or approval timeline signals it, retirement and maintenance
+     * included; a reader no hint reaches re-reads within its fallback.
+     */
+    readonly wake: TaskEventsWake;
     /** Ends every read when the server closes. */
     readonly shutdown: AbortSignal;
 }
@@ -1651,7 +1658,7 @@ export interface TaskEventReadOptions {
  */
 export declare function readTaskEvents<T = TaskEventEntry>(deps: TaskEventDeps, taskId: string, options?: TaskEventReadOptions, project?: (entry: TaskEventEntry) => T): AsyncIterable<T>;
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
-import { type ByokCloud, type SteerRejectionCode, type TaskAbandonCause, type TaskAttempt, type TenantId } from '@byok-sdk/cloud';
+import { type ByokCloud, type SteerRejectionCode, type TaskAbandonCause, type TaskAttempt } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay';
 import { type TaskEventDeps } from './task-events';
@@ -1691,7 +1698,6 @@ export declare class SteerRejectedError extends Error {
     constructor(taskId: string, code: SteerRejectionCode, state: TaskState, runtime: RuntimeId | undefined);
 }
 export interface TaskHandleDeps extends TaskEventDeps {
-    readonly tenant: TenantId;
     readonly cloud: ByokCloud;
     /**
      * The task's current `TaskSnapshot.state` and `updatedAt`, or `undefined`

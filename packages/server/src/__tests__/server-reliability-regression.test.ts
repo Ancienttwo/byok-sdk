@@ -1,4 +1,4 @@
-import { createInProcessMailboxWake } from '@byok-sdk/cloud';
+import { createInProcessMailboxWake, createInProcessTaskEventsWake } from '@byok-sdk/cloud';
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -148,6 +148,7 @@ describe('issues #141-#144 server reliability regressions', () => {
       cloud: {} as ByokCloud,
       relay,
       sources: { readFacts: async () => undefined, readActivity: async () => undefined },
+      wake: createInProcessTaskEventsWake(),
       shutdown: new AbortController().signal,
       readState: async () => ({ state: 'Complete', at: '2026-09-05T00:00:00.000Z' }),
       readResult: async () => ({ state: 'Complete', summary: 'durably complete' }),

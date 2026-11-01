@@ -676,7 +676,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       after: { version: 1, tenantId: tenant, taskId, generation: after.generation, revision: after.revision },
     })),
   };
-  const eventDeps: TaskEventDeps = { relay, sources: eventSources, shutdown: readShutdown.signal };
+  const eventDeps: TaskEventDeps = { relay, tenant, sources: eventSources, wake: composition.taskEventsWake, shutdown: readShutdown.signal };
 
   function handleFor(taskId: string): TaskHandle {
     return createTaskHandle(taskId, {

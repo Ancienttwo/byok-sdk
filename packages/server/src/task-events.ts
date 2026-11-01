@@ -1,14 +1,7 @@
-import { ByokCloudError, isCloudError, type ActivityTail } from '@byok-sdk/cloud';
+import { ByokCloudError, isCloudError, type ActivityTail, type TaskEventsWake, type TenantId } from '@byok-sdk/cloud';
 import { TASK_STATES, type TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay';
 import { TaskEventsUnavailableError, type ServerTaskEvent, type TaskEventEntry } from './types';
-
-/**
- * Re-read interval for a reader no wake reached. Wakes are in-process hints;
- * a transition with no envelope or Host call behind it (a retirement, a
- * maintenance abandonment) is still seen within this bound.
- */
-const TASK_EVENT_RECHECK_MS = 1_000;
 
 const TERMINAL_STATES: ReadonlySet<TaskState> = new Set<TaskState>(['Complete', 'Failed', 'Cancelled']);
 const TRUNCATED: ServerTaskEvent = { kind: 'error', reason: 'events_truncated' };
@@ -38,7 +31,14 @@ export interface TaskEventSources {
 
 export interface TaskEventDeps {
   readonly relay: TaskEventRelay;
+  readonly tenant: TenantId;
   readonly sources: TaskEventSources;
+  /**
+   * The stores' own commit hints (#1113 A4). Every writer of a task's state,
+   * activity log or approval timeline signals it, retirement and maintenance
+   * included; a reader no hint reaches re-reads within its fallback.
+   */
+  readonly wake: TaskEventsWake;
   /** Ends every read when the server closes. */
   readonly shutdown: AbortSignal;
 }
@@ -148,68 +148,55 @@ async function* followTaskEvents(
   const { relay, sources } = deps;
   if (relay.stopped || signal.aborted) return;
   let position = after === undefined ? undefined : decodeCursor(taskId, after);
-  let wake = () => {};
-  const unwatch = relay.watch(taskId, () => wake());
-  const onAbort = () => wake();
-  signal.addEventListener('abort', onAbort, { once: true });
+  // Subscribed before the first read, so a commit during any read is kept.
+  const changes = deps.wake.subscribe(deps.tenant, taskId, signal);
   const entry = (event: ServerTaskEvent): TaskEventEntry => ({ cursor: encodeCursor(taskId, position!), event });
   try {
     for (let window = 0; ; window += 1) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      // Armed before the reads, so a commit during them is never missed.
-      const changed = new Promise<void>((resolve) => {
-        wake = resolve;
-        timer = setTimeout(resolve, TASK_EVENT_RECHECK_MS);
-        timer.unref?.();
-      });
-      try {
-        const facts = await sources.readFacts(taskId);
-        if (signal.aborted || relay.stopped) return;
-        if (facts === undefined) {
-          if (window === 0) throw new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
-          return;
-        }
-        position ??= from === 'state' ? await logHead(sources, taskId) : START;
-        const terminal = TERMINAL_STATES.has(facts.state);
-        if (!terminal) {
-          if (facts.approval !== undefined && facts.approval.revision > position.approval) {
-            position = { ...position, approval: facts.approval.revision };
-            if (facts.approval.request !== undefined) yield entry(facts.approval.request);
-          }
-          if (facts.state !== position.state) {
-            position = { ...position, state: facts.state };
-            yield entry({ kind: 'state', state: facts.state, at: facts.at });
-          }
-        }
-        const log = readLog(sources, taskId, position, window === 0);
-        try {
-          for (let item = await log.next(); ; item = await log.next()) {
-            if (signal.aborted) return;
-            if (item.done) {
-              position = item.value;
-              break;
-            }
-            position = item.value.position;
-            yield entry(item.value.event);
-          }
-        } finally {
-          await log.return(position);
-        }
-        if (terminal) {
-          if (facts.state !== position.state) {
-            position = { ...position, state: facts.state };
-            yield entry({ kind: 'state', state: facts.state, at: facts.at });
-          }
-          return;
-        }
-        await changed;
-      } finally {
-        clearTimeout(timer);
+      const facts = await sources.readFacts(taskId);
+      if (signal.aborted || relay.stopped) return;
+      if (facts === undefined) {
+        if (window === 0) throw new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
+        return;
       }
+      position ??= from === 'state' ? await logHead(sources, taskId) : START;
+      const terminal = TERMINAL_STATES.has(facts.state);
+      if (!terminal) {
+        if (facts.approval !== undefined && facts.approval.revision > position.approval) {
+          position = { ...position, approval: facts.approval.revision };
+          if (facts.approval.request !== undefined) yield entry(facts.approval.request);
+        }
+        if (facts.state !== position.state) {
+          position = { ...position, state: facts.state };
+          yield entry({ kind: 'state', state: facts.state, at: facts.at });
+        }
+      }
+      const log = readLog(sources, taskId, position, window === 0);
+      try {
+        for (let item = await log.next(); ; item = await log.next()) {
+          if (signal.aborted) return;
+          if (item.done) {
+            position = item.value;
+            break;
+          }
+          position = item.value.position;
+          yield entry(item.value.event);
+        }
+      } finally {
+        await log.return(position);
+      }
+      if (terminal) {
+        if (facts.state !== position.state) {
+          position = { ...position, state: facts.state };
+          yield entry({ kind: 'state', state: facts.state, at: facts.at });
+        }
+        return;
+      }
+      await changes.next(Number.MAX_SAFE_INTEGER);
+      if (signal.aborted) return;
     }
   } finally {
-    signal.removeEventListener('abort', onAbort);
-    unwatch();
+    changes.close();
   }
 }
 

@@ -4,7 +4,7 @@ import type { Server as HttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ByokCloudError, isCloudError, type ActivityTail, type ActivityTailEntry } from '@byok-sdk/cloud';
+import { ByokCloudError, createInProcessTaskEventsWake, isCloudError, type ActivityTail, type ActivityTailEntry } from '@byok-sdk/cloud';
 import { tenantId } from '@byok-sdk/core';
 import { createEnvelope, type AgentEventOrUnknown, type Envelope } from '@byok-sdk/protocol';
 import { TaskEventRelay } from '../relay';
@@ -453,10 +453,14 @@ function fakeSources(initial: TaskEventFacts | undefined) {
   return { state, sources, append };
 }
 
+const FAKE_TENANT = tenantId(PRODUCT_ID);
+
 function readFake(sources: TaskEventSources, options: { after?: string; from?: 'state' } = {}) {
   const relay = new TaskEventRelay();
+  const wake = createInProcessTaskEventsWake({ fallbackMs: 20 });
   const shutdown = new AbortController();
-  return { relay, reader: readTaskEvents({ relay, sources, shutdown: shutdown.signal }, 'task', options)[Symbol.asyncIterator](), shutdown };
+  const deps = { relay, tenant: FAKE_TENANT, sources, wake, shutdown: shutdown.signal };
+  return { relay, wake, reader: readTaskEvents(deps, 'task', options)[Symbol.asyncIterator](), shutdown };
 }
 
 const RUNNING: TaskEventFacts = { state: 'Running', at: '2026-11-01T00:00:00.000Z' };
@@ -535,16 +539,16 @@ describe('readTaskEvents over its sources', () => {
     await expect(reader.next()).rejects.toThrow(/sealed activity/);
   });
 
-  it('reads again on a wake and on the recheck bound, never yielding an unchanged state twice', async () => {
+  it('reads again on a wake and on the fallback bound, never yielding an unchanged state twice', async () => {
     const fake = fakeSources(RUNNING);
-    const { relay, reader } = readFake(fake.sources);
+    const { relay, wake, reader } = readFake(fake.sources);
     expect((await reader.next()).value?.event).toMatchObject({ kind: 'state', state: 'Running' });
     const next = reader.next();
-    relay.wake('task');
+    wake.changed(FAKE_TENANT, 'task');
     fake.append([text('woken')]);
-    relay.wake('task');
+    wake.changed(FAKE_TENANT, 'task');
     expect((await next).value?.event).toEqual({ kind: 'agent', event: text('woken') });
-    // No wake at all: the recheck bound still finds the terminal.
+    // No hint at all: the wake's fallback still finds the terminal.
     const terminal = reader.next();
     fake.state.facts = { state: 'Failed', at: '2026-11-01T00:00:02.000Z' };
     expect((await terminal).value?.event).toMatchObject({ kind: 'state', state: 'Failed' });
@@ -559,7 +563,7 @@ describe('readTaskEvents over its sources', () => {
     const abort = new AbortController();
     const relay = new TaskEventRelay();
     const sources: TaskEventSources = { ...fake.sources, readFacts: async () => { await gate; return RUNNING; } };
-    const pending = first(readTaskEvents({ relay, sources, shutdown: new AbortController().signal }, 'task', { signal: abort.signal }));
+    const pending = first(readTaskEvents({ relay, tenant: FAKE_TENANT, sources, wake: createInProcessTaskEventsWake(), shutdown: new AbortController().signal }, 'task', { signal: abort.signal }));
     abort.abort();
     release();
     expect(await pending).toEqual({ value: undefined, done: true });

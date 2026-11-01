@@ -42,8 +42,9 @@ describe('task event read lifetime', () => {
     for (let i = 0; i < 20; i += 1) {
       expect(await collect(handle.events())).toEqual([expect.objectContaining({ kind: 'state', state: 'Cancelled' })]);
     }
-    // Each read watches its task while it runs and stops watching when it ends.
-    const watched = writes.mock.calls.filter(([key]) => key === handle.taskId).length;
+    // Each read subscribes to its task's wake while it runs and drops the route when it ends.
+    const route = (key: unknown) => typeof key === 'string' && key.endsWith(`,${JSON.stringify(handle.taskId)}]`);
+    const watched = writes.mock.calls.filter(([key]) => route(key)).length;
     expect(watched).toBe(20);
     writes.mockRestore();
     const durable = await handle.result();

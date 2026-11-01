@@ -97,7 +97,6 @@ function refusalCode(kernelCode: SteerRejectionCode, state: TaskState): SteerRej
 }
 
 export interface TaskHandleDeps extends TaskEventDeps {
-  readonly tenant: TenantId;
   readonly cloud: ByokCloud;
   /**
    * The task's current `TaskSnapshot.state` and `updatedAt`, or `undefined`
@@ -110,9 +109,6 @@ export interface TaskHandleDeps extends TaskEventDeps {
 }
 
 type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
-
-/** How long `result()` waits on a wake before reading the store again. */
-const RESULT_RECHECK_MS = 1_000;
 
 /**
  * The host's approval decision, shared by {@link TaskHandle.approve} and
@@ -206,21 +202,16 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
 
     async result(): Promise<TaskResult> {
       // The store is the only answer; a wake only says when to ask again.
-      for (;;) {
-        let wake!: () => void;
-        const changed = new Promise<void>((resolve) => { wake = resolve; });
-        const unwatch = deps.relay.watch(taskId, wake);
-        const timer = setTimeout(wake, RESULT_RECHECK_MS);
-        timer.unref?.();
-        try {
+      const changes = deps.wake.subscribe(deps.tenant, taskId, deps.shutdown);
+      try {
+        for (;;) {
           const result = await deps.readResult(taskId);
           if (result !== undefined) return result;
           if (deps.relay.stopped || deps.shutdown.aborted) throw new Error(`server closed before task ${taskId} reached a terminal`);
-          await changed;
-        } finally {
-          clearTimeout(timer);
-          unwatch();
+          await changes.next(Number.MAX_SAFE_INTEGER);
         }
+      } finally {
+        changes.close();
       }
     },
   };

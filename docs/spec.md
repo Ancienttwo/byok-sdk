@@ -3485,12 +3485,12 @@ its own. `TaskHandle.events()` reads the same feed without cursors.
   pre-#1113 relay, is `TaskEventsUnavailableError` `cursor_unknown`. Terminal
   is judged by the `tasks.get` projection, so an accepted Host cancellation is
   terminal even while the attempt reads `cancel_requested`.
-- The relay is a content-free wake-up: each committed envelope that names a
-  task, and each Host transition, wakes its readers, which then read the
-  stores. A wake may cause an extra read, never an event. A reader no wake
-  reached reads again within one second, so a transition with no envelope or
-  Host call behind it (retirement, abandonment by maintenance) is still seen.
-  Wakes are in-process; the embedded server has one storage owner.
+- Readers wait on the stores' task events wake: every committed write of the
+  task's state, activity log or approval timeline, retirement and maintenance
+  included, wakes them, and they then read the stores. A wake may cause an
+  extra read, never an event. A reader no hint reached reads again within the
+  wake's five-second fallback. Wakes are in-process; the embedded server has
+  one storage owner.
 - The embedded server refuses sealed dispatch, so its log holds no sealed
   progress; a sealed entry is refused rather than dropped. A sealed approval
   request moves the state to `AwaitApproval` without an `await_approval`
