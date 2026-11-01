@@ -6,6 +6,7 @@ import { freezeRuntimeAdapterDescriptor, type RuntimeAdapterDescriptor, type Run
 import {
   CONTRACT_CASES,
   assertContractPlan,
+  assertRuntimeCases,
   contractMode,
   contractTarget,
   expectDetectedVersion,
@@ -60,6 +61,10 @@ describe('runtime contract plan admission', () => {
   it('refuses a skip with no reason', () => {
     const plan = { ...skipEveryCase(), drafts: { skip: '   ' } };
     expect(() => assertContractPlan(descriptor(), plan)).toThrow(/skip needs a reason/);
+  });
+
+  it('refuses a runtime case skipped with no reason', () => {
+    expect(() => assertRuntimeCases('runtime cases', { 'x.case': ['a runtime case', { skip: '  ' }] })).toThrow(/x\.case skip needs a reason/);
   });
 
   it.each([
