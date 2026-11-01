@@ -40,6 +40,26 @@ describe('Claude MCP identity from its own mcp_status answer', () => {
     await source.observe();
     expect(fetch).toHaveBeenCalledOnce();
   });
+  it('resolves an SDK helper for authorization without adding it to event identity', async () => {
+    const source = createClaudeMcpIdentityResolver(async () => status(
+      { name: 'market', tools: ['quote'] },
+      { name: AGENT_MESSAGE_MCP_SERVER_NAME, tools: ['send_agent_message'] },
+    ), configured('market', AGENT_MESSAGE_MCP_SERVER_NAME));
+    await expect(source.resolve(`mcp__${AGENT_MESSAGE_MCP_SERVER_NAME}__send_agent_message`))
+      .resolves.toEqual({ server: AGENT_MESSAGE_MCP_SERVER_NAME, tool: 'send_agent_message' });
+    expect([...source.identities.keys()]).toEqual(['mcp__market__quote']);
+  });
+
+  it('resolves helpers when the task has no toolset server, and skips the event lookup', async () => {
+    const fetch = vi.fn(async () => status({ name: AGENT_MESSAGE_MCP_SERVER_NAME, tools: ['send_agent_message'] }));
+    const source = createClaudeMcpIdentityResolver(fetch, configured(AGENT_MESSAGE_MCP_SERVER_NAME));
+    await source.observe();
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(source.resolve(`mcp__${AGENT_MESSAGE_MCP_SERVER_NAME}__send_agent_message`))
+      .resolves.toEqual({ server: AGENT_MESSAGE_MCP_SERVER_NAME, tool: 'send_agent_message' });
+    expect(source.identities.size).toBe(0);
+  });
+
   it('maps Claude runtime names to the configured server and original tool names', () => {
     const identities = claudeMcpEventIdentities(
       status({ name: 'market.feed', tools: ['get.quote', 'get_snapshot'] }),
@@ -51,7 +71,7 @@ describe('Claude MCP identity from its own mcp_status answer', () => {
     ]);
   });
 
-  it('gives no identity to servers outside the task toolsets, but counts them for collisions', () => {
+  it('gives no identity to servers the SDK did not configure, but counts them for collisions', () => {
     const toolset = configured('market');
     // The user's own `market__feed` server and the task's `market` server both yield `mcp__market__feed__get`.
     expect(claudeMcpEventIdentities(status(

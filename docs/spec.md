@@ -4072,6 +4072,10 @@ must all match. A rule has a unique nonblank `id`, optional display-only
   observation, or the normalized event in `all`. Claude shares one runtime
   `mcp_status` lookup between its pre-execution gate and event reporting,
   matching the task's configured command/args and rejecting ambiguous names.
+  The gate resolves every server the SDK wrote, the SDK helpers included, by
+  that same command/args match, so a Host MCP rule applies to helpers by
+  identity and does not deny them for missing identity; helper events still
+  carry no `mcp`.
   Identity lookup consumes the same authorization deadline as approval wait.
   In `auto`, an MCP call without trusted identity is denied when the policy
   includes MCP selectors. Names are not split on `__`; unobserved personal

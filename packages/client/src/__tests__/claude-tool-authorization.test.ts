@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeToolAuthorizationBridge } from '../adapters/claude/tool-authorization';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolCall } from '../tool-authorization';
+import {
+  AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MEMORY_RECALL_TOOL_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_MESSAGE_TOOL_NAME,
+  AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME, SDK_RESERVED_MCP_TOOL_NAMES,
+} from '../sdk-reserved-mcp';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { McpStdioServerConfig, MessageDraftDelta, Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -89,6 +93,68 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
     expect(requestAuthorization).not.toHaveBeenCalled();
     await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
   });
+
+  // #1091 F1: a user MCP selector must not lock out the SDK helpers the daemon injects.
+  const helperServers = {
+    salesko: { command: process.execPath, args: ['salesko-mcp-server'] },
+    [AGENT_RESULT_MCP_SERVER_NAME]: { command: process.execPath, args: ['agent-result-helper'] },
+    [AGENT_MESSAGE_MCP_SERVER_NAME]: { command: process.execPath, args: ['agent-message-helper'] },
+    [AGENT_MEMORY_MCP_SERVER_NAME]: { command: process.execPath, args: ['agent-memory-helper'] },
+  };
+  const helperTools = JSON.stringify({
+    salesko: ['find_leads'], ...SDK_RESERVED_MCP_TOOL_NAMES,
+  });
+  async function runWithSaleskoAsk(toolName: string, approved: boolean) {
+    const workspace = await tempRoot();
+    const requestAuthorization = vi.fn(async (_summary: string) => ({ approved }));
+    const verdicts: string[] = [];
+    const gate = createAutoToolAuthorizationGate({ workspace, timeoutMs: 2_000,
+      rules: { alwaysAsk: [{ id: 'crm', match: { mcpServer: 'salesko' } }] },
+      requestAuthorization, onDecision: ({ verdict }) => { verdicts.push(verdict.decision === 'deny' ? verdict.code : 'allow'); },
+    });
+    const session = await start(workspace, gate, { ...process.env, FAKE_TOOL_NAME: toolName, FAKE_MCP_TOOLS: helperTools }, helperServers);
+    const events = await takeTurn(session);
+    return { workspace, events, verdicts, requestAuthorization };
+  }
+
+  it.each([
+    `mcp__${AGENT_RESULT_MCP_SERVER_NAME}__${AGENT_RESULT_TOOL_NAME}`,
+    `mcp__${AGENT_MESSAGE_MCP_SERVER_NAME}__${AGENT_MESSAGE_TOOL_NAME}`,
+    `mcp__${AGENT_MEMORY_MCP_SERVER_NAME}__${AGENT_MEMORY_RECALL_TOOL_NAME}`,
+  ])('runs SDK helper %s without asking under a user MCP server rule', async toolName => {
+    const { workspace, events, verdicts, requestAuthorization } = await runWithSaleskoAsk(toolName, false);
+    expect(verdicts).toEqual(['allow']);
+    expect(requestAuthorization).not.toHaveBeenCalled();
+    expect(await fs.readFile(path.join(workspace, 'tool-1.txt'), 'utf8')).toBe('actual fixture write');
+    // Helper identity authorizes the call; tool events still carry none (#633).
+    for (const event of events.filter(event => event.type === 'tool_use' || event.type === 'tool_result')) {
+      expect(event).not.toHaveProperty('mcp');
+    }
+  });
+
+  it('still asks for the user server the rule names when helpers are present', async () => {
+    const { workspace, verdicts, requestAuthorization } = await runWithSaleskoAsk('mcp__salesko__find_leads', false);
+    expect(verdicts).toEqual(['tool_authorization_denied']);
+    expect(requestAuthorization).toHaveBeenCalledOnce();
+    expect(requestAuthorization.mock.calls[0]?.[0]).toContain('Tool authorization rule (crm)');
+    await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
+  });
+
+  it('gives no identity to a helper name Claude reports with another command', async () => {
+    const workspace = await tempRoot();
+    const requestAuthorization = vi.fn(async () => ({ approved: true }));
+    const gate = createAutoToolAuthorizationGate({ workspace, timeoutMs: 2_000,
+      rules: { alwaysAsk: [{ id: 'crm', match: { mcpServer: 'salesko' } }] }, requestAuthorization,
+    });
+    const status = { mcpServers: [{ name: AGENT_RESULT_MCP_SERVER_NAME,
+      config: { command: 'user-command', args: ['agent-result-helper'] }, tools: [{ name: AGENT_RESULT_TOOL_NAME }] }] };
+    const session = await start(workspace, gate, { ...process.env, FAKE_MCP_STATUS: JSON.stringify(status),
+      FAKE_TOOL_NAME: `mcp__${AGENT_RESULT_MCP_SERVER_NAME}__${AGENT_RESULT_TOOL_NAME}` }, helperServers);
+    expect(JSON.stringify(await takeTurn(session))).toContain('tool_authorization_unavailable');
+    expect(requestAuthorization).not.toHaveBeenCalled();
+    await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
+  });
+
   it('denies a high-risk write outside the workspace before it happens, with the classified reason', async () => {
     const root = await tempRoot();
     const workspace = path.join(root, 'home');
