@@ -130,7 +130,7 @@ describe('DshAdapter detect and prepare', () => {
   it('reads the version, resolves the acp profile in the SDK root, and reports the key variable', async () => {
     const { adapter, root } = await setup();
     setAmbient('TEST_DSH_PROVIDER_KEY', 'test-key');
-    expect(await adapter.detect()).toEqual({ kind: 'available', version: QUALIFIED_DSH_VERSION, authPresent: true, versionVerdict: { state: 'allow', qualifiedVersion: QUALIFIED_DSH_VERSION } });
+    expect(await adapter.detect()).toEqual({ kind: 'available', version: QUALIFIED_DSH_VERSION, authPresent: true, executablePath: fixture, executableSource: 'config', versionVerdict: { state: 'allow', qualifiedVersion: QUALIFIED_DSH_VERSION } });
     await expect(fs.stat(path.join(root, 'profiles', 'acp'))).resolves.toBeDefined();
     await expect(fs.readdir(path.join(root, 'byok-agents-home'))).resolves.toEqual([]);
   });

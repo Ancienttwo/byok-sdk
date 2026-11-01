@@ -1138,6 +1138,24 @@ and never blocks startup. Version text and the change never enter
 `conn.hello`, presence, `audit.jsonl` or `DaemonRecord`, and offline
 `doctor` reports unknown instead of reconstructing a previous version.
 
+The runtime executable is local-only evidence too (#1103 O10). An available
+`RuntimeDetectResult` and `RuntimeObservation` may carry `executablePath` (the
+absolute file detection ran) and `executableSource`: `config` when the
+adapter's Host `resolveBin` option chose it, `env` for a `BYOK_<RUNTIME>_BIN`
+override, `path` for a bare name. Both come from the adapter's one bin
+resolution and, for Claude and Codex, `resolveRuntimeInvocation`; no reader
+searches PATH to fill them. On win32 that invocation finds Claude's or Codex's
+file on PATH, so their `path` source has a path. Otherwise a bare name is
+found by the OS at spawn, so `path` carries no path. Pi reports the fields only
+for a Host `resolveBin` on its plain pi-rpc lane, the one lane that launches
+that file; its bundled package, `BYOK_PI_BIN`, durable lane and SDK helper
+host launch SDK entries and report neither field.
+`Daemon.status()` carries them inline, control `status` through the additive
+`runtimeExecutables` channel, and `status`, `runtimes` and `doctor` print them
+as `executable=<source>("<path>")`. The path can name the local user, so it
+never enters `conn.hello`, presence, `audit.jsonl`, `DaemonRecord` or a
+support bundle.
+
 For the next minor, a newer CLI reports unknown when an older daemon omits
 these fields. It never translates `runtimeIds` into availability or executes
 a local probe to fill the missing daemon facts.

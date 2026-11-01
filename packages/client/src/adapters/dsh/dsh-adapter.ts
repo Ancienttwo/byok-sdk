@@ -31,6 +31,7 @@ import { DSH_RUNTIME_CAPABILITIES } from './dsh-capabilities';
 import { assertDshModelSelection, assertDshSandboxMode, dshAgentsHome, dshEnvironment, dshPatch, dshRoute } from './dsh-profile';
 import { DSH_VERSION_POLICY, dshVersionToken } from './dsh-version';
 import { resolveDshBin } from './resolve-bin';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable';
 
 /**
  * Provider and model for every dsh execution (#1258 O4). Credentials stay in
@@ -198,7 +199,7 @@ export class DshAdapter implements RuntimeAdapter {
   }
 
   private command(): string {
-    return (this.options.resolveBin ?? resolveDshBin)().command;
+    return resolveRuntimeCommand(this.options.resolveBin, resolveDshBin).bin.command;
   }
 
   runtimeEnvironment(): Promise<RuntimeEnvironment> {
@@ -217,7 +218,8 @@ export class DshAdapter implements RuntimeAdapter {
    */
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const command = this.command();
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin);
+      const command = resolved.bin.command;
       const { env: base } = await this.runtimeEnvironment();
       const env = dshEnvironment(base, this.root, this.sandbox);
       await this.ensureRoot();
@@ -230,6 +232,7 @@ export class DshAdapter implements RuntimeAdapter {
         kind: 'available',
         version: token,
         authPresent: typeof key === 'string' && key.length > 0,
+        ...runtimeExecutableFields(resolved, command),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, token),
       };
     } catch (error) {
