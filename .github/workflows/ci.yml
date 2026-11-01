@@ -356,7 +356,7 @@ jobs:
     # root identity that the TS caller sends to open. windows-latest is
     # Server 2025 and windows-2022 is Server 2022, so the evidence covers two
     # Windows builds. The TS gate admits Windows x64 recall and save, and B
-    # stays false. See docs/plans/2026-10-22-605-windows-memory.md.
+    # stays false. See docs/researches/2026-10-22-605-windows-memory.md.
     strategy:
       fail-fast: false
       matrix:
@@ -748,7 +748,7 @@ jobs:
       # default temp root is on the runner OS disk (fsync p50 4 ms, p99 up to
       # 210 ms). runner.temp is on the local NVMe disk (fsync p50 0.1 ms).
       # Keep the temp root there. Do not weaken the durability settings.
-      # See docs/notes/2026-10-22-windows-k8-fsync-stalls.md.
+      # See docs/researches/2026-10-22-windows-k8-fsync-stalls.md.
       # Full K4 discovery preserves the existing Linux-only device-memory skips.
       - name: K4 Windows Host execution qualification
         if: matrix.os == 'windows-latest'

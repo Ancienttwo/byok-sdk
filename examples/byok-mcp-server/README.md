@@ -3,7 +3,7 @@
 This private, copy-and-own example supplies the Host authorization and admission
 ledger (B2), the task tool catalogue (B3), the routine tools (B4) and the
 read-only memory tool (B5) from
-[the beta plan](../../docs/plans/2026-10-19-byok-mcp-server-external-bot-beta.md).
+[the beta plan](../../docs/adr/ADR-040-byok-mcp-server-external-bot-beta.md).
 It reuses the public B1 HTTP transport, the public `@byok-sdk/server` API and the
 K4 Host execution core (`@byok-sdk/server/execution-core`) for routines and memory.
 It adds no public SDK API or new SDK runtime dependency.
@@ -353,7 +353,7 @@ ledger releases transport resources; ledger close does not abandon reservations.
 
 ## Evidence and checks
 
-The [B2 plan](../../docs/plans/2026-10-19-byok-mcp-beta-b2.md) records P1/P2/P3.
+The [B2 plan](https://github.com/Ancienttwo/byok-sdk/pull/550) records P1/P2/P3.
 Tests use actual temporary SQLite files, the standard MCP HTTP client over local
 sockets, and the SDK's device simulator against the real embedded coordinator.
 They do not claim vendor runtime execution or require a paid model/account.
@@ -384,7 +384,7 @@ was not started. Skipped cases are not verified cases.
 
 ### B3 verification record: 2026-10-20
 
-The [B3 plan](../../docs/plans/2026-10-20-byok-mcp-beta-b3.md) records P1/P2/P3.
+The [B3 plan](https://github.com/Ancienttwo/byok-sdk/pull/589) records P1/P2/P3.
 B3 tests drive the tools with the standard MCP HTTP client over a loopback socket.
 `tools.test.ts` uses the real device daemon from `@byok-sdk/client`, paired to the
 embedded server, with a scripted `RuntimeAdapter` defined in this example. It covers
@@ -413,7 +413,7 @@ the call signal).
 
 ### B4 verification record: 2026-10-20
 
-The [B4 plan](../../docs/plans/2026-10-20-byok-mcp-beta-b4.md) records P1/P2/P3.
+The [B4 plan](https://github.com/Ancienttwo/byok-sdk/pull/590) records P1/P2/P3.
 `routines.test.ts` uses K4's test Host: the embedded server, the real device daemon
 with Agent homes and egress, and the stub Pi runtime that calls the real
 `submit_result` helper. The beta endpoint runs on a loopback origin with the
@@ -447,7 +447,7 @@ Not tested: a Host that injects another K4 calendar, and a device without Agent-
 
 ### B5 verification record: 2026-10-20
 
-The [B5 plan](../../docs/plans/2026-10-20-byok-mcp-beta-b5.md) records P1/P2/P3.
+The [B5 plan](https://github.com/Ancienttwo/byok-sdk/pull/591) records P1/P2/P3.
 `memory.test.ts` runs K4's `HostMemoryPage` on a temporary SQLite ledger and the beta
 endpoint on a loopback origin with the standard MCP HTTP client. The device side is
 synthetic: redacted mutations go through the page's own `projectionPort`, and one

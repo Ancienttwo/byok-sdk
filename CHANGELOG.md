@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-These changes need the next MINOR after 0.33.0.
+These changes need 0.34.0, the next MINOR.
 
 - **Breaking (protocol, core, client, server, cloud, cloud-dataplane)** — wire
   v5 (`PROTOCOL_VERSION = 5`). The runtime capability `durablePi` is renamed
@@ -32,7 +32,7 @@ These changes need the next MINOR after 0.33.0.
   instead of the Pi type, which now extends it. See
   [runtime names](docs/migrations/wire-v5-durable-lane.md#runtime-names).
 
-## 0.33.0 — source candidate
+## 0.33.0 — 2026-11-01 (published)
 
 0.33.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
@@ -45,7 +45,7 @@ the sealed payload v2 categories and sealed forms behind `sealed-payload-v2`
 server upgrades a SQLite schema 6 or 7 file to schema 8 in place, one-way.
 0.33.0 completes #1113 (A2b to A5) and ships the first batch of #1045 E2EE v2,
 sealed Agent messages and memory projections, opt-in and hosted only (see the
-[0.33.0 candidate notes](docs/releases/v0.33.0.md) and the
+[0.33.0 release notes](docs/releases/v0.33.0.md) and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.33.0.md)). The
 breaking changes by package: server writes SQLite schema 8, which 0.32.0 and
 earlier cannot open (#1113 A2b, A3), and serves `tasks.events` from durable
@@ -60,7 +60,12 @@ category exports (#1045 S1); cloud takes `agentMessage` as an
 `AgentMessageConsumers` object, and cloud and cloud-dataplane make the
 projection commit input a union, with Postgres migration 0037 (#1045 S3,
 S4). On POSIX, disposal now also ends the observed descendants of a runtime
-root that exited by itself or was killed from outside (#1269).
+root that exited by itself or was killed from outside (#1269). The npm
+registry lists all nine public packages at 0.33.0 as `latest`, published on
+2026-11-01 (UTC), and the registry readback passed. The release commit is
+`fdf39b10a` on `main`, and the annotated tag `v0.33.0` and its GitHub Release
+point to it. This release does not say that 0.33.0, or a Host on it, is ready
+for production.
 
 - **Feature (client; #1258)** — `DshAdapter` runs DeepSeek Harness
   (`@deepseek-ai/dsh`, qualified 0.2.1-rc.5) over ACP on the custom-harness
@@ -1643,7 +1648,7 @@ manifests and their lock records move to 0.30.1.
   durable lane passes `identity: { attribution: null }`, and both Harness lanes
   set `restartLimit: Infinity` (the exported `CLOUD_HARNESS_SETTINGS` gains
   the field), so provider headers and restart handling stay as on 1.3.0. See
-  `docs/notes/2026-10-24-pi-1.4.0-oar-0.71.0-upgrade.md`.
+  `docs/researches/2026-10-24-pi-1.4.0-oar-0.71.0-upgrade.md`.
 - **Breaking (client, cloud-do)** — pi-durable 1.4.0 migrates a SQLite store
   to schema version 2 when it opens. A migrated store cannot be opened by a
   build on Pi 1.3.0, so there is no rollback to 1.3.0 past this release.
@@ -1952,7 +1957,7 @@ manifests and their lock records move to 0.30.1.
   patterns. `docs/adapter-capabilities.md` now lists, for every adapter,
   whether the user's MCP servers reach a task and what runtime memory loads.
   The evidence is in
-  `docs/notes/2026-10-24-871-873-claude-agent-user-context.md`.
+  `docs/researches/2026-10-24-871-873-claude-agent-user-context.md`.
 - **Feature (examples)** — K8 runs the Host's own K4 work on the Bot tenant's
   core (#882). `enqueueHostIntent(input, handler)` enqueues a K4 intent and
   stores the name of its `BotOptions.hostIntents` handler in one transaction.
@@ -2781,7 +2786,7 @@ lock records move to 0.28.3.
   openai's node x509 path, the Host's own tree decides which undici copy
   loads. A copy older than 7.30.1 (or, on the 8 line, older than 8.12.2) has
   the advisories. #700 is closed with these items open. The Pi and Node
-  items are in `docs/notes/2026-10-22-700-undici-copies.md` (#725). The
+  items are in `docs/researches/2026-10-22-700-undici-copies.md` (#725). The
   openai item is in a #700 comment.
 - **Feature (client)** — an opt-in Grok option for user-level instructions
   (#634). `GrokAdapterOptions.compatInstructions: 'disabled'` sets Grok's four
@@ -2797,7 +2802,7 @@ lock records move to 0.28.3.
   deny rules and hooks. Codex 0.160.0 and Pi 1.3.0 have no such switch, and
   Hermes needs none. `docs/adapter-capabilities.md` lists the user-level
   sources of each pinned runtime, and
-  `docs/notes/2026-10-22-634-runtime-user-config.md` gives the evidence.
+  `docs/researches/2026-10-22-634-runtime-user-config.md` gives the evidence.
 - **Fixed (client)** — a resumed Grok memory reader no longer fails before it
   starts (#609). A resumed reader runs in the run directory that its handoff
   recorded, which has the name of the earlier task. The persona check wanted
@@ -2820,7 +2825,7 @@ lock records move to 0.28.3.
   barrier failures on NTFS. They also replace `notes` or a note with a junction
   or a symlink after the home is pinned. Windows admission stays closed, and B
   stays false. The plan and the owner decisions are in
-  `docs/plans/2026-10-22-605-windows-memory.md`.
+  `docs/researches/2026-10-22-605-windows-memory.md`.
 - **Tests (client, keys)** — the Hermes suites now run on Windows in routine
   CI (#712). The `windows-git-workspace` job runs the client suites
   `hermes-adapter`, `hermes-custody`, `hermes-gateway-control` and
@@ -3227,7 +3232,7 @@ on 2026-10-21 at 18:13 UTC. That read reported 0.28.1 as `latest`. See the
 - **Changed (client)** — update the private OAR source from 0.66.0 to 0.67.0
   (`c264f17`). One selected file changed upstream, by one comment. The five
   maintained BYOK deltas and the import closure stay the same. No public API
-  change. See `docs/notes/2026-10-18-pi-1.3-oar-0.67-upgrade.md`.
+  change. See `docs/researches/2026-10-18-pi-1.3-oar-0.67-upgrade.md`.
 
 ## 0.27.0 / @byok-sdk/keys 0.12.0 — 2026-10-17 (published)
 
@@ -3379,7 +3384,7 @@ devices and the Host upgrade together.
   A Codex session open now refuses an MCP server named `__proto__`,
   `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` or
   `__lookupSetter__` with `UnsupportedOptionError`. No public API change. See
-  `docs/notes/2026-10-16-oar-0.66-upgrade.md`.
+  `docs/researches/2026-10-16-oar-0.66-upgrade.md`.
 
 - **Breaking (server, 0.x; #413, PR #443)** — the reference server has one TTL
   presence lease. `DispatchInput.deviceId` is required on every `dispatch()`;
@@ -3770,7 +3775,7 @@ devices and the Host upgrade together.
   (`bf55fd6`). No selected source file changed upstream, so the five
   maintained BYOK deltas and the import closure stay the same. Only the vendor
   directory, the manifest base and the change notices move. No behavior or
-  public API change. See `docs/notes/2026-10-13-oar-0.62-upgrade.md`.
+  public API change. See `docs/researches/2026-10-13-oar-0.62-upgrade.md`.
 - **Changed (client)** — update the private OAR source from 0.57.0 to 0.59.1
   (`bb98cbc`). The maintained BYOK deltas shrink from 6 files to 5:
   session-options, credential-redactor and the `Promise.withResolvers` hunk are
@@ -3780,7 +3785,7 @@ devices and the Host upgrade together.
   the same message and cause, still a retryable start failure in the adapter.
   The client TypeScript `lib` is raised to ES2024; the emit target stays es2022
   and the emitted declarations are byte-identical. See
-  `docs/notes/2026-10-13-oar-0.59-upgrade.md`.
+  `docs/researches/2026-10-13-oar-0.59-upgrade.md`.
 - **Changed (client service)** — on macOS and Linux, `byok-agent install`
   now writes a launchd plist or systemd unit that runs `byok-agent start
   --service` (`nodeAgentProgram({ service: true })`; a Host program given to
@@ -3894,12 +3899,12 @@ devices and the Host upgrade together.
   `reasoningOutputTokens` into its derived token totals, and adds each
   `session_linked` event once per record stream. SDK events read native frames
   only and already report Codex `reasoningTokens`, so SDK events and the public
-  API do not change. See `docs/notes/2026-10-12-oar-0.57-upgrade.md`.
+  API do not change. See `docs/researches/2026-10-12-oar-0.57-upgrade.md`.
 - **Changed (client)** — update the private OAR source from 0.54.3 to 0.56.0
   (`163d551`). The vendored Codex session can now send `additionalDirectories`
   as `runtimeWorkspaceRoots` and `outputSchema` on `turn/start`. The SDK Codex
   adapter passes neither option, so Codex requests, SDK events and the public
-  API do not change. See `docs/notes/2026-10-12-oar-0.56-upgrade.md`.
+  API do not change. See `docs/researches/2026-10-12-oar-0.56-upgrade.md`.
 
 ## 0.26.0 / @byok-sdk/keys 0.11.0 — 2026-10-11 (published)
 
@@ -3938,7 +3943,7 @@ end-to-end run that the rc route named. The three entries below ship first in
   with `SessionNotFoundError`; its message keeps the
   `codex thread/resume failed: …` prefix. SDK events read native Codex frames
   only, so the new derived event kinds do not reach them. See
-  `docs/notes/2026-10-11-oar-0.54-upgrade.md`.
+  `docs/researches/2026-10-11-oar-0.54-upgrade.md`.
 
 ## 0.26.0-rc.4 / @byok-sdk/keys 0.11.0-rc.4 — 2026-10-10 (published)
 
@@ -4046,7 +4051,7 @@ public keys Pi launcher entry and the private OAR 0.48.0 source.
   (`087df16`). The derived Codex fold now reports `turn_active`, streamed
   command output as `outputDelta` and `app_request_cancelled`. SDK events read
   native Codex frames only, so ordinary task launches and SDK events keep their
-  existing behavior. See `docs/notes/2026-10-09-oar-0.48-upgrade.md`.
+  existing behavior. See `docs/researches/2026-10-09-oar-0.48-upgrade.md`.
 - **Security (client)** — the provider credential deny list now covers every
   credential name that the pinned official pi 1.1.0 reads:
   `ANTHROPIC_AUTH_TOKEN`, `COPILOT_GITHUB_TOKEN`, `GOOGLE_CLOUD_API_KEY`,
@@ -4131,7 +4136,7 @@ artifacts, registry readback and tag evidence.
   (`7dc98e0`). The raw Codex adapter takes upstream launch arguments and
   service-tier readback. The SDK bridge exposes neither option, so ordinary
   task launches and SDK events keep their existing behavior.
-  See `docs/notes/2026-10-09-oar-0.45.1-upgrade.md`.
+  See `docs/researches/2026-10-09-oar-0.45.1-upgrade.md`.
 
 ## 0.25.0-rc.2 / @byok-sdk/keys 0.10.0-rc.2 — 2026-10-09
 
@@ -4176,7 +4181,7 @@ Release candidate for 0.25.0, published under the npm dist-tag `rc`;
   `quota` or `rate_limited`, with the HTTP status where codex gives it), and
   an accepted steer that an interrupt drops is reported as `input_dropped`.
   The SDK event projection reads native frames only, so its events do not
-  change. See `docs/notes/2026-10-09-oar-0.44.0-upgrade.md`.
+  change. See `docs/researches/2026-10-09-oar-0.44.0-upgrade.md`.
 
 - **Changed (client)** — update the official Pi runtime from 1.0.4 to 1.1.0
   (all nine `@earendil-works/*` packages, upstream `abe508e1`). Pi 1.1.0 adds
@@ -4261,7 +4266,7 @@ Release candidate for 0.25.0, published under the npm dist-tag `rc`;
   `runtime_exited`, not `runtime_refused`. Error replies keep the redacted
   native error. The `CodexAdapter` default interrupt deadline (1 s) ends the
   session before the 10 s fallback, so adapter events do not change.
-  See `docs/notes/2026-10-08-oar-0.37.0-upgrade.md`.
+  See `docs/researches/2026-10-08-oar-0.37.0-upgrade.md`.
 
 - **Fixed (client)** — on POSIX, runtime disposal and the host-exit sweep now
   also end the descendants that left the runtime's process group (for
@@ -4441,7 +4446,7 @@ Release candidate for 0.25.0, published under the npm dist-tag `rc`;
   (`f1a2b88eb63e47de8197514e9329642e2d0ae02c`). Codex usage records now carry
   optional `cacheRead` and `cacheWrite` token parts. Add `shared/token-totals.ts`
   to the inventory. Keep the six BYOK-maintained source deltas. See
-  [the upgrade note](docs/notes/2026-10-07-oar-0.29-upgrade.md).
+  [the upgrade note](docs/researches/2026-10-07-oar-0.29-upgrade.md).
 
 - **Changed (client)** — Codex detection no longer pins `codex-cli 0.160.0`.
   As in OAR, the version is read, never gated: Codex updates itself, so any
