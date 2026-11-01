@@ -44,13 +44,30 @@ two:
 - Grok syncs its workspace and bundles with `cli-chat-proxy.grok.com` during a
   turn, whatever the model provider.
 
+dsh adds three cases of its own in `dsh.contract.ts`:
+
+- `dsh.patch`: every model request goes to the patch route and names the
+  patch model.
+- `dsh.userSkills`: a positive control for `isolation.userContext`. A skill in
+  the adapter's own `DSH_AGENTS_HOME` reaches the model.
+- `dsh.close`: closing a session while a shell tool runs reaps the tool's
+  processes.
+
+A fourth, `dsh.sigkill`, is registered as skipped: a dsh root killed from
+outside leaves its tool processes running, which is a known 0.33 limitation
+([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269), see the [dsh adapter](adapter-capabilities.md#dsh-adapter-custom-harness)).
+
+dsh publishes only prereleases, so the installer accepts an exact semver
+prerelease (`0.2.1-rc.5`) as an exact version.
+
 ## Runs
 
 - **PR CI** (`ci.yml` job `runtime-contract`, selected by
   `scripts/ci/select-impact.mjs`): one leg per adapter, at the qualified
   versions. Each qualified version comes from the adapter's constant:
   `QUALIFIED_CODEX_VERSION`, `QUALIFIED_GROK_VERSION`,
-  `QUALIFIED_HERMES_VERSION`, or `QUALIFIED_CLAUDE_VERSION`. Pi has no
+  `QUALIFIED_HERMES_VERSION`, `QUALIFIED_DSH_VERSION`, or
+  `QUALIFIED_CLAUDE_VERSION`. Pi has no
   separate constant: it is bundled, and its version is
   `byok.piRuntimePin`.
 - **Nightly** (`runtime-contract-nightly.yml`, also `workflow_dispatch`): the

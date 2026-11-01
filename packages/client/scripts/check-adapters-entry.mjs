@@ -100,7 +100,7 @@ const adapters = await import(new URL('../dist/adapters/index.js', import.meta.u
 const root = await import(new URL('../dist/index.js', import.meta.url));
 assert.deepEqual(
   Object.keys(adapters).sort(),
-  ['ClaudeAdapter', 'CodexAdapter', 'GrokAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeEnvironmentUnavailableError', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnvironment', 'createExecutionScratch', 'isWireRuntimeId', 'observeRuntimeDetection', 'projectRuntimeObservation', 'taskRuntimeTarget', 'validateRuntimeDetectResult'],
+  ['ClaudeAdapter', 'CodexAdapter', 'DshAdapter', 'GrokAdapter', 'HermesAdapter', 'NativeInteractionController', 'NativeInteractionError', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeEnvironmentUnavailableError', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnvironment', 'createExecutionScratch', 'isWireRuntimeId', 'observeRuntimeDetection', 'projectRuntimeObservation', 'taskRuntimeTarget', 'validateRuntimeDetectResult'],
 );
 // The public testing entry is transport-free too: a Host test must not load the daemon.
 const bundledTesting = readFileSync(new URL('../dist/testing/index.js', import.meta.url), 'utf8');
@@ -127,6 +127,7 @@ assert.equal(new adapters.PiAdapter().descriptor.id, 'pi');
 assert.equal(new adapters.ClaudeAdapter().descriptor.id, 'claude');
 assert.equal(new adapters.CodexAdapter().descriptor.id, 'codex');
 assert.equal(new adapters.GrokAdapter().descriptor.id, 'grok');
+assert.equal(new adapters.DshAdapter({ home: '/tmp/byok-dsh-entry-check', model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'ENTRY_CHECK_KEY' } }).descriptor.id, 'dsh');
 // The ACP stack and its protocol SDK are a private lazy entry, never part of this one.
 assert.doesNotMatch(bundledEntry, /@agentclientprotocol\/sdk/);
 

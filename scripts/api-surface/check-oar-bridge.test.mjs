@@ -65,6 +65,7 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/044633e/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
     ['../../vendor/oar/044633e/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
     ['../../vendor/oar/044633e/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
+    ['./dsh-acp-session.js', [['dshSession', 'dshSession']]],
   ]);
 });
 

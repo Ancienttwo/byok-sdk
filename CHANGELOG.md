@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Feature (client; #1258)** — `DshAdapter` runs DeepSeek Harness
+  (`@deepseek-ai/dsh`, qualified 0.2.1-rc.5) over ACP on the custom-harness
+  path (`harnessId: 'dsh'`). It runs on macOS and Linux, in a Host-owned
+  `DSH_HOME`. The Host's `model` option names the provider route, model and key
+  variable, which go into a per-execution `--patch` overlay; the key stays in
+  the environment. It supports resume and MCP toolsets. Drafts, steer, `auto`
+  and prepared lanes are unsupported, and `auto` is declined before claim. The
+  ACP session runs on the vendored OAR ACP stack in the lazy private
+  `#byok-acp-runtime` entry, beside Grok. The runtime contract suite and
+  nightly matrix gain a dsh leg. Known limitation: after the dsh root is
+  killed from outside, its shell tools keep running (#1269).
+
 ## 0.32.0 — 2026-11-01 (published)
 
 0.32.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
