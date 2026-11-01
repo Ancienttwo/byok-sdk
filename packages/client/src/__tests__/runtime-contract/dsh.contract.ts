@@ -1,13 +1,14 @@
-import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../../adapters/dsh/dsh-adapter';
+import { dshEnvironment } from '../../adapters/dsh/dsh-profile';
 import { QUALIFIED_DSH_VERSION } from '../../adapters/dsh/dsh-version';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import {
   baseEnv, check, contractTarget, createSandbox, defineRuntimeContract, detectWith, egressCheck, expectAuth,
-  expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer,
+  expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, withProcessEnv, writeSubmitResultServer,
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
 
@@ -34,10 +35,25 @@ const detectModel = loopbackModel('http://127.0.0.1:9/v1');
 /** `dsh --version` prints the bare package version. */
 const identifies = (version: string, expected: string) => version.trim().split('\n')[0]?.trim() === expected;
 
+/**
+ * detect() keeps a failed probe's output to itself, so a failed root init
+ * reruns `dsh --version` in the adapter's own runtime environment to show why.
+ */
+async function directVersion(runtime: DshAdapter, home: string): Promise<string> {
+  const base = await withProcessEnv(baseEnv(home), () => runtime.runtimeEnvironment());
+  const env = dshEnvironment(base.env, path.join((await rootBox()).root, 'dsh'), 'danger-full-access');
+  const run = (command: string, args: string[]) => {
+    const result = spawnSync(command, args, { env, encoding: 'utf8', timeout: 30_000 });
+    return { status: result.status, signal: result.signal, error: (result.error as NodeJS.ErrnoException | undefined)?.code, stdout: result.stdout?.slice(0, 500), stderr: result.stderr?.slice(0, 2000) };
+  };
+  return JSON.stringify({ PATH: env.PATH, node: run('sh', ['-c', 'command -v node && node --version']), version: run(target.bin, ['--version']) });
+}
+
 beforeAll(async () => {
   const box = await createSandbox('dsh-init');
-  const result = await detectWith(await adapter(detectModel), baseEnv(box.home));
-  if (result.kind !== 'available') throw new Error(`dsh root init: ${JSON.stringify(result)}`);
+  const runtime = await adapter(detectModel);
+  const result = await detectWith(runtime, baseEnv(box.home));
+  if (result.kind !== 'available') throw new Error(`dsh root init: ${JSON.stringify(result)}; direct: ${await directVersion(runtime, box.home).catch((error: unknown) => String(error))}`);
 });
 
 const submitResult = callOnceThenReply(mcpTool('host', 'submit_result'), { summary: 'runtime contract' });
