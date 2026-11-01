@@ -1049,9 +1049,10 @@ export interface PiRpcClientOptions {
  * JSONL request/response + event-stream client for `pi --mode rpc`.
  *
  * Framing per pi's own docs/rpc.md: strict JSONL, LF (`\n`) as the only
- * record delimiter (a trailing `\r` is stripped; this deliberately does NOT
- * use `node:readline`, which pi's docs call out as non-compliant because it
- * also splits on U+2028/U+2029 — valid inside JSON strings).
+ * record delimiter, a trailing `\r` stripped. It is the SDK's one line
+ * framing (`../../util/jsonl-lines.ts`), never `node:readline`, which pi's
+ * docs call out as non-compliant because it also splits on U+2028/U+2029 —
+ * valid inside JSON strings.
  *
  * Responses are correlated by `id`, never by arrival order: empirically,
  * pi's responses do not preserve request order (an immediate parse-failure
@@ -1060,7 +1061,7 @@ export interface PiRpcClientOptions {
 export declare class PiRpcClient {
     private readonly options;
     private readonly child;
-    private buffer;
+    private readonly lines;
     private nextId;
     private readonly pending;
     private readonly eventQueue;
@@ -1139,7 +1140,6 @@ export declare class PiRpcClient {
      * adoption failure, not a terminator's own complaint, is the reason to report.
      */
     private adoptOwnedTree;
-    private onData;
     private onLine;
     /** Write an explicit host-owned response; completion is a transport receipt only. */
     respondExtensionUi(response: {
