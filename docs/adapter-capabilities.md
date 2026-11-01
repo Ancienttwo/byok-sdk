@@ -987,6 +987,29 @@ the [downstream diagnostics guide](agent-diagnostics-integration.md).
   If you do not, every normal run is `partial`. A shared runtime name does not
   inherit the Pi declaration.
 
+## Local admission declarations
+
+Three adapter declarations are local facts the daemon reads instead of the
+runtime id. None of them reaches the wire, and a custom adapter that shares a
+built-in runtime name does not inherit them.
+
+- `RuntimeAdapterDescriptor.fileScope: { lanes }`: the lanes on which the
+  adapter enforces an explicit `ToolAuthorizationPolicy.fileScope` (#1061).
+  A scoped offer on any other lane, or on an adapter without the declaration,
+  declines before claim with `file_scope_unsupported`. Memory-reader offers
+  and platforms other than darwin and linux still decline. `PiAdapter`
+  declares `['rpc']`, also with `durablePi: true`, where the durable lane
+  stays undeclared.
+- `RuntimeAdapterDescriptor.providerProfileBinding: true`: the adapter runs an
+  exact `byok-profile` dispatch selection. The daemon advertises
+  `provider-profile-binding` only when such an adapter also opts into dispatch
+  selection and the BYOK launcher is configured. `PiAdapter` declares it.
+- `RuntimeAdapter.projectMcpEnvironment(env)`: the environment the adapter's
+  task-scoped MCP servers receive. The admission-time MCP probes and helper
+  preflights use the same value. Without it, MCP servers receive the task's
+  runtime environment unchanged. `PiAdapter` keeps its directory selectors,
+  `BYOK_PI_*` names and provider credentials out.
+
 ## References and ownership
 
 - Source contract: `packages/client/src/types.ts`.

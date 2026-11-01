@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.32.0",
-    "snapshotSha256": "ca73ee237f0c0a3b1f4066961cfce3497a3bd73e4f1a7eaa662e6e6af3e691bd"
+    "snapshotSha256": "0a5ae02cfb3b9e2b534dd607045538ab0e5ac837d68cf4322f598e0879f5142c"
   },
   "configFields": {
     "status": "tracked",
@@ -135,6 +135,20 @@
         "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPES",
         "export:@byok-sdk/protocol/constants#RUNTIME_QUOTA_SCOPE_CAPABILITY"
       ]
+    },
+    {
+      "id": "adapter-admission-declarations",
+      "impact": "additive",
+      "summary": "RuntimeAdapterDescriptor gains optional fileScope ({ lanes }) and providerProfileBinding, and RuntimeAdapter gains an optional projectMcpEnvironment(env). The daemon reads these declarations for file-scope admission, the provider-profile-binding capability and the MCP environment of probes and task MCP servers, instead of checking for the runtime id pi. PiAdapter declares all three, so built-in behavior is unchanged. A custom adapter needs no change; one that reused the id pi without enforcing a file scope no longer admits scoped offers until it declares fileScope.",
+      "migration": "docs/adapter-capabilities.md#local-admission-declarations",
+      "items": [
+        "export:@byok-sdk/client#PiAdapter",
+        "export:@byok-sdk/client#RuntimeAdapter",
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client/adapters#PiAdapter",
+        "export:@byok-sdk/client/adapters#RuntimeAdapter",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor"
+      ]
     }
   ],
   "changes": [
@@ -171,6 +185,21 @@
       "entry": "dsh-adapter"
     },
     {
+      "item": "export:@byok-sdk/client#PiAdapter",
+      "change": "changed",
+      "entry": "adapter-admission-declarations"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapter",
+      "change": "changed",
+      "entry": "adapter-admission-declarations"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "adapter-admission-declarations"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#DshAdapter",
       "change": "added",
       "entry": "dsh-adapter"
@@ -189,6 +218,21 @@
       "item": "export:@byok-sdk/client/adapters#DshSandboxMode",
       "change": "added",
       "entry": "dsh-adapter"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapter",
+      "change": "changed",
+      "entry": "adapter-admission-declarations"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapter",
+      "change": "changed",
+      "entry": "adapter-admission-declarations"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "adapter-admission-declarations"
     },
     {
       "item": "export:@byok-sdk/client/testing#FakeRuntimeAdapterId",

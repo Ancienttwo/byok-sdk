@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2119105,
+      "budgetBytes": 2119841,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -110,7 +110,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 396801,
+      "budgetBytes": 397524,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -425,7 +425,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 384421,
+      "budgetBytes": 385144,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -588,7 +588,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 487250,
+      "budgetBytes": 488401,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -629,7 +629,6 @@
         "node:os",
         "node:path",
         "node:process",
-        "node:readline",
         "node:stream/promises",
         "node:string_decoder",
         "node:url",
@@ -712,7 +711,6 @@
           "node:os",
           "node:path",
           "node:process",
-          "node:readline",
           "node:stream/promises",
           "node:string_decoder",
           "node:url",
@@ -813,12 +811,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 33,
+          "line": 32,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 33,
+          "line": 32,
           "rule": "opaque import()"
         },
         {
@@ -863,7 +861,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private sealed Pi runtime host",
-      "budgetBytes": 445575,
+      "budgetBytes": 446731,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -906,7 +904,6 @@
         "path",
         "pi-web-access/dist/index.js",
         "process",
-        "readline",
         "stream/promises",
         "string_decoder",
         "typebox",
@@ -988,7 +985,6 @@
           "os",
           "path",
           "process",
-          "readline",
           "stream/promises",
           "string_decoder",
           "url",
@@ -2342,7 +2338,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2077686,
+      "budgetBytes": 2078422,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
