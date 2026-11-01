@@ -1,8 +1,9 @@
 /**
- * The embedded SQLite composition keeps activity and Agent message drafts in
- * memory, outside the archive transaction (#1120). A rollback of that
- * transaction must leave them in place, and `settle` removes them once the
+ * The embedded SQLite composition keeps Agent message drafts in memory,
+ * outside the archive transaction (#1120), and `settle` removes them once the
  * archive committed: a failure inside `settle` is finished by the next call.
+ * The activity log is durable (#1113): the archive transaction removes its
+ * content, so a rollback restores it.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,13 +35,13 @@ const codec: TaskRedactionCodec = {
   blobHashes: () => [],
 };
 
-describeSqlite('SQLite terminal-task archive and its in-memory rows (#1120)', () => {
+describeSqlite('SQLite terminal-task archive, its activity log and its in-memory rows (#1120, #1113)', () => {
   const directories: string[] = [];
   afterEach(() => {
     for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
-  it('keeps the rows through a rolled-back archive and removes them in an idempotent settle', async () => {
+  it('keeps the rows through a rolled-back archive, removes activity in the archive and drafts in an idempotent settle', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'byok-sqlite-archive-settle-'));
     directories.push(directory);
     const path = join(directory, 'server.sqlite');
@@ -67,7 +68,7 @@ describeSqlite('SQLite terminal-task archive and its in-memory rows (#1120)', ()
       await tasks.recordStatus(TENANT, { taskId: TASK, status: 'complete' });
       await receipts.record(TENANT, { key: TERMINAL_KEY, body: TERMINAL_BODY });
       await activity.append(TENANT, { taskId: TASK, sourceEnvelopeId: 'source', batchSeq: 1,
-        events: [{ type: 'progress', text: 'kept until settled' }], dropped: 0, ttlMs: 300_000 });
+        events: [{ type: 'progress', text: 'kept until archived' }], dropped: 0, ttlMs: 300_000 });
       expect(await agentMessageDraft.apply(TENANT, { taskId: TASK, deviceId: 'device', agentRef: AGENT_REF, revision: 1,
         offset: 0, text: 'draft', maxBytes: 16, now: clock.now().toISOString() })).toBe('applied');
 
@@ -81,14 +82,15 @@ describeSqlite('SQLite terminal-task archive and its in-memory rows (#1120)', ()
       await taskArchive.settle(TENANT, TASK, LATER);
       expect(await activity.read(TENANT, TASK)).toBeDefined();
 
-      await expect(taskArchive.archive(TENANT, input(LATER))).resolves.toMatchObject({ outcome: 'archived' });
+      await expect(taskArchive.archive(TENANT, input(LATER)))
+        .resolves.toMatchObject({ outcome: 'archived', counts: { ephemeralRowsDeleted: 1 } });
       expect(await archived()).toBe(LATER);
-      expect(await activity.read(TENANT, TASK)).toBeDefined();
+      expect(await activity.read(TENANT, TASK)).toBeUndefined();
+      expect(await agentMessageDraft.read(TENANT, TASK)).toBeDefined();
       expect(await work()).toEqual([expect.objectContaining({ taskId: TASK, phase: 'settle' })]);
 
-      // Settle removes the rows, then fails to record itself; the next call finishes.
+      // Settle removes the draft, then fails to record itself; the next call finishes.
       await expect(taskArchive.settle(TENANT, TASK, FAILING)).rejects.toThrow('settle update failed');
-      expect(await activity.read(TENANT, TASK)).toBeUndefined();
       expect(await agentMessageDraft.read(TENANT, TASK)).toBeUndefined();
       expect(await work()).toEqual([expect.objectContaining({ taskId: TASK, phase: 'settle' })]);
       await taskArchive.settle(TENANT, TASK, LATER);

@@ -175,13 +175,16 @@ State is in memory by default. `storage: { kind: 'sqlite', path }` persists:
 - task attempts and their Agent message admission records;
 - cancellations;
 - approval timelines, bounded by their existing TTL and capacity;
+- each task's activity log (progress and plaintext artifacts), bounded at 1,000
+  entries and 4 MiB per task, so a `readActivity` cursor resumes after a
+  restart;
 - objects and blobs.
 
 Everything else stays in the process and is lost on restart, in SQLite mode as
 well: device presence, `TaskHandle` promises and the task-event relay (so
 `tasks.events` cursors), the
 inbound dedup, nonces, Agent egress receipt readback
-(`egress.get`), activity, unredeemed pairing codes, storage quota accounting,
+(`egress.get`), unredeemed pairing codes, storage quota accounting,
 and the token signing key when you do not pass `tokenSigner`.
 
 A SQLite file has one owner at a time; see
@@ -443,15 +446,18 @@ fake timers.
 
 ## SQLite schema version
 
-The current schema is v7. It includes a durable approval timeline alongside the
-existing task, enrollment, receipt and wake authorities, and the retired-device
-stream tombstone on `mailbox_cursor` (#1160). A new database, a v7 file and a
-v6 file can open. A v6 file is upgraded in place once, in the open transaction:
-the two tombstone columns are added, and the stream of every device the
-directory no longer holds is closed as `device_revoked` with its pending rows
-expired. Its pairings and other rows are kept, so no re-enrollment is needed.
-Versions 1–5 and unknown versions are rejected; there is no migration selector
-or other automatic adoption path.
+The current schema is v8. It includes a durable approval timeline alongside the
+existing task, enrollment, receipt and wake authorities, the retired-device
+stream tombstone on `mailbox_cursor` (#1160) and the durable task activity log
+(`activity_log_head`, `activity_log_entry`; #1113). A new database and a v8, v7
+or v6 file can open. An older file is upgraded in place once, in the open
+transaction, one step at a time. From v6 to v7 the two tombstone columns are
+added, and the stream of every device the directory no longer holds is closed
+as `device_revoked` with its pending rows expired. From v7 to v8 the activity
+log tables are created empty: earlier builds kept activity only in process
+memory, so no pre-upgrade history exists to carry over. Pairings and other rows
+are kept, so no re-enrollment is needed. Versions 1–5 and unknown versions are
+rejected; there is no migration selector or other automatic adoption path.
 
 Preserve existing databases. For a file older than v6, stop the previous owner
 and explicitly select a new state path and enrollment. Do not delete history or
@@ -464,11 +470,11 @@ Open failures use `SqliteSchemaError` with `foundVersion` and `requiredVersion`:
 - `SQLITE_SCHEMA_INVALID`: a required authority is missing or malformed.
 - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox bytes are not wire v4.
 
-A declared v7 file missing its approval table fails closed instead of silently
-recreating an empty authority. Existing database contents are not adopted,
-rewritten or deleted on a version refusal. New files create their schema and
-version marker in one transaction. Older builds cannot open v7, so a store
-cannot roll back past this release once it has been opened.
+A declared v8 file missing its approval or activity log tables fails closed
+instead of silently recreating an empty authority. Existing database contents
+are not adopted, rewritten or deleted on a version refusal. New files create
+their schema and version marker in one transaction. Older builds cannot open
+v8, so a store cannot roll back past this release once it has been opened.
 
 ## Persistent host request identity
 

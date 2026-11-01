@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.31.0",
-    "snapshotSha256": "0d2a8ca77ab177b16e64129d22bc2d8c1ac9173cfafa667181fd37a27ddffb7c"
+    "snapshotSha256": "93e56045b723934ccaadd05ca734fa3c1d459db745583426bfa8fdd1057539df"
   },
   "configFields": {
     "status": "tracked",
@@ -920,7 +920,7 @@
       "id": "retired-device-stream-closed",
       "impact": "breaking",
       "acceptance": "accept",
-      "summary": "A retired device's mailbox stream is now closed (#1160). Revoking or superseding a device closes its stream in the retirement's transaction, and every later append for that device id is refused, whatever its admission and even for a known messageId: core raises mailbox_stream_closed (MailboxStreamClosedError, with deviceId and closeCause), and ByokCloud raises device_retired (DeviceRetiredError, with deviceId and retirementCause). Before, a writer whose check ran before the retirement (offers, agent controls, scope-key notices, approve/reject, steer, inbound acks, dead-letter replay) could still commit a pending row for the retired device. An offer refused this way settles its attempt cancelled with the retirement cause in the same call and names its taskId; a scope-key notice skips a recipient retired after the list was read; a /byok/messages batch whose reply is refused answers 401. Registering the same device id again reopens the stream; rows, cursor, seq and recoverableFrom are kept. Custom stores must implement MailboxStore.closeStream and reopenStream, refuse appends on a closed stream, and close on revoke and supersede and reopen on register; MailboxStore.expirePending no longer takes seqs 'all'. Postgres: migration 0033 adds device_stream.closed_at and closed_cause and closes, as device_revoked, the stream of every device whose row is already gone (a supersede before the upgrade reads as a revoke); the migration writes the tombstone and does not expire those pending rows, which the dead-letter retention collects. Embedded SQLite: a schema 6 file is upgraded in place to 7 when it opens, with the same backfill, keeping its pairings and rows; older versions are refused as before, and a v7 file cannot be opened by an earlier build.",
+      "summary": "A retired device's mailbox stream is now closed (#1160). Revoking or superseding a device closes its stream in the retirement's transaction, and every later append for that device id is refused, whatever its admission and even for a known messageId: core raises mailbox_stream_closed (MailboxStreamClosedError, with deviceId and closeCause), and ByokCloud raises device_retired (DeviceRetiredError, with deviceId and retirementCause). Before, a writer whose check ran before the retirement (offers, agent controls, scope-key notices, approve/reject, steer, inbound acks, dead-letter replay) could still commit a pending row for the retired device. An offer refused this way settles its attempt cancelled with the retirement cause in the same call and names its taskId; a scope-key notice skips a recipient retired after the list was read; a /byok/messages batch whose reply is refused answers 401. Registering the same device id again reopens the stream; rows, cursor, seq and recoverableFrom are kept. Custom stores must implement MailboxStore.closeStream and reopenStream, refuse appends on a closed stream, and close on revoke and supersede and reopen on register; MailboxStore.expirePending no longer takes seqs 'all'. Postgres: migration 0033 adds device_stream.closed_at and closed_cause and closes, as device_revoked, the stream of every device whose row is already gone (a supersede before the upgrade reads as a revoke); the migration writes the tombstone and does not expire those pending rows, which the dead-letter retention collects. Embedded SQLite: the schema is now 8. A schema 6 or 7 file is upgraded in place when it opens, keeping its pairings and rows: 6 to 7 runs the same backfill, and 7 to 8 (#1113) adds the durable activity log tables empty, since no activity history was persisted before the upgrade. Task activity now survives a restart and is removed by the terminal-task archive. Older versions are refused as before, and a v8 file cannot be opened by an earlier build.",
       "migration": "docs/hosted-host-contract.md#revokedevice",
       "items": [
         "export:@byok-sdk/cloud#DeviceRetiredError",
@@ -3716,7 +3716,7 @@
       "item": "store:server-sqlite",
       "change": "changed",
       "before": "schema_version=6",
-      "after": "schema_version=7",
+      "after": "schema_version=8",
       "entry": "retired-device-stream-closed"
     },
     {

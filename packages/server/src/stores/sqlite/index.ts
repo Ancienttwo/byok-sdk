@@ -82,15 +82,14 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '7';
-/** The one older version this build upgrades in place; every other one is refused. */
-const SQLITE_UPGRADABLE_SCHEMA_VERSION = '6';
+const SQLITE_SCHEMA_VERSION = '8';
 const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'] as const;
 /** Host retention instants (#1120): when a terminal task may be archived, when it was, and when its board item went. */
 const TASK_ARCHIVE_COLUMNS = ['archive_after', 'archived_at', 'archive_settled_at'] as const;
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
 import { APPROVAL_TIMELINE_SCHEMA, SqliteApprovalTimelineStore } from './approval-timeline';
+import { ACTIVITY_LOG_PROJECTIONS, ACTIVITY_LOG_SCHEMA, SqliteActivityStore } from './activity';
 import type { WakeStore } from '../../wakes/store';
 import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
@@ -123,7 +122,7 @@ const MAILBOX_CURSOR_CLOSED_CAUSE = "closed_cause TEXT CHECK ((closed_cause IS N
   "(closed_cause IN ('device_revoked', 'device_superseded') AND closed_at IS NOT NULL))";
 
 /**
- * The one in-place upgrade, v6 to v7, run inside the open transaction. It adds
+ * The in-place upgrade from v6 to v7, run inside the open transaction. It adds
  * the stream tombstone and closes the stream of every device the directory no
  * longer holds, which was retired before the upgrade, expiring its pending
  * rows as a retirement does. Revoke and supersede were not told apart then, so
@@ -137,8 +136,24 @@ function upgradeSchemaFromV6(db: DatabaseSync): void {
       WHERE d.tenant_id = mailbox_cursor.tenant_id AND d.device_id = mailbox_cursor.device_id)`);
   db.exec(`UPDATE mailbox_message SET state = 'expired' WHERE state = 'pending' AND EXISTS (SELECT 1 FROM mailbox_cursor c
     WHERE c.tenant_id = mailbox_message.tenant_id AND c.device_id = mailbox_message.device_id AND c.closed_cause IS NOT NULL)`);
-  db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(SQLITE_SCHEMA_VERSION);
+  db.prepare("UPDATE byok_sqlite_meta SET value = '7' WHERE key = 'schema_version'").run();
 }
+
+/**
+ * The in-place upgrade from v7 to v8 (#1113): the durable activity log starts
+ * empty. Earlier builds kept activity only in process memory, so there is no
+ * history to carry over.
+ */
+function upgradeSchemaFromV7(db: DatabaseSync): void {
+  db.exec(ACTIVITY_LOG_SCHEMA);
+  db.prepare("UPDATE byok_sqlite_meta SET value = '8' WHERE key = 'schema_version'").run();
+}
+
+/** Older versions this build upgrades in place, oldest first; a file runs every step from its own version. */
+const SCHEMA_UPGRADES: readonly (readonly [from: string, step: (db: DatabaseSync) => void])[] = [
+  ['6', upgradeSchemaFromV6],
+  ['7', upgradeSchemaFromV7],
+];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS byok_sqlite_meta (
@@ -280,11 +295,12 @@ class SqliteCoordinator {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
           foundVersion = version?.value;
-          if (version?.value === SQLITE_UPGRADABLE_SCHEMA_VERSION) {
-            upgradeSchemaFromV6(this.db);
+          const firstStep = SCHEMA_UPGRADES.findIndex(([from]) => from === version?.value);
+          if (firstStep >= 0) {
+            for (const [, step] of SCHEMA_UPGRADES.slice(firstStep)) step(this.db);
           } else if (version?.value !== SQLITE_SCHEMA_VERSION) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SQLITE_UPGRADABLE_SCHEMA_VERSION} in place. ` +
+              `this build requires ${SQLITE_SCHEMA_VERSION} and upgrades only ${SCHEMA_UPGRADES.map(([from]) => from).join(' and ')} in place. ` +
               'An older file is not adopted: start on a new database. A newer file needs a newer build.');
           }
           for (const projection of [
@@ -306,10 +322,12 @@ class SqliteCoordinator {
           this.db.exec(DEVICE_SCHEMA);
           this.db.exec(WAKE_SCHEMA);
           this.db.exec(APPROVAL_TIMELINE_SCHEMA);
+          this.db.exec(ACTIVITY_LOG_SCHEMA);
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         assertProjection('claimed_harness_id FROM task_attempt');
         assertProjection('tenant_id, task_id, entries_json, next_revision, dropped, capacity, expires_at FROM approval_timeline_tail');
+        for (const projection of ACTIVITY_LOG_PROJECTIONS) assertProjection(projection);
         const approvalColumns = this.db.prepare('PRAGMA table_info(approval_timeline_tail)').all();
         const approvalNames = ['tenant_id', 'task_id', 'entries_json', 'next_revision', 'dropped', 'capacity', 'expires_at'];
         if (approvalColumns.length !== approvalNames.length || approvalColumns.some((column, index) =>
@@ -1526,7 +1544,7 @@ export function createSqliteEmbeddedStores(
     objects,
     quota,
   };
-  // Activity and Agent message drafts remain ephemeral in this composition.
+  // Agent message drafts remain ephemeral in this composition; activity is durable below.
   const inMemoryCloud = createInMemoryCloudStores(
     dependencies.clock,
     dependencies.crypto,
@@ -1539,6 +1557,7 @@ export function createSqliteEmbeddedStores(
   const pairing = new InMemoryPairingCodeStore(dependencies.clock, devices);
   const cloud: CloudStores = {
     ...inMemoryCloud.stores,
+    activity: new SqliteActivityStore(coordinator, dependencies.clock),
     approvals: new SqliteApprovalTimelineStore(coordinator, dependencies.clock),
     devices,
     pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },

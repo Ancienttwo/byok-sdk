@@ -8,6 +8,7 @@ import type {
   TaskArchiveWork,
 } from '@byok-sdk/cloud';
 import type { DatabaseSync } from 'node:sqlite';
+import { removeActivityContent } from './activity';
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'cancelled']);
 const TERMINAL_SQL = "('complete', 'failed', 'cancelled')";
@@ -19,7 +20,6 @@ interface Coordinator {
 
 /** Ephemeral rows that this composition keeps in memory, not in the file. Each returns the rows removed. */
 export interface InMemoryTaskRows {
-  deleteActivity(tenant: TenantId, taskId: string): number;
   deleteAgentMessageDraft(tenant: TenantId, taskId: string): number;
 }
 
@@ -127,8 +127,8 @@ export class SqliteTaskArchiveStore implements TaskArchiveStore {
           .run(tombstone.body, tombstone.bodyHash, String(tombstone.byteSize), tenant, row.device_id, row.seq);
       }
 
-      // The in-memory activity and draft rows go in `settle`: a rollback here could not restore them.
-      const ephemeralRowsDeleted = Number(
+      // The in-memory draft row goes in `settle`: a rollback here could not restore it.
+      const ephemeralRowsDeleted = removeActivityContent(db, tenant, taskId) + Number(
         db.prepare('DELETE FROM approval_timeline_tail WHERE tenant_id = ? AND task_id = ?').run(tenant, taskId).changes,
       );
 
@@ -157,9 +157,9 @@ export class SqliteTaskArchiveStore implements TaskArchiveStore {
   }
 
   /**
-   * Runs after the archive committed: removes the task's in-memory activity
-   * and draft rows, then records settlement. Both steps are idempotent, so a
-   * failure between them is finished by the next run.
+   * Runs after the archive committed: removes the task's in-memory draft row,
+   * then records settlement. Both steps are idempotent, so a failure between
+   * them is finished by the next run.
    */
   settle(tenant: TenantId, taskId: string, settledAt: string): Promise<void> {
     return this.coordinator.run((db) => {
@@ -167,7 +167,6 @@ export class SqliteTaskArchiveStore implements TaskArchiveStore {
         'SELECT 1 FROM task_attempt WHERE tenant_id = ? AND task_id = ? AND archived_at IS NOT NULL AND archive_settled_at IS NULL',
       ).get(tenant, taskId);
       if (archived === undefined) return;
-      this.ephemeral.deleteActivity(tenant, taskId);
       this.ephemeral.deleteAgentMessageDraft(tenant, taskId);
       db.prepare(
         `UPDATE task_attempt SET archive_settled_at = ?

@@ -1,9 +1,9 @@
 # Durable activity log contract
 
 This MINOR breaking change is A1 of the #1113 stack. **A1 is not deployable and
-is not a merge candidate on its own.** A2a now supplies the Postgres activity adapter and migration 0034; the
-complete stack remains non-deployable until final acceptance. SQLite durability
-remains A2b, after #1164 lands.
+is not a merge candidate on its own.** A2a supplies the Postgres activity adapter and migration 0034, and
+A2b the embedded SQLite adapter with the in-place 7→8 schema step; the
+complete stack remains non-deployable until final acceptance.
 No old activity-tail reader or writer is used as a fallback.
 
 The complete A1–A5 stack remains a reviewed, frozen Draft chain until A5 final
@@ -93,3 +93,23 @@ Restarted processes read the same generation/revisions; no in-process cache
 is a replay authority. Redaction/archive retain a removed-history fence;
 tenant erasure removes entry/fence rows before heads. Canonical lifecycle
 atomicity and artifact object-reference ownership remain A3 work.
+
+## SQLite A2b
+
+The embedded SQLite composition now persists the activity log in its database
+file (schema 8) instead of process memory, through the same shared
+`createActivityEntry`, `activitySourceHash` and `activityEntryBytes` exports as
+the other adapters. A schema 6 or 7 file is upgraded in place when it opens, in
+the open transaction: 6→7 as before, then 7→8 creates `activity_log_head` and
+`activity_log_entry` empty. No pre-upgrade activity history exists to carry over,
+because earlier builds never wrote it to disk. Pairings, tasks, approvals and
+other rows are kept; no re-enrollment or new state directory is needed. A v8
+file missing either table is refused as `SQLITE_SCHEMA_INVALID`, never
+recreated, and builds before schema 8 cannot open the upgraded file.
+
+After a restart the same generation and revisions are served, so a cursor
+taken before the restart resumes after it. Malformed persisted rows fail closed.
+The terminal-task archive now removes activity content inside its transaction
+(a rollback restores it) and keeps a removed head, so a later read with a
+cursor reports `activity_history_gap` and a later append is refused. Canonical
+lifecycle atomicity remains A3 work, and cross-process invalidation A4.

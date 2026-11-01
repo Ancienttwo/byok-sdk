@@ -9,11 +9,12 @@ import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isSqliteAvailable, SqliteSchemaError } from '../sqlite-support';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
+import { ACTIVITY_LOG_SCHEMA } from '../stores/sqlite/activity';
 
 /**
- * #1160: the one in-place SQLite upgrade, schema 6 to 7, over the store the
- * 0.31.0 release wrote. Rows are added through SQL in that file's own v6
- * schema, then this build opens it.
+ * The in-place SQLite upgrades: schema 6 to 7 (#1160) over the store the
+ * 0.31.0 release wrote, with rows added through SQL in that file's own v6
+ * schema, then 7 to 8 (#1113), which adds the durable activity log empty.
  */
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
@@ -56,6 +57,38 @@ function open(file: string) {
   return createSqliteEmbeddedStores({ path: file }, { clock: createMutableClock(new Date(NOW)), crypto: createWebCrypto() });
 }
 
+/** A v7 file: this build's schema without the activity log tables that v8 added. */
+async function seededV7Store(): Promise<string> {
+  const directory = mkdtempSync(join(tmpdir(), 'byok-sqlite-v7-'));
+  scratch.push(directory);
+  const file = join(directory, 'server.db');
+  const stores = open(file);
+  try {
+    await stores.cloud.tasks.open(TENANT, { taskId: 'kept-task', deviceId: 'kept' });
+  } finally {
+    await stores.close();
+  }
+  const db = new DatabaseSync(file);
+  try {
+    db.exec("DROP TABLE activity_log_entry; DROP TABLE activity_log_head; UPDATE byok_sqlite_meta SET value = '7' WHERE key = 'schema_version'");
+  } finally {
+    db.close();
+  }
+  return file;
+}
+
+function activityTables(file: string): unknown[] {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    return db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'activity_log_%' ORDER BY name").all()
+      .map((row) => row.name);
+  } finally {
+    db.close();
+  }
+}
+
+const progress = { taskId: 'kept-task', sourceEnvelopeId: 'after-upgrade', batchSeq: 1, events: [{ type: 'turn_end' as const }], dropped: 0, ttlMs: 600_000 };
+
 function append(deviceId: string, messageId: string) {
   const body = JSON.stringify({ v: PROTOCOL_VERSION, type: 'task.cancel', task_id: messageId });
   return {
@@ -66,7 +99,7 @@ function append(deviceId: string, messageId: string) {
   };
 }
 
-describeSqlite('SQLite schema 6 to 7', () => {
+describeSqlite('SQLite in-place schema upgrades', () => {
   it('upgrades the released v6 store in place, keeping its pairings and rows, and closes the streams of retired devices', async () => {
     const file = seededV6Store();
     const stores = open(file);
@@ -89,16 +122,53 @@ describeSqlite('SQLite schema 6 to 7', () => {
 
     const db = new DatabaseSync(file);
     try {
-      expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '7' });
+      expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '8' });
+      expect(db.prepare('SELECT count(*) AS heads FROM activity_log_head').get()).toEqual({ heads: 0 });
       expect(db.prepare('SELECT device_id, closed_cause FROM mailbox_cursor ORDER BY device_id').all())
         .toEqual([{ device_id: 'gone', closed_cause: 'device_revoked' }, { device_id: 'kept', closed_cause: null }]);
     } finally {
       db.close();
     }
 
-    // A v7 file opens as it is: the upgrade ran once.
+    // A v8 file opens as it is: the upgrade ran once, and its activity log is usable.
     const reopened = open(file);
-    await reopened.close();
+    try {
+      await expect(reopened.cloud.activity.append(TENANT, progress)).resolves.toMatchObject({ cursor: { revision: 1 } });
+    } finally {
+      await reopened.close();
+    }
+    expect(activityTables(file)).toEqual(['activity_log_entry', 'activity_log_head']);
+  });
+
+  it('upgrades a v7 store in place to 8, adding the activity log empty and keeping its tasks', async () => {
+    const file = await seededV7Store();
+    expect(activityTables(file)).toEqual([]);
+    const stores = open(file);
+    try {
+      await expect(stores.cloud.tasks.get(TENANT, 'kept-task')).resolves.toMatchObject({ taskId: 'kept-task', deviceId: 'kept' });
+      await expect(stores.cloud.activity.read(TENANT, 'kept-task')).resolves.toBeUndefined();
+      await expect(stores.cloud.activity.append(TENANT, progress)).resolves.toMatchObject({ cursor: { revision: 1 } });
+    } finally {
+      await stores.close();
+    }
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '8' });
+    } finally {
+      db.close();
+    }
+    expect(activityTables(file)).toEqual(['activity_log_entry', 'activity_log_head']);
+  });
+
+  it.each(['activity_log_entry', 'activity_log_head'])('refuses a v8 file missing %s without recreating it', async (table) => {
+    const file = await seededV7Store();
+    const db = new DatabaseSync(file);
+    db.exec(`${ACTIVITY_LOG_SCHEMA}; DROP TABLE ${table}; UPDATE byok_sqlite_meta SET value = '8' WHERE key = 'schema_version'`);
+    db.close();
+    expect(() => open(file)).toThrow(expect.objectContaining({
+      code: 'SQLITE_SCHEMA_INVALID', foundVersion: '8', message: expect.stringContaining(`FROM ${table}`),
+    }));
+    expect(activityTables(file)).not.toContain(table);
   });
 
   it('still refuses every other older version', () => {
@@ -107,6 +177,7 @@ describeSqlite('SQLite schema 6 to 7', () => {
     db.prepare("UPDATE byok_sqlite_meta SET value = '5' WHERE key = 'schema_version'").run();
     db.close();
     expect(() => open(file)).toThrow(SqliteSchemaError);
-    expect(() => open(file)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '5', requiredVersion: '7' }));
+    expect(() => open(file)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '5', requiredVersion: '8' }));
+    expect(() => open(file)).toThrow('upgrades only 6 and 7 in place');
   });
 });
