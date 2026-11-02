@@ -21,7 +21,13 @@ vi.mock('./command-runner', async importOriginal => {
   const actual = await importOriginal<typeof import('./command-runner')>();
   const { nativeAclProbeObserver: observer } = await import('./fixtures/owned-acl-probe');
   return { ...actual, runCommand: function (this: unknown, ...args: Parameters<typeof actual.runCommand>) {
-    return observer.command(actual.runCommand, this, args);
+    // DIAG #1364 E1: side-effect log of every runCommand; the original promise is returned unchanged.
+    const started = Date.now();
+    const pending = observer.command(actual.runCommand, this, args);
+    pending.then(result => {
+      console.log(`[e1-run] exe=${args[0].split(/[\\/]/u).pop()} spawnUtc=${new Date(started).toISOString()} closeUtc=${new Date().toISOString()} elapsed=${Date.now() - started}ms exit=${result.exitCode}\n${result.stderr.trim()}`);
+    }, () => console.log(`[e1-run] exe=${args[0].split(/[\\/]/u).pop()} spawnUtc=${new Date(started).toISOString()} rejected after ${Date.now() - started}ms`));
+    return pending;
   } };
 });
 vi.mock('node:child_process', async importOriginal => {
@@ -107,7 +113,26 @@ function describeBoundedResult(result: BoundedExecResult): string {
 
 // Runs in the existing real non-administrator release-pack lane. POSIX cannot
 // provide ACL/token evidence and explicitly skips this platform-only suite.
+// DIAG #1364 E2: list powershell.exe/conhost.exe with parent pid and CPU via
+// PowerShell 7 (already warm in this account: the CI step itself runs in pwsh),
+// never via the Windows PowerShell 5.1 host under test. Each listing runs in
+// its own hook, so it never spends a test's or the teardown hook's budget.
+function listProcessTable(label: string): Promise<void> {
+  const started = Date.now();
+  const script = "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe' OR Name='conhost.exe' OR Name='pwsh.exe'\" | "
+    + "ForEach-Object { '{0} pid={1} ppid={2} created={3} userMs={4} kernelMs={5} ws={6}' -f $_.Name,$_.ProcessId,$_.ParentProcessId,"
+    + "($(if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') } else { 'n/a' })),"
+    + "[math]::Round($_.UserModeTime/10000),[math]::Round($_.KernelModeTime/10000),$_.WorkingSetSize }";
+  return new Promise(resolve => {
+    execFile('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 8_000 }, (error, stdout, stderr) => {
+      console.log(`[e2] label=${label} utc=${new Date(started).toISOString()} listElapsed=${Date.now() - started}ms error=${error ? String(error.message).split('\n')[0] : 'none'}\n${String(stdout).trim()}${stderr ? `\nstderr=${String(stderr).trim()}` : ''}`);
+      resolve();
+    });
+  });
+}
+
 describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL', () => {
+  beforeEach(async ctx => { await listProcessTable(`case-start ${ctx.task.name}`); });
   let pendingCleanup: { directory: string; owner: OwnedAclProbe; log: (phase: string, message: string) => void } | undefined;
   beforeEach(() => nativeAclProbeObserver.assertIdle());
   afterEach(async () => {
@@ -121,6 +146,9 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
     pendingCleanup = undefined;
     nativeAclProbeObserver.assertIdle();
   });
+  // Registered after the disposing afterEach, so under Vitest's stack hook
+  // order it runs first: right after any cancellation, before disposal.
+  afterEach(async ctx => { await listProcessTable(`after-case(pre-dispose) ${ctx.task.name} state=${ctx.task.result?.state ?? 'unknown'}`); });
   // The owned positive case. `label` names its log prefix; `evidenceBudgetMs`
   // is the whole-case evidence budget the watchdog enforces inside the test's
   // own timeout. Ownership, cancellation and disposal are identical for both uses.

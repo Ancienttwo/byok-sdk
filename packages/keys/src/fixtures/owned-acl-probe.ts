@@ -161,6 +161,8 @@ export class OwnedAclProbe {
     let stdoutSeen = false; let stderrSeen = false;
     on(child.stdout, 'data', () => { if (!stdoutSeen) { stdoutSeen = true; this.note('first-stdout'); } });
     on(child.stderr, 'data', () => { if (!stderrSeen) { stderrSeen = true; this.note('first-stderr'); } });
+    // DIAG #1364 E1: every stderr chunk (the script's [e1] marks), even when the child is later cancelled.
+    on(child.stderr, 'data', (chunk: unknown) => this.note('stderr-data', String(chunk).trim().replace(/\r?\n/gu, ' | ')));
     // Cancellation can race the original stdin.end(). Observe its error without
     // allowing an unhandled pipe error to escape before owned teardown finishes.
     on(child.stdin, 'error', () => { this.note('stdin-error'); this.captureFailure ??= new Error('ACL probe stdin failed'); });

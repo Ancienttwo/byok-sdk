@@ -409,9 +409,12 @@ export function buildPiProviderChildEnvironment(options: {
 // assembly loads in its own try: a missing assembly throws FileNotFoundException,
 // which the outer mapping would misreport as path_not_found, so it exits 5 and
 // takes the generic 'unexpected' cause.
+// DIAG #1364 (do not merge): E1 stderr timestamps only; stderr is never read by the verdict.
 const WINDOWS_PROJECTION_ACL_SCRIPT = String.raw`
+[Console]::Error.WriteLine('[e1] mark=first utc=' + [DateTime]::UtcNow.ToString('o') + ' pid=' + $PID + ' osStart=' + [System.Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().ToString('o'))
 $ErrorActionPreference = 'Stop'
 try { [void][System.Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35') } catch { exit 5 }
+[Console]::Error.WriteLine('[e1] mark=assembly-loaded utc=' + [DateTime]::UtcNow.ToString('o'))
 try {
   $serializer = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
   $requestText = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
@@ -421,6 +424,7 @@ try {
   $sidType = [System.Security.Principal.SecurityIdentifier]
   $reparsePoint = ([System.IO.File]::GetAttributes($path) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
   $acl = [System.IO.Directory]::GetAccessControl($path)
+  [Console]::Error.WriteLine('[e1] mark=getaccesscontrol-returned utc=' + [DateTime]::UtcNow.ToString('o'))
   $rules = [System.Collections.Generic.List[object]]::new()
   foreach ($rule in $acl.GetAccessRules($true, $true, $sidType)) {
     $entry = [System.Collections.Generic.Dictionary[string, object]]::new()
@@ -437,8 +441,10 @@ try {
   $result['protected'] = [bool]$acl.AreAccessRulesProtected
   $result['rules'] = $rules.ToArray()
   [Console]::Out.Write($serializer.Serialize($result))
+  [Console]::Error.WriteLine('[e1] mark=before-exit utc=' + [DateTime]::UtcNow.ToString('o'))
   exit 0
 } catch {
+  [Console]::Error.WriteLine('[e1] mark=catch utc=' + [DateTime]::UtcNow.ToString('o'))
   $failure = $_.Exception
   while ($failure -is [System.Management.Automation.MethodInvocationException] -and $null -ne $failure.InnerException) { $failure = $failure.InnerException }
   if ($failure -is [System.IO.FileNotFoundException] -or $failure -is [System.IO.DirectoryNotFoundException]) { exit 3 }
