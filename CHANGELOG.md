@@ -10,6 +10,13 @@
   Host that vendors K8 can run them too. `src/VENDOR.md` Layer 3 lists the file
   and no longer tells a Host to skip these vectors (#1325).
 
+- **Fix (client; #1335)** — Grok no longer declares
+  `isolation.userContext`. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
+  `[paths] extra_rule_dirs` still reach an Agent task, and `compatInstructions`
+  turns off only the Claude and Cursor sources. A Host that gates on
+  `isolation.userContext` now reads `false` for Grok, as it already did for
+  Codex.
+
 - **Fix (client; #1350)** — a failed or interrupted service upgrade now rolls
   back a Host directory store whose accepted path ends in `/`, `/.` or `/./`.
   Before, restore failed with `EINVAL` on Linux and `recover()` stayed
