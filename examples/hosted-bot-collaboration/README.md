@@ -26,6 +26,12 @@ transaction. The transaction holds the state change, the command record and the 
   `updatePersona`, `teamBot`, the outcome's `manage`, and the push route ports with `{ channel: true }`. A model template
   carries the device that a new Bot runs on, so each scope has its own config. `commit`, `receive`, `consume` and `finish`
   take the Host clock, not ports. The sync reads its model names and read-only toolsets from the same config.
+- Each `sync` and each Bot routine command first re-projects the config's templates onto the scope's Bots with K8
+  `applyModels`, as L's construction and `setModels` do (#1358). A Bot keeps its device, and its agentRef follows its
+  profile revision. A Bot whose model is not in the config keeps its stored template, and its Turns block with
+  `Unavailable model: <name>` until the config has the model; then it freezes with that model's template. A sealed
+  routine seals the re-projected template. A template that fails the toolset check refuses the whole call, which then
+  writes nothing. A frozen Turn and an already sealed routine copy keep their template.
 - A command reads the intent facts (K8 `CommandPorts.intents`) from the intent rows, under the scope lock, as L reads its
   K4 intents in the commit transaction. The committed intents of an outcome
   (`outcome.committed`, which a Main Bot cancel reads) come from the same rows.

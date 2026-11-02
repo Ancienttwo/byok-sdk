@@ -4,7 +4,7 @@ import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTe
   type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/server/execution-core';
 import { botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
-import { admitBotToolsets, applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
+import { admitBotToolsets, applyHomeTerminal, applyManagement, applyModels, failHomeFlush, homeEnqueued, homeHead, inactive, planHomeRetry, requireMain, updateBot,
   writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
@@ -486,6 +486,8 @@ export class HostedCollaborationStore {
     if (this.coalesce) coalescePolicy(this.coalesce, options.limits.contextMaxBytes);
     const key = storedKey(scope), config = await this.host(scope), models = Object.keys(config.models), readOnlyToolsets = config.readOnlyToolsets ?? [];
     return this.change(scope, undefined, async (state, publish, client) => {
+      // As L re-projects the Host's templates (#1357), so a freeze in this sync uses the scope config's current templates (#1358).
+      applyModels(state, config.models, readOnlyToolsets);
       const published = new Set<string>();
       const slice = await loadSlice(client, key), routines = botRoutines(Object.values(slice.state.routines));
       const emit: Publish = (id, body) => { publish(id, body); published.add(id); };
@@ -556,12 +558,14 @@ export class HostedCollaborationStore {
   setRoutineLifecycle(scope: string, botId: string, id: string, lifecycle: Routine['lifecycle'], now: number): Promise<void> {
     return this.routineCommand(scope, botId, now, commands => commands.lifecycle(owned(commands.list(), botId, id).definition.id, lifecycle));
   }
-  private routineCommand(scope: string, botId: string, now: number,
+  private async routineCommand(scope: string, botId: string, now: number,
     run: (commands: ReturnType<typeof hostedRoutineCommands>, execution: ExecutionTemplate) => void): Promise<void> {
-    const key = storedKey(scope);
+    const key = storedKey(scope), config = await this.host(scope);
     return this.change(scope, undefined, async (state, _publish, client) => {
       // H has no Host-wide Bot id, so the caller names the acting Bot. Only the Main Bot owns this API.
       requireMain(state.team, botId);
+      // A sealed routine seals the re-projected template of the scope config (#1358).
+      applyModels(state, config.models, config.readOnlyToolsets ?? []);
       const slice = await loadSlice(client, key);
       run(hostedRoutineCommands(slice, now), state.team.bots[botId]!.execution);
       await writeSlice(client, key, slice);

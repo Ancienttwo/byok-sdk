@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Added (examples)** — H re-projects the scope config's model templates
+  onto the scope's Bots at each `sync` and each Bot routine command, with K8
+  `applyModels` (#1358). A Bot that a team snapshot moved to a model the config
+  lacked is held with `Unavailable model: <name>`; once the config has the
+  model, it freezes with that model's template instead of the old one. A
+  changed template reaches existing Bots at their next freeze, with the device
+  and agentRef unchanged, and a sealed routine seals the re-projected
+  template. A template outside `readOnlyToolsets` now fails the `sync` or the
+  routine command, which writes nothing. `HostConfig` is unchanged.
+
 - **Added (examples)** — K8 `BotOptions.hostIntentMessages` (#1356): an Agent
   message of a Host intent goes to the Host's message handler of the same name,
   synchronously in the K4 message transaction, and its `MessageDisposition`
