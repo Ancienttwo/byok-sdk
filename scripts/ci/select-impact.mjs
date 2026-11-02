@@ -6,6 +6,9 @@ import { verifyReviewedContent, changedApiOwners } from './reviewed-content.mjs'
 import { documentationChecks } from './documentation-checks.mjs';
 import { resolveScriptChecks, scriptTestInputs } from './script-test-inputs.mjs';
 
+// #1316: the archived upgrade manifests, one exact path each.
+const UPGRADE_HISTORY_FILES = new Set(['0.31.0-0.32.0', '0.32.0-0.33.0', '0.33.0-0.34.0'].map(name => `packages/client/upgrade-history/${name}.json`));
+
 // Reviewed workspace graph; the contract test detects manifest drift.
 export const workspaceGraph = {
   "examples/basic": {
@@ -372,6 +375,7 @@ export const reviewedScripts = Object.freeze({
   'scripts/release/check-upgrade-manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/check-upgrade-manifest.test.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/dts-surface.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
+  'scripts/release/upgrade-manifest/history.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/manifest.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
   'scripts/release/upgrade-manifest/snapshot.mjs': { tests: ['scripts/release/check-upgrade-manifest.test.mjs'] },
 });
@@ -575,6 +579,8 @@ export function selectImpact(paths, context = {}) {
     // tarball ships. The targeted job's gate step reads both.
     if (path === 'scripts/release/upgrade-manifest/baseline.json') { scripts = true; continue; }
     if (path === 'packages/client/upgrade-manifest.json') { scripts = true; families.add('npm-release-pack'); continue; }
+    // #1316: the released manifests the client tarball ships beside it.
+    if (UPGRADE_HISTORY_FILES.has(path)) { scripts = true; families.add('npm-release-pack'); continue; }
     // #1102: the store precheck fixtures, their index and generator. The server,
     // keys and client suites check every fixture against its `expected` verdicts.
     if (/^scripts\/release\/fixtures\/stores\/(?:generate\.mjs|index\.json|(?:\d+\.\d+\.\d+|main)\/[a-z0-9/-]+\.(?:db|sqlite))$/.test(path)) {

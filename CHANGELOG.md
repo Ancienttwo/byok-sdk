@@ -21,6 +21,15 @@
   itself. Invalid `codexSandbox` or `runtimeEnvironment` throws `TypeError`;
   any other invalid value, including `runtimes.pi.durableLane`, throws
   `DaemonConfigInvalidError` (#1315).
+- **Added (client)** — `byok-agent upgrade check --from <version> [--json]` and
+  `checkUpgradeFrom(fromVersion, { resolveFrom })`: every breaking
+  upgrade-manifest entry released after `--from`, with its release and
+  migration link, plus a check that every installed `@byok-sdk/*` package has
+  the client's version; exit 2 when either needs action. The client tarball
+  ships every released manifest since 0.31.0 in `upgrade-history/`, and a
+  rebaseline archives the released manifest instead of dropping it. See
+  [the upgrade manifest](docs/upgrade-manifest.md#upgrading-across-releases)
+  (#1316).
 - **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
   absolute Windows system directory PowerShell is started from. Omitted, the
   store reads `process.env.SystemRoot` once at construction; an injected value

@@ -117,6 +117,18 @@ test('the client manifest admits only the exact runtime contract script', t => {
 });
 
 // #1094: the generated DaemonConfig schema is appended after the upgrade manifest, exactly.
+test('the client files list admits exactly the appended upgrade history (#1316)', t => {
+  const f = fixture(t);
+  const files = ['dist', 'README.md', 'LICENSE', 'upgrade-manifest.json', 'daemon-config.schema.json'];
+  f.write('packages/client/package.json', { ...f.manifest, files });
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'files'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-history'] });
+  assert.deepEqual(selectImpact(['packages/client/package.json'], f).families, ['npm-release-pack']);
+  f.write('packages/client/package.json', { ...f.manifest, files: [...files, 'upgrade-history', 'src'] });
+  assert.throws(() => selectImpact(['packages/client/package.json'], f), /more than/);
+});
+
 test('the client files list admits exactly the appended DaemonConfig schema', t => {
   const f = fixture(t);
   const files = ['dist', 'README.md', 'LICENSE', 'upgrade-manifest.json'];

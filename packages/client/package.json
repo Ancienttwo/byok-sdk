@@ -73,7 +73,8 @@
     "README.md",
     "LICENSE",
     "upgrade-manifest.json",
-    "daemon-config.schema.json"
+    "daemon-config.schema.json",
+    "upgrade-history"
   ],
   "publishConfig": {
     "access": "public"

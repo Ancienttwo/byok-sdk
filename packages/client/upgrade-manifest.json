@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "415b977a1b3435813e7b4557786bd0a47dc6d2eb98993cc99dca98bf47964794"
+    "snapshotSha256": "01f11c331c076d3cb1a2525306c8ea90861b3dba4f8de465f4e4afdd45e4438c"
   },
   "configFields": {
     "status": "tracked",
@@ -56,6 +56,19 @@
         "export:@byok-sdk/client#PiAdapterOptions",
         "export:@byok-sdk/client/adapters#PiAdapterOptions"
       ]
+    },
+    {
+      "id": "client-upgrade-check-from",
+      "impact": "additive",
+      "summary": "checkUpgradeFrom(fromVersion, { resolveFrom }) and byok-agent upgrade check --from <version> [--json] list every breaking upgrade-manifest entry released after fromVersion, with its release and migration link, and check that every @byok-sdk/* package resolving from resolveFrom (default: the working directory) has the client's version. Exit 0 on verdict pass, 2 otherwise (breaking entries, a mixed train, or refusal upgrade_from_unsupported, upgrade_history_unavailable or upgrade_train_unresolved). The client tarball now ships upgrade-history/<from>-<to>.json, every released manifest since 0.31.0. No Host code change is needed.",
+      "migration": "docs/upgrade-manifest.md#upgrading-across-releases",
+      "items": [
+        "export:@byok-sdk/client#UpgradeFromBreakingEntry",
+        "export:@byok-sdk/client#UpgradeFromRefusalCode",
+        "export:@byok-sdk/client#UpgradeFromReport",
+        "export:@byok-sdk/client#UpgradeTrainPackage",
+        "export:@byok-sdk/client#checkUpgradeFrom"
+      ]
     }
   ],
   "changes": [
@@ -82,6 +95,31 @@
       "item": "export:@byok-sdk/client#PiAdapterOptions",
       "change": "changed",
       "entry": "pi-package-dir-config"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeFromBreakingEntry",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeFromRefusalCode",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeFromReport",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeTrainPackage",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
+    },
+    {
+      "item": "export:@byok-sdk/client#checkUpgradeFrom",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
     },
     {
       "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",

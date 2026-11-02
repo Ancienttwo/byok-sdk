@@ -370,6 +370,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
         && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json'])) {
         after.files = before.files;
       }
+      // #1316 ships the released upgrade manifests beside the current one: exactly one appended files entry.
+      if (isDeepStrictEqual(before.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json'])
+        && isDeepStrictEqual(after.files, [...CLIENT_FILES, 'upgrade-manifest.json', 'daemon-config.schema.json', 'upgrade-history'])) {
+        after.files = before.files;
+      }
       // #635 adds the public transport-free test-double entry; its bundle is checked by check-adapters-entry.mjs.
       const testing = { types: './dist/testing/index.d.ts', import: './dist/testing/index.js' };
       if (before.exports?.['./testing'] === undefined && isDeepStrictEqual(after.exports?.['./testing'], testing)) delete after.exports['./testing'];

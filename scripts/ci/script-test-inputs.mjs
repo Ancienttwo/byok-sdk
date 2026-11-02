@@ -6,6 +6,7 @@ export const scriptTestInputs = Object.freeze({
     /^api-surface\//,
     /^packages\/[^/]+\/package\.json$/,
     /^packages\/client\/(?:daemon-config\.schema|upgrade-manifest)\.json$/,
+    /^packages\/client\/upgrade-history\/(?:0\.31\.0-0\.32\.0|0\.32\.0-0\.33\.0|0\.33\.0-0\.34\.0)\.json$/,
     /^packages\/server\/src\/stores\/sqlite\/index\.ts$/,
     /^packages\/client\/src\/(?:daemon\/journal\/sqlite-journal|util\/path-mutation-gate)\.ts$/,
     /^packages\/keys\/src\//,

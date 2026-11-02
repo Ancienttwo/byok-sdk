@@ -9728,6 +9728,8 @@ export { createServiceInstallation, readPayloadManifest, readServiceInstallation
 export type { ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceUpgradeReceipt, } from './lifecycle/service-installation';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit';
 export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit';
+export { checkUpgradeFrom } from './lifecycle/upgrade-from';
+export type { UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage, } from './lifecycle/upgrade-from';
 export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
 export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes';
 export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log';
@@ -11697,6 +11699,50 @@ export declare function generateSystemdUnit(def: {
  * with a clear error surfaced from `runOrThrow`, not a silent no-op.
  */
 export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: SystemdDeps): ManagedServiceLifecycle;
+// ==== @byok-sdk/client dist/lifecycle/upgrade-from.d.ts ====
+export type UpgradeFromRefusalCode = 'upgrade_from_unsupported' | 'upgrade_history_unavailable' | 'upgrade_train_unresolved';
+export interface UpgradeFromBreakingEntry {
+    readonly id: string;
+    /** The release that ships the change. */
+    readonly release: string;
+    /** `<repo doc>.md#<anchor>` or a byok-sdk issue/PR URL. */
+    readonly migration: string;
+}
+export interface UpgradeTrainPackage {
+    readonly name: string;
+    /** The resolved package version, or `'absent'` when it does not resolve. */
+    readonly version: string;
+}
+export interface UpgradeFromReport {
+    readonly from: string;
+    /** The resolved `@byok-sdk/client` version; `null` when it does not resolve. */
+    readonly to: string | null;
+    /** Every breaking entry released after `from`, up to and including `to`. */
+    readonly breaking: readonly UpgradeFromBreakingEntry[];
+    readonly additiveCount: number;
+    readonly train: {
+        readonly version: string | null;
+        readonly packages: readonly UpgradeTrainPackage[];
+    };
+    /** `pass`: no breaking entry in the range and every resolved package is on the client's version. */
+    readonly verdict: 'pass' | 'refused';
+    /** Set when the range could not be checked at all. */
+    readonly refusal?: {
+        readonly code: UpgradeFromRefusalCode;
+        readonly message: string;
+    };
+}
+/**
+ * Lists the breaking upgrade-manifest entries released after `fromVersion`
+ * up to the `@byok-sdk/client` that resolves from `options.resolveFrom`
+ * (default: the working directory), and checks that every public
+ * `@byok-sdk/*` package resolving from there is on that client's version.
+ *
+ * Throws when `fromVersion` is not a version or is newer than the client.
+ */
+export declare function checkUpgradeFrom(fromVersion: string, options?: {
+    readonly resolveFrom?: string;
+}): UpgradeFromReport;
 // ==== @byok-sdk/client dist/lifecycle/winsw.d.ts ====
 import { promises as fsp } from 'node:fs';
 import { type Runner } from '../util/exec-runner';
