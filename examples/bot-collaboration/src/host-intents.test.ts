@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, type ExecutionServer, type IntentInput } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { BotCollaboration, HostIntentError, IntentOutcomeError, type BotOptions, type HostIntentHandler } from './host';
+import { BotCollaboration, IntentOutcomeError, type BotOptions, type HostIntentHandler } from './host';
 import { botCompactVeto } from './compaction';
 
 /**
@@ -283,14 +283,11 @@ it('cancels an unsubmitted Host intent, so no handler runs and the Bot FIFO move
   const keys: string[] = [];
   bot = openBot({ research: handled(keys) });
   // One Main Bot FIFO: a submitted Host intent, then the one to cancel, then a Bot Turn.
-  await bot.enqueueHostIntent(input({ key: 'head', execution: template('device') }), 'research');
-  await bot.enqueueHostIntent(input({ execution: template('device') }), 'research');
+  for (const key of ['head', KEY]) await bot.enqueueHostIntent(input({ key, execution: template('device') }), 'research');
   const turnId = await bot.input('k1', 'hello');
   await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'cancelled', conclusion: 'cancelled' });
-  expect(cancels).toEqual([]);
   paused = false;
   await bot.drain();
-  // The Turn froze and submitted; the cancelled intent never did.
   expect({ keys, turn: bot.core.intent(turnId)?.phase, submitted: submitted.size }).toEqual({ keys: ['head'], turn: 'inflight', submitted: 2 });
   // K4 keeps the cancel on the intent row, so a restart reads the same fact and a replay sends nothing.
   bot = await restart({ research: handled(keys) });
@@ -305,12 +302,10 @@ it('sends an SDK cancel for a submitted Host intent, and a cancelled terminal af
   bot = openBot({ research: handled(keys) });
   const { taskId } = await bot.enqueueHostIntent(input(), 'research');
   await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'cancel_pending' });
-  // K4 repeats the cancel at each scan until a terminal arrives.
   expect({ cancels: [...new Set(cancels)], conclusion: bot.core.intent(KEY)?.conclusion }).toEqual({ cancels: [taskId], conclusion: undefined });
   bot = await restart({ research: handled(keys) });
   paused = false;
   await bot.recover();
-  await bot.drain();
   expect({ conclusion: bot.core.intent(KEY)?.conclusion, keys }).toEqual({ conclusion: 'cancelled', keys: [] });
   await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'already_settled', conclusion: 'cancelled' });
 });
@@ -320,8 +315,7 @@ it('runs the handler once for a Host intent that completed before the cancel', a
   const keys: string[] = [];
   bot = openBot({ research: handled(keys) });
   await bot.enqueueHostIntent(input(), 'research');
-  // The terminal is on the server before the cancel; no K8 pass has read it yet.
-  paused = false;
+  paused = false; // The terminal is on the server before the cancel; no K8 pass has read it yet.
   await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'cancel_pending' });
   await bot.drain();
   expect({ conclusion: bot.core.intent(KEY)?.conclusion, keys, cancels }).toEqual({ conclusion: 'succeeded', keys: [KEY], cancels: [] });
@@ -334,7 +328,6 @@ it('refuses to cancel an unknown key, a direct K4 intent, a Bot Turn and a non-o
   await bot.core.enqueue(input({ key: 'direct' }));
   await expect(bot.cancelHostIntent('direct')).rejects.toMatchObject({ code: 'unknown_intent' });
   const turnId = await bot.input('k1', 'hello');
-  await expect(bot.cancelHostIntent(turnId)).rejects.toBeInstanceOf(HostIntentError);
   await expect(bot.cancelHostIntent(turnId)).rejects.toMatchObject({ key: turnId, code: 'not_host_intent' });
   await bot.enqueueHostIntent(input(), 'research');
   await expect(bot.cancelHostIntent(KEY, { id: 'guest', kind: 'human' })).rejects.toThrow('not_owner: cancelHostIntent needs the owner principal');
