@@ -14,7 +14,6 @@ const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const MODEL = 'contract-model';
 const adapter = (options: GrokAdapterOptions = {}) => new GrokAdapter({ resolveBin, model: MODEL, ...options });
 const PROJECT_MARKER = 'BYOK-CONTRACT-GROK-PROJECT-5d20';
-const USER_MARKER = 'BYOK-CONTRACT-GROK-USER-e917';
 
 /** Grok's own `--version` text: `grok 1.0.52 (0920c8169e27)`. */
 const identifies = (version: string, expected: string) => /^grok (\S+)/.exec(version.trim())?.[1] === expected;
@@ -35,9 +34,9 @@ const submitThroughSearchTool = searchThenCall({
 
 /**
  * One contract turn as an Agent task: a loopback chat-completions model in
- * GROK_HOME, a Host MCP server, the Agent home AGENTS.md, and user context in
- * Grok's Claude-compatible sources (`~/.claude/CLAUDE.md`, `~/.claude.json`),
- * which the two isolation options switch off.
+ * GROK_HOME, a Host MCP server, the Agent home AGENTS.md, and a user MCP server
+ * in Grok's Claude-compatible `~/.claude.json`, which `agentUserMcpServers`
+ * switches off.
  */
 async function turn(mode: 'inherit' | 'excluded') {
   const box = await createSandbox(`grok-${mode}`);
@@ -46,7 +45,6 @@ async function turn(mode: 'inherit' | 'excluded') {
   try {
     const grokHome = path.join(box.home, '.grok');
     await fs.mkdir(grokHome);
-    await fs.mkdir(path.join(box.home, '.claude'));
     const receipt = path.join(box.root, 'host.jsonl');
     const userReceipt = path.join(box.root, 'user-mcp.jsonl');
     const host = await writeSubmitResultServer(box.root, receipt);
@@ -57,7 +55,6 @@ async function turn(mode: 'inherit' | 'excluded') {
       `[model."${MODEL}"]`, `model = "${MODEL}"`, 'model_provider = "contract"', `name = "${MODEL}"`,
       'context_window = 128000', 'max_completion_tokens = 1024', 'api_key = "runtime-contract-placeholder"', '',
     ].join('\n'), { mode: 0o600 });
-    await fs.writeFile(path.join(box.home, '.claude', 'CLAUDE.md'), `# User\n\n${USER_MARKER}\n`);
     await fs.writeFile(path.join(box.home, '.claude.json'), JSON.stringify({ mcpServers: { usermcp: { type: 'stdio', command: user.command, args: user.args } } }));
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     const options: GrokAdapterOptions = mode === 'excluded' ? { compatInstructions: 'disabled', agentUserMcpServers: 'excluded' } : {};
@@ -98,10 +95,7 @@ defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVe
   'instructions.project': check(async () => {
     expect((await excluded()).provider.saw(PROJECT_MARKER)).toBe(true);
   }),
-  'isolation.userContext': check(async () => {
-    expect((await inherited()).provider.saw(USER_MARKER), 'positive control: inherited ~/.claude/CLAUDE.md reaches the model').toBe(true);
-    expect((await excluded()).provider.saw(USER_MARKER)).toBe(false);
-  }),
+  'isolation.userContext': skip('Grok has no per-process switch for $GROK_HOME/AGENTS.md, $GROK_HOME/rules/ or [paths] extra_rule_dirs; compatInstructions turns off only the Claude and Cursor sources (docs/adapter-capabilities.md)'),
   'isolation.userMcp': check(async () => {
     expect((await inherited()).userSpawned, 'positive control: inherited Claude-compatible MCP server starts').toBe(true);
     expect((await excluded()).userSpawned).toBe(false);

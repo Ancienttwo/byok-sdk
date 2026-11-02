@@ -35,7 +35,7 @@ the runtime does instead.
 | Tool authorization `auto` | `toolAuthorizationAuto` | yes | no | no | no | no | yes | yes |
 | Prepared lane | `preparedLane` | no | no | no | no | no | yes | no |
 | Durable worker lane | `durableLane` | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | yes | yes | yes | no |
+| Keeps user-level instructions out | `isolation.userContext` | yes | no | yes | no | yes | yes | no |
 | Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | no | no |
 | Turns off the transcript store | `isolation.sessionPersistence` | yes | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
@@ -265,7 +265,12 @@ project files. The `config`, `base_instructions` and `developer_instructions`
 fields of `thread/start` and `thread/resume` do not remove the user file, and a
 per-thread MCP override does not either. `CODEX_HOME` also holds `auth.json`
 and the sessions, so moving it moves the login. The SDK has no Codex option
-for user instructions.
+for user instructions. Keeping the user file out means moving `CODEX_HOME`,
+and the login moves with it. A ChatGPT login refresh writes the new token back
+to `auth.json` and the old refresh token stops working, so a copied login does
+not survive its first refresh. The SDK therefore does not move `CODEX_HOME`. A
+Host that needs isolation checks `isolation.userContext`, which is `false` for
+Codex.
 
 #### `agentUserMcpServers` (Codex)
 
@@ -367,8 +372,9 @@ stay:
 - The Claude and Cursor `skills`, `hooks` and `mcps` cells, with their
   configured values.
 
-Moving `GROK_HOME` also moves `auth.json` and the sessions; the adapter does
-not do it. With the four variables, `grok inspect --json` 1.0.52 lists the
+Keeping these out means moving `GROK_HOME`, which also moves `auth.json` and
+the sessions; the adapter does not do it, so Grok declares
+`isolation.userContext: false`. A Host that needs isolation checks that bit. With the four variables, `grok inspect --json` 1.0.52 lists the
 four Claude and Cursor files as `disabled`; without them, as `enabled`. The
 probe ran in a synthetic home with the network denied. `inspect` reports
 discovery, not prompt text. No live Grok session shows what the model sees.
