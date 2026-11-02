@@ -532,7 +532,7 @@ describe('Windows projection ACL verification', () => {
     expect(command).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
     expect(args.slice(0,3)).toEqual(['-NoProfile','-NonInteractive','-EncodedCommand']);
     expect(args.join(' ')).not.toContain(directory);
-    expect(JSON.parse(input)).toEqual({path:directory});
+    expect(input).toBe(directory);
   });
   it.each([
     {...good,owner:'S-1-5-21-2000'}, {...good,protected:false},
@@ -578,14 +578,13 @@ describe('Windows projection ACL verification', () => {
       expect(powershellCommandFindings(script), script).toEqual([]);
     }
   });
-  it('loads the serializer assembly in its own try, outside the path_not_found mapping', async () => {
+  it('loads no serializer assembly, whose first use on a machine dominated a cold query (#1364)', async () => {
     const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(good),stderr:''}));
     await assertWindowsPiProjectionAcl('C:\\projection',{systemRoot:'C:\\Windows',run});
     const [,args] = run.mock.calls[0] as unknown as [string,string[]];
     const script = Buffer.from(args[3]!, 'base64').toString('utf16le');
-    // A missing System.Web.Extensions throws FileNotFoundException; inside the
-    // main try it would be mapped to exit 3 (path_not_found).
-    expect(script).toMatch(/^try \{ \[void\]\[System\.Reflection\.Assembly\]::Load\('System\.Web\.Extensions,[^']*'\) \} catch \{ exit 5 \}$/mu);
+    expect(script).not.toContain('Assembly]::Load');
+    expect(script).not.toContain('System.Web');
   });
   it.each([
     [2, 'invalid_request'], [3, 'path_not_found'], [4, 'access_denied'],
