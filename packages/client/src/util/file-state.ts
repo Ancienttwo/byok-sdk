@@ -14,5 +14,5 @@ export function sameFile(left: Pick<FileState, 'dev' | 'ino'>, right: Pick<FileS
 
 /** Same inode with the same size and content mtime. */
 export function sameContent(left: FileState, right: FileState): boolean {
-  return sameFile(left, right) && left.size === right.size && left.mtimeNs === right.mtimeNs;
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size && left.mtimeNs === right.mtimeNs;
 }
