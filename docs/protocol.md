@@ -124,10 +124,10 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 `PROTOCOL_VERSION` is `5`. Every v5 change takes exactly one of three paths.
 Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
-not by author judgment. No v5 release has been published yet, so there is no
-published v5 decoder to run: until the first v5 release is published and
-pinned, the suite proves v5 self-consistency only and cross-release gates are
-unproven (see the evidence list below).
+not by author judgment. 0.34.0, the first v5 release, is published, but no
+published v5 decoder is pinned as an oracle yet: until one is, the suite
+proves v5 self-consistency only and cross-release gates are unproven (see the
+evidence list below).
 
 1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
    together under "Server supports N and N-1" below. This is the only path
@@ -185,8 +185,8 @@ unproven (see the evidence list below).
   account for their `batchLength`). The v5 corpus carries every message type,
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
-  and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers the 0.34.0 corpus,
-  the first v5 release and a source candidate until it is published; 0.33.0 is the last v4 release. It has no `floor`. Each registered v5 entry pins both corpus
+  and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers the published 0.34.0 corpus,
+  the first v5 release; 0.33.0 is the last v4 release. It has no `floor`. Each registered v5 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.33.0 registry tarball, the last v4 release. It rejects every v5
@@ -195,9 +195,10 @@ unproven (see the evidence list below).
   `requiredReceiverCapabilities` derives, for every v4 `task.offer` line that
   release shipped, the same flags as the current table (`task-offer-gates.test.ts`).
 
-No published release reads v5, so no test proves the gated and strip-safe
-declarations against a released v5 decoder yet. That evidence starts with the
-first published v5 release.
+No test runs a published v5 decoder yet, so the gated and strip-safe
+declarations are not proven against a released v5 decoder. That evidence
+starts when a published v5 release (0.34.0 or later) is pinned as an
+oracle.
 
 The v5 table is the v4 table: the rename touches no gate. `durableLane`
 replaces `durablePi` among the runtime capability matrix fields, which are
