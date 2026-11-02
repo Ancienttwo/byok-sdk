@@ -97,6 +97,10 @@ const K8_MIGRATION_EXPORTS = Object.freeze({ './migration': './src/migration.ts'
 // with it node:sqlite (ledger.ts) and node:async_hooks (core.ts); it does not
 // load the K8 host. Only H tests import it; H's src does not.
 const K8_SWITCH_EXPORTS = Object.freeze({ './switch': './src/switch.ts' });
+// #1325: the L test Host that the routine and delivery vectors run on, added on
+// top of the switch entry. It is test support that a Host vendors; it imports
+// only published packages.
+const K8_L_TEST_HOST_EXPORTS = Object.freeze({ './l-test-host': './src/l-test-host.test-support.ts' });
 /** The other workspace manifests, each with its dir. */
 function otherWorkspaceManifests(cwd, self) {
   const manifests = [];
@@ -289,6 +293,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     // #975 slice 5: the switch entry, only on top of exactly the entries up to and including the migration entry.
     const migrated = { ...delivered, ...K8_MIGRATION_EXPORTS };
     if (isDeepStrictEqual(before.exports, migrated) && isDeepStrictEqual(after.exports, { ...migrated, ...K8_SWITCH_EXPORTS })) {
+      after.exports = before.exports;
+    }
+    // #1325: the L test Host entry, only on top of exactly the entries up to and including the switch entry.
+    const switched = { ...migrated, ...K8_SWITCH_EXPORTS };
+    if (isDeepStrictEqual(before.exports, switched) && isDeepStrictEqual(after.exports, { ...switched, ...K8_L_TEST_HOST_EXPORTS })) {
       after.exports = before.exports;
     }
   } else if (path === 'examples/packaging/package.json') {

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Added (examples)** — K8 exports `./l-test-host`
+  (`src/l-test-host.test-support.ts`), an L test Host built only from the
+  published packages: an embedded SQLite server, a paired daemon with a stub
+  runtime that submits the result document, and the `HostLedger`. The K8
+  routine and delivery vectors now run on it instead of the K4 `openHost`, so a
+  Host that vendors K8 can run them too. `src/VENDOR.md` Layer 3 lists the file
+  and no longer tells a Host to skip these vectors (#1325).
+
 ## 0.35.0 — source candidate
 
 0.35.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
