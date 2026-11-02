@@ -71,6 +71,24 @@ restart admits every open intent. A Host intent shares the FIFO of its Agent: on
 a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
 returns the same intent while K4 keeps it.
 
+An Agent message of a Host intent goes to the message handler of the same name
+in `hostIntentMessages` (#1356). The handler runs synchronously in the K4
+message transaction and returns the `MessageDisposition` that K4 records:
+`{ outcome: 'accepted' }` or `{ outcome: 'refused', reasonCode }`. K8 does not
+deliver the body; the handler delivers it with `tx.publish` or the Host's own
+channel. A handler that throws rolls the transaction back, so neither K8 nor K4
+writes anything, and a handler that returns a promise or another shape throws
+too. An accepted message is recorded in `replies` under its task id, with the
+intent key as `turnId` and no body, so a replay is accepted without the
+handler. A refused message keeps its command record, so a replay gets the same
+refusal without the handler and other content for the same message id gets
+`message_conflict`. A Host intent whose name has no message handler refuses its
+messages with `binding_mismatch`. A name in `hostIntentMessages` needs a
+`hostIntents` handler. `enqueueHostIntent` refuses an execution with
+`messageEgress` whose name has no message handler, and a restart refuses an
+open such intent whose message handler is not registered. The pass that removes
+a compacted Host intent's record also removes its replies.
+
 Cancel a Host intent with the owner call `cancelHostIntent(key)` (#1320), not
 with `bot.core.cancel`. K4 records the cancel on the intent row, so a restart
 reads the same fact. An intent that was not submitted settles as `cancelled`
@@ -626,9 +644,11 @@ transaction freezes only a Turn that still has no offer.
   `outcomeSummary`, and optional `reply`, the reply text that the user saw for
   that Turn (#1318). Rows in another shape are refused, as is a `reply` that
   is not a string.
-- `historyRowFromTurn` in `src/rules/context.ts` builds one row from a
-  `bot-turn:<id>` projection value and the caller's `reply`, so the authority
-  does not derive `outcomeSummary` itself.
+- `historyRowFromTurn` builds one row from a `bot-turn:<id>` projection value
+  and the caller's `reply`, so the authority does not derive `outcomeSummary`
+  itself. `contextTurns` checks rows in this shape and returns them as
+  `ContextTurn[]`. The K8 entry exports both and the `ContextTurn` type
+  (#1356).
 - A row's `reply` counts in `contextMaxBytes` with the rest of the row. When
   the rows do not fit, whole rows go oldest first and `historyWindow` counts
   them; a reply is never cut.
@@ -1047,7 +1067,11 @@ after that state, reports in its own Turn `H('bot_reply', delegationId)`.
 When an outcome has no accepted item, one refusal report Turn
 `H('bot_reply', taskId)` holds all its refusals. That
 report has no `delegate` fragment. Status changes publish
-`delegation:<id>:<revision>` projections.
+`delegation:<id>:<revision>` projections with `id`, `revision`, `root`,
+`fromBotId`, `toBotId`, `request`, `status`, and `verdict`, `reason`,
+`replyTurnId` and `undelivered` once set. `root` is the delegation's root, so a
+Host can place a cross-Bot delegation under the conversation of its root
+(#1356).
 
 The root Bot budget is 12 units. An outcome with `n` accepted items reserves
 `n + max(n, 1)` units: one B unit and one A reply slot for each item.

@@ -41,6 +41,7 @@ export interface Batch { id: string; delegationIds: string[]; slots: string[]; r
 /** `turnId` is the Turn that holds the unit. A free A slot has none. */
 export interface Unit { id: string; root: string; state: 'reserved' | 'spent' | 'released'; turnId?: string }
 export interface AcceptedReply {
+  /** The intent key. For a Bot Turn, it is the Turn id. */
   turnId: string; messageId: string; contentHash: string; contentType: string; acceptedAt: number;
   /** Stored only for delegation chain Turns. */
   body?: string;
@@ -147,7 +148,7 @@ export function releaseUnit(state: DelegationState, id: string | undefined): voi
 
 function publish(d: Delegation, emit: Publish): void {
   d.revision++;
-  emit(`delegation:${d.id}:${d.revision}`, json({ id: d.id, revision: d.revision, fromBotId: d.fromBotId, toBotId: d.toBotId,
+  emit(`delegation:${d.id}:${d.revision}`, json({ id: d.id, revision: d.revision, root: d.root, fromBotId: d.fromBotId, toBotId: d.toBotId,
     request: d.request, status: d.status, verdict: d.verdict, reason: d.reason, replyTurnId: d.replyTurnId, undelivered: d.undelivered }));
 }
 function close(d: Delegation, verdict: Verdict, now: number, reason?: string, reply?: string): void {

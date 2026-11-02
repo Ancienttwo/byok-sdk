@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Added (examples)** — K8 `BotOptions.hostIntentMessages` (#1356): an Agent
+  message of a Host intent goes to the Host's message handler of the same name,
+  synchronously in the K4 message transaction, and its `MessageDisposition`
+  goes back to K4 as it is. An accepted message is recorded without its body;
+  K8 does not deliver it. Without a message handler the message still refuses
+  with `binding_mismatch`. `enqueueHostIntent` refuses an execution with
+  `messageEgress` whose name has no message handler, and a restart refuses an
+  open such intent. The K8 entry now exports `contextTurns`,
+  `historyRowFromTurn`, `ContextTurn`, `HostIntentMessageHandler` and
+  `MessageDisposition`. The `delegation:<id>:<revision>` projection carries the
+  delegation's `root`.
+
 - **Added (examples)** — K8 `BotCollaboration.setModels(models)` replaces the
   Host's model templates at run time (#1357). Construction and `setModels`
   apply each template by model name to every unarchived Bot, keeping its

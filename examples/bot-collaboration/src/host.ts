@@ -15,6 +15,7 @@ import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
 import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, expireCards, replyCheckDue, reportCardDecisions,
   commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
+import { hostMessageDisposition, type MessageDisposition } from './rules/message';
 import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
@@ -81,8 +82,15 @@ export interface BotOptions {
   /**
    * Handlers of the Host's own K4 intents (#882), by name. `enqueueHostIntent` stores the name with the intent.
    * At a `task.complete` terminal, the handler runs synchronously in the terminal transaction with the result document.
+   * An intent whose execution has `messageEgress` also needs a handler of the same name in `hostIntentMessages`.
    */
   hostIntents?: Readonly<Record<string, HostIntentHandler>>;
+  /**
+   * Agent message handlers of Host intents (#1356), by the `hostIntents` name. The handler runs synchronously in the K4
+   * message transaction and decides the message. K8 records an accepted message without its body and does not deliver it.
+   * A Host intent whose name has no message handler refuses its messages with `binding_mismatch`.
+   */
+  hostIntentMessages?: Readonly<Record<string, HostIntentMessageHandler>>;
   /** Passed to the K4 core. Default 100. */
   reconcileMs?: number;
   /** Passed to the K4 core: a coalesced hint after a commit that wrote the outbox. */
@@ -137,6 +145,8 @@ export interface BotOptions {
 }
 /** Synchronous. A throw or a thenable leaves the intent open, and `drain()` rejects. */
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
+/** Synchronous. A throw rolls the message transaction back, and a thenable or another result throws. */
+export type HostIntentMessageHandler = (input: AgentMessageInput, transaction: MessageTransaction) => MessageDisposition;
 /**
  * A K4 terminal that K8 cannot apply (#882 Q6f): its key is neither a Bot Turn nor a Host intent, its Host handler
  * failed, or the outcome commit of its Bot Turn threw. The intent stays open at the head of its FIFO, and each pass rejects
@@ -231,6 +241,7 @@ export class BotCollaboration {
   /** History mode: Turns whose history read failed in this pass. The timer reads them again. */
   private unread = new Set<string>();
   private readonly hostIntentHandlers: ReadonlyMap<string, HostIntentHandler>;
+  private readonly hostIntentMessageHandlers: ReadonlyMap<string, HostIntentMessageHandler>;
   /** Terminals that could not apply in the current K4 drain, by intent key. K4 also drains from its own timer. */
   private readonly intentFailures = new Map<string, IntentOutcomeError>();
   /** The last audited reason of each refused key, so a stuck intent adds one audit row and not one per pass. */
@@ -268,11 +279,18 @@ export class BotCollaboration {
       if (execution) admitBotToolsets(execution.input, options.readOnlyToolsets);
     }
     this.hostIntentHandlers = new Map(Object.entries(options.hostIntents ?? {}));
+    this.hostIntentMessageHandlers = new Map(Object.entries(options.hostIntentMessages ?? {}));
+    for (const name of this.hostIntentMessageHandlers.keys()) {
+      if (!this.hostIntentHandlers.has(name)) throw new Error(`A Host intent message handler needs the Host intent handler ${name}`);
+    }
     for (const [key, { handler }] of Object.entries(stateOf(persisted.application).hostIntents ?? {})) {
       // A record whose intent K4 compacted is stale until the next pass. It needs no handler.
       const intent = persisted.intents[hash(key)];
       if (intent && intent.conclusion === undefined && !this.hostIntentHandlers.has(handler)) {
         throw new Error(`An open Host intent needs the handler ${handler}`);
+      }
+      if (intent && intent.conclusion === undefined && intent.execution.payload.messageEgress && !this.hostIntentMessageHandlers.has(handler)) {
+        throw new Error(`An open Host intent needs the message handler ${handler}`);
       }
     }
     this.owner = { id: options.owner ?? 'owner', kind: 'human' };
@@ -537,6 +555,9 @@ export class BotCollaboration {
   enqueueHostIntent(input: IntentInput, handler: string): Promise<Intent> {
     return this.exclusive(async () => {
       if (!this.hostIntentHandlers.has(handler)) throw new Error(`Unknown Host intent handler: ${handler}`);
+      if (input.execution.payload.messageEgress && !this.hostIntentMessageHandlers.has(handler)) {
+        throw new Error(`Host intent handler ${handler} has no message handler`);
+      }
       // A restart admits every open intent, so a Host intent passes the same toolset admission as a Bot execution.
       admitBotToolsets(input.execution, this.options.readOnlyToolsets);
       this.write(s => {
@@ -642,11 +663,13 @@ export class BotCollaboration {
   private applyMessage(input: AgentMessageInput, tx: MessageTransaction): { outcome: 'accepted' | 'refused'; reasonCode?: string } {
     const state = stateOf(tx.application);
     refuseExported(state);
+    const name = hostIntent(state, tx.intent.key)?.handler, handler = name === undefined ? undefined : this.hostIntentMessageHandlers.get(name);
     let disposition;
     try {
       ({ disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
         { kind: 'message', turnId: tx.intent.key, message: { taskId: input.taskId, payload: input.payload } },
-        { publish: tx.publish, ...this.deliverPort(state, input.taskId) },
+        { publish: tx.publish, ...this.deliverPort(state, input.taskId),
+          ...(handler ? { hostMessage: () => hostMessageDisposition(handler(input, tx)) } : {}) },
         // A refused message keeps a command record, and retention can move it into K4 rows (#798).
         id => tx.rows.get('commands', id) as CommandRecord | undefined));
     } catch (cause) {
@@ -990,7 +1013,12 @@ export class BotCollaboration {
   private sync(s: LedgerState, rows: ApplicationRows, injected?: InjectedHistory): boolean {
     const state = stateOf(s.application);
     // A Host intent record lives as long as K4 keeps the intent, so a replay stays exact until K4 compacts it.
-    for (const key of Object.keys(state.hostIntents ?? {})) if (!s.intents[hash(key)]) delete state.hostIntents![key];
+    // Its accepted message records (#1356) go with it.
+    for (const key of Object.keys(state.hostIntents ?? {})) {
+      if (s.intents[hash(key)]) continue;
+      delete state.hostIntents![key];
+      for (const [taskId, reply] of Object.entries(state.replies)) if (reply.turnId === key) delete state.replies[taskId];
+    }
     // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
     sealDueBatches(state, this.coalesce, this.now());
     // Refresh passive state before any new offer freezes its ContextPack.

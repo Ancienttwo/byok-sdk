@@ -410,7 +410,7 @@ export function settlementVectors(name: string, open: () => SettlementSubject | 
     }
 
     it('spends the unit at the first claim, and the delegation runs', async () => {
-      const { subject, id, delegation } = await delegated();
+      const { subject, id, delegation, root: chain } = await delegated();
       const root = (await delegation()).root, before = (await subject.state()).budgets[root]!;
       await subject.claim(id);
       await settled(subject);
@@ -418,7 +418,7 @@ export function settlementVectors(name: string, open: () => SettlementSubject | 
       expect(unit(state, id)).toBe('spent');
       expect(state.budgets[root]).toMatchObject({ reserved: before.reserved! - 1, delegation: before.delegation + 1 });
       expect(await delegation()).toMatchObject({ status: 'running', claimed: { turnId: id, at: VECTOR_NOW } });
-      expect(await subject.projection(`delegation:${id}:2`)).toEqual([expect.objectContaining({ status: 'running' })]);
+      expect(await subject.projection(`delegation:${id}:2`)).toEqual([expect.objectContaining({ root: chain, status: 'running' })]);
     });
 
     it('takes a decline terminal as no start, and any other terminal as a start', async () => {

@@ -7,7 +7,7 @@ import { roomInput, setMemberMentions, updateRoom, type MemberMentions, type Men
 import { sealBatchForCancel, type InputFields } from './coalesce';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
-import { acceptMessage, type MessageFields } from './message';
+import { acceptMessage, type MessageDisposition, type MessageFields } from './message';
 import { expireCard } from './cards';
 import type { Autonomy } from './autonomy';
 import { commit, revisionOf, type CommandRecord, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
@@ -119,6 +119,8 @@ export interface CommandPorts {
   remember?(root: string): void;
   /** Queues one channel message and returns the delivery id. Absent: the Host has no channel. */
   deliver?(turn: Turn, key: string, text: string): string | undefined;
+  /** Decides the Agent message of a Host intent whose handler has a message handler (#1356). Absent: `binding_mismatch`. */
+  hostMessage?(): MessageDisposition;
   outcome?: Omit<OutcomePorts, 'now' | 'publish' | 'deliver'>;
   /** Writes the routine Turn of the occurrence. */
   occurrence?(): void;
@@ -283,7 +285,7 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       applyTurnOutcome(state, command.turnId, command.taskId, command.document, { ...need(ports.outcome, command.kind),
         now: ports.now, publish, ...(deliver ? { deliver } : {}) });
       return accepted();
-    case 'message': return acceptMessage(state, command.turnId, command.message, ports.now, deliver);
+    case 'message': return acceptMessage(state, command.turnId, command.message, ports.now, deliver, ports.hostMessage);
     case 'occurrence':
       need(ports.occurrence, command.kind)();
       return accepted();
