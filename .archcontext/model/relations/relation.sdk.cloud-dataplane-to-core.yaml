@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.cloud-dataplane-to-core",
+  "kind": "depends-on",
+  "source": "module.sdk.cloud-dataplane",
+  "target": "module.sdk.core",
+  "synchrony": "synchronous",
+  "intent": "Implement the store ports on Postgres and R2."
+}

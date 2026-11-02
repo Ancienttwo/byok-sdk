@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.conformance-to-core",
+  "kind": "depends-on",
+  "source": "module.sdk.conformance",
+  "target": "module.sdk.core",
+  "synchrony": "synchronous",
+  "intent": "Run the store port conformance suites."
+}

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.client-to-core",
+  "kind": "depends-on",
+  "source": "module.sdk.client",
+  "target": "module.sdk.core",
+  "synchrony": "synchronous",
+  "intent": "Use device proof canonicalization and sealed payloads."
+}

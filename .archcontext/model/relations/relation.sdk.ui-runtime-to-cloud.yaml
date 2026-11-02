@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.ui-runtime-to-cloud",
+  "kind": "depends-on",
+  "source": "module.sdk.ui-runtime",
+  "target": "module.sdk.cloud",
+  "synchrony": "synchronous",
+  "intent": "Read the timeline event and approval observation schemas of the kernel."
+}

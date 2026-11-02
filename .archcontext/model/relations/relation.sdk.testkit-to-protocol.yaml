@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.testkit-to-protocol",
+  "kind": "depends-on",
+  "source": "module.sdk.testkit",
+  "target": "module.sdk.protocol",
+  "synchrony": "synchronous",
+  "intent": "Speak the wire protocol as a simulated device."
+}

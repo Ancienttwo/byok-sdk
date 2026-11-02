@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.conformance-to-testkit",
+  "kind": "depends-on",
+  "source": "module.sdk.conformance",
+  "target": "module.sdk.testkit",
+  "synchrony": "synchronous",
+  "intent": "Drive the device simulator in the simulator suites."
+}

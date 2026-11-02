@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.client",
+  "kind": "module",
+  "name": "Device daemon",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "device",
+  "summary": "Device-side daemon package: composes session, execution, approvals, Agent home storage and the service CLI, and owns the remaining daemon stores, Agent memory, MCP surfaces and control channel.",
+  "source": {
+    "include": [
+      "packages/client/**"
+    ]
+  },
+  "notes": [
+    "Imports only core and protocol among workspace packages. Composition entry points: createDaemon and createDaemonWithAdapters (src/daemon/create-daemon.ts). Paths that a child component claims belong to that component."
+  ]
+}

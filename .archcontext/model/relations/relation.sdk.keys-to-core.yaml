@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.keys-to-core",
+  "kind": "depends-on",
+  "source": "module.sdk.keys",
+  "target": "module.sdk.core",
+  "synchrony": "synchronous",
+  "intent": "Use the provider provisioning operations and request digests of core."
+}

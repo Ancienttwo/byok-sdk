@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.ui-runtime-to-protocol",
+  "kind": "depends-on",
+  "source": "module.sdk.ui-runtime",
+  "target": "module.sdk.protocol",
+  "synchrony": "synchronous",
+  "intent": "Use wire activity types in the projection."
+}

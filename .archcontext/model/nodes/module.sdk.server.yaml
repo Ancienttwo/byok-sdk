@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.server",
+  "kind": "module",
+  "name": "Embedded server composition",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "composition",
+  "summary": "Single-product, single-tenant Node composition over the kernel: wake-driven HTTP long-poll, memory or SQLite storage, loopback listener and the Host execution core.",
+  "source": {
+    "include": [
+      "packages/server/**"
+    ]
+  },
+  "notes": [
+    "Topology L. Entry points: createByokServer (src/index.ts), listenLoopback (src/loopback.ts), subpath ./execution-core. ADR-035 keeps it as a separate package."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "component.sdk.client-agent-home",
+  "kind": "component",
+  "name": "Agent home and local storage",
+  "status": "active",
+  "parent": "module.sdk.client",
+  "layer": "device",
+  "summary": "Device state under storeDir, the per-Agent home under the Host storage root, execution scratch and retention.",
+  "source": {
+    "include": [
+      "packages/client/src/agent-home.ts",
+      "packages/client/src/agent-home-readers.ts",
+      "packages/client/src/agent-home-reader-retention.ts",
+      "packages/client/src/daemon/store.ts",
+      "packages/client/src/daemon/host-layout.ts",
+      "packages/client/src/daemon/retention/**"
+    ]
+  }
+}

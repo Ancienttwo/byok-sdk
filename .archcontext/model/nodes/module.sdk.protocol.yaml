@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.protocol",
+  "kind": "module",
+  "name": "Wire protocol",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "contract",
+  "summary": "Wire v5 envelope schema, message types, codec helpers and HTTP path constants shared by the device and Host sides.",
+  "source": {
+    "include": [
+      "packages/protocol/**"
+    ]
+  },
+  "notes": [
+    "Leaf package: no workspace dependency. Entry points: PROTOCOL_VERSION (src/version.ts), parseMessage/decodeEnvelope/encodeEnvelope (src/codec.ts), BYOK_*_PATH (src/http-api.ts)."
+  ]
+}

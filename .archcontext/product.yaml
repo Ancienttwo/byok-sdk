@@ -1,0 +1,15 @@
+capabilities:
+  - "sdk-root"
+id: "product.byok-sdk"
+name: "BYOK SDK"
+nonGoals:
+[]
+purpose: "Bring-your-own-agent task dispatch for SaaS products: a Host product dispatches tasks to the agent runtime on the end user's device."
+riskDomains:
+[]
+schemaVersion: "archcontext.product/v1"
+successCriteria:
+  - "Agent tasks bind to architecture context before completion."
+users:
+  - description: "Developer who integrates the BYOK SDK into a Host product."
+    id: "developer"

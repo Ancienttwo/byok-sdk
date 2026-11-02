@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.cloud-dataplane-to-protocol",
+  "kind": "depends-on",
+  "source": "module.sdk.cloud-dataplane",
+  "target": "module.sdk.protocol",
+  "synchrony": "synchronous",
+  "intent": "Encode and decode mailbox envelopes and apply wire limits in the stores."
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "capability.sdk.sdk-root",
+  "kind": "capability",
+  "name": "SDK Root",
+  "status": "active",
+  "summary": "Owns the BYOK SDK workspace packages: the wire and store contracts, the coordination kernel, the Host compositions, the device daemon, key custody, the Durable Object host and the private conformance suites.",
+  "responsibilities": [
+    "Keep the wire protocol, tenant store ports and device proof contracts as dependency-free leaf packages.",
+    "Hold coordination and terminal authority in one environment-neutral kernel over injected stores.",
+    "Compose the kernel for embedded (memory or SQLite) and hosted (Postgres and R2) Host deployments.",
+    "Run the device daemon that pairs, long-polls, admits offers, drives local agent runtimes and reports terminal results.",
+    "Prove every composition against one conformance assertion source."
+  ],
+  "source": {
+    "include": [
+      "packages/**"
+    ]
+  },
+  "extensions": {
+    "contractFiles": {
+      "agents": "packages/AGENTS.md",
+      "claude": "packages/CLAUDE.md"
+    },
+    "lspProfile": "typescript-lsp",
+    "verification": [
+      "bun run build",
+      "bun run typecheck",
+      "bun run test",
+      "bun run check:api-surface",
+      "bun run check:version-authority"
+    ]
+  }
+}

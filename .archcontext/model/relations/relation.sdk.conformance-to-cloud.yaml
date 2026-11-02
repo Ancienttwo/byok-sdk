@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.conformance-to-cloud",
+  "kind": "depends-on",
+  "source": "module.sdk.conformance",
+  "target": "module.sdk.cloud",
+  "synchrony": "synchronous",
+  "intent": "Run the kernel conformance suites against each composition."
+}

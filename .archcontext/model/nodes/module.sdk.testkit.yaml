@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "module.sdk.testkit",
+  "kind": "module",
+  "name": "Device simulator",
+  "status": "active",
+  "parent": "capability.sdk.sdk-root",
+  "layer": "verification",
+  "summary": "Private headless device simulator: protocol-level pairing, token renewal, presence and built-in negative assertions.",
+  "source": {
+    "include": [
+      "packages/testkit/**"
+    ]
+  },
+  "notes": [
+    "Private; its only consumer is the conformance suite."
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "archcontext.node/v2",
+  "id": "component.sdk.client-session",
+  "kind": "component",
+  "name": "Device access and session",
+  "status": "active",
+  "parent": "module.sdk.client",
+  "layer": "device",
+  "summary": "Pairing, token renewal, the single long-poll session, persisted cursor acknowledgement, the SQLite journal, presence and device credential custody.",
+  "source": {
+    "include": [
+      "packages/client/src/daemon/auth-manager.ts",
+      "packages/client/src/daemon/connection-manager.ts",
+      "packages/client/src/daemon/long-poll-transport.ts",
+      "packages/client/src/daemon/http-client.ts",
+      "packages/client/src/daemon/cursor-store.ts",
+      "packages/client/src/daemon/replay-cursor.ts",
+      "packages/client/src/daemon/journal/**",
+      "packages/client/src/daemon/presence-publisher.ts",
+      "packages/client/src/daemon/deterministic-jitter.ts",
+      "packages/client/src/daemon/device-credential-store.ts",
+      "packages/client/src/daemon/device-credential-provider.ts",
+      "packages/client/src/daemon/device-keys.ts",
+      "packages/client/src/daemon/device-proof-signer.ts",
+      "packages/client/src/daemon/device-assertion-signer.ts"
+    ]
+  }
+}

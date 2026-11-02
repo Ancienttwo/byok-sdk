@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.client-session-to-cloud",
+  "kind": "calls",
+  "source": "component.sdk.client-session",
+  "target": "module.sdk.cloud",
+  "synchrony": "asynchronous",
+  "intent": "Pair, renew tokens, long-poll the device mailbox and post device messages; this is the only channel between the device and the Host side.",
+  "protocol": "HTTPS long-poll"
+}

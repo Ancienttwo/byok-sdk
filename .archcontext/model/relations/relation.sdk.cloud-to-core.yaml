@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "archcontext.relation/v1",
+  "id": "relation.sdk.cloud-to-core",
+  "kind": "depends-on",
+  "source": "module.sdk.cloud",
+  "target": "module.sdk.core",
+  "synchrony": "synchronous",
+  "intent": "Read and write coordination facts through the tenant-first store ports."
+}

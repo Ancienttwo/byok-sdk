@@ -1,0 +1,33 @@
+codeFacts:
+  mode: "embedded"
+  provider: "codegraph"
+  required: true
+content:
+  decisions: "docs/adr"
+  generated: ".archcontext/generated"
+  policies: ".archcontext/policies"
+  practices: ".archcontext/practices"
+  projections: ".archcontext/projections"
+generated:
+  commitToGit: true
+  formats:
+    - "markdown"
+    - "mermaid"
+model:
+  layout: "split"
+  root: ".archcontext/model"
+privacy:
+  cloudContentUpload: "deny"
+  localTunnel:
+    includeSourceByDefault: false
+    maxResultBytes: 8192
+product:
+  governanceLevel: "auto"
+  id: "product.byok-sdk"
+  name: "BYOK SDK"
+runtime:
+  checkpoint:
+    changedFileThreshold: 20
+    requiredBeforeComplete: true
+  contextBudgetBytes: 12288
+schemaVersion: "archcontext.manifest/v1"
