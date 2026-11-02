@@ -11,6 +11,7 @@ import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { atomicWriteFile } from '../util/atomic-write';
 import { pickPlainDataProperties } from '../util/plain-data';
+import { sameContent, sameFile } from '../util/file-state';
 import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
   type DeviceCredentialBackend,
@@ -137,23 +138,6 @@ export function assertStoreBound(projection: DeviceMetadata | undefined, authori
   }
 }
 
-function sameInode(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return (
-    sameInode(left, right) &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
-}
-
-function sameContentState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return sameInode(left, right) && left.size === right.size && left.mtimeNs === right.mtimeNs;
-}
-
 const LEGACY_SECRET_FIELDS = new Set(['accessToken', 'expiresAt', 'devicePrivateKeyPem']);
 
 function assertDeviceMetadata(value: unknown): asserts value is DeviceMetadata {
@@ -261,9 +245,9 @@ export class DeviceStore {
       const guarded = lstatSync(guardPath, { bigint: true });
       const named = lstatSync(this.filePath, { bigint: true });
       // Creating the guard hard-link legitimately changes ctime/link count on
-      // the inode, so the post-link check compares identity + content-bearing
-      // size/mtime. The bounded read already compared ctime before publication.
-      if (!sameContentState(openStat, opened.stat) || !sameInode(guarded, opened.stat) || !sameContentState(named, opened.stat)) {
+      // the inode; the post-link check compares identity + content-bearing
+      // size/mtime, as the bounded read does.
+      if (!sameContent(openStat, opened.stat) || !sameFile(guarded, opened.stat) || !sameContent(named, opened.stat)) {
         throw new Error('device identity changed before removal');
       }
       unlinkSync(this.filePath);
@@ -352,8 +336,8 @@ export class DeviceStore {
         !before.isFile() ||
         !namedAfterOpen.isFile() ||
         namedAfterOpen.isSymbolicLink() ||
-        !sameFileState(namedBefore, before) ||
-        !sameFileState(before, namedAfterOpen)
+        !sameContent(namedBefore, before) ||
+        !sameContent(before, namedAfterOpen)
       ) {
         throw new Error('device identity pathname changed before safe open');
       }
@@ -367,8 +351,8 @@ export class DeviceStore {
       const namedAfterRead = await fs.lstat(this.filePath, { bigint: true });
       if (
         bytesRead !== size ||
-        !sameFileState(before, after) ||
-        !sameFileState(after, namedAfterRead) ||
+        !sameContent(before, after) ||
+        !sameContent(after, namedAfterRead) ||
         namedAfterRead.isSymbolicLink()
       ) {
         throw new Error('device identity changed during bounded read');

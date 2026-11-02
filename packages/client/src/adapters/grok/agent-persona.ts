@@ -2,6 +2,7 @@ import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { RuntimeOperationManifest } from '../../types';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
+import { sameContent, sameFile } from '../../util/file-state';
 
 // Session-local instructions have their own read budget, independent of model context size.
 const MAX_PERSONA_BYTES = 64 * 1024;
@@ -27,13 +28,13 @@ export async function grokAgentPersona(manifest: RuntimeOperationManifest): Prom
     if (await fs.realpath(home) !== home || !(await fs.lstat(home)).isDirectory()) throw new Error('invalid home');
     const file = path.join(home, 'AGENTS.md');
     let before;
-    try { before = await fs.lstat(file); }
+    try { before = await fs.lstat(file, { bigint: true }); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
-    if (!before.isFile() || before.size > MAX_PERSONA_BYTES) throw new Error('invalid persona');
+    if (!before.isFile() || before.size > BigInt(MAX_PERSONA_BYTES)) throw new Error('invalid persona');
     const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     try {
-      const opened = await handle.stat();
-      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > MAX_PERSONA_BYTES) throw new Error('persona changed');
+      const opened = await handle.stat({ bigint: true });
+      if (!opened.isFile() || !sameFile(opened, before) || opened.size > BigInt(MAX_PERSONA_BYTES)) throw new Error('persona changed');
       const bytes = Buffer.alloc(MAX_PERSONA_BYTES + 1);
       let total = 0;
       while (total < bytes.length) {
@@ -41,10 +42,10 @@ export async function grokAgentPersona(manifest: RuntimeOperationManifest): Prom
         if (!bytesRead) break;
         total += bytesRead;
       }
-      const after = await fs.lstat(file);
-      const final = await handle.stat();
-      if (total > MAX_PERSONA_BYTES || !after.isFile() || after.dev !== opened.dev || after.ino !== opened.ino ||
-          final.size !== total || final.mtimeMs !== opened.mtimeMs || final.ctimeMs !== opened.ctimeMs) throw new Error('persona changed');
+      const after = await fs.lstat(file, { bigint: true });
+      const final = await handle.stat({ bigint: true });
+      if (total > MAX_PERSONA_BYTES || !after.isFile() || !sameFile(after, opened) ||
+          final.size !== BigInt(total) || !sameContent(final, opened)) throw new Error('persona changed');
       text = total === 0 ? undefined : new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total));
     } finally { await handle.close(); }
   } catch {

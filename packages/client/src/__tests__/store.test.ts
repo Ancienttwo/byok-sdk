@@ -105,6 +105,25 @@ describe('DeviceStore (atomic write path)', () => {
     expect(await store.load()).toBeUndefined();
   });
 
+  it('#1342: a metadata-only (ctime) change between the first lstat and open() still loads the record', async () => {
+    storeDir = await tmpDir('byok-device-store-');
+    const store = createTestDeviceStore(storeDir);
+    await store.save(record);
+    const filePath = path.join(storeDir, 'device.json');
+    const realLstat = fs.lstat.bind(fs);
+    let calls = 0;
+    const spy = vi.spyOn(fs, 'lstat').mockImplementation((async (...args: Parameters<typeof fs.lstat>) => {
+      const result = await realLstat(...args);
+      if (++calls === 1) await fs.chmod(filePath, 0o600);
+      return result;
+    }) as typeof fs.lstat);
+    try {
+      expect(await store.load()).toEqual(record);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   // Finding R4 (cross-model re-review — F7 residual): verifying the actual
   // claim ("DeviceStore.save -> pairing fails with a clear typed error"),
   // not just asserting it — `secureDirOptions` (a test-only DI seam, see
