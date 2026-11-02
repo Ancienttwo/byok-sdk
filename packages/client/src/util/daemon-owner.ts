@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
+import { sameContent } from './file-state';
 import { ensureSecureDir } from './secure-dir';
 import {
   acquirePathMutationGate,
@@ -225,16 +226,8 @@ async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
       !stat.isFile() ||
       !namedAfterOpen.isFile() ||
       namedAfterOpen.isSymbolicLink() ||
-      stat.dev !== namedBefore.dev ||
-      stat.ino !== namedBefore.ino ||
-      stat.size !== namedBefore.size ||
-      stat.mtimeNs !== namedBefore.mtimeNs ||
-      stat.ctimeNs !== namedBefore.ctimeNs ||
-      stat.dev !== namedAfterOpen.dev ||
-      stat.ino !== namedAfterOpen.ino ||
-      stat.size !== namedAfterOpen.size ||
-      stat.mtimeNs !== namedAfterOpen.mtimeNs ||
-      stat.ctimeNs !== namedAfterOpen.ctimeNs
+      !sameContent(stat, namedBefore) ||
+      !sameContent(stat, namedAfterOpen)
     ) {
       throw new Error('store mutation owner path changed before safe open');
     }
@@ -246,16 +239,8 @@ async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
     const namedAfterRead = await fs.lstat(filePath, { bigint: true });
     if (
       bytesRead !== size ||
-      after.dev !== stat.dev ||
-      after.ino !== stat.ino ||
-      after.size !== stat.size ||
-      after.mtimeNs !== stat.mtimeNs ||
-      after.ctimeNs !== stat.ctimeNs ||
-      namedAfterRead.dev !== stat.dev ||
-      namedAfterRead.ino !== stat.ino ||
-      namedAfterRead.size !== stat.size ||
-      namedAfterRead.mtimeNs !== stat.mtimeNs ||
-      namedAfterRead.ctimeNs !== stat.ctimeNs
+      !sameContent(after, stat) ||
+      !sameContent(namedAfterRead, stat)
     ) {
       throw new Error('store mutation owner path changed during inspection');
     }

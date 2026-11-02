@@ -13,6 +13,7 @@ import {
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
 } from '@byok-sdk/protocol';
 import { AgentContentAuditStore, AgentContentAuditStoreError } from './agent-content-audit-store';
+import { sameContent } from '../util/file-state';
 
 export const AGENT_CONTENT_READ_SURFACES = ['workspace', 'transcript', 'artifact'] as const;
 export type AgentContentReadSurface = (typeof AGENT_CONTENT_READ_SURFACES)[number];
@@ -556,23 +557,13 @@ async function inspectRegularTarget(root: string, target: string): Promise<void>
   if (realTarget !== target || !isWithin(root, realTarget)) throw new TargetPolicyError('symlink');
 }
 
-function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return (
-    left.dev === right.dev &&
-    left.ino === right.ino &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
-}
-
 async function readBoundedFile(target: string, maxBytes: number): Promise<Uint8Array> {
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
     handle = await fs.open(target, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
     const before = await handle.stat({ bigint: true });
     const namedBefore = await fs.lstat(target, { bigint: true });
-    if (!before.isFile() || before.isSymbolicLink() || !namedBefore.isFile() || namedBefore.isSymbolicLink() || !sameFileState(before, namedBefore)) {
+    if (!before.isFile() || before.isSymbolicLink() || !namedBefore.isFile() || namedBefore.isSymbolicLink() || !sameContent(before, namedBefore)) {
       throw new TargetPolicyError('symlink');
     }
     if (before.size > BigInt(maxBytes)) throw new TargetPolicyError('byte-limit');
@@ -585,7 +576,7 @@ async function readBoundedFile(target: string, maxBytes: number): Promise<Uint8A
     }
     const after = await handle.stat({ bigint: true });
     const namedAfter = await fs.lstat(target, { bigint: true });
-    if (!sameFileState(before, after) || !sameFileState(after, namedAfter)) throw new TargetPolicyError('symlink');
+    if (!sameContent(before, after) || !sameContent(after, namedAfter)) throw new TargetPolicyError('symlink');
     if (offset > maxBytes) throw new TargetPolicyError('byte-limit');
     return new Uint8Array(buffer.subarray(0, offset));
   } catch (error) {

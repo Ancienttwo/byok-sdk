@@ -28,6 +28,7 @@ import type {
   InputPreparationReceiptV1,
   InputPreparationRequestV1,
 } from '../input-preparation';
+import { sameContent } from '../util/file-state';
 
 /**
  * M4 Phase 2: the CLI-side half of the control socket — connects, performs
@@ -71,16 +72,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return (
-    left.dev === right.dev &&
-    left.ino === right.ino &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
-}
-
 /**
  * Read the authentication token through a bounded pathname-bound handle.
  * Diagnostics calls this client even when no daemon is expected, so a FIFO,
@@ -109,8 +100,8 @@ async function readControlToken(tokenPath: string): Promise<string | undefined> 
       !opened.isFile() ||
       !namedAfterOpen.isFile() ||
       namedAfterOpen.isSymbolicLink() ||
-      !sameFileState(namedBefore, opened) ||
-      !sameFileState(opened, namedAfterOpen)
+      !sameContent(namedBefore, opened) ||
+      !sameContent(opened, namedAfterOpen)
     ) {
       throw new Error('control token pathname changed before safe open');
     }
@@ -125,8 +116,8 @@ async function readControlToken(tokenPath: string): Promise<string | undefined> 
     if (
       bytesRead !== size ||
       namedAfterRead.isSymbolicLink() ||
-      !sameFileState(opened, afterRead) ||
-      !sameFileState(afterRead, namedAfterRead)
+      !sameContent(opened, afterRead) ||
+      !sameContent(afterRead, namedAfterRead)
     ) {
       throw new Error('control token changed during bounded read');
     }

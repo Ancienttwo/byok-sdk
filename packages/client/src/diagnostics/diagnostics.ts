@@ -44,6 +44,7 @@ import {
 } from '../daemon/operational-health';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { ensureSecureDir } from '../util/secure-dir';
+import { sameContent, sameFile } from '../util/file-state';
 
 /**
  * The server rejects a device proof whose `issuedAt` is further than its skew
@@ -97,9 +98,9 @@ async function fileSize(filePath: string): Promise<number | undefined> {
 
 async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['device']> {
   const filePath = path.join(storeDir, 'device.json');
-  let pathStat: import('node:fs').Stats;
+  let pathStat: import('node:fs').BigIntStats;
   try {
-    pathStat = await fs.lstat(filePath);
+    pathStat = await fs.lstat(filePath, { bigint: true });
     if (!pathStat.isFile()) return { status: 'unavailable' };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'unpaired' };
@@ -116,41 +117,25 @@ async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['dev
     return { status: 'unavailable' };
   }
   try {
-    const stat = await handle.stat();
-    const namedAfterOpen = await fs.lstat(filePath);
+    const stat = await handle.stat({ bigint: true });
+    const namedAfterOpen = await fs.lstat(filePath, { bigint: true });
     if (
       !stat.isFile() ||
       !namedAfterOpen.isFile() ||
       namedAfterOpen.isSymbolicLink() ||
-      stat.dev !== pathStat.dev ||
-      stat.ino !== pathStat.ino ||
-      stat.size !== pathStat.size ||
-      stat.mtimeMs !== pathStat.mtimeMs ||
-      stat.ctimeMs !== pathStat.ctimeMs ||
-      stat.dev !== namedAfterOpen.dev ||
-      stat.ino !== namedAfterOpen.ino ||
-      stat.size !== namedAfterOpen.size ||
-      stat.mtimeMs !== namedAfterOpen.mtimeMs ||
-      stat.ctimeMs !== namedAfterOpen.ctimeMs ||
-      stat.size <= 0 ||
-      stat.size > MAX_DEVICE_RECORD_BYTES
+      !sameContent(stat, pathStat) ||
+      !sameContent(stat, namedAfterOpen) ||
+      stat.size <= 0n ||
+      stat.size > BigInt(MAX_DEVICE_RECORD_BYTES)
     ) return { status: 'unavailable' };
-    const bytes = Buffer.alloc(stat.size);
+    const bytes = Buffer.alloc(Number(stat.size));
     const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
-    const after = await handle.stat();
-    const namedAfterRead = await fs.lstat(filePath);
+    const after = await handle.stat({ bigint: true });
+    const namedAfterRead = await fs.lstat(filePath, { bigint: true });
     if (
       bytesRead !== bytes.length ||
-      after.dev !== stat.dev ||
-      after.ino !== stat.ino ||
-      after.size !== stat.size ||
-      after.mtimeMs !== stat.mtimeMs ||
-      after.ctimeMs !== stat.ctimeMs ||
-      namedAfterRead.dev !== stat.dev ||
-      namedAfterRead.ino !== stat.ino ||
-      namedAfterRead.size !== stat.size ||
-      namedAfterRead.mtimeMs !== stat.mtimeMs ||
-      namedAfterRead.ctimeMs !== stat.ctimeMs
+      !sameContent(after, stat) ||
+      !sameContent(namedAfterRead, stat)
     ) {
       return { status: 'unavailable' };
     }
@@ -170,14 +155,13 @@ interface FileIdentity {
   ino: bigint;
   size: bigint;
   mtimeNs: bigint;
-  ctimeNs: bigint;
 }
 
 async function regularFileIdentity(filePath: string): Promise<FileIdentity | undefined> {
   try {
     const stat = await fs.lstat(filePath, { bigint: true });
     if (!stat.isFile()) throw new Error('journal component is not a regular file');
-    return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
+    return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw err;
@@ -186,13 +170,7 @@ async function regularFileIdentity(filePath: string): Promise<FileIdentity | und
 
 function sameIdentity(left: FileIdentity | undefined, right: FileIdentity | undefined): boolean {
   if (!left || !right) return left === right;
-  return (
-    left.dev === right.dev &&
-    left.ino === right.ino &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
+  return sameContent(left, right);
 }
 
 function identityFromBigIntStat(stat: {
@@ -200,9 +178,8 @@ function identityFromBigIntStat(stat: {
   ino: bigint;
   size: bigint;
   mtimeNs: bigint;
-  ctimeNs: bigint;
 }): FileIdentity {
-  return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
+  return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs };
 }
 
 async function copyOpenFileBounded(
@@ -370,7 +347,7 @@ function readPinnedQuarantineFile(
   const fd = openSync(name, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0));
   try {
     const opened = fstatSync(fd, { bigint: true });
-    if (!opened.isFile() || !sameInode(opened, namedBefore) || opened.size < 0 || opened.size > BigInt(maxBytes)) {
+    if (!opened.isFile() || !sameFile(opened, namedBefore) || opened.size < 0 || opened.size > BigInt(maxBytes)) {
       throw new Error('quarantine entry could not be opened as a bounded regular file');
     }
     let bytes: Buffer | undefined;
@@ -390,7 +367,7 @@ function readPinnedQuarantineFile(
     }
     const openedAfter = fstatSync(fd, { bigint: true });
     const namedAfter = lstatSync(name, { bigint: true });
-    if (!sameFileState(openedAfter, opened) || !sameFileState(namedAfter, opened)) {
+    if (!sameContent(openedAfter, opened) || !sameContent(namedAfter, opened)) {
       throw new Error('quarantine entry changed during inspection');
     }
     return {
@@ -457,7 +434,7 @@ function inspectQuarantinePinned(
   try {
     process.chdir(dir);
     const pinned = lstatSync('.', { bigint: true });
-    if (!pinned.isDirectory() || !sameInode(pinned, expectedDirectory)) {
+    if (!pinned.isDirectory() || !sameFile(pinned, expectedDirectory)) {
       throw new Error('quarantine directory changed during inspection');
     }
     const selected: import('node:fs').Dirent[] = [];
@@ -905,19 +882,6 @@ export function stableIdentifierHash(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-function sameInode(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
-  return (
-    sameInode(left, right) &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
-}
-
 /**
  * Run the destructive publication against a cwd-pinned directory inode. Node
  * does not expose openat/linkat; a checked `process.chdir()` plus a fully
@@ -947,12 +911,12 @@ function publishQuarantineEvidencePinned(
     process.chdir(quarantineDir);
     entered = true;
     const pinned = lstatSync('.', { bigint: true });
-    if (!pinned.isDirectory() || !sameInode(pinned, expectedDirectory)) {
+    if (!pinned.isDirectory() || !sameFile(pinned, expectedDirectory)) {
       throw new Error('quarantine path changed before publication; refusing quarantine');
     }
     const openSource = fstatSync(sourceFd, { bigint: true });
     const namedSource = lstatSync(sourcePath, { bigint: true });
-    if (!sameFileState(openSource, sourceStat) || !sameFileState(namedSource, sourceStat)) {
+    if (!sameContent(openSource, sourceStat) || !sameContent(namedSource, sourceStat)) {
       throw new Error('operational health source identity changed before quarantine');
     }
     const sizeBytes = Number(sourceStat.size);
@@ -967,7 +931,7 @@ function publishQuarantineEvidencePinned(
       position += bytesRead;
     }
     const afterRead = fstatSync(sourceFd, { bigint: true });
-    if (!sameFileState(afterRead, sourceStat)) {
+    if (!sameContent(afterRead, sourceStat)) {
       throw new Error('operational health state changed during bounded copy');
     }
     const sha256 = createHash('sha256').update(bytes).digest('hex');
@@ -984,14 +948,14 @@ function publishQuarantineEvidencePinned(
     evidenceCreated = true;
     const evidence = lstatSync(evidenceName, { bigint: true });
     const tempEvidence = lstatSync(evidenceTemp, { bigint: true });
-    if (!evidence.isFile() || !sameInode(evidence, tempEvidence) || evidence.size !== sourceStat.size) {
+    if (!evidence.isFile() || !sameFile(evidence, tempEvidence) || evidence.size !== sourceStat.size) {
       throw new Error('quarantined operational health evidence does not match the bounded copy');
     }
     unlinkSync(evidenceTemp);
     evidenceTemp = undefined;
     const finalOpenSource = fstatSync(sourceFd, { bigint: true });
     const finalNamedSource = lstatSync(sourcePath, { bigint: true });
-    if (!sameFileState(finalOpenSource, sourceStat) || !sameFileState(finalNamedSource, sourceStat)) {
+    if (!sameContent(finalOpenSource, sourceStat) || !sameContent(finalNamedSource, sourceStat)) {
       throw new Error('operational health source changed before removal');
     }
     const manifestBody = `${JSON.stringify(
@@ -1035,7 +999,7 @@ function publishQuarantineEvidencePinned(
     }
     const removalOpenSource = fstatSync(sourceFd, { bigint: true });
     const removalNamedSource = lstatSync(sourcePath, { bigint: true });
-    if (!sameFileState(removalOpenSource, sourceStat) || !sameFileState(removalNamedSource, sourceStat)) {
+    if (!sameContent(removalOpenSource, sourceStat) || !sameContent(removalNamedSource, sourceStat)) {
       throw new Error('operational health source changed before removal');
     }
     unlinkSync(sourcePath);
