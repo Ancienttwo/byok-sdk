@@ -50,9 +50,13 @@ function fixture(t) {
     git('commit', '-q', '-m', tag);
     git('tag', tag);
   };
-  for (const name of readdirSync(path.join(root, HISTORY_DIR))) {
-    tagManifest(readFileSync(path.join(root, HISTORY_DIR, name)), `v${name.slice(name.indexOf('-') + 1, -'.json'.length)}`);
-  }
+  const spans = readdirSync(path.join(root, HISTORY_DIR)).map((name) => name.slice(0, -'.json'.length).split('-'));
+  for (const [from, to] of spans) tagManifest(readFileSync(path.join(root, HISTORY_DIR, `${from}-${to}.json`)), `v${to}`);
+  // The baseline is the release the history ends at. A release preparation
+  // has already bumped the package version past it.
+  const [, released] = spans.find(([, to]) => !spans.some(([from]) => from === to));
+  const clientPackage = path.join(root, 'packages/client/package.json');
+  writeFileSync(clientPackage, readFileSync(clientPackage, 'utf8').replace(/"version": "[^"]+"/, `"version": "${released}"`));
   const baseline = buildSnapshot(root);
   mkdirSync(path.dirname(path.join(root, BASELINE_PATH)), { recursive: true });
   writeFileSync(path.join(root, BASELINE_PATH), `${JSON.stringify(baseline, null, 2)}\n`);
