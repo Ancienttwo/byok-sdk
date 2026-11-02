@@ -9,6 +9,9 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolAuthorizationRules, type ToolAuthorizationVerdict, type ToolCall } from '../tool-authorization';
 import { readToolAuthorizationGateEnv, requestToolAuthorization, TOOL_AUTHORIZATION_GATE_ENV } from '../tool-authorization-ipc';
+import { bindFileScopeGate } from '../file-scope-gate-binding';
+import { resolveFileScopeGrant, type FileScopeGrant } from '../file-scope-guard';
+import { observationOf } from './fixtures/mcp-observation';
 import type { Session } from '../types';
 
 const roots: string[] = [];
@@ -22,7 +25,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
-async function fixture(delegated = false, childAgent = 'hook-child', background = false, command?: string) {
+async function fixture(delegated = false, childAgent = 'hook-child', background = false, command?: string, mcpTool?: string) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-tool-auth-')));
   roots.push(root);
   const agentDir = path.join(root, 'agent');
@@ -55,7 +58,9 @@ async function fixture(delegated = false, childAgent = 'hook-child', background 
         ? { agent: childAgent, task: 'Write the target file', model: 'hook-loopback/probe', async: background, context: 'fresh', output: false, artifacts: false, timeoutMs: 20000 }
         : { agent: childAgent, task: 'Write the target file' }) }
       : childFirst || (!delegated && turn % 2 === 1)
-        ? command === undefined
+        ? mcpTool !== undefined
+          ? { name: mcpTool, arguments: '{}' }
+          : command === undefined
           ? { name: 'write', arguments: JSON.stringify({ path: target, content: 'actual file content' }) }
           : { name: 'bash', arguments: JSON.stringify({ command }) }
         : undefined;
@@ -110,12 +115,19 @@ function adapter() {
 function gate(
   workspace: string,
   decide: (summary: string) => { approved: boolean; reason?: string } = () => ({ approved: false, reason: 'owner authorization required' }),
-  options: { rules?: ToolAuthorizationRules; home?: string } = {},
+  options: {
+    rules?: ToolAuthorizationRules; home?: string;
+    mcpIdentities?: ReadonlyMap<string, { readonly server: string; readonly tool: string }>; fileScope?: FileScopeGrant;
+  } = {},
 ) {
   const calls: ToolCall[] = [];
   const summaries: string[] = [];
   const verdicts: ToolAuthorizationVerdict[] = [];
-  const inner = createAutoToolAuthorizationGate({ workspace, timeoutMs: 5_000, ...options, requestAuthorization: async summary => { summaries.push(summary); return decide(summary); } });
+  const { fileScope, ...gateOptions } = options;
+  const inner = createAutoToolAuthorizationGate({ workspace, timeoutMs: 5_000, ...gateOptions, requestAuthorization: async summary => { summaries.push(summary); return decide(summary); } });
+  if (fileScope !== undefined) {
+    bindFileScopeGate(inner, { grant: fileScope, taskId: 'pi-tool-auth', lane: 'rpc', homeAccess: 'writer', onDeny: () => {} });
+  }
   const toolAuthorization: ToolAuthorizationGate = { timeoutMs: inner.timeoutMs, authorize: async call => {
     calls.push(call);
     const verdict = await inner.authorize(call);
@@ -183,6 +195,35 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
       }
     }
   }, 30_000);
+
+  // `approveTools` is a grant only a declaring runtime (Codex) receives. Pi
+  // declares none, so a listed tool keeps asking even if a grant reached it.
+  it.each(['fileScope', 'alwaysAsk'] as const)('%s: an approveTools-listed MCP tool still asks on Pi', async mode => {
+    const f = await fixture(false, 'hook-child', false, undefined, 'mcp__salesko__echo');
+    const recordTo = path.join(f.root, 'mcp-records.jsonl');
+    const server = path.resolve(import.meta.dirname, 'fixtures/mcp-fixture-server.mjs');
+    const cwdIdentity = await fs.stat(f.cwd, { bigint: true });
+    const g = gate(f.cwd, undefined, {
+      home: f.root,
+      mcpIdentities: new Map([['mcp__salesko__echo', { server: 'salesko', tool: 'echo' }]]),
+      ...(mode === 'fileScope'
+        ? { fileScope: await resolveFileScopeGrant({ fileScope: { mode: 'home' }, home: { path: f.cwd, identity: { dev: cwdIdentity.dev, ino: cwdIdentity.ino } } }) }
+        : { rules: { alwaysAsk: [{ id: 'ask-salesko', match: { mcpServer: 'salesko' } }] } }),
+    });
+    const session = await startPreparedOperation(adapter(), { instruction: 'Run the scripted call, then finish.' }, {
+      workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization,
+      mcpServers: { salesko: { command: process.execPath, args: [server, JSON.stringify({ recordTo })] } },
+      mcpToolsetTools: observationOf({ salesko: ['echo'] }),
+      mcpToolApprovals: { salesko: ['echo'] },
+    });
+    sessions.push(session);
+    await finish(session);
+    expect(g.summaries).toHaveLength(1);
+    expect(g.summaries[0]).toContain('mcp__salesko__echo [mcp salesko/echo]');
+    expect(g.verdicts).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: 'owner authorization required',
+      authorization: mode === 'fileScope' ? { source: 'floor', ruleIds: [] } : { source: 'rule', ruleIds: ['ask-salesko'] } }]);
+    await expect(fs.stat(recordTo)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 45_000);
 
   it('applies a newly selected Always Ask rule when a previously allowed native session resumes', async () => {
     const f = await fixture();

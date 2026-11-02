@@ -378,9 +378,10 @@ Only exact, unique tool names are accepted; no wildcard or server-wide default
 is supported. Reserved SDK server names cannot be configured or overridden.
 An omitted/empty list adds no approval. The list participates in the registry's
 content revision and is frozen with each attempt before runtime detection;
-reloads affect later attempts only. A nonempty list requires the adapter's local
-`mcpToolApprovals` capability (currently Codex); another explicitly selected
-runtime is declined before claim. No wire field or new tool discovery is added.
+reloads affect later attempts only. The list is a grant projected only to a
+runtime whose descriptor declares `mcpToolApprovals` (currently Codex). It never
+affects admission or runtime selection; any other runtime handles the server as
+if `approveTools` were absent. No wire field or new tool discovery is added.
 
 A misspelled tool name may allow the thread to open but does not authorize the
 real tool. There is no separate approval-status API. Start and resume both use

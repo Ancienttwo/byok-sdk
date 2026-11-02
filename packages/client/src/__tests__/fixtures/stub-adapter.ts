@@ -218,6 +218,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       env: NodeJS.ProcessEnv;
       mcpServers?: RuntimeOperationStartInput['mcpServers'];
       mcpToolsetTools?: RuntimeOperationStartInput['mcpToolsetTools'];
+      mcpToolApprovals?: RuntimeOperationStartInput['mcpToolApprovals'];
       approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
     };
   }> = [];
@@ -343,6 +344,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
         env: startInput.env,
         ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
         ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
+        ...(startInput.mcpToolApprovals === undefined ? {} : { mcpToolApprovals: startInput.mcpToolApprovals }),
         ...(startInput.approvalChannel === undefined ? {} : { approvalChannel: startInput.approvalChannel }),
       },
     });

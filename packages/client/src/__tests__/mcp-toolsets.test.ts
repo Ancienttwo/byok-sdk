@@ -144,40 +144,64 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     }
   });
 
-  it('refuses unsupported explicit runtimes before detection, probing or claim', async () => {
+  it('runs an explicitly selected runtime without the capability and projects no grant to it', async () => {
     const registry = new McpToolsetRegistry({ host: { mcpServers: { host: { command: '/opt/host-mcp', approveTools: ['read'] } } } });
     const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
-    const detect = vi.spyOn(adapter, 'detect');
-    const probe = vi.fn(stubToolsProbe);
     const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot().toolsets, probe);
-    await runner.handleEnvelope(createEnvelope('task.offer', {
-      agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'claude', requiredToolsets: ['host'],
-    }, { taskId: 'unsupported-approvals', seq: 1 }));
-    expect(sent.find(e => e.type === 'task.decline')?.payload).toMatchObject({
-      reason: 'runtime "claude" cannot enforce Host MCP tool approvals', retryable: false,
-    });
-    expect(sent.some(e => e.type === 'task.claim')).toBe(false);
-    expect(adapter.startCalls).toHaveLength(0);
-    expect(detect).not.toHaveBeenCalled();
-    expect(probe).not.toHaveBeenCalled();
+    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot().toolsets);
+    try {
+      await runner.handleEnvelope(createEnvelope('task.offer', {
+        agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'claude', requiredToolsets: ['host'],
+      }, { taskId: 'unsupported-approvals', seq: 1 }));
+      expect(sent.some(e => e.type === 'task.decline')).toBe(false);
+      expect(sent.filter(e => e.type === 'task.claim')).toHaveLength(1);
+      expect(adapter.startCalls).toHaveLength(1);
+      expect(adapter.startCalls[0]!.ctx.mcpServers).toEqual({ host: { command: '/opt/host-mcp' } });
+      expect(adapter.startCalls[0]!.ctx.mcpToolApprovals).toBeUndefined();
+    } finally {
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'unsupported-approvals', seq: 2 }));
+    }
   });
 
-  it('automatic runtime selection skips a runtime that cannot enforce the Host declaration', async () => {
+  it('automatic runtime selection follows the preference order regardless of approveTools', async () => {
     const unsupported = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const supported = new HostApprovalAdapter();
-    const detect = vi.spyOn(unsupported, 'detect');
     const registry = new McpToolsetRegistry({ host: { mcpServers: { host: { command: '/opt/host-mcp', approveTools: ['read'] } } } });
-    const runner = await makeRunner([unsupported, supported], [], undefined, () => registry.snapshot().toolsets);
+    const runner = await makeRunner([supported, unsupported], [], undefined, () => registry.snapshot().toolsets);
     try {
       await runner.handleEnvelope(createEnvelope('task.offer', {
         agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', requiredToolsets: ['host'],
       }, { taskId: 'automatic-approvals', seq: 1 }));
-      expect(detect).not.toHaveBeenCalled();
-      expect(supported.approvals).toEqual([{ host: ['read'] }]);
-      expect(unsupported.startCalls).toHaveLength(0);
+      expect(unsupported.startCalls).toHaveLength(1);
+      expect(unsupported.startCalls[0]!.ctx.mcpToolApprovals).toBeUndefined();
+      expect(supported.approvals).toEqual([]);
     } finally {
       await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'automatic-approvals', seq: 2 }));
+    }
+  });
+
+  it('projects one toolset revision as a grant to Codex and as nothing to Claude', async () => {
+    const registry = new McpToolsetRegistry({ host: { mcpServers: { host: { command: '/opt/host-mcp', approveTools: ['read'] } } } });
+    const revision = registry.status().revision;
+    const codex = new HostApprovalAdapter();
+    const claude = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner([codex, claude], sent, undefined, () => registry.snapshot().toolsets);
+    try {
+      for (const [index, runtime] of (['codex', 'claude'] as const).entries()) {
+        await runner.handleEnvelope(createEnvelope('task.offer', {
+          agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime, requiredToolsets: ['host'],
+        }, { taskId: `shared-${runtime}`, seq: index + 1 }));
+      }
+      expect(registry.status().revision).toBe(revision);
+      expect(sent.filter(e => e.type === 'task.claim')).toHaveLength(2);
+      expect(codex.approvals).toEqual([{ host: ['read'] }]);
+      expect(claude.startCalls).toHaveLength(1);
+      expect(claude.startCalls[0]!.ctx.mcpServers).toEqual({ host: { command: '/opt/host-mcp' } });
+      expect(claude.startCalls[0]!.ctx.mcpToolApprovals).toBeUndefined();
+    } finally {
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'shared-codex', seq: 3 }));
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'shared-claude', seq: 4 }));
     }
   });
 
