@@ -2346,11 +2346,12 @@ reloads change identity and invalidate the old definition's observation.
 Servers and approvals are copied together from one registry snapshot before
 runtime detection and claim. The deeply frozen per-attempt `mcpToolApprovals`
 start resource cannot be enlarged by a later `toolsets.reload`; later attempts
-read the new definition. Runtime selection requires the local descriptor's
-`mcpToolApprovals: true` for a nonempty declaration. Codex declares it; other
-bundled runtimes do not. Explicit unsupported runtime selection declines
-non-retryably before claim; automatic selection excludes unsupported adapters.
-No approval declaration or capability is added to wire.
+read the new definition. `approveTools` is a grant: the daemon projects it
+only to a runtime whose descriptor declares `mcpToolApprovals: true`. It takes
+no part in admission or runtime selection. On any other runtime it has no
+effect, and that runtime handles the server exactly as it handles a server
+without `approveTools`. Codex declares the capability; other bundled runtimes
+do not. No approval declaration or capability is added to wire.
 
 Codex projects only `tools.<exact-name>.approval_mode = "approve"` in the
 thread config for both start and resume, alongside the separate fixed SDK

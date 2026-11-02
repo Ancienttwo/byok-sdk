@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Breaking (client)** — `approveTools` on a toolset server is a grant, not an
+  admission requirement. The daemon projects it only to a runtime whose
+  descriptor declares `mcpToolApprovals: true` (Codex today). It takes no part
+  in admission or runtime selection; any other runtime handles the server
+  exactly as it handles a server without `approveTools`. The declines
+  `runtime "<id>" cannot enforce Host MCP tool approvals` and `no available
+  runtime on this device can enforce Host MCP tool approvals` are removed. Two
+  behaviors change: an explicitly selected runtime without the capability (for
+  example Claude, Pi or Grok) now runs a task whose server carries
+  `approveTools`, where it was declined before claim; and automatic selection
+  on a device with both Claude and Codex now follows
+  `DEFAULT_RUNTIME_PREFERENCE` and picks Claude, where it picked Codex. No
+  field, default or wire shape changes. Migration: a Host that used
+  `approveTools` to keep a server on Codex pins the runtime with an explicit
+  runtime selection or `runtimeAllowlist`; a Host that wants Claude or Pi to
+  ask on every call sets `toolAuthorization` `auto` with an
+  `alwaysAsk { mcpServer }` rule; a Host that copied a toolset per runtime can
+  merge the copies into one id (#1324).
+
 - **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
   absolute Windows system directory PowerShell is started from. Omitted, the
   store reads `process.env.SystemRoot` once at construction; an injected value

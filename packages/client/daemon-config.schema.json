@@ -1543,7 +1543,7 @@
                   "items": {
                     "type": "string"
                   },
-                  "description": "Exact Host-approved tool names; omitted or empty adds no approval. Local configuration only."
+                  "description": "Exact Host-approved tool names, granted only to a runtime that declares `mcpToolApprovals`; never an admission requirement. Omitted or empty grants nothing. Local configuration only."
                 }
               },
               "required": [

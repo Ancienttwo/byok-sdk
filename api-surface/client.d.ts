@@ -13429,7 +13429,7 @@ export interface McpStdioServerConfig {
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
     mcpServers: Readonly<Record<string, McpStdioServerConfig & {
-        /** Exact Host-approved tool names; omitted or empty adds no approval. Local configuration only. */
+        /** Exact Host-approved tool names, granted only to a runtime that declares `mcpToolApprovals`; never an admission requirement. Omitted or empty grants nothing. Local configuration only. */
         readonly approveTools?: readonly string[];
     }>>;
 }
@@ -13575,7 +13575,7 @@ export interface RuntimeAdapterDescriptor {
      * never makes an offer wait on one it has no use for.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
-    /** Can enforce the local Host's exact per-tool MCP approvals. Nonempty grants require this capability. */
+    /** Receives the local Host's exact per-tool MCP approvals; projects grants; absent = the runtime receives none; never an admission requirement. */
     readonly mcpToolApprovals?: boolean;
     /**
      * Whether each `progress` event carries one complete assistant message
@@ -13804,7 +13804,7 @@ interface RuntimeOperationStartBase {
     readonly env: NodeJS.ProcessEnv;
     /** Local MCP authority resolved from logical wire ids. */
     readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
-    /** Local registry approvals copied and frozen with this attempt's servers; never sourced from wire or transcript. */
+    /** Local registry approvals copied and frozen with this attempt's servers, present only when the descriptor declares `mcpToolApprovals`; never sourced from wire or transcript. */
     readonly mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
     /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
     readonly mcpToolsetTools?: McpToolsetToolObservation;
