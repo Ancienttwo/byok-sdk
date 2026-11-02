@@ -9762,7 +9762,7 @@ export { generateWinswXml } from './lifecycle/winsw';
 export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service';
 export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service';
 export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError, } from './lifecycle/service-installation';
-export type { ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceUpgradeReceipt, } from './lifecycle/service-installation';
+export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit';
 export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit';
 export { checkUpgradeFrom } from './lifecycle/upgrade-from';
@@ -11083,7 +11083,7 @@ export declare function applyLoginShellEnvironment(): Promise<ServiceEnvironment
  */
 export declare function captureAndApply(options: ApplyLoginShellEnvironmentOptions): Promise<ServiceEnvironmentStatus>;
 // ==== @byok-sdk/client dist/lifecycle/service-installation.d.ts ====
-import type { StoreCompatibility } from '@byok-sdk/core';
+import type { StoreCompatibilityVerdict } from '@byok-sdk/core';
 import { type CreateServiceLifecycleOptions } from './create-service-lifecycle';
 import type { ManagedServiceLifecycle } from './managed-lifecycle';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types';
@@ -11101,6 +11101,32 @@ export interface ServicePayloadManifest {
     id: string;
     /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
     files: Record<string, string>;
+}
+/**
+ * One store the candidate's precheck reports (#1328): an SDK `LocalStoreId`
+ * or a Host store id, with the verdict the candidate gives it. The snapshot
+ * covers exactly the reported stores.
+ */
+export interface ServiceStoreVerdict {
+    /** An SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`, starting with a letter or digit. */
+    readonly store: string;
+    /** Absolute. No two stores share a path, and no store lies inside a `directory` store. */
+    readonly path: string;
+    /**
+     * `file` (the default): the file plus its `-wal` and `-journal`, each a
+     * regular file or absent. `directory`: the whole tree, a real directory
+     * (not a symlink) or absent; symlinks inside it are copied as links.
+     */
+    readonly kind?: 'file' | 'directory';
+    readonly verdict: StoreCompatibilityVerdict;
+    /** The error code the store reported when it refused the store. */
+    readonly code?: string;
+    readonly reason: string;
+}
+/** A daemon store the service process owns (#1328): the `DaemonConfig.storeDir` and `productId` of one daemon it runs. */
+export interface ServiceDaemonStore {
+    readonly storeDir: string;
+    readonly productId: string;
 }
 /**
  * What an installation is told to do (#1097). `program` and `precheck`
@@ -11122,10 +11148,12 @@ export interface ServiceInstallationOptions {
     program(versionDir: string): ServiceProgram;
     /**
      * The candidate's store precheck, run from its staged `versionDir` while
-     * every writer is stopped. It prints `{ "stores": StoreCompatibility[] }`
-     * (what `byok-agent upgrade check --store --json` prints) and exits 0 or 2.
-     * Every store the candidate rewrites must be listed: the snapshot covers
-     * exactly the listed stores.
+     * every writer is stopped. It prints `{ "stores": ServiceStoreVerdict[] }`
+     * (`byok-agent upgrade check --store --json` prints the SDK's own stores in
+     * this shape) and exits 0 or 2. Every store the candidate rewrites must be
+     * listed, Host stores included: the snapshot covers exactly the listed
+     * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
+     * `precheck_failed`.
      */
     precheck(versionDir: string): ServiceProgram;
     /**
@@ -11137,7 +11165,16 @@ export interface ServiceInstallationOptions {
     healthCheck?(signal: AbortSignal): Promise<void>;
     /** How long the health check may take. Default 60000. */
     healthTimeoutMs?: number;
-    /** How long a stop may take to leave the store quiescent. Default 30000. */
+    /**
+     * Every daemon store the service process owns, read after the service has
+     * stopped, on every upgrade, rollback and recover (#1328). Each `storeDir`
+     * is absolute and listed once; `productId` is not empty; an empty list is
+     * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
+     * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
+     * since the default one reaches only `productId`'s daemon.
+     */
+    daemonStores?(): Promise<readonly ServiceDaemonStore[]>;
+    /** How long a stop may take to leave every daemon store quiescent, shared by all of them. Default 30000. */
     stopTimeoutMs?: number;
     /** Test seams for the underlying lifecycle. */
     lifecycle?: CreateServiceLifecycleOptions;
@@ -11166,7 +11203,7 @@ export interface ServiceUpgradeReceipt {
     previous?: string;
     at: string;
     code?: ServiceInstallationErrorCode;
-    stores?: StoreCompatibility[];
+    stores?: ServiceStoreVerdict[];
 }
 /**
  * Every mutation (install, upgrade, rollback, recover, uninstall) first
@@ -11210,9 +11247,11 @@ declare const ERROR_MESSAGES: {
     readonly version_current: 'The payload is the version already running.';
     readonly version_conflict: 'A different payload with the same version id is already staged.';
     readonly upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.';
-    readonly store_busy: 'The store still has a running owner after the stop. Stop every process that uses this store and retry.';
+    readonly store_busy: 'A daemon store still has a running owner after the stop. Stop every process that uses it and retry.';
+    readonly daemon_stores_invalid: 'daemonStores() threw or listed an invalid store: each storeDir must be absolute and listed once, each productId not empty.';
     readonly owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.';
-    readonly precheck_failed: 'The candidate\'s store precheck did not produce a verdict.';
+    readonly precheck_failed: 'The candidate\'s store precheck did not produce a valid verdict.';
+    readonly snapshot_failed: 'The store snapshot could not be written. Nothing was switched; free space or remove what cannot be copied, then retry.';
     readonly store_repair_required: 'The candidate needs a new store path and a new pairing. Nothing was switched; decide before upgrading.';
     readonly store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.';
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
@@ -11220,11 +11259,11 @@ declare const ERROR_MESSAGES: {
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
-/** Closed codes; a store refusal carries the precheck verdicts. */
+/** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */
 export declare class ServiceInstallationError extends Error {
     readonly code: ServiceInstallationErrorCode;
-    readonly stores?: readonly StoreCompatibility[] | undefined;
-    constructor(code: ServiceInstallationErrorCode, stores?: readonly StoreCompatibility[] | undefined);
+    readonly stores?: readonly ServiceStoreVerdict[] | undefined;
+    constructor(code: ServiceInstallationErrorCode, stores?: readonly ServiceStoreVerdict[] | undefined, options?: ErrorOptions);
 }
 /** `<storeDir>/service/installation.json`: where this store's installation lives. */
 export interface ServiceInstallationRecord {
@@ -11406,7 +11445,12 @@ export interface ServiceDefinition {
     displayName?: string;
     /** What the launcher runs — see {@link ServiceProgram}. */
     program: ServiceProgram;
-    /** The product's SDK store (`DaemonConfig.storeDir` or its default). Holds the launcher and the lifecycle owner record under `<storeDir>/service`. */
+    /**
+     * The directory that holds the launcher and the lifecycle owner record
+     * under `<storeDir>/service`: the product's SDK store (`DaemonConfig.storeDir`
+     * or its default). With `ServiceInstallationOptions.daemonStores` it may be
+     * the product's own data directory instead.
+     */
     storeDir: string;
     /** `resolveHostLayout(...).logDir`: the daemon log and the service manager's redirect files (created if missing). On Windows also the default WinSW install directory — see `windows.installDir`. */
     logDir: string;

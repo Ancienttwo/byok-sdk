@@ -529,8 +529,8 @@ export {
   createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError,
 } from './lifecycle/service-installation';
 export type {
-  ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest,
-  ServiceUpgradeReceipt,
+  ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord,
+  ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt,
 } from './lifecycle/service-installation';
 export {
   claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError,

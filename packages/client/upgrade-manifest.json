@@ -88,6 +88,28 @@
       "items": [
         "export:@byok-sdk/client#ExecutionRecordUnknown"
       ]
+    },
+    {
+      "id": "client-service-daemon-stores",
+      "impact": "additive",
+      "summary": "ServiceInstallationOptions gains daemonStores(), and ServiceDaemonStore is exported: a service process that owns several daemon stores lists them, and every upgrade, rollback and recover stops all of them, holds an installer owner lease and the store gate of each through the pointer switch, and ends each store's owned processes. daemonStores requires healthCheck (createServiceInstallation throws TypeError without it). ServiceInstallationErrorCode gains daemon_stores_invalid (a relative or repeated storeDir, an empty productId, or a throw; the receipt is failed, nothing is switched and the old version is started again): a reader with an exhaustive switch over the codes gets one more case. The stop now takes an owner lease on each store, the default single store included, so what a crashed daemon left (a dead owner, a control.token whose endpoint refuses connections) is reclaimed and the upgrade goes on, where it was store_busy before. No Host code change is needed without daemonStores.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client#ServiceDaemonStore",
+        "export:@byok-sdk/client#ServiceInstallationErrorCode",
+        "export:@byok-sdk/client#ServiceInstallationOptions"
+      ]
+    },
+    {
+      "id": "client-service-store-verdicts",
+      "impact": "breaking",
+      "summary": "The service installation precheck prints { \"stores\": ServiceStoreVerdict[] }, and ServiceUpgradeReceipt.stores and ServiceInstallationError.stores hold ServiceStoreVerdict, a new exported type: store is an SDK LocalStoreId or a Host store id (1-64 of a-z 0-9 -, starting with a letter or digit), path is absolute, and an optional kind is file (the default: the file plus -wal and -journal) or directory (the whole tree, symlinks kept as links). core StoreCompatibility and LocalStoreId do not change. The precheck output is checked more strictly: a store id outside the pattern, an unknown kind, a repeated path or a store inside a directory store is precheck_failed, and so is a store that is not what its kind says, or is a symlink, at the snapshot (a symlinked store file was followed and copied before). A copy that fails is the new ServiceInstallationErrorCode snapshot_failed, with the copy error as its cause (the ServiceInstallationError constructor takes optional ErrorOptions): the partial snapshot is removed, the receipt is failed and the old version is started again; a reader with an exhaustive switch over the codes gets one more case. A snapshot 0.34 wrote is still restored.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationError",
+        "export:@byok-sdk/client#ServiceStoreVerdict",
+        "export:@byok-sdk/client#ServiceUpgradeReceipt"
+      ]
     }
   ],
   "changes": [
@@ -184,6 +206,36 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
       "change": "changed",
       "entry": "client-progress-message-boundary"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceDaemonStore",
+      "change": "added",
+      "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationError",
+      "change": "changed",
+      "entry": "client-service-store-verdicts"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "changed",
+      "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceStoreVerdict",
+      "change": "added",
+      "entry": "client-service-store-verdicts"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",
+      "change": "changed",
+      "entry": "client-service-store-verdicts"
     }
   ]
 }

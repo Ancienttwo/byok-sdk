@@ -195,8 +195,15 @@ async function acquireOne(input: PathMutationGateInput): Promise<PathMutationGat
   });
 }
 
-/** Acquire multiple path gates in one deterministic order to prevent deadlock. */
-export async function acquirePathMutationGates(inputs: readonly PathMutationGateInput[]): Promise<readonly PathMutationGate[]> {
+/**
+ * Acquire multiple path gates in one deterministic order to prevent deadlock.
+ * `waitMs` bounds the whole acquisition, as {@link acquirePathMutationGate}'s does for one gate.
+ */
+export async function acquirePathMutationGates(
+  inputs: readonly PathMutationGateInput[],
+  options: PathMutationGateAcquireOptions = {},
+): Promise<readonly PathMutationGate[]> {
+  const deadline = waitDeadline(options);
   const resolved = await Promise.all(inputs.map(async (input) => {
     const targetPath = await resolveGateTarget(input);
     const canonicalInput: PathMutationGateInput = isPathless(input) ? input : { ...input, targetPath };
@@ -206,7 +213,7 @@ export async function acquirePathMutationGates(inputs: readonly PathMutationGate
     .sort((left, right) => left.identity.localeCompare(right.identity));
   const acquired: PathMutationGate[] = [];
   try {
-    for (const item of unique) acquired.push(await acquireOne(item.input));
+    for (const item of unique) acquired.push(await acquireBefore(item.input, deadline));
     return Object.freeze(acquired.slice());
   } catch (error) {
     await Promise.allSettled(acquired.reverse().map((gate) => gate.release()));
@@ -218,11 +225,18 @@ export async function acquirePathMutationGate(
   input: PathMutationGateInput,
   options: PathMutationGateAcquireOptions = {},
 ): Promise<PathMutationGate> {
+  return acquireBefore(input, waitDeadline(options));
+}
+
+function waitDeadline(options: PathMutationGateAcquireOptions): number {
   const waitMs = options.waitMs ?? 0;
   if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 30_000) {
     throw new Error('path mutation gate waitMs must be an integer from 0 through 30000');
   }
-  const deadline = Date.now() + waitMs;
+  return Date.now() + waitMs;
+}
+
+async function acquireBefore(input: PathMutationGateInput, deadline: number): Promise<PathMutationGate> {
   for (;;) {
     try {
       return await acquireOne(input);

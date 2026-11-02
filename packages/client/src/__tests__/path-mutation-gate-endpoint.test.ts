@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { acquirePathMutationGate, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
+import { acquirePathMutationGate, acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
 import { resolveBunBin } from './support/test-bun-bin';
 
 /**
@@ -157,6 +157,17 @@ describe.runIf(supported)('path-mutation gate: one OS lock per handle (#1149)', 
     expect(performance.now() - started).toBeLessThan(50);
     expect(result).toBeInstanceOf(PathMutationGateBusyError);
     expect(result).toMatchObject({ scope: 'store', targetPath: await nodeFs.realpath(targetPath) });
+  });
+
+  it('acquirePathMutationGates waits up to waitMs for a held gate and takes every gate', async () => {
+    const [first, second] = [await target(), await target()];
+    const holder = await acquirePathMutationGate({ scope: 'store', targetPath: second });
+    const inputs = [{ scope: 'store', targetPath: first }, { scope: 'store', targetPath: second }] as const;
+    await expect(acquirePathMutationGates(inputs, { waitMs: 0 })).rejects.toBeInstanceOf(PathMutationGateBusyError);
+    setTimeout(() => void holder.release(), 50);
+    const gates = await acquirePathMutationGates(inputs, { waitMs: 5_000 });
+    held.push(...gates);
+    expect(gates.map((gate) => gate.targetPath).sort()).toEqual([await nodeFs.realpath(first), await nodeFs.realpath(second)].sort());
   });
 
   it.runIf(process.platform === 'darwin')('darwin: the lock file keeps its inode over 100 acquire/release cycles', async () => {

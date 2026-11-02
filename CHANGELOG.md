@@ -76,6 +76,41 @@
   The ordinary Pi launch config is now v10 with `agentHome`; v9 is refused, and
   an excluded Agent task without a sealed canonical-home lease is refused before
   spawning (#1338).
+- **Breaking (client)** — the service installation precheck prints
+  `{ "stores": ServiceStoreVerdict[] }`, and `ServiceUpgradeReceipt.stores` and
+  `ServiceInstallationError.stores` hold `ServiceStoreVerdict`, a new exported
+  type: `store` is an SDK `LocalStoreId` or a Host store id (1-64 of
+  `a-z 0-9 -`), and an optional `kind` is `file` (the default) or `directory`.
+  A directory store is snapshotted and restored as a whole tree, symlinks kept
+  as links. The precheck output is checked more strictly: a store id outside
+  the pattern, an unknown `kind`, a repeated path or a store inside a directory
+  store is `precheck_failed` ("did not produce a valid verdict"), and so is a
+  store whose path is not what its `kind` says, or is a symlink, at the
+  snapshot; a symlinked store file was followed and copied before. A copy that
+  fails is the new code `snapshot_failed`, with the copy error as its `cause`:
+  the receipt is `failed` and the old version is started again. A snapshot that 0.34 wrote is still restored.
+  Migration: a Host that reads `stores` as `StoreCompatibility` reads
+  `ServiceStoreVerdict`; a precheck that printed `StoreCompatibility[]` needs
+  no change; a reader with an exhaustive switch over the codes gets one more
+  case (#1328).
+
+- **Added (client)** — `ServiceInstallationOptions.daemonStores()` and the
+  `ServiceDaemonStore` type: a service process that owns several daemon stores
+  lists them, and every upgrade, rollback and recover stops all of them, holds
+  an owner lease and the store gate of each through the pointer switch, and
+  ends each store's owned processes. It requires `healthCheck`
+  (`createServiceInstallation` throws `TypeError` without it). A list with a
+  relative or repeated `storeDir` or an empty `productId`, or a throw, is the
+  new `ServiceInstallationErrorCode` `daemon_stores_invalid`: the receipt is
+  `failed`, nothing is switched and the old version is started again. A reader
+  with an exhaustive switch over the codes gets one more case (#1328).
+- **Changed (client)** — the stop before an upgrade, rollback or recover now
+  takes an owner lease on each daemon store, the default single store
+  included, instead of polling for a missing `daemon-owner.json` and
+  `control.token`. A store a crashed daemon left behind (a dead owner, a
+  `control.token` whose endpoint refuses connections) is reclaimed and the
+  upgrade goes on; before, it was `store_busy` until that daemon started again
+  (#1328).
 
 - **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
   absolute Windows system directory PowerShell is started from. Omitted, the

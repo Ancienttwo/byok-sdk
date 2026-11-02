@@ -215,6 +215,28 @@ The CLI exits 0 when every store is `accepted` or `absent`, and 2 otherwise.
 Stop the owner of a store before checking it: a file that changes while it is
 copied makes the check fail with an error instead of a verdict.
 
+A service installation (`createServiceInstallation`, #1097) runs the
+candidate's precheck program, which prints `{ "stores": ServiceStoreVerdict[] }`
+and exits 0 or 2 by the same rule (#1328). `ServiceStoreVerdict` is
+`StoreCompatibility` widened for a Host:
+
+- `store` is an SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`,
+  starting with a letter or digit.
+- `path` is absolute. No two stores share a path, and no store lies inside a
+  `directory` store.
+- `kind` is `file` (the default: the file plus its `-wal` and `-journal`) or
+  `directory` (the whole tree).
+
+Output that breaks these rules is `precheck_failed`. The installation then
+snapshots exactly the listed stores, checking each with `lstat` first: a
+`file` store must be a regular file or absent and a `directory` store a real
+directory or absent, never a symlink, or the upgrade is `precheck_failed`. A
+directory is copied with its symlinks kept as links. A copy that fails (no
+space, a socket in the tree) is `snapshot_failed`: the partial snapshot is
+removed, the receipt is `failed` and the old version is started again. A
+restore removes a directory store and copies its snapshot back; a store that
+was absent at the snapshot is only removed.
+
 `scripts/release/fixtures/stores/` holds the stores each recent release writes
 on first open. `generate.mjs` installs the release from npm, or uses this
 workspace for `main`, and writes them. `index.json` lists the fixtures with
