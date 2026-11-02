@@ -126,8 +126,10 @@ function blockTurn(state: Pick<SyncState<FreezeExecution>, 'team'>, turn: Turn, 
 export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(state: SyncState<E>, turn: Turn, facts: SyncFacts,
   options: SyncOptions<R>, publish: Publish): SyncStep<E> | undefined {
   const intent = facts.intent(turn.id), bot = state.team.bots[turn.botId];
+  // A missing Bot is not archived here: its Turn stays unadmitted, as before #1319.
+  const stopped = bot && inactive(bot);
   if (intent) {
-    if (!intent.conclusion) return inactive(bot) && !facts.executionStarted(turn.id) ? { kind: 'cancel' } : undefined;
+    if (!intent.conclusion) return stopped && !facts.executionStarted(turn.id) ? { kind: 'cancel' } : undefined;
     // Work that never started did not consume its rejected actions.
     if (intent.conclusion !== 'succeeded' && !facts.executionStarted(turn.id)) {
       for (const rejection of state.rejected) if (rejection.consumedBy === turn.id) delete rejection.consumedBy;
@@ -155,7 +157,7 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     return undefined;
   }
   // An archived or suspended Bot never starts this Turn. A concluded Turn keeps its conclusion.
-  if (!turn.conclusion && inactive(bot)) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
+  if (!turn.conclusion && stopped) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
   if (turn.conclusion) return { kind: 'ended' };
   if (turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked') return undefined;
   // #956: a Turn whose Bot's device is refused waits, before the profile check, since a refused device may never apply a

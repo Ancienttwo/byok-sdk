@@ -48,6 +48,10 @@ const input = (key: string, request = 'Hello'): Extract<Command, { kind: 'input'
 
 /** Runs `work` so that a sync throw and a rejection both reject. */
 const settle = async <T>(work: () => T | Promise<T>): Promise<T> => work();
+const teamError = async (work: () => unknown) => {
+  try { await work(); } catch (cause) { return cause instanceof TeamModeError ? cause.code : cause; }
+  return 'no error';
+};
 export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSubject | Promise<CommitSubject>): void {
   describe(`commit contract: ${name}`, () => {
     const request = (subject: CommitSubject, commandId: string, command: Command, expectedRevision?: number): CommitRequest<Command> =>
@@ -141,10 +145,6 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
     const main = { id: 'main', name: 'Main', role: 'Team owner', mainBot: true };
     const team = (revision: number, ...bots: Array<Partial<TeamSnapshotBot> & { id: string }>): [string, Command] => [hash(['team', revision]),
       { kind: 'team_snapshot', snapshot: { revision, bots: bots.map(bot => ({ name: bot.id, role: 'Helper', persona: '', model: 'default', mainBot: false, ...bot })) } }];
-    const teamError = async (work: () => unknown) => {
-      try { await work(); } catch (cause) { return cause instanceof TeamModeError ? cause.code : cause; }
-      return 'no error';
-    };
 
     it('applies a newer team snapshot: archives a missing Bot, adds a new one and queues a projection for a changed one (#739 Q4c)', async () => {
       const subject = await open('external');
@@ -186,6 +186,9 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
       await expect(settle(() => subject.commit(request(subject, ...team(2, main, { id: 'b2', persona: 'x'.repeat(70_000) })))))
         .rejects.toThrow('Team snapshot Bot projection is too large');
       await expect(settle(() => subject.commit(request(subject, ...team(2, { ...main, model: 'absent' }))))).rejects.toThrow('Unavailable model');
+      // #1319: participation is `suspended` or absent.
+      await expect(settle(() => subject.commit(request(subject, ...team(2, main, { id: 'b2', participation: 'active' as never })))))
+        .rejects.toThrow(/^Invalid team snapshot Bot$/);
       expect(await teamError(() => subject.commit(request(subject, 'm1', { kind: 'set_main_bot', botId: 'main', mainBot: false })))).toBe('external_team');
       expect(await subject.stored()).toBe(before);
       await subject.commit(request(subject, ...team(2, main, { id: 'b2' })));
@@ -435,6 +438,50 @@ export function settlementVectors(name: string, open: () => SettlementSubject | 
       await subject.conclude(id, 'cancelled', 'cancelled');
       await settled(subject);
       expect(await delegation()).toMatchObject({ verdict: 'refused', reason: 'target_archived', status: 'resolved' });
+    });
+
+    it('suspends a Bot by team snapshot: its work ends, it takes no new work, and a later snapshot restores it (#1319)', async () => {
+      const { subject, id, delegation } = await delegated();
+      const snapshot = (revision: number, b: Partial<TeamSnapshotBot>): Command => ({ kind: 'team_snapshot', snapshot: { revision, bots: [
+        { id: 'main', name: 'Main', role: 'Team owner', persona: '', model: 'default', mainBot: true },
+        { id: 'b', name: 'B', role: 'Reviewer', persona: '', model: 'default', mainBot: false, ...b }] } });
+      const input = (botId: string, key: string): Command => ({ kind: 'input', botId, key, request: key, sender: 'owner' });
+      const targets = async (turnId: string) => ((await subject.state()).schemas[turnId] as {
+        properties: { delegate: { items: { properties: { to: { enum: string[] } } } } } }).properties.delegate.items.properties.to.enum;
+      await subject.change(state => {
+        state.team.external = { revision: 1 };
+        state.team.bots.b!.autonomy = 'auto';
+        state.turns.qb = { id: 'qb', root: 'qb', botId: 'b', source: 'user', request: 'Later', hop: 0, status: 'queued', authority: 'owner' };
+        state.questions.qb = { id: 'qb', turnId: id, value: { question: 'Go?', answerKind: 'text' } };
+        state.team.rooms.r = { id: 'r', ...roomFields(state.team, { name: 'Room', members: ['main', 'b'] }), messages: [] };
+      });
+      const before = (await subject.state()).team.bots.b!;
+      await commit(subject, snapshot(2, { participation: 'suspended' }));
+      await settled(subject);
+      expect((await subject.state()).turns.qb).toMatchObject({ status: 'failed', conclusion: 'cancelled' });
+      expect(await delegation()).toMatchObject({ cancel: { reason: 'target_suspended', targetTurnId: id } });
+      await subject.conclude(id, 'cancelled', 'cancelled');
+      await settled(subject);
+      expect(await delegation()).toMatchObject({ verdict: 'refused', reason: 'target_suspended', status: 'resolved' });
+      const stored = await subject.stored();
+      for (const command of [input('b', 'kb'), { kind: 'answer', questionId: 'qb', answer: 'Yes' }] as Command[]) {
+        expect(await teamError(() => subject.commit({ scope: subject.scope, commandId: `refused-${command.kind}`, command }))).toBe('bot_suspended');
+      }
+      expect(await subject.stored()).toBe(stored);
+      const own = await commit(subject, input('main', 'k2')) as string;
+      const round = await commit(subject, { kind: 'room_input', key: 'm1', roomId: 'r', text: 'Hello', mentions: 'all' }) as string;
+      await settled(subject);
+      expect(await targets(own)).toEqual(['main']);
+      const team = (await subject.state()).team;
+      expect(team.rounds[round]!.seats.map(seat => team.seats[seat]!.botId)).toEqual(['main']);
+      await commit(subject, snapshot(3, {}));
+      const after = (await subject.state()).team.bots.b!;
+      expect(after.participation).toBeUndefined();
+      expect([after.revision, after.readyRevision, after.autonomy]).toEqual([before.revision, before.readyRevision, 'auto']);
+      const restored = await commit(subject, input('b', 'kb')) as string, next = await commit(subject, input('main', 'k3')) as string;
+      await settled(subject);
+      expect(await subject.intent(restored)).toMatchObject({ key: restored });
+      expect(await targets(next)).toEqual(['main', 'b']);
     });
 
     it('shows a cancel with no conclusion as uncertain once the cancel grace passed', async () => {

@@ -10,6 +10,18 @@
   Host that vendors K8 can run them too. `src/VENDOR.md` Layer 3 lists the file
   and no longer tells a Host to skip these vectors (#1325).
 
+- **Added (examples)** — An external team snapshot Bot in K8 and H can carry
+  `participation: 'suspended'` (#1319). The Bot stays in the team but takes no
+  new work: it leaves `delegate.to` and the `room_call` members and gets no
+  room seat. Its open work ends as for an archived Bot. Delegations to it
+  resolve `refused` with reason `target_suspended`, and a verdict for one that
+  it started is `undelivered: 'initiator_suspended'`. `input`, owner `receive`,
+  `answer` and `decide` for it refuse with `TeamModeError` code
+  `bot_suspended`. A later snapshot without the field restores it, with its
+  profile revision, readiness and autonomy unchanged. Any other
+  `participation` value refuses the snapshot. A snapshot without the field
+  behaves as before.
+
 - **Fix (client; #1342)** — `byok-agent status`, doctor and the support bundle
   no longer report a store file as replaced or as changed during the read when
   only its metadata changed (its ctime, for example after icacls pushes

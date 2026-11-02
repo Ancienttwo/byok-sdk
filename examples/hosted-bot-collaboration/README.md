@@ -125,7 +125,7 @@ SDK call.
 insertion order, in one transaction under the scope lock. It writes each step as L writes it to K4:
 
 - `freeze`: `freezeIntent` stores the rule's intent input as it is.
-- `cancel`: the open intent of an archived Bot gets `cancel_reason = 'cancelled'`. A row that no submit tried also gets
+- `cancel`: the open intent of an archived or suspended (#1319) Bot gets `cancel_reason = 'cancelled'`. A row that no submit tried also gets
   the conclusion `cancelled`, as K4 `queuedExpiry` concludes a cancelled queued intent: the submit claim runs under the
   same lock, so no SDK attempt can exist. A tried row waits for the reconciliation.
 - `routine`: K4 `promoteOccurrence` runs on the routine slice. The intent row takes the step's execution and the K4
@@ -171,7 +171,7 @@ facts from the intent rows again after the steps wrote: `intent`, `started` (any
 claim or a terminal that is not a decline, as K8 `intentFacts`: the intent row, and the earlier generations that an import
 moved to `intent_execution`) and `declineCode`. `offeredTo` throws: settlement never reads it.
 Settlement spends or releases units, moves a claimed delegation to `running`, writes the `lateTurnId` audit line,
-freezes the `target_archived` cancel, resolves a cancel once its target concluded, shows `uncertain` after the delegation
+freezes the `target_archived` or `target_suspended` cancel, resolves a cancel once its target concluded, shows `uncertain` after the delegation
 timers, and gives a chain end that did not succeed its verdict. A verdict can add the `bot_reply` Turn of a batch join.
 
 The same round then delivers each new delegation cancel fact (`deliverCancels`), as the L pass does after its sync. A
@@ -392,10 +392,11 @@ mode revision in one write, and keeps the row as the tombstone.
   projection with a fixed body, and an audit line with the reason. The rest of the scope syncs, an Agent's delegation to
   such a Bot included. A Turn that already has an intent is not checked: its work lands under its own identity.
 - A held Turn is released by the next sync that does not hold it. The scope's due time (`scope.due_at`, written in each
-  transaction) is 0 while a held Turn's Bot device has an active binding or its Bot is archived or gone, so the due
+  transaction) is 0 while a held Turn's Bot device has an active binding or its Bot is archived, suspended or gone, so the due
   scheduler syncs it at once:
   - after `bindDevice` of that device, which writes the due time in the same transaction, the Turn freezes;
-  - after a `team_snapshot` without the Bot (or `delete_bot`), which archives it, the Turn ends `cancelled`.
+  - after a `team_snapshot` without the Bot (or `delete_bot`), which archives it, or one that suspends it, the Turn ends
+    `cancelled`.
 
   A snapshot cannot move a Bot to another device: K8 keeps the device when the model changes. A held Turn on a
   refused device adds no due time, so a revoked device does not make the scope spin. The owner can also end the Turn

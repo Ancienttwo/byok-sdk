@@ -717,6 +717,30 @@ template.
 - The ledger stores the mode. A ledger with a local team cannot open in
   external mode, and an external ledger cannot open without the option.
 
+A snapshot Bot can carry `participation: 'suspended'` (#1319). The Bot stays in
+the team, its rooms and its routines, but takes no new K8 work. `participation`
+is `'suspended'` or absent; any other value refuses the whole snapshot as
+`Invalid team snapshot Bot`, and nothing changes. A suspended Bot:
+
+- leaves the `delegate.to` and `room_call` member lists of every schema frozen
+  after the snapshot, and gets no room seat, even when a message names it;
+- ends its open work as an archived Bot's does: a Turn that has not frozen
+  concludes `cancelled`, a frozen intent that has not started is cancelled, and
+  work that started runs on with its outcome kept as audit only. An open
+  delegation to it resolves `refused` with reason `target_suspended`; a verdict
+  for a delegation that it started gets no reply Turn
+  (`undelivered: 'initiator_suspended'`);
+- refuses `input`, an owner `receive`, `answer` of its question and `decide` of
+  its card with `TeamModeError` code `bot_suspended`
+  (`bot_suspended: Bot <id> is not participating`), and the commit writes
+  nothing. `setAutonomy`, `persona_ready` and push routes stay available.
+
+A later snapshot without the field restores the Bot as it was: its profile
+revision, `readyRevision`, autonomy, room memberships and routines are kept.
+Work cancelled or refused while it was suspended, and routine slots that it
+missed, do not come back. Archive stays for a deleted Bot: a suspended Bot that
+a snapshot no longer lists is archived.
+
 With `persona: 'external'` as well, the Host owns the persona projection of
 each Bot (#879). The Host projects the Agent home with its own daemon hook, so
 there is one projection writer and one revision for each agentRef.
