@@ -1,178 +1,57 @@
 {
-  "schemaVersion": "archcontext.architecture-docs-projection-manifest/v1",
-  "rendererVersion": "archcontext.docs-renderer/v4",
+  "schemaVersion": "archcontext.architecture-docs-projection-manifest/v3",
+  "rendererVersion": "archcontext.docs-renderer/v6",
   "profile": "repo-harness/v1",
-  "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
-  "provenance": {
-    "schemaVersion": "archcontext.architecture-docs-projection-provenance/v1",
-    "baseHeadSha": "0cdde3706bb716526d94a1c6878a7b12b3c3d0c9",
-    "worktreeDigest": "sha256:987bc1bc8641bb7e08ac3d82be43c2aae9f0ac19c904180a4bad537f047d7073",
-    "sourceTreeDigest": "sha256:f13a9179e3e797ab47eed1a1526eee6478dc9d46f34430f0b7ecd92b3f03c7ad",
-    "modelDigest": "sha256:3967fb09bdbb43f62528bdd71dae409497edd9e7102a542b398b434f7c0b9cfb",
-    "codeGraphDigest": "sha256:2c56564748ab813d0ea3093cf4be63223bd4d17c098d58318314c863ee550f17",
-    "indexedWorktreeDigest": "sha256:076af35930ca70a059d8c99b3cb317fd74641bc0b9f9d5acc41a26b572a20779",
-    "rendererVersion": "archcontext.docs-renderer/v4",
-    "layoutVersion": "archcontext.docs-layout/v1",
-    "generatedFrom": {
-      "codeGraphPackage": "@colbymchenry/codegraph",
-      "codeGraphVersion": "1.6.1",
-      "codeGraphBinaryDigest": "sha256:aaf60671de2533409c0ac11aa5db94ec1ac4d758cce92b4b78219ce21edf61d7",
-      "codeGraphStatus": "ready"
-    },
-    "projectionInputDigest": "sha256:ef903e58d89b4d94438c6e13ff5022fd90a66076b9657d635670652d0c011c90"
-  },
-  "projectionDigest": "sha256:91d49075803b7899a23b7873a5fb44ba709848efd77a843cab46bae55c14e89d",
+  "layoutVersion": "archcontext.docs-layout/v1",
+  "generatedFrom": {"codeGraphPackage":"@colbymchenry/codegraph","codeGraphVersion":"1.6.2"},
   "semanticBaseline": {
-    "semanticState": {
-      "schemaVersion": "archcontext.architecture-semantic-state/v1",
-      "capabilities": [
-        {
-          "capabilityId": "capability.sdk.sdk-root",
-          "memberNodeIds": [
-            "capability.sdk.sdk-root",
-            "component.sdk.offer-validation",
-            "module.sdk.runtime-start",
-            "module.sdk.task-runner"
-          ],
-          "semanticFingerprint": "sha256:b0464e4af59d805794615bd7ce291f742f8bcd30f2c0ec67b28da37b99b14911",
-          "flowProofFingerprint": "sha256:5d87faae5e3b0dc5822f552fce9d7312cf2d2fba948bee927ea2ad29af659b24",
-          "proofStatus": {
-            "p1": "proven",
-            "p2": "proven"
-          },
-          "facets": {
-            "constraints": "sha256:536b667984a59da860e92455c083c51ecb631f85278d58723def5f1893d5479d",
-            "entrypoints": "sha256:1e800ded7d0f59419b153f194f4d7b643c73f26a69d2f506d857a27c968be70e",
-            "interfaces": "sha256:1e9b97c613cbc69a903072a84694952e4a8ef06386d66019ad65d66ea4837bf6",
-            "lifecycle": "sha256:4248f8552b8d892b9c7f0ac527e91f526af6ecfb7254aa3c836c71090a867cb9",
-            "names": "sha256:c1dc726c952a991544511c19346693012fa2bc311b746fb1043880321a9fb556",
-            "ownership": "sha256:dcc39851718965adf3570c45620c441dbcdaa9764f17244bc6b911dda2860a7c",
-            "placement": "sha256:de2f5b308aa49246d481427456d1ca5beb6251d7d116823e5e519f6b91dba7c2",
-            "relations": "sha256:540c5a06af0a6a335927365dcb3a29d5c7ddaa4c6161eed40ccfbe2d82a912fc",
-            "responsibilities": "sha256:7b7592720eadf9ab544db35262a4f4bf57d854021d6122b21065a90773adb5be",
-            "riskBoundaries": "sha256:6c9e58f426473f7b0e29acf307b14c559eb878768d9e09f74f4371bd57036461"
-          }
-        }
-      ],
-      "semanticFingerprint": "sha256:3ecc6169e4c5054cf186040ab535eda9057ade882eb0b2a943138291c06c176c",
-      "flowProofFingerprint": "sha256:c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214"
-    },
-    "digests": {
-      "modelDigest": "sha256:3967fb09bdbb43f62528bdd71dae409497edd9e7102a542b398b434f7c0b9cfb",
-      "sourceTreeDigest": "sha256:f13a9179e3e797ab47eed1a1526eee6478dc9d46f34430f0b7ecd92b3f03c7ad",
-      "flowProofDigest": "sha256:c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214",
-      "projectionDigest": "sha256:91d49075803b7899a23b7873a5fb44ba709848efd77a843cab46bae55c14e89d"
-    },
-    "evidence": {
-      "sourceTreeDigest": "sha256:f13a9179e3e797ab47eed1a1526eee6478dc9d46f34430f0b7ecd92b3f03c7ad",
-      "selectorEvidenceDigest": "sha256:2c152166abffaca7bb7951befe3a590953471e24aa39217c1fde3bfdb48ec4ea",
-      "rendererVersion": "archcontext.docs-renderer/v4"
-    }
-  },
-  "receiptDigest": "sha256:7587e262e46388e72453ec26364a8558b6ee6c5c0430208a0fe1a60f6bbdc367",
-  "targetCount": 7,
-  "fileCount": 7,
-  "targets": [
-    {
-      "targetId": "projection_target.architecture.index",
-      "type": "architecture-index",
-      "scope": {
-        "kind": "repository"
-      },
-      "path": "docs/architecture/index.md",
-      "ownership": "mixed",
-      "rendererVersion": "archcontext.docs-renderer/v4",
-      "format": "markdown",
-      "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
-      "outputDigest": "sha256:09e39b870a5e7002a47e18f7c415fc08c29d631fb932dff054fe40b56fae9ef1"
-    },
-    {
-      "targetId": "projection_target.entity.capability-sdk-sdk-root",
-      "type": "entity-summary",
-      "scope": {
-        "kind": "entity",
-        "id": "capability.sdk.sdk-root",
-        "entityKind": "capability"
-      },
-      "path": "docs/architecture/modules/sdk/sdk-root.md",
-      "ownership": "mixed",
-      "rendererVersion": "archcontext.docs-renderer/v4",
-      "format": "markdown",
-      "sourceDigest": "sha256:8a356f1f8cde7afe326b5033ae8d6ea5bba3db826b1db3e1223405ed3e6361e2",
-      "outputDigest": "sha256:2bf05588105f46b1329f21cb42bdb87f212de8fd4a636783b09e7a9de9f2bea3",
-      "verifiedAgainst": {
-        "branch": "pi-1.0.2-oar-0.20.3",
-        "commit": "0cdde3706bb716526d94a1c6878a7b12b3c3d0c9",
-        "committedAt": "2026-10-05T14:31:43+08:00"
+    "modelDigest": "sha256:99060fb3afc3ca083a4a2f629f9dda582f14095936648d26b090aef467715afc",
+    "capabilities": [
+      {
+        "capabilityId": "capability.sdk.sdk-root",
+        "memberNodeIds": [
+          "capability.sdk.sdk-root",
+          "component.sdk.client-agent-home",
+          "component.sdk.client-approvals",
+          "component.sdk.client-execution",
+          "component.sdk.client-service",
+          "component.sdk.client-session",
+          "module.sdk.client",
+          "module.sdk.cloud",
+          "module.sdk.cloud-dataplane",
+          "module.sdk.cloud-do",
+          "module.sdk.conformance",
+          "module.sdk.core",
+          "module.sdk.keys",
+          "module.sdk.protocol",
+          "module.sdk.server",
+          "module.sdk.testkit",
+          "module.sdk.ui-runtime"
+        ],
+        "semanticFingerprint": "sha256:b167f85c668def774066c98b3c875d9ef329fd1040fc281114cf43ae32a57467",
+        "flowProofFingerprint": "sha256:76cb17d70ce85ecbbaaa422cb11fe6f8756f5b803218001941f6e701ca207c36",
+        "proofStatus": {
+          "p1": "proven",
+          "p2": "proven"
+        },
+        "facets": {
+          "constraints": "sha256:6ecdce68936a4017394c083f8878ad2547d74a5671e7f7d5ed326784dcb4ed80",
+          "entrypoints": "sha256:adf108cbe3e33dc88c08b362f3f0b4656b06a388f5cc27595ffc4ba9bcc26112",
+          "interfaces": "sha256:4802b7f911d31751b674f8f5941b8ad147e7cb95a0d18ffaa3153f79a8bae1ea",
+          "lifecycle": "sha256:1b26d338a06f7e2ba4dc1c15026ab44e465f3a96e4b604168329d8076ba7b79c",
+          "names": "sha256:74e959abdb9d961295c257cf65b8efd6b68f2dfee08e290dd2aadd324e8bb5cb",
+          "ownership": "sha256:fc6c0fc104b2c732e263ef71dc159b60702744b3023b4abef689c4dfdcec5f8a",
+          "placement": "sha256:78b41212de38c0c83ebdb749e79aad7afe41e7f9b38f960ba5a17d0ce0a611b4",
+          "relations": "sha256:64af36a0ff40e34e452f324ec0e4cec070f6f170c4b516a2b1683ae17d009d83",
+          "responsibilities": "sha256:ed361be4b854daa16d5c8cb8b502761db0bd0a3d806c7527ead7bd5a55c20c01",
+          "riskBoundaries": "sha256:97daa10bb88a9b7293600ace19502f11a64923bfe923d144d13d7479cf41c67c"
+        },
+        "selectorEvidenceDigest": "sha256:26ef8f0b971cc2eabb2d009a70fe9133f6bd7dbc6fefb7d78a0898c8413b5669"
       }
-    },
-    {
-      "targetId": "projection_target.decision.index",
-      "type": "decision-index",
-      "scope": {
-        "kind": "decision"
-      },
-      "path": "docs/architecture/decisions/index.md",
-      "ownership": "mixed",
-      "rendererVersion": "archcontext.docs-renderer/v4",
-      "format": "markdown",
-      "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
-      "outputDigest": "sha256:34055a2aa0fbe868ce5dea7df5354de5da63830e5972ff683d9647f97374ec26"
-    },
-    {
-      "targetId": "projection_target.architecture.changelog",
-      "type": "architecture-changelog",
-      "scope": {
-        "kind": "changelog"
-      },
-      "path": "docs/architecture/changelog.md",
-      "ownership": "mixed",
-      "rendererVersion": "archcontext.docs-renderer/v4",
-      "format": "markdown",
-      "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
-      "outputDigest": "sha256:1f723aeb74466aae7d607eeab8c438a830c36f49a48e6622f868a8151afabea6"
-    },
-    {
-      "targetId": "projection_target.diagram.mermaid",
-      "type": "diagram-mermaid",
-      "scope": {
-        "kind": "diagram",
-        "id": "architecture"
-      },
-      "path": "docs/architecture/diagrams/architecture.mmd",
-      "ownership": "generated",
-      "rendererVersion": "archcontext.docs-renderer/v4",
-      "format": "mermaid",
-      "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
-      "outputDigest": "sha256:db6dc1c7609be1e1eac492fe555b317b088670c90352c907de53baaac3480216"
-    },
-    {
-      "targetId": "projection_target.diagram.structurizr",
-      "type": "diagram-structurizr",
-      "scope": {
-        "kind": "diagram",
-        "id": "architecture"
-      },
-      "path": "docs/architecture/diagrams/architecture.structurizr.json",
-      "ownership": "generated",
-      "rendererVersion": "archcontext.docs-renderer/v4",
-      "format": "structurizr-json",
-      "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
-      "outputDigest": "sha256:1fdba41476ba4660f3740cf9c4d0da5e1f6d545ff4e5c126a086030a005aa262"
-    },
-    {
-      "targetId": "projection_target.diagram.likec4",
-      "type": "diagram-likec4",
-      "scope": {
-        "kind": "diagram",
-        "id": "architecture"
-      },
-      "path": "docs/architecture/diagrams/architecture.likec4",
-      "ownership": "generated",
-      "rendererVersion": "archcontext.docs-renderer/v4",
-      "format": "likec4",
-      "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
-      "outputDigest": "sha256:0c36acb247c58f33172e9aafd63f705bb59a84e22afb3021406a5df98d931866"
-    }
-  ]
+    ]
+  },
+  "targets": {
+    "projection_target.entity.capability-sdk-sdk-root":
+      {"type":"entity-summary","scope":{"kind":"entity","id":"capability.sdk.sdk-root","entityKind":"capability"},"path":"docs/architecture/modules/sdk/sdk-root.md","ownership":"mixed","format":"markdown","outputDigest":"sha256:0dba605b7e8f28d02b4dd49e281971555437e3df14541484209a89e17907430c","sourceStamps":{"capability.sdk.sdk-root":"sha256:92b80d512c164af177d64710976cab516e1ad653ade8ed37b61511619025885c","component.sdk.client-agent-home":"sha256:49d5242eb055b66d50fdede0fa33e411111b22aa14a186561dfcb40ee84baf46","component.sdk.client-approvals":"sha256:24c0d9592d9b712babf7e8a8638d2e6e8252259ed6cbbf9d87d1b3b6b1ea20e7","component.sdk.client-execution":"sha256:b253e43fee2ef8bb5bfaa1aa0c0ac99eca439c22fd75b383a2cc05970fabd1b3","component.sdk.client-service":"sha256:b99c0235471c6ae18dc7560b2fe1260df323060c1ac42a24efd34b6f38825fbd","component.sdk.client-session":"sha256:b2114ae1256ef5724c644ac076eb05a364f383f563794d593d9f19aff6bbc13c","module.sdk.client":"sha256:cf5fefda633bfe62a2fed954b9079b6f64e18dd96a1ae3ce7781f43480ae6685","module.sdk.cloud":"sha256:f34435f7e71b5eb6d8ab5e662df0745ea349a09fcc640885e26bb45452dea51e","module.sdk.cloud-dataplane":"sha256:f4a644e625db11b9b23a78b9627683475ce9f8b7ec3bf0699dc0e9109973577f","module.sdk.cloud-do":"sha256:ac221cea6877d2036b943f9cdf0b3ae9f42c67c0e9ff4ea73ce0512e270de528","module.sdk.conformance":"sha256:557a48134d7b8b503a5387d95329b4aad563117458769fa386f82073215e88fc","module.sdk.core":"sha256:99c3386728d341000c626bf98799d1f37c5d6ddb232cdec141d62bcbf4b5a783","module.sdk.keys":"sha256:083d0f1e08b52936227f2ef50bf990c372e78e45b7155e0b6602954dc19d71aa","module.sdk.protocol":"sha256:6e0cbf419261a2999f6fee5b8b795020ef51d709373cdbaea374ec4cdfb3bf29","module.sdk.server":"sha256:607c9001798aa7f290c3b69beb128a5e2d79e8c87fea196e70466ed1a0769950","module.sdk.testkit":"sha256:3ad62e7251bcf3916077f2e4b47c6aae48350a4c1891b0ade493579cc7ebb171","module.sdk.ui-runtime":"sha256:62c91776f2a27c971c5cd86e537107dc75e522521052aab76b8e9dfc3c670817"},"scale":{"fileCountBucket":{"lower":2000,"upper":5000},"lineCountBucket":{"lower":200000,"upper":500000}}}
+  }
 }
