@@ -2433,10 +2433,9 @@ behind an explicit helper dispatch.
 A single-file product sets `sdkHelperHost: { mode: 'self-executable' }`. Every
 Pi launch then re-enters the product executable as
 `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`, and
-the product names its Pi asset root in `PI_PACKAGE_DIR` and passes that name
-explicitly through `DaemonConfig.runtimeEnvironment.pass` or
-`PiAdapterOptions.runtimeEnvironment` (a Bun-compiled executable may keep the
-assets beside itself).
+the product names its Pi asset root in `DaemonConfig.runtimes.pi.packageDir` or
+`PiAdapterOptions.packageDir`, the only source; the SDK gives it to Pi as
+`PI_PACKAGE_DIR` (a Bun-compiled executable may keep the assets beside itself).
 
 This is the one supported way to ship official pi in a host download. The
 product bundles the SDK root, so official pi from the build machine install is
@@ -2472,7 +2471,7 @@ holds the SDK asset manifest; otherwise it reports `not-found`, and a launch is
 refused with `pi_bundled_assets_unavailable`. The client packaging test builds
 interpreter + bundle hosts, run by Bun and by Node, with no `node_modules`, and
 runs one pi task against a loopback provider. It also builds a Bun-compiled
-host whose asset root is its own directory, with no `PI_PACKAGE_DIR`, and runs
+host whose asset root is its own directory, with no `packageDir`, and runs
 the same task. Each task loads a user Pi package whose TypeScript extension
 imports the pi coding-agent package and `typebox`.
 
