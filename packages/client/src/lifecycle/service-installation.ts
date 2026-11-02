@@ -7,7 +7,7 @@ import type { StoreCompatibility, StoreCompatibilityVerdict } from '@byok-sdk/co
 import { connectControlClient } from '../daemon/control-client';
 import { controlEndpointPath, controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { acquireDaemonOwner, DaemonOwnerActiveError, type DaemonOwnerLease } from '../util/daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError, type DaemonOwnerLease } from '../util/daemon-owner';
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { acquirePathMutationGates, PathMutationGateBusyError, type PathMutationGate } from '../util/path-mutation-gate';
 import { createManagedServiceLifecycle, type CreateServiceLifecycleOptions } from './create-service-lifecycle';
@@ -212,6 +212,8 @@ const POINTERS = ['current', 'previous'] as const;
 type Pointer = (typeof POINTERS)[number];
 /** A SQLite store is its main file plus a WAL or a hot rollback journal; `-shm` is rebuilt and is removed on restore. */
 const STORE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
+/** How long a stale-token probe waits for the control endpoint to accept or refuse. */
+const CONTROL_PROBE_TIMEOUT_MS = 1_000;
 const VERDICTS: ReadonlySet<StoreCompatibilityVerdict> = new Set(['accepted', 'new-path-repair', 'rejected', 'absent']);
 
 /** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
@@ -436,8 +438,9 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
    * whose endpoint no longer answers. Then it holds every store gate (taken
    * after the service gate, the documented order, and sorted) and ends
    * whatever the stopped runs left in their owned-process ledgers. The
-   * returned release frees the gates first: a lease's own release takes its
-   * store gate.
+   * returned release frees every gate, then every lease (a lease's own
+   * release takes its store gate), and throws the first failure only after
+   * all of them were tried.
    */
   async function stopQuiescent(): Promise<() => Promise<void>> {
     await lifecycle.stop();
@@ -445,8 +448,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     const leases: DaemonOwnerLease[] = [];
     let gates: readonly PathMutationGate[] = [];
     const release = async (): Promise<void> => {
-      for (const gate of gates) await gate.release();
-      for (const lease of leases) await lease.release();
+      const failures: unknown[] = [];
+      for (const gate of gates) await gate.release().catch((error: unknown) => { failures.push(error); });
+      for (const lease of leases) await lease.release().catch((error: unknown) => { failures.push(error); });
+      if (failures.length > 0) throw failures[0];
     };
     try {
       const stores = await readDaemonStores();
@@ -462,7 +467,8 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       }
       for (const store of stores) await new OwnedProcessLedger(store.storeDir).reconcile();
     } catch (error) {
-      await release();
+      // The stop's own error decides the receipt; a release failure must not replace it.
+      await release().catch(() => undefined);
       if (error instanceof OwnedProcessResidueError) throw new ServiceInstallationError('owned_process_residue');
       throw error;
     }
@@ -544,9 +550,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       if (await exists(path.join(snapshotsDir, to, 'snapshot.json'))) await restoreSnapshot(to);
       await setPointer('current', from);
       await setPointer('previous', previous);
-    } finally {
-      await release();
+    } catch (error) {
+      await release().catch(() => undefined);
+      throw error;
     }
+    await release();
     const kept = previous === undefined ? {} : { previous };
     const receipt = (await startHealthy())
       ? await writeReceipt({ state: 'rolled-back', from, to, ...kept, ...(code === undefined ? {} : { code }) })
@@ -592,7 +600,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
           }
           await snapshot(to, stores);
         } catch (error) {
-          await release();
+          await release().catch(() => undefined);
           throw error;
         }
       } catch (error) {
@@ -608,9 +616,11 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       try {
         await setPointer('previous', from);
         await setPointer('current', to);
-      } finally {
-        await release();
+      } catch (error) {
+        await release().catch(() => undefined);
+        throw error;
       }
+      await release();
       if (!(await startHealthy())) {
         const receipt = await restore(from, to, previous, 'health_check_failed');
         throw new ServiceInstallationError(receipt.state === 'rolled-back' ? 'health_check_failed' : 'rollback_unhealthy');
@@ -719,7 +729,7 @@ function isStoreCompatibility(value: unknown): value is StoreCompatibility {
 
 /**
  * Takes an `installer` lease on a stopped daemon's store, retrying while its
- * last owner is still alive. `acquireDaemonOwner` reclaims the owner files of
+ * last owner is still alive or another process is reclaiming its lease. `acquireDaemonOwner` reclaims the owner files of
  * a dead one.
  */
 async function leaseStore(storeDir: string, deadline: number): Promise<DaemonOwnerLease> {
@@ -727,7 +737,7 @@ async function leaseStore(storeDir: string, deadline: number): Promise<DaemonOwn
     try {
       return await acquireDaemonOwner(storeDir, 'installer');
     } catch (error) {
-      if (!(error instanceof DaemonOwnerActiveError)) throw error;
+      if (!(error instanceof DaemonOwnerActiveError) && !(error instanceof DaemonOwnerReclaimingError)) throw error;
       if (Date.now() >= deadline) throw new ServiceInstallationError('store_busy');
       await delay(100);
     }
@@ -737,14 +747,17 @@ async function leaseStore(storeDir: string, deadline: number): Promise<DaemonOwn
 /**
  * Under the store's lease no daemon can serve it, so a `control.token` whose
  * endpoint refuses connections was left by a crashed run and is removed. An
- * endpoint that answers, or whose state is unknown, is `store_busy`.
+ * endpoint that answers, or whose state is unknown (including no answer
+ * within {@link CONTROL_PROBE_TIMEOUT_MS}), is `store_busy`.
  */
 async function removeStaleControlToken(store: ServiceDaemonStore): Promise<void> {
   const token = controlTokenPath(store.storeDir);
   if (!(await exists(token))) return;
   const refused = await new Promise<boolean>((resolve) => {
     const socket = createConnection(controlEndpointPath(store.productId, store.storeDir));
+    const timer = setTimeout(() => finish(false), CONTROL_PROBE_TIMEOUT_MS);
     const finish = (result: boolean): void => {
+      clearTimeout(timer);
       socket.removeAllListeners();
       socket.destroy();
       resolve(result);

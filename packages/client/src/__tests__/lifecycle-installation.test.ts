@@ -14,6 +14,7 @@ import {
 } from '../lifecycle/service-installation';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { SERVICE_UNIT_MARKER, withServiceOwnerGate } from '../lifecycle/service-unit';
+import * as daemonOwner from '../util/daemon-owner';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
@@ -466,6 +467,18 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       try { await expect(installation.upgrade(await payload('2.0.0'))).resolves.toMatchObject({ state: 'switched' }); }
       finally { spy.mockRestore(); }
       expect(seen).toEqual([['installer', true], ['installer', true]]);
+      await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
+    });
+
+    it('a lease that fails to release does not keep the next store leased', async () => {
+      installation = both();
+      await installation.install(await payload('1.0.0'));
+      const original = daemonOwner.acquireDaemonOwner;
+      vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+        const lease = await original(...args);
+        return { release: async () => { await lease.release(); throw new Error('injected release failure'); } };
+      });
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toThrow('injected release failure');
       await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
     });
 
