@@ -6,6 +6,18 @@ import { MAX_OPERATIONAL_HEALTH_FILE_BYTES, OperationalHealthTracker } from '../
 import type { Runner } from '../util/exec-runner';
 import { SecureDirHardeningError } from '../util/secure-dir';
 
+// Route the tracker's ensureSecureDir through the win32 icacls branch with a
+// fake runner so the hardening count is observable on any host OS.
+const icacls = vi.hoisted(() => ({ run: undefined as Runner | undefined }));
+vi.mock('../util/secure-dir', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../util/secure-dir')>();
+  return {
+    ...actual,
+    ensureSecureDir: (dir: string) =>
+      icacls.run ? actual.ensureSecureDir(dir, { platform: 'win32', run: icacls.run }) : actual.ensureSecureDir(dir),
+  };
+});
+
 const dirs: string[] = [];
 
 async function tempDir(): Promise<string> {
@@ -15,6 +27,7 @@ async function tempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  icacls.run = undefined;
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -140,7 +153,8 @@ describe('operational health', () => {
   it('hardens storeDir with icacls once per tracker, not on every state write', async () => {
     const dir = await tempDir();
     const run = vi.fn<Runner>().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
-    const tracker = new OperationalHealthTracker(dir, { secureDir: { platform: 'win32', run } });
+    icacls.run = run;
+    const tracker = new OperationalHealthTracker(dir);
     await tracker.startRun();
     await tracker.recordFailure('reconnect');
     await tracker.recordFailure('upload');
@@ -153,8 +167,8 @@ describe('operational health', () => {
 
   it('fails the write closed when the first hardening fails and never writes unhardened state', async () => {
     const dir = await tempDir();
-    const run = vi.fn<Runner>().mockResolvedValue({ code: 5, stdout: '', stderr: 'Access is denied.' });
-    const tracker = new OperationalHealthTracker(dir, { secureDir: { platform: 'win32', run } });
+    icacls.run = vi.fn<Runner>().mockResolvedValue({ code: 5, stdout: '', stderr: 'Access is denied.' });
+    const tracker = new OperationalHealthTracker(dir);
     await expect(tracker.startRun()).rejects.toBeInstanceOf(SecureDirHardeningError);
     await expect(fs.stat(path.join(dir, 'operational-health.json'))).rejects.toThrow();
     expect(tracker.snapshot()).toEqual({ availability: 'unavailable', reason: 'operational health state could not be persisted' });
