@@ -1,5 +1,5 @@
-import { runtimeVersionPolicyIssues } from '../../runtime-version-policy';
-import type { DaemonConfigIssue } from './validate';
+import { runtimeVersionPolicyIssues } from './runtime-version-policy';
+import type { DaemonConfigIssue } from './daemon/config-schema/validate';
 
 const RUNTIMES = ['pi', 'claude', 'codex', 'grok'] as const;
 

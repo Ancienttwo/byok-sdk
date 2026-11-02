@@ -83,7 +83,7 @@ import { bindDaemonFunctions } from './create-daemon/functions';
 import { createControlMethods } from './create-daemon/control-methods';
 import type { ToolAuthorizationPolicy } from '../tool-authorization';
 import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './config-schema/effective';
-import { DaemonConfigInvalidError } from './config-schema/invalid-error';
+import { DaemonConfigInvalidError } from '../daemon-config-invalid-error';
 import { toolAuthorizationIssues } from './config-schema/static-tool-authorization';
 import type { AgentMemoryExport, AgentMemoryIntentTransport } from '@byok-sdk/protocol/agent-memory';
 

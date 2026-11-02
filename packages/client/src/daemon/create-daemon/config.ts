@@ -1,5 +1,5 @@
 import { assertDaemonConfigValid, removedFieldError } from '../config-schema/errors';
-import { DaemonConfigInvalidError } from '../config-schema/invalid-error';
+import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error';
 import type { DaemonMemoryHelperResolution } from '../config-schema/effective';
 import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release';
 import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';

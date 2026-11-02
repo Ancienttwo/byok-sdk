@@ -1,5 +1,5 @@
 import type { LocalAgentReleaseIdentity } from '../../release-identity';
-import { DaemonConfigInvalidError } from './invalid-error';
+import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error';
 import type { RuntimeAdapter } from '../../types';
 import { AgentEgressPolicyError, resolveAgentEgressPolicy } from '../agent-egress-policy';
 import { resolveDaemonConfig } from '../create-daemon/config';
@@ -13,7 +13,7 @@ import { DeviceStore } from '../store';
 import { describeEffectiveDaemonConfig, type DaemonEffectiveConfig } from './effective';
 import { toolAuthorizationIssues } from './static-tool-authorization';
 import { validateDaemonConfig, type DaemonConfigIssue, type DaemonConfigSource } from './validate';
-import { versionPolicyConfigIssues } from './version-policy';
+import { versionPolicyConfigIssues } from '../../daemon-config-version-policy';
 
 export interface DaemonConfigCheckOptions {
   readonly source: DaemonConfigSource;

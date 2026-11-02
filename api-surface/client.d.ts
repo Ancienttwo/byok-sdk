@@ -2034,6 +2034,20 @@ export type { RequestDeviceAssertionOptions } from '../daemon/assertion-client';
 export type { RequestDeviceAssertionErrorCode } from '../daemon/assertion-client';
 /** Typed result: a parsed `DeviceAssertionEnvelopeV1` with its expiry, or a refusal code and reason. Never throws for an expected outcome. */
 export type { RequestDeviceAssertionResult } from '../daemon/assertion-client';
+// ==== @byok-sdk/client dist/daemon-config-invalid-error.d.ts ====
+import type { DaemonConfigIssue } from './daemon/config-schema/validate';
+/**
+ * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:
+ * a missing required field, or a value of the wrong JSON type or literal.
+ * A removed field throws {@link DaemonConfigFieldRemovedError} instead.
+ * `createRuntimeAdapters` throws it too, so this module stays free of the
+ * schema and the validator that the `/adapters` entry must not load.
+ */
+export declare class DaemonConfigInvalidError extends Error {
+    readonly issues: readonly DaemonConfigIssue[];
+    readonly code: 'daemon_config_invalid';
+    constructor(issues: readonly DaemonConfigIssue[]);
+}
 // ==== @byok-sdk/client dist/daemon/agent-content-audit-store.d.ts ====
 import type { AgentContentAuditReceipt } from './agent-content-read';
 /**
@@ -3718,22 +3732,8 @@ export { validateDaemonConfig } from './validate';
 export type { DaemonConfigIssue, DaemonConfigIssueCode, DaemonConfigSource, DaemonConfigValidation } from './validate';
 export { checkDaemonConfig } from './check';
 export type { DaemonConfigCheck, DaemonConfigCheckOptions } from './check';
-export { DaemonConfigInvalidError } from './invalid-error';
+export { DaemonConfigInvalidError } from '../../daemon-config-invalid-error';
 export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonEffectiveToolAuthorization, DaemonMemoryHelperResolution } from './effective';
-// ==== @byok-sdk/client dist/daemon/config-schema/invalid-error.d.ts ====
-import type { DaemonConfigIssue } from './validate';
-/**
- * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:
- * a missing required field, or a value of the wrong JSON type or literal.
- * A removed field throws {@link DaemonConfigFieldRemovedError} instead.
- * `createRuntimeAdapters` throws it too, so this module stays free of the
- * schema and the validator that the `/adapters` entry must not load.
- */
-export declare class DaemonConfigInvalidError extends Error {
-    readonly issues: readonly DaemonConfigIssue[];
-    readonly code: 'daemon_config_invalid';
-    constructor(issues: readonly DaemonConfigIssue[]);
-}
 // ==== @byok-sdk/client dist/daemon/config-schema/removed-fields.d.ts ====
 /**
  * `DaemonConfig` fields that no longer exist (#1094). The one table both the

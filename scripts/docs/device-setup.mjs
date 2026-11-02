@@ -30,7 +30,7 @@ export function declaredCodes() {
   const halts = read('packages/client/src/daemon/daemon-lifecycle.ts').match(/export const DAEMON_HALT_REASONS\s*=\s*\[([\s\S]*?)\] as const/);
   if (!union || !halts) throw new Error('Setup error declarations changed shape; update coverage extraction.');
   const literals = (text) => [...text.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-  const classes = ['packages/client/src/daemon/daemon-errors.ts', 'packages/client/src/daemon/config-schema/invalid-error.ts']
+  const classes = ['packages/client/src/daemon/daemon-errors.ts', 'packages/client/src/daemon-config-invalid-error.ts']
     .flatMap((file) => [...read(file).matchAll(/readonly code\s*=\s*'([^']+)'/g)].map((m) => m[1]));
   if (!classes.length) throw new Error('No coded startup errors found');
   return [...new Set([...literals(union[1]), ...literals(halts[1]), ...classes])].sort();

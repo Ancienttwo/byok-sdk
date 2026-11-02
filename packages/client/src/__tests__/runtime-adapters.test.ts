@@ -9,7 +9,7 @@ import type { GrokAdapterOptions } from '../adapters/grok/grok-adapter';
 import type { PiAdapterOptions } from '../adapters/pi/pi-adapter';
 import { createRuntimeAdapters, type RuntimeAdaptersConfig } from '../adapters';
 import { createDaemon, type DaemonConfig } from '../daemon/create-daemon';
-import { DaemonConfigInvalidError } from '../daemon/config-schema/invalid-error';
+import { DaemonConfigInvalidError } from '../daemon-config-invalid-error';
 import { DAEMON_CONFIG_SCHEMA } from '../daemon/config-schema/schema.generated';
 import type { DaemonConfigJsonSchema } from '../daemon/config-schema/schema-types';
 
