@@ -19,7 +19,7 @@
       "id": "keys-windows-credential-system-root",
       "impact": "additive",
       "summary": "WindowsCredentialManagerSecretStoreOptions gains an optional systemRoot, the absolute Windows system directory PowerShell is started from. Omitted, the store reads process.env.SystemRoot once at construction, as before. A systemRoot that is not an absolute path makes the store unavailable (available() is false, operations throw CREDENTIAL_MANAGER_UNAVAILABLE) and never falls back to the process environment; scope() passes it to the scoped store. A Host test that injects platform: \"win32\" on another OS can pass systemRoot instead of setting the process environment. No Host code change is needed otherwise.",
-      "migration": "docs/releases/host-upgrade-0.34.0.md#from-0330-to-0340",
+      "migration": "CHANGELOG.md#unreleased",
       "items": [
         "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
       ]
