@@ -272,10 +272,9 @@ async function lifecycle(variant, cmd, server, payloads) {
   log(`${owner}: rolled back to v1`);
 
   await ok(cmd.uninstall());
-  // macOS, Linux and a Windows `user` scope service keep the enrollment in this user's keychain,
-  // Secret Service or Credential Manager; leave none behind. A WinSW service keeps it in the
-  // service account's Credential Manager, which this user cannot reach.
-  if (!isWindows || owner === 'app') {
+  // macOS and Linux keep the enrollment in the user's keychain or Secret Service; leave none behind.
+  // On Windows `byok-agent unpair` checks only a WinSW service, so neither run unpairs there.
+  if (!isWindows) {
     // The manager unloads the service before its daemon has released the store.
     await until(async () => (/^live status: daemon not reachable/mu.test((await run([agentCli, 'status', '--config', variant.config])).stdout) ? true : undefined),
       `${variant.name} exit`);
