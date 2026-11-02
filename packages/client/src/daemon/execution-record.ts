@@ -1,5 +1,6 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { RuntimeAdapterDescriptor, Session } from '../types';
+import type { RuntimeAdapterDescriptor } from '../types';
+import type { DeclaredSessionMembers } from './session-contract';
 
 /**
  * Octop ③ (#553): a local, content-free diagnostic that says whether the SDK
@@ -12,8 +13,9 @@ import type { RuntimeAdapterDescriptor, Session } from '../types';
  *   exactly one result, no frame was dropped or invented, and the runtime sent
  *   `turn_end`. It is about collection only; a failed task can be complete.
  * - `partial`: a declared source with at least one gap.
- * - `unknown`: no declared source, or more open tool calls than the record
- *   tracks. A Host that has no record for a terminal also shows `unknown`.
+ * - `unknown`: no declared source, a declaring session without
+ *   `Session.evidence()`, or more open tool calls than the record tracks. A
+ *   Host that has no record for a terminal also shows `unknown`.
  */
 export type ExecutionRecordStatus = 'complete' | 'partial' | 'unknown';
 
@@ -46,8 +48,12 @@ export type ExecutionRecordGap =
   | 'no_turn_end'
   | 'spill_unstored';
 
-/** Why a record is `unknown`. */
-export type ExecutionRecordUnknown = 'source_not_declared' | 'evidence_overflow';
+/**
+ * Why a record is `unknown`. `evidence_missing`: the adapter declares
+ * `trajectoryEvidence` but its started Session has no `evidence()`, as when a
+ * Host wrapper does not forward it.
+ */
+export type ExecutionRecordUnknown = 'source_not_declared' | 'evidence_missing' | 'evidence_overflow';
 
 /** One started execution's record. Counts and closed codes only: never a tool input, output, path or reason text. */
 export interface ExecutionRecord {
@@ -92,7 +98,8 @@ export class ExecutionRecordAccumulator {
   constructor(
     private readonly taskId: string,
     private readonly source: RuntimeAdapterDescriptor['trajectoryEvidence'],
-    private readonly session: Pick<Session, 'evidence'>,
+    /** The bound `Session.evidence`; see {@link DeclaredSessionMembers.evidence}. */
+    private readonly evidence: DeclaredSessionMembers['evidence'],
   ) {}
 
   observe(event: AgentEvent): void {
@@ -124,18 +131,19 @@ export class ExecutionRecordAccumulator {
     if (this.source === undefined) {
       return { taskId: this.taskId, terminal, status: 'unknown', source: 'none', gaps: [], unknownReason: 'source_not_declared' };
     }
+    if (this.evidence === undefined || this.evidence === 'missing') {
+      return { taskId: this.taskId, terminal, status: 'unknown', source: this.source, gaps: [], unknownReason: 'evidence_missing' };
+    }
     if (this.overflowed) {
       return { taskId: this.taskId, terminal, status: 'unknown', source: this.source, gaps: [], unknownReason: 'evidence_overflow' };
     }
     const counts = { ...this.counts };
     counts.unpaired_tool_call += this.open.size;
     if (!this.turnEnded) counts[this.streamEndedEarly ? 'stream_ended_early' : 'no_turn_end'] += 1;
-    const evidence = this.session.evidence?.();
-    if (evidence !== undefined) {
-      counts.decode_dropped += evidenceCount(evidence.decodeDropped);
-      counts.unmapped_frame += evidenceCount(evidence.unmappedFrames);
-      counts.synthetic_tool_result += evidenceCount(evidence.syntheticToolResults);
-    }
+    const evidence = this.evidence();
+    counts.decode_dropped += evidenceCount(evidence.decodeDropped);
+    counts.unmapped_frame += evidenceCount(evidence.unmappedFrames);
+    counts.synthetic_tool_result += evidenceCount(evidence.syntheticToolResults);
     const gaps = (Object.keys(counts) as ExecutionRecordGap[])
       .filter(reason => counts[reason] > 0)
       .map(reason => ({ reason, count: counts[reason] }));

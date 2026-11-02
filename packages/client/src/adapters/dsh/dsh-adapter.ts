@@ -154,7 +154,7 @@ export class DshAdapter implements RuntimeAdapter {
       platforms: ['darwin', 'linux'],
       capabilities: DSH_RUNTIME_CAPABILITIES,
       // Each `agent_message_chunk` is one committed assistant message.
-      progressEventsAreMessages: true,
+      progressMessageBoundary: 'event',
       ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
     });
   }

@@ -239,6 +239,8 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
   private sessionCounter = 0;
   /** When set, start() throws this instead of returning a session (for testing the daemon's failure paths). */
   startError: Error | undefined;
+  /** Test hook: shapes each instruction-started Session before `start()` returns it, as a Host wrapper would. */
+  decorateSession: ((session: StubSession) => void) | undefined;
   private startGate: Promise<void> | undefined;
 
   /**
@@ -349,6 +351,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     if (this.startGate) await this.startGate;
     this.sessionCounter += 1;
     const session = new StubSession(startInput.manifest.sessionRef ?? `stub-session-${this.sessionCounter}`, startInput.approvalChannel);
+    this.decorateSession?.(session);
     this.sessions.push(session);
     return session;
   }

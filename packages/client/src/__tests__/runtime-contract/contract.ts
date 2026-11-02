@@ -7,6 +7,7 @@ import { bindMcpToolsetServerObservation, observeMcpServer } from '../../mcp/obs
 import type { McpStdioServerConfig, McpToolsetToolObservation, MessageDraftDelta, RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeDetectResult, Session } from '../../types';
 import { startPreparedOperation, type PreparedOperationResources } from '../fixtures/prepared-operation';
 import { runtimeVersionPolicyProjection } from '../../runtime-version-policy';
+import { bindDeclaredSessionMembers } from '../../daemon/session-contract';
 import { startEgressRecorder, type EgressAttempt, type EgressRecorder } from './loopback';
 
 /**
@@ -325,6 +326,8 @@ export async function runTurn(
   const events: TurnEvent[] = [];
   let timer: NodeJS.Timeout | undefined;
   try {
+    // The real Session carries every member its descriptor declares (#1323).
+    expect(bindDeclaredSessionMembers(adapter.descriptor, session).evidence).not.toBe('missing');
     await Promise.race([
       (async () => {
         for await (const event of session.events) {
@@ -349,7 +352,7 @@ export async function runTurn(
  */
 export function draftText(events: readonly TurnEvent[], descriptor: RuntimeAdapterDescriptor): string {
   return events.flatMap(event => event.type === 'message_draft_delta' ? [event.text]
-    : event.type === 'progress' && descriptor.progressEventsAreMessages !== true ? [event.text] : []).join('');
+    : event.type === 'progress' && descriptor.progressMessageBoundary === undefined ? [event.text] : []).join('');
 }
 
 /** Memoize one expensive turn shared by several cases. */

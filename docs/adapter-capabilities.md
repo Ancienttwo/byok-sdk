@@ -790,7 +790,8 @@ beside Grok. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes n
   Linux). Every `session/request_permission` is answered `cancelled`: that
   tool fails and the turn continues. `auto` is declined before claim.
 - Events: each `agent_message_chunk` is one committed message, so the
-  descriptor sets `progressEventsAreMessages` and declares no message draft.
+  descriptor sets `progressMessageBoundary: 'event'` and declares no message
+  draft.
   `tool_call` kinds are always `other`, with the input in `rawInput`; as for
   Grok, `tool_use.input` is that raw input as JSON text and
   `tool_result.output` carries the content blocks under `content`.
@@ -974,11 +975,13 @@ to succeed.
 - `Session.evidence()` counts runtime output that the session could not turn
   into events: undecoded frames, unmapped frames, and tool results that the
   adapter made itself. The counts cover the whole session up to `close()`.
-  A declaring adapter without `evidence()` states that nothing below its event
-  stream can drop or invent a frame.
+  The Session must implement `evidence()`, and returns zero counts when
+  nothing was dropped.
 
 An adapter without the declaration gets `unknown` records
-(`source_not_declared`). A declaration names the collection surface. It does
+(`source_not_declared`). A declaring adapter whose started Session has no
+`evidence()` gets `unknown` records (`evidence_missing`); the task runs and
+ends as usual. A declaration names the collection surface. It does
 not prove that each run is complete. The record never changes the terminal or
 a retry decision. Downstream read paths and display text are in section 7 of
 the [downstream diagnostics guide](agent-diagnostics-integration.md).
@@ -1000,6 +1003,26 @@ the [downstream diagnostics guide](agent-diagnostics-integration.md).
   Treat the runtime's routine bookkeeping frames as expected, not unmapped.
   If you do not, every normal run is `partial`. A shared runtime name does not
   inherit the Pi declaration.
+
+## Wrapping a Session
+
+A Host that wraps an adapter or its `Session` (admission, ownership, audit,
+metering) keeps the adapter's descriptor, so the wrapped Session must carry
+every member that descriptor declares. The daemon binds those members once,
+when `start()` returns, and never falls back to "no capability":
+
+- `progressMessageBoundary: 'session'` (Claude) requires
+  `Session.progressStartsMessage()`. Without it the daemon closes the session
+  and fails the task at start with `runtime_session_incomplete`
+  (`task.fail`, non-retryable, failure class `unknown`).
+- `trajectoryEvidence: 'event-stream'` (Pi RPC lanes) requires
+  `Session.evidence()`. Without it the task runs as usual, and its execution
+  record is `unknown` (`evidence_missing`).
+
+A wrapper also yields the inner event objects unchanged, because
+`progressStartsMessage(event)` recognizes the objects its own `events`
+yielded, and reads `sessionRef` from the live inner session rather than a
+copy taken at start.
 
 ## Local admission declarations
 
