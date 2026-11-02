@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "67c5722d35cae5674b7ac6b2e85aff3b43d4ea44eb5c29f4bb6d909d6ee5a1d1"
+    "snapshotSha256": "466ddc35913b93cc9871dc44f5a731460494b7721639ff326031ac81405b4804"
   },
   "configFields": {
     "status": "tracked",
@@ -23,9 +23,35 @@
       "items": [
         "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
       ]
+    },
+    {
+      "id": "client-service-daemon-stores",
+      "impact": "additive",
+      "summary": "ServiceInstallationOptions gains daemonStores(), and ServiceDaemonStore is exported: a service process that owns several daemon stores lists them, and every upgrade, rollback and recover stops all of them, holds an installer owner lease and the store gate of each through the pointer switch, and ends each store's owned processes. daemonStores requires healthCheck (createServiceInstallation throws TypeError without it). ServiceInstallationErrorCode gains daemon_stores_invalid (a relative or repeated storeDir, an empty productId, or a throw; the receipt is failed, nothing is switched and the old version is started again): a reader with an exhaustive switch over the codes gets one more case. The stop now takes an owner lease on each store, the default single store included, so what a crashed daemon left (a dead owner, a control.token whose endpoint refuses connections) is reclaimed and the upgrade goes on, where it was store_busy before. No Host code change is needed without daemonStores.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client#ServiceDaemonStore",
+        "export:@byok-sdk/client#ServiceInstallationErrorCode",
+        "export:@byok-sdk/client#ServiceInstallationOptions"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#ServiceDaemonStore",
+      "change": "added",
+      "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "changed",
+      "entry": "client-service-daemon-stores"
+    },
     {
       "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
       "change": "changed",

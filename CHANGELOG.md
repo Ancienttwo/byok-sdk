@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Added (client)** — `ServiceInstallationOptions.daemonStores()` and the
+  `ServiceDaemonStore` type: a service process that owns several daemon stores
+  lists them, and every upgrade, rollback and recover stops all of them, holds
+  an owner lease and the store gate of each through the pointer switch, and
+  ends each store's owned processes. It requires `healthCheck`
+  (`createServiceInstallation` throws `TypeError` without it). A list with a
+  relative or repeated `storeDir` or an empty `productId`, or a throw, is the
+  new `ServiceInstallationErrorCode` `daemon_stores_invalid`: the receipt is
+  `failed`, nothing is switched and the old version is started again. A reader
+  with an exhaustive switch over the codes gets one more case (#1328).
+- **Changed (client)** — the stop before an upgrade, rollback or recover now
+  takes an owner lease on each daemon store, the default single store
+  included, instead of polling for a missing `daemon-owner.json` and
+  `control.token`. A store a crashed daemon left behind (a dead owner, a
+  `control.token` whose endpoint refuses connections) is reclaimed and the
+  upgrade goes on; before, it was `store_busy` until that daemon started again
+  (#1328).
+
 - **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
   absolute Windows system directory PowerShell is started from. Omitted, the
   store reads `process.env.SystemRoot` once at construction; an injected value

@@ -9625,7 +9625,7 @@ export { generateWinswXml } from './lifecycle/winsw';
 export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service';
 export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service';
 export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError, } from './lifecycle/service-installation';
-export type { ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceUpgradeReceipt, } from './lifecycle/service-installation';
+export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceUpgradeReceipt, } from './lifecycle/service-installation';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit';
 export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit';
 export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
@@ -10963,6 +10963,11 @@ export interface ServicePayloadManifest {
     /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
     files: Record<string, string>;
 }
+/** A daemon store the service process owns (#1328): the `DaemonConfig.storeDir` and `productId` of one daemon it runs. */
+export interface ServiceDaemonStore {
+    readonly storeDir: string;
+    readonly productId: string;
+}
 /**
  * What an installation is told to do (#1097). `program` and `precheck`
  * receive a version directory: `program` gets `<installRoot>/current`, so the
@@ -10998,7 +11003,16 @@ export interface ServiceInstallationOptions {
     healthCheck?(signal: AbortSignal): Promise<void>;
     /** How long the health check may take. Default 60000. */
     healthTimeoutMs?: number;
-    /** How long a stop may take to leave the store quiescent. Default 30000. */
+    /**
+     * Every daemon store the service process owns, read after the service has
+     * stopped, on every upgrade, rollback and recover (#1328). Each `storeDir`
+     * is absolute and listed once; `productId` is not empty; an empty list is
+     * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
+     * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
+     * since the default one reaches only `productId`'s daemon.
+     */
+    daemonStores?(): Promise<readonly ServiceDaemonStore[]>;
+    /** How long a stop may take to leave every daemon store quiescent, shared by all of them. Default 30000. */
     stopTimeoutMs?: number;
     /** Test seams for the underlying lifecycle. */
     lifecycle?: CreateServiceLifecycleOptions;
@@ -11071,7 +11085,8 @@ declare const ERROR_MESSAGES: {
     readonly version_current: 'The payload is the version already running.';
     readonly version_conflict: 'A different payload with the same version id is already staged.';
     readonly upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.';
-    readonly store_busy: 'The store still has a running owner after the stop. Stop every process that uses this store and retry.';
+    readonly store_busy: 'A daemon store still has a running owner after the stop. Stop every process that uses it and retry.';
+    readonly daemon_stores_invalid: 'daemonStores() threw or listed an invalid store: each storeDir must be absolute and listed once, each productId not empty.';
     readonly owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.';
     readonly precheck_failed: 'The candidate\'s store precheck did not produce a verdict.';
     readonly store_repair_required: 'The candidate needs a new store path and a new pairing. Nothing was switched; decide before upgrading.';
@@ -11267,7 +11282,12 @@ export interface ServiceDefinition {
     displayName?: string;
     /** What the launcher runs — see {@link ServiceProgram}. */
     program: ServiceProgram;
-    /** The product's SDK store (`DaemonConfig.storeDir` or its default). Holds the launcher and the lifecycle owner record under `<storeDir>/service`. */
+    /**
+     * The directory that holds the launcher and the lifecycle owner record
+     * under `<storeDir>/service`: the product's SDK store (`DaemonConfig.storeDir`
+     * or its default). With `ServiceInstallationOptions.daemonStores` it may be
+     * the product's own data directory instead.
+     */
     storeDir: string;
     /** `resolveHostLayout(...).logDir`: the daemon log and the service manager's redirect files (created if missing). On Windows also the default WinSW install directory — see `windows.installDir`. */
     logDir: string;

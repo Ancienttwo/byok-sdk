@@ -74,7 +74,12 @@ export interface ServiceDefinition {
   displayName?: string;
   /** What the launcher runs — see {@link ServiceProgram}. */
   program: ServiceProgram;
-  /** The product's SDK store (`DaemonConfig.storeDir` or its default). Holds the launcher and the lifecycle owner record under `<storeDir>/service`. */
+  /**
+   * The directory that holds the launcher and the lifecycle owner record
+   * under `<storeDir>/service`: the product's SDK store (`DaemonConfig.storeDir`
+   * or its default). With `ServiceInstallationOptions.daemonStores` it may be
+   * the product's own data directory instead.
+   */
   storeDir: string;
   /** `resolveHostLayout(...).logDir`: the daemon log and the service manager's redirect files (created if missing). On Windows also the default WinSW install directory — see `windows.installDir`. */
   logDir: string;
