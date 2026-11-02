@@ -21,8 +21,9 @@ export class PiBundledAssetsError extends Error {
 
 /**
  * The asset root of a single-file product that bundles Pi: where Pi itself
- * looks, `PI_PACKAGE_DIR`, else the directory of a compiled executable. An
- * interpreter + bundle product (`entry`) must set `PI_PACKAGE_DIR`. The root
+ * looks, `PI_PACKAGE_DIR`, else the directory of a compiled executable. The
+ * SDK sets `PI_PACKAGE_DIR` from `runtimes.pi.packageDir` only, so an
+ * interpreter + bundle product (`entry`) must configure that. The root
  * must hold the SDK asset manifest.
  */
 export function locateBundledPiAssets(input: {

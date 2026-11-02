@@ -4,5 +4,5 @@ export { validateDaemonConfig } from './validate';
 export type { DaemonConfigIssue, DaemonConfigIssueCode, DaemonConfigSource, DaemonConfigValidation } from './validate';
 export { checkDaemonConfig } from './check';
 export type { DaemonConfigCheck, DaemonConfigCheckOptions } from './check';
-export { DaemonConfigInvalidError } from './errors';
+export { DaemonConfigInvalidError } from './invalid-error';
 export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonEffectiveToolAuthorization, DaemonMemoryHelperResolution } from './effective';

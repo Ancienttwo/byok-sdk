@@ -1,4 +1,5 @@
-import { assertDaemonConfigValid, DaemonConfigInvalidError, removedFieldError } from '../config-schema/errors';
+import { assertDaemonConfigValid, removedFieldError } from '../config-schema/errors';
+import { DaemonConfigInvalidError } from '../config-schema/invalid-error';
 import type { DaemonMemoryHelperResolution } from '../config-schema/effective';
 import { resolveAgentMemoryFilesystemHelper } from '../../util/agent-memory-helper-release';
 import { resolveSdkReservedHelperBin } from '../../sdk-reserved-helper-host';
@@ -8,13 +9,12 @@ import { resolveAgentMemoryMcpBin, resolveAgentMemoryDescribeBin } from '../reso
 import { resolveLocalAgentReleaseIdentity } from '../../release-identity';
 import { LocalStorageConfigError } from '../retention/config';
 import { McpToolsetRegistry } from '../toolset-registry';
-import { validatePiByokLauncherConfig } from '../../adapters/pi/pi-adapter';
+import { resolvePiByokLauncher } from '../../adapters/runtime-adapters';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME, DEFAULT_MAX_CONCURRENT_TASKS } from '../task-runner';
 import { MIN_MAX_INLINE_EVENT_BYTES, DEFAULT_MAX_INLINE_EVENT_BYTES } from '../event-spill';
 import { validateProgressBatcherOptions } from '../progress-batcher';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon';
 import type { DaemonInputs } from './scope';
-import { foldNameAliases } from '../../util/fold-name-aliases';
 import {
   FileScopePolicyError, parseToolAuthorizationPolicy, toolAuthorizationResolver as deriveToolAuthorizationResolver,
   type ToolAuthorizationPolicy, type ToolAuthorizationResolver,
@@ -31,14 +31,6 @@ function admitToolAuthorizationPolicy(value: unknown): ToolAuthorizationPolicy {
       path: fileScope ? 'toolAuthorization.fileScope' : 'toolAuthorization', message: error.message,
     }]);
   }
-}
-
-/** Validates `DaemonConfig.piByokLauncher` and folds its `sessionDir`; `createDaemon` and the runtime probes build Pi from this one value. */
-export function resolvePiByokLauncher(config: Pick<DaemonConfig, 'piByokLauncher'>) {
-  validatePiByokLauncherConfig(config.piByokLauncher);
-  // The launcher writes sessions here and retention sweeps it; both use this spelling.
-  return config.piByokLauncher === undefined ? undefined
-    : Object.freeze({ ...config.piByokLauncher, sessionDir: foldNameAliases(config.piByokLauncher.sessionDir) });
 }
 
 /**

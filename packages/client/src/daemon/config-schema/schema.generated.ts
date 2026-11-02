@@ -728,6 +728,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "pi": {
           "type": "object",
           "properties": {
+            "durableLane": {
+              "type": "boolean"
+            },
             "agentUserContext": {
               "enum": [
                 "excluded",
@@ -864,8 +867,8 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
                 "unqualified"
               ]
             },
-            "durableLane": {
-              "type": "boolean"
+            "packageDir": {
+              "type": "string"
             }
           }
         },

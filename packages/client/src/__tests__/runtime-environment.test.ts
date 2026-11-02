@@ -11,7 +11,7 @@ import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { HermesAdapter } from '../adapters/hermes/hermes-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { createDaemon, createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
-import { buildAdapter } from '../daemon/create-daemon/support';
+import { createRuntimeAdapters } from '../adapters/runtime-adapters';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { RuntimeEnvironmentUnavailableError, type RuntimeEnvironmentPolicy } from '../runtime/environment';
 import { setLoginShellSnapshotSource, type LoginShellSnapshot } from '../login-shell-environment';
@@ -129,6 +129,28 @@ describe('Claude conflict rule', () => {
   });
 });
 
+// #1315: runtimes.pi.packageDir is the one Pi asset root; no other runtime gets it.
+describe('runtimes.pi.packageDir', () => {
+  it.skipIf(process.platform === 'win32')('is the PI_PACKAGE_DIR of Pi alone, over a Host and a login-shell value', async () => {
+    process.env.PI_PACKAGE_DIR = '/host/pi-assets';
+    try {
+      useSnapshot(captured);
+      const adapters = createRuntimeAdapters({ runtimeAllowlist: ['pi', 'claude', 'codex', 'grok'], runtimes: { pi: { packageDir: '/product/pi-assets' } } });
+      const environments = await Promise.all(adapters.map(async (adapter) => [adapter.descriptor.id, await adapter.runtimeEnvironment()] as const));
+      for (const [id, { env }] of environments) expect(env.PI_PACKAGE_DIR, id).toBe(id === 'pi' ? '/product/pi-assets' : undefined);
+      expect(environments[0]![1].report.names).toContainEqual({ name: 'PI_PACKAGE_DIR', source: 'sdk' });
+      useSnapshot({ ...captured, env: { ...SHELL_ENV, PI_PACKAGE_DIR: '/shell/pi-assets' } });
+      const [configured, unset] = [...createRuntimeAdapters({ runtimeAllowlist: ['pi'], runtimes: { pi: { packageDir: '/product/pi-assets' } } }), ...createRuntimeAdapters({ runtimeAllowlist: ['pi'] })];
+      expect((await configured!.runtimeEnvironment()).env.PI_PACKAGE_DIR).toBe('/product/pi-assets');
+      const { env, report } = await unset!.runtimeEnvironment();
+      expect(env).not.toHaveProperty('PI_PACKAGE_DIR');
+      expect(report.removed).toContainEqual({ name: 'PI_PACKAGE_DIR', rule: 'conflict' });
+    } finally {
+      delete process.env.PI_PACKAGE_DIR;
+    }
+  });
+});
+
 describe('daemon wiring', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
@@ -149,8 +171,8 @@ describe('daemon wiring', () => {
   it('createDaemon gives its adapters DaemonConfig.runtimeEnvironment; createDaemonWithAdapters refuses the field', async () => {
     useSnapshot(captured);
     const base = await config();
-    const adapter = buildAdapter('claude', { ...base, runtimeEnvironment: { pass: ['HOST_PASSED_SENTINEL'] } }, undefined);
-    expect((await adapter.runtimeEnvironment()).env.HOST_PASSED_SENTINEL).toBe('passed');
+    const [adapter] = createRuntimeAdapters({ runtimeAllowlist: ['claude'], runtimeEnvironment: { pass: ['HOST_PASSED_SENTINEL'] } });
+    expect((await adapter!.runtimeEnvironment()).env.HOST_PASSED_SENTINEL).toBe('passed');
     expect(() => createDaemonWithAdapters({ ...base, runtimeEnvironment: {} }, [new StubRuntimeAdapter()]))
       .toThrow('DaemonConfig.runtimeEnvironment is only supported by createDaemon');
     expect(() => createDaemon({ ...base, runtimeEnvironment: { base: 'inherit' } as never })).toThrow('DaemonConfig.runtimeEnvironment.base must be login-shell or allowlist');
