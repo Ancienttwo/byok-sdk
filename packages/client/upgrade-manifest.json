@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "01f11c331c076d3cb1a2525306c8ea90861b3dba4f8de465f4e4afdd45e4438c"
+    "snapshotSha256": "0a65cc7f66d10efd98e91dda7498662848b4646dbebf9b15eb837b09f25f1259"
   },
   "configFields": {
     "status": "tracked",
@@ -133,9 +133,49 @@
       "entry": "pi-package-dir-config"
     },
     {
+      "item": "export:@byok-sdk/client#ExecutionRecordUnknown",
+      "change": "changed",
+      "entry": "client-execution-record-evidence-missing"
+    },
+    {
       "item": "export:@byok-sdk/client#PiAdapterOptions",
       "change": "changed",
       "entry": "pi-package-dir-config"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "client-progress-message-boundary"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceDaemonStore",
+      "change": "added",
+      "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationError",
+      "change": "changed",
+      "entry": "client-service-store-verdicts"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "changed",
+      "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceStoreVerdict",
+      "change": "added",
+      "entry": "client-service-store-verdicts"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",
+      "change": "changed",
+      "entry": "client-service-store-verdicts"
     },
     {
       "item": "export:@byok-sdk/client#UpgradeFromBreakingEntry",
@@ -173,6 +213,11 @@
       "entry": "runtime-adapters-factory"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "client-progress-message-boundary"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersConfig",
       "change": "added",
       "entry": "runtime-adapters-factory"
@@ -191,51 +236,6 @@
       "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
       "change": "changed",
       "entry": "keys-windows-credential-system-root"
-    },
-    {
-      "item": "export:@byok-sdk/client#ExecutionRecordUnknown",
-      "change": "changed",
-      "entry": "client-execution-record-evidence-missing"
-    },
-    {
-      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
-      "change": "changed",
-      "entry": "client-progress-message-boundary"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
-      "change": "changed",
-      "entry": "client-progress-message-boundary"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceDaemonStore",
-      "change": "added",
-      "entry": "client-service-daemon-stores"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceInstallationError",
-      "change": "changed",
-      "entry": "client-service-store-verdicts"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
-      "change": "changed",
-      "entry": "client-service-daemon-stores"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
-      "change": "changed",
-      "entry": "client-service-daemon-stores"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceStoreVerdict",
-      "change": "added",
-      "entry": "client-service-store-verdicts"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",
-      "change": "changed",
-      "entry": "client-service-store-verdicts"
     }
   ]
 }
