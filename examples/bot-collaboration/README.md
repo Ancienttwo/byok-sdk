@@ -732,8 +732,8 @@ template.
   revision.
 - The snapshot covers the Bots only. `setMainBot`, `create_bot`, `update_bot`
   and `delete_bot` refuse with `external_team`, and the Main Bot schema does
-  not offer those three actions. Rooms, team notes and persona retries stay
-  local.
+  not offer those three actions. Team notes and persona retries stay local.
+  Rooms stay local too, unless the external rooms mode below is on.
 - The ledger stores the mode. A ledger with a local team cannot open in
   external mode, and an external ledger cannot open without the option.
 
@@ -779,6 +779,41 @@ there is one projection writer and one revision for each agentRef.
   `personaReady` only after the snapshot that introduces that revision
   resolves: an earlier report is refused, not stored.
 - `retryPersona` refuses with `external_persona`.
+- The ledger stores this mode too, so a restart cannot change it. The mode is
+  fixed once stored, with no migration. The option needs `team: 'external'`.
+
+With `rooms: 'external'` as well, the team snapshot also owns the rooms
+(#1321). Each snapshot carries `rooms`, the authority's whole room list, and
+`applyTeam({ revision, bots, rooms })` writes it after the Bots. Without the
+mode, a snapshot with `rooms` is refused; with it, a snapshot without `rooms`
+is refused, and nothing changes.
+
+- A room has `id`, `name`, `members`, and optionally `admin`, `mode`,
+  `announcement` and `memberMentions`. The id matches
+  `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` and is not an `Object.prototype` key.
+  The rules are those of `create_room`, with one difference: a room can have
+  no member. Its members are Bots of the same snapshot, 0 to 12 and distinct,
+  and its admin is a member. `mode` is `mention` or omitted, `memberMentions`
+  is `execute`, `ignore` or omitted. A snapshot holds at most
+  `TEAM_ROOM_LIMIT` (64) rooms, and room order is not content.
+- A new room starts with no visible history for its members. A listed room
+  takes the snapshot's fields as a whole: an omitted admin, announcement or
+  `memberMentions` is cleared, and `memberMentions` returns to `execute`. A
+  member that stays keeps its visibility, a new member sees messages from now
+  on, and a member that left and came back starts again from now.
+- A room that the snapshot no longer lists is archived for good: it shows
+  `archived: true`, with no member, no visibility and no admin. At the next
+  pass its seats are removed as for a member that left: a seat that has not
+  started is cancelled, a seat that started runs on and its speech is kept as
+  audit only, and the round closes once every seat is released. `roomInput`,
+  a room `receive` and a `room_call` round in it throw `Room is archived`, so
+  the Host stops giving K8 its inbound messages first. A snapshot that lists
+  an archived room is refused, and nothing changes.
+- `createRoom`, `updateRoom` and `setMemberMentions` refuse with
+  `external_rooms`. The Main Bot schema offers neither `create_room` nor
+  `update_room`, and an outcome that has one is refused with `external_rooms`.
+- A suspended Bot (#1319) can be a room member, under the suspension rules
+  above.
 - The ledger stores this mode too, so a restart cannot change it. The mode is
   fixed once stored, with no migration. The option needs `team: 'external'`.
 
@@ -846,6 +881,19 @@ The Host never scans text for names or `[PASS]`. Rooms support mention mode.
 An admin identity grants a larger budget. It does not create an implicit seat.
 The optional admin mode is refused. `updateRoom` is an authenticated owner API
 for membership, admin, name, and announcement changes.
+
+`createRoom(roomId, fields)` is an authenticated owner API that creates a room
+with a Host room id and no model run (#1321). The id follows the snapshot room
+id rule ([External team authority](#external-team-authority)), and the fields
+follow `create_room`: 1 to 12 distinct active members, an admin that is a
+member, and mention mode only. The command id comes from the room id. The same
+id with the same name, members, admin and announcement replays the first
+result, and other fields are an `identity_conflict` (`Room identity conflict`).
+An id that already has a room, also one that a Main Bot outcome created, throws
+`Room already exists`. A new room starts with no visible history for its
+members. Later membership changes follow `updateRoom`. A local room cannot be
+deleted. In the external rooms mode, `createRoom` refuses with
+`external_rooms`.
 
 `setMemberMentions(roomId, value, principal)` is an owner API for the
 `memberMentions` setting of a room (#1230). The value is `execute` or `ignore`;

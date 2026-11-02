@@ -217,7 +217,8 @@ it('records the root of the input itself when the input also seals an earlier du
 });
 
 /**
- * The L ledger with L's sync order (K8 host.ts `sync`): the Turn steps, then `settleDelegations` on the K8 `intentFacts` adapter.
+ * The L ledger with L's sync order (K8 host.ts `sync`): the room step and the Turn steps, then `settleDelegations` on the K8
+ * `intentFacts` adapter.
  * Commands take the intent rows as the L Host's owner commands and outcomes do (host.ts `commitOwner`, `committed`).
  */
 function settlementSubject(): SettlementSubject & { ledger: HostLedger } {
@@ -232,7 +233,7 @@ function settlementSubject(): SettlementSubject & { ledger: HostLedger } {
     settle: (now, timers) => {
       ledger.transaction((s, rows) => {
         const state = stateOf(s.application);
-        for (const turn of Object.values(state.turns)) syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now });
+        advanceRoomsAndTurns(s, state, now, turn => syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now }));
         settleDelegations(s, state, now, (id, value) => project(s, id, value), timers);
       });
     },

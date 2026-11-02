@@ -54,6 +54,21 @@
   `participation` value refuses the snapshot. A snapshot without the field
   behaves as before.
 
+- **Added (examples)** — K8 and H have an owner `create_room` command (#1321):
+  `BotCollaboration.createRoom(roomId, fields)` and
+  `HostedCommandEntry.createRoom(credential, roomId, fields)` create a room
+  with a Host room id and no model run. The same id with the same fields
+  replays the first result, other fields are an `identity_conflict`, and an id
+  that already has a room throws `Room already exists`. With the new
+  `rooms: 'external'` option (only with `team: 'external'`), each team
+  snapshot carries `rooms`, the authority's whole room list, and the authority
+  owns the rooms and their `memberMentions`. A room that a snapshot no longer
+  lists is archived for good: its seats are removed at the next pass, and
+  `roomInput` throws `Room is archived`. In that mode `createRoom`,
+  `updateRoom`, `setMemberMentions` and the Main Bot's `create_room` and
+  `update_room` refuse with `TeamModeError` code `external_rooms`. Without the
+  option, behavior is unchanged.
+
 - **Fix (client; #1335)** — Grok no longer declares
   `isolation.userContext`. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
   `[paths] extra_rule_dirs` still reach an Agent task, and `compatInstructions`

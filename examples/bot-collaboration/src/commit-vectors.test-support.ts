@@ -5,7 +5,7 @@ import type { CollaborationState } from './model';
 import { outcomeSchema } from './schema';
 import { CommitConflict, type CommitRequest, type CommitResult } from './rules/commit';
 import type { Command } from './rules/commands';
-import { TeamModeError, type TeamSnapshotBot } from './rules/team';
+import { TeamModeError, type TeamSnapshotBot, type TeamSnapshotRoom } from './rules/team';
 import { BOT_TURN_OUTCOME_CONTRACT } from '@byok-sdk/protocol';
 import { OFFER_WAIT_MS, syncTurn, type SyncFacts, type SyncOptions, type SyncStep } from './rules/sync';
 import type { Conclusion, DelegationTimers, ReplyReadback } from './rules/delegation';
@@ -31,9 +31,9 @@ export interface CommitSubject {
 export const VECTOR_NOW = 1000;
 /**
  * One active Main Bot `main`, its processing Turn `t1` with a frozen schema, an open question `q1` and an expired card `c1`.
- * `external`: the team authority owns the Bots, and its team revision 1 holds `main`.
+ * `external`: the team authority owns the Bots, and its team revision 1 holds `main`. `rooms`: it also owns the rooms (#1321).
  */
-export type SeedTeam = 'local' | 'external';
+export type SeedTeam = 'local' | 'external' | 'rooms';
 export function seedCollaboration(state: CollaborationState, team: SeedTeam = 'local'): void {
   state.team.bots.main = { id: 'main', name: 'Main', role: 'Team owner', persona: '', model: 'default', mainBot: true, archived: false,
     revision: '1', readyRevision: '1', execution: template('device', 'main') };
@@ -43,6 +43,7 @@ export function seedCollaboration(state: CollaborationState, team: SeedTeam = 'l
   state.questions.q1 = { id: 'q1', turnId: 't1', value: { question: 'Go?', answerKind: 'text' } };
   state.cards.c1 = { id: 'c1', turnId: 't1', action: { action: 'send_message', summary: 'Send', draft: { text: 'hi' } }, state: 'pending', expiresAt: 0 };
   if (team === 'external') state.team.external = { revision: 1 };
+  if (team === 'rooms') state.team.external = { revision: 1, rooms: true };
 }
 const input = (key: string, request = 'Hello'): Extract<Command, { kind: 'input' }> => ({ kind: 'input', botId: 'main', key, request, sender: 'owner' });
 
@@ -143,8 +144,11 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
     });
 
     const main = { id: 'main', name: 'Main', role: 'Team owner', mainBot: true };
-    const team = (revision: number, ...bots: Array<Partial<TeamSnapshotBot> & { id: string }>): [string, Command] => [hash(['team', revision]),
+    type Snapshot = Extract<Command, { kind: 'team_snapshot' }>;
+    const team = (revision: number, ...bots: Array<Partial<TeamSnapshotBot> & { id: string }>): [string, Snapshot] => [hash(['team', revision]),
       { kind: 'team_snapshot', snapshot: { revision, bots: bots.map(bot => ({ name: bot.id, role: 'Helper', persona: '', model: 'default', mainBot: false, ...bot })) } }];
+    const withRooms = ([id, command]: [string, Snapshot], rooms: TeamSnapshotRoom[]): [string, Command] =>
+      [id, { ...command, snapshot: { ...command.snapshot, rooms } }];
 
     it('applies a newer team snapshot: archives a missing Bot, adds a new one and queues a projection for a changed one (#739 Q4c)', async () => {
       const subject = await open('external');
@@ -206,6 +210,51 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
       const subject = await open(), before = await subject.stored();
       await expect(settle(() => subject.commit(request(subject, ...team(1, main))))).rejects.toThrow('Team snapshots need the external team mode');
       expect(await subject.stored()).toBe(before);
+    });
+
+    it('creates an owner room with the Host room id: a replay returns the first result, other fields conflict (#1321)', async () => {
+      const subject = await open(), fields = { name: 'Macro', members: ['main'] };
+      const create = (roomId: string, commandId = hash(['create_room', roomId])): CommitRequest<Command> =>
+        request(subject, commandId, { kind: 'create_room', roomId, fields });
+      const first = await subject.commit(create('macro'));
+      expect(first).toEqual({ revision: 1, disposition: { outcome: 'accepted' }, outbox: [] });
+      const stored = await subject.stored();
+      expect(await subject.commit(create('macro'))).toEqual(first);
+      expect(await subject.stored()).toBe(stored);
+      await conflict(subject, { ...create('macro'), command: { kind: 'create_room', roomId: 'macro', fields: { ...fields, name: 'Other' } } },
+        'identity_conflict', 'Room identity conflict');
+      expect((await subject.state()).team.rooms.macro).toEqual({ id: 'macro', name: 'Macro', members: ['main'], mode: 'mention', announcement: '',
+        visibleFrom: { main: 0 }, messages: [] });
+      const round = await subject.commit(request(subject, 'r1', { kind: 'room_input', key: 'm1', roomId: 'macro', text: 'Hello', mentions: ['main'] }));
+      expect((await subject.state()).team.rounds[(round.disposition as { value: string }).value]).toMatchObject({ roomId: 'macro' });
+      // A room that has the id, also one that a Main Bot outcome created, has no record under another command id.
+      await expect(settle(() => subject.commit(create('macro', 'other')))).rejects.toThrow('Room already exists');
+      for (const id of ['a:b', 'constructor']) await expect(settle(() => subject.commit(create(id)))).rejects.toThrow('Invalid room id');
+    });
+
+    it('writes the rooms of a team snapshot in the external rooms mode as a whole (#1321)', async () => {
+      const subject = await open('rooms'), bots = [main, { id: 'b2' }, { id: 'b3' }];
+      await subject.commit(request(subject, ...withRooms(team(2, ...bots),
+        [{ id: 'r', name: 'R', members: ['main', 'b2'], admin: 'b2', announcement: 'Hi', memberMentions: 'ignore' }])));
+      expect((await subject.state()).team.rooms.r).toEqual({ id: 'r', name: 'R', members: ['main', 'b2'], admin: 'b2', mode: 'mention',
+        announcement: 'Hi', memberMentions: 'ignore', visibleFrom: { main: 0, b2: 0 }, messages: [] });
+      await subject.commit(request(subject, 'r1', { kind: 'room_input', key: 'm1', roomId: 'r', text: 'Hello', mentions: [] }));
+      // A member that stays keeps its offset, a new one starts at the end. An omitted admin, announcement or memberMentions is cleared.
+      await subject.commit(request(subject, ...withRooms(team(3, ...bots), [{ id: 'r', name: 'R', members: ['main', 'b3'] }])));
+      expect((await subject.state()).team.rooms.r).toEqual({ id: 'r', name: 'R', members: ['main', 'b3'], mode: 'mention', announcement: '',
+        visibleFrom: { main: 0, b3: 1 }, messages: [expect.objectContaining({ text: 'Hello' })] });
+    });
+
+    it('refuses local room management and a snapshot whose rooms do not match the mode, and changes nothing (#1321)', async () => {
+      const subject = await open('rooms'), before = await subject.stored();
+      const commands: Command[] = [{ kind: 'create_room', roomId: 'r', fields: { name: 'R', members: ['main'] } },
+        { kind: 'update_room', roomId: 'r', update: { name: 'S' } }, { kind: 'set_room_member_mentions', roomId: 'r', memberMentions: 'ignore' }];
+      for (const command of commands) expect(await teamError(() => subject.commit(request(subject, command.kind, command)))).toBe('external_rooms');
+      await expect(settle(() => subject.commit(request(subject, ...team(2, main))))).rejects.toThrow('A team snapshot needs rooms in the external rooms mode');
+      expect(await subject.stored()).toBe(before);
+      const local = await open('external'), stored = await local.stored();
+      await expect(settle(() => local.commit(request(local, ...withRooms(team(2, main), []))))).rejects.toThrow('Snapshot rooms need the external rooms mode');
+      expect(await local.stored()).toBe(stored);
     });
 
     it('returns the outbox rows that the commit wrote', async () => {
@@ -500,6 +549,40 @@ export function settlementVectors(name: string, open: () => SettlementSubject | 
       await settled(subject);
       expect(await subject.intent(restored)).toMatchObject({ key: restored });
       expect(await targets(next)).toEqual(['main', 'b']);
+    });
+
+    it('archives a room that a rooms-mode snapshot no longer lists: its seats are removed, a started seat\'s speech is audit only (#1321)', async () => {
+      const subject = await open();
+      const bots = [{ id: 'main', name: 'Main', role: 'Team owner', persona: '', model: 'default', mainBot: true },
+        { id: 'b', name: 'B', role: 'Reviewer', persona: '', model: 'default', mainBot: false }];
+      const snapshot = (revision: number, rooms: TeamSnapshotRoom[]): Command => ({ kind: 'team_snapshot', snapshot: { revision, bots, rooms } });
+      const room = { id: 'r', name: 'Room', members: ['main', 'b'] };
+      await subject.change(state => {
+        state.team.external = { revision: 1, rooms: true };
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        state.team.bots.b = { ...state.team.bots.main!, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, execution: template('device', 'b') };
+      });
+      await commit(subject, snapshot(2, [room]));
+      const round = await commit(subject, { kind: 'room_input', key: 'm1', roomId: 'r', text: 'Hello', mentions: ['b', 'main'] }) as string;
+      await settled(subject);
+      const [started, waiting] = (await subject.state()).team.rounds[round]!.seats as [string, string];
+      await subject.claim(started);
+      await settled(subject);
+      await commit(subject, snapshot(3, []));
+      await settled(subject);
+      const team = (await subject.state()).team;
+      expect(team.rooms.r).toMatchObject({ archived: true, members: [], visibleFrom: {} });
+      expect([team.seats[started], team.seats[waiting]]).toMatchObject([{ botId: 'b', status: 'removed', released: true },
+        { botId: 'main', status: 'removed', released: true }]);
+      expect(team.rounds[round]!.closed).toBe(true);
+      await commit(subject, { kind: 'outcome', turnId: started, taskId: taskId(started, 0), document: { speech: { kind: 'post', text: 'Late' } } });
+      const after = await subject.state();
+      expect(after.audit).toContain(`Outcome audit only: ${taskId(started, 0)}`);
+      expect(after.team.rooms.r!.messages.map(message => message.id)).toEqual([round]);
+      await expect(commit(subject, { kind: 'room_input', key: 'm2', roomId: 'r', text: 'Again', mentions: [] })).rejects.toThrow('Room is archived');
+      const stored = await subject.stored();
+      await expect(commit(subject, snapshot(4, [room]))).rejects.toThrow('An archived room cannot return');
+      expect(await subject.stored()).toBe(stored);
     });
 
     it('shows a cancel with no conclusion as uncertain once the cancel grace passed', async () => {

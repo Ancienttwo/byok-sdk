@@ -10,7 +10,8 @@ import { botCompactVeto } from './compaction';
 import { stateOf } from './model';
 import { CommitConflict } from './rules/commit';
 import { TeamModeError, type TeamSnapshot, type TeamSnapshotBot } from './rules/team';
-import type { ContextTurn } from './schema';
+import { outcomeSchema, type ContextTurn } from './schema';
+import { roomFields } from './rules/rooms';
 import { applyManagement } from './team';
 import { openTeam, type TestTeam } from './team.test-support';
 import { seedCollaboration } from './commit-vectors.test-support';
@@ -186,4 +187,34 @@ it('#1357: a missing template holds only that Bot, a suspended one too, across s
   await host.setModels({ default: NEW, spare: NEW });
   expect(frozen(host, held)).toMatchObject({ deviceId: 'device', payload: { agentRef: { agentId: 'helper', profileRevision: '1' }, requiredToolsets: ['docs'] } });
   expect(host.snapshot().turns[held]!.blockedReason).toBeUndefined();
+});
+
+it('keeps the external rooms mode of a ledger across a restart (#1321)', async () => {
+  fixture = await openTeam({ bot: { team: 'external', rooms: 'external' } });
+  expect(fixture.host.snapshot().team.external).toEqual({ revision: 0, rooms: true });
+  delete fixture.botOptions.rooms;
+  await expect(fixture.reopen()).rejects.toThrow('This ledger has external rooms');
+  fixture.botOptions.rooms = 'external';
+  await fixture.reopen();
+  await fixture.close();
+  fixture = await openTeam({ bot: { team: 'external' } });
+  fixture.botOptions.rooms = 'external';
+  await expect(fixture.reopen()).rejects.toThrow('This ledger has local rooms');
+  delete fixture.botOptions.rooms;
+  await fixture.reopen();
+});
+
+it('refuses create_room and update_room from an outcome in the external rooms mode, and offers neither (#1321)', () => {
+  const state = stateOf({}), refused: Record<string, string> = {};
+  seedCollaboration(state, 'rooms');
+  state.team.rooms.r = { id: 'r', ...roomFields(state.team, { name: 'R', members: ['main'] }), messages: [] };
+  const outcome = { create_room: [{ localId: 'new_room_1', name: 'New', members: ['main'] }], update_room: [{ roomId: 'r', name: 'S' }] } as unknown as BotTurnOutcome;
+  applyManagement(state, 'main', 'task-1', outcome, { default: template('device', 'main') }, (kind, work) => {
+    try { work(); } catch (cause) { refused[kind] = (cause as Error).message; }
+  });
+  expect(refused).toEqual(Object.fromEntries(['create_room', 'update_room'].map(kind => [kind, `external_rooms: ${kind} is owned by the team authority`])));
+  expect(Object.values(state.team.rooms).map(room => room.name)).toEqual(['R']);
+  const schema = JSON.stringify(outcomeSchema('main', state, state.turns.t1));
+  expect(schema).toContain('"team_note"');
+  for (const action of ['create_room', 'update_room']) expect(schema).not.toContain(`"${action}"`);
 });
