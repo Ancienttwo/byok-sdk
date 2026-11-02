@@ -10,7 +10,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type Session } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -27,9 +27,38 @@ const unusedBlobClient: BlobResolver = {
 function wholeMessageAdapter(): StubRuntimeAdapter {
   const adapter = new StubRuntimeAdapter('codex');
   Object.defineProperty(adapter, 'descriptor', {
-    value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressEventsAreMessages: true }),
+    value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressMessageBoundary: 'event' }),
   });
   return adapter;
+}
+
+/** A Host guard around the Claude adapter (aiphabee#427) that forwards `progressStartsMessage` or drops it. */
+function wrappedClaude(forwardProgressStartsMessage: boolean): RuntimeAdapter {
+  const inner = new ClaudeAdapter({ resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }) });
+  const wrap = (session: Session): Session => ({
+    get sessionRef() { return session.sessionRef; },
+    events: session.events,
+    steer: text => session.steer(text),
+    followUp: task => session.followUp(task),
+    interrupt: () => session.interrupt(),
+    close: () => session.close(),
+    ...(forwardProgressStartsMessage ? { progressStartsMessage: event => session.progressStartsMessage!(event) } : {}),
+  });
+  return {
+    descriptor: inner.descriptor,
+    detect: () => inner.detect(),
+    runtimeEnvironment: () => inner.runtimeEnvironment(),
+    prepare: async input => {
+      const result = await inner.prepare(input);
+      if (result.kind !== 'prepared') return result;
+      const { operation } = result;
+      return { kind: 'prepared', operation: {
+        ...(operation.acquireSessionLease === undefined ? {} : { acquireSessionLease: ref => operation.acquireSessionLease!(ref) }),
+        ...(operation.resolveRuntimeLaunch === undefined ? {} : { resolveRuntimeLaunch: launch => operation.resolveRuntimeLaunch!(launch) }),
+        start: async start => wrap(await operation.start(start)),
+      } };
+    },
+  };
 }
 
 const INSTRUCTION = 'reply with exactly: CONSOLIDATED';
@@ -69,7 +98,38 @@ async function completion(sent: Envelope[], taskId: string) {
 
 describe('TaskRunner task.complete.finalMessage (#322)', () => {
   it('the bundled Codex adapter declares whole-message progress events', () => {
-    expect(new CodexAdapter().descriptor.progressEventsAreMessages).toBe(true);
+    expect(new CodexAdapter().descriptor.progressMessageBoundary).toBe('event');
+  });
+
+  it('fails a Claude task whose wrapped Session drops progressStartsMessage (aiphabee#427)', async () => {
+    vi.stubEnv('FAKE_CLAUDE_SPLIT_CLOSING_TEXT', '1');
+    try {
+      const sent: Envelope[] = [];
+      const runner = await makeRunner(wrappedClaude(false), sent);
+      await startTask(runner, 'claude-wrapped-drop', 'claude');
+
+      await vi.waitFor(() => expect(sent.some(item => item.type === 'task.fail' && item.task_id === 'claude-wrapped-drop')).toBe(true));
+      const fail = sent.find(item => item.type === 'task.fail' && item.task_id === 'claude-wrapped-drop');
+      expect(JSON.stringify(fail)).toContain('runtime_session_incomplete: runtime \\"claude\\" declares progressMessageBoundary');
+      expect(sent.filter(item => item.task_id === 'claude-wrapped-drop' && (item.type === 'task.complete' || item.type === 'task.progress'))).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('keeps every text block of one Claude message when the wrapped Session forwards progressStartsMessage', async () => {
+    vi.stubEnv('FAKE_CLAUDE_SPLIT_CLOSING_TEXT', '1');
+    try {
+      const sent: Envelope[] = [];
+      const runner = await makeRunner(wrappedClaude(true), sent);
+      await startTask(runner, 'claude-wrapped-forward', 'claude');
+
+      const payload = await completion(sent, 'claude-wrapped-forward');
+      expect(payload.finalMessage).toBe(`reply-1:${prependAgentMemoryGuidance(INSTRUCTION)}`);
+      expect(payload.summary).toBe(payload.finalMessage);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('publishes a Claude closing reply once when a later model call repeats it (#501)', async () => {

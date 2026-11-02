@@ -117,9 +117,11 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
       }
 
       // The session hook can be stateful. Share one decision with both text lanes.
-      const startsMessage = event.type === 'progress'
-        && active.adapter.descriptor.progressEventsAreMessages === true && event.text.trim() !== ''
-        && active.session.progressStartsMessage?.(event) !== false;
+      // `progressStartsMessage` is bound exactly for a `'session'` boundary.
+      const boundary = active.adapter.descriptor.progressMessageBoundary;
+      const startsMessage = event.type === 'progress' && event.text.trim() !== ''
+        && (boundary === 'event' || (active.sessionMembers.progressStartsMessage !== undefined
+          && active.sessionMembers.progressStartsMessage(event)));
       active.messageDraft?.push(event, startsMessage);
       if (event.type === 'tool_use' || event.type === 'tool_result') {
         // A tool interaction ends the current text run: whatever the model

@@ -4,6 +4,7 @@ import { AgentMessageDraftPublisher } from '../agent-message-draft';
 import { createEnvelope } from '@byok-sdk/protocol';
 import type { Session } from '../../types';
 import { ExecutionRecordAccumulator } from '../execution-record';
+import type { DeclaredSessionMembers } from '../session-contract';
 import { ProgressBatcher } from '../progress-batcher';
 import type { ActiveTask, OfferPhaseContext } from './support';
 import { outboundErrorMessage } from './support';
@@ -23,6 +24,7 @@ export interface OfferActivationInput
   readonly blobAbort: AbortController;
   readonly payload: AcceptedOfferPayload;
   readonly session: Session;
+  readonly sessionMembers: DeclaredSessionMembers;
   readonly messageRequirement: ActiveTask['messageRequirement'];
   readonly terminalProjection: ActiveTask['terminalProjection'];
 }
@@ -36,7 +38,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   const { taskId } = phase;
   const {
     agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
-    workspaceDir, blobAbort, payload, session, messageRequirement, terminalProjection, toolAuthorization,
+    workspaceDir, blobAbort, payload, session, sessionMembers, messageRequirement, terminalProjection, toolAuthorization,
   } = input;
   try {
   try {
@@ -66,6 +68,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     egressEnabled: payload.egressPolicy !== undefined,
     adapter: pick.adapter,
     session,
+    sessionMembers,
     scratch,
     workspaceDir,
     toolAuthorization,
@@ -98,7 +101,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     ),
     outputBytesSoFar: 0,
     startedAtMs: Date.now(),
-    executionRecord: new ExecutionRecordAccumulator(taskId, pick.descriptor.trajectoryEvidence, session),
+    executionRecord: new ExecutionRecordAccumulator(taskId, pick.descriptor.trajectoryEvidence, sessionMembers.evidence),
     ...(preparedObservation === undefined ? {} : { prepared: preparedObservation }),
     ...(messageRequirement === undefined ? {} : {
       messageRequirement,

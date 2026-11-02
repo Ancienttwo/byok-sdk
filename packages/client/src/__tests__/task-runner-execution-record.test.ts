@@ -34,6 +34,8 @@ function deferred() {
 interface RunnerOptions {
   /** The adapter declares `trajectoryEvidence: 'event-stream'`. */
   declared?: boolean;
+  /** Its Session has no `evidence()`. */
+  omitEvidence?: boolean;
   /** Omit `onExecutionRecord` entirely, as a runner that never publishes. */
   withoutRecords?: boolean;
   deps?: Partial<Pick<TaskRunnerDeps, 'awaitTerminalCommit' | 'onRuntimeDisposalFailure' | 'onExecutionRecord'>>;
@@ -43,6 +45,7 @@ async function makeRunner(options: RunnerOptions = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-execution-record-'));
   directories.push(directory);
   const adapter = new StubRuntimeAdapter('pi', undefined, undefined, undefined, options.declared === true ? 'event-stream' : undefined);
+  if (options.omitEvidence === true) adapter.decorateSession = stub => { Object.defineProperty(stub, 'evidence', { value: undefined }); };
   const sent: Envelope[] = [];
   const records: ExecutionRecord[] = [];
   const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
@@ -108,6 +111,19 @@ describe('TaskRunner execution record', () => {
     expect(records).toEqual([{
       taskId: TASK_ID, terminal: 'complete', status: 'unknown', source: 'none', gaps: [], unknownReason: 'source_not_declared',
     }]);
+  });
+
+  it.each([
+    ['complete', [{ type: 'turn_end' }], 'task.complete', undefined],
+    ['failed', [], 'task.fail', true],
+  ] as const)('records %s as unknown (evidence_missing) when a declaring Session has no evidence(), with the same terminal', async (terminal, tail, type, retryable) => {
+    const { session, records, terminals, finished } = await makeRunner({ declared: true, omitEvidence: true });
+    emitAll(session, [use('a'), result('a'), ...tail]);
+    if (terminal === 'failed') session.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'retryable', reason: 'runtime exited' }));
+    await finished();
+    expect(terminals().map(envelope => envelope.type)).toEqual([type]);
+    if (retryable !== undefined) expect(terminals()[0]!.payload).toMatchObject({ retryable });
+    expect(records).toEqual([{ taskId: TASK_ID, terminal, status: 'unknown', source: 'event-stream', gaps: [], unknownReason: 'evidence_missing' }]);
   });
 
   it('marks a runtime stream that failed before turn_end', async () => {

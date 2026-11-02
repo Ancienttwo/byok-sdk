@@ -122,7 +122,7 @@ export class CodexAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
-    progressEventsAreMessages: true,
+    progressMessageBoundary: 'event',
     platforms: ['darwin', 'linux', 'win32'],
     mcpToolApprovals: true,
     capabilities: {

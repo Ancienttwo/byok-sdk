@@ -851,7 +851,7 @@ describe('required Agent message completion gate', () => {
     if (wholeMessages) {
       // The Codex adapter's descriptor shape: one `progress` per whole message.
       Object.defineProperty(adapter, 'descriptor', {
-        value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressEventsAreMessages: true }),
+        value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressMessageBoundary: 'event' }),
       });
     }
     const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),

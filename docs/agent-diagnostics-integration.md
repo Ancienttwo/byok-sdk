@@ -180,7 +180,7 @@ const archiveReceipt = await archiveAgentTerminalMessages(config, {
 import type { ExecutionRecord } from '@byok-sdk/client';
 // { taskId, terminal: 'complete' | 'failed' | 'cancelled',
 //   status: 'complete' | 'partial' | 'unknown', source: 'event-stream' | 'none',
-//   gaps: Array<{ reason, count }>, unknownReason?: 'source_not_declared' | 'evidence_overflow' }
+//   gaps: Array<{ reason, count }>, unknownReason?: 'source_not_declared' | 'evidence_missing' | 'evidence_overflow' }
 ```
 
 ### 读取方式
@@ -252,6 +252,7 @@ await daemon.start();
 | 条件 | 文案 |
 | --- | --- |
 | `unknownReason: source_not_declared` | 这个 runtime 不提供轨迹证据。 |
+| `unknownReason: evidence_missing` | runtime 声明了轨迹证据，但它的 Session 没有 `evidence()`，常见于 Host 包装层没有转发。 |
 | `unknownReason: evidence_overflow` | 未结束的工具调用超过记录上限，记录不再计数。 |
 | 没有记录 | 没有读到这次执行的记录。 |
 
