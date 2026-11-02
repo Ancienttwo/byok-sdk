@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 0.35.0 — source candidate
+
+0.35.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
+The upgrade manifest that `@byok-sdk/client` ships
+(`packages/client/upgrade-manifest.json`, 0.34.0 to 0.35.0) lists the
+Host-visible changes since 0.34.0 that change an API, config or example item:
+3 breaking entries and 6 additive entries, each with a migration link. The
+`approveTools` change (#1324) changes behavior only, so it has no manifest
+entry; it is the third Breaking (client) item below. The wire stays v5
+(`PROTOCOL_VERSION = 5`) with an unchanged corpus. There is no new Postgres
+migration and no SQLite schema change. See the
+[0.35.0 candidate notes](docs/releases/v0.35.0.md) and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.35.0.md). The breaking
+changes, all in client: `runtimes.pi.packageDir` is the only Pi asset root,
+and `PI_PACKAGE_DIR` no longer reaches Pi from the environment (#1315);
+`progressMessageBoundary` replaces `progressEventsAreMessages`, and a Session
+without a member its descriptor declares fails at start (#1323);
+`approveTools` is a grant and no longer an admission requirement, which
+changes runtime selection (#1324); the service precheck, receipt and error
+hold `ServiceStoreVerdict` (#1328).
+
 - **Breaking (client)** — `DaemonConfig.runtimes.pi.packageDir` (and
   `PiAdapterOptions.packageDir`) is the only source of the Pi asset root of a
   product that bundles Pi. It must be absolute; the SDK sets `PI_PACKAGE_DIR`
@@ -111,6 +132,14 @@
   `control.token` whose endpoint refuses connections) is reclaimed and the
   upgrade goes on; before, it was `store_busy` until that daemon started again
   (#1328).
+
+- **Added (examples)** — K8 history rows from an external history authority
+  can carry an optional `reply`, the reply text the user saw for that Turn;
+  K8 freezes it in the ContextPack row, counts it in `contextMaxBytes` and
+  covers it in `historyDigest` (#1318). K8 gains the owner call
+  `cancelHostIntent(key)` (#1320). A Host that vendored K8 copies the new
+  `rules/context.ts`; see
+  [external history authority](examples/bot-collaboration/README.md#external-history-authority).
 
 - **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
   absolute Windows system directory PowerShell is started from. Omitted, the

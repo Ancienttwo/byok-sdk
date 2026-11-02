@@ -6,8 +6,8 @@
     "snapshotSha256": "fee22954a2a80cb73c9e2d790d31e6e3b3618d535f0027c6942622bb80df981c"
   },
   "to": {
-    "version": "0.34.0",
-    "snapshotSha256": "0a65cc7f66d10efd98e91dda7498662848b4646dbebf9b15eb837b09f25f1259"
+    "version": "0.35.0",
+    "snapshotSha256": "9d71ff20dc74f88a519fc46d47f14f6e39ab08472ba8ec179accc00b4ad45d76"
   },
   "configFields": {
     "status": "tracked",
@@ -19,7 +19,7 @@
       "id": "keys-windows-credential-system-root",
       "impact": "additive",
       "summary": "WindowsCredentialManagerSecretStoreOptions gains an optional systemRoot, the absolute Windows system directory PowerShell is started from. Omitted, the store reads process.env.SystemRoot once at construction, as before. A systemRoot that is not an absolute path makes the store unavailable (available() is false, operations throw CREDENTIAL_MANAGER_UNAVAILABLE) and never falls back to the process environment; scope() passes it to the scoped store. A Host test that injects platform: \"win32\" on another OS can pass systemRoot instead of setting the process environment. No Host code change is needed otherwise.",
-      "migration": "CHANGELOG.md#unreleased",
+      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
       "items": [
         "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
       ]
@@ -37,7 +37,7 @@
       "id": "runtime-adapters-factory",
       "impact": "additive",
       "summary": "@byok-sdk/client/adapters exports createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAdapter[], which builds the adapters createDaemon builds for the same runtimeAllowlist, runtimes, codexSandbox, runtimeEnvironment, nativeAssetRoot, sdkHelperHost and piByokLauncher. A Host that decorates each adapter and passes them to createDaemonWithAdapters calls it instead of constructing PiAdapter, ClaudeAdapter, CodexAdapter and GrokAdapter itself. An invalid codexSandbox or runtimeEnvironment throws TypeError, any other invalid value DaemonConfigInvalidError; runtimes.pi.durableLane is refused because only the daemon builds the durable lane. The entry loads no daemon, journal, full protocol or zod.",
-      "migration": "CHANGELOG.md#unreleased",
+      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
       "items": [
         "export:@byok-sdk/client/adapters#PiRuntimeConfig",
         "export:@byok-sdk/client/adapters#RuntimeAdaptersConfig",
@@ -49,7 +49,7 @@
       "id": "pi-package-dir-config",
       "impact": "breaking",
       "summary": "Needs the next MINOR after 0.34.0. The Pi asset root of a product that bundles Pi is DaemonConfig.runtimes.pi.packageDir (PiAdapterOptions.packageDir for an adapter the Host builds), an absolute path; a relative one throws DaemonConfigInvalidError invalid_value. It is the only source: the SDK sets PI_PACKAGE_DIR for Pi and the pi-host helper process from it, other runtimes do not get it, and a PI_PACKAGE_DIR in the login-shell snapshot or the Host environment no longer reaches Pi. runtimeEnvironment.pass naming PI_PACKAGE_DIR throws DaemonConfigInvalidError invalid_value. Move the value a Host put in PI_PACKAGE_DIR (for example SdkPackagingAssets.piPackageDir made absolute) into runtimes.pi.packageDir and drop PI_PACKAGE_DIR from runtimeEnvironment.pass and from the process environment.",
-      "migration": "CHANGELOG.md#unreleased",
+      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
       "items": [
         "config:runtimes",
         "export:@byok-sdk/client#DaemonConfig",
@@ -93,7 +93,7 @@
       "id": "client-service-daemon-stores",
       "impact": "additive",
       "summary": "ServiceInstallationOptions gains daemonStores(), and ServiceDaemonStore is exported: a service process that owns several daemon stores lists them, and every upgrade, rollback and recover stops all of them, holds an installer owner lease and the store gate of each through the pointer switch, and ends each store's owned processes. daemonStores requires healthCheck (createServiceInstallation throws TypeError without it). ServiceInstallationErrorCode gains daemon_stores_invalid (a relative or repeated storeDir, an empty productId, or a throw; the receipt is failed, nothing is switched and the old version is started again): a reader with an exhaustive switch over the codes gets one more case. The stop now takes an owner lease on each store, the default single store included, so what a crashed daemon left (a dead owner, a control.token whose endpoint refuses connections) is reclaimed and the upgrade goes on, where it was store_busy before. No Host code change is needed without daemonStores.",
-      "migration": "CHANGELOG.md#unreleased",
+      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
       "items": [
         "export:@byok-sdk/client#ServiceDaemonStore",
         "export:@byok-sdk/client#ServiceInstallationErrorCode",
@@ -104,7 +104,7 @@
       "id": "client-service-store-verdicts",
       "impact": "breaking",
       "summary": "The service installation precheck prints { \"stores\": ServiceStoreVerdict[] }, and ServiceUpgradeReceipt.stores and ServiceInstallationError.stores hold ServiceStoreVerdict, a new exported type: store is an SDK LocalStoreId or a Host store id (1-64 of a-z 0-9 -, starting with a letter or digit), path is absolute, and an optional kind is file (the default: the file plus -wal and -journal) or directory (the whole tree, symlinks kept as links). core StoreCompatibility and LocalStoreId do not change. The precheck output is checked more strictly: a store id outside the pattern, an unknown kind, a repeated path or a store inside a directory store is precheck_failed, and so is a store that is not what its kind says, or is a symlink, at the snapshot (a symlinked store file was followed and copied before). A copy that fails is the new ServiceInstallationErrorCode snapshot_failed, with the copy error as its cause (the ServiceInstallationError constructor takes optional ErrorOptions): the partial snapshot is removed, the receipt is failed and the old version is started again; a reader with an exhaustive switch over the codes gets one more case. A snapshot 0.34 wrote is still restored.",
-      "migration": "CHANGELOG.md#unreleased",
+      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationError",
         "export:@byok-sdk/client#ServiceStoreVerdict",
