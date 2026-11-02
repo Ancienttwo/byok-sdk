@@ -131,7 +131,10 @@ validation. It fails when:
    `scripts/release/upgrade-manifest/baseline.json` and starts an empty
    manifest from that version. It refuses a version that is not newer than the
    current baseline, and a tag manifest that does not span the release
-   (`from < to`, `to` equal to the tag's version).
+   (`from < to`, `to` equal to the tag's version). CI admits each archive by
+   its exact path, so the same PR adds `<from>-<to>` to
+   `UPGRADE_HISTORY_FILES` in `scripts/ci/select-impact.mjs`; otherwise
+   "Select reviewed CI scope" fails on the new archive.
 
 ## Upgrading across releases
 
