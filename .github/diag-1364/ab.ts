@@ -44,12 +44,14 @@ const OLD_ANCHORS: Anchor[] = [
   ['$acl = [System.IO.Directory]::GetAccessControl', 'getaccesscontrol-returned', 'after'],
   ['  exit 0', 'before-exit', 'before'],
 ];
-const source = readFileSync('packages/keys/src/pi-provider-launcher-core.ts', 'utf8');
+// A Windows checkout has CRLF files; a JS template literal (raw too) normalizes to LF.
+const lf = (text: string): string => text.replace(/\r\n/gu, '\n');
+const source = lf(readFileSync('packages/keys/src/pi-provider-launcher-core.ts', 'utf8'));
 const match = /const WINDOWS_PROJECTION_ACL_SCRIPT = String\.raw`([\s\S]*?)\n`;/u.exec(source);
 if (!match) throw new Error('product script not found');
 const productScript = `${match[1]}\n`;
 const newScript = inject(productScript, NEW_ANCHORS);
-const oldScript = inject(readFileSync('.github/diag-1364/old-acl-script.ps1', 'utf8'), OLD_ANCHORS);
+const oldScript = inject(lf(readFileSync('.github/diag-1364/old-acl-script.ps1', 'utf8')), OLD_ANCHORS);
 const encode = (script: string): string => Buffer.from(script, 'utf16le').toString('base64');
 
 function timedRunner(label: string, variant: 'new' | 'old'): CommandRunner {
