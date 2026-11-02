@@ -558,6 +558,50 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await tree(index)).toEqual(before);
     });
 
+    it.each([['/', false], ['/.', false], ['/./', false], ['/.', true]] as const)('restores a directory store spelled with suffix %j, replaced by a file: %s (#1350)', async (suffix, replaced) => {
+      await verdictsWith({ store: 'research-index', path: `${index}${suffix}`, kind: 'directory', verdict: 'accepted', reason: 'ok' });
+      await installation.install(await payload('1.0.0'));
+      const before = await tree(index);
+      unhealthy.add('2.0.0');
+      onHealth = async (version) => {
+        if (version !== '2.0.0') return;
+        await fs.writeFile(db, 'v2 data');
+        await fs.rm(index, { recursive: true });
+        if (replaced) await fs.writeFile(index, 'v2 file');
+        else await fs.mkdir(index);
+      };
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
+      expect(await tree(index)).toEqual(before);
+      expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', code: 'health_check_failed' });
+    });
+
+    it.each([false, true])('recovers an old pending snapshot spelled /., refusing a root symlink first: %s (#1350)', async (symlink) => {
+      await installation.install(await payload('1.0.0'));
+      const before = await tree(index);
+      await installation.upgrade(await payload('2.0.0'));
+      const snapshotFile = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
+      const snapshot = JSON.parse(await fs.readFile(snapshotFile, 'utf8')) as { entries: Array<{ path: string }> };
+      snapshot.entries[1]!.path = `${index}/.`; // The old persisted spelling; path.join would normalize it.
+      await fs.writeFile(snapshotFile, JSON.stringify(snapshot));
+      const pending = { ...(await installation.receipt()), state: 'pending' };
+      await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), JSON.stringify(pending));
+      await fs.writeFile(db, 'v2 data');
+      if (symlink) {
+        await fs.rename(index, `${index}-target`);
+        await fs.symlink(`${index}-target`, index, 'dir');
+        await expect(installation.recover()).rejects.toMatchObject({ code: 'precheck_failed' });
+        expect(await fs.readFile(db, 'utf8')).toBe('v2 data'); // The earlier file store is untouched.
+        expect(await installation.receipt()).toEqual(pending);
+      } else {
+        await expect(installation.recover()).resolves.toMatchObject({ state: 'rolled-back', code: 'upgrade_pending' });
+        expect(await tree(index)).toEqual(before);
+        expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
+        expect(await pointer('current')).toBe('1.0.0');
+      }
+    });
+
     it('a directory store absent at the snapshot is removed on restore', async () => {
       await fs.rm(index, { recursive: true });
       await installation.install(await payload('1.0.0'));

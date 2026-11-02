@@ -532,7 +532,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     }
     if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict) || overlaps(stores)) throw new ServiceInstallationError('precheck_failed');
     if (stores.some((store) => store.verdict !== 'accepted' && store.verdict !== 'absent') !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
-    return stores;
+    return stores.map((store) => store.kind === 'directory' ? { ...store, path: directoryStorePath(store.path) } : store);
   }
 
   /**
@@ -569,7 +569,17 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
-    const { entries } = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
+    const snapshot = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
+    // Older snapshots retain the Host's spelling. Check every directory root
+    // before changing any store, including links hidden by a trailing / or /.
+    const entries = snapshot.entries.map((entry) => entry.kind === 'directory' ? { ...entry, path: directoryStorePath(entry.path) } : entry);
+    await Promise.all(entries.filter((entry) => entry.kind === 'directory').map(async (entry) => {
+      try {
+        if ((await fs.lstat(entry.path)).isSymbolicLink()) throw new ServiceInstallationError('precheck_failed');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }));
     for (const entry of entries) {
       if (entry.kind === 'directory') {
         await fs.rm(entry.path, { recursive: true, force: true });
@@ -743,6 +753,21 @@ async function storeSources(store: ServiceStoreVerdict): Promise<string[]> {
     present.push(suffix);
   }
   return present;
+}
+
+/** Strip only terminal separators and dot components, exposing the root to lstat.
+ * Do not resolve symlinks or collapse interior `..`: those can change the target. */
+function directoryStorePath(input: string): string {
+  const root = path.parse(input).root;
+  const separators = process.platform === 'win32' ? /[\\/]+$/u : /\/+$/u;
+  let value = input;
+  while (value.length > root.length) {
+    const trimmed = value.replace(separators, '');
+    if (trimmed.length < root.length) return root;
+    if (path.basename(trimmed) !== '.') return trimmed;
+    value = path.dirname(trimmed);
+  }
+  return value;
 }
 
 export async function readPayloadManifest(payloadDir: string): Promise<ServicePayloadManifest> {
