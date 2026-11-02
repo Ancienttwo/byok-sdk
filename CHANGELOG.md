@@ -10,6 +10,12 @@
   Host that vendors K8 can run them too. `src/VENDOR.md` Layer 3 lists the file
   and no longer tells a Host to skip these vectors (#1325).
 
+- **Fix (client; #1342)** — `byok-agent status`, doctor and the support bundle
+  no longer report a store file as replaced or as changed during the read when
+  only its metadata changed (its ctime, for example after icacls pushes
+  inherited permissions down on Windows). A replaced file or changed bytes
+  still fail as before.
+
 ## 0.35.0 — source candidate
 
 0.35.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
