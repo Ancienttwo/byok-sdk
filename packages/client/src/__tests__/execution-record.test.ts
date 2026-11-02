@@ -9,13 +9,12 @@ import { formatDaemonEventLine } from '../diagnostics/format';
 import { ExecutionRecordAccumulator, MAX_OPEN_TOOL_CALLS, type ExecutionRecord, type ExecutionRecordGap } from '../daemon/execution-record';
 import { DaemonObserver, MAX_TRACKED_TASKS } from '../daemon/observer';
 import { createDaemonRecordProjector, type DaemonEvent } from '../index';
-import type { Session, SessionEvidence } from '../types';
+import type { SessionEvidence } from '../types';
 
 const NO_LOSS: SessionEvidence = { decodeDropped: 0, unmappedFrames: 0, syntheticToolResults: 0 };
 
-function declared(evidence: SessionEvidence | undefined = NO_LOSS): ExecutionRecordAccumulator {
-  const session: Pick<Session, 'evidence'> = evidence === undefined ? {} : { evidence: () => evidence };
-  return new ExecutionRecordAccumulator('task-1', 'event-stream', session);
+function declared(evidence: SessionEvidence | 'missing' = NO_LOSS): ExecutionRecordAccumulator {
+  return new ExecutionRecordAccumulator('task-1', 'event-stream', evidence === 'missing' ? 'missing' : () => evidence);
 }
 
 function feed(accumulator: ExecutionRecordAccumulator, events: AgentEvent[]): ExecutionRecordAccumulator {
@@ -70,15 +69,17 @@ describe('ExecutionRecordAccumulator', () => {
 
   it('reads the session evidence once, when the record is finished', () => {
     const evidence = vi.fn(() => NO_LOSS);
-    const accumulator = new ExecutionRecordAccumulator('task-1', 'event-stream', { evidence });
+    const accumulator = new ExecutionRecordAccumulator('task-1', 'event-stream', evidence);
     feed(accumulator, [use('a'), result('a'), turnEnd]);
     expect(evidence).not.toHaveBeenCalled();
     accumulator.finish('complete');
     expect(evidence).toHaveBeenCalledOnce();
   });
 
-  it('counts only the stream when a declaring session has no evidence()', () => {
-    expect(feed(declared(undefined), [use('a'), result('a'), turnEnd]).finish('complete')).toMatchObject({ status: 'complete', gaps: [] });
+  it('is unknown (evidence_missing) when a declaring session has no evidence()', () => {
+    expect(feed(declared('missing'), [use('a'), result('a'), turnEnd]).finish('complete')).toEqual({
+      taskId: 'task-1', terminal: 'complete', status: 'unknown', source: 'event-stream', gaps: [], unknownReason: 'evidence_missing',
+    });
   });
 
   it('refuses an evidence count that is not a non-negative safe integer', () => {
@@ -144,7 +145,7 @@ describe('ExecutionRecordAccumulator', () => {
 
   it('is unknown without reading evidence when the adapter declares no source', () => {
     const evidence = vi.fn(() => ({ ...NO_LOSS, decodeDropped: 5 }));
-    const accumulator = new ExecutionRecordAccumulator('task-1', undefined, { evidence });
+    const accumulator = new ExecutionRecordAccumulator('task-1', undefined, evidence);
     feed(accumulator, [use('a'), turnEnd]);
     expect(accumulator.finish('failed')).toEqual({
       taskId: 'task-1', terminal: 'failed', status: 'unknown', source: 'none', gaps: [], unknownReason: 'source_not_declared',
@@ -154,9 +155,8 @@ describe('ExecutionRecordAccumulator', () => {
 
   it('carries no tool input or output and stays within 1 KiB with every possible gap present', () => {
     const max = Number.MAX_SAFE_INTEGER;
-    const accumulator = new ExecutionRecordAccumulator('t'.repeat(128), 'event-stream', {
-      evidence: () => ({ decodeDropped: max, unmappedFrames: max, syntheticToolResults: max }),
-    });
+    const accumulator = new ExecutionRecordAccumulator('t'.repeat(128), 'event-stream',
+      () => ({ decodeDropped: max, unmappedFrames: max, syntheticToolResults: max }));
     const spill = { field: 'output' as const, totalBytes: 9, omittedBytes: 9, contentType: 'application/json' as const, unstoredReason: 'upload failed' };
     feed(accumulator, [use('a'), use(), result('x'), result('b'), use('c'), result('c'), result('c'), { ...result('d'), spill } as AgentEvent]);
     accumulator.streamEnded();

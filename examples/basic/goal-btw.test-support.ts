@@ -86,6 +86,8 @@ export class BotStubSession implements Session {
   async steer(): Promise<void> { this.steered += 1; }
   async followUp(): Promise<void> { this.followedUp += 1; }
   async interrupt(): Promise<void> { this.interrupted = true; }
+  /** Read only for a descriptor that declares `trajectoryEvidence`; the stub drops no runtime output. */
+  evidence() { return { decodeDropped: 0, unmappedFrames: 0, syntheticToolResults: 0 }; }
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true; this.wake?.(); this.wake = undefined;

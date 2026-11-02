@@ -285,9 +285,10 @@ task-scoped `--mcp-config` 加入这些 stdio server，用户自己的 MCP 配�
 
 Host 的工具预批准只由本机 toolset server 的 `approveTools` 精确名单声明；
 registry 定义期一次校验、排序并深冻结，名单进入 canonical digest。
-`resolveMcpServers` 在同一次快照解析中复制 server 与授权，准入时要求本地
-`RuntimeAdapterDescriptor.mcpToolApprovals` 能力；Codex 声明，其他 bundled
-runtime 不声明。显式选择不支持者在 claim 前拒绝，自动选择会排除它们。
+`resolveMcpServers` 在同一次快照解析中复制 server 与授权。`approveTools` 是授权，
+daemon 只把它投影给声明了本地 `RuntimeAdapterDescriptor.mcpToolApprovals` 的
+runtime；它不参与准入，也不参与 runtime 选择。Codex 声明，其他 bundled runtime
+不声明，它们处理该 server 的方式与没有 `approveTools` 的 server 完全相同。
 `toolsets.reload` 不能放宽正在准入或运行的 attempt。
 Codex 的同一 beforeOpen 投影处理 start/resume：固定 SDK helper 表与 Host
 声明按 server 隔离，仅写精确工具的 `approval_mode: approve`，不写 wildcard、

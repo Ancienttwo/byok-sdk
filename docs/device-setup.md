@@ -837,6 +837,20 @@ still need correction. Codes do not replace the reported field/path or cause.
 
 Use the manifest shipped with the target distribution; its `from`/`to` versions
 identify that transition. The current relevant entries are generated below.
+
+A Host that skips releases checks the whole range after it installs the
+target train, from the directory that resolves its `@byok-sdk/*` packages:
+
+```sh
+npx byok-agent upgrade check --from 0.32.0 --json
+```
+
+It lists every breaking manifest entry released after `--from`, with its
+release and migration link, and checks that every installed `@byok-sdk/*`
+package has the client's version. Exit 2 means a migration or a mixed train
+needs action; see [the upgrade manifest](upgrade-manifest.md#upgrading-across-releases).
+A `--from` before 0.31.0 has no manifest: follow the release's
+`docs/releases/host-upgrade-<version>.md` instead.
 Historical changes not represented by a current manifest entry remain linked to
 their source contract rather than being assigned invented release versions:
 

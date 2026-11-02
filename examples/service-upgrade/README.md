@@ -23,6 +23,52 @@ node app-installer.ts uninstall --install-root ./app --config device.json
 On Windows pass `--winsw-bin <WinSW-x64.exe>` (and `--winsw-install-dir` for a
 short install path).
 
+## Stores the precheck reports
+
+The precheck program prints `{ "stores": ServiceStoreVerdict[] }` and exits 0
+or 2 (#1328). It lists every store the candidate rewrites: the SDK's own, which
+`byok-agent upgrade check --store --json` reports, and the Host's, under a Host
+store id of 1-64 of `a-z 0-9 -`. A store that is a directory tree, such as an
+index, says `kind: "directory"`:
+
+```json
+{ "stores": [
+  { "store": "client-journal", "path": "/…/store/daemon.db", "verdict": "accepted", "reason": "…" },
+  { "store": "research-index", "path": "/…/research/index", "kind": "directory", "verdict": "accepted", "reason": "…" }
+] }
+```
+
+The installation snapshots exactly these stores before the switch and puts
+them back together with the old version. See
+[the precheck rules](../../docs/upgrade-manifest.md#store-compatibility-precheck).
+
+## A service with several daemon stores
+
+A service process that runs more than one daemon, for example one per signed-in
+identity, lists them in `daemonStores()` (#1328). The installation calls it after
+every stop, on upgrade, rollback and recover, and gives the service no store
+access until each listed store has no live owner:
+
+```ts
+createServiceInstallation({
+  service, productId, installRoot, program, precheck,
+  healthCheck,                               // required with daemonStores
+  daemonStores: async () => [
+    { storeDir: service.storeDir, productId },
+    ...(await signedInIdentities()).map((id) => ({ storeDir: identityStoreDir(id), productId: researchProductId })),
+  ],
+});
+```
+
+Each `storeDir` is absolute and listed once, and each `productId` is not
+empty; an empty list is valid. A list that breaks this, or a `daemonStores()`
+that throws, fails the upgrade with `daemon_stores_invalid` before anything is
+switched, and the old version is started again. Every store is held with an
+owner lease until the pointer switch ends: a store whose owner is still alive
+when `stopTimeoutMs` (one deadline for all stores) runs out is `store_busy`,
+and what a crashed daemon left (its owner file and a `control.token` nobody
+answers on) is reclaimed instead.
+
 ## Pairing a Windows service
 
 WinSW runs the service as `LocalSystem`, and Windows Credential Manager entries

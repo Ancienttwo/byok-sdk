@@ -246,7 +246,7 @@ describe('Claude startup cancellation ownership', () => {
   it('makes the real startup deadline owner converge with an in-flight silent-init disposal', async () => {
     const fake = fixture(); const disposal = deferred(); tree.dispose.mockReturnValue(disposal.promise);
     const op = await operation(fake.spawnFn);
-    const failure = await startOwnedRuntime(input => op.prepared.start(input), op.input, new AbortController().signal, 10).catch(error => error);
+    const failure = await startOwnedRuntime(input => op.prepared.start(input), op.input, op.input.manifest.descriptor, new AbortController().signal, 10).catch(error => error);
     await flush();
     expect(failure).toBeInstanceOf(RuntimeStartupDisposalFailure);
     expect(tree.dispose).toHaveBeenCalledTimes(1);

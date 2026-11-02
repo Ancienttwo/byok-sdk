@@ -13,7 +13,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
-import { freezeRuntimeAdapterDescriptor } from '../types';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapterDescriptor, type Session } from '../types';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -201,7 +201,7 @@ describe('AgentMessageDraftPublisher', () => {
     expect(toRuntimeInfoCapabilities(new PiAdapter().descriptor.capabilities).messageDraft).toBe(true);
     expect(toRuntimeInfoCapabilities({ steer: false, resume: false, approvalInteractive: false, messageDraft: false }).messageDraft).toBe(false);
     const claude = new ClaudeAdapter();
-    expect(claude.descriptor.progressEventsAreMessages).toBe(true);
+    expect(claude.descriptor.progressMessageBoundary).toBe('session');
     for (const adapter of [claude, new CodexAdapter()]) {
       expect(adapter.descriptor.capabilities.messageDraft).toBe(true);
       expect(toRuntimeInfoCapabilities(adapter.descriptor.capabilities).messageDraft).toBe(true);
@@ -323,7 +323,10 @@ describe('TaskRunner draft reconciliation before publish', () => {
     await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
   });
 
-  async function start(wholeMessages = false) {
+  async function start(
+    progressMessageBoundary?: RuntimeAdapterDescriptor['progressMessageBoundary'],
+    progressStartsMessage?: Session['progressStartsMessage'],
+  ) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-draft-finalize-'));
     roots.push(root);
     const storeDir = path.join(root, 'store');
@@ -331,11 +334,10 @@ describe('TaskRunner draft reconciliation before publish', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: true, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true,
     });
-    if (wholeMessages) {
-      Object.defineProperty(adapter, 'descriptor', {
-        value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressEventsAreMessages: true }),
-      });
-    }
+    Object.defineProperty(adapter, 'descriptor', {
+      value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressMessageBoundary }),
+    });
+    if (progressStartsMessage !== undefined) adapter.decorateSession = session => { Object.assign(session, { progressStartsMessage }); };
     const policy = { ...DEFAULT_AGENT_EGRESS_POLICY,
       activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxCoalesceMs: 10 } };
     const runner = new TaskRunner({
@@ -356,8 +358,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
       instruction: 'reply', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
       messageEgress: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: frameMax * 3 },
     }, { taskId: 'finalize-task', seq: 1 }));
-    if (wholeMessages) expect(adapter.descriptor.progressEventsAreMessages).toBe(true);
-    else expect(adapter.descriptor.progressEventsAreMessages).toBeUndefined();
+    expect(adapter.descriptor.progressMessageBoundary).toBe(progressMessageBoundary);
     expect(adapter.sessions).toHaveLength(1);
     const frames = () => sent.filter((e): e is Draft => e.type === 'agent.message.draft');
     const published = async () => {
@@ -432,9 +433,8 @@ describe('TaskRunner draft reconciliation before publish', () => {
   });
 
   it('keeps three blocks of one message in one revision and calls the boundary hook once per block', async () => {
-    const f = await start(true);
     const progressStartsMessage = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
-    Object.assign(f.session, { progressStartsMessage });
+    const f = await start('session', progressStartsMessage);
     const blocks = ['first ', 'second ', 'third'];
     for (const [index, text] of blocks.entries()) {
       const event = { type: 'progress' as const, text };
@@ -455,10 +455,9 @@ describe('TaskRunner draft reconciliation before publish', () => {
   });
 
   it('starts a new revision only at the next message boundary', async () => {
-    const f = await start(true);
     const progressStartsMessage = vi.fn()
       .mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValueOnce(true);
-    Object.assign(f.session, { progressStartsMessage });
+    const f = await start('session', progressStartsMessage);
     const blocks = ['first ', 'second ', 'third', 'next message'];
     for (const [index, text] of blocks.entries()) {
       f.session.emit({ type: 'progress', text });
@@ -475,7 +474,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
   });
 
   it('keeps per-event message boundaries without a session hook and preserves blank suffixes', async () => {
-    const f = await start(true);
+    const f = await start('event');
     expect(f.session).not.toHaveProperty('progressStartsMessage');
     const blocks = ['first', ' \n', 'second'];
     for (const [index, text] of blocks.entries()) {
@@ -492,7 +491,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
   });
 
   it('routes draft deltas only to the draft lane', async () => {
-    const f = await start(true);
+    const f = await start('event');
     f.session.emit({ type: 'message_draft_delta', text: 'draft-only ', startsMessage: true });
     await vi.waitFor(() => expect(f.frames()).toHaveLength(1));
     f.session.emit({ type: 'progress', text: 'accepted reply' });

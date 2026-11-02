@@ -3,16 +3,19 @@
 // Each test copies the inputs the snapshot reads into a scratch root, freezes
 // that copy as the released baseline with an empty manifest, then makes one
 // Host-visible change and runs the gate. The repository's own manifest is not
-// read here: `bun run check:upgrade-manifest` gates it.
+// read here: `bun run check:upgrade-manifest` gates it. The scratch root is a
+// git repository whose tags `v<to>` hold the archived manifests (#1316).
 
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { run } from './check-upgrade-manifest.mjs';
 import { packageSurface, splitStatements } from './upgrade-manifest/dts-surface.mjs';
+import { HISTORY_DIR } from './upgrade-manifest/history.mjs';
 import { BASELINE_PATH, MANIFEST_PATH, breakingAllowed, bumpKind, markdownAnchors, renderManifest, serialize } from './upgrade-manifest/manifest.mjs';
 import { CONFIG_SCHEMA_PATH, INTERPROCESS_PROTOCOLS, PUBLIC_PACKAGES, STORES, VENDORED_EXAMPLES, buildSnapshot } from './upgrade-manifest/snapshot.mjs';
 
@@ -38,12 +41,25 @@ function fixture(t) {
   }
   mkdirSync(path.join(root, 'docs'), { recursive: true });
   writeFileSync(path.join(root, DOC), '# Migration\n\n## Removed export\n\n## New event\n\n## Store bump\n');
+  copy(HISTORY_DIR);
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...args], { cwd: root, stdio: 'pipe' });
+  git('init', '-q');
+  const tagManifest = (bytes, tag) => {
+    writeFileSync(path.join(root, MANIFEST_PATH), bytes);
+    git('add', MANIFEST_PATH);
+    git('commit', '-q', '-m', tag);
+    git('tag', tag);
+  };
+  for (const name of readdirSync(path.join(root, HISTORY_DIR))) {
+    tagManifest(readFileSync(path.join(root, HISTORY_DIR, name)), `v${name.slice(name.indexOf('-') + 1, -'.json'.length)}`);
+  }
   const baseline = buildSnapshot(root);
   mkdirSync(path.dirname(path.join(root, BASELINE_PATH)), { recursive: true });
   writeFileSync(path.join(root, BASELINE_PATH), `${JSON.stringify(baseline, null, 2)}\n`);
   writeFileSync(path.join(root, MANIFEST_PATH), serialize(renderManifest(baseline, baseline, [])));
   return {
     root,
+    tagManifest,
     edit(relative, transform) {
       const file = path.join(root, relative);
       const before = readFileSync(file, 'utf8');
@@ -267,10 +283,42 @@ test('rebaseline snapshots a release checkout and refuses a version that is not 
   const [major, minor] = buildSnapshot(release.root).version.split('.').map(Number);
   release.setVersion(`${major}.${minor + 1}.0`);
   f.setVersion(`${major}.${minor + 1}.0`);
-  assert.equal(run(['--root', f.root, '--rebaseline', release.root], { log() {}, error() {} }), 0);
+  const next = `${major}.${minor + 1}.0`;
+  // The release checkout's manifest is not a release of its version until --write spans it.
+  assert.throws(() => run(['--root', f.root, '--rebaseline', release.root], { log() {}, error() {} }), /not a release of/);
+  assert.equal(release.gate('--write').status, 0);
+  const archives = readdirSync(path.join(f.root, HISTORY_DIR));
+  assert.equal(run(['--root', f.root, '--rebaseline', release.root], { log() {}, error() {} }), 1);
   const manifest = JSON.parse(readFileSync(path.join(f.root, MANIFEST_PATH), 'utf8'));
-  assert.equal(manifest.from.version, `${major}.${minor + 1}.0`);
+  assert.equal(manifest.from.version, next);
   assert.deepEqual(manifest.entries, []);
+  // The released manifest is archived byte for byte beside the earlier ones; the gate then needs its tag.
+  const released = readFileSync(path.join(release.root, MANIFEST_PATH));
+  const archive = path.join(f.root, HISTORY_DIR, `${major}.${minor}.0-${next}.json`);
+  assert.deepEqual(readFileSync(archive), released);
+  assert.deepEqual(readdirSync(path.join(f.root, HISTORY_DIR)).sort(), [...archives, path.basename(archive)].sort());
+  assert.match(f.gate().output, new RegExp(`tag v${next} has no`));
+  const current = readFileSync(path.join(f.root, MANIFEST_PATH));
+  f.tagManifest(released, `v${next}`);
+  writeFileSync(path.join(f.root, MANIFEST_PATH), current);
+  assert.equal(f.gate().status, 0, f.gate().output);
+});
+
+test('the history is a byte-exact, contiguous chain from 0.31.0 to the manifest\'s from (#1316)', (t) => {
+  const f = fixture(t);
+  const archives = readdirSync(path.join(f.root, HISTORY_DIR)).sort();
+  assert.deepEqual(archives.slice(0, 1), ['0.31.0-0.32.0.json']);
+  const middle = path.join(f.root, HISTORY_DIR, archives[1]);
+  const bytes = readFileSync(middle);
+  appendFileSync(middle, ' ');
+  assert.match(f.gate().output, /differs from packages\/client\/upgrade-manifest\.json at tag v\S+; an archive is never edited/);
+  rmSync(middle);
+  const output = f.gate().output;
+  assert.match(output, /not on the chain from 0\.31\.0/);
+  assert.match(output, /the chain from 0\.31\.0 ends at \S+, not at the manifest's from/);
+  writeFileSync(middle, bytes);
+  assert.equal(f.gate().status, 0);
+  assert.ok(existsSync(middle));
 });
 
 test('version bump rules', () => {

@@ -7,6 +7,7 @@ import { InputPreparationRequestError } from '../input-preparation-service';
 import { DURABLE_REPLICA_DIRNAME } from '../../adapters/pi-durable/replica';
 import { terminalIdentity } from '../terminal-identity';
 import { abortedStartOf, startOwnedRuntime } from '../runtime-start';
+import type { DeclaredSessionMembers } from '../session-contract';
 import path from 'node:path';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types';
@@ -423,7 +424,7 @@ export async function startOfferRuntime(
   phase: OfferPhaseContext,
   held: OfferHeld,
   input: OfferStartInput,
-  activation: Omit<OfferActivationInput, 'session'>,
+  activation: Omit<OfferActivationInput, 'session' | 'sessionMembers'>,
 ): Promise<void> {
   let settleLaunch!: () => void;
   const launch: LaunchGate = { settled: false, promise: new Promise<void>((resolve) => { settleLaunch = resolve; }) };
@@ -442,7 +443,7 @@ async function startAndActivateRuntime(
   phase: OfferPhaseContext,
   held: OfferHeld,
   input: OfferStartInput,
-  activation: Omit<OfferActivationInput, 'session'>,
+  activation: Omit<OfferActivationInput, 'session' | 'sessionMembers'>,
   launch: LaunchGate,
 ): Promise<void> {
   const { taskId } = phase;
@@ -587,9 +588,10 @@ async function startAndActivateRuntime(
     ...(toolAuthorizationGate === undefined ? {} : { toolAuthorization: toolAuthorizationGate }),
   };
   let session: Session;
+  let sessionMembers: DeclaredSessionMembers;
   try {
-    session = await startOwnedRuntime(input => prepared.operation.start(input), startInput, blobAbort.signal,
-      Math.max(0, startupDeadline - Date.now()));
+    ({ session, members: sessionMembers } = await startOwnedRuntime(input => prepared.operation.start(input), startInput,
+      pick.descriptor, blobAbort.signal, Math.max(0, startupDeadline - Date.now())));
   } catch (err) {
     const disposalFailure = isRuntimeStartupDisposalFailure(err);
     const host = hostFor(this);
@@ -710,5 +712,5 @@ async function startAndActivateRuntime(
       startedAtMs: Date.now(),
     },
   });
-  await activateOffer.call(this, phase, held, { ...activation, session });
+  await activateOffer.call(this, phase, held, { ...activation, session, sessionMembers });
 }

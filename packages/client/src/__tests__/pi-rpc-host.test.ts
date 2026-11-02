@@ -49,8 +49,8 @@ function fixture() {
   const entry = join(root, 'host-entry.ts');
   writeFileSync(entry, `import {runPiRpcHost} from ${JSON.stringify(resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js'))}; runPiRpcHost(process.argv.slice(2)).catch(error=>{console.error(String(error));process.exit(1)});`);
   const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
-  const config = { format: 'byok.pi.rpc-launch', version: 9, credentialSource: 'pi-auth-store', cwd,
-    agentUserContext: 'inherit', agentSkillPaths: [], agentExtensionPaths: [], toolAuthorization: null as unknown,
+  const config = { format: 'byok.pi.rpc-launch', version: 10, credentialSource: 'pi-auth-store', cwd,
+    agentUserContext: 'inherit', agentHome: null as string | null, agentSkillPaths: [], agentExtensionPaths: [], toolAuthorization: null as unknown,
     fileScope: null, mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } };
   const configPath = join(root, 'config.json');
   const serialized=serializePiHostConfig(config);
@@ -79,12 +79,13 @@ describe('SDK ordinary Pi RPC entry', () => {
       }
       const {credentialSource:_, ...withoutSource} = base;
       for (const cfg of [{...base, version:1}, {...base, version:3}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'auto'}}, {...base, binding:{}}, {...base, descendantPlan:null},
-        {...base, version:4}, {...base, version:8}, withoutSource, {...base, credentialSource:'env'}]) {
+        {...base, version:4}, {...base, version:8}, {...base, version:9}, withoutSource, {...base, credentialSource:'env'},
+        {...base, agentHome:'/home'}, {...base, agentUserContext:'excluded'}, {...base, agentUserContext:'excluded', agentHome:'relative'}]) {
         try { host.parsePiRpcHostConfig(cfg); rejected.push(false); } catch { rejected.push(true); }
       }
       console.log(JSON.stringify(rejected));
     `);
-    expect(result).toEqual(Array(16).fill(true));
+    expect(result).toEqual(Array(20).fill(true));
   });
 
   it('rejects v6, legacy tool policy and non-loopback gates instead of accepting an ungated launch', () => {
@@ -102,7 +103,7 @@ describe('SDK ordinary Pi RPC entry', () => {
     `)).toEqual(Array(10).fill(true));
   });
 
-  it('accepts a v9 serialized file scope and rejects a malformed one', () => {
+  it('accepts a v10 serialized file scope and rejects a malformed one', () => {
     const f = fixture();
     const home = f.cwd;
     const grant = {
@@ -166,7 +167,7 @@ describe('SDK ordinary Pi RPC entry', () => {
       baseUrl:`http://127.0.0.1:${address.port}/v1`, api:'openai-completions', apiKey:'synthetic-not-a-secret',
       models:[{id:'probe',name:'probe',contextWindow:4096,maxTokens:32,input:['text'],reasoning:false}],
     } } }));
-    const config = { ...f.config, agentUserContext: 'excluded', toolAuthorization: ipc.config };
+    const config = { ...f.config, agentUserContext: 'excluded', agentHome: f.cwd, toolAuthorization: ipc.config };
     const serialized = serializePiHostConfig(config);
     writeFileSync(f.configPath, serialized.bytes);
     const client = new PiRpcClient({
@@ -192,7 +193,7 @@ describe('SDK ordinary Pi RPC entry', () => {
 
   it('refuses startup when an explicitly authorized skill is missing', () => {
     const f = fixture();
-    const config = {...f.config,agentUserContext:'excluded',agentSkillPaths:[join(f.root,'missing','SKILL.md')]};
+    const config = {...f.config,agentUserContext:'excluded',agentHome:f.cwd,agentSkillPaths:[join(f.root,'missing','SKILL.md')]};
     const serialized = serializePiHostConfig(config);
     writeFileSync(f.configPath, serialized.bytes);
     const result = spawnSync(bun, [f.entry,`--config-digest=${serialized.digest}`,'--config',f.configPath,'--mode','rpc','--provider','anthropic','--model','claude-sonnet-4-5'], {
@@ -204,7 +205,7 @@ describe('SDK ordinary Pi RPC entry', () => {
     expect(result.stdout).not.toContain('"success":true');
   }, 15_000);
 
-  it('runs an explicitly authorized skill and extension while excluding unrelated user context and resources', async () => {
+  it('runs an explicitly authorized skill and extension while excluding user context, ancestor instruction files and resources', async () => {
     const f = fixture();
     const agentDir = join(f.root, 'agent');
     const skills = join(agentDir, 'skills');
@@ -218,7 +219,9 @@ describe('SDK ordinary Pi RPC entry', () => {
     writeFileSync(skillPath, '---\nname: approved\ndescription: Authorized task skill.\n---\nAUTHORIZED_SKILL_BODY: call authorized_probe.\n');
     writeFileSync(join(skills, 'unselected', 'SKILL.md'), '---\nname: unselected\ndescription: UNSELECTED_SKILL\n---\nDo not load.\n');
     writeFileSync(join(agentDir, 'AGENTS.md'), 'FORBIDDEN_GLOBAL_CONTEXT');
-    writeFileSync(join(f.cwd, 'AGENTS.md'), 'FORBIDDEN_PROJECT_CONTEXT');
+    // The session cwd is the Agent home: its own instruction file stays, the one above it does not.
+    writeFileSync(join(f.cwd, 'AGENTS.md'), 'AGENT_HOME_CONTEXT');
+    writeFileSync(join(f.root, 'AGENTS.md'), 'FORBIDDEN_ANCESTOR_CONTEXT');
     writeFileSync(join(extensions, 'unselected.ts'), 'throw new Error("UNSELECTED_EXTENSION_LOADED");');
     writeFileSync(extensionPath, `import {writeFileSync} from 'node:fs'; export default function(pi) {
       pi.registerTool({name:'authorized_probe',label:'Authorized probe',description:'Execute the authorized task.',parameters:{type:'object',properties:{}},
@@ -249,7 +252,7 @@ describe('SDK ordinary Pi RPC entry', () => {
       baseUrl:`http://127.0.0.1:${address.port}/v1`,api:'openai-completions',apiKey:'synthetic',
       models:[{id:'probe',name:'probe',contextWindow:4096,maxTokens:64,input:['text'],reasoning:false}],
     }}}));
-    const config = {...f.config,agentUserContext:'excluded',agentSkillPaths:[skillPath],agentExtensionPaths:[extensionPath]};
+    const config = {...f.config,agentUserContext:'excluded',agentHome:f.cwd,agentSkillPaths:[skillPath],agentExtensionPaths:[extensionPath]};
     const serialized = serializePiHostConfig(config);
     writeFileSync(f.configPath, serialized.bytes);
     const client = new PiRpcClient({command:bun,cwd:f.sealed,env:f.env,
@@ -265,7 +268,8 @@ describe('SDK ordinary Pi RPC entry', () => {
       expect(body.tools.map((tool: {function:{name:string}})=>tool.function.name)).toEqual(expect.arrayContaining(['read','bash','edit','write','authorized_probe']));
       expect(JSON.stringify(body.messages)).toContain('AUTHORIZED_SKILL_BODY');
       expect(JSON.stringify(body.messages)).not.toContain('FORBIDDEN_GLOBAL_CONTEXT');
-      expect(JSON.stringify(body.messages)).not.toContain('FORBIDDEN_PROJECT_CONTEXT');
+      expect(JSON.stringify(body.messages)).toContain('AGENT_HOME_CONTEXT');
+      expect(JSON.stringify(body.messages)).not.toContain('FORBIDDEN_ANCESTOR_CONTEXT');
       expect(JSON.stringify(body.messages)).not.toContain('UNSELECTED_SKILL');
       expect(JSON.stringify((await secondRequest).messages)).toContain('AUTHORIZED_TOOL_RESULT');
       expect(existsSync(marker)).toBe(true);
@@ -533,7 +537,7 @@ describe('SDK ordinary Pi RPC entry', () => {
       'loopback-q': provider(ports[1]!, 'q-model'), 'loopback-p': auth === 'P has a key' ? provider(ports[0]!, 'p-model') : keylessP,
     } }));
     writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'loopback-p', defaultModel: 'p-model' }));
-    const serialized = serializePiHostConfig({ ...f.config, agentUserContext: 'excluded' });
+    const serialized = serializePiHostConfig({ ...f.config, agentUserContext: 'excluded', agentHome: f.cwd });
     writeFileSync(f.configPath, serialized.bytes);
     const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env, args: [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc'] });
     try {

@@ -6,7 +6,8 @@
 // (public export, entry, bin, union member, store format, vendored example)
 // must belong to exactly one authored entry in packages/client/upgrade-manifest.json
 // with an impact, a summary and a migration anchor; a breaking entry fails a
-// PATCH bump (Q8). See docs/upgrade-manifest.md.
+// PATCH bump (Q8). Every released manifest stays archived in
+// packages/client/upgrade-history/ (#1316). See docs/upgrade-manifest.md.
 //
 // Usage:
 //   node scripts/release/check-upgrade-manifest.mjs [--root <dir>]
@@ -15,8 +16,9 @@
 //       Rewrite the generated fields (from, to, configFields, changes) and keep
 //       the authored entries. Still exits 1 while an item lacks an entry.
 //   node scripts/release/check-upgrade-manifest.mjs --rebaseline <release checkout> [--root <dir>]
-//       After a release is published: snapshot the release tag checkout into
-//       the baseline and start an empty manifest from that version.
+//       After a release is published: archive the release tag checkout's
+//       manifest into the history, snapshot the checkout into the baseline and
+//       start an empty manifest from that version.
 //   node scripts/release/check-upgrade-manifest.mjs --snapshot [--root <dir>]
 //       Print the snapshot of the tree.
 
@@ -25,6 +27,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { buildSnapshot } from './upgrade-manifest/snapshot.mjs';
+import { archiveRelease, checkHistory } from './upgrade-manifest/history.mjs';
 import { BASELINE_PATH, MANIFEST_PATH, bumpKind, checkManifest, renderManifest, serialize } from './upgrade-manifest/manifest.mjs';
 
 const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -67,6 +70,7 @@ export function run(argv, log = console) {
         throw new Error(`release checkout is ${released.version}, not newer than the baseline ${previous.version}`);
       }
     }
+    archiveRelease(root, options.release, released.version);
     writeFileSync(baselineFile, `${JSON.stringify(released, null, 2)}\n`);
     writeFileSync(manifestFile, serialize(renderManifest(released, current, [])));
     log.log(`[upgrade-manifest] baseline is now ${released.version}; the manifest starts empty`);
@@ -79,6 +83,7 @@ export function run(argv, log = console) {
   }
   const manifestText = existsSync(manifestFile) ? readFileSync(manifestFile, 'utf8') : '';
   const { errors, notes } = checkManifest({ root, baseline, current, manifestText });
+  errors.push(...checkHistory(root, baseline.version));
   for (const note of notes) log.log(`[upgrade-manifest] note: ${note}`);
   if (errors.length > 0) {
     for (const error of errors) log.error(`[upgrade-manifest] ${error}`);

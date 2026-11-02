@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,9 +10,13 @@ import {
   ServiceInstallationError,
   SERVICE_PAYLOAD_MANIFEST,
   type ServiceInstallation,
+  type ServiceInstallationOptions,
 } from '../lifecycle/service-installation';
 import { createManagedLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { SERVICE_UNIT_MARKER, withServiceOwnerGate } from '../lifecycle/service-unit';
+import * as daemonOwner from '../util/daemon-owner';
+import { acquireDaemonOwner } from '../util/daemon-owner';
+import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 useInProcessServiceLifecycleGate();
@@ -130,7 +135,7 @@ async function expectConsistent(dataOf: Record<string, string>): Promise<void> {
 }
 
 /** The installation over `lifecycle`, with this suite's health seam. */
-function installationOver(lifecycle: ManagedServiceLifecycle): ServiceInstallation {
+function installationOver(lifecycle: ManagedServiceLifecycle, extra: Partial<ServiceInstallationOptions> = {}): ServiceInstallation {
   return serviceInstallationOver({
     service: { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app' },
     productId: 'svc',
@@ -145,6 +150,7 @@ function installationOver(lifecycle: ManagedServiceLifecycle): ServiceInstallati
     },
     healthTimeoutMs: 5_000,
     stopTimeoutMs: 2_000,
+    ...extra,
   }, lifecycle);
 }
 
@@ -430,6 +436,187 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
         await expectConsistent({ '1.0.0': 'v1 data', '2.0.0': 'v2 data' });
         expect(await pointer('current')).toBe('1.0.0');
       }
+    });
+  });
+
+  describe('daemon stores (#1328): every store is leased and gated across the switch', () => {
+    let research: string;
+    beforeEach(async () => {
+      research = path.join(root, 'research', 'device');
+      await fs.mkdir(research, { recursive: true });
+    });
+    const both = () => installationOver(fakeLifecycle(), {
+      daemonStores: async () => [{ storeDir, productId: 'svc' }, { storeDir: research, productId: 'research' }],
+    });
+
+    it('stops both stores and holds their leases and gates through the pointer switch', async () => {
+      installation = both();
+      await installation.install(await payload('1.0.0'));
+      const seen: unknown[] = [];
+      const original = fs.rename.bind(fs);
+      const spy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+        if (String(to) === path.join(installRoot, 'current')) {
+          for (const dir of [storeDir, research]) {
+            const owner = JSON.parse(await fs.readFile(path.join(dir, 'daemon-owner.json'), 'utf8')) as { role: string };
+            const gate = await acquirePathMutationGate({ scope: 'store', targetPath: dir }).catch((error: unknown) => error);
+            seen.push([owner.role, gate instanceof PathMutationGateBusyError]);
+          }
+        }
+        return original(from, to);
+      });
+      try { await expect(installation.upgrade(await payload('2.0.0'))).resolves.toMatchObject({ state: 'switched' }); }
+      finally { spy.mockRestore(); }
+      expect(seen).toEqual([['installer', true], ['installer', true]]);
+      await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
+    });
+
+    it('a lease that fails to release does not keep the next store leased', async () => {
+      installation = both();
+      await installation.install(await payload('1.0.0'));
+      const original = daemonOwner.acquireDaemonOwner;
+      vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+        const lease = await original(...args);
+        return { release: async () => { await lease.release(); throw new Error('injected release failure'); } };
+      });
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toThrow('injected release failure');
+      await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
+    });
+
+    it('a store with a live owner is store_busy and nothing is switched', async () => {
+      installation = both();
+      await installation.install(await payload('1.0.0'));
+      const live = await acquireDaemonOwner(research, 'daemon');
+      events = [];
+      try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'store_busy' }); }
+      finally { await live.release(); }
+      expect(events).toEqual(['stop', 'start']);
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'store_busy' });
+    });
+
+    it('reclaims what a crashed daemon left (a dead owner and a control.token) and upgrades', async () => {
+      installation = both();
+      await installation.install(await payload('1.0.0'));
+      const dead = spawnSync(process.execPath, ['-e', '']).pid;
+      const at = new Date().toISOString();
+      await fs.writeFile(path.join(research, 'daemon-owner.json'), JSON.stringify({
+        version: 2, pid: dead, nonce: randomUUID(), role: 'daemon', acquiredAt: at, processStartedAt: at, livenessPort: 1,
+      }));
+      await fs.writeFile(path.join(research, 'control.token'), 'stale');
+      await expect(installation.upgrade(await payload('2.0.0'))).resolves.toMatchObject({ state: 'switched' });
+      await expect(fs.access(path.join(research, 'control.token'))).rejects.toThrow();
+      await expect(fs.access(path.join(research, 'daemon-owner.json'))).rejects.toThrow();
+    });
+
+    it.each([
+      ['a relative storeDir', async () => [{ storeDir: 'store', productId: 'svc' }]],
+      ['a store listed twice', async () => [{ storeDir, productId: 'svc' }, { storeDir: `${storeDir}${path.sep}`, productId: 'other' }]],
+      ['an empty productId', async () => [{ storeDir, productId: '' }]],
+      ['a throw', async () => { throw new Error('no session'); }],
+    ])('%s is daemon_stores_invalid and nothing is switched', async (_label, daemonStores) => {
+      await installation.install(await payload('1.0.0'));
+      events = [];
+      await expect(installationOver(fakeLifecycle(), { daemonStores }).upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'daemon_stores_invalid' });
+      expect(events).toEqual(['stop', 'start']);
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'daemon_stores_invalid' });
+    });
+
+    it('daemonStores without healthCheck is a TypeError', () => {
+      expect(() => installationOver(fakeLifecycle(), { daemonStores: async () => [], healthCheck: undefined })).toThrow(TypeError);
+    });
+  });
+
+  describe('store verdicts (#1328): Host stores, directory stores and the lstat check', () => {
+    let index: string;
+    const verdictsWith = async (...extra: object[]): Promise<void> => {
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([
+        { store: 'client-journal', path: db, verdict: 'accepted', reason: 'ok' }, ...extra,
+      ]));
+    };
+    beforeEach(async () => {
+      index = path.join(root, 'research-index');
+      await fs.mkdir(path.join(index, 'shards'), { recursive: true });
+      await fs.writeFile(path.join(index, 'shards', 'a'), 'v1 a');
+      await fs.symlink('shards/a', path.join(index, 'latest'));
+      await verdictsWith({ store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' });
+    });
+
+    it('a Host directory store enters the receipt and is restored with its snapshot after a failed health check', async () => {
+      await installation.install(await payload('1.0.0'));
+      const switched = await installation.upgrade(await payload('2.0.0'));
+      expect(switched.stores).toContainEqual(expect.objectContaining({ store: 'research-index', kind: 'directory' }));
+      const before = await tree(index);
+      unhealthy.add('3.0.0');
+      onHealth = async (version) => {
+        if (version !== '3.0.0') return;
+        await fs.writeFile(path.join(index, 'shards', 'a'), 'v3 a');
+        await fs.writeFile(path.join(index, 'shards', 'b'), 'v3 b');
+        await fs.rm(path.join(index, 'latest'));
+      };
+      await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
+      expect(await tree(index)).toEqual(before);
+    });
+
+    it('a directory store absent at the snapshot is removed on restore', async () => {
+      await fs.rm(index, { recursive: true });
+      await installation.install(await payload('1.0.0'));
+      unhealthy.add('2.0.0');
+      onHealth = async (version) => { if (version === '2.0.0') await fs.mkdir(index); };
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
+      await expect(fs.lstat(index)).rejects.toThrow();
+    });
+
+    it.each([
+      ['a store id outside the pattern', () => verdictsWith({ store: 'Research', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' })],
+      ['an unknown kind', () => verdictsWith({ store: 'research-index', path: index, kind: 'tree', verdict: 'accepted', reason: 'ok' })],
+      ['a repeated path', () => verdictsWith({ store: 'other', path: db, verdict: 'accepted', reason: 'ok' })],
+      ['a store inside a directory store', () => verdictsWith(
+        { store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' },
+        { store: 'shard', path: path.join(index, 'shards', 'a'), verdict: 'accepted', reason: 'ok' },
+      )],
+      ['a file store that is a directory', () => verdictsWith({ store: 'research-index', path: index, verdict: 'accepted', reason: 'ok' })],
+      ['a directory store that is a symlink', async () => {
+        await fs.symlink(index, path.join(root, 'index-link'));
+        await verdictsWith({ store: 'research-index', path: path.join(root, 'index-link'), kind: 'directory', verdict: 'accepted', reason: 'ok' });
+      }],
+      ['a file store that is a symlink', async () => {
+        await fs.symlink(db, path.join(root, 'db-link'));
+        await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'client-journal', path: path.join(root, 'db-link'), verdict: 'accepted', reason: 'ok' }]));
+      }],
+    ])('%s is precheck_failed and nothing is switched', async (_label, write) => {
+      await installation.install(await payload('1.0.0'));
+      await write();
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'precheck_failed' });
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'precheck_failed' });
+    });
+
+    it('a failed cleanup of the partial snapshot does not replace snapshot_failed', async () => {
+      await installation.install(await payload('1.0.0'));
+      const partial = path.join(installRoot, 'snapshots', '2.0.0');
+      const realRm = fs.rm.bind(fs);
+      let copied = false;
+      const cp = vi.spyOn(fs, 'cp').mockImplementationOnce(async () => { copied = true; throw Object.assign(new Error('injected'), { code: 'ENOSPC' }); });
+      const rm = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+        if (copied && String(target) === partial) throw Object.assign(new Error('injected cleanup'), { code: 'EBUSY' });
+        return realRm(target, options);
+      });
+      try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'snapshot_failed', cause: { code: 'ENOSPC' } }); }
+      finally { cp.mockRestore(); rm.mockRestore(); }
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'snapshot_failed' });
+    });
+
+    it('a copy that fails is snapshot_failed: no partial snapshot, no pending receipt, the old version restarted', async () => {
+      await installation.install(await payload('1.0.0'));
+      const spy = vi.spyOn(fs, 'cp').mockRejectedValueOnce(Object.assign(new Error('injected'), { code: 'ENOSPC' }));
+      events = [];
+      try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'snapshot_failed', cause: { code: 'ENOSPC' } }); }
+      finally { spy.mockRestore(); }
+      expect(events).toEqual(['stop', 'start']);
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'snapshot_failed' });
+      await expect(fs.access(path.join(installRoot, 'snapshots', '2.0.0'))).rejects.toThrow();
     });
   });
 

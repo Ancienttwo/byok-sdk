@@ -6453,7 +6453,8 @@ export declare function createStoredDeviceProofSigner(options: CreateStoredDevic
 export {};
 // ==== @byok-sdk/client dist/daemon/execution-record.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { RuntimeAdapterDescriptor, Session } from '../types';
+import type { RuntimeAdapterDescriptor } from '../types';
+import type { DeclaredSessionMembers } from './session-contract';
 /**
  * Octop ③ (#553): a local, content-free diagnostic that says whether the SDK
  * saw the whole event trajectory of one started execution. `TaskRunner`
@@ -6465,8 +6466,9 @@ import type { RuntimeAdapterDescriptor, Session } from '../types';
  *   exactly one result, no frame was dropped or invented, and the runtime sent
  *   `turn_end`. It is about collection only; a failed task can be complete.
  * - `partial`: a declared source with at least one gap.
- * - `unknown`: no declared source, or more open tool calls than the record
- *   tracks. A Host that has no record for a terminal also shows `unknown`.
+ * - `unknown`: no declared source, a declaring session without
+ *   `Session.evidence()`, or more open tool calls than the record tracks. A
+ *   Host that has no record for a terminal also shows `unknown`.
  */
 export type ExecutionRecordStatus = 'complete' | 'partial' | 'unknown';
 /**
@@ -6488,8 +6490,12 @@ export type ExecutionRecordStatus = 'complete' | 'partial' | 'unknown';
  *   full bytes could not be stored (`spill.unstoredReason`).
  */
 export type ExecutionRecordGap = 'unpaired_tool_call' | 'orphan_tool_result' | 'duplicate_tool_result' | 'synthetic_tool_result' | 'decode_dropped' | 'unmapped_frame' | 'stream_ended_early' | 'no_turn_end' | 'spill_unstored';
-/** Why a record is `unknown`. */
-export type ExecutionRecordUnknown = 'source_not_declared' | 'evidence_overflow';
+/**
+ * Why a record is `unknown`. `evidence_missing`: the adapter declares
+ * `trajectoryEvidence` but its started Session has no `evidence()`, as when a
+ * Host wrapper does not forward it.
+ */
+export type ExecutionRecordUnknown = 'source_not_declared' | 'evidence_missing' | 'evidence_overflow';
 /** One started execution's record. Counts and closed codes only: never a tool input, output, path or reason text. */
 export interface ExecutionRecord {
     taskId: string;
@@ -6515,7 +6521,8 @@ export declare const MAX_OPEN_TOOL_CALLS = 4096;
 export declare class ExecutionRecordAccumulator {
     private readonly taskId;
     private readonly source;
-    private readonly session;
+    /** The bound `Session.evidence`; see {@link DeclaredSessionMembers.evidence}. */
+    private readonly evidence;
     private readonly open;
     /** The latest answered ids, kept only to tell a repeated result from an orphan. Bounded like `open`. */
     private readonly answered;
@@ -6523,7 +6530,9 @@ export declare class ExecutionRecordAccumulator {
     private turnEnded;
     private streamEndedEarly;
     private overflowed;
-    constructor(taskId: string, source: RuntimeAdapterDescriptor['trajectoryEvidence'], session: Pick<Session, 'evidence'>);
+    constructor(taskId: string, source: RuntimeAdapterDescriptor['trajectoryEvidence'], 
+    /** The bound `Session.evidence`; see {@link DeclaredSessionMembers.evidence}. */
+    evidence: DeclaredSessionMembers['evidence']);
     observe(event: AgentEvent): void;
     /** The runtime ended or failed its event stream on its own, before the daemon decided a terminal. */
     streamEnded(): void;
@@ -8202,6 +8211,34 @@ export declare class RetentionSweeper {
     private arm;
     stop(): Promise<void>;
 }
+// ==== @byok-sdk/client dist/daemon/session-contract.d.ts ====
+import type { AgentEvent } from '@byok-sdk/protocol';
+import type { RuntimeAdapterDescriptor, Session, SessionEvidence } from '../types';
+/**
+ * The optional `Session` members that the adapter descriptor declares, bound
+ * once when the session started. The daemon reads these and never
+ * `session.<member>?.()`, so a Host wrapper that drops a declared member
+ * cannot pass for an adapter without the capability.
+ */
+export interface DeclaredSessionMembers {
+    /** Bound exactly when the descriptor declares `progressMessageBoundary: 'session'`. */
+    readonly progressStartsMessage?: (event: Extract<AgentEvent, {
+        type: 'progress';
+    }>) => boolean;
+    /**
+     * Bound exactly when the descriptor declares `trajectoryEvidence`.
+     * `'missing'`: the session has no `evidence()`, so its execution record is
+     * `unknown` (`evidence_missing`).
+     */
+    readonly evidence?: (() => SessionEvidence) | 'missing';
+}
+/**
+ * Binds the members `descriptor` declares on a started `session`. Throws a
+ * non-retryable start failure when the descriptor declares
+ * `progressMessageBoundary: 'session'` and the session has no
+ * `progressStartsMessage()`; the caller still owns and closes the session.
+ */
+export declare function bindDeclaredSessionMembers(descriptor: RuntimeAdapterDescriptor, session: Session): DeclaredSessionMembers;
 // ==== @byok-sdk/client dist/daemon/skill-pack-installer.d.ts ====
 import { type CapabilityDeclaration } from '@byok-sdk/core';
 import type { AuthManager } from './auth-manager';
@@ -9725,9 +9762,11 @@ export { generateWinswXml } from './lifecycle/winsw';
 export { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from './lifecycle/agent-service';
 export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from './lifecycle/agent-service';
 export { createServiceInstallation, readPayloadManifest, readServiceInstallationRecord, SERVICE_PAYLOAD_MANIFEST, ServiceInstallationError, } from './lifecycle/service-installation';
-export type { ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceUpgradeReceipt, } from './lifecycle/service-installation';
+export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord, ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit';
 export type { ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState, } from './lifecycle/service-unit';
+export { checkUpgradeFrom } from './lifecycle/upgrade-from';
+export type { UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage, } from './lifecycle/upgrade-from';
 export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
 export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes';
 export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log';
@@ -11044,7 +11083,7 @@ export declare function applyLoginShellEnvironment(): Promise<ServiceEnvironment
  */
 export declare function captureAndApply(options: ApplyLoginShellEnvironmentOptions): Promise<ServiceEnvironmentStatus>;
 // ==== @byok-sdk/client dist/lifecycle/service-installation.d.ts ====
-import type { StoreCompatibility } from '@byok-sdk/core';
+import type { StoreCompatibilityVerdict } from '@byok-sdk/core';
 import { type CreateServiceLifecycleOptions } from './create-service-lifecycle';
 import type { ManagedServiceLifecycle } from './managed-lifecycle';
 import type { ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram } from './service-types';
@@ -11062,6 +11101,32 @@ export interface ServicePayloadManifest {
     id: string;
     /** Every file of the payload except the manifest: `/`-separated relative path → lowercase hex SHA-256. */
     files: Record<string, string>;
+}
+/**
+ * One store the candidate's precheck reports (#1328): an SDK `LocalStoreId`
+ * or a Host store id, with the verdict the candidate gives it. The snapshot
+ * covers exactly the reported stores.
+ */
+export interface ServiceStoreVerdict {
+    /** An SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`, starting with a letter or digit. */
+    readonly store: string;
+    /** Absolute. No two stores share a path, and no store lies inside a `directory` store. */
+    readonly path: string;
+    /**
+     * `file` (the default): the file plus its `-wal` and `-journal`, each a
+     * regular file or absent. `directory`: the whole tree, a real directory
+     * (not a symlink) or absent; symlinks inside it are copied as links.
+     */
+    readonly kind?: 'file' | 'directory';
+    readonly verdict: StoreCompatibilityVerdict;
+    /** The error code the store reported when it refused the store. */
+    readonly code?: string;
+    readonly reason: string;
+}
+/** A daemon store the service process owns (#1328): the `DaemonConfig.storeDir` and `productId` of one daemon it runs. */
+export interface ServiceDaemonStore {
+    readonly storeDir: string;
+    readonly productId: string;
 }
 /**
  * What an installation is told to do (#1097). `program` and `precheck`
@@ -11083,10 +11148,12 @@ export interface ServiceInstallationOptions {
     program(versionDir: string): ServiceProgram;
     /**
      * The candidate's store precheck, run from its staged `versionDir` while
-     * every writer is stopped. It prints `{ "stores": StoreCompatibility[] }`
-     * (what `byok-agent upgrade check --store --json` prints) and exits 0 or 2.
-     * Every store the candidate rewrites must be listed: the snapshot covers
-     * exactly the listed stores.
+     * every writer is stopped. It prints `{ "stores": ServiceStoreVerdict[] }`
+     * (`byok-agent upgrade check --store --json` prints the SDK's own stores in
+     * this shape) and exits 0 or 2. Every store the candidate rewrites must be
+     * listed, Host stores included: the snapshot covers exactly the listed
+     * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
+     * `precheck_failed`.
      */
     precheck(versionDir: string): ServiceProgram;
     /**
@@ -11098,7 +11165,16 @@ export interface ServiceInstallationOptions {
     healthCheck?(signal: AbortSignal): Promise<void>;
     /** How long the health check may take. Default 60000. */
     healthTimeoutMs?: number;
-    /** How long a stop may take to leave the store quiescent. Default 30000. */
+    /**
+     * Every daemon store the service process owns, read after the service has
+     * stopped, on every upgrade, rollback and recover (#1328). Each `storeDir`
+     * is absolute and listed once; `productId` is not empty; an empty list is
+     * valid. An invalid list or a throw is `daemon_stores_invalid`. Default:
+     * `[{ storeDir: service.storeDir, productId }]`. Requires `healthCheck`,
+     * since the default one reaches only `productId`'s daemon.
+     */
+    daemonStores?(): Promise<readonly ServiceDaemonStore[]>;
+    /** How long a stop may take to leave every daemon store quiescent, shared by all of them. Default 30000. */
     stopTimeoutMs?: number;
     /** Test seams for the underlying lifecycle. */
     lifecycle?: CreateServiceLifecycleOptions;
@@ -11127,7 +11203,7 @@ export interface ServiceUpgradeReceipt {
     previous?: string;
     at: string;
     code?: ServiceInstallationErrorCode;
-    stores?: StoreCompatibility[];
+    stores?: ServiceStoreVerdict[];
 }
 /**
  * Every mutation (install, upgrade, rollback, recover, uninstall) first
@@ -11171,9 +11247,11 @@ declare const ERROR_MESSAGES: {
     readonly version_current: 'The payload is the version already running.';
     readonly version_conflict: 'A different payload with the same version id is already staged.';
     readonly upgrade_pending: 'An earlier upgrade or rollback was interrupted. Run recover() (CLI: byok-agent upgrade recover) first.';
-    readonly store_busy: 'The store still has a running owner after the stop. Stop every process that uses this store and retry.';
+    readonly store_busy: 'A daemon store still has a running owner after the stop. Stop every process that uses it and retry.';
+    readonly daemon_stores_invalid: 'daemonStores() threw or listed an invalid store: each storeDir must be absolute and listed once, each productId not empty.';
     readonly owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.';
-    readonly precheck_failed: 'The candidate\'s store precheck did not produce a verdict.';
+    readonly precheck_failed: 'The candidate\'s store precheck did not produce a valid verdict.';
+    readonly snapshot_failed: 'The store snapshot could not be written. Nothing was switched; free space or remove what cannot be copied, then retry.';
     readonly store_repair_required: 'The candidate needs a new store path and a new pairing. Nothing was switched; decide before upgrading.';
     readonly store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.';
     readonly health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.';
@@ -11181,11 +11259,11 @@ declare const ERROR_MESSAGES: {
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
-/** Closed codes; a store refusal carries the precheck verdicts. */
+/** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */
 export declare class ServiceInstallationError extends Error {
     readonly code: ServiceInstallationErrorCode;
-    readonly stores?: readonly StoreCompatibility[] | undefined;
-    constructor(code: ServiceInstallationErrorCode, stores?: readonly StoreCompatibility[] | undefined);
+    readonly stores?: readonly ServiceStoreVerdict[] | undefined;
+    constructor(code: ServiceInstallationErrorCode, stores?: readonly ServiceStoreVerdict[] | undefined, options?: ErrorOptions);
 }
 /** `<storeDir>/service/installation.json`: where this store's installation lives. */
 export interface ServiceInstallationRecord {
@@ -11367,7 +11445,12 @@ export interface ServiceDefinition {
     displayName?: string;
     /** What the launcher runs — see {@link ServiceProgram}. */
     program: ServiceProgram;
-    /** The product's SDK store (`DaemonConfig.storeDir` or its default). Holds the launcher and the lifecycle owner record under `<storeDir>/service`. */
+    /**
+     * The directory that holds the launcher and the lifecycle owner record
+     * under `<storeDir>/service`: the product's SDK store (`DaemonConfig.storeDir`
+     * or its default). With `ServiceInstallationOptions.daemonStores` it may be
+     * the product's own data directory instead.
+     */
     storeDir: string;
     /** `resolveHostLayout(...).logDir`: the daemon log and the service manager's redirect files (created if missing). On Windows also the default WinSW install directory — see `windows.installDir`. */
     logDir: string;
@@ -11697,6 +11780,50 @@ export declare function generateSystemdUnit(def: {
  * with a clear error surfaced from `runOrThrow`, not a silent no-op.
  */
 export declare function createSystemdLifecycle(def: ServiceDefinition, deps?: SystemdDeps): ManagedServiceLifecycle;
+// ==== @byok-sdk/client dist/lifecycle/upgrade-from.d.ts ====
+export type UpgradeFromRefusalCode = 'upgrade_from_unsupported' | 'upgrade_history_unavailable' | 'upgrade_train_unresolved';
+export interface UpgradeFromBreakingEntry {
+    readonly id: string;
+    /** The release that ships the change. */
+    readonly release: string;
+    /** `<repo doc>.md#<anchor>` or a byok-sdk issue/PR URL. */
+    readonly migration: string;
+}
+export interface UpgradeTrainPackage {
+    readonly name: string;
+    /** The resolved package version, or `'absent'` when it does not resolve. */
+    readonly version: string;
+}
+export interface UpgradeFromReport {
+    readonly from: string;
+    /** The resolved `@byok-sdk/client` version; `null` when it does not resolve. */
+    readonly to: string | null;
+    /** Every breaking entry released after `from`, up to and including `to`. */
+    readonly breaking: readonly UpgradeFromBreakingEntry[];
+    readonly additiveCount: number;
+    readonly train: {
+        readonly version: string | null;
+        readonly packages: readonly UpgradeTrainPackage[];
+    };
+    /** `pass`: no breaking entry in the range and every resolved package is on the client's version. */
+    readonly verdict: 'pass' | 'refused';
+    /** Set when the range could not be checked at all. */
+    readonly refusal?: {
+        readonly code: UpgradeFromRefusalCode;
+        readonly message: string;
+    };
+}
+/**
+ * Lists the breaking upgrade-manifest entries released after `fromVersion`
+ * up to the `@byok-sdk/client` that resolves from `options.resolveFrom`
+ * (default: the working directory), and checks that every public
+ * `@byok-sdk/*` package resolving from there is on that client's version.
+ *
+ * Throws when `fromVersion` is not a version or is newer than the client.
+ */
+export declare function checkUpgradeFrom(fromVersion: string, options?: {
+    readonly resolveFrom?: string;
+}): UpgradeFromReport;
 // ==== @byok-sdk/client dist/lifecycle/winsw.d.ts ====
 import { promises as fsp } from 'node:fs';
 import { type Runner } from '../util/exec-runner';
@@ -13530,7 +13657,7 @@ export interface McpStdioServerConfig {
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
     mcpServers: Readonly<Record<string, McpStdioServerConfig & {
-        /** Exact Host-approved tool names; omitted or empty adds no approval. Local configuration only. */
+        /** Exact Host-approved tool names, granted only to a runtime that declares `mcpToolApprovals`; never an admission requirement. Omitted or empty grants nothing. Local configuration only. */
         readonly approveTools?: readonly string[];
     }>>;
 }
@@ -13605,11 +13732,12 @@ export interface Session {
     /** Normalized events for this session; the daemon batches these into `task.progress`. A `MessageDraftDelta` only feeds the display-only draft. */
     events: AsyncIterable<AgentEvent | MessageDraftDelta>;
     /**
-     * For an adapter whose descriptor sets `progressEventsAreMessages` but
-     * emits one assistant message as several `progress` events. Return false
-     * when `event`, an object this session's `events` yielded, continues the
-     * message of an earlier event: the daemon then keeps both in the same
-     * closing reply. Absent: every non-blank `progress` event starts a message.
+     * Required when the descriptor declares `progressMessageBoundary:
+     * 'session'`; the daemon closes and refuses a started session without it
+     * (`runtime_session_incomplete`). Return false when `event`, an object this
+     * session's `events` yielded, continues the message of an earlier event:
+     * the daemon then keeps both in the same closing reply. Never read for any
+     * other boundary.
      */
     progressStartsMessage?(event: Extract<AgentEvent, {
         type: 'progress';
@@ -13629,10 +13757,10 @@ export interface Session {
     close(): Promise<void>;
     /**
      * Runtime output this session could not turn into `events`, as counts for
-     * the whole session up to `close()`. The daemon reads it once, after
-     * `close()` resolved, and only when the descriptor declares
-     * `trajectoryEvidence`. A declaring adapter that omits it states that
-     * nothing below its event stream can drop or invent a frame.
+     * the whole session up to `close()`. Required when the descriptor declares
+     * `trajectoryEvidence`; return zero counts when nothing was dropped. The
+     * daemon reads it once, after `close()` resolved. A declaring session
+     * without it makes the execution record `unknown` (`evidence_missing`).
      */
     evidence?(): SessionEvidence;
 }
@@ -13676,25 +13804,27 @@ export interface RuntimeAdapterDescriptor {
      * never makes an offer wait on one it has no use for.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
-    /** Can enforce the local Host's exact per-tool MCP approvals. Nonempty grants require this capability. */
+    /** Receives the local Host's exact per-tool MCP approvals; projects grants; absent = the runtime receives none; never an admission requirement. */
     readonly mcpToolApprovals?: boolean;
     /**
-     * Whether each `progress` event carries one complete assistant message
-     * rather than a streaming delta. Codex emits one event per completed
-     * `agentMessage`, and Claude one per complete text block, so commentary and
-     * the final answer arrive as separate events with no tool interaction
-     * between them. When this is true, the
-     * daemon starts a new closing reply at every `progress` event, so the
-     * closing reply (`task.complete.finalMessage`) is the last message only.
-     * Absent or false: consecutive `progress` events form one reply until a
-     * tool interaction.
+     * Where one assistant message ends among `progress` events. The closing
+     * reply (`task.complete.finalMessage`) is the last message.
+     *
+     * - Absent: `progress` events are streaming deltas; consecutive ones form
+     *   one reply until a tool interaction.
+     * - `'event'`: each non-blank `progress` event is one complete message and
+     *   starts a new reply. Codex (one event per `agentMessage`) and dsh.
+     * - `'session'`: `Session.progressStartsMessage` decides for each non-blank
+     *   `progress` event, and the Session must implement it. Claude, whose
+     *   events are text blocks and one message can span several.
      */
-    readonly progressEventsAreMessages?: boolean;
+    readonly progressMessageBoundary?: 'event' | 'session';
     /**
      * Declares `Session.events` as the evidence source of the daemon's local
      * execution record (`daemon/execution-record.ts`): every tool call and
      * result carries its `toolCallId`, and `turn_end` means the runtime
-     * completed. Absent: every record of this adapter is `unknown`.
+     * completed. The Session must implement `evidence()`. Absent: every record
+     * of this adapter is `unknown`.
      */
     readonly trajectoryEvidence?: 'event-stream';
     /**
@@ -13905,7 +14035,7 @@ interface RuntimeOperationStartBase {
     readonly env: NodeJS.ProcessEnv;
     /** Local MCP authority resolved from logical wire ids. */
     readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
-    /** Local registry approvals copied and frozen with this attempt's servers; never sourced from wire or transcript. */
+    /** Local registry approvals copied and frozen with this attempt's servers, present only when the descriptor declares `mcpToolApprovals`; never sourced from wire or transcript. */
     readonly mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
     /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
     readonly mcpToolsetTools?: McpToolsetToolObservation;

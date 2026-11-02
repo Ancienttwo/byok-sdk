@@ -100,7 +100,12 @@ validation. It fails when:
   (Q8). Before 1.0 a breaking entry needs a MINOR, from 1.0 a MAJOR. While the
   tree version still equals the baseline, the gate prints the bump the next
   release needs;
-- the generated fields differ from what the tree produces.
+- the generated fields differ from what the tree produces;
+- the history (`packages/client/upgrade-history/`, #1316) does not chain from
+  0.31.0 to the manifest's `from` (each `<to>` is the next `<from>`), or an
+  archive differs from `packages/client/upgrade-manifest.json` at tag
+  `v<to>`. The gate reads the tags with `git show`, so it needs a checkout
+  with tags (`fetch-depth: 0` in CI).
 
 ## Workflow
 
@@ -121,9 +126,58 @@ validation. It fails when:
 3. After the release is tagged and published, make the release the new
    baseline from a checkout of its tag:
    `node scripts/release/check-upgrade-manifest.mjs --rebaseline <tag checkout>`.
-   It writes `scripts/release/upgrade-manifest/baseline.json` and starts an
-   empty manifest from that version. It refuses a version that is not newer
-   than the current baseline.
+   It first archives the tag's `packages/client/upgrade-manifest.json`, byte
+   for byte, as `packages/client/upgrade-history/<from>-<to>.json`, then writes
+   `scripts/release/upgrade-manifest/baseline.json` and starts an empty
+   manifest from that version. It refuses a version that is not newer than the
+   current baseline, and a tag manifest that does not span the release
+   (`from < to`, `to` equal to the tag's version).
+
+## Upgrading across releases
+
+The manifest covers one release. `@byok-sdk/client` also ships every earlier
+released manifest since 0.31.0 in `upgrade-history/<from>-<to>.json`, exactly
+as each release shipped it. A Host that skips releases checks the whole range
+with the installed client (#1316):
+
+```sh
+npx byok-agent upgrade check --from 0.32.0 [--json]
+```
+
+```ts
+import { checkUpgradeFrom } from '@byok-sdk/client';
+
+const report = checkUpgradeFrom('0.32.0', { resolveFrom: hostDir }); // default: process.cwd()
+```
+
+- Every `breaking` entry released after `--from`, up to and including the
+  installed client, is listed with its `id`, `release` and `migration` link.
+  Additive entries are only counted (`additiveCount`). A released manifest
+  (`from < to`) ships its entries in `to`; the in-development one
+  (`from == to`) in the client's own version.
+- The train check resolves the nine public `@byok-sdk/*` packages from
+  `resolveFrom`. Each one that resolves must have the client's version; one
+  that does not resolve is listed as `absent`. Lockfiles are not read.
+- `verdict` is `pass` (exit 0) when the range has no breaking entry and the
+  train matches, `refused` (exit 2) otherwise.
+- A refusal that stops the check sets `refusal.code`:
+  `upgrade_train_unresolved` (`@byok-sdk/client` does not resolve from
+  `resolveFrom`), `upgrade_from_unsupported` (`--from` before 0.31.0; read
+  `docs/releases/host-upgrade-<version>.md`) or `upgrade_history_unavailable`
+  (the resolved client has no `upgrade-history/`, as in a single-file bundle).
+- A `--from` that is not a version, or is newer than the client, throws.
+- `--from` and `--store` are separate checks; passing both prints the usage
+  and exits 2.
+
+`--json` prints the report:
+
+```jsonc
+{ "from": "0.32.0", "to": "0.34.0",
+  "breaking": [{ "id": "wire-v5-durable-lane", "release": "0.34.0", "migration": "docs/migrations/wire-v5-durable-lane.md#drain-and-upgrade" }],
+  "additiveCount": 7,
+  "train": { "version": "0.34.0", "packages": [{ "name": "@byok-sdk/client", "version": "0.34.0" }, { "name": "@byok-sdk/cloud", "version": "absent" }] },
+  "verdict": "refused" }
+```
 
 ## Store compatibility precheck
 
@@ -160,6 +214,28 @@ stores calls their inspectors itself. Every inspector returns the
 The CLI exits 0 when every store is `accepted` or `absent`, and 2 otherwise.
 Stop the owner of a store before checking it: a file that changes while it is
 copied makes the check fail with an error instead of a verdict.
+
+A service installation (`createServiceInstallation`, #1097) runs the
+candidate's precheck program, which prints `{ "stores": ServiceStoreVerdict[] }`
+and exits 0 or 2 by the same rule (#1328). `ServiceStoreVerdict` is
+`StoreCompatibility` widened for a Host:
+
+- `store` is an SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`,
+  starting with a letter or digit.
+- `path` is absolute. No two stores share a path, and no store lies inside a
+  `directory` store.
+- `kind` is `file` (the default: the file plus its `-wal` and `-journal`) or
+  `directory` (the whole tree).
+
+Output that breaks these rules is `precheck_failed`. The installation then
+snapshots exactly the listed stores, checking each with `lstat` first: a
+`file` store must be a regular file or absent and a `directory` store a real
+directory or absent, never a symlink, or the upgrade is `precheck_failed`. A
+directory is copied with its symlinks kept as links. A copy that fails (no
+space, a socket in the tree) is `snapshot_failed`: the partial snapshot is
+removed, the receipt is `failed` and the old version is started again. A
+restore removes a directory store and copies its snapshot back; a store that
+was absent at the snapshot is only removed.
 
 `scripts/release/fixtures/stores/` holds the stores each recent release writes
 on first open. `generate.mjs` installs the release from npm, or uses this

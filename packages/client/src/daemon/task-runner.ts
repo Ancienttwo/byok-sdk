@@ -1777,8 +1777,7 @@ export class TaskRunner {
     requestedRuntime: string | undefined,
     requiresMcpToolsets: boolean,
     signal: AbortSignal,
-    requiresMcpToolApprovals = false,
   ): Promise<PickResult> {
-    return pickAdapter.call(this, requestedRuntime, requiresMcpToolsets, signal, requiresMcpToolApprovals);
+    return pickAdapter.call(this, requestedRuntime, requiresMcpToolsets, signal);
   }
 }

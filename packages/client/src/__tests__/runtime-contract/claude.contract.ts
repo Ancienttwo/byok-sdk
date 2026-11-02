@@ -15,6 +15,7 @@ const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const adapter = (options: ClaudeAdapterOptions = {}) => new ClaudeAdapter({ resolveBin, ...options });
 const PROJECT_MARKER = 'BYOK-CONTRACT-CLAUDE-PROJECT-3a9d';
 const USER_MARKER = 'BYOK-CONTRACT-CLAUDE-USER-b42f';
+const ANCESTOR_MARKER = 'BYOK-CONTRACT-CLAUDE-ANCESTOR-7c20';
 
 /** Claude Code's own `--version` text: `2.1.312 (Claude Code)`. */
 const identifies = (version: string, expected: string) => /^(\S+) \(Claude Code\)$/.exec(version.trim())?.[1] === expected;
@@ -70,6 +71,7 @@ async function turn(mode: 'inherit' | 'excluded') {
     await fs.writeFile(path.join(config, 'CLAUDE.md'), `# User\n\n${USER_MARKER}\n`);
     await fs.writeFile(path.join(config, '.claude.json'), JSON.stringify({ mcpServers: { usermcp: { type: 'stdio', command: user.command, args: user.args } } }));
     await fs.writeFile(path.join(box.workspace, 'CLAUDE.md'), `# Project\n\n${PROJECT_MARKER}\n`);
+    await fs.writeFile(path.join(box.root, 'CLAUDE.md'), `# Ancestor\n\n${ANCESTOR_MARKER}\n`);
     const options: ClaudeAdapterOptions = mode === 'excluded' ? { agentUserContext: 'excluded', agentSessionPersistence: 'disabled' } : {};
     const events = await runTurn(adapter(options), 'Call the submit_result tool, then finish.', {
       workspaceDir: box.workspace, agentHome: box.workspace, env: runtimeEnv(box.home, config, provider.origin, recorder.env),
@@ -139,6 +141,8 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
   'isolation.userContext': check(async () => {
     expect((await inherited()).provider.saw(USER_MARKER), 'positive control: inherited user CLAUDE.md reaches the model').toBe(true);
     expect((await excluded()).provider.saw(USER_MARKER)).toBe(false);
+    // Under excluded only the Agent home's instruction file remains, as for Pi.
+    expect((await excluded()).provider.saw(ANCESTOR_MARKER)).toBe(false);
   }),
   'isolation.userMcp': check(async () => {
     expect((await inherited()).userSpawned, 'positive control: inherited user MCP server starts').toBe(true);

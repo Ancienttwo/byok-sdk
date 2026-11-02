@@ -26,11 +26,15 @@ async function tempRoot(): Promise<string> {
   roots.push(root);
   return root;
 }
-async function start(workspace: string, toolAuthorization?: ToolAuthorizationGate, env: NodeJS.ProcessEnv = process.env, mcpServers?: Record<string, McpStdioServerConfig>): Promise<Session> {
+async function start(
+  workspace: string, toolAuthorization?: ToolAuthorizationGate, env: NodeJS.ProcessEnv = process.env,
+  mcpServers?: Record<string, McpStdioServerConfig>, mcpToolApprovals?: Record<string, readonly string[]>,
+): Promise<Session> {
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: fixture, source: 'env' }) });
   const session = await startPreparedOperation(adapter, { instruction: 'write' }, {
     workspaceDir: workspace, agentHome: workspace, env, ...(toolAuthorization === undefined ? {} : { toolAuthorization }),
     ...(mcpServers === undefined ? {} : { mcpServers }),
+    ...(mcpToolApprovals === undefined ? {} : { mcpToolApprovals }),
   });
   sessions.push(session);
   return session;
@@ -104,7 +108,7 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
   const helperTools = JSON.stringify({
     salesko: ['find_leads'], ...SDK_RESERVED_MCP_TOOL_NAMES,
   });
-  async function runWithSaleskoAsk(toolName: string, approved: boolean) {
+  async function runWithSaleskoAsk(toolName: string, approved: boolean, mcpToolApprovals?: Record<string, readonly string[]>) {
     const workspace = await tempRoot();
     const requestAuthorization = vi.fn(async (_summary: string) => ({ approved }));
     const verdicts: string[] = [];
@@ -112,7 +116,7 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
       rules: { alwaysAsk: [{ id: 'crm', match: { mcpServer: 'salesko' } }] },
       requestAuthorization, onDecision: ({ verdict }) => { verdicts.push(verdict.decision === 'deny' ? verdict.code : 'allow'); },
     });
-    const session = await start(workspace, gate, { ...process.env, FAKE_TOOL_NAME: toolName, FAKE_MCP_TOOLS: helperTools }, helperServers);
+    const session = await start(workspace, gate, { ...process.env, FAKE_TOOL_NAME: toolName, FAKE_MCP_TOOLS: helperTools }, helperServers, mcpToolApprovals);
     const events = await takeTurn(session);
     return { workspace, events, verdicts, requestAuthorization };
   }
@@ -137,6 +141,14 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
     expect(verdicts).toEqual(['tool_authorization_denied']);
     expect(requestAuthorization).toHaveBeenCalledOnce();
     expect(requestAuthorization.mock.calls[0]?.[0]).toContain('Tool authorization rule (crm)');
+    await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
+  });
+
+  // `approveTools` is a grant only a declaring runtime (Codex) receives; Claude asks as before.
+  it('still asks for an approveTools-listed tool under the server rule', async () => {
+    const { workspace, verdicts, requestAuthorization } = await runWithSaleskoAsk('mcp__salesko__find_leads', false, { salesko: ['find_leads'] });
+    expect(verdicts).toEqual(['tool_authorization_denied']);
+    expect(requestAuthorization).toHaveBeenCalledOnce();
     await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
   });
 

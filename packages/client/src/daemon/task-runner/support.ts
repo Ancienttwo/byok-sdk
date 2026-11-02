@@ -25,6 +25,7 @@ import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-hom
 import type { AgentTerminalCause } from '../agent-session-handoff-store';
 import type { BlobResolver } from '../blob-client';
 import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-record';
+import type { DeclaredSessionMembers } from '../session-contract';
 import { ProgressBatcher } from '../progress-batcher';
 import { AgentMessageOutbox, type AgentMessageDraftSealer } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
@@ -106,6 +107,8 @@ export interface ActiveTask {
   egressEnabled: boolean;
   adapter: RuntimeAdapter;
   session: Session;
+  /** What the daemon reads instead of `session.<member>?.()`; see `daemon/session-contract.ts`. */
+  sessionMembers: DeclaredSessionMembers;
   scratch: ExecutionScratch;
   /** One consumer; teardown drains its final usage within the existing interrupt deadline. */
   eventPump?: Promise<void>;
@@ -147,10 +150,10 @@ export interface ActiveTask {
    * intermediate narration ("let me read X first…") glued in front of it.
    *
    * The same slice is `task.complete.finalMessage`, so the host reads the same closing reply
-   * the daemon would publish. An adapter whose descriptor sets
-   * `progressEventsAreMessages` (Codex, Claude) also resets it at each `progress`
-   * event that `Session.progressStartsMessage` does not mark as a
-   * continuation, so the slice is that runtime's last whole message.
+   * the daemon would publish. An adapter whose descriptor declares a
+   * `progressMessageBoundary` (Codex and dsh `'event'`, Claude `'session'`)
+   * also resets it at each non-blank `progress` event that starts a message,
+   * so the slice is that runtime's last whole message.
    *
    * `turn_end` deliberately does not reset (it is what reads this), and
    * neither does `usage`: bundled adapters emit terminal usage IMMEDIATELY
