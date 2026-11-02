@@ -10,6 +10,7 @@ import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { sealRuntimeOperationManifest, type Session } from '../types';
 import { testExecutionScratch } from './fixtures/execution-scratch';
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 
 const FAKE_PI = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const roots: string[] = [];
@@ -41,9 +42,9 @@ describe('Pi Agent resources', () => {
       });
       sessions.push(session);
     }
-    expect(configs.map(config=>config.version)).toEqual([9,9]);
-    expect(configs[0]).toMatchObject({agentUserContext:'inherit',agentSkillPaths:[],agentExtensionPaths:[],fileScope:null});
-    expect(configs[1]).toMatchObject({agentUserContext:options.agentUserContext,agentSkillPaths:options.agentSkillPaths ?? [],agentExtensionPaths:options.agentExtensionPaths ?? [],fileScope:null});
+    expect(configs.map(config=>config.version)).toEqual([10,10]);
+    expect(configs[0]).toMatchObject({agentUserContext:'inherit',agentHome:null,agentSkillPaths:[],agentExtensionPaths:[],fileScope:null});
+    expect(configs[1]).toMatchObject({agentUserContext:options.agentUserContext,agentHome:options.agentUserContext==='excluded'?root:null,agentSkillPaths:options.agentSkillPaths ?? [],agentExtensionPaths:options.agentExtensionPaths ?? [],fileScope:null});
     for (const config of configs) expect(config).not.toHaveProperty('agentToolPolicy');
   });
 
@@ -64,6 +65,27 @@ describe('Pi Agent resources', () => {
     {agentExtensionPaths:['npm:unapproved']}, {agentExtensionPaths:[path.resolve('x'),path.resolve('x')]},
   ])('rejects invalid resource grants %j', options => {
     expect(()=>new PiAdapter(options as PiAdapterOptions)).toThrow('Pi Agent resources');
+  });
+
+  it('refuses excluded user context on the RPC lane before spawning when the Agent manifest has no canonical-home lease', async () => {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-pi-unleased-')));
+    roots.push(root);
+    let spawned = false;
+    const adapter = new PiAdapter({agentUserContext:'excluded',resolveBin:()=>({command:FAKE_PI,source:'env'}),spawnFn:(()=>{spawned=true;throw new Error('unexpected spawn');}) as never});
+    const prepared = await adapter.prepare({offer:{instruction:'hello'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
+    const scratch = await testExecutionScratch();
+    try {
+      const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({kind:'instruction',cwd:root,env:process.env,scratch});
+      const manifest = sealRuntimeOperationManifest({
+        taskId:'unleased',runtimeId:'pi',descriptor:adapter.descriptor,requiredToolsetIds:[],
+        cwd:root,agentRef:{agentId:'unleased',profileRevision:'r1'},
+        workspace:{workspaceDir:root},forwardedEnvironmentNames:[],
+      });
+      await expect(prepared.operation.start({kind:'instruction',scratch,runtimeLaunch,manifest,env:process.env,mcpEnv:projectPiMcpEnvironment(process.env),instruction:'hello'} as never))
+        .rejects.toThrow('Pi Agent user-context exclusion requires a sealed canonical-home lease');
+      expect(spawned).toBe(false);
+    } finally { await scratch.release(); }
   });
 
   it.each([{agentUserContext:'excluded'}, {agentSkillPaths:[path.resolve('skill')]}, {agentExtensionPaths:[path.resolve('extension.ts')]}] satisfies PiAdapterOptions[])('refuses Agent resources %j on the prepared lane before spawning or reading its artifact', async options => {

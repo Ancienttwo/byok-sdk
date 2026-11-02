@@ -624,6 +624,17 @@ export class PiAdapter implements RuntimeAdapter {
             if (startInput.sessionLease === undefined) await sessionLease?.release();
           } });
           try {
+            // Excluded user context keeps only the Agent home's instruction
+            // files, so the home must be the lease's sealed canonical home.
+            let agentHome: string | null = null;
+            if (resources.userContext === 'excluded') {
+              const lease = startInput.manifest.lease;
+              const home = lease?.canonicalHome;
+              if (!home || !lease.leaseId || !path.isAbsolute(home) || path.resolve(home) !== home) {
+                throw authorityFailure('Pi Agent user-context exclusion requires a sealed canonical-home lease');
+              }
+              agentHome = home;
+            }
             const gate = startInput.toolAuthorization === undefined ? undefined : await startToolAuthorizationIpc(startInput.toolAuthorization);
             // The daemon bound the resolved grant to this attempt's gate. A
             // scope that does not name the manifest's canonical home is a
@@ -653,13 +664,14 @@ export class PiAdapter implements RuntimeAdapter {
             // What is written is the START observation, already compared
             // above with the one this operation was admitted with.
             const serialized = serializePiHostConfig({
-              format: 'byok.pi.rpc-launch', version: 9,
+              format: 'byok.pi.rpc-launch', version: 10,
               // Digest-bound, as in the prepared lane: under `keys-profile`
               // the host takes the provider key over the launcher's private
               // IPC channel and refuses to start without it.
               credentialSource: runtimeLaunch.credentialSource,
               cwd: runtimeLaunch.sessionCwd,
               agentUserContext: resources.userContext,
+              agentHome,
               agentSkillPaths: resources.skillPaths,
               agentExtensionPaths: resources.extensionPaths,
               toolAuthorization: gate?.config ?? null,
