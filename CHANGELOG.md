@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.34.0 — source candidate
+## 0.34.0 — 2026-11-02 (published)
 
 0.34.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
@@ -11,14 +11,19 @@ Host-visible change since 0.33.0: 2 breaking entries and 1 additive entry,
 each with a migration link. The envelope wire moves from v4 to v5
 (`PROTOCOL_VERSION = 5`); 0.33.0 is the last v4 release, and a Host drains
 once before the cut. There is no new Postgres migration and no SQLite schema
-change. See the [0.34.0 candidate notes](docs/releases/v0.34.0.md) and the
+change. See the [0.34.0 release notes](docs/releases/v0.34.0.md) and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.34.0.md). The breaking
 changes by package: protocol, core, client, server, cloud and
 cloud-dataplane speak wire v5 and rename the runtime capability `durablePi`
 to `durableLane`, refusing a pending v4 row at startup and a hosted terminal
 receipt a v4 build wrote (#1290); client removes `DaemonConfig.durablePi`,
 renames `PiAdapterOptions.durablePi` to `durableLane` and types the launch
-resources as `RuntimeLaunchResources` (#1290).
+resources as `RuntimeLaunchResources` (#1290). The npm registry lists all
+nine public packages at 0.34.0 as `latest`, published on 2026-11-02 (UTC),
+and the registry readback passed. The release commit is `58658abd5` on
+`main`, and the annotated tag `v0.34.0` and its GitHub Release point to it.
+This release does not say that 0.34.0, or a Host on it, is ready for
+production.
 
 - **Breaking (protocol, core, client, server, cloud, cloud-dataplane)** — wire
   v5 (`PROTOCOL_VERSION = 5`). The runtime capability `durablePi` is renamed

@@ -821,11 +821,10 @@ their source contract rather than being assigned invented release versions:
   [the shared approval path](security.md#3-shared-approval-path).
 
 <!-- generated:migrations:start -->
-Manifest transition: **0.33.0 → 0.34.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
+Manifest transition: **0.34.0 → 0.34.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
-| runtime-generic-names | breaking | Needs the next MINOR after 0.33.0. Runtime names are generic. DaemonConfig.durablePi is removed and raises DaemonConfigFieldRemovedError: set runtimes.pi.durableLane. PiAdapterOptions.durablePi and RuntimeCapabilities.durablePi are durableLane. The daemon wires the durable journal and durableContext from an adapter's capabilities.durableLane, so a Host that builds PiAdapter({ durableLane: true }) for createDaemonWithAdapters needs no daemon option, and such an adapter without an Agent home refuses to start. The launch resources are the new RuntimeLaunchResources (scratch, release()): RuntimeOperationStartInput.runtimeLaunch and PreparedRuntimeOperation.resolveRuntimeLaunch use it instead of the Pi type, which extends it. [Migration](../docs/migrations/wire-v5-durable-lane.md#runtime-names) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

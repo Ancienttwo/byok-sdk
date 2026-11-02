@@ -7,9 +7,9 @@ and #977 (coordinator, 2026-11-01): AiphaBee skips 0.31.x to 0.33.x and moves
 from 0.30.2 to 0.34.0 by this page, and the owner's grokbot walks it on macOS
 and Windows after 0.34.0 is published.
 
-Its fixed source is the release commit, the squash merge of the 0.34.0
-release PR on `main`, not moving `main` or Unreleased. The release commit is
-not known yet; it is filled in at publication. The rows below are counted
+Its fixed source is the release commit `58658abd5`, the squash merge of the
+release PR #1309 on `main`, not moving `main` or Unreleased. 0.34.0 is
+published on npm `latest` for all nine packages. The rows below are counted
 from the upgrade manifest at the freeze base `0f8a35425`. It has not been
 walked through.
 The behavior authorities are the upgrade manifest that `@byok-sdk/client`
@@ -51,8 +51,8 @@ All nine public packages move together. Pin each one to exactly 0.34.0.
 | Release field | Value |
 | --- | --- |
 | Git tag | `v0.34.0` |
-| Release commit SHA | not known yet (filled in at publication) |
-| Release PR base | not known yet (the scope is frozen at main `0f8a35425`) |
+| Release commit SHA | `58658abd5b3d0fcad47c3c5a21b8326b922d3ece` |
+| Release PR base | main `0f8a35425` (#1309) |
 
 Verify a source checkout with
 `git rev-parse 'v0.34.0^{commit}'`; the result must equal the release commit
@@ -213,8 +213,22 @@ Additions and behavior changes a Host may see in 0.34.0:
   fails with the new exported `SystemToolUnavailableError`; Windows runtime
   disposal reports it as a `RuntimeDisposalFailure` (`stage: 'signal'`). The
   keys Windows Credential Manager store is unavailable
-  (`CREDENTIAL_MANAGER_UNAVAILABLE`) without an absolute `SystemRoot`. No Host
-  code change is needed unless the Host catches the error.
+  (`CREDENTIAL_MANAGER_UNAVAILABLE`) without an absolute `SystemRoot`; see the
+  next item. Otherwise no Host code change is needed unless the Host catches
+  the error.
+- **Windows Credential Manager store needs `SystemRoot`**
+  ([#1310](https://github.com/Ancienttwo/byok-sdk/issues/1310)): keys'
+  `WindowsCredentialManagerSecretStore` reads `process.env.SystemRoot`, which
+  must be a drive-qualified absolute path, and throws `ByokKeysError`
+  `CREDENTIAL_MANAGER_UNAVAILABLE` without it (`available()` returns `false`).
+  An injected `commandRunner` receives the absolute
+  `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` instead of
+  `powershell.exe`. Every real Windows process has `SystemRoot`, so a Windows
+  Host sees no change. A Host test that injects `platform: 'win32'` on another
+  OS must also set `SystemRoot` in the process environment, since the store
+  does not take it from an option. The manifest still classifies
+  `system-tool-trusted-paths` as additive; a `systemRoot` option and the
+  manifest classification are deferred to the next batch.
 - **`auto` and file scope on the Pi prepared and durable lanes** (#1061,
   #1302, no manifest entry): on darwin and linux these lanes now run `auto`
   tool authorization and `toolAuthorization.fileScope` instead of declining
@@ -360,12 +374,12 @@ Stop on any failed gate; a package pin alone does not establish acceptance.
 
 ### Walkthrough evidence
 
-This checklist is anchored to the 0.34.0 release commit, which is not known
-yet. No one has walked it through. The owner's grokbot walks it for #978 on
+This checklist is anchored to the release commit `58658abd5`. No one has
+walked it through. The owner's grokbot walks it for #978 on
 macOS and Windows after 0.34.0 is published.
 
-- [ ] **[unverified] Release commit recorded** in the fixed revisions table,
-  and the tag `v0.34.0` points to it.
+- [x] **Release commit recorded** in the fixed revisions table, and the tag
+  `v0.34.0` points to it.
 - [ ] **[unverified] Maintainer walked the complete checklist** in a clean
   environment, on macOS and on Windows (AiphaBee, 0.30.2 → 0.34.0).
 - [ ] **[unverified]** Backup restored; the SQLite copy taken before the
