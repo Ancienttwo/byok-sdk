@@ -188,7 +188,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     const sent: Envelope[] = [];
     const runner = await makeRunner([codex, claude], sent, undefined, () => registry.snapshot().toolsets);
     try {
-      for (const [index, runtime] of ['codex', 'claude'].entries()) {
+      for (const [index, runtime] of (['codex', 'claude'] as const).entries()) {
         await runner.handleEnvelope(createEnvelope('task.offer', {
           agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime, requiredToolsets: ['host'],
         }, { taskId: `shared-${runtime}`, seq: index + 1 }));
