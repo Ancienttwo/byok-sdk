@@ -410,7 +410,10 @@ export function buildPiProviderChildEnvironment(options: {
 // running JavaScriptSerializer for the first time on a machine was most of a
 // cold query, up to 30s on a hosted runner). The output is written by hand:
 // every value is a boolean or a SID checked against S-1-[0-9-]+ first, so
-// nothing needs escaping; a SID of any other shape exits non-zero.
+// nothing needs escaping; a SID of any other shape exits non-zero. A missing
+// path is detected up front rather than by the GetAttributes exception: the
+// first .NET exception a fresh process throws can take seconds (#1364). The
+// catch still maps a path that disappears after the check.
 // DIAG #1364 (do not merge): stderr [e1] marks only; the verdict never reads stderr.
 const WINDOWS_PROJECTION_ACL_SCRIPT = String.raw`
 [Console]::Error.WriteLine('[e1] mark=first utc=' + [DateTime]::UtcNow.ToString('o') + ' pid=' + $PID + ' osStart=' + [System.Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().ToString('o'))
@@ -419,6 +422,9 @@ try {
   $path = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
   [Console]::Error.WriteLine('[e1] mark=stdin-read utc=' + [DateTime]::UtcNow.ToString('o'))
   if ($path.Length -eq 0) { exit 2 }
+  $exists = [System.IO.File]::Exists($path) -or [System.IO.Directory]::Exists($path)
+  [Console]::Error.WriteLine('[e1] mark=exists-checked utc=' + [DateTime]::UtcNow.ToString('o'))
+  if ($exists -eq $false) { exit 3 }
   $sidType = [System.Security.Principal.SecurityIdentifier]
   $sidPattern = '^S-1-[0-9-]+\z'
   $reparsePoint = ([System.IO.File]::GetAttributes($path) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
