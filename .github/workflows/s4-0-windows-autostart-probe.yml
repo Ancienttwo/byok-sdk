@@ -1,0 +1,65 @@
+name: S4-0 Windows user autostart probe
+
+# #1329 (S4-0): one-shot evidence for the S4-3 per-user autostart mechanism.
+# A new standard (non-administrator) account runs a Startup-folder .cmd plus a
+# cmd launcher loop, and a Task Scheduler control group. Each step reports its
+# result in the step summary; a failed check is a result, not a failed run.
+# This workflow and scripts/probes/s4-0-windows-autostart/ are deleted in the
+# same PR before merge; only the research document stays.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/s4-0-windows-autostart-probe.yml
+      - scripts/probes/s4-0-windows-autostart/**
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: autostart probe (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: bun ci
+      - run: bun run build
+
+      - name: Setup standard user and probe directory
+        run: ./scripts/probes/s4-0-windows-autostart/setup.ps1
+
+      - name: Q3 launcher loop and stop marker
+        if: ${{ !cancelled() }}
+        run: ./scripts/probes/s4-0-windows-autostart/q3.ps1
+
+      - name: Q1/Q2 Startup .cmd install (start /min and conhost --headless)
+        if: ${{ !cancelled() }}
+        run: ./scripts/probes/s4-0-windows-autostart/q12-install.ps1
+
+      - name: Q1/Q2 launcher survives the installing step
+        if: ${{ !cancelled() }}
+        run: ./scripts/probes/s4-0-windows-autostart/q12-check.ps1
+
+      - name: Q4 byok-agent daemon under the launcher, then stop
+        if: ${{ !cancelled() }}
+        run: ./scripts/probes/s4-0-windows-autostart/q4.ps1
+
+      - name: Q5 Task Scheduler control group
+        if: ${{ !cancelled() }}
+        run: ./scripts/probes/s4-0-windows-autostart/q5.ps1
+
+      - name: Upload probe logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: s4-0-windows-autostart-probe
+          path: C:\byokprobe\
+          if-no-files-found: warn
