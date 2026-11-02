@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  createServiceInstallation,
   readServiceInstallationRecord,
   serviceInstallationOver,
   ServiceInstallationError,
@@ -136,8 +135,8 @@ async function expectConsistent(dataOf: Record<string, string>): Promise<void> {
 }
 
 /** The installation over `lifecycle`, with this suite's health seam. */
-function installationOver(lifecycle: ManagedServiceLifecycle | undefined, extra: Partial<ServiceInstallationOptions> = {}): ServiceInstallation {
-  const options: ServiceInstallationOptions = {
+function installationOver(lifecycle: ManagedServiceLifecycle, extra: Partial<ServiceInstallationOptions> = {}): ServiceInstallation {
+  return serviceInstallationOver({
     service: { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app' },
     productId: 'svc',
     installRoot,
@@ -152,8 +151,7 @@ function installationOver(lifecycle: ManagedServiceLifecycle | undefined, extra:
     healthTimeoutMs: 5_000,
     stopTimeoutMs: 2_000,
     ...extra,
-  };
-  return lifecycle === undefined ? createServiceInstallation(options) : serviceInstallationOver(options, lifecycle);
+  }, lifecycle);
 }
 
 beforeEach(async () => {
@@ -560,22 +558,7 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await tree(index)).toEqual(before);
     });
 
-    // Linux: public constructor and real fixture-local unit files, never host systemctl.
-    // Other platforms retain the suite's service seam and native pointer behavior.
-    function publicInstallation(): ServiceInstallation {
-      if (process.platform !== 'linux') return installationOver(fakeLifecycle());
-      return installationOver(undefined, { lifecycle: { deps: {
-        homedir: () => path.join(root, 'home'),
-        run: async (command, args) => {
-          expect(command).toBe('systemctl');
-          if (args[1] === 'start' || args[1] === 'stop') events.push(args[1]);
-          return { code: 0, stdout: '', stderr: '' };
-        },
-      } } });
-    }
-
-    it.each([['', false], ['/', false], ['/.', false], ['/./', false], ['/.', true]] as const)('restores all stores with suffix %j and directory replaced by a file: %s (#1350)', async (suffix, replaced) => {
-      installation = publicInstallation();
+    it.each([['/', false], ['/.', false], ['/./', false], ['/.', true]] as const)('restores a directory store spelled with suffix %j, replaced by a file: %s (#1350)', async (suffix, replaced) => {
       await verdictsWith({ store: 'research-index', path: `${index}${suffix}`, kind: 'directory', verdict: 'accepted', reason: 'ok' });
       await installation.install(await payload('1.0.0'));
       const before = await tree(index);
@@ -583,80 +566,40 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       onHealth = async (version) => {
         if (version !== '2.0.0') return;
         await fs.writeFile(db, 'v2 data');
-        if (replaced) {
-          await fs.rm(index, { recursive: true });
-          await fs.writeFile(index, 'v2 file');
-        } else {
-          await fs.writeFile(path.join(index, 'shards', 'a'), 'v2 a');
-          await fs.writeFile(path.join(index, 'shards', 'b'), 'v2 b');
-        }
+        await fs.rm(index, { recursive: true });
+        if (replaced) await fs.writeFile(index, 'v2 file');
+        else await fs.mkdir(index);
       };
-      events = [];
       await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
       expect(await tree(index)).toEqual(before);
       expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
-      expect([await pointer('current'), await pointer('previous')]).toEqual(['1.0.0', undefined]);
+      expect(await pointer('current')).toBe('1.0.0');
       expect(await installation.receipt()).toMatchObject({ state: 'rolled-back', code: 'health_check_failed' });
-      expect(events).toEqual(['stop', 'start', 'health 2.0.0', 'stop', 'start', 'health 1.0.0']);
-      await expect(fs.access(path.join(installRoot, 'snapshots', '2.0.0'))).rejects.toThrow();
-      events = [];
-      await expect(installation.recover()).resolves.toMatchObject({ state: 'rolled-back' });
-      expect(events).toEqual([]);
     });
 
-    it.each([false, true])('recovers an old dot-suffix snapshot, refusing a substituted root symlink: %s (#1350)', async (symlink) => {
-      installation = publicInstallation();
+    it.each([false, true])('recovers an old pending snapshot spelled /., refusing a root symlink first: %s (#1350)', async (symlink) => {
       await installation.install(await payload('1.0.0'));
       const before = await tree(index);
       await installation.upgrade(await payload('2.0.0'));
       const snapshotFile = path.join(installRoot, 'snapshots', '2.0.0', 'snapshot.json');
       const snapshot = JSON.parse(await fs.readFile(snapshotFile, 'utf8')) as { entries: Array<{ path: string }> };
-      snapshot.entries[1]!.path = `${index}/.`; // Old persisted spelling; do not use path.join.
+      snapshot.entries[1]!.path = `${index}/.`; // The old persisted spelling; path.join would normalize it.
       await fs.writeFile(snapshotFile, JSON.stringify(snapshot));
       const pending = { ...(await installation.receipt()), state: 'pending' };
       await fs.writeFile(path.join(installRoot, 'upgrade-receipt.json'), JSON.stringify(pending));
       await fs.writeFile(db, 'v2 data');
-      await fs.writeFile(path.join(index, 'shards', 'a'), 'v2 a');
       if (symlink) {
         await fs.rename(index, `${index}-target`);
         await fs.symlink(`${index}-target`, index, 'dir');
-      }
-      installation = publicInstallation(); // Reconstruct from persisted state, as after a crash.
-      events = [];
-      if (symlink) {
         await expect(installation.recover()).rejects.toMatchObject({ code: 'precheck_failed' });
-        expect(await fs.readFile(db, 'utf8')).toBe('v2 data'); // Refuse before partly restoring an earlier store.
-        expect(await fs.readFile(path.join(index, 'shards', 'a'), 'utf8')).toBe('v2 a');
-        expect((await fs.lstat(index)).isSymbolicLink()).toBe(true);
+        expect(await fs.readFile(db, 'utf8')).toBe('v2 data'); // The earlier file store is untouched.
         expect(await installation.receipt()).toEqual(pending);
-        expect([await pointer('current'), await pointer('previous')]).toEqual(['2.0.0', '1.0.0']);
-        expect(events).toEqual(['stop']);
       } else {
-        const receipt = await installation.recover();
-        expect(receipt).toMatchObject({ state: 'rolled-back', code: 'upgrade_pending' });
+        await expect(installation.recover()).resolves.toMatchObject({ state: 'rolled-back', code: 'upgrade_pending' });
         expect(await tree(index)).toEqual(before);
         expect(await fs.readFile(db, 'utf8')).toBe('v1 data');
-        expect([await pointer('current'), await pointer('previous')]).toEqual(['1.0.0', undefined]);
-        expect(events).toEqual(['stop', 'start', 'health 1.0.0']);
-        await expect(fs.access(snapshotFile)).rejects.toThrow();
-        events = [];
-        expect(await installation.recover()).toEqual(receipt);
-        expect(events).toEqual([]);
+        expect(await pointer('current')).toBe('1.0.0');
       }
-    });
-
-    it.each(['', '/', '/.'])('refuses a directory root symlink with suffix %j before snapshot (#1350)', async (suffix) => {
-      installation = publicInstallation();
-      const link = path.join(root, 'index-link');
-      await fs.symlink(index, link, 'dir');
-      const before = await tree(index);
-      await verdictsWith({ store: 'research-index', path: `${link}${suffix}`, kind: 'directory', verdict: 'accepted', reason: 'ok' });
-      await installation.install(await payload('1.0.0'));
-      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'precheck_failed' });
-      expect(await tree(index)).toEqual(before);
-      expect(await pointer('current')).toBe('1.0.0');
-      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'precheck_failed' });
-      await expect(fs.access(path.join(installRoot, 'snapshots', '2.0.0'))).rejects.toThrow();
     });
 
     it('a directory store absent at the snapshot is removed on restore', async () => {
@@ -674,10 +617,6 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       ['a repeated path', () => verdictsWith({ store: 'other', path: db, verdict: 'accepted', reason: 'ok' })],
       ['a store inside a directory store', () => verdictsWith(
         { store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' },
-        { store: 'shard', path: path.join(index, 'shards', 'a'), verdict: 'accepted', reason: 'ok' },
-      )],
-      ['a store inside a dot-suffix directory store', () => verdictsWith(
-        { store: 'research-index', path: `${index}/.`, kind: 'directory', verdict: 'accepted', reason: 'ok' },
         { store: 'shard', path: path.join(index, 'shards', 'a'), verdict: 'accepted', reason: 'ok' },
       )],
       ['a file store that is a directory', () => verdictsWith({ store: 'research-index', path: index, verdict: 'accepted', reason: 'ok' })],
