@@ -23,9 +23,14 @@ if ($LASTEXITCODE -ne 0) { Write-Host "[diag] core build failed"; exit $LASTEXIT
 $ps51 = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'").Count
 $load = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
 Stamp "[e3] before-probe cpuLoadPct=$load powershellExeRunning=$ps51"
-if ($Arm -eq 'baseline') {
+if ($Arm -eq 'baseline' -or $Arm -eq 'marked') {
   bun run --filter @byok-sdk/keys test -- src/pi-projection-windows.test.ts
   $code = $LASTEXITCODE
+  if ($Arm -eq 'marked') {
+    bun build .github/diag-1364/ab.ts --target=node --format=esm --packages=external --outfile packages/keys/diag-ab.bundle.mjs
+    if ($LASTEXITCODE -ne 0) { Write-Host "[diag] ab bundle failed"; exit $LASTEXITCODE }
+    node packages/keys/diag-ab.bundle.mjs old-missing
+  }
 } else {
   bun build .github/diag-1364/ab.ts --target=node --format=esm --packages=external --outfile packages/keys/diag-ab.bundle.mjs
   if ($LASTEXITCODE -ne 0) { Write-Host "[diag] ab bundle failed"; exit $LASTEXITCODE }

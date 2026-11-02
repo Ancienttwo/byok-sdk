@@ -28,7 +28,17 @@ vi.mock('node:child_process', async importOriginal => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   const { nativeAclProbeObserver: observer } = await import('./fixtures/owned-acl-probe');
   return { ...actual, spawn: function (this: unknown, ...args: Parameters<typeof actual.spawn>) {
-    return observer.spawn(actual.spawn, this, args);
+    const child = observer.spawn(actual.spawn, this, args);
+    // DIAG #1364: timestamps for every ACL query child (owned or not), observation only.
+    const argv = args[1];
+    if (String(args[0]).toLowerCase().endsWith('\\powershell.exe') && Array.isArray(argv) && argv[2] === '-EncodedCommand') {
+      const spawnedAt = Date.now();
+      const tag = `[e1-child] pid=${child.pid} spawnUtc=${new Date(spawnedAt).toISOString()}`;
+      child.stderr?.on('data', (chunk: unknown) => console.log(`${tag} t=${Date.now() - spawnedAt}ms stderr ${String(chunk).trim().replace(/\r?\n/gu, ' | ')}`));
+      child.stdout?.once('data', () => console.log(`${tag} t=${Date.now() - spawnedAt}ms first-stdout`));
+      child.once('exit', (code: unknown) => console.log(`${tag} t=${Date.now() - spawnedAt}ms exit code=${String(code)} exitUtc=${new Date().toISOString()}`));
+    }
+    return child;
   } };
 });
 afterAll(() => {

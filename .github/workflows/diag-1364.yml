@@ -1,4 +1,4 @@
-# DIAG #1364 verification -- do not merge. Fix-branch cold ACL query on fresh accounts: baseline x20 (unmodified test file), new/old A/B x10.
+# DIAG #1364 verification -- do not merge. Fix-branch cold ACL query on fresh accounts: marked x20 (stderr marks on every ACL child; then the old script on a missing directory).
 name: diag-1364
 on:
   pull_request:
@@ -17,19 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arm: [baseline, ab]
-        rep: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        include:
-          - { arm: baseline, rep: 11 }
-          - { arm: baseline, rep: 12 }
-          - { arm: baseline, rep: 13 }
-          - { arm: baseline, rep: 14 }
-          - { arm: baseline, rep: 15 }
-          - { arm: baseline, rep: 16 }
-          - { arm: baseline, rep: 17 }
-          - { arm: baseline, rep: 18 }
-          - { arm: baseline, rep: 19 }
-          - { arm: baseline, rep: 20 }
+        arm: [marked]
+        rep: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

@@ -21,7 +21,8 @@ type Anchor = [string, string, 'before' | 'after'];
 function inject(script: string, anchors: Anchor[]): string {
   const lines = script.split('\n');
   for (const [anchor, name, where] of anchors) {
-    const hits = lines.flatMap((line, i) => (line.includes(anchor) ? [i] : []));
+    // An anchor starting with '=' matches a whole line exactly.
+    const hits = lines.flatMap((line, i) => ((anchor.startsWith('=') ? line === anchor.slice(1) : line.includes(anchor)) ? [i] : []));
     if (hits.length !== 1) throw new Error(`anchor ${JSON.stringify(anchor)} hit ${hits.length} lines`);
     lines.splice(where === 'before' ? hits[0]! : hits[0]! + 1, 0, mark(name));
   }
@@ -43,6 +44,9 @@ const OLD_ANCHORS: Anchor[] = [
   ['$reparsePoint = ', 'getattributes-returned', 'after'],
   ['$acl = [System.IO.Directory]::GetAccessControl', 'getaccesscontrol-returned', 'after'],
   ['  exit 0', 'before-exit', 'before'],
+  ['[Console]::Out.Write(', 'stdout-written', 'after'],
+  ['=} catch {', 'catch-entered', 'after'],
+  ['while ($failure -is', 'catch-unwrapped', 'after'],
 ];
 // A Windows checkout has CRLF files; a JS template literal (raw too) normalizes to LF.
 const lf = (text: string): string => text.replace(/\r\n/gu, '\n');
@@ -76,6 +80,17 @@ function timedRunner(label: string, variant: 'new' | 'old'): CommandRunner {
   });
 }
 
+const mode = process.argv[2] ?? 'ab';
+if (mode === 'old-missing') {
+  // Same-condition control for the native missing-directory case: the old script, after the suite.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-acl-old-missing-')));
+  const started = Date.now();
+  const failure = await assertWindowsPiProjectionAcl(path.join(root, 'absent'), { run: timedRunner('old-missing', 'old') })
+    .then(() => undefined, (error: unknown) => error as Error);
+  log(`probe=old-missing RESULT=${failure ? 'rejected' : 'accepted'} elapsed=${Date.now() - started}ms ${failure?.message ?? ''}`);
+  await fs.rm(root, { recursive: true, force: true });
+  process.exit(0);
+}
 const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-acl-ab-')));
 execFileSync('icacls', [directory, '/inheritance:r', '/grant:r', `${os.userInfo().username}:(OI)(CI)F`,
   '/grant', '*S-1-5-18:(OI)(CI)F', '/grant', '*S-1-5-32-544:(OI)(CI)F'], { windowsHide: true });

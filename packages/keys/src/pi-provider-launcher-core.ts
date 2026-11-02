@@ -411,15 +411,20 @@ export function buildPiProviderChildEnvironment(options: {
 // cold query, up to 30s on a hosted runner). The output is written by hand:
 // every value is a boolean or a SID checked against S-1-[0-9-]+ first, so
 // nothing needs escaping; a SID of any other shape exits non-zero.
+// DIAG #1364 (do not merge): stderr [e1] marks only; the verdict never reads stderr.
 const WINDOWS_PROJECTION_ACL_SCRIPT = String.raw`
+[Console]::Error.WriteLine('[e1] mark=first utc=' + [DateTime]::UtcNow.ToString('o') + ' pid=' + $PID + ' osStart=' + [System.Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().ToString('o'))
 $ErrorActionPreference = 'Stop'
 try {
   $path = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
+  [Console]::Error.WriteLine('[e1] mark=stdin-read utc=' + [DateTime]::UtcNow.ToString('o'))
   if ($path.Length -eq 0) { exit 2 }
   $sidType = [System.Security.Principal.SecurityIdentifier]
   $sidPattern = '^S-1-[0-9-]+\z'
   $reparsePoint = ([System.IO.File]::GetAttributes($path) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+  [Console]::Error.WriteLine('[e1] mark=getattributes-returned utc=' + [DateTime]::UtcNow.ToString('o'))
   $acl = [System.IO.Directory]::GetAccessControl($path)
+  [Console]::Error.WriteLine('[e1] mark=getaccesscontrol-returned utc=' + [DateTime]::UtcNow.ToString('o'))
   $rules = [System.Collections.Generic.List[string]]::new()
   foreach ($rule in $acl.GetAccessRules($true, $true, $sidType)) {
     $sid = [string]$rule.IdentityReference.Value
@@ -433,10 +438,13 @@ try {
   $currentUser = [string][System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   if ($owner -cnotmatch $sidPattern -or $currentUser -cnotmatch $sidPattern) { exit 1 }
   [Console]::Out.Write('{"reparsePoint":' + ([string][bool]$reparsePoint).ToLowerInvariant() + ',"owner":"' + $owner + '","currentUser":"' + $currentUser + '","protected":' + ([string][bool]$acl.AreAccessRulesProtected).ToLowerInvariant() + ',"rules":[' + [string]::Join(',', $rules) + ']}')
+  [Console]::Error.WriteLine('[e1] mark=stdout-written utc=' + [DateTime]::UtcNow.ToString('o'))
   exit 0
 } catch {
+  [Console]::Error.WriteLine('[e1] mark=catch-entered utc=' + [DateTime]::UtcNow.ToString('o'))
   $failure = $_.Exception
   while ($failure -is [System.Management.Automation.MethodInvocationException] -and $null -ne $failure.InnerException) { $failure = $failure.InnerException }
+  [Console]::Error.WriteLine('[e1] mark=catch-unwrapped utc=' + [DateTime]::UtcNow.ToString('o'))
   if ($failure -is [System.IO.FileNotFoundException] -or $failure -is [System.IO.DirectoryNotFoundException]) { exit 3 }
   if ($failure -is [System.UnauthorizedAccessException] -or $failure -is [System.Security.AccessControl.PrivilegeNotHeldException]) { exit 4 }
   exit 1
