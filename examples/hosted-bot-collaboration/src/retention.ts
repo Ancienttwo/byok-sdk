@@ -150,6 +150,15 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
     hasIntent: turnId => intents.has(storedKey(turnId)),
     occurrenceOpen: turnId => { const key = occurrenceOfIntentKey(turnId); return key !== undefined && openOccurrences.has(key); },
   }, store);
+  // The reply of a concluded Host intent (#1362) leaves the state as a Turn's reply does: archived with no expiry, where the
+  // replay check and the switch export receipt check read it.
+  const concluded = new Set((await client.query<{ key: string }>(
+    'SELECT key FROM intent WHERE scope = $1 AND handler IS NOT NULL AND conclusion IS NOT NULL', [scopeKey])).rows.map(row => row.key));
+  for (const [taskId, reply] of Object.entries(state.replies)) {
+    if (!concluded.has(storedKey(reply.turnId))) continue;
+    store.put('replies', taskId, reply as unknown as Json);
+    delete state.replies[taskId];
+  }
   for (const row of puts.values()) {
     const body = JSON.stringify(row.value);
     if (typeof body !== 'string') throw new Error('An application row must be JSON');

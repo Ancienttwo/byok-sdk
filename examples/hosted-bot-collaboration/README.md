@@ -363,6 +363,17 @@ L lets the Host run its own work on the K4 core (`enqueueHostIntent`, #882). H d
   instead; H has no startup scan over every scope), and `outcome_failed` for a Bot Turn whose outcome commit throws. The
   reconciler then writes `<code>: <message>` to the row's `last_error` and one audit line
   (`Intent outcome refused <code>: <key> <message>`) when that value changed, so several processes add one line.
+- An Agent message of a Host intent goes to the store's `hostIntentMessages` handler of the same name (#1362), as L's
+  (#1356). The consume transaction runs it synchronously, after the binding check and the accepted-reply check, with
+  `{ intent: { key, taskId }, publish }`, and returns its `MessageDisposition`. An accepted message is recorded without its
+  body, and K8 does not deliver it. A handler that throws, returns a thenable or another shape throws, and nothing is
+  written. A refusal keeps its command record, so a replay returns it and other content for the id is `message_conflict`.
+  Without a message handler the message is refused with `binding_mismatch`, unless the frozen execution has
+  `messageEgress`: then the consume throws `An open Host intent needs the message handler <name>` and writes nothing,
+  since H has no startup scan over every scope. Each `hostIntentMessages` name needs a `hostIntents` handler, and
+  `enqueueHostIntent` refuses an execution with `messageEgress` whose name has no message handler, with nothing written.
+- Retention moves the reply of a concluded Host intent from the state into `archived_row` (namespace `replies`, no
+  expiry), as it moves a Turn's reply. The replay check and the switch export's receipt check read it there.
 - `HostedReconciler.failStuckIntent(scope, key)` is L's owner `failStuckIntent`. It reconciles that one row again, and
   only when that throws `IntentOutcomeError` for the key, one transaction under the scope lock concludes the row `failed`
   with no terminal, writes `Intent failed by owner <code>: <key> <message>` and runs the version switch. It refuses an
@@ -943,7 +954,9 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
 - **Host jobs.** The store takes the Host job handlers (`{ host, hostJobs: { watchlist } }`), and the sender takes their
   deadline (`hostJobTimeoutMs`). Host code adds each routine once with `addHostJobRoutine`. Every store over one schema
   that a sender or the scheduler uses must have the same handlers.
-- **Host intents.** The store takes the Host intent handlers (`{ host, hostIntents: { research } }`). Every store that a
+- **Host intents.** The store takes the Host intent handlers (`{ host, hostIntents: { research } }`), and the message
+  handlers of those that message (`hostIntentMessages`). Every store that a consumer uses must have the same message
+  handlers. Every store that a
   reconciler uses must have them; a missing one keeps the row open as `handler_failed`. The command entry takes
   `failStuckIntent: (scope, key) => reconciler.failStuckIntent(scope, key)`.
 
@@ -1052,6 +1065,10 @@ three and runs these suites.
   written; an `unknown_intent` row refused and audited once; a failed, an unconfigured and an async handler; the Main Bot
   FIFO held until the Host intent settles; `failStuckIntent` through the entry for a stuck row, a failed handler (run once,
   in the probe), and a Bot Turn whose outcome throws, with its refusals and a probe error; and compaction of a Host intent.
+  For a Host intent message (#1362): an accepted and a refused disposition with their replays and a conflict, a handler that
+  throws, returns a thenable or another shape, the construction, enqueue and consume refusals of a missing message
+  handler, and `binding_mismatch` with no handler. `retention.test.ts` archives a concluded Host intent's reply, replays it
+  with no handler call and passes a switch export.
 - The Host job tests (`host-jobs.test.ts`) port the cases of K4 `host-jobs.test.ts` through the scheduler and the sender:
   a summary stored once with a settled row and no intent; the Bot policy kept apart from Host code, and the definition
   checks; a handler throw with its backoff and a retry with the same occurrence key; a missing and a non-JSON summary;

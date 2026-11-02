@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Added (examples)** — H store option `hostIntentMessages` (#1362), as L's
+  (#1356): an Agent message of a Host intent goes to the Host's message handler
+  of the same name, synchronously in the consume transaction, and its
+  `MessageDisposition` is the decision. An accepted message is recorded without
+  its body; K8 does not deliver it. Without a message handler the message still
+  refuses with `binding_mismatch`, and one whose frozen execution has
+  `messageEgress` makes the consume throw with nothing written.
+  `enqueueHostIntent` refuses an execution with `messageEgress` whose name has
+  no message handler, and each `hostIntentMessages` name needs a `hostIntents`
+  handler. Retention archives the reply of a concluded Host intent. H exports
+  `HostedIntentMessageHandler`, `HostedIntentMessageTransaction` and
+  `MessageDisposition`; K8 exports `./rules/message`.
+
 - **Added (examples)** — H re-projects the scope config's model templates
   onto the scope's Bots at each `sync` and each Bot routine command, with K8
   `applyModels` (#1358). A Bot that a team snapshot moved to a model the config

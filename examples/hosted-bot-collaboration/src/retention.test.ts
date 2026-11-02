@@ -8,10 +8,11 @@ import { RETENTION_NOW, retentionVectors, type RetentionSubject } from '@byok-sd
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent } from './intents';
 import { storedKey } from './layout';
-import { vectorClock } from './memory-subject.test-support';
+import { TEST_HOST, vectorClock } from './memory-subject.test-support';
 import { hostedMessageConsumer, type AgentMessageInput } from './messages';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { inSchema, lockScope } from './store';
+import { HostedOutboxSender } from './sender';
+import { HostedCollaborationStore, inSchema, lockScope } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -155,5 +156,33 @@ describe.skipIf(POSTGRES_URL === undefined)('H retention on real Postgres (#793 
     await store().sync(h.scope, { ...SYNC_OPTIONS, history: undefined });
     expect((await h.state()).turns.q1).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true });
     expect((await opened!.pool.query(`SELECT 1 FROM ${table('intent')} WHERE scope = $1`, [storedKey(h.scope)])).rows).toEqual([]);
+  });
+
+  it('#1362: archives the reply of a concluded Host intent, its replay calls no handler, and a switch export passes the receipt check', async () => {
+    const calls: string[] = [];
+    const hosts = new HostedCollaborationStore(opened!.pool, store().schema, { host: TEST_HOST, hostIntents: { chat: () => {} },
+      hostIntentMessages: { chat: message => { calls.push(message.payload.messageId); return { outcome: 'accepted' }; } } });
+    const h = await hosted(), base = template('device', 'research'), key = 'host-chat-1', task = taskId(key, 0);
+    await h.change(state => Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true }));
+    await store().bindDevice(h.scope, 'device');
+    const chat = { ...base, agentMessageContext: { destinationBinding: 'conversation' }, payload: { ...base.payload,
+      messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 } } };
+    await hosts.enqueueHostIntent(h.scope, { key, source: 'user', execution: chat, waitUntil: RETENTION_NOW + 60_000 }, 'chat', vectorClock);
+    const message = { tenant: h.scope, taskId: task, deviceId: 'device', context: chat.agentMessageContext,
+      payload: { agentRef: chat.payload.agentRef, messageId: 'm1', contentHash: 'h1', contentType: 'text/markdown', body: 'Answer' } } as unknown as AgentMessageInput;
+    expect(await hosts.consume(h.scope, message, vectorClock)).toEqual({ outcome: 'accepted' });
+    const reply = (await h.state()).replies[task];
+    // A test edit: the intent was delivered and concludes, as the submitter and its terminal transaction write it.
+    await opened!.pool.query(`UPDATE ${table('intent')} SET submission = 'delivered', conclusion = 'succeeded' WHERE scope = $1 AND key = $2`,
+      [storedKey(h.scope), storedKey(key)]);
+    await hosts.retain(h.scope, retention(), LIMITS);
+    expect((await h.state()).replies[task]).toBeUndefined();
+    expect((await opened!.pool.query(`SELECT body FROM ${table('archived_row')} WHERE scope = $1 AND namespace = 'replies' AND id = $2`,
+      [storedKey(h.scope), storedKey(task)])).rows.map(row => row.body)).toEqual([reply]);
+    expect(await hosts.consume(h.scope, message, vectorClock)).toEqual({ outcome: 'accepted' });
+    expect(calls).toEqual(['m1']);
+    await hosts.beginSwitch(h.scope, 'device', 'L', 1);
+    await new HostedOutboxSender(opened!.pool, hosts, { projections: { deliver: async () => {} }, now: () => RETENTION_NOW + 86_400_000 }).run();
+    await expect(hosts.exportScope(h.scope, [{ deviceId: 'device', expectedRevision: 2 }], vectorClock)).resolves.toBeDefined();
   });
 });

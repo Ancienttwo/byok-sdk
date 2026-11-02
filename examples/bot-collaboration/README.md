@@ -1434,7 +1434,8 @@ source's idempotency key. Whether a platform honors that key is its adapter's
 concern (`docs/host-im-adapter.md`); the switch does not change it.
 
 This entry has no I/O. L's export, import and commit are in "Owner switch on L";
-H's come in a later #975 slice.
+H's are in the hosted example README, "Owner switch export (#975)" and "Owner switch
+import (#975)".
 
 ### Second-device placement and device wait
 

@@ -17,7 +17,7 @@ import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefu
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
-import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
+import { decideMessage, messageCommandId, type AgentMessageInput, type HostedIntentMessageHandler, type MessageDecision } from './messages';
 import { decideFinish, type HostedIntentHandler, type IntentOutcomeError, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, hostJobCommands, hostJobRowKey, loadSlice, planSlice, recordDue, switchDueVersions,
@@ -115,6 +115,12 @@ export interface HostedStoreOptions {
    * intent row, and the terminal transaction of a `task.complete` result runs that handler.
    */
   hostIntents?: Readonly<Record<string, HostedIntentHandler>>;
+  /**
+   * The Agent message handlers of Host intents (#1362), by the `hostIntents` name, as L's `hostIntentMessages`. The consume
+   * transaction runs the handler synchronously and returns its disposition. An accepted message is recorded without its
+   * body and not delivered. A Host intent whose execution has `messageEgress` needs one.
+   */
+  hostIntentMessages?: Readonly<Record<string, HostedIntentMessageHandler>>;
 }
 /** A Host intent (#955): its key, its stable task id, and its conclusion once it has one. */
 export interface HostIntent { key: string; taskId: string; conclusion?: Conclusion }
@@ -233,11 +239,17 @@ export class HostedCollaborationStore {
   readonly hostJobs: ReadonlyMap<string, HostJobHandler>;
   /** The Host intent handlers by name (#955). */
   private readonly hostIntents: ReadonlyMap<string, HostedIntentHandler>;
+  /** The Host intent message handlers by name (#1362). */
+  private readonly hostIntentMessages: ReadonlyMap<string, HostedIntentMessageHandler>;
   constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions) {
     if (typeof options?.host !== 'function') throw new Error('The Host config of each scope is required');
     this.host = options.host;
     this.hostJobs = new Map(Object.entries(options.hostJobs ?? {}));
     this.hostIntents = new Map(Object.entries(options.hostIntents ?? {}));
+    this.hostIntentMessages = new Map(Object.entries(options.hostIntentMessages ?? {}));
+    for (const name of this.hostIntentMessages.keys()) {
+      if (!this.hostIntents.has(name)) throw new Error(`A Host intent message handler needs the Host intent handler ${name}`);
+    }
     this.channel = options.channel === true;
     // The ContextPack budget comes with each sync, so the construction checks every bound except that one.
     if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, Number.MAX_SAFE_INTEGER);
@@ -673,7 +685,7 @@ export class HostedCollaborationStore {
     return this.transaction(async client => {
       if (!await exists(client)) return refused;
       return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, input,
-        this.ports(config, state, publish, clock), this.channel));
+        this.ports(config, state, publish, clock), this.channel, this.hostIntentMessages));
     }, false);
   }
 
@@ -699,6 +711,9 @@ export class HostedCollaborationStore {
    */
   async enqueueHostIntent(scope: string, input: IntentInput, handler: string, clock: () => number): Promise<HostIntent> {
     if (!this.hostIntents.has(handler)) throw new Error(`Unknown Host intent handler: ${handler}`);
+    if (input.execution.payload.messageEgress && !this.hostIntentMessages.has(handler)) {
+      throw new Error(`Host intent handler ${handler} has no message handler`);
+    }
     admitBotToolsets(input.execution, (await this.host(scope)).readOnlyToolsets ?? []);
     const scopeKey = storedKey(scope), key = storedKey(input.key);
     return this.change(scope, undefined, async (state, _publish, client) => {
