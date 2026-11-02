@@ -66,9 +66,7 @@
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing/index.js"
     },
-    "./package.json": "./package.json",
-    "./upgrade-manifest.json": "./upgrade-manifest.json",
-    "./daemon-config.schema.json": "./daemon-config.schema.json"
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
