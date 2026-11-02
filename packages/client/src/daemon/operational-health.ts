@@ -285,8 +285,8 @@ export class OperationalHealthTracker {
     this.#writeTail = this.#writeTail.then(async () => {
       // Harden storeDir once per tracker: on win32 each `icacls` re-push of
       // inheritable ACEs rewrites the ctime of every sibling (`device.json`,
-      // `control.token`). A failed hardening stays unmarked so the next write
-      // retries it.
+      // `control.token`). A failed hardening is not marked; the write fails
+      // closed and the tracker becomes unavailable.
       if (!this.#dirHardened) {
         await ensureSecureDir(path.dirname(this.#filePath));
         this.#dirHardened = true;
