@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Breaking (client)** — `RuntimeAdapterDescriptor.progressEventsAreMessages`
+  is removed, with no alias. Declare `progressMessageBoundary` instead:
+  `'event'` (each non-blank `progress` event is one message; Codex and dsh) or
+  `'session'` (`Session.progressStartsMessage` decides; Claude). Absent, as
+  before, consecutive `progress` events form one reply until a tool
+  interaction. `freezeRuntimeAdapterDescriptor` throws `TypeError` for any
+  other value. The daemon binds the members a descriptor declares once, when
+  `start()` returns, and no longer reads `session.<member>?.()`: a `'session'`
+  adapter whose Session has no `progressStartsMessage()` is closed and its task
+  fails at start with `runtime_session_incomplete` (`task.fail`,
+  non-retryable, failure class `unknown`). A Host that wraps an adapter or its
+  Session forwards every declared member; see
+  [Wrapping a Session](docs/adapter-capabilities.md#wrapping-a-session)
+  (#1323, aiphabee#427).
+- **Added (client)** — `ExecutionRecordUnknown` gains `evidence_missing`. A
+  `trajectoryEvidence: 'event-stream'` adapter whose started Session has no
+  `evidence()` keeps running, and its execution record is `unknown`
+  (`evidence_missing`) instead of silently omitting the adapter counts. A
+  declaring Session must implement `evidence()` and return zero counts when
+  nothing was dropped (#1323).
 - **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
   absolute Windows system directory PowerShell is started from. Omitted, the
   store reads `process.env.SystemRoot` once at construction; an injected value

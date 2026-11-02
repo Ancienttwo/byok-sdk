@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "67c5722d35cae5674b7ac6b2e85aff3b43d4ea44eb5c29f4bb6d909d6ee5a1d1"
+    "snapshotSha256": "96cff6a8cbfea5dd31ff80dc15625ab42b192b910aafb87f8553b8098b246f4b"
   },
   "configFields": {
     "status": "tracked",
@@ -23,9 +23,43 @@
       "items": [
         "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
       ]
+    },
+    {
+      "id": "client-progress-message-boundary",
+      "impact": "breaking",
+      "summary": "RuntimeAdapterDescriptor.progressEventsAreMessages is removed with no alias; declare progressMessageBoundary instead. Replace progressEventsAreMessages: true with progressMessageBoundary: 'event' (each non-blank progress event is one message, as Codex and dsh declare), or with 'session' when Session.progressStartsMessage decides where a message starts (as Claude declares); drop the field where it was false or absent. freezeRuntimeAdapterDescriptor throws TypeError for any other value. A 'session' adapter whose started Session has no progressStartsMessage() is closed and its task fails at start with runtime_session_incomplete (task.fail, non-retryable, failure class unknown). A Host that wraps an adapter or its Session must forward every member the descriptor declares, yield the inner event objects unchanged and read sessionRef from the live inner Session.",
+      "migration": "docs/adapter-capabilities.md#wrapping-a-session",
+      "items": [
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor"
+      ]
+    },
+    {
+      "id": "client-execution-record-evidence-missing",
+      "impact": "additive",
+      "summary": "ExecutionRecordUnknown gains evidence_missing: the adapter declares trajectoryEvidence: 'event-stream' but its started Session has no evidence(), as when a Host wrapper does not forward it. The record is { status: 'unknown', source: 'event-stream', gaps: [], unknownReason: 'evidence_missing' }; the task terminal and retry decision do not change. A declaring Session must implement evidence() and return zero counts when nothing was dropped. A Host that switches over unknownReason adds the new value.",
+      "migration": "docs/adapter-capabilities.md#trajectory-evidence",
+      "items": [
+        "export:@byok-sdk/client#ExecutionRecordUnknown"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#ExecutionRecordUnknown",
+      "change": "changed",
+      "entry": "client-execution-record-evidence-missing"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "client-progress-message-boundary"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "client-progress-message-boundary"
+    },
     {
       "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
       "change": "changed",

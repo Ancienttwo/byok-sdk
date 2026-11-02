@@ -6353,7 +6353,8 @@ export declare function createStoredDeviceProofSigner(options: CreateStoredDevic
 export {};
 // ==== @byok-sdk/client dist/daemon/execution-record.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { RuntimeAdapterDescriptor, Session } from '../types';
+import type { RuntimeAdapterDescriptor } from '../types';
+import type { DeclaredSessionMembers } from './session-contract';
 /**
  * Octop ③ (#553): a local, content-free diagnostic that says whether the SDK
  * saw the whole event trajectory of one started execution. `TaskRunner`
@@ -6365,8 +6366,9 @@ import type { RuntimeAdapterDescriptor, Session } from '../types';
  *   exactly one result, no frame was dropped or invented, and the runtime sent
  *   `turn_end`. It is about collection only; a failed task can be complete.
  * - `partial`: a declared source with at least one gap.
- * - `unknown`: no declared source, or more open tool calls than the record
- *   tracks. A Host that has no record for a terminal also shows `unknown`.
+ * - `unknown`: no declared source, a declaring session without
+ *   `Session.evidence()`, or more open tool calls than the record tracks. A
+ *   Host that has no record for a terminal also shows `unknown`.
  */
 export type ExecutionRecordStatus = 'complete' | 'partial' | 'unknown';
 /**
@@ -6388,8 +6390,12 @@ export type ExecutionRecordStatus = 'complete' | 'partial' | 'unknown';
  *   full bytes could not be stored (`spill.unstoredReason`).
  */
 export type ExecutionRecordGap = 'unpaired_tool_call' | 'orphan_tool_result' | 'duplicate_tool_result' | 'synthetic_tool_result' | 'decode_dropped' | 'unmapped_frame' | 'stream_ended_early' | 'no_turn_end' | 'spill_unstored';
-/** Why a record is `unknown`. */
-export type ExecutionRecordUnknown = 'source_not_declared' | 'evidence_overflow';
+/**
+ * Why a record is `unknown`. `evidence_missing`: the adapter declares
+ * `trajectoryEvidence` but its started Session has no `evidence()`, as when a
+ * Host wrapper does not forward it.
+ */
+export type ExecutionRecordUnknown = 'source_not_declared' | 'evidence_missing' | 'evidence_overflow';
 /** One started execution's record. Counts and closed codes only: never a tool input, output, path or reason text. */
 export interface ExecutionRecord {
     taskId: string;
@@ -6415,7 +6421,8 @@ export declare const MAX_OPEN_TOOL_CALLS = 4096;
 export declare class ExecutionRecordAccumulator {
     private readonly taskId;
     private readonly source;
-    private readonly session;
+    /** The bound `Session.evidence`; see {@link DeclaredSessionMembers.evidence}. */
+    private readonly evidence;
     private readonly open;
     /** The latest answered ids, kept only to tell a repeated result from an orphan. Bounded like `open`. */
     private readonly answered;
@@ -6423,7 +6430,9 @@ export declare class ExecutionRecordAccumulator {
     private turnEnded;
     private streamEndedEarly;
     private overflowed;
-    constructor(taskId: string, source: RuntimeAdapterDescriptor['trajectoryEvidence'], session: Pick<Session, 'evidence'>);
+    constructor(taskId: string, source: RuntimeAdapterDescriptor['trajectoryEvidence'], 
+    /** The bound `Session.evidence`; see {@link DeclaredSessionMembers.evidence}. */
+    evidence: DeclaredSessionMembers['evidence']);
     observe(event: AgentEvent): void;
     /** The runtime ended or failed its event stream on its own, before the daemon decided a terminal. */
     streamEnded(): void;
@@ -8102,6 +8111,34 @@ export declare class RetentionSweeper {
     private arm;
     stop(): Promise<void>;
 }
+// ==== @byok-sdk/client dist/daemon/session-contract.d.ts ====
+import type { AgentEvent } from '@byok-sdk/protocol';
+import type { RuntimeAdapterDescriptor, Session, SessionEvidence } from '../types';
+/**
+ * The optional `Session` members that the adapter descriptor declares, bound
+ * once when the session started. The daemon reads these and never
+ * `session.<member>?.()`, so a Host wrapper that drops a declared member
+ * cannot pass for an adapter without the capability.
+ */
+export interface DeclaredSessionMembers {
+    /** Bound exactly when the descriptor declares `progressMessageBoundary: 'session'`. */
+    readonly progressStartsMessage?: (event: Extract<AgentEvent, {
+        type: 'progress';
+    }>) => boolean;
+    /**
+     * Bound exactly when the descriptor declares `trajectoryEvidence`.
+     * `'missing'`: the session has no `evidence()`, so its execution record is
+     * `unknown` (`evidence_missing`).
+     */
+    readonly evidence?: (() => SessionEvidence) | 'missing';
+}
+/**
+ * Binds the members `descriptor` declares on a started `session`. Throws a
+ * non-retryable start failure when the descriptor declares
+ * `progressMessageBoundary: 'session'` and the session has no
+ * `progressStartsMessage()`; the caller still owns and closes the session.
+ */
+export declare function bindDeclaredSessionMembers(descriptor: RuntimeAdapterDescriptor, session: Session): DeclaredSessionMembers;
 // ==== @byok-sdk/client dist/daemon/skill-pack-installer.d.ts ====
 import { type CapabilityDeclaration } from '@byok-sdk/core';
 import type { AuthManager } from './auth-manager';
@@ -13504,11 +13541,12 @@ export interface Session {
     /** Normalized events for this session; the daemon batches these into `task.progress`. A `MessageDraftDelta` only feeds the display-only draft. */
     events: AsyncIterable<AgentEvent | MessageDraftDelta>;
     /**
-     * For an adapter whose descriptor sets `progressEventsAreMessages` but
-     * emits one assistant message as several `progress` events. Return false
-     * when `event`, an object this session's `events` yielded, continues the
-     * message of an earlier event: the daemon then keeps both in the same
-     * closing reply. Absent: every non-blank `progress` event starts a message.
+     * Required when the descriptor declares `progressMessageBoundary:
+     * 'session'`; the daemon closes and refuses a started session without it
+     * (`runtime_session_incomplete`). Return false when `event`, an object this
+     * session's `events` yielded, continues the message of an earlier event:
+     * the daemon then keeps both in the same closing reply. Never read for any
+     * other boundary.
      */
     progressStartsMessage?(event: Extract<AgentEvent, {
         type: 'progress';
@@ -13528,10 +13566,10 @@ export interface Session {
     close(): Promise<void>;
     /**
      * Runtime output this session could not turn into `events`, as counts for
-     * the whole session up to `close()`. The daemon reads it once, after
-     * `close()` resolved, and only when the descriptor declares
-     * `trajectoryEvidence`. A declaring adapter that omits it states that
-     * nothing below its event stream can drop or invent a frame.
+     * the whole session up to `close()`. Required when the descriptor declares
+     * `trajectoryEvidence`; return zero counts when nothing was dropped. The
+     * daemon reads it once, after `close()` resolved. A declaring session
+     * without it makes the execution record `unknown` (`evidence_missing`).
      */
     evidence?(): SessionEvidence;
 }
@@ -13578,22 +13616,24 @@ export interface RuntimeAdapterDescriptor {
     /** Can enforce the local Host's exact per-tool MCP approvals. Nonempty grants require this capability. */
     readonly mcpToolApprovals?: boolean;
     /**
-     * Whether each `progress` event carries one complete assistant message
-     * rather than a streaming delta. Codex emits one event per completed
-     * `agentMessage`, and Claude one per complete text block, so commentary and
-     * the final answer arrive as separate events with no tool interaction
-     * between them. When this is true, the
-     * daemon starts a new closing reply at every `progress` event, so the
-     * closing reply (`task.complete.finalMessage`) is the last message only.
-     * Absent or false: consecutive `progress` events form one reply until a
-     * tool interaction.
+     * Where one assistant message ends among `progress` events. The closing
+     * reply (`task.complete.finalMessage`) is the last message.
+     *
+     * - Absent: `progress` events are streaming deltas; consecutive ones form
+     *   one reply until a tool interaction.
+     * - `'event'`: each non-blank `progress` event is one complete message and
+     *   starts a new reply. Codex (one event per `agentMessage`) and dsh.
+     * - `'session'`: `Session.progressStartsMessage` decides for each non-blank
+     *   `progress` event, and the Session must implement it. Claude, whose
+     *   events are text blocks and one message can span several.
      */
-    readonly progressEventsAreMessages?: boolean;
+    readonly progressMessageBoundary?: 'event' | 'session';
     /**
      * Declares `Session.events` as the evidence source of the daemon's local
      * execution record (`daemon/execution-record.ts`): every tool call and
      * result carries its `toolCallId`, and `turn_end` means the runtime
-     * completed. Absent: every record of this adapter is `unknown`.
+     * completed. The Session must implement `evidence()`. Absent: every record
+     * of this adapter is `unknown`.
      */
     readonly trajectoryEvidence?: 'event-stream';
     /**
