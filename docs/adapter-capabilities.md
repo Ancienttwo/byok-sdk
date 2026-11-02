@@ -433,12 +433,15 @@ Pi 1.4.0 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
 prompts, themes and skills. It also loads skills from `~/.agents/skills`. The
 context walk goes from the cwd up to the filesystem root and does not stop at
 the git root. So an `AGENTS.md` or `CLAUDE.md` in `~` loads for an Agent home
-below `~`. Pi's `--no-context-files` drops every context file, the Agent-home
-`AGENTS.md` too, and the SDK host accepts no Pi resource flag. The agent
-directory also holds `auth.json`, `models.json` and the sessions. The SDK has
-an ordinary-Pi option for user instructions: Agent tasks accept
+below `~`. The SDK host accepts no Pi resource flag. The agent directory also
+holds `auth.json`, `models.json` and the sessions. The SDK has an ordinary-Pi
+option for user instructions: Agent tasks accept
 `PiAdapterOptions.agentUserContext: 'excluded'` (see
 [Pi explicitly authorized resources](#pi-explicitly-authorized-resources)).
+`agentUserContext: 'excluded'` excludes user-level resources and the instruction
+files of every directory above the Agent home. Instruction files in the Agent
+home (`lease.canonicalHome`) itself and its subdirectories load as usual, the
+same rule as Claude.
 
 The host bundles pi-web-access and rpiv-todo as replaceable extensions. When
 another loaded extension registers one of their tool, command or flag names,
