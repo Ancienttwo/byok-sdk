@@ -13,5 +13,5 @@ export const GROK_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   mcpToolsets: true,
   messageDraft: true,
   preparedLane: false,
-  isolation: Object.freeze({ userContext: true, userMcpServers: true, sessionPersistence: false }),
+  isolation: Object.freeze({ userContext: false, userMcpServers: true, sessionPersistence: false }),
 });
