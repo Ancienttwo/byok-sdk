@@ -350,3 +350,26 @@ describe('WindowsCredentialManagerSecretStore platform and scope', () => {
     expect(store().providerLabel).toBe('Windows Credential Manager');
   });
 });
+
+describe('WindowsCredentialManagerSecretStore systemRoot injection', () => {
+  it('starts PowerShell from the injected systemRoot without reading process.env', async () => {
+    vi.stubEnv('SystemRoot', undefined);
+    runner.queue({ exitCode: 0 });
+    await store({ systemRoot: 'C:\\Windows' }).set('model-openai-api-key', CANARY);
+    expect(runner.invocations[0]?.executable).toBe(POWERSHELL);
+  });
+
+  it('never falls back to process.env when the injected systemRoot is not absolute', async () => {
+    const subject = store({ systemRoot: 'Windows' });
+    await expect(subject.available()).resolves.toBe(false);
+    await expect(subject.get('model-openai-api-key')).rejects.toMatchObject({ code: 'CREDENTIAL_MANAGER_UNAVAILABLE' });
+    expect(runner.invocations).toHaveLength(0);
+  });
+
+  it('carries the injected systemRoot into the scoped store', async () => {
+    vi.stubEnv('SystemRoot', undefined);
+    runner.queue({ exitCode: 44 });
+    await store({ systemRoot: 'C:\\Windows' }).scope('acct_00000000').get('model-openai-api-key');
+    expect(runner.invocations[0]?.executable).toBe(POWERSHELL);
+  });
+});
