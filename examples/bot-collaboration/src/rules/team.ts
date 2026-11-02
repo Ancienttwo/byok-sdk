@@ -120,7 +120,8 @@ export function teamSnapshot(value: unknown): TeamSnapshot {
     Object.fromEntries(bots.map(bot => [bot.id, { archived: false }]))) };
   const rooms = row.rooms.map(room => {
     if (!room || typeof room !== 'object' || !text(room.name) || !Array.isArray(room.members) || !room.members.every(text)
-      || room.admin !== undefined && !text(room.admin) || room.announcement !== undefined && !text(room.announcement)
+      || room.admin !== undefined && (!text(room.admin) || !room.admin) || room.mode !== undefined && room.mode !== 'mention'
+      || room.announcement !== undefined && !text(room.announcement)
       || room.memberMentions !== undefined && room.memberMentions !== 'execute' && room.memberMentions !== 'ignore') {
       throw new Error('Invalid team snapshot room');
     }

@@ -251,6 +251,11 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
         { kind: 'update_room', roomId: 'r', update: { name: 'S' } }, { kind: 'set_room_member_mentions', roomId: 'r', memberMentions: 'ignore' }];
       for (const command of commands) expect(await teamError(() => subject.commit(request(subject, command.kind, command)))).toBe('external_rooms');
       await expect(settle(() => subject.commit(request(subject, ...team(2, main))))).rejects.toThrow('A team snapshot needs rooms in the external rooms mode');
+      // Only an omitted mode or `mention`, and an admin that names a Bot, pass the snapshot boundary.
+      for (const field of [{ mode: null }, { mode: '' }, { mode: 0 }, { mode: false }, { mode: 'admin' }, { admin: '' }]) {
+        await expect(settle(() => subject.commit(request(subject, ...withRooms(team(2, main), [{ id: 'r', name: 'R', members: ['main'], ...field } as never])))))
+          .rejects.toThrow(/^Invalid team snapshot room$/);
+      }
       expect(await subject.stored()).toBe(before);
       const local = await open('external'), stored = await local.stored();
       await expect(settle(() => local.commit(request(local, ...withRooms(team(2, main), []))))).rejects.toThrow('Snapshot rooms need the external rooms mode');
