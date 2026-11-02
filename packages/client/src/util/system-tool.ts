@@ -23,6 +23,8 @@ const SYSTEM_TOOLS: Readonly<Record<string, Readonly<Partial<Record<NodeJS.Platf
   'sc.exe': { win32: 'sc.exe' },
   reg: { win32: 'reg.exe' },
   icacls: { win32: 'icacls.exe' },
+  cmd: { win32: 'cmd.exe' },
+  powershell: { win32: 'WindowsPowerShell\\v1.0\\powershell.exe' },
 };
 
 const LINUX_SYSTEM_DIRS = ['/usr/bin', '/bin', '/usr/sbin', '/sbin'] as const;

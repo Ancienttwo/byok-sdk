@@ -6,18 +6,26 @@
 // `byok-agent upgrade` use the same createServiceInstallation; this App only
 // records itself as a different lifecycle owner.
 //
-//   node app-installer.ts <install|upgrade|rollback|recover|uninstall|status> --config <path> --install-root <dir>
-//     [--payload <dir>] [--name <svc>] [--winsw-bin <exe>] [--winsw-install-dir <dir>]
+// On Windows the App either registers a WinSW service (--winsw-bin, needs an
+// administrator) or autostarts at the user's logon (--windows-user, #1337).
+// A `user` scope service needs the Host's own stop program; this App's is its
+// `stop-daemon` action.
+//
+//   node app-installer.ts <install|upgrade|rollback|recover|uninstall|status|stop-daemon> --config <path> --install-root <dir>
+//     [--payload <dir>] [--name <svc>] [--winsw-bin <exe> [--winsw-install-dir <dir>] | --windows-user]
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { agentServiceInstallation, createServiceInstallation, ServiceInstallationError, type DaemonConfig } from '@byok-sdk/client';
+import {
+  agentServiceDefinition, agentServiceInstallation, createServiceInstallation, ServiceInstallationError, type DaemonConfig, type ServiceWindowsOptions,
+} from '@byok-sdk/client';
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
     config: { type: 'string' }, 'install-root': { type: 'string' }, payload: { type: 'string' }, name: { type: 'string' },
-    'winsw-bin': { type: 'string' }, 'winsw-install-dir': { type: 'string' },
+    'winsw-bin': { type: 'string' }, 'winsw-install-dir': { type: 'string' }, 'windows-user': { type: 'boolean' },
   },
 });
 const [action] = positionals;
@@ -25,15 +33,42 @@ if (values.config === undefined || values['install-root'] === undefined) throw n
 
 const configPath = path.resolve(values.config);
 const config = JSON.parse(readFileSync(configPath, 'utf8')) as Pick<DaemonConfig, 'productId' | 'productName' | 'storeDir' | 'branding'>;
+const installRoot = path.resolve(values['install-root']);
 const winswBin = values['winsw-bin'];
+const windows: ServiceWindowsOptions | undefined = values['windows-user'] === true
+  ? { scope: 'user', stop: { command: process.execPath, args: [path.resolve(process.argv[1]!), 'stop-daemon', '--config', configPath, '--install-root', installRoot] } }
+  : winswBin === undefined ? undefined : { winswBin, ...(values['winsw-install-dir'] ? { installDir: values['winsw-install-dir'] } : {}) };
 const installation = createServiceInstallation(agentServiceInstallation({
   config,
   configPath,
-  installRoot: path.resolve(values['install-root']),
+  installRoot,
   owner: 'app',
   ...(values.name === undefined ? {} : { name: values.name }),
-  ...(winswBin === undefined ? {} : { windows: { winswBin, ...(values['winsw-install-dir'] ? { installDir: values['winsw-install-dir'] } : {}) } }),
+  ...(windows === undefined ? {} : { windows }),
 }));
+
+/**
+ * The `user` scope service's stop program: ends the daemon that owns the
+ * store and exits 0 when none does. A Host with its own control client sends
+ * the daemon `shutdown` instead; this example has none, so it terminates the
+ * process, and the installation's owner lease reclaims what that leaves.
+ */
+async function stopDaemon(): Promise<void> {
+  const { storeDir } = agentServiceDefinition({ config, configPath, agentBin: 'byok-agent.mjs', owner: 'app' });
+  let owner: { role?: string; pid?: number };
+  try {
+    owner = JSON.parse(await readFile(path.join(storeDir, 'daemon-owner.json'), 'utf8')) as typeof owner;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (owner.role !== 'daemon' || typeof owner.pid !== 'number') return;
+  try {
+    process.kill(owner.pid);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+  }
+}
 
 function payload(): string {
   if (values.payload === undefined) throw new Error(`${action} requires --payload <dir>`);
@@ -59,6 +94,9 @@ try {
       break;
     case 'status':
       break;
+    case 'stop-daemon':
+      await stopDaemon();
+      process.exit(0);
     default:
       throw new Error(`unknown action ${JSON.stringify(action)}`);
   }

@@ -1790,6 +1790,8 @@ jobs:
           "WINSW_BIN=$out" >> $env:GITHUB_ENV
           New-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
           if ((Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem).LongPathsEnabled -ne 1) { throw "Long paths are not enabled" }
+      # On Windows the CLI run is a WinSW service and the App run a `user` scope service
+      # (Startup .cmd + batch launcher, no SCM registration; #1337).
       - name: CLI and App service install, upgrade recovery, rollback and uninstall
         run: node examples/service-upgrade/upgrade-smoke.mjs
 
