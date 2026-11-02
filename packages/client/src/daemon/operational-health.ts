@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureDir } from '../util/secure-dir';
+import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir';
 import { sameContent } from '../util/file-state';
 
 export type OperationalHealthState = 'healthy' | 'degraded' | 'recovering';
@@ -121,6 +121,8 @@ export interface OperationalHealthOptions {
   clock?: () => Date;
   runId?: () => string;
   pid?: number;
+  /** Test-only DI seam for the win32 `icacls` hardening; mirrors `DeviceStore`'s `secureDirOptions`. */
+  secureDir?: EnsureSecureDirOptions;
 }
 
 export class OperationalHealthTracker {
@@ -132,10 +134,12 @@ export class OperationalHealthTracker {
   readonly #clock: () => Date;
   readonly #runId: () => string;
   readonly #pid: number;
+  readonly #secureDirOptions: EnsureSecureDirOptions | undefined;
   #state: HealthFileV1 | undefined;
   #unavailableReason: string | undefined;
   #writeTail: Promise<void> = Promise.resolve();
   #started = false;
+  #dirHardened = false;
 
   constructor(storeDir: string, options: OperationalHealthOptions = {}) {
     this.#filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
@@ -146,6 +150,7 @@ export class OperationalHealthTracker {
     this.#clock = options.clock ?? (() => new Date());
     this.#runId = options.runId ?? randomUUID;
     this.#pid = options.pid ?? process.pid;
+    this.#secureDirOptions = options.secureDir;
     if (!Number.isSafeInteger(this.#windowMs) || this.#windowMs <= 0) throw new Error('health windowMs must be positive');
     if (!Number.isSafeInteger(this.#failureThreshold) || this.#failureThreshold <= 0) throw new Error('health failureThreshold must be positive');
     if (!Number.isSafeInteger(this.#maxFailures) || this.#maxFailures <= 0) throw new Error('health maxFailures must be positive');
@@ -282,7 +287,14 @@ export class OperationalHealthTracker {
     if (!this.#state) return;
     const body = JSON.stringify(this.#state, null, 2);
     this.#writeTail = this.#writeTail.then(async () => {
-      await ensureSecureDir(path.dirname(this.#filePath));
+      // Harden storeDir once per tracker: on win32 each `icacls` re-push of
+      // inheritable ACEs rewrites the ctime of every sibling (`device.json`,
+      // `control.token`). A failed hardening stays unmarked so the next write
+      // retries it.
+      if (!this.#dirHardened) {
+        await ensureSecureDir(path.dirname(this.#filePath), this.#secureDirOptions);
+        this.#dirHardened = true;
+      }
       await atomicWriteFile(this.#filePath, body, { mode: 0o600, fsync: true });
     });
     try {
