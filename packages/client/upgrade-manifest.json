@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "7b05380ba7d609384df1cb1e150b08ff763fb8f323ea48acd51c7f00632aae83"
+    "snapshotSha256": "415b977a1b3435813e7b4557786bd0a47dc6d2eb98993cc99dca98bf47964794"
   },
   "configFields": {
     "status": "tracked",
@@ -32,15 +32,81 @@
       "items": [
         "example:bot-collaboration"
       ]
+    },
+    {
+      "id": "runtime-adapters-factory",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/adapters exports createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAdapter[], which builds the adapters createDaemon builds for the same runtimeAllowlist, runtimes, codexSandbox, runtimeEnvironment, nativeAssetRoot, sdkHelperHost and piByokLauncher. A Host that decorates each adapter and passes them to createDaemonWithAdapters calls it instead of constructing PiAdapter, ClaudeAdapter, CodexAdapter and GrokAdapter itself. An invalid codexSandbox or runtimeEnvironment throws TypeError, any other invalid value DaemonConfigInvalidError; runtimes.pi.durableLane is refused because only the daemon builds the durable lane. The entry loads no daemon, journal, full protocol or zod.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client/adapters#PiRuntimeConfig",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersConfig",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+        "export:@byok-sdk/client/adapters#createRuntimeAdapters"
+      ]
+    },
+    {
+      "id": "pi-package-dir-config",
+      "impact": "breaking",
+      "summary": "Needs the next MINOR after 0.34.0. The Pi asset root of a product that bundles Pi is DaemonConfig.runtimes.pi.packageDir (PiAdapterOptions.packageDir for an adapter the Host builds), an absolute path; a relative one throws DaemonConfigInvalidError invalid_value. It is the only source: the SDK sets PI_PACKAGE_DIR for Pi and the pi-host helper process from it, other runtimes do not get it, and a PI_PACKAGE_DIR in the login-shell snapshot or the Host environment no longer reaches Pi. runtimeEnvironment.pass naming PI_PACKAGE_DIR throws DaemonConfigInvalidError invalid_value. Move the value a Host put in PI_PACKAGE_DIR (for example SdkPackagingAssets.piPackageDir made absolute) into runtimes.pi.packageDir and drop PI_PACKAGE_DIR from runtimeEnvironment.pass and from the process environment.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#DaemonConfig",
+        "export:@byok-sdk/client#PiAdapterOptions",
+        "export:@byok-sdk/client/adapters#PiAdapterOptions"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=9f4e9eb2caa55a95",
+      "after": "optional schema-sha256=87a07d84a14860fe",
+      "entry": "pi-package-dir-config"
+    },
     {
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=e352ad2b8a4000ee",
       "after": "K8 0.0.1 src-sha256=13268de4f68b46f5",
       "entry": "k8-history-reply"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfig",
+      "change": "changed",
+      "entry": "pi-package-dir-config"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapterOptions",
+      "change": "changed",
+      "entry": "pi-package-dir-config"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
+      "change": "changed",
+      "entry": "pi-package-dir-config"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiRuntimeConfig",
+      "change": "added",
+      "entry": "runtime-adapters-factory"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersConfig",
+      "change": "added",
+      "entry": "runtime-adapters-factory"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "added",
+      "entry": "runtime-adapters-factory"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#createRuntimeAdapters",
+      "change": "added",
+      "entry": "runtime-adapters-factory"
     },
     {
       "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",

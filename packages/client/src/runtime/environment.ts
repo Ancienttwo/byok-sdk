@@ -213,7 +213,8 @@ export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => re
 /**
  * Where a runtime environment name came from: the base (`login-shell`,
  * `windows-session` or `allowlist`), the policy's `pass`, or `sdk` for the
- * `NO_PROXY`/`no_proxy` this module writes.
+ * `NO_PROXY`/`no_proxy` this module writes and the `PI_PACKAGE_DIR` the Pi
+ * adapter writes from `packageDir`.
  */
 export type RuntimeEnvironmentSource = 'login-shell' | 'windows-session' | 'allowlist' | 'pass' | 'sdk';
 

@@ -37,9 +37,9 @@ describe('todo locale preverification', () => {
     };
     const bundleUnset = refusal({ piPackageDir: undefined, executable: path.join(f.root, 'bun'), entry: '/product/sdk.js' });
     expect(bundleUnset).toBeInstanceOf(PiBundledAssetsError);
-    expect((bundleUnset as Error).message).toMatch(/interpreter \+ bundle product must set PI_PACKAGE_DIR/);
-    expect(refusal({ piPackageDir: empty, executable: process.execPath })).toMatchObject({ code: 'pi_bundled_assets_unavailable', message: expect.stringMatching(/PI_PACKAGE_DIR holds no SDK Pi asset manifest/) });
-    expect(refusal({ piPackageDir: '', executable: path.join(empty, 'product') })).toMatchObject({ message: expect.stringMatching(/beside the executable; set PI_PACKAGE_DIR/) });
+    expect((bundleUnset as Error).message).toMatch(/interpreter \+ bundle product must set runtimes\.pi\.packageDir \(PiAdapterOptions\.packageDir\)/);
+    expect(refusal({ piPackageDir: empty, executable: process.execPath })).toMatchObject({ code: 'pi_bundled_assets_unavailable', message: expect.stringMatching(/runtimes\.pi\.packageDir holds no SDK Pi asset manifest/) });
+    expect(refusal({ piPackageDir: '', executable: path.join(empty, 'product') })).toMatchObject({ message: expect.stringMatching(/beside the executable; set runtimes\.pi\.packageDir/) });
     vi.stubEnv('PI_PACKAGE_DIR', empty);
     expect(() => bundledAssetRoot()).toThrow(PiBundledAssetsError);
   });

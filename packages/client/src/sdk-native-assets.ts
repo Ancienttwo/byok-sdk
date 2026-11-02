@@ -104,7 +104,7 @@ export interface SdkDistributionBin {
 
 /**
  * The supported single-file formats. Every format ships the same asset layout (`copySdkPackagingAssets` in
- * `@byok-sdk/client/packaging`): `pi` is `PI_PACKAGE_DIR`, `native` is `nativeAssetRoot` and
+ * `@byok-sdk/client/packaging`): `pi` is `runtimes.pi.packageDir`, `native` is `nativeAssetRoot` and
  * `native/agent-memory-fs` is `agentMemoryHelperAssetRoot`, where the platform has native targets.
  */
 export const sdkPackagingFormats = Object.freeze({

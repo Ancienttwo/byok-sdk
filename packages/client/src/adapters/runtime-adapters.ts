@@ -1,0 +1,291 @@
+import type { RuntimeId } from '@byok-sdk/protocol';
+import { isAbsolute } from 'node:path';
+import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types';
+import { assertRuntimeEnvironmentPolicy, type RuntimeEnvironmentPolicy } from '../runtime/environment';
+import type { SdkHelperHostConfig } from '../sdk-reserved-helper-host';
+import { foldNameAliases } from '../util/fold-name-aliases';
+import { DaemonConfigInvalidError } from '../daemon-config-invalid-error';
+import type { DaemonConfigIssue } from '../daemon/config-schema/validate';
+import { versionPolicyConfigIssues } from '../daemon-config-version-policy';
+import { PiAdapter, PI_PACKAGE_DIR_ENV, validatePiByokLauncherConfig, type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapter';
+import { ClaudeAdapter, type ClaudeAdapterOptions } from './claude/claude-adapter';
+import { CodexAdapter, assertCodexSandboxSetting, type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
+import { GrokAdapter, type GrokAdapterOptions } from './grok/grok-adapter';
+
+/** `RuntimeAdaptersConfig.runtimes.pi`: the Pi options a Host can configure. */
+export interface PiRuntimeConfig {
+  /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
+  agentUserContext?: PiAdapterOptions['agentUserContext'];
+  /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+  versionPolicy?: RuntimeVersionPolicy;
+  /**
+   * `PiAdapterOptions.packageDir`: the absolute Pi asset root of a product
+   * that bundles Pi. It is the only source: the SDK sets it as
+   * `PI_PACKAGE_DIR` for Pi and the pi-host helper process alone, and
+   * removes any `PI_PACKAGE_DIR` the login shell or Host environment holds.
+   */
+  packageDir?: string;
+}
+
+/**
+ * Isolation options of the SDK-built runtime adapters (#1094), passed to each
+ * adapter's constructor; an unset option keeps the adapter's default, under
+ * which a runtime keeps the user's own context, sessions and MCP servers.
+ * Which runtimes are built stays `runtimeAllowlist`, and the Codex sandbox
+ * stays `codexSandbox`.
+ */
+export interface RuntimeAdaptersRuntimes {
+  pi?: PiRuntimeConfig;
+  claude?: {
+    /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
+    agentUserContext?: ClaudeAdapterOptions['agentUserContext'];
+    /** `ClaudeAdapterOptions.agentSessionPersistence`: `disabled` does not save an Agent task's session transcript, so it cannot be resumed. Default `enabled`. */
+    agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
+    /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+  };
+  codex?: {
+    /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
+    agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
+    /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+  };
+  /** Applies only when `runtimeAllowlist` lists `grok`. */
+  grok?: {
+    /** `GrokAdapterOptions.compatInstructions`: `disabled` turns off Grok's Claude and Cursor instruction and rules compatibility scanning. Default `inherit`. */
+    compatInstructions?: GrokAdapterOptions['compatInstructions'];
+    /** `GrokAdapterOptions.agentUserMcpServers`: `excluded` switches off the user MCP sources Grok can disable and refuses an Agent task while another is enabled. Default `inherit`. */
+    agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
+    /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+  };
+}
+
+/**
+ * The input of {@link createRuntimeAdapters}: the `DaemonConfig` keys that
+ * configure the SDK-built adapters, with the same meaning. The durable Pi
+ * lane (`DaemonConfig.runtimes.pi.durableLane`) needs the daemon's journal,
+ * so only the daemon builds it.
+ */
+export interface RuntimeAdaptersConfig {
+  /** Absolute native asset root of every built adapter. */
+  nativeAssetRoot?: string;
+  /** Re-enter the product's single-file/SEA executable for SDK helpers and every Pi launch. */
+  sdkHelperHost?: SdkHelperHostConfig;
+  /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok` is built only when listed. */
+  runtimeAllowlist?: string[];
+  runtimes?: RuntimeAdaptersRuntimes;
+  /** The environment every built runtime gives its children (#1095); `pass` must not name `PI_PACKAGE_DIR`. */
+  runtimeEnvironment?: RuntimeEnvironmentPolicy;
+  /** Separate-process Pi BYOK credential boundary. */
+  piByokLauncher?: PiByokLauncherConfig;
+  /** Codex sandbox of the built Codex adapter. Default `danger-full-access`. */
+  codexSandbox?: CodexSandboxSetting;
+}
+
+/** `DaemonConfig.runtimes.pi`: the factory's Pi options and the durable lane. */
+export interface DaemonPiRuntimeConfig extends PiRuntimeConfig {
+  /** `PiAdapterOptions.durableLane`: the opt-in durable worker. Disabled by default. Requires `agentHome` and `piByokLauncher`; unavailable on Windows. */
+  durableLane?: PiAdapterOptions['durableLane'];
+}
+
+/** `DaemonConfig.runtimes`: {@link RuntimeAdaptersRuntimes} with the durable Pi lane. */
+export interface DaemonRuntimesConfig extends RuntimeAdaptersRuntimes {
+  pi?: DaemonPiRuntimeConfig;
+}
+
+/** The daemon's form of {@link RuntimeAdaptersConfig}: it also admits the durable Pi lane. */
+export interface DaemonRuntimeAdaptersConfig extends RuntimeAdaptersConfig {
+  runtimes?: DaemonRuntimesConfig;
+}
+
+/**
+ * Canonical construction/identity order for `createDaemon`'s bundled adapter
+ * set (`buildRuntimeAdapters` below) and for `conn.hello.runtimes`
+ * reporting order (`detectRuntimes`) — this is NOT the auto-select priority
+ * order.
+ *
+ * M5 batch-3 (workstream 1): auto-select priority now lives entirely in
+ * `task-runner.ts`, as its own explicit order independent of this one — see
+ * `DEFAULT_RUNTIME_PREFERENCE`/`TaskRunner.pickAdapter`, overridable
+ * per-daemon via `DaemonConfig.runtimePreference` above. Before this change,
+ * `pickAdapter`'s no-runtime branch walked `deps.adapters` directly (this
+ * array's own construction order), so listing pi first here silently made
+ * it the de-facto DEFAULT auto-selected runtime whenever present — the
+ * opposite of the product decision that pi is the FALLBACK runtime (tried
+ * only once nothing better is available/capable), not the default. That
+ * conflation is why this constant's order and the auto-select order are now
+ * two independent things: this one stays `['pi', 'claude', 'codex']`
+ * (unchanged — still a perfectly fine construction/reporting order, and
+ * changing it would needlessly reshuffle `conn.hello.runtimes` for no
+ * reason), while `DEFAULT_RUNTIME_PREFERENCE` states the actual selection
+ * priority explicitly (`['claude', 'codex', 'pi']`, pi last) instead of
+ * leaving it as an implicit side effect of this list's order.
+ */
+export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
+
+/**
+ * Every runtime the SDK can build, in construction order. `grok` is a custom
+ * harness, not a wire runtime id, so it is built only when `runtimeAllowlist`
+ * lists it; an unset allowlist keeps `ALL_RUNTIME_IDS`.
+ */
+const SDK_BUILT_RUNTIME_IDS: readonly SdkBuiltRuntimeId[] = [...ALL_RUNTIME_IDS, 'grok'];
+type SdkBuiltRuntimeId = RuntimeId | 'grok';
+
+/** The enumerated runtime options and their admitted values. */
+const RUNTIME_OPTION_VALUES: Readonly<Record<keyof RuntimeAdaptersRuntimes, Readonly<Record<string, readonly string[]>>>> = {
+  pi: { agentUserContext: ['excluded', 'inherit'] },
+  claude: { agentUserContext: ['excluded', 'inherit'], agentSessionPersistence: ['disabled', 'enabled'] },
+  codex: { agentUserMcpServers: ['excluded', 'inherit'] },
+  grok: { compatInstructions: ['disabled', 'inherit'], agentUserMcpServers: ['excluded', 'inherit'] },
+};
+
+/**
+ * Builds the adapters `createDaemon` builds for the same configuration, for a
+ * Host that decorates them and passes them to `createDaemonWithAdapters`.
+ *
+ * Throws a `TypeError` for an invalid `codexSandbox` or `runtimeEnvironment`,
+ * and `DaemonConfigInvalidError` for any other invalid value, including
+ * `runtimes.pi.durableLane`.
+ */
+export function createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAdapter[] {
+  if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
+  assertRuntimeEnvironmentPolicy(config.runtimeEnvironment, 'DaemonConfig.runtimeEnvironment');
+  const issues = runtimeAdaptersConfigIssues(config);
+  if (issues.length > 0) throw new DaemonConfigInvalidError(issues);
+  return buildRuntimeAdapters(config, resolvePiByokLauncher(config));
+}
+
+/**
+ * The adapter set of a validated `DaemonConfig`: `createDaemon`, config check,
+ * `byok-agent runtimes` and doctor build through it, and
+ * {@link createRuntimeAdapters} after its own validation.
+ */
+export function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter[] {
+  const issues = piPackageDirIssues(config);
+  if (issues.length > 0) throw new DaemonConfigInvalidError(issues);
+  const ids = config.runtimeAllowlist
+    ? SDK_BUILT_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
+    : ALL_RUNTIME_IDS;
+  return ids.map((id) => buildAdapter(id, config, piByokLauncher));
+}
+
+/** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
+export function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByokLauncher'>): PiByokLauncherConfig | undefined {
+  validatePiByokLauncherConfig(config.piByokLauncher);
+  // The launcher writes sessions here and retention sweeps it; both use this spelling.
+  return config.piByokLauncher === undefined ? undefined
+    : Object.freeze({ ...config.piByokLauncher, sessionDir: foldNameAliases(config.piByokLauncher.sessionDir) });
+}
+
+function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter {
+  const environment = config.runtimeEnvironment === undefined ? {} : { runtimeEnvironment: config.runtimeEnvironment };
+  // An unset option keeps the adapter default.
+  const pi = config.runtimes?.pi;
+  const claude = config.runtimes?.claude;
+  const codex = config.runtimes?.codex;
+  const grok = config.runtimes?.grok;
+  switch (id) {
+    case 'pi':
+      return new PiAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...environment,
+        ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }),
+        ...(pi?.durableLane === true ? { durableLane: true } : {}),
+        ...(pi?.agentUserContext === undefined ? {} : { agentUserContext: pi.agentUserContext }),
+        ...(pi?.packageDir === undefined ? {} : { packageDir: pi.packageDir }),
+        ...(pi?.versionPolicy === undefined ? {} : { versionPolicy: pi.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+      });
+    case 'claude':
+      return new ClaudeAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        ...(claude?.agentUserContext === undefined ? {} : { agentUserContext: claude.agentUserContext }),
+        ...(claude?.agentSessionPersistence === undefined ? {} : { agentSessionPersistence: claude.agentSessionPersistence }),
+        ...(claude?.versionPolicy === undefined ? {} : { versionPolicy: claude.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+      });
+    case 'codex':
+      return new CodexAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }),
+        ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
+        ...(codex?.versionPolicy === undefined ? {} : { versionPolicy: codex.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+      });
+    case 'grok':
+      return new GrokAdapter({
+        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        ...(grok?.compatInstructions === undefined ? {} : { compatInstructions: grok.compatInstructions }),
+        ...(grok?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: grok.agentUserMcpServers }),
+        ...(grok?.versionPolicy === undefined ? {} : { versionPolicy: grok.versionPolicy, versionPolicySource: 'daemon-config' as const }),
+      });
+  }
+}
+
+/** `runtimes.pi.packageDir` is the one Pi asset root: absolute, and never also passed from the Host environment. */
+function piPackageDirIssues(config: DaemonRuntimeAdaptersConfig): DaemonConfigIssue[] {
+  const issues: DaemonConfigIssue[] = [];
+  const packageDir = config.runtimes?.pi?.packageDir;
+  if (packageDir !== undefined && !(typeof packageDir === 'string' && isAbsolute(packageDir))) {
+    issues.push(invalid('runtimes.pi.packageDir', 'DaemonConfig.runtimes.pi.packageDir must be an absolute path'));
+  }
+  if (config.runtimeEnvironment?.pass?.some((name) => name.toUpperCase() === PI_PACKAGE_DIR_ENV) === true) {
+    issues.push(invalid('runtimeEnvironment.pass', `DaemonConfig.runtimeEnvironment.pass must not name ${PI_PACKAGE_DIR_ENV}; set runtimes.pi.packageDir, the only source of the Pi asset root`));
+  }
+  return issues;
+}
+
+/** The JSON types and literals of the factory keys, which `createDaemon` checks with the DaemonConfig schema. */
+function runtimeAdaptersConfigIssues(config: RuntimeAdaptersConfig): DaemonConfigIssue[] {
+  const issues: DaemonConfigIssue[] = [];
+  const expect = (ok: boolean, path: string, expected: string): void => {
+    if (!ok) issues.push(invalid(path, `DaemonConfig.${path} must be ${expected}`));
+  };
+  const optional = (value: unknown, ok: (value: unknown) => boolean): boolean => value === undefined || ok(value);
+  expect(optional(config.nativeAssetRoot, isString), 'nativeAssetRoot', 'a string');
+  expect(optional(config.runtimeAllowlist, isStringArray), 'runtimeAllowlist', 'an array of strings');
+  const host: unknown = config.sdkHelperHost;
+  expect(optional(host, (value) => isObject(value) && value.mode === 'self-executable'
+    && optional(value.executable, isString) && optional(value.entry, isString)), 'sdkHelperHost', 'an object with mode "self-executable" and string executable and entry');
+  const launcher: unknown = config.piByokLauncher;
+  expect(optional(launcher, (value) => isObject(value) && isString(value.command) && isString(value.profileDbPath) && isString(value.sessionDir)
+    && optional(value.args, isStringArray) && optional(value.macosKeychainPath, isString) && optional(value.secretServicePrefix, isString)),
+  'piByokLauncher', 'an object with string command, profileDbPath and sessionDir');
+  const runtimes: unknown = config.runtimes;
+  if (!optional(runtimes, isObject)) {
+    expect(false, 'runtimes', 'an object');
+  } else if (runtimes !== undefined) {
+    const record = runtimes as Record<string, unknown>;
+    for (const [id, options] of Object.entries(RUNTIME_OPTION_VALUES)) {
+      const runtime = record[id];
+      if (!optional(runtime, isObject)) {
+        expect(false, `runtimes.${id}`, 'an object');
+        continue;
+      }
+      for (const [option, values] of Object.entries(options)) {
+        const value = (runtime as Record<string, unknown> | undefined)?.[option];
+        expect(optional(value, (candidate) => values.includes(candidate as string)), `runtimes.${id}.${option}`, `one of ${values.map((name) => JSON.stringify(name)).join(', ')}`);
+      }
+    }
+    const pi = record.pi as Record<string, unknown> | undefined;
+    if (isObject(pi) && Object.hasOwn(pi, 'durableLane')) {
+      issues.push(invalid('runtimes.pi.durableLane', 'DaemonConfig.runtimes.pi.durableLane needs the daemon journal, so only the SDK daemon builds the durable Pi lane; createRuntimeAdapters does not accept it'));
+    }
+    issues.push(...versionPolicyConfigIssues(config));
+  }
+  issues.push(...piPackageDirIssues(config));
+  return issues;
+}
+
+function invalid(path: string, message: string): DaemonConfigIssue {
+  return { severity: 'error', code: 'invalid_value', path, message };
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(isString);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}

@@ -102,6 +102,12 @@ export interface PiAdapterOptions {
   nativeAssetRoot?: string;
   /** The environment Pi and its MCP servers get (#1095). Default: the login-shell snapshot. */
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
+  /**
+   * Absolute Pi asset root of a product that bundles Pi (`DaemonConfig.runtimes.pi.packageDir`).
+   * Pi and the pi-host helper process get it as `PI_PACKAGE_DIR`; a
+   * `PI_PACKAGE_DIR` from the login shell or the Host never reaches them.
+   */
+  packageDir?: string;
   /** Opt-in ordinary, lease-bound durable worker. */
   durableLane?: boolean;
   /** Override bin resolution — tests substitute the fake-pi fixture script. */
@@ -129,6 +135,33 @@ export interface PiAdapterOptions {
   versionPolicy?: RuntimeVersionPolicy;
   /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
   versionPolicySource?: 'adapter-option' | 'daemon-config';
+}
+
+/** The variable Pi reads its asset root from; the SDK writes it from `PiAdapterOptions.packageDir` only. */
+export const PI_PACKAGE_DIR_ENV = 'PI_PACKAGE_DIR';
+
+function isPiPackageDirName(name: string): boolean {
+  return (process.platform === 'win32' ? name.toUpperCase() : name) === PI_PACKAGE_DIR_ENV;
+}
+
+/** `env` with every `PI_PACKAGE_DIR` replaced by `packageDir`, or removed. */
+function withPiPackageDirEnv<T extends string | undefined>(env: Readonly<Record<string, T>>, packageDir: string | undefined): Record<string, T | string> {
+  const result: Record<string, T | string> = Object.fromEntries(Object.entries(env).filter(([name]) => !isPiPackageDirName(name)));
+  if (packageDir !== undefined) result[PI_PACKAGE_DIR_ENV] = packageDir;
+  return result;
+}
+
+/** {@link withPiPackageDirEnv} over a built environment and its report. */
+function withPiPackageDir(environment: RuntimeEnvironment, packageDir: string | undefined): RuntimeEnvironment {
+  const env = withPiPackageDirEnv(environment.env, packageDir);
+  const names = environment.report.names.filter(({ name }) => !isPiPackageDirName(name));
+  const removed = [...environment.report.removed];
+  if (packageDir !== undefined) names.push({ name: PI_PACKAGE_DIR_ENV, source: 'sdk' });
+  for (const { name } of environment.report.names) {
+    if (isPiPackageDirName(name) && !Object.hasOwn(env, name)) removed.push({ name, rule: 'conflict' });
+  }
+  const byName = (a: { name: string }, b: { name: string }): number => a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  return { env, report: { names: names.sort(byName), removed: removed.sort(byName) } };
 }
 
 export interface PiByokLauncherConfig {
@@ -257,6 +290,7 @@ export class PiAdapter implements RuntimeAdapter {
       skillPaths: options.agentSkillPaths === undefined ? [] : options.agentSkillPaths,
       extensionPaths: options.agentExtensionPaths === undefined ? [] : options.agentExtensionPaths,
     });
+    if (options.packageDir !== undefined && !isAbsolute(options.packageDir)) throw new TypeError('PiAdapterOptions.packageDir must be an absolute path');
     if (options.durableLane !== undefined && typeof options.durableLane !== 'boolean') throw new Error('PiAdapterOptions.durableLane must be boolean; pass replicaRoot through durableContext');
     this.descriptor = freezeRuntimeAdapterDescriptor({
       ...this.descriptor,
@@ -272,8 +306,8 @@ export class PiAdapter implements RuntimeAdapter {
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
 
-  runtimeEnvironment(): Promise<RuntimeEnvironment> {
-    return buildRuntimeEnvironment(this.environmentPolicy);
+  async runtimeEnvironment(): Promise<RuntimeEnvironment> {
+    return withPiPackageDir(await buildRuntimeEnvironment(this.environmentPolicy), this.options.packageDir);
   }
 
   /** Pi's directory selectors and provider credentials stay with Pi; its MCP servers never inherit them. */
@@ -292,7 +326,7 @@ export class PiAdapter implements RuntimeAdapter {
         const version = readClientPiRuntimePin();
         if (version === undefined) return { kind: 'not-found' };
         try {
-          locateBundledPiAssets({ piPackageDir: env.PI_PACKAGE_DIR, executable: host.executable ?? process.execPath, ...(host.entry === undefined ? {} : { entry: host.entry }) });
+          locateBundledPiAssets({ piPackageDir: this.options.packageDir, executable: host.executable ?? process.execPath, ...(host.entry === undefined ? {} : { entry: host.entry }) });
         } catch {
           return { kind: 'not-found' };
         }
@@ -450,13 +484,14 @@ export class PiAdapter implements RuntimeAdapter {
           const kind = this.options.durableLane === true ? 'pi-durable' : resources.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc';
           boundRuntime = await resolvePiRuntimeLaunch({
             ...resources, sessionCwd: resources.cwd, kind,
-            env: pinnedSelection === undefined ? resources.env : withoutProviderCredentials(resources.env),
+            // The launch env may not come from runtimeEnvironment(); packageDir stays the one asset root.
+            env: withPiPackageDirEnv(pinnedSelection === undefined ? resources.env : withoutProviderCredentials(resources.env), this.options.packageDir),
             resolveInvocation: () => {
               const host = this.options.sdkHelperHost;
               if (host !== undefined) {
                 const helper = resolveSdkReservedHelperBin(kind, host);
                 try {
-                  locateBundledPiAssets({ piPackageDir: resources.env.PI_PACKAGE_DIR, executable: helper.command, ...(host.entry === undefined ? {} : { entry: host.entry }) });
+                  locateBundledPiAssets({ piPackageDir: this.options.packageDir, executable: helper.command, ...(host.entry === undefined ? {} : { entry: host.entry }) });
                 } catch (error) {
                   throw authorityFailure(error instanceof Error ? error.message : String(error), error);
                 }

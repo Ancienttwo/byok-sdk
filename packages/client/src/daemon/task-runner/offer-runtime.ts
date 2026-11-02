@@ -288,7 +288,7 @@ export async function pickAdapter(
   const eligible = allowlist ? this['deps'].adapters.filter((a) => allowlist.includes(a.descriptor.id)) : this['deps'].adapters;
   // M5 batch-3: product decision — pi is the FALLBACK runtime, not the
   // default. Ordered independently of `deps.adapters`'s own construction
-  // order (which stays whatever `buildDefaultAdapters`/the embedder built
+  // order (which stays whatever `buildRuntimeAdapters`/the embedder built
   // it as — see `ALL_RUNTIME_IDS`'s doc comment, `create-daemon.ts`).
   const candidates = orderByPreference(eligible, this['deps'].runtimePreference ?? DEFAULT_RUNTIME_PREFERENCE);
   // Count candidates that pass the capability filters. A requirement no

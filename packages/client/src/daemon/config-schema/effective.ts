@@ -143,13 +143,16 @@ export interface EffectiveDaemonConfigInput {
 /**
  * The isolation options of the adapters `createDaemon` builds: the values of
  * `DaemonConfig.runtimes` and `codexSandbox`, and for an unset option the
- * adapter's default, under which a runtime keeps the user's own login,
- * settings and MCP servers.
+ * adapter's default (Pi's `packageDir` only when set), under which a
+ * runtime keeps the user's own login, settings and MCP servers.
  */
 function sdkBuiltIsolation(id: string, config: DaemonConfig): Readonly<Record<string, string>> | undefined {
   const runtimes = config.runtimes;
   switch (id) {
-    case 'pi': return { agentUserContext: runtimes?.pi?.agentUserContext ?? 'inherit' };
+    case 'pi': return {
+      agentUserContext: runtimes?.pi?.agentUserContext ?? 'inherit',
+      ...(runtimes?.pi?.packageDir === undefined ? {} : { packageDir: runtimes.pi.packageDir }),
+    };
     case 'claude': return {
       agentUserContext: runtimes?.claude?.agentUserContext ?? 'inherit',
       agentSessionPersistence: runtimes?.claude?.agentSessionPersistence ?? 'enabled',
