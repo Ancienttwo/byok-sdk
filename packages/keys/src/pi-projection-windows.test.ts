@@ -168,7 +168,7 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
       const probeStarted = Date.now();
       owner = nativeAclProbeObserver.create({
         executable: path.win32.join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-        stdin: JSON.stringify({ path: directory }),
+        stdin: directory,
       }, event => logPhase(`owned-${event.phase}`, `generation=${event.generation} t=${event.elapsedMs}ms pid=${event.pid ?? 'none'} ${event.detail ?? ''}`));
       pendingCleanup = { directory, owner, log: logPhase };
       const probe = owner.run(() => assertPiProjectionDirectory(directory));

@@ -322,6 +322,13 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\//,
   ],
 });
+// #1364: the real Windows Pi projection ACL query and its native suite run
+// only in npm-release-pack, under a freshly created standard-user account.
+const keysWindowsAclPaths = new Set([
+  'packages/keys/src/pi-provider-launcher-core.ts',
+  'packages/keys/src/pi-projection-windows.test.ts',
+  'packages/keys/src/fixtures/acl-evidence-budget.ts',
+]);
 // #649 and #702: release script paths that the owner reviewed for 0.28.2.
 // `tests` run the path (scripts/ci/run-targeted.mjs runs them); `install` marks
 // tests that need installed packages, so the targeted job installs first;
@@ -463,6 +470,7 @@ export function selectImpact(paths, context = {}) {
         if (owners.some(owner => owner.test(path))) { families.add(id); owned = true; }
       }
     }
+    if (keysWindowsAclPaths.has(path)) families.add('npm-release-pack');
     if (path === '.gitattributes') {
       verifyReviewedContent(path, context);
       dirs.add('packages/client');

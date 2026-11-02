@@ -296,6 +296,9 @@ test('schema, native memory and SEA changes retain relevant qualification', () =
     assert.ok(impact.families.includes('packageability-smoke'));
     assert.ok(impact.families.includes('npm-release-pack'));
   }
+  for (const path of ['packages/keys/src/pi-provider-launcher-core.ts', 'packages/keys/src/pi-projection-windows.test.ts', 'packages/keys/src/fixtures/acl-evidence-budget.ts']) {
+    assert.ok(selectImpact([path]).families.includes('npm-release-pack'), path);
+  }
 });
 
 test('the removed Windows memory workflow selects the families that run its checks', () => {
