@@ -8,7 +8,8 @@ import { hash, HostLedger } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
-import { contextPack } from './schema';
+import { contextPack, contextTurns } from './schema';
+import { contextPack as historyPack } from './rules/context';
 import { roomFields } from './team';
 import { botRoutines, createDefinition, updateDefinition } from './routines';
 import { deliverRoutine, routineOf, routineRow, seedRoutine } from './routines.test-support';
@@ -106,6 +107,13 @@ it('reduces older history with an explicit notice when the current request fits'
   expect(Buffer.byteLength(JSON.stringify(context))).toBeLessThanOrEqual(32 * 1024);
   expect(context.historyWindow.omittedTurns).toBe(1);
   expect(context.turns.map(turn => turn.id)).toEqual(['large-1']);
+  // #1318: an injected reply counts in the same budget. The oldest whole row goes; no reply is cut.
+  const rows = contextTurns(['r0', 'r1'].map(id => ({ id, root: id, source: 'user', request: 'short', hop: 0, status: 'succeeded', outcomeSummary: [],
+    reply: 'y'.repeat(18_000) })));
+  const injected = historyPack({ turns: rows, cards: [], questions: [], rejected: [] }, 12);
+  expect(Buffer.byteLength(JSON.stringify(injected))).toBeLessThanOrEqual(32 * 1024);
+  expect(injected.historyWindow.omittedTurns).toBe(1);
+  expect(injected.turns).toEqual([rows[1]]);
 });
 
 it('admits a new turn after large settled cards and questions fill the history', async () => {
