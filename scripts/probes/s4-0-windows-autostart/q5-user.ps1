@@ -1,5 +1,6 @@
 # Runs as the standard user: Task Scheduler control group. Every line that
 # starts with RESULT is read by q5.ps1.
+. 'C:\byokprobe\user-env.ps1'
 $ErrorActionPreference = 'Continue'
 $dir = 'C:\byokprobe\q5'
 $me = "$env:USERDOMAIN\$env:USERNAME"
@@ -12,7 +13,7 @@ try {
   Register-ScheduledTask -TaskName byok-probe-atlogon -Force `
     -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $me) `
     -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument '/d /c exit 0') `
-    -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited) | Out-Null
+    -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited) -ErrorAction Stop | Out-Null
   "RESULT register-atlogon-interactive ok"
 } catch { "RESULT register-atlogon-interactive error :: $($_.Exception.Message)" }
 
@@ -26,9 +27,9 @@ foreach ($lt in 'Interactive', 'S4U') {
   try {
     Register-ScheduledTask -TaskName $task -Force -Settings $settings `
       -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument "/d /c `"`"$dir\exit3.cmd`" `"$log`"`"") `
-      -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType $lt -RunLevel Limited) | Out-Null
+      -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType $lt -RunLevel Limited) -ErrorAction Stop | Out-Null
     "RESULT register-$lt ok"
-    try { Start-ScheduledTask -TaskName $task; "RESULT start-$lt ok" } catch { "RESULT start-$lt error :: $($_.Exception.Message)" }
+    try { Start-ScheduledTask -TaskName $task -ErrorAction Stop; "RESULT start-$lt ok" } catch { "RESULT start-$lt error :: $($_.Exception.Message)" }
   } catch { "RESULT register-$lt error :: $($_.Exception.Message)" }
 }
 Start-Sleep -Seconds 170
@@ -49,8 +50,8 @@ if ($runnable.Count -eq 0) {
   try {
     Register-ScheduledTask -TaskName byok-probe-daemon -Force -Settings $settings `
       -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument "/d /c `"$dir\daemon.cmd`"") `
-      -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType $lt -RunLevel Limited) | Out-Null
-    Start-ScheduledTask -TaskName byok-probe-daemon
+      -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType $lt -RunLevel Limited) -ErrorAction Stop | Out-Null
+    Start-ScheduledTask -TaskName byok-probe-daemon -ErrorAction Stop
     $ready = $false
     for ($i = 0; $i -lt 30 -and -not $ready; $i++) {
       Start-Sleep -Seconds 3

@@ -15,7 +15,7 @@ Start-Sleep -Seconds 20
 foreach ($mode in 'min', 'headless') {
   $name = "q12-$mode"
   $left = @(Get-ProbeProcess "state\$name\")
-  $log = Get-Content (Join-Path $Probe "state\$name\launcher.log")
+  $log = Get-Content (Join-Path $Probe "state\$name\launcher.log") -ErrorAction SilentlyContinue
   Write-Summary "[$mode] launcher.log: $($log -join ' | ')"
   Write-Verdict "[$mode] after marker + child exit the launcher ended without a rerun" ($left.Count -eq 0 -and (@($log | Select-String ' start$').Count -eq 1)) "remaining=$($left.Count)"
 }

@@ -17,7 +17,7 @@ Write-Summary ('stop program: ```' + ((Get-Content (Join-Path $Probe 'out\q4-sto
 Write-Verdict 'stop program: shutdown RPC, daemon gone, control.token and daemon-owner.json removed' ($stopCode -eq 0)
 Start-Sleep -Seconds 15
 $left = @(Get-ProbeProcess "state\$name\")
-$log = Get-Content (Join-Path $Probe "state\$name\launcher.log")
+$log = Get-Content (Join-Path $Probe "state\$name\launcher.log") -ErrorAction SilentlyContinue
 Write-Summary "launcher.log: $($log -join ' | ')"
 Write-Verdict 'launcher ended after stop without restarting the daemon' ($left.Count -eq 0 -and @($log | Select-String ' start$').Count -eq 1) "remaining=$($left.Count)"
 Write-Summary ('daemon.log tail: ```' + ((Get-Content (Join-Path $Probe 'q4\daemon.log') -Tail 8 -ErrorAction SilentlyContinue) -join "`n") + '```')

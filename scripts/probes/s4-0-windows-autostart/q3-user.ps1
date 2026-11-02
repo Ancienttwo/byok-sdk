@@ -1,4 +1,5 @@
 # Runs as the standard user: three launcher cases with the fake child.
+. 'C:\byokprobe\user-env.ps1'
 $ErrorActionPreference = 'Stop'
 $root = 'C:\byokprobe\state\q3'
 function Run-Case([string]$Name, [string]$Seq, [string]$MarkOnRun, [bool]$PreMarker) {

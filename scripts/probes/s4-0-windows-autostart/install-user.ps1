@@ -2,6 +2,7 @@
 # <Startup>\<Name>.cmd, then runs it once the way Explorer would at logon,
 # and exits. Mode min = start "" /min; headless = conhost.exe --headless.
 param([string]$Mode, [string]$Name, [string]$Child)
+. 'C:\byokprobe\user-env.ps1'
 $ErrorActionPreference = 'Stop'
 $state = Join-Path 'C:\byokprobe\state' $Name
 New-Item -ItemType Directory -Force $state | Out-Null
@@ -14,9 +15,12 @@ $line = switch ($Mode) {
   'headless' { "start `"`" conhost.exe --headless $inner" }
   default { throw "unknown mode $Mode" }
 }
-$startup = [Environment]::GetFolderPath('Startup')
+$known = [Environment]::GetFolderPath('Startup')
+# A profile that never had an interactive logon may not resolve the known
+# folder yet; Explorer's default location is then used.
+$startup = if ($known) { $known } else { "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup" }
 "whoami: $(whoami)"
-"startup folder: $startup"
+"GetFolderPath(Startup): '$known'; using: $startup"
 New-Item -ItemType Directory -Force $startup | Out-Null
 $entry = Join-Path $startup "$Name.cmd"
 @('@echo off', $line) -join "`r`n" | Set-Content -Encoding ascii -NoNewline $entry
