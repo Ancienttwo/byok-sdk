@@ -26,7 +26,7 @@ connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
-Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, `endRoutine`, `cancelDelegation`, and `abandonDelegation`.
+Use `input`, `answer`, `decide`, `cancelTurn`, `enqueueHostIntent`, `cancelHostIntent`, `updateRoutine`, `setRoutineLifecycle`, `endRoutine`, `cancelDelegation`, and `abandonDelegation`.
 Use `receive` for IM messages ([IM channel input](#im-channel-input)).
 Use `autonomy`, `wouldDoRecords` and `setBotAutonomy` for the owner's observe/auto switch
 ([Bot autonomy](#bot-autonomy-observe-and-auto-1229)).
@@ -70,6 +70,21 @@ policy. Its execution still passes the read-only toolset admission, because a
 restart admits every open intent. A Host intent shares the FIFO of its Agent: on
 a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
 returns the same intent while K4 keeps it.
+
+Cancel a Host intent with the owner call `cancelHostIntent(key)` (#1320), not
+with `bot.core.cancel`. K4 records the cancel on the intent row, so a restart
+reads the same fact. An intent that was not submitted settles as `cancelled`
+inside the call, which returns `{ result: 'cancelled' }`: its handler does not
+run, and its FIFO moves on. A submitted or running intent gets an SDK cancel, and
+the call returns `{ result: 'cancel_pending' }` at once. K4 then settles it: a
+cancelled terminal runs no handler, but a `task.complete` that arrived before the
+cancel still runs the handler once. Read the final conclusion with
+`bot.core.intent(key)`. A settled intent returns `{ result: 'already_settled' }`
+with its conclusion and sends nothing, so a replay does not fail. The call throws
+`HostIntentError` with `unknown_intent` for a key that is not a Host intent and
+`not_host_intent` for a Bot Turn key; cancel a Bot Turn with `cancelTurn`. A
+cancel does not release a `handler_failed` intent, because K4 applies its
+terminal again; `failStuckIntent` below is the way out.
 
 A K4 terminal that K8 cannot apply leaves its intent open: a key that is neither
 a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`

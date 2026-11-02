@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "67c5722d35cae5674b7ac6b2e85aff3b43d4ea44eb5c29f4bb6d909d6ee5a1d1"
+    "snapshotSha256": "f9aa8806a8cf86e52ed8b14820967b57f793d6769455c475d4afef343f8aeb14"
   },
   "configFields": {
     "status": "tracked",
@@ -23,9 +23,25 @@
       "items": [
         "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
       ]
+    },
+    {
+      "id": "k8-cancel-host-intent",
+      "impact": "additive",
+      "summary": "K8 (examples/bot-collaboration) gains the owner call cancelHostIntent(key), which cancels a Host intent through K4 and returns cancelled, cancel_pending or already_settled; it throws HostIntentError with unknown_intent or not_host_intent. A Host that called bot.core.cancel on a Host intent key calls cancelHostIntent instead. No other Host code change is needed.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1320",
+      "items": [
+        "example:bot-collaboration"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=e352ad2b8a4000ee",
+      "after": "K8 0.0.1 src-sha256=68206ded2770ffbb",
+      "entry": "k8-cancel-host-intent"
+    },
     {
       "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
       "change": "changed",
