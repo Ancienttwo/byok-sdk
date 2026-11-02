@@ -189,7 +189,9 @@ They require an acknowledgement and self delegation for long work. Final text
 uses messageEgress. Progress uses messageDraft or typed activity. A failed,
 cancelled, or missing-outcome continuation has a failed owner projection.
 The Host publishes final turns with `owner`, source, status, and conclusion.
-It does not turn an outcome document into a second chat message.
+It does not turn an outcome document into a second chat message. K8 stores no
+reply text that the user saw. In history mode the external authority gives it
+as a row's `reply` (see External history authority).
 
 `src/rules/` holds the collaboration rules as pure functions (#606, #739 D1):
 room seats, input coalescing, Turns, delegation, the result schema, the
@@ -620,13 +622,21 @@ transaction. Then one transaction freezes the offer with those rows. The
 transaction freezes only a Turn that still has no offer.
 
 - The authority returns rows in the ContextPack row shape: `id`, `root`,
-  `source`, `request`, `hop`, `status`, optional `conclusion` and
-  `outcomeSummary`. Rows in another shape are refused.
+  `source`, `request`, `hop`, `status`, optional `conclusion`,
+  `outcomeSummary`, and optional `reply`, the reply text that the user saw for
+  that Turn (#1318). Rows in another shape are refused, as is a `reply` that
+  is not a string.
+- `historyRowFromTurn` in `src/rules/context.ts` builds one row from a
+  `bot-turn:<id>` projection value and the caller's `reply`, so the authority
+  does not derive `outcomeSummary` itself.
+- A row's `reply` counts in `contextMaxBytes` with the rest of the row. When
+  the rows do not fit, whole rows go oldest first and `historyWindow` counts
+  them; a reply is never cut.
 - The rows replace the stored Turns in that ContextPack. The current Turn
   always comes from this ledger.
 - The collaboration state does not store the rows. The Turn keeps their hash
-  in `historyDigest`. K4 keeps the frozen instruction of the offer, as for
-  every offer.
+  in `historyDigest`, which covers `reply`. K4 keeps the frozen instruction
+  of the offer, as for every offer.
 - Cards, questions and rejected actions stay Host state. Room seats read room
   messages, so they read no history.
 - A read that throws or returns another shape leaves the Turn queued. The
