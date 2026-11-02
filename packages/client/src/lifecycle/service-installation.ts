@@ -196,10 +196,10 @@ const ERROR_MESSAGES = {
 
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
 
-/** Closed codes; a store refusal carries the precheck verdicts. */
+/** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */
 export class ServiceInstallationError extends Error {
-  constructor(readonly code: ServiceInstallationErrorCode, readonly stores?: readonly ServiceStoreVerdict[]) {
-    super(ERROR_MESSAGES[code]);
+  constructor(readonly code: ServiceInstallationErrorCode, readonly stores?: readonly ServiceStoreVerdict[], options?: ErrorOptions) {
+    super(ERROR_MESSAGES[code], options);
     this.name = 'ServiceInstallationError';
   }
 }
@@ -560,9 +560,10 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
         entries.push({ store: store.store, path: store.path, ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
       }
       await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ entries }, null, 2)}\n`);
-    } catch {
-      await fs.rm(dir, { recursive: true, force: true });
-      throw new ServiceInstallationError('snapshot_failed');
+    } catch (error) {
+      // The cleanup is best effort: the receipt must say snapshot_failed, with the copy error as its cause.
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      throw new ServiceInstallationError('snapshot_failed', undefined, { cause: error });
     }
   }
 

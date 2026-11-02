@@ -11120,11 +11120,11 @@ declare const ERROR_MESSAGES: {
     readonly no_rollback: 'There is no previous version with a store snapshot to roll back to.';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
-/** Closed codes; a store refusal carries the precheck verdicts. */
+/** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */
 export declare class ServiceInstallationError extends Error {
     readonly code: ServiceInstallationErrorCode;
     readonly stores?: readonly ServiceStoreVerdict[] | undefined;
-    constructor(code: ServiceInstallationErrorCode, stores?: readonly ServiceStoreVerdict[] | undefined);
+    constructor(code: ServiceInstallationErrorCode, stores?: readonly ServiceStoreVerdict[] | undefined, options?: ErrorOptions);
 }
 /** `<storeDir>/service/installation.json`: where this store's installation lives. */
 export interface ServiceInstallationRecord {

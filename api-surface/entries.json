@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2138514,
+      "budgetBytes": 2138578,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2338,7 +2338,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2096793,
+      "budgetBytes": 2096857,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

@@ -592,11 +592,26 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
       expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'precheck_failed' });
     });
 
+    it('a failed cleanup of the partial snapshot does not replace snapshot_failed', async () => {
+      await installation.install(await payload('1.0.0'));
+      const partial = path.join(installRoot, 'snapshots', '2.0.0');
+      const realRm = fs.rm.bind(fs);
+      let copied = false;
+      const cp = vi.spyOn(fs, 'cp').mockImplementationOnce(async () => { copied = true; throw Object.assign(new Error('injected'), { code: 'ENOSPC' }); });
+      const rm = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+        if (copied && String(target) === partial) throw Object.assign(new Error('injected cleanup'), { code: 'EBUSY' });
+        return realRm(target, options);
+      });
+      try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'snapshot_failed', cause: { code: 'ENOSPC' } }); }
+      finally { cp.mockRestore(); rm.mockRestore(); }
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'snapshot_failed' });
+    });
+
     it('a copy that fails is snapshot_failed: no partial snapshot, no pending receipt, the old version restarted', async () => {
       await installation.install(await payload('1.0.0'));
       const spy = vi.spyOn(fs, 'cp').mockRejectedValueOnce(Object.assign(new Error('injected'), { code: 'ENOSPC' }));
       events = [];
-      try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'snapshot_failed' }); }
+      try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'snapshot_failed', cause: { code: 'ENOSPC' } }); }
       finally { spy.mockRestore(); }
       expect(events).toEqual(['stop', 'start']);
       expect(await pointer('current')).toBe('1.0.0');

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "aafc9a836afff85f0d5b35768f84d04e9667a86f9cc806bcf04980a7e192ee5e"
+    "snapshotSha256": "1bf74abb5bb1ca99722143aeb8cfb2697e7e48ef23f46b1003227ddb552cb6f0"
   },
   "configFields": {
     "status": "tracked",
@@ -47,7 +47,7 @@
     {
       "id": "client-service-store-verdicts",
       "impact": "breaking",
-      "summary": "The service installation precheck prints { \"stores\": ServiceStoreVerdict[] }, and ServiceUpgradeReceipt.stores and ServiceInstallationError.stores hold ServiceStoreVerdict, a new exported type: store is an SDK LocalStoreId or a Host store id (1-64 of a-z 0-9 -, starting with a letter or digit), path is absolute, and an optional kind is file (the default: the file plus -wal and -journal) or directory (the whole tree, symlinks kept as links). core StoreCompatibility and LocalStoreId do not change. The precheck output is checked more strictly: a store id outside the pattern, an unknown kind, a repeated path or a store inside a directory store is precheck_failed, and so is a store that is not what its kind says, or is a symlink, at the snapshot (a symlinked store file was followed and copied before). A copy that fails is the new ServiceInstallationErrorCode snapshot_failed: the partial snapshot is removed, the receipt is failed and the old version is started again; a reader with an exhaustive switch over the codes gets one more case. A snapshot 0.34 wrote is still restored.",
+      "summary": "The service installation precheck prints { \"stores\": ServiceStoreVerdict[] }, and ServiceUpgradeReceipt.stores and ServiceInstallationError.stores hold ServiceStoreVerdict, a new exported type: store is an SDK LocalStoreId or a Host store id (1-64 of a-z 0-9 -, starting with a letter or digit), path is absolute, and an optional kind is file (the default: the file plus -wal and -journal) or directory (the whole tree, symlinks kept as links). core StoreCompatibility and LocalStoreId do not change. The precheck output is checked more strictly: a store id outside the pattern, an unknown kind, a repeated path or a store inside a directory store is precheck_failed, and so is a store that is not what its kind says, or is a symlink, at the snapshot (a symlinked store file was followed and copied before). A copy that fails is the new ServiceInstallationErrorCode snapshot_failed, with the copy error as its cause (the ServiceInstallationError constructor takes optional ErrorOptions): the partial snapshot is removed, the receipt is failed and the old version is started again; a reader with an exhaustive switch over the codes gets one more case. A snapshot 0.34 wrote is still restored.",
       "migration": "CHANGELOG.md#unreleased",
       "items": [
         "export:@byok-sdk/client#ServiceInstallationError",

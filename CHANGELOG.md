@@ -13,8 +13,8 @@
   store is `precheck_failed` ("did not produce a valid verdict"), and so is a
   store whose path is not what its `kind` says, or is a symlink, at the
   snapshot; a symlinked store file was followed and copied before. A copy that
-  fails is the new code `snapshot_failed`: the receipt is `failed` and the old
-  version is started again. A snapshot that 0.34 wrote is still restored.
+  fails is the new code `snapshot_failed`, with the copy error as its `cause`:
+  the receipt is `failed` and the old version is started again. A snapshot that 0.34 wrote is still restored.
   Migration: a Host that reads `stores` as `StoreCompatibility` reads
   `ServiceStoreVerdict`; a precheck that printed `StoreCompatibility[]` needs
   no change; a reader with an exhaustive switch over the codes gets one more
