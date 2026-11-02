@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "466ddc35913b93cc9871dc44f5a731460494b7721639ff326031ac81405b4804"
+    "snapshotSha256": "0ae07be0fcb2f9c94acd296e25c92c5606fab8a489a8bbfafcffdaac36c16c39"
   },
   "configFields": {
     "status": "tracked",
@@ -25,6 +25,15 @@
       ]
     },
     {
+      "id": "k8-history-reply",
+      "impact": "additive",
+      "summary": "K8 history rows from an external history authority can carry an optional reply, the reply text that the user saw for that Turn (#1318). K8 puts it in the frozen ContextPack row, counts it in contextMaxBytes with the rest of the row (whole rows go oldest first, a reply is never cut) and covers it in historyDigest; K8 still stores no reply text. A reply that is not a string refuses the whole history and the Turn stays queued. historyRowFromTurn in src/rules/context.ts builds a row from a bot-turn:<id> projection value and the reply. Rows without reply behave as before; a Host that vendored K8 copies the new rules/context.ts.",
+      "migration": "examples/bot-collaboration/README.md#external-history-authority",
+      "items": [
+        "example:bot-collaboration"
+      ]
+    },
+    {
       "id": "client-service-daemon-stores",
       "impact": "additive",
       "summary": "ServiceInstallationOptions gains daemonStores(), and ServiceDaemonStore is exported: a service process that owns several daemon stores lists them, and every upgrade, rollback and recover stops all of them, holds an installer owner lease and the store gate of each through the pointer switch, and ends each store's owned processes. daemonStores requires healthCheck (createServiceInstallation throws TypeError without it). ServiceInstallationErrorCode gains daemon_stores_invalid (a relative or repeated storeDir, an empty productId, or a throw; the receipt is failed, nothing is switched and the old version is started again): a reader with an exhaustive switch over the codes gets one more case. The stop now takes an owner lease on each store, the default single store included, so what a crashed daemon left (a dead owner, a control.token whose endpoint refuses connections) is reclaimed and the upgrade goes on, where it was store_busy before. No Host code change is needed without daemonStores.",
@@ -37,6 +46,13 @@
     }
   ],
   "changes": [
+    {
+      "item": "example:bot-collaboration",
+      "change": "changed",
+      "before": "K8 0.0.1 src-sha256=e352ad2b8a4000ee",
+      "after": "K8 0.0.1 src-sha256=43ad240e9fb07721",
+      "entry": "k8-history-reply"
+    },
     {
       "item": "export:@byok-sdk/client#ServiceDaemonStore",
       "change": "added",
