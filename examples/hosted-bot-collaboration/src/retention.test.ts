@@ -158,7 +158,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H retention on real Postgres (#793 
     expect((await opened!.pool.query(`SELECT 1 FROM ${table('intent')} WHERE scope = $1`, [storedKey(h.scope)])).rows).toEqual([]);
   });
 
-  it('#1362: archives the reply of a concluded Host intent, its replay calls no handler, and a switch export passes the receipt check', async () => {
+  it.each([['present', false], ['compacted first', true]])('#1362: archives the reply of a concluded Host intent (row %s), its replay calls no handler, and a switch export passes the receipt check', async (_row, compact) => {
     const calls: string[] = [];
     const hosts = new HostedCollaborationStore(opened!.pool, store().schema, { host: TEST_HOST, hostIntents: { chat: () => {} },
       hostIntentMessages: { chat: message => { calls.push(message.payload.messageId); return { outcome: 'accepted' }; } } });
@@ -175,11 +175,13 @@ describe.skipIf(POSTGRES_URL === undefined)('H retention on real Postgres (#793 
     // A test edit: the intent was delivered and concludes, as the submitter and its terminal transaction write it.
     await opened!.pool.query(`UPDATE ${table('intent')} SET submission = 'delivered', conclusion = 'succeeded' WHERE scope = $1 AND key = $2`,
       [storedKey(h.scope), storedKey(key)]);
+    if (compact) expect(await hosts.compactIntents(h.scope, { acknowledgedTurnIds: [key] })).toMatchObject({ compactedIntents: 1 });
     await hosts.retain(h.scope, retention(), LIMITS);
     expect((await h.state()).replies[task]).toBeUndefined();
     expect((await opened!.pool.query(`SELECT body FROM ${table('archived_row')} WHERE scope = $1 AND namespace = 'replies' AND id = $2`,
       [storedKey(h.scope), storedKey(task)])).rows.map(row => row.body)).toEqual([reply]);
-    expect(await hosts.consume(h.scope, message, vectorClock)).toEqual({ outcome: 'accepted' });
+    // A compacted task is retired, as K4 refuses its replay (K8 reply-receipts.test.ts).
+    expect(await hosts.consume(h.scope, message, vectorClock)).toEqual(compact ? { outcome: 'refused', reasonCode: 'unknown_task' } : { outcome: 'accepted' });
     expect(calls).toEqual(['m1']);
     await hosts.beginSwitch(h.scope, 'device', 'L', 1);
     await new HostedOutboxSender(opened!.pool, hosts, { projections: { deliver: async () => {} }, now: () => RETENTION_NOW + 86_400_000 }).run();

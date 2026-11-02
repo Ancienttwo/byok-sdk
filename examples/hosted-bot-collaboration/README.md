@@ -373,7 +373,8 @@ L lets the Host run its own work on the K4 core (`enqueueHostIntent`, #882). H d
   since H has no startup scan over every scope. Each `hostIntentMessages` name needs a `hostIntents` handler, and
   `enqueueHostIntent` refuses an execution with `messageEgress` whose name has no message handler, with nothing written.
 - Retention moves the reply of a concluded Host intent from the state into `archived_row` (namespace `replies`, no
-  expiry), as it moves a Turn's reply. The replay check and the switch export's receipt check read it there.
+  expiry), as it moves a Turn's reply, also when compaction removed the intent row first. The replay check and the switch
+  export's receipt check read it there.
 - `HostedReconciler.failStuckIntent(scope, key)` is L's owner `failStuckIntent`. It reconciles that one row again, and
   only when that throws `IntentOutcomeError` for the key, one transaction under the scope lock concludes the row `failed`
   with no terminal, writes `Intent failed by owner <code>: <key> <message>` and runs the version switch. It refuses an
@@ -956,9 +957,8 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   that a sender or the scheduler uses must have the same handlers.
 - **Host intents.** The store takes the Host intent handlers (`{ host, hostIntents: { research } }`), and the message
   handlers of those that message (`hostIntentMessages`). Every store that a consumer uses must have the same message
-  handlers. Every store that a
-  reconciler uses must have them; a missing one keeps the row open as `handler_failed`. The command entry takes
-  `failStuckIntent: (scope, key) => reconciler.failStuckIntent(scope, key)`.
+  handlers. Every store that a reconciler uses must have the same Host intent handlers; a missing one keeps the row open
+  as `handler_failed`. The command entry takes `failStuckIntent: (scope, key) => reconciler.failStuckIntent(scope, key)`.
 
 ## Tests
 

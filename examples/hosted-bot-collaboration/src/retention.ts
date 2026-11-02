@@ -151,11 +151,14 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
     occurrenceOpen: turnId => { const key = occurrenceOfIntentKey(turnId); return key !== undefined && openOccurrences.has(key); },
   }, store);
   // The reply of a concluded Host intent (#1362) leaves the state as a Turn's reply does: archived with no expiry, where the
-  // replay check and the switch export receipt check read it.
-  const concluded = new Set((await client.query<{ key: string }>(
-    'SELECT key FROM intent WHERE scope = $1 AND handler IS NOT NULL AND conclusion IS NOT NULL', [scopeKey])).rows.map(row => row.key));
+  // replay check and the switch export receipt check read it. Compaction may have removed the concluded row first: then its
+  // intent tombstone, with no Turn of that id, marks it.
+  const owners = [...new Set(Object.values(state.replies).map(reply => reply.turnId))].filter(turnId => !Object.hasOwn(state.turns, turnId));
+  const concluded = new Set((await client.query<{ key: string }>(`SELECT key FROM intent WHERE scope = $1 AND key = ANY($2::text[])
+    AND handler IS NOT NULL AND conclusion IS NOT NULL`, [scopeKey, owners.map(storedKey)])).rows.map(row => JSON.parse(row.key) as string));
+  for (const turnId of await retiredIntents(client, scopeKey, owners)) concluded.add(turnId);
   for (const [taskId, reply] of Object.entries(state.replies)) {
-    if (!concluded.has(storedKey(reply.turnId))) continue;
+    if (!concluded.has(reply.turnId)) continue;
     store.put('replies', taskId, reply as unknown as Json);
     delete state.replies[taskId];
   }
