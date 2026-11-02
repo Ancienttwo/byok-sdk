@@ -33,19 +33,6 @@ if (values.config === undefined || values['install-root'] === undefined) throw n
 
 const configPath = path.resolve(values.config);
 const config = JSON.parse(readFileSync(configPath, 'utf8')) as Pick<DaemonConfig, 'productId' | 'productName' | 'storeDir' | 'branding'>;
-const installRoot = path.resolve(values['install-root']);
-const winswBin = values['winsw-bin'];
-const windows: ServiceWindowsOptions | undefined = values['windows-user'] === true
-  ? { scope: 'user', stop: { command: process.execPath, args: [path.resolve(process.argv[1]!), 'stop-daemon', '--config', configPath, '--install-root', installRoot] } }
-  : winswBin === undefined ? undefined : { winswBin, ...(values['winsw-install-dir'] ? { installDir: values['winsw-install-dir'] } : {}) };
-const installation = createServiceInstallation(agentServiceInstallation({
-  config,
-  configPath,
-  installRoot,
-  owner: 'app',
-  ...(values.name === undefined ? {} : { name: values.name }),
-  ...(windows === undefined ? {} : { windows }),
-}));
 
 /**
  * The `user` scope service's stop program: ends the daemon that owns the
@@ -69,6 +56,26 @@ async function stopDaemon(): Promise<void> {
     if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
   }
 }
+
+if (action === 'stop-daemon') {
+  await stopDaemon();
+  process.exit(0);
+}
+
+const installRoot = path.resolve(values['install-root']);
+const winswBin = values['winsw-bin'];
+const windows: ServiceWindowsOptions | undefined = values['windows-user'] === true
+  ? { scope: 'user', stop: { command: process.execPath, args: [path.resolve(process.argv[1]!), 'stop-daemon', '--config', configPath, '--install-root', installRoot] } }
+  : winswBin === undefined ? undefined : { winswBin, ...(values['winsw-install-dir'] ? { installDir: values['winsw-install-dir'] } : {}) };
+const installation = createServiceInstallation(agentServiceInstallation({
+  config,
+  configPath,
+  installRoot,
+  owner: 'app',
+  ...(values.name === undefined ? {} : { name: values.name }),
+  ...(windows === undefined ? {} : { windows }),
+}));
+
 
 function payload(): string {
   if (values.payload === undefined) throw new Error(`${action} requires --payload <dir>`);
@@ -94,9 +101,6 @@ try {
       break;
     case 'status':
       break;
-    case 'stop-daemon':
-      await stopDaemon();
-      process.exit(0);
     default:
       throw new Error(`unknown action ${JSON.stringify(action)}`);
   }
