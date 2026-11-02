@@ -101,7 +101,7 @@ export interface DaemonRuntimeAdaptersConfig extends RuntimeAdaptersConfig {
 
 /**
  * Canonical construction/identity order for `createDaemon`'s bundled adapter
- * set (`buildDefaultAdapters` below) and for `conn.hello.runtimes`
+ * set (`buildRuntimeAdapters` below) and for `conn.hello.runtimes`
  * reporting order (`detectRuntimes`) — this is NOT the auto-select priority
  * order.
  *

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "67c5722d35cae5674b7ac6b2e85aff3b43d4ea44eb5c29f4bb6d909d6ee5a1d1"
+    "snapshotSha256": "674a0c7ad4b60f6c1f892d34d662769c7b39deeda0f415b765e1e7baefd71fd6"
   },
   "configFields": {
     "status": "tracked",
@@ -23,9 +23,75 @@
       "items": [
         "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
       ]
+    },
+    {
+      "id": "runtime-adapters-factory",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/adapters exports createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAdapter[], which builds the adapters createDaemon builds for the same runtimeAllowlist, runtimes, codexSandbox, runtimeEnvironment, nativeAssetRoot, sdkHelperHost and piByokLauncher. A Host that decorates each adapter and passes them to createDaemonWithAdapters calls it instead of constructing PiAdapter, ClaudeAdapter, CodexAdapter and GrokAdapter itself. An invalid codexSandbox or runtimeEnvironment throws TypeError, any other invalid value DaemonConfigInvalidError; runtimes.pi.durableLane is refused because only the daemon builds the durable lane. The entry loads no daemon, journal, full protocol or zod.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client/adapters#PiRuntimeConfig",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersConfig",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+        "export:@byok-sdk/client/adapters#createRuntimeAdapters"
+      ]
+    },
+    {
+      "id": "pi-package-dir-config",
+      "impact": "breaking",
+      "summary": "Needs the next MINOR after 0.34.0. The Pi asset root of a product that bundles Pi is DaemonConfig.runtimes.pi.packageDir (PiAdapterOptions.packageDir for an adapter the Host builds), an absolute path; a relative one throws DaemonConfigInvalidError invalid_value. It is the only source: the SDK sets PI_PACKAGE_DIR for Pi and the pi-host helper process from it, other runtimes do not get it, and a PI_PACKAGE_DIR in the login-shell snapshot or the Host environment no longer reaches Pi. runtimeEnvironment.pass naming PI_PACKAGE_DIR throws DaemonConfigInvalidError invalid_value. Move the value a Host put in PI_PACKAGE_DIR (for example SdkPackagingAssets.piPackageDir made absolute) into runtimes.pi.packageDir and drop PI_PACKAGE_DIR from runtimeEnvironment.pass and from the process environment.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#DaemonConfig",
+        "export:@byok-sdk/client#PiAdapterOptions",
+        "export:@byok-sdk/client/adapters#PiAdapterOptions"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=9f4e9eb2caa55a95",
+      "after": "optional schema-sha256=87a07d84a14860fe",
+      "entry": "pi-package-dir-config"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfig",
+      "change": "changed",
+      "entry": "pi-package-dir-config"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapterOptions",
+      "change": "changed",
+      "entry": "pi-package-dir-config"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
+      "change": "changed",
+      "entry": "pi-package-dir-config"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiRuntimeConfig",
+      "change": "added",
+      "entry": "runtime-adapters-factory"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersConfig",
+      "change": "added",
+      "entry": "runtime-adapters-factory"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "added",
+      "entry": "runtime-adapters-factory"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#createRuntimeAdapters",
+      "change": "added",
+      "entry": "runtime-adapters-factory"
+    },
     {
       "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
       "change": "changed",
