@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection } from 'node:net';
 import path from 'node:path';
-import type { StoreCompatibility, StoreCompatibilityVerdict } from '@byok-sdk/core';
+import type { StoreCompatibilityVerdict } from '@byok-sdk/core';
 import { connectControlClient } from '../daemon/control-client';
 import { controlEndpointPath, controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { daemonLifecycleHealth, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
@@ -32,6 +32,28 @@ export interface ServicePayloadManifest {
   files: Record<string, string>;
 }
 
+/**
+ * One store the candidate's precheck reports (#1328): an SDK `LocalStoreId`
+ * or a Host store id, with the verdict the candidate gives it. The snapshot
+ * covers exactly the reported stores.
+ */
+export interface ServiceStoreVerdict {
+  /** An SDK `LocalStoreId` or a Host store id: 1-64 of `a-z 0-9 -`, starting with a letter or digit. */
+  readonly store: string;
+  /** Absolute. No two stores share a path, and no store lies inside a `directory` store. */
+  readonly path: string;
+  /**
+   * `file` (the default): the file plus its `-wal` and `-journal`, each a
+   * regular file or absent. `directory`: the whole tree, a real directory
+   * (not a symlink) or absent; symlinks inside it are copied as links.
+   */
+  readonly kind?: 'file' | 'directory';
+  readonly verdict: StoreCompatibilityVerdict;
+  /** The error code the store reported when it refused the store. */
+  readonly code?: string;
+  readonly reason: string;
+}
+
 /** A daemon store the service process owns (#1328): the `DaemonConfig.storeDir` and `productId` of one daemon it runs. */
 export interface ServiceDaemonStore {
   readonly storeDir: string;
@@ -58,10 +80,12 @@ export interface ServiceInstallationOptions {
   program(versionDir: string): ServiceProgram;
   /**
    * The candidate's store precheck, run from its staged `versionDir` while
-   * every writer is stopped. It prints `{ "stores": StoreCompatibility[] }`
-   * (what `byok-agent upgrade check --store --json` prints) and exits 0 or 2.
-   * Every store the candidate rewrites must be listed: the snapshot covers
-   * exactly the listed stores.
+   * every writer is stopped. It prints `{ "stores": ServiceStoreVerdict[] }`
+   * (`byok-agent upgrade check --store --json` prints the SDK's own stores in
+   * this shape) and exits 0 or 2. Every store the candidate rewrites must be
+   * listed, Host stores included: the snapshot covers exactly the listed
+   * stores. Output that breaks {@link ServiceStoreVerdict}'s rules is
+   * `precheck_failed`.
    */
   precheck(versionDir: string): ServiceProgram;
   /**
@@ -112,7 +136,7 @@ export interface ServiceUpgradeReceipt {
   previous?: string;
   at: string;
   code?: ServiceInstallationErrorCode;
-  stores?: StoreCompatibility[];
+  stores?: ServiceStoreVerdict[];
 }
 
 /**
@@ -161,7 +185,8 @@ const ERROR_MESSAGES = {
   store_busy: 'A daemon store still has a running owner after the stop. Stop every process that uses it and retry.',
   daemon_stores_invalid: 'daemonStores() threw or listed an invalid store: each storeDir must be absolute and listed once, each productId not empty.',
   owned_process_residue: 'Processes from the previous daemon run survived; resolve them before upgrading.',
-  precheck_failed: 'The candidate\'s store precheck did not produce a verdict.',
+  precheck_failed: 'The candidate\'s store precheck did not produce a valid verdict.',
+  snapshot_failed: 'The store snapshot could not be written. Nothing was switched; free space or remove what cannot be copied, then retry.',
   store_repair_required: 'The candidate needs a new store path and a new pairing. Nothing was switched; decide before upgrading.',
   store_rejected: 'The candidate refuses a store. Nothing was switched; resolve the store first.',
   health_check_failed: 'The new version failed its health check; the previous version and its store snapshot were restored.',
@@ -173,7 +198,7 @@ export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
 
 /** Closed codes; a store refusal carries the precheck verdicts. */
 export class ServiceInstallationError extends Error {
-  constructor(readonly code: ServiceInstallationErrorCode, readonly stores?: readonly StoreCompatibility[]) {
+  constructor(readonly code: ServiceInstallationErrorCode, readonly stores?: readonly ServiceStoreVerdict[]) {
     super(ERROR_MESSAGES[code]);
     this.name = 'ServiceInstallationError';
   }
@@ -212,6 +237,10 @@ const POINTERS = ['current', 'previous'] as const;
 type Pointer = (typeof POINTERS)[number];
 /** A SQLite store is its main file plus a WAL or a hot rollback journal; `-shm` is rebuilt and is removed on restore. */
 const STORE_FILE_SUFFIXES = ['', '-wal', '-journal'] as const;
+const STORE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+const STORE_KINDS: ReadonlySet<unknown> = new Set([undefined, 'file', 'directory']);
+/** A directory store's tree is copied as it is: links stay links, nothing is overwritten, a clone where the file system has one. */
+const TREE_COPY = { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false, preserveTimestamps: true, mode: fsConstants.COPYFILE_FICLONE } as const;
 const VERDICTS: ReadonlySet<StoreCompatibilityVerdict> = new Set(['accepted', 'new-path-repair', 'rejected', 'absent']);
 
 /** The version `<installRoot>/<name>` points at, or `undefined` when the pointer is absent. */
@@ -485,7 +514,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
   }
 
   /** Runs the staged candidate's precheck and returns its verdicts. */
-  async function precheck(id: string): Promise<StoreCompatibility[]> {
+  async function precheck(id: string): Promise<ServiceStoreVerdict[]> {
     const program = opts.precheck(path.join(versionsDir, id));
     const { code, stdout } = await runProgram(program);
     if (code !== 0 && code !== 2) throw new ServiceInstallationError('precheck_failed');
@@ -495,35 +524,51 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     } catch {
       throw new ServiceInstallationError('precheck_failed');
     }
-    if (!Array.isArray(stores) || !stores.every(isStoreCompatibility)) throw new ServiceInstallationError('precheck_failed');
+    if (!Array.isArray(stores) || !stores.every(isServiceStoreVerdict) || overlaps(stores)) throw new ServiceInstallationError('precheck_failed');
     if (stores.some((store) => store.verdict !== 'accepted' && store.verdict !== 'absent') !== (code === 2)) throw new ServiceInstallationError('precheck_failed');
     return stores;
   }
 
-  /** Copies every listed store's files to `snapshots/<to>`. `snapshot.json` is written last and marks a complete snapshot. */
-  async function snapshot(to: string, stores: readonly StoreCompatibility[]): Promise<void> {
+  /**
+   * Copies every listed store to `snapshots/<to>`: a file store's files as
+   * `<index><suffix>`, a directory store's tree as `<index>.d`. Every store
+   * is checked with `lstat` first, so nothing is followed through a symlink.
+   * `snapshot.json` is written last and marks a complete snapshot; a copy
+   * that fails removes the partial snapshot.
+   */
+  async function snapshot(to: string, stores: readonly ServiceStoreVerdict[]): Promise<void> {
+    const sources = await Promise.all(stores.map(storeSources));
     const dir = path.join(snapshotsDir, to);
     await fs.rm(dir, { recursive: true, force: true });
-    await fs.mkdir(dir, { recursive: true });
-    const entries: SnapshotEntry[] = [];
-    for (const [index, store] of stores.entries()) {
-      const files: Record<string, string> = {};
-      for (const suffix of STORE_FILE_SUFFIXES) {
-        const source = `${store.path}${suffix}`;
-        if (!(await exists(source))) continue;
-        const name = `${index}${suffix}`;
-        await fs.copyFile(source, path.join(dir, name));
-        files[suffix] = name;
+    try {
+      await fs.mkdir(dir, { recursive: true });
+      const entries: SnapshotEntry[] = [];
+      for (const [index, store] of stores.entries()) {
+        const files: Record<string, string> = {};
+        for (const suffix of sources[index]!) {
+          const name = store.kind === 'directory' ? `${index}.d` : `${index}${suffix}`;
+          if (store.kind === 'directory') await fs.cp(store.path, path.join(dir, name), TREE_COPY);
+          else await fs.copyFile(`${store.path}${suffix}`, path.join(dir, name));
+          files[suffix] = name;
+        }
+        entries.push({ store: store.store, path: store.path, ...(store.kind === 'directory' ? { kind: 'directory' as const } : {}), files });
       }
-      entries.push({ store: store.store, path: store.path, files });
+      await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ entries }, null, 2)}\n`);
+    } catch {
+      await fs.rm(dir, { recursive: true, force: true });
+      throw new ServiceInstallationError('snapshot_failed');
     }
-    await writeFileAtomic(path.join(dir, 'snapshot.json'), `${JSON.stringify({ entries }, null, 2)}\n`);
   }
 
   async function restoreSnapshot(to: string): Promise<void> {
     const dir = path.join(snapshotsDir, to);
     const { entries } = JSON.parse(await fs.readFile(path.join(dir, 'snapshot.json'), 'utf8')) as { entries: SnapshotEntry[] };
     for (const entry of entries) {
+      if (entry.kind === 'directory') {
+        await fs.rm(entry.path, { recursive: true, force: true });
+        if (entry.files[''] !== undefined) await fs.cp(path.join(dir, entry.files['']), entry.path, TREE_COPY);
+        continue;
+      }
       for (const suffix of [...STORE_FILE_SUFFIXES, '-shm']) await fs.rm(`${entry.path}${suffix}`, { force: true });
       for (const [suffix, name] of Object.entries(entry.files)) await fs.copyFile(path.join(dir, name), `${entry.path}${suffix}`);
     }
@@ -580,7 +625,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // switch leaves recover() a pending receipt to finish or roll back;
       // before it, nothing has changed and a failure restarts `from`.
       await writeReceipt({ state: 'pending', from, to, ...kept });
-      let stores: StoreCompatibility[];
+      let stores: ServiceStoreVerdict[];
       let release: () => Promise<void>;
       try {
         release = await stopQuiescent();
@@ -658,10 +703,35 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
 }
 
 interface SnapshotEntry {
-  store: StoreCompatibility['store'];
+  store: string;
   path: string;
-  /** Saved files by suffix (`''`, `-wal`, `-journal`); empty when the store was absent. */
+  /** Absent in a snapshot 0.34 wrote, and for every file store. */
+  kind?: 'directory';
+  /** Saved files by suffix (`''`, `-wal`, `-journal`; a directory's tree under `''`); empty when the store was absent. */
   files: Record<string, string>;
+}
+
+/**
+ * The suffixes of a store that exist now: a file store's regular files, or a
+ * directory store's real directory under `''`. Anything else at a store path
+ * (a symlink, a directory for a file store, a file for a directory store) is
+ * `precheck_failed`.
+ */
+async function storeSources(store: ServiceStoreVerdict): Promise<string[]> {
+  const suffixes = store.kind === 'directory' ? [''] : [...STORE_FILE_SUFFIXES];
+  const present: string[] = [];
+  for (const suffix of suffixes) {
+    let stat: import('node:fs').Stats;
+    try {
+      stat = await fs.lstat(`${store.path}${suffix}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    if (!(store.kind === 'directory' ? stat.isDirectory() : stat.isFile())) throw new ServiceInstallationError('precheck_failed');
+    present.push(suffix);
+  }
+  return present;
 }
 
 export async function readPayloadManifest(payloadDir: string): Promise<ServicePayloadManifest> {
@@ -710,11 +780,18 @@ async function listFiles(dir: string, prefix = ''): Promise<string[]> {
   return result;
 }
 
-function isStoreCompatibility(value: unknown): value is StoreCompatibility {
+function isServiceStoreVerdict(value: unknown): value is ServiceStoreVerdict {
   if (typeof value !== 'object' || value === null) return false;
   const store = value as Record<string, unknown>;
-  return typeof store.store === 'string' && typeof store.path === 'string' && path.isAbsolute(store.path)
-    && typeof store.reason === 'string' && VERDICTS.has(store.verdict as StoreCompatibilityVerdict);
+  return typeof store.store === 'string' && STORE_ID.test(store.store) && typeof store.path === 'string' && path.isAbsolute(store.path)
+    && STORE_KINDS.has(store.kind) && typeof store.reason === 'string' && VERDICTS.has(store.verdict as StoreCompatibilityVerdict);
+}
+
+/** Whether two stores share a path or one lies inside a directory store. */
+function overlaps(stores: readonly ServiceStoreVerdict[]): boolean {
+  const paths = stores.map((store) => path.resolve(store.path));
+  return stores.some((store, index) => paths.some((other, at) => at !== index
+    && (other === paths[index] || (store.kind === 'directory' && other.startsWith(`${paths[index]}${path.sep}`)))));
 }
 
 /**

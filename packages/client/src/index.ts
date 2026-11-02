@@ -530,7 +530,7 @@ export {
 } from './lifecycle/service-installation';
 export type {
   ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceInstallationRecord,
-  ServicePayloadManifest, ServiceUpgradeReceipt,
+  ServicePayloadManifest, ServiceStoreVerdict, ServiceUpgradeReceipt,
 } from './lifecycle/service-installation';
 export {
   claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError,

@@ -23,6 +23,25 @@ node app-installer.ts uninstall --install-root ./app --config device.json
 On Windows pass `--winsw-bin <WinSW-x64.exe>` (and `--winsw-install-dir` for a
 short install path).
 
+## Stores the precheck reports
+
+The precheck program prints `{ "stores": ServiceStoreVerdict[] }` and exits 0
+or 2 (#1328). It lists every store the candidate rewrites: the SDK's own, which
+`byok-agent upgrade check --store --json` reports, and the Host's, under a Host
+store id of 1-64 of `a-z 0-9 -`. A store that is a directory tree, such as an
+index, says `kind: "directory"`:
+
+```json
+{ "stores": [
+  { "store": "client-journal", "path": "/…/store/daemon.db", "verdict": "accepted", "reason": "…" },
+  { "store": "research-index", "path": "/…/research/index", "kind": "directory", "verdict": "accepted", "reason": "…" }
+] }
+```
+
+The installation snapshots exactly these stores before the switch and puts
+them back together with the old version. See
+[the precheck rules](../../docs/upgrade-manifest.md#store-compatibility-precheck).
+
 ## A service with several daemon stores
 
 A service process that runs more than one daemon, for example one per signed-in

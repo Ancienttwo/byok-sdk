@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Breaking (client)** — the service installation precheck prints
+  `{ "stores": ServiceStoreVerdict[] }`, and `ServiceUpgradeReceipt.stores` and
+  `ServiceInstallationError.stores` hold `ServiceStoreVerdict`, a new exported
+  type: `store` is an SDK `LocalStoreId` or a Host store id (1-64 of
+  `a-z 0-9 -`), and an optional `kind` is `file` (the default) or `directory`.
+  A directory store is snapshotted and restored as a whole tree, symlinks kept
+  as links. The precheck output is checked more strictly: a store id outside
+  the pattern, an unknown `kind`, a repeated path or a store inside a directory
+  store is `precheck_failed` ("did not produce a valid verdict"), and so is a
+  store whose path is not what its `kind` says, or is a symlink, at the
+  snapshot; a symlinked store file was followed and copied before. A copy that
+  fails is the new code `snapshot_failed`: the receipt is `failed` and the old
+  version is started again. A snapshot that 0.34 wrote is still restored.
+  Migration: a Host that reads `stores` as `StoreCompatibility` reads
+  `ServiceStoreVerdict`; a precheck that printed `StoreCompatibility[]` needs
+  no change; a reader with an exhaustive switch over the codes gets one more
+  case (#1328).
+
 - **Added (client)** — `ServiceInstallationOptions.daemonStores()` and the
   `ServiceDaemonStore` type: a service process that owns several daemon stores
   lists them, and every upgrade, rollback and recover stops all of them, holds

@@ -514,6 +514,84 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     });
   });
 
+  describe('store verdicts (#1328): Host stores, directory stores and the lstat check', () => {
+    let index: string;
+    const verdictsWith = async (...extra: object[]): Promise<void> => {
+      await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([
+        { store: 'client-journal', path: db, verdict: 'accepted', reason: 'ok' }, ...extra,
+      ]));
+    };
+    beforeEach(async () => {
+      index = path.join(root, 'research-index');
+      await fs.mkdir(path.join(index, 'shards'), { recursive: true });
+      await fs.writeFile(path.join(index, 'shards', 'a'), 'v1 a');
+      await fs.symlink('shards/a', path.join(index, 'latest'));
+      await verdictsWith({ store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' });
+    });
+
+    it('a Host directory store enters the receipt and is restored with its snapshot after a failed health check', async () => {
+      await installation.install(await payload('1.0.0'));
+      const switched = await installation.upgrade(await payload('2.0.0'));
+      expect(switched.stores).toContainEqual(expect.objectContaining({ store: 'research-index', kind: 'directory' }));
+      const before = await tree(index);
+      unhealthy.add('3.0.0');
+      onHealth = async (version) => {
+        if (version !== '3.0.0') return;
+        await fs.writeFile(path.join(index, 'shards', 'a'), 'v3 a');
+        await fs.writeFile(path.join(index, 'shards', 'b'), 'v3 b');
+        await fs.rm(path.join(index, 'latest'));
+      };
+      await expect(installation.upgrade(await payload('3.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
+      expect(await tree(index)).toEqual(before);
+    });
+
+    it('a directory store absent at the snapshot is removed on restore', async () => {
+      await fs.rm(index, { recursive: true });
+      await installation.install(await payload('1.0.0'));
+      unhealthy.add('2.0.0');
+      onHealth = async (version) => { if (version === '2.0.0') await fs.mkdir(index); };
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'health_check_failed' });
+      await expect(fs.lstat(index)).rejects.toThrow();
+    });
+
+    it.each([
+      ['a store id outside the pattern', () => verdictsWith({ store: 'Research', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' })],
+      ['an unknown kind', () => verdictsWith({ store: 'research-index', path: index, kind: 'tree', verdict: 'accepted', reason: 'ok' })],
+      ['a repeated path', () => verdictsWith({ store: 'other', path: db, verdict: 'accepted', reason: 'ok' })],
+      ['a store inside a directory store', () => verdictsWith(
+        { store: 'research-index', path: index, kind: 'directory', verdict: 'accepted', reason: 'ok' },
+        { store: 'shard', path: path.join(index, 'shards', 'a'), verdict: 'accepted', reason: 'ok' },
+      )],
+      ['a file store that is a directory', () => verdictsWith({ store: 'research-index', path: index, verdict: 'accepted', reason: 'ok' })],
+      ['a directory store that is a symlink', async () => {
+        await fs.symlink(index, path.join(root, 'index-link'));
+        await verdictsWith({ store: 'research-index', path: path.join(root, 'index-link'), kind: 'directory', verdict: 'accepted', reason: 'ok' });
+      }],
+      ['a file store that is a symlink', async () => {
+        await fs.symlink(db, path.join(root, 'db-link'));
+        await fs.writeFile(path.join(root, 'verdicts.json'), JSON.stringify([{ store: 'client-journal', path: path.join(root, 'db-link'), verdict: 'accepted', reason: 'ok' }]));
+      }],
+    ])('%s is precheck_failed and nothing is switched', async (_label, write) => {
+      await installation.install(await payload('1.0.0'));
+      await write();
+      await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'precheck_failed' });
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'precheck_failed' });
+    });
+
+    it('a copy that fails is snapshot_failed: no partial snapshot, no pending receipt, the old version restarted', async () => {
+      await installation.install(await payload('1.0.0'));
+      const spy = vi.spyOn(fs, 'cp').mockRejectedValueOnce(Object.assign(new Error('injected'), { code: 'ENOSPC' }));
+      events = [];
+      try { await expect(installation.upgrade(await payload('2.0.0'))).rejects.toMatchObject({ code: 'snapshot_failed' }); }
+      finally { spy.mockRestore(); }
+      expect(events).toEqual(['stop', 'start']);
+      expect(await pointer('current')).toBe('1.0.0');
+      expect(await installation.receipt()).toMatchObject({ state: 'failed', code: 'snapshot_failed' });
+      await expect(fs.access(path.join(installRoot, 'snapshots', '2.0.0'))).rejects.toThrow();
+    });
+  });
+
   describe('lifecycle owner: another recorded owner is refused before anything is written', () => {
     it('a refused foreign-owner install preserves the recorded installation', async () => {
       await installation.install(await payload('1.0.0'));

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "466ddc35913b93cc9871dc44f5a731460494b7721639ff326031ac81405b4804"
+    "snapshotSha256": "f42e9687d8f11ef1abf685ba2269a9b1d8be72e4394bf7d997a3209a0174873c"
   },
   "configFields": {
     "status": "tracked",
@@ -34,6 +34,17 @@
         "export:@byok-sdk/client#ServiceInstallationErrorCode",
         "export:@byok-sdk/client#ServiceInstallationOptions"
       ]
+    },
+    {
+      "id": "client-service-store-verdicts",
+      "impact": "breaking",
+      "summary": "The service installation precheck prints { \"stores\": ServiceStoreVerdict[] }, and ServiceUpgradeReceipt.stores and ServiceInstallationError.stores hold ServiceStoreVerdict, a new exported type: store is an SDK LocalStoreId or a Host store id (1-64 of a-z 0-9 -, starting with a letter or digit), path is absolute, and an optional kind is file (the default: the file plus -wal and -journal) or directory (the whole tree, symlinks kept as links). core StoreCompatibility and LocalStoreId do not change. The precheck output is checked more strictly: a store id outside the pattern, an unknown kind, a repeated path or a store inside a directory store is precheck_failed, and so is a store that is not what its kind says, or is a symlink, at the snapshot (a symlinked store file was followed and copied before). A copy that fails is the new ServiceInstallationErrorCode snapshot_failed: the partial snapshot is removed, the receipt is failed and the old version is started again; a reader with an exhaustive switch over the codes gets one more case. A snapshot 0.34 wrote is still restored.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationError",
+        "export:@byok-sdk/client#ServiceStoreVerdict",
+        "export:@byok-sdk/client#ServiceUpgradeReceipt"
+      ]
     }
   ],
   "changes": [
@@ -41,6 +52,11 @@
       "item": "export:@byok-sdk/client#ServiceDaemonStore",
       "change": "added",
       "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationError",
+      "change": "changed",
+      "entry": "client-service-store-verdicts"
     },
     {
       "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
@@ -51,6 +67,16 @@
       "item": "export:@byok-sdk/client#ServiceInstallationOptions",
       "change": "changed",
       "entry": "client-service-daemon-stores"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceStoreVerdict",
+      "change": "added",
+      "entry": "client-service-store-verdicts"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",
+      "change": "changed",
+      "entry": "client-service-store-verdicts"
     },
     {
       "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
