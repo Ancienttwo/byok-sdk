@@ -538,6 +538,11 @@ export {
 export type {
   ServiceLifecycleOwnerInput, ServiceRepairResult, ServiceUnitErrorCode, ServiceUnitInspection, ServiceUnitState,
 } from './lifecycle/service-unit';
+// #1316: the breaking upgrade-manifest entries since a version, and the @byok-sdk/* train check.
+export { checkUpgradeFrom } from './lifecycle/upgrade-from';
+export type {
+  UpgradeFromBreakingEntry, UpgradeFromRefusalCode, UpgradeFromReport, UpgradeTrainPackage,
+} from './lifecycle/upgrade-from';
 export { EXIT_CODE_CONTRACT, serviceExitDisposition } from './lifecycle/exit-codes';
 export type { ExitCode, ServiceExitDisposition } from './lifecycle/exit-codes';
 export { DAEMON_LOG_LIMITS, inspectServiceLogs, openDaemonLog, SERVICE_REDIRECT_LIMITS } from './lifecycle/service-log';

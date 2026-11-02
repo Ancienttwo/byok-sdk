@@ -7,13 +7,17 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LocalStoreId, StoreCompatibility } from '@byok-sdk/core';
 import { inspectDaemonStores } from '../diagnostics/store-compatibility';
-import { runUpgradeStoreCheckCommand, UPGRADE_CHECK_REFUSED_EXIT_CODE } from '../bin/commands/upgrade';
+import { runUpgradeFromCheckCommand, runUpgradeStoreCheckCommand, UPGRADE_CHECK_REFUSED_EXIT_CODE } from '../bin/commands/upgrade';
+import { checkUpgradeFrom, type UpgradeFromReport } from '../lifecycle/upgrade-from';
 import { isSqliteAvailable } from '../util/sqlite-support';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { acquireReplicaLock, admitReplica, DURABLE_REPLICA_DIRNAME, replicaLockPath, resetReplica } from '../adapters/pi-durable/replica';
 import { openLocalDurableStorage } from '../adapters/pi-durable/storage';
 
-/** #1102: the daemon store precheck (journal + pi-durable replicas) and `byok-agent upgrade check --store`. */
+/**
+ * #1102: the daemon store precheck (journal + pi-durable replicas) and `byok-agent upgrade check --store`.
+ * #1316: `byok-agent upgrade check --from` over the archived manifests.
+ */
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const REPO = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -283,5 +287,83 @@ describeSqlite('byok-agent upgrade check --store', () => {
     expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
     expect(UPGRADE_CHECK_REFUSED_EXIT_CODE).toBe(2);
     expect(lines[1]).toMatch(/^rejected client-journal .*daemon\.db code=JournalUnavailableError — /);
+  });
+});
+
+describe('upgrade check --from (#1316)', () => {
+  const TRAIN = ['client', 'cloud', 'cloud-dataplane', 'cloud-do', 'core', 'keys', 'protocol', 'server', 'ui-runtime'];
+
+  /** A Host directory with an installed 0.34.0 train: the archived manifests and an in-development 0.34.0 one. */
+  function host(options: { readonly versions?: Record<string, string>; readonly history?: boolean } = {}): string {
+    const root = tempDir();
+    for (const name of TRAIN) {
+      const dir = join(root, 'node_modules/@byok-sdk', name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: `@byok-sdk/${name}`, version: options.versions?.[name] ?? '0.34.0' }));
+    }
+    const client = join(root, 'node_modules/@byok-sdk/client');
+    if (options.history !== false) {
+      mkdirSync(join(client, 'upgrade-history'));
+      for (const archive of ['0.31.0-0.32.0', '0.32.0-0.33.0', '0.33.0-0.34.0']) {
+        cpSync(join(REPO, 'packages/client/upgrade-history', `${archive}.json`), join(client, 'upgrade-history', `${archive}.json`));
+      }
+    }
+    writeFileSync(join(client, 'upgrade-manifest.json'), JSON.stringify({
+      from: { version: '0.34.0' }, to: { version: '0.34.0' },
+      entries: [{ id: 'unreleased', impact: 'additive', summary: 'x', migration: 'CHANGELOG.md#unreleased', items: [] }],
+    }));
+    return root;
+  }
+
+  function command(fromVersion: string, resolveFrom: string): { code: number; report: UpgradeFromReport } {
+    const lines: string[] = [];
+    const code = runUpgradeFromCheckCommand({ fromVersion, json: true, resolveFrom, log: (line) => lines.push(line) });
+    return { code, report: JSON.parse(lines.join('\n')) as UpgradeFromReport };
+  }
+
+  it('lists the breaking entries released after --from and exits 2', () => {
+    const { code, report } = command('0.33.0', host());
+    expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
+    expect(report.breaking).toEqual([
+      { id: 'wire-v5-durable-lane', release: '0.34.0', migration: 'docs/migrations/wire-v5-durable-lane.md#drain-and-upgrade' },
+      { id: 'runtime-generic-names', release: '0.34.0', migration: 'docs/migrations/wire-v5-durable-lane.md#runtime-names' },
+    ]);
+    expect(report.additiveCount).toBe(2);
+    expect(command('0.31.0', host()).report.breaking.map((entry) => entry.release)).toEqual([
+      ...Array<string>(28).fill('0.32.0'), ...Array<string>(7).fill('0.33.0'), '0.34.0', '0.34.0',
+    ]);
+  });
+
+  it('passes from the current version with a consistent train', () => {
+    const { code, report } = command('0.34.0', host());
+    expect(code).toBe(0);
+    expect(report).toMatchObject({ from: '0.34.0', to: '0.34.0', breaking: [], additiveCount: 0, verdict: 'pass' });
+    expect(report.train.packages).toHaveLength(9);
+  });
+
+  it('refuses a train with another @byok-sdk version; an absent package is only listed', () => {
+    const root = host({ versions: { core: '0.33.0' } });
+    rmSync(join(root, 'node_modules/@byok-sdk/cloud-do'), { recursive: true });
+    const { code, report } = command('0.34.0', root);
+    expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
+    expect(report.train.packages).toContainEqual({ name: '@byok-sdk/core', version: '0.33.0' });
+    expect(report.train.packages).toContainEqual({ name: '@byok-sdk/cloud-do', version: 'absent' });
+    expect(report.refusal).toBeUndefined();
+  });
+
+  it.each([
+    ['0.30.2', () => host(), 'upgrade_from_unsupported', /docs\/releases\/host-upgrade-0\.34\.0\.md/],
+    ['0.33.0', () => host({ history: false }), 'upgrade_history_unavailable', /upgrade-history/],
+    ['0.33.0', () => tempDir(), 'upgrade_train_unresolved', /@byok-sdk\/client does not resolve/],
+  ])('--from %s refuses with %s', (fromVersion, root, refusal, message) => {
+    const { code, report } = command(fromVersion, root());
+    expect(code).toBe(UPGRADE_CHECK_REFUSED_EXIT_CODE);
+    expect(report.refusal?.code).toBe(refusal);
+    expect(report.refusal?.message).toMatch(message);
+  });
+
+  it('throws on a --from that is not a version or is newer than the client', () => {
+    expect(() => checkUpgradeFrom('0.34', { resolveFrom: host() })).toThrow(/is not a version/);
+    expect(() => checkUpgradeFrom('0.35.0', { resolveFrom: host() })).toThrow(/newer than @byok-sdk\/client 0\.34\.0/);
   });
 });

@@ -66,14 +66,17 @@
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./upgrade-manifest.json": "./upgrade-manifest.json",
+    "./daemon-config.schema.json": "./daemon-config.schema.json"
   },
   "files": [
     "dist",
     "README.md",
     "LICENSE",
     "upgrade-manifest.json",
-    "daemon-config.schema.json"
+    "daemon-config.schema.json",
+    "upgrade-history"
   ],
   "publishConfig": {
     "access": "public"
