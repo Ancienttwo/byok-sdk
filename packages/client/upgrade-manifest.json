@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.35.0",
-    "snapshotSha256": "a142c57bef69cd935a741d4f6e29dba30a9232b5e2a547d677e35e2848ca5248"
+    "snapshotSha256": "f0c312ecd2e3f7e18abd15a9fe646996e981af2cec68656fc2987066107bbf80"
   },
   "configFields": {
     "status": "tracked",
@@ -18,7 +18,7 @@
     {
       "id": "k8-l-test-host",
       "impact": "additive",
-      "summary": "K8 exports ./l-test-host (src/l-test-host.test-support.ts), an L test Host built only from the published packages: an embedded SQLite server, a paired daemon with a stub runtime that submits the result document, and the HostLedger. The K8 routine and delivery vectors run on it instead of the K4 openHost, so a Host that vendors K8 can run them too (#1325). The K8 rules and their runtime behavior do not change; a Host that vendored K8 copies the new file with the two contract tests, as src/VENDOR.md Layer 3 lists.",
+      "summary": "K8 exports ./l-test-host (src/l-test-host.test-support.ts), an L test Host built only from the published packages: an embedded SQLite server, a paired daemon with a stub runtime that submits the result document, and the HostLedger. The K8 routine and delivery vectors run on it instead of the K4 openHost, so a Host that vendors K8 can run them too (#1325). The test Host changes no K8 rule; a Host that vendored K8 copies the new file with the two contract tests, as src/VENDOR.md Layer 3 lists. K8 also lets an external team snapshot mark a Bot participation: 'suspended' (#1319): the Bot stays in the team but takes no new work, its open work ends as for an archived Bot (delegation reason target_suspended, undelivered initiator_suspended), and input, answer and decide for it refuse with TeamModeError code bot_suspended. A later snapshot without the field restores it; a snapshot without the field behaves as before (README.md#external-team-authority). A Host that vendored K8 copies the changed src/rules files.",
       "migration": "examples/bot-collaboration/src/VENDOR.md#layer-3-shared-vectors",
       "items": [
         "example:bot-collaboration"
@@ -30,7 +30,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=13268de4f68b46f5",
-      "after": "K8 0.0.1 src-sha256=203a3a753c7dee77",
+      "after": "K8 0.0.1 src-sha256=b7b787c6e13159f8",
       "entry": "k8-l-test-host"
     }
   ]
