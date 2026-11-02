@@ -5,17 +5,17 @@ import { afterEach, expect } from 'vitest';
 import { freezeRuntimeAdapterDescriptor } from '@byok-sdk/client';
 import { tenantId } from '@byok-sdk/core';
 import { HostLedger } from '@byok-sdk/server/execution-core';
-import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
-import { BotStubAdapter } from '../../basic/goal-btw.test-support';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { ChannelPort, InboundMessage } from './channel';
 import { botCompactVeto } from './compaction';
 import { FINAL_BODY, deliveryVectors, replyToken, type DeliverySubject } from './delivery-vectors.test-support';
 import { BotCollaboration, type AgentMessageInput, type BotOptions } from './host';
+import { openLTestHost, ResultStubAdapter, type LTestHost } from './l-test-host.test-support';
 
 // #793 D2b-out-1: the delivery vectors on the K8 L Host, with a real SQLite HostLedger, embedded server and daemon.
-class DraftAdapter extends BotStubAdapter {
-  override readonly descriptor = freezeRuntimeAdapterDescriptor({ ...new BotStubAdapter().descriptor,
-    capabilities: { ...new BotStubAdapter().descriptor.capabilities, messageDraft: true } });
+class DraftAdapter extends ResultStubAdapter {
+  override readonly descriptor = freezeRuntimeAdapterDescriptor({ ...new ResultStubAdapter().descriptor,
+    capabilities: { ...new ResultStubAdapter().descriptor.capabilities, messageDraft: true } });
   private readonly startWaiters = new Map<string, Set<() => void>>();
   started(taskId: string): Promise<void> {
     if (this.sessions.has(taskId)) return Promise.resolve();
@@ -24,7 +24,7 @@ class DraftAdapter extends BotStubAdapter {
       waiters.add(resolve); this.startWaiters.set(taskId, waiters);
     });
   }
-  override async prepare(input: Parameters<BotStubAdapter['prepare']>[0]): ReturnType<BotStubAdapter['prepare']> {
+  override async prepare(input: Parameters<ResultStubAdapter['prepare']>[0]): ReturnType<ResultStubAdapter['prepare']> {
     const prepared = await super.prepare(input);
     if (prepared.kind !== 'prepared') return prepared;
     const operation = prepared.operation;
@@ -62,14 +62,14 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
   };
   const roots = new Map<string, string>();
   const adapter = new DraftAdapter();
-  const fixture: TestHost = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, adapter,
+  const fixture: LTestHost = await openLTestHost({ ledgerOptions: { compactVeto: botCompactVeto }, adapter,
     consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: input => bot.consumeMessage(input) } });
   const ledger = () => reopened ?? fixture.ledger;
   // The crash boundary: the claim is committed, and this copy of the database is what a restarted Host opens.
   const send: ChannelPort['send'] = async (input, signal) => {
     if (crash) {
       crash = false;
-      const db = new DatabaseSync(join(fixture.root, 'host.sqlite'));
+      const db = new DatabaseSync(fixture.ledgerPath);
       checkpoint = join(fixture.root, `crash-${randomUUID()}.sqlite`);
       db.exec(`VACUUM INTO '${checkpoint.replaceAll("'", "''")}'`); db.close();
     }

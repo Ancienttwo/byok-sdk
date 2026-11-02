@@ -19,6 +19,7 @@
     "./delivery": "./src/delivery.ts",
     "./delivery-routing": "./src/delivery-routing.ts",
     "./delivery-vectors": "./src/delivery-vectors.test-support.ts",
+    "./l-test-host": "./src/l-test-host.test-support.ts",
     "./migration": "./src/migration.ts",
     "./switch": "./src/switch.ts"
   },

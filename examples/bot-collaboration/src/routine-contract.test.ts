@@ -1,6 +1,7 @@
 import { afterEach, expect, vi } from 'vitest';
 import { hash, taskId } from '@byok-sdk/server/execution-core';
-import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { openLTestHost, type LTestHost } from './l-test-host.test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
 import { stateOf } from './model';
@@ -8,14 +9,14 @@ import { createDefinition } from './routines';
 import { occurrenceView, routineVectors, routineView, type RoutineSubject } from './routine-vectors.test-support';
 
 // #793 D2f-1: the routine vectors on the K8 L Host. Only the Bot Host and its K4 core read the test clock.
-const opened: Array<{ fixture: TestHost; bot: BotCollaboration }> = [];
+const opened: Array<{ fixture: LTestHost; bot: BotCollaboration }> = [];
 afterEach(async () => {
   for (const { fixture, bot } of opened.splice(0).reverse()) { await bot.close(); await fixture.close(); }
 });
 
 async function ledgerSubject(): Promise<RoutineSubject> {
   let clock = Date.now(), bot: BotCollaboration | undefined;
-  const fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
+  const fixture = await openLTestHost({ ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', execution: template(fixture.deviceId), connector: async () => null,
     now: () => clock });
   opened.push({ fixture, bot });
