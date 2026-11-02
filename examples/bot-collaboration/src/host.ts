@@ -22,7 +22,7 @@ import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCale
 import { DEFAULT_AUTONOMY, autonomyOf, recordWouldDo, wouldDoRows, type Autonomy, type AutonomyGate, type WouldDo } from './rules/autonomy';
 import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority';
 
-import { applyManagement, updateBot, writeSnapshotBot } from './team';
+import { applyManagement, applyModels, updateBot, writeSnapshotBot } from './team';
 import { botCompactVeto } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
 import { advanceRoomsAndTurns, memberMentions, roomMessageProjection, roomMessages, type MemberMentions, type Mentions, type RoomMessage } from './rooms';
@@ -48,7 +48,10 @@ export interface BotOptions {
   owner?: string;
   /** Optional Host IM outbox. Push stays off until an owner enables a route. */
   channel?: ChannelOptions;
-  /** Host-owned model templates. New Bots stay on the selected template's device. */
+  /**
+   * Host-owned model templates. New Bots stay on the selected template's device. Construction and `setModels` apply each
+   * template by model name to every unarchived Bot. A Bot whose model has none keeps its Turns blocked (`Unavailable model`).
+   */
   models?: Record<string, ExecutionTemplate>;
   /** Host-owned read-only toolset IDs. Default empty. The Host's local tool server must enforce read-only behavior. */
   readOnlyToolsets?: readonly string[];
@@ -256,8 +259,6 @@ export class BotCollaboration {
     if (team.external && !!team.external.persona !== (options.persona === 'external')) {
       throw new Error(`This ledger has ${team.external.persona ? 'Host' : 'K8'} persona projections`);
     }
-    // An archived Bot never runs a new Turn, so its stored template is not "current".
-    for (const bot of Object.values(team.bots)) if (!bot.archived) admitBotToolsets(bot.execution, options.readOnlyToolsets);
     // Recovery can resubmit a frozen older generation after the Bot changes models.
     // Historical settled executions remain readable; only outstanding work must be admitted.
     for (const intent of Object.values(persisted.intents)) {
@@ -324,15 +325,33 @@ export class BotCollaboration {
       const state = stateOf(s.application);
       if (options.team === 'external') {
         state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}) };
-        return;
+      } else {
+        state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
+          model: Object.keys(this.models())[0]!, mainBot: true, archived: false, autonomy: DEFAULT_AUTONOMY,
+          revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
+          execution: structuredClone(options.execution) };
       }
-      state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
-        model: Object.keys(this.models())[0]!, mainBot: true, archived: false, autonomy: DEFAULT_AUTONOMY,
-        revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
-        execution: structuredClone(options.execution) };
+      // #1357: the stored templates become the Host's current ones. Frozen intents keep the execution they froze with.
+      applyModels(state, this.models(), options.readOnlyToolsets ?? []);
     });
   }
   private models(): Record<string, ExecutionTemplate> { return this.options.models ?? { default: this.options.execution }; }
+  /**
+   * Replaces the Host's model templates at run time (#1357), for example after a device key changed. Each unarchived Bot takes
+   * the template of its model; a Turn frozen before keeps its execution. No profile revision, readiness or persona projection
+   * changes. A Bot whose model is missing keeps its Turns blocked until a later call provides it. A template that fails the
+   * toolset check, or model names that the outcome schema cannot take, refuse the call and change nothing.
+   */
+  setModels(models: Readonly<Record<string, ExecutionTemplate>>): Promise<void> {
+    return this.exclusive(async () => {
+      const next = structuredClone(models) as Record<string, ExecutionTemplate>;
+      // The model names enter the Main Bot's create_bot and update_bot schemas, as at construction.
+      outcomeSchema(this.options.botId, stateOf({}), undefined, Object.keys(next), [], this.offer);
+      this.write(s => applyModels(stateOf(s.application), next, this.options.readOnlyToolsets ?? []));
+      this.options.models = next;
+      await this.process();
+    });
+  }
   snapshot(): CollaborationState { return stateOf(this.ledger.snapshot().application); }
   /**
    * Every K8 write of this Host, except the switch steps (#975). It refuses while the domain is exported, after the work,

@@ -1,7 +1,12 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
+import { HostLedger, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import type { BotCollaboration } from './host';
+import { BotCollaboration } from './host';
+import { botCompactVeto } from './compaction';
 import { stateOf } from './model';
 import { CommitConflict } from './rules/commit';
 import { TeamModeError, type TeamSnapshot, type TeamSnapshotBot } from './rules/team';
@@ -11,7 +16,13 @@ import { openTeam, type TestTeam } from './team.test-support';
 import { seedCollaboration } from './commit-vectors.test-support';
 
 let fixture: TestTeam | undefined;
-afterEach(async () => { await fixture?.close(); fixture = undefined; });
+let persona: { root: string; ledger: HostLedger; host?: BotCollaboration } | undefined;
+afterEach(async () => {
+  await fixture?.close(); fixture = undefined;
+  await persona?.host?.close(); persona?.ledger.close();
+  if (persona) rmSync(persona.root, { recursive: true, force: true });
+  persona = undefined;
+});
 
 const INJECTED: ContextTurn[] = [
   { id: 'cloud-1', root: 'cloud-1', source: 'user', request: 'Injected request', hop: 0, status: 'succeeded', conclusion: 'succeeded', outcomeSummary: [] },
@@ -102,4 +113,77 @@ it('refuses create_bot, update_bot and delete_bot from an outcome in external te
   expect(refused).toEqual(Object.fromEntries(['create_bot', 'update_bot', 'delete_bot'].map(kind => [kind, `external_team: ${kind} is owned by the team authority`])));
   expect(state.team.bots.main).toMatchObject({ archived: false, persona: '', revision: '1' });
   expect(state.team.notes.map(note => note.text)).toEqual(['Note']);
+});
+
+/** #1357: Host persona mode on a fake server. No task ever ends, so the first frozen Turn of a Bot stays in flight. */
+const FAKE = {
+  executions: { submit: async () => ({}) },
+  tasks: { offer: async () => undefined, deviceTerminal: async () => undefined, attempt: async () => undefined, cancel: async () => undefined },
+  wakes: { pending: async () => [], schedule: async () => undefined, cancel: async () => undefined },
+  enqueueAgentHomeProjection: async () => undefined, readAgentHomeProjection: async () => undefined,
+} as unknown as ExecutionServer;
+const OLD = { ...template('device'), payload: { ...template('device').payload, requiredToolsets: [] } }, NEW = { ...template('other-device'), payload: { ...template('other-device').payload, requiredToolsets: ['docs'] } };
+const HOST_MAIN = { ...MAIN, profileRevision: '5' }, HELPER = bot('helper', { model: 'spare', profileRevision: '1' });
+function personaHost(models: Record<string, ExecutionTemplate>): BotCollaboration {
+  if (!persona) {
+    const root = mkdtempSync(join(tmpdir(), 'k8-models-'));
+    persona = { root, ledger: new HostLedger(join(root, 'host.sqlite'), 'tenant', { compactVeto: botCompactVeto }) };
+  }
+  persona.host = undefined;
+  return persona.host = new BotCollaboration(FAKE as never, persona.ledger, { botId: 'main', execution: OLD, connector: async () => null,
+    team: 'external', persona: 'external', models, readOnlyToolsets: ['docs'] });
+}
+async function restart(models: Record<string, ExecutionTemplate>): Promise<BotCollaboration> {
+  await persona!.host!.close();
+  return personaHost(models);
+}
+const frozen = (host: BotCollaboration, turnId: string) => host.core.intent(turnId)?.execution;
+const profile = (host: BotCollaboration, id: string) => { const { execution: _, ...rest } = host.snapshot().team.bots[id]!; return rest; };
+
+it('#1357: setModels re-projects the templates, a later freeze uses them, a frozen Turn keeps its own, and no profile changes', async () => {
+  const host = personaHost({ default: OLD });
+  await host.applyTeam(snapshot(1, HOST_MAIN));
+  await host.personaReady('main', '5');
+  const before = profile(host, 'main'), first = await host.input('k1', 'Hello'), queued = await host.input('k2', 'Queued');
+  await host.setModels({ default: NEW });
+  const later = await host.input('k3', 'Later');
+  const agentRef = { agentId: 'main', profileRevision: '5' };
+  for (const turnId of [first, queued]) expect(frozen(host, turnId)).toMatchObject({ deviceId: 'device', payload: { agentRef, requiredToolsets: [] } });
+  expect(frozen(host, later)).toMatchObject({ deviceId: 'device', payload: { agentRef, requiredToolsets: ['docs'] } });
+  expect(profile(host, 'main')).toEqual(before);
+  expect(before).toMatchObject({ revision: '5', readyRevision: '5' });
+  expect(host.snapshot().team.homeOperations).toEqual([]);
+});
+
+it('#1357: refuses setModels with a template outside the read-only toolsets, and changes neither the state nor the models', async () => {
+  const host = personaHost({ default: OLD, spare: OLD });
+  await host.applyTeam(snapshot(1, HOST_MAIN, HELPER));
+  await host.personaReady('helper', '1');
+  const before = host.snapshot();
+  const bad = { ...OLD, payload: { ...OLD.payload, requiredToolsets: ['write'] } };
+  await expect(host.setModels({ default: NEW, other: bad })).rejects.toThrow('not declared read-only by the Host: write');
+  expect(host.snapshot()).toEqual(before);
+  // The models still name `spare`, so the helper freezes with its old template.
+  const turnId = await host.input('k1', 'Hello', 'helper');
+  expect(frozen(host, turnId)).toMatchObject({ deviceId: 'device', payload: { requiredToolsets: [] } });
+});
+
+it('#1357: a missing template holds only that Bot, a suspended one too, across setModels and a restart, until a call returns it', async () => {
+  let host = personaHost({ default: OLD, spare: OLD });
+  await host.applyTeam(snapshot(1, HOST_MAIN, HELPER));
+  await host.personaReady('main', '5'); await host.personaReady('helper', '1');
+  // #1319: a suspended Bot with no template is no reason to refuse setModels or the construction.
+  await host.applyTeam(snapshot(2, HOST_MAIN, { ...HELPER, participation: 'suspended' }));
+  await host.setModels({ default: OLD });
+  host = await restart({ default: NEW });
+  expect(host.snapshot().team.bots).toMatchObject({ main: { execution: { deviceId: 'device', payload: { requiredToolsets: ['docs'] } } },
+    helper: { execution: { deviceId: 'device', payload: { requiredToolsets: [] } } } });
+  await host.applyTeam(snapshot(3, HOST_MAIN, HELPER));
+  const held = await host.input('k1', 'Hello', 'helper'), other = await host.input('k2', 'Hello');
+  expect(host.snapshot().turns[held]).toMatchObject({ status: 'blocked', blockedReason: 'Unavailable model: spare' });
+  expect(frozen(host, held)).toBeUndefined();
+  expect(frozen(host, other)).toBeDefined();
+  await host.setModels({ default: NEW, spare: NEW });
+  expect(frozen(host, held)).toMatchObject({ deviceId: 'device', payload: { agentRef: { agentId: 'helper', profileRevision: '1' }, requiredToolsets: ['docs'] } });
+  expect(host.snapshot().turns[held]!.blockedReason).toBeUndefined();
 });

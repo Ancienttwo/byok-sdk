@@ -185,7 +185,6 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
       }
       await expect(settle(() => subject.commit(request(subject, ...team(2, main, { id: 'b2', persona: 'x'.repeat(70_000) })))))
         .rejects.toThrow('Team snapshot Bot projection is too large');
-      await expect(settle(() => subject.commit(request(subject, ...team(2, { ...main, model: 'absent' }))))).rejects.toThrow('Unavailable model');
       // #1319: participation is `suspended` or absent.
       await expect(settle(() => subject.commit(request(subject, ...team(2, main, { id: 'b2', participation: 'active' as never })))))
         .rejects.toThrow(/^Invalid team snapshot Bot$/);
@@ -196,6 +195,11 @@ export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSub
       const archived = await subject.stored();
       await expect(settle(() => subject.commit(request(subject, ...team(4, main, { id: 'b2' }))))).rejects.toThrow('An archived Bot cannot return');
       expect(await subject.stored()).toBe(archived);
+      // #1357: a profile change to a model with no template is stored. The Bot keeps its template, and the freeze holds its Turns.
+      const execution = (await subject.state()).team.bots.main!.execution;
+      await subject.commit(request(subject, ...team(4, { ...main, model: 'absent' })));
+      expect((await subject.state()).team.bots.main).toMatchObject({ model: 'absent', revision: '2',
+        execution: { ...execution, payload: { ...execution.payload, agentRef: { agentId: 'main', profileRevision: '2' } } } });
     });
 
     it('refuses a team snapshot for a local team', async () => {

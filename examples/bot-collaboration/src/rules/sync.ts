@@ -38,7 +38,7 @@ export interface SealedRoutineTemplate {
 /** A sealed routine Turn that cannot freeze ends `failed` with one of these reasons (#953). */
 export const SEALED_ROUTINE_TEMPLATE_MISSING = 'sealed_routine_template_missing';
 export const SEALED_ROUTINE_AGENT_CHANGED = 'sealed_routine_agent_changed';
-export interface SyncBot<E extends FreezeExecution> extends ContextBot { readonly revision: string; readonly execution: E }
+export interface SyncBot<E extends FreezeExecution> extends ContextBot { readonly revision: string; readonly model: string; readonly execution: E }
 /** The rows that the sync step reads and changes. */
 export interface SyncState<E extends FreezeExecution> extends ContextState, BotHistoryState {
   readonly turns: Readonly<Record<string, Turn>>;
@@ -186,6 +186,12 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     return undefined;
   }
   delete turn.profileFailure;
+  // #1357: the Host has no template of the Bot's model, for example after a device key was removed. Every Turn of the Bot,
+  // a sealed routine Turn too, waits here and freezes once the Host provides the template.
+  if (!options.models.includes(bot.model)) {
+    blockTurn(state, turn, `Unavailable model: ${bot.model}`, publish);
+    return undefined;
+  }
   if (turn.sealedRoutine) return freezeSealed(state, turn, turn.sealedRoutine, bot, options, publish);
   // Phase 2 of a history-mode sync: a Bot Turn freezes only with the history read before this transaction.
   const history = options.historyMode && turn.source !== 'room_slot' ? options.history : undefined;
@@ -232,6 +238,8 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
  * template or a Bot Agent that the template is not sealed for, so those end the Turn `failed`: a blocked routine Turn keeps
  * its occurrence open, and an open occurrence stops the version switch that the reseal needs. An outcome schema over
  * budget depends on the state, not on the version, so it blocks the Turn as for a plain one until the state shrinks.
+ * A missing execution template of the Bot's model (#1357) is a device state that a reseal cannot fix, so `syncTurn` blocks
+ * the Turn before this, until the Host provides the template.
  */
 function freezeSealed<E extends FreezeExecution, R extends ContextRoutine>(state: SyncState<E>, turn: Turn, routine: SealedRoutineRef,
   bot: SyncBot<E>, options: SyncOptions<R>, publish: Publish): SyncStep<E> | undefined {

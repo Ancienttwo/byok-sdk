@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Added (examples)** — K8 `BotCollaboration.setModels(models)` replaces the
+  Host's model templates at run time (#1357). Construction and `setModels`
+  apply each template by model name to every unarchived Bot, keeping its
+  device, and change no profile revision, readiness or persona projection.
+  A Turn that froze before keeps its execution. A restart now re-projects the
+  Host's templates onto existing Bots; before, a Bot kept its stored template.
+  In local team mode the Main Bot therefore runs `models[<first model>]` from
+  the first construction on, as `update_bot` already did at its first profile
+  change; without `models` nothing changes. Construction no longer checks the
+  stored templates against `readOnlyToolsets`, since they are replaced by the
+  checked current ones. A missing template of an existing Bot no longer
+  refuses a team snapshot, `update_bot`, construction or `setModels`: the Bot
+  keeps its stored template, and in K8 and H each of its Turns, a sealed
+  routine Turn too, blocks with `Unavailable model: <name>` before it freezes,
+  until the template returns. In H, a Bot whose model is not in the scope
+  config is now held instead of running its stored template. A new Bot still
+  needs a template.
+
 - **Added (examples)** — K8 exports `./l-test-host`
   (`src/l-test-host.test-support.ts`), an L test Host built only from the
   published packages: an embedded SQLite server, a paired daemon with a stub

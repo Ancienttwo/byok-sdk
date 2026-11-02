@@ -104,11 +104,11 @@ export function updateBot(state: CollaborationState, action: UpdateBotAction, mo
   const bot = activeBot(state.team, action.botId);
   if (!['name', 'role', 'persona', 'model'].some(k => k in action)) throw new Error('An update must change a Bot field');
   const model = action.model ?? bot.model, base = models[model];
-  if (!base) throw new Error('Unavailable model');
-  admitBotToolsets(base, readOnlyToolsets);
+  if (base) admitBotToolsets(base, readOnlyToolsets);
   const revision = (BigInt(bot.revision) + 1n).toString();
   if (BigInt(revision) > 9223372036854775807n) throw new Error('Profile revision limit');
-  const execution = structuredClone(base);
+  // #1357: without a template the Bot keeps its stored one, and the freeze holds its Turns until the Host provides one.
+  const execution = structuredClone(base ?? bot.execution);
   // Model selection cannot move the Bot home to another device.
   execution.deviceId = bot.execution.deviceId;
   execution.payload.agentRef = { agentId: bot.id, profileRevision: revision };
@@ -141,6 +141,23 @@ export function writeSnapshotBot(state: CollaborationState, row: TeamSnapshotBot
   projection(state, created);
 }
 /**
+ * Re-projects the Host's execution templates onto each unarchived Bot, a suspended one too (#1357). A Bot keeps its device,
+ * and its agentRef follows its profile. A Bot whose model has no template keeps its stored one, and the freeze holds its Turns
+ * with `Unavailable model` until the Host provides it. No profile field changes and no persona projection is queued.
+ * A template that fails the toolset check refuses the whole call before any write.
+ */
+export function applyModels(state: CollaborationState, models: Readonly<Record<string, ExecutionTemplate>>, readOnlyToolsets: readonly string[]): void {
+  for (const model of Object.values(models)) admitBotToolsets(model, readOnlyToolsets);
+  for (const bot of Object.values(state.team.bots)) {
+    const base = models[bot.model];
+    if (bot.archived || !base) continue;
+    const execution = structuredClone(base);
+    execution.deviceId = bot.execution.deviceId;
+    execution.payload.agentRef = { agentId: bot.id, profileRevision: bot.revision };
+    bot.execution = execution;
+  }
+}
+/**
  * Host persona mode (#879). The revision never goes back, and a profile change needs a newer revision. A newer revision
  * keeps `readyRevision` at the last revision that the Host reported ready: the Bot stays a delegate target, and its
  * Turns wait for `persona_ready` of the new revision.
@@ -156,10 +173,11 @@ function writeHostProfile(state: CollaborationState, bot: BotProfile | undefined
       return;
     }
   }
+  // A new Bot needs a template: its device comes from it. An existing Bot keeps its stored one, as in `updateBot` (#1357).
   const base = models[row.model];
-  if (!base) throw new Error('Unavailable model');
-  admitBotToolsets(base, readOnlyToolsets);
-  const execution = structuredClone(base);
+  if (base) admitBotToolsets(base, readOnlyToolsets);
+  else if (!bot) throw new Error('Unavailable model');
+  const execution = structuredClone(base ?? bot!.execution);
   // Model selection cannot move the Bot home to another device.
   if (bot) execution.deviceId = bot.execution.deviceId;
   execution.payload.agentRef = { agentId: row.id, profileRevision: revision };

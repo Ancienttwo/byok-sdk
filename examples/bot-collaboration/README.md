@@ -789,6 +789,21 @@ again when applying each action. Creation offers three local Bot slots and one
 local room slot. A room can use those Bot slots in the same outcome. Model ids
 come from `BotOptions.models`. The default model id is `default`. Each model
 has a Host-owned execution template. A Bot update cannot move its device.
+The Host can replace the templates at run time with `setModels(models)`, for
+example after a device key changed (#1357). Construction and `setModels` apply
+each template by model name to every unarchived Bot, a suspended one too. The
+Bot keeps its device and its profile; its agentRef follows its profile
+revision. No profile revision, readiness or persona projection changes. A Turn
+that froze before keeps the execution it froze with, also while it waits in
+the K4 FIFO. A template outside `readOnlyToolsets` refuses the call, which then
+changes nothing. A Bot whose model has no template keeps its stored template,
+and each of its Turns, a sealed routine Turn too, blocks with
+`Unavailable model: <name>` before it freezes (`blocked:<turnId>`). It freezes
+once a later `setModels` or restart provides the template. No write entry
+refuses a missing template of an existing Bot: a snapshot or `update_bot` that
+names such a model stores the profile and keeps the stored template. A new Bot
+still needs a template, since its device comes from it. A sealed routine's
+template is the sealed copy and is not re-projected.
 Profiles cap the active team at 24 Bots. Team notes cap at 20 entries of 300
 characters. Every team Bot receives these notes. Other Bots' private turns and
 persona text do not enter its ContextPack. No cross-home memory read occurs.
@@ -1363,7 +1378,9 @@ const models = {
 
 A `create_bot` action selects `model: 'remote'`. The Host copies that
 execution template's device into the Bot profile. A model update keeps the
-Bot's device. This is creation placement, not home migration.
+Bot's device. This is creation placement, not home migration. A changed
+`remote` template, passed to `setModels` or at a restart, is re-projected onto
+each Bot of that model on its own device; it does not move a Bot either.
 Install `createBotPersonaProjection()` on both daemons. Wait for exact persona
 readback before dispatch. Device B needs SDK daemon and runtime code, with
 its own credential store and Agent homes. It needs no collaboration Host.
