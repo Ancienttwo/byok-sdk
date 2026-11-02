@@ -133,6 +133,12 @@ export interface BotOptions {
    */
   persona?: 'external';
   /**
+   * External rooms mode (#1321), only with `team: 'external'`. Each team snapshot carries the authority's whole room list,
+   * and a room that it no longer lists is archived for good. `createRoom`, `updateRoom`, `setMemberMentions` and the Main Bot's
+   * `create_room` and `update_room` refuse with `external_rooms`. The ledger stores the mode, so a restart cannot change it.
+   */
+  rooms?: 'external';
+  /**
    * Outcome offer (#881): allowlists of actions by Turn kind, the IANA time zones of routine actions, and the
    * `confirmable_action` branches. Each field only narrows the default. It applies to Turns frozen after construction.
    */
@@ -270,6 +276,12 @@ export class BotCollaboration {
     if (team.external && !!team.external.persona !== (options.persona === 'external')) {
       throw new Error(`This ledger has ${team.external.persona ? 'Host' : 'K8'} persona projections`);
     }
+    if (options.rooms !== undefined && (options.rooms !== 'external' || options.team !== 'external')) {
+      throw new Error("The external rooms mode needs team: 'external'");
+    }
+    if (team.external && !!team.external.rooms !== (options.rooms === 'external')) {
+      throw new Error(`This ledger has ${team.external.rooms ? 'external' : 'local'} rooms`);
+    }
     // Recovery can resubmit a frozen older generation after the Bot changes models.
     // Historical settled executions remain readable; only outstanding work must be admitted.
     for (const intent of Object.values(persisted.intents)) {
@@ -342,7 +354,8 @@ export class BotCollaboration {
     if (!stateOf(persisted.application).switchExport) ledger.transaction(s => {
       const state = stateOf(s.application);
       if (options.team === 'external') {
-        state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}) };
+        state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}),
+          ...(options.rooms === 'external' ? { rooms: true as const } : {}) };
       } else {
         state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
           model: Object.keys(this.models())[0]!, mainBot: true, archived: false, autonomy: DEFAULT_AUTONOMY,
@@ -810,6 +823,16 @@ export class BotCollaboration {
     await this.exclusive(async () => {
       this.ownerOnly(by, 'setMemberMentions', roomId);
       this.commitKeyless({ kind: 'set_room_member_mentions', roomId, memberMentions: value });
+      await this.process();
+    });
+  }
+  /**
+   * Owner API (#1321): create room `roomId` with no model run. The command id comes from the room id, so the same id with
+   * the same fields replays, and other fields are an identity conflict.
+   */
+  async createRoom(roomId: string, fields: RoomFields): Promise<void> {
+    await this.exclusive(async () => {
+      this.commitOwner(hash(['create_room', roomId]), { kind: 'create_room', roomId, fields });
       await this.process();
     });
   }

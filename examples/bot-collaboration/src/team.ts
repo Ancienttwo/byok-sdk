@@ -7,7 +7,7 @@ import { roomFields, roomVisibility } from './rules/rooms';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
 import { DEFAULT_AUTONOMY } from './rules/autonomy';
-import { activeBot, admitBotToolsets, archiveBot, inactive, profileProjection, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
+import { activeBot, admitBotToolsets, archiveBot, inactive, profileProjection, refuseExternalRooms, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
 
 export { activeBot, admitBotToolsets, inactive, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
 export const TEAM_NOTE_LIMIT = 20;
@@ -189,8 +189,9 @@ export function applyManagement(state: CollaborationState, actor: string, taskId
   models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets: readonly string[] = []): void {
   const team = state.team, local: Record<string, string> = {};
   const managed = (kind: string, work: () => void) => accept(kind, () => { requireMain(team, actor); work(); });
-  // T3: the team authority owns the Bots. Rooms and team notes stay local.
+  // T3: the team authority owns the Bots. Team notes stay local, and rooms too unless it owns them (#1321).
   const bots = (kind: string, work: () => void) => managed(kind, () => { refuseExternalTeam(team, kind); work(); });
+  const rooms = (kind: string, work: () => void) => managed(kind, () => { refuseExternalRooms(team, kind); work(); });
   outcome.create_bot?.forEach(action => bots('create_bot', () => { local[action.localId] = createBot(state, taskId, action, models, readOnlyToolsets).id; }));
   outcome.update_bot?.forEach(action => bots('update_bot', () => updateBot(state, action, models, readOnlyToolsets)));
   outcome.delete_bot?.forEach(action => bots('delete_bot', () => archiveBot(team, action.botId)));
@@ -198,13 +199,13 @@ export function applyManagement(state: CollaborationState, actor: string, taskId
     ...(fields.members ? { members: fields.members.map(id => local[id] ?? id) } : {}),
     ...(fields.admin ? { admin: local[fields.admin] ?? fields.admin } : {}),
   });
-  outcome.create_room?.forEach(action => managed('create_room', () => {
+  outcome.create_room?.forEach(action => rooms('create_room', () => {
     if (!NEW_ROOMS.includes(action.localId as typeof NEW_ROOMS[number])) throw new Error('Unknown local room slot');
     const id = hash([taskId, action.localId]);
     if (team.rooms[id]) throw new Error('Duplicate local room slot');
     team.rooms[id] = { id, ...roomFields(team, resolve(action) as RoomFields), messages: [] };
   }));
-  outcome.update_room?.forEach(action => managed('update_room', () => {
+  outcome.update_room?.forEach(action => rooms('update_room', () => {
     const room = team.rooms[action.roomId];
     if (!room) throw new Error('Room not found');
     if (!['name', 'members', 'admin', 'mode', 'announcement'].some(k => k in action)) throw new Error('An update must change a room field');

@@ -22,7 +22,7 @@ export { TEAM_NOTE_LIMIT } from './team';
 export { DEFAULT_AUTONOMY, autonomyOf, wouldDoRows, type Autonomy, type WouldDo, type WouldDoAction } from './rules/autonomy';
 export { inboundDisposition, inboundDispositions, type InboundDisposition, type InboundRow, type InboundState } from './rules/inbound';
 export { DEVICE_CONCURRENCY } from './rules/priority';
-export { TeamModeError, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot } from './rules/team';
+export { TEAM_ROOM_LIMIT, TeamModeError, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot, type TeamSnapshotRoom } from './rules/team';
 export { createBotPersonaProjection } from './persona';
 export { DeviceModeError, DeviceSwitchingError, type DeviceTopology, type SwitchWork } from './topology';
 export { SWITCH_EXPORT_VERSION, SWITCH_SECTIONS, SwitchExportError, sealSwitchExport, switchAttempts, verifySwitchExport, type ArchivedRecord, type ExecutionRecord, type IntentRecord, type MessageReceipt,

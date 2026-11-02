@@ -1,9 +1,9 @@
 import type { RoomFields } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn';
-import { activeBot, archiveBot, inactive, profileRevision, refuseExternalTeam, refuseSuspended, requireMain, teamSnapshot, TeamModeError, type ExternalTeam, type TeamSnapshot,
-  type TeamSnapshotBot } from './team';
-import { roomInput, setMemberMentions, updateRoom, type MemberMentions, type Mentions } from './rooms';
+import { activeBot, archiveBot, inactive, profileRevision, refuseExternalRooms, refuseExternalTeam, refuseSuspended, requireMain, roomId, teamSnapshot, TeamModeError,
+  type ExternalTeam, type TeamSnapshot, type TeamSnapshotBot } from './team';
+import { applyRoomSnapshot, createRoom, roomInput, setMemberMentions, updateRoom, type MemberMentions, type Mentions } from './rooms';
 import { sealBatchForCancel, type InputFields } from './coalesce';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
@@ -42,7 +42,9 @@ export type KeyedCommand =
   /** K4 callback: the Bot routine occurrence hook. */
   | { kind: 'occurrence'; key: string }
   /** External team mode (#739 Q4c): the authority's team snapshot. The command id comes from its team revision. */
-  | { kind: 'team_snapshot'; snapshot: TeamSnapshot };
+  | { kind: 'team_snapshot'; snapshot: TeamSnapshot }
+  /** Owner room (#1321). The Host gives the room id, and the command id comes from it. */
+  | { kind: 'create_room'; roomId: string; fields: RoomFields };
 /** The same shape as the channel `Conversation`. */
 export interface Conversation { kind: 'direct' | 'group'; id: string }
 /**
@@ -200,6 +202,8 @@ export function commandEvidence(command: KeyedCommand): Json {
       contentHash: command.message.payload.contentHash };
     case 'occurrence': return { kind: command.kind, key: command.key };
     case 'team_snapshot': return { kind: command.kind, snapshot: json(teamSnapshot(command.snapshot)) };
+    case 'create_room': return { kind: command.kind, roomId: command.roomId, name: command.fields.name, members: [...command.fields.members],
+      admin: command.fields.admin ?? null, announcement: command.fields.announcement ?? '' };
   }
 }
 const mentionsJson = (value: Mentions): Json => value === 'all' ? 'all' : Array.isArray(value) ? [...value] : null;
@@ -218,6 +222,7 @@ function conflictMessage(state: CommandState, command: KeyedCommand): string {
     case 'message': return 'message_conflict';
     case 'occurrence': return 'Occurrence identity conflict';
     case 'team_snapshot': return 'Team snapshot identity conflict';
+    case 'create_room': return 'Room identity conflict';
   }
 }
 function need<T>(port: T | undefined, kind: string): T {
@@ -290,14 +295,20 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       need(ports.occurrence, command.kind)();
       return accepted();
     case 'team_snapshot': return applyTeamSnapshot(state, teamSnapshot(command.snapshot), ports);
+    case 'create_room':
+      refuseExternalRooms(state.team, 'createRoom');
+      createRoom(state.team, roomId(command.roomId), command.fields);
+      return accepted();
     case 'set_main_bot':
       refuseExternalTeam(state.team, 'setMainBot');
       activeBot(state.team, command.botId).mainBot = command.mainBot;
       return accepted();
     case 'update_room':
+      refuseExternalRooms(state.team, 'updateRoom');
       updateRoom(state.team, command.roomId, command.update);
       return accepted();
     case 'set_room_member_mentions':
+      refuseExternalRooms(state.team, 'setMemberMentions');
       setMemberMentions(state.team, command.roomId, command.memberMentions);
       return accepted();
     case 'retry_persona': {
@@ -364,8 +375,9 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
   }
 }
 /**
- * T2–T5: a newer snapshot archives each missing Bot, then writes each listed Bot and its Main Bot flag.
- * A snapshot that is not newer is refused with `stale_team`. A replay of an applied snapshot never gets here.
+ * T2–T5: a newer snapshot archives each missing Bot, then writes each listed Bot and its Main Bot flag. In the external rooms
+ * mode (#1321) it then writes the rooms. A snapshot that is not newer is refused with `stale_team`. A replay of an applied
+ * snapshot never gets here.
  */
 function applyTeamSnapshot(state: CommandState, snapshot: TeamSnapshot, ports: CommandPorts): Disposition {
   const team = state.team, external = team.external;
@@ -379,6 +391,9 @@ function applyTeamSnapshot(state: CommandState, snapshot: TeamSnapshot, ports: C
   if (snapshot.bots.some(bot => (bot.profileRevision !== undefined) !== !!external.persona)) {
     throw new Error(external.persona ? 'Each snapshot Bot needs a profileRevision in the Host persona mode' : 'profileRevision needs the Host persona mode');
   }
+  if (!snapshot.rooms !== !external.rooms) throw new Error(external.rooms ? 'A team snapshot needs rooms in the external rooms mode' : 'Snapshot rooms need the external rooms mode');
+  // A room archive is permanent too.
+  if (snapshot.rooms?.some(room => team.rooms[room.id]?.archived)) throw new Error('An archived room cannot return');
   const listed = new Set(snapshot.bots.map(bot => bot.id));
   for (const bot of Object.values(team.bots)) if (!bot.archived && !listed.has(bot.id)) archiveBot(team, bot.id);
   const write = need(ports.teamBot, 'team_snapshot');
@@ -391,6 +406,7 @@ function applyTeamSnapshot(state: CommandState, snapshot: TeamSnapshot, ports: C
     if (bot.participation) row.participation = bot.participation;
     else delete row.participation;
   }
+  if (snapshot.rooms) applyRoomSnapshot(team, snapshot.rooms);
   external.revision = snapshot.revision;
   return accepted();
 }

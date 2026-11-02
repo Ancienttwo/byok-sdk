@@ -23,7 +23,7 @@ export interface ContextState extends DelegationView {
     bots: Readonly<Record<string, ContextBot>>; notes: Array<{ id: string; text: string }>;
     homeOperations: ReadonlyArray<{ readonly botId: string; readonly status: string }>;
     /** External team mode: the team authority owns the Bots (#739 Q4c). */
-    readonly external?: { readonly revision: number };
+    readonly external?: { readonly revision: number; readonly rooms?: true };
   };
 }
 /** The actions of an ordinary Bot Turn, and the extra actions of an owner Main Bot Turn. A room seat always has speech. */
@@ -191,8 +191,12 @@ export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, m
           create_bot: f.createBot({ localIds: NEW_BOTS, models: models as unknown as NonEmptyIds }),
           update_bot: f.updateBot({ botIds, models: models as unknown as NonEmptyIds }), delete_bot: f.deleteBot({ botIds }),
         }),
-        create_room: f.createRoom({ localIds: NEW_ROOMS, members: memberIds }), team_note: f.teamNote(),
-        ...(Object.keys(state.team.rooms).length ? { update_room: f.updateRoom({ roomIds: Object.keys(state.team.rooms) as unknown as NonEmptyIds, members: memberIds }) } : {}),
+        // #1321: in the external rooms mode, the authority owns the rooms, so these two actions are not offered.
+        ...(state.team.external?.rooms ? {} : {
+          create_room: f.createRoom({ localIds: NEW_ROOMS, members: memberIds }),
+          ...(Object.keys(state.team.rooms).length ? { update_room: f.updateRoom({ roomIds: Object.keys(state.team.rooms) as unknown as NonEmptyIds, members: memberIds }) } : {}),
+        }),
+        team_note: f.teamNote(),
         ...(open.length ? { cancel_delegation: f.cancelDelegation({ delegationIds: open as unknown as NonEmptyIds }) } : {}),
       }, offer?.actions?.main));
     }

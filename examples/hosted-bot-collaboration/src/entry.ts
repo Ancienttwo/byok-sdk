@@ -6,6 +6,7 @@ import { CommitConflict, type CommitResult } from '@byok-sdk/example-bot-collabo
 import type { HostedCollaborationStore } from './store';
 
 type RoomInputCommand = Extract<Command, { kind: 'room_input' }>;
+type CreateRoomCommand = Extract<Command, { kind: 'create_room' }>;
 type PushRouteCommand = Extract<KeylessCommand, { kind: 'enable_push_route' }>;
 /** A K8 `update_routine` action, as the store's owner API takes it. */
 type UpdateRoutineAction = Parameters<HostedCollaborationStore['updateRoutine']>[2];
@@ -49,7 +50,7 @@ export interface CommandEntryOptions<C> {
  * pass. A commit that adds work (a Turn that is not concluded, a room seat, or an input batch or an input to one) for a Bot
  * whose device has no active H binding rolls back with `DeviceBindingError` (§55a, the entry half).
  *
- * L trusts the caller of `setMainBot`, `updateRoom`, `retryPersona` and its routine API; every call here comes from a
+ * L trusts the caller of `setMainBot`, `createRoom`, `updateRoom`, `retryPersona` and its routine API; every call here comes from a
  * request, so they need the owner too. The Host's own calls (`personaReady`, a team snapshot, retention, compaction, device
  * binding) stay store methods.
  */
@@ -118,6 +119,11 @@ export class HostedCommandEntry<C> {
   async setMainBot(credential: C, botId: string, mainBot: boolean): Promise<void> {
     const { scope } = await this.owned(credential, 'setMainBot', botId);
     await this.keyless(scope, { kind: 'set_main_bot', botId, mainBot });
+  }
+  /** Owner room with a Host room id (#1321): the same id with the same fields replays, other fields are an identity conflict. */
+  async createRoom(credential: C, roomId: string, fields: CreateRoomCommand['fields']): Promise<void> {
+    const { scope } = await this.owned(credential, 'createRoom', roomId);
+    await this.commit(scope, hash(['create_room', roomId]), { kind: 'create_room', roomId, fields });
   }
   async updateRoom(credential: C, roomId: string, update: Extract<KeylessCommand, { kind: 'update_room' }>['update']): Promise<void> {
     const { scope } = await this.owned(credential, 'updateRoom', roomId);
