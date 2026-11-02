@@ -126,34 +126,48 @@ node:crypto
 ## Layer 3: shared vectors
 
 The roots are the package entries `./test-support`, `./retention-vectors`,
-`./routine-vectors` and `./delivery-vectors`. Each runs the same cases against a
-Host's own store, as the hosted example does on Postgres. The vectors need
-layers 1 and 2: `CollaborationState`, the outcome schema and the routine rules
-come from L files. They also import `hash` and `taskId` from the K4 root, and
-they run on vitest.
+`./routine-vectors`, `./delivery-vectors` and `./l-test-host`. Each runs the
+same cases against a Host's own store, as the hosted example does on Postgres.
+The vectors need layers 1 and 2: `CollaborationState`, the outcome schema and
+the routine rules come from L files. They also import `hash` and `taskId` from
+the K4 root, and they run on vitest.
 
 The commit vectors import only `template` from K4 `test-support`, and the test
-holds them to that one name. Do not copy K4 `src/test-support.ts`. It is the
-SDK repository's real server and daemon smoke helper. It loads a test
-enrollment store from `scripts/testing/`, whose types come from the client
-package source, and a stub runtime adapter from the basic example. Resolve
-`@byok-sdk/example-host-execution-core/test-support` to a module of your own
-instead. Copy the `policy` constant and the `template(deviceId, agentId =
-'main')` function from `examples/host-execution-core/src/test-support.ts` into
-it. They need only `AgentEgressPolicy` from `@byok-sdk/client` and
-`ExecutionTemplate` from `@byok-sdk/server/execution-core`, so the module
-typechecks against the published packages. Keep the returned value the same as
-the example's.
+holds them to that one name. Resolve
+`@byok-sdk/example-host-execution-core/test-support` to a module of your own.
+Copy the `policy` constant and the `template(deviceId, agentId = 'main')`
+function from `examples/host-execution-core/src/test-support.ts` into it. They
+need only `AgentEgressPolicy` from `@byok-sdk/client` and `ExecutionTemplate`
+from `@byok-sdk/server/execution-core`, so the module typechecks against the
+published packages. Keep the returned value the same as the example's.
+
+The routine and delivery vectors need a running L Host. Vendor
+`src/l-test-host.test-support.ts`: with the published packages only, it starts
+an embedded SQLite server and a paired daemon, opens the `HostLedger`, and runs
+a stub runtime that submits the result document. Write your own subjects after
+`src/routine-contract.test.ts` and `src/delivery-contract.test.ts`, on
+`openLTestHost`. Its daemon admits only the egress policy revision of the
+copied `template`, `k4-v1`, so keep the two the same.
 
 ```vendor vectors
 src/commit-vectors.test-support.ts
 src/delivery-vectors.test-support.ts
+src/l-test-host.test-support.ts
 src/retention-vectors.test-support.ts
 src/routine-vectors.test-support.ts
+@byok-sdk/client: AgentEgressPolicy Daemon DeviceCredentialBackend RuntimeAdapter RuntimeAdapterPrepareInput RuntimeAdapterPrepareResult RuntimeDetectResult RuntimeDisposalFailure RuntimeEnvironment RuntimeOperationStartInput Session buildRuntimeEnvironment createDaemonWithAdapters freezeRuntimeAdapterDescriptor
 @byok-sdk/core
 @byok-sdk/example-host-execution-core/test-support: template
 @byok-sdk/protocol
+@byok-sdk/server: CreateByokServerOptions DueWake createByokServer
 @byok-sdk/server/execution-core
+@hono/node-server: serve
+node:child_process
+node:crypto
+node:fs/promises
+node:os
+node:path
+node:readline
 vitest
 ```
 
