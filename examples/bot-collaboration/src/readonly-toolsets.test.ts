@@ -18,7 +18,7 @@ it('allows a Host-declared read-only toolset on a chat turn and owns its policy/
   expect(bot.core.intent(id)?.execution.payload.requiredToolsets).toEqual(['market.read']);
 });
 
-it('rejects undeclared toolsets in model templates and persisted Bot executions', async () => {
+it('rejects undeclared toolsets in model templates, and replaces a persisted Bot execution with the admitted template', async () => {
   fixture = await openHost({ ledgerOptions: { compactVeto: botCompactVeto } });
   const execution = template(fixture.deviceId);
   const unsafe = structuredClone(execution); unsafe.payload.requiredToolsets = ['market.trade'];
@@ -27,7 +27,9 @@ it('rejects undeclared toolsets in model templates and persisted Bot executions'
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
   await bot.close(); bot = undefined;
   fixture.ledger.transaction(s => { stateOf(s.application).team.bots.main!.execution = unsafe; });
-  expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, options)).toThrow('not declared read-only');
+  // #1357: the reopen re-projects the current template, which the construction admitted, over the stored one.
+  bot = new BotCollaboration(fixture.server, fixture.ledger, options);
+  expect(bot.snapshot().team.bots.main!.execution).toEqual(execution);
 });
 
 import { createBot, updateBot } from './team';
@@ -102,7 +104,7 @@ it('refuses an initial template with required toolsets when the Host declares no
     .toThrow('not declared read-only');
 });
 
-it('checks only non-archived Bot templates on reopen', async () => {
+it('re-projects only non-archived Bot templates on reopen', async () => {
   fixture = await openHost({ ledgerOptions: { compactVeto: botCompactVeto } });
   const options = { botId: 'main', execution: template(fixture.deviceId), connector: async () => ({}), readOnlyToolsets: ['market.read'] };
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
@@ -114,8 +116,10 @@ it('checks only non-archived Bot templates on reopen', async () => {
   retired.execution.payload.requiredToolsets = ['market.trade'];
   fixture.ledger.transaction(s => { stateOf(s.application).team.bots.retired = retired; });
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
-  expect(bot.snapshot().team.bots.retired!.archived).toBe(true);
+  expect(bot.snapshot().team.bots.retired).toEqual(retired);
   await bot.close(); bot = undefined;
   fixture.ledger.transaction(s => { stateOf(s.application).team.bots.retired!.archived = false; });
-  expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, options)).toThrow('not declared read-only');
+  bot = new BotCollaboration(fixture.server, fixture.ledger, options);
+  expect(bot.snapshot().team.bots.retired!.execution).toEqual({ ...options.execution,
+    payload: { ...options.execution.payload, agentRef: { agentId: 'retired', profileRevision: retired.revision } } });
 });
