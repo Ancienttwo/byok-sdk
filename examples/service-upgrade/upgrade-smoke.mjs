@@ -169,6 +169,11 @@ async function smoke(owner, server, payloads) {
 async function diagnose(variant) {
   const { stdout, stderr } = await run([agentCli, 'status', '--config', variant.config]);
   console.log(`--- ${variant.owner} status\n${stdout}${stderr}`);
+  if (isWindows && variant.owner === 'app') {
+    // The `user` scope service's stop program: the SDK reports only its exit status.
+    const stop = await run([installer, 'stop-daemon', '--config', variant.config, '--install-root', variant.installRoot]);
+    console.log(`--- app stop-daemon exit ${stop.code}\n${stop.stdout}${stop.stderr}`);
+  }
   const logDir = path.join(variant.storeDir, 'service-logs');
   for (const name of await fs.readdir(logDir).catch(() => [])) {
     const text = await fs.readFile(path.join(logDir, name), 'utf8').catch(() => '');
