@@ -176,6 +176,7 @@ test('a platform family is selected only by a path it owns', () => {
 test('shared Windows filesystem helpers select their real Windows consumers', () => {
   assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'linux-systemd-smoke', 'windows-client', 'windows-service-smoke']);
   assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-client']);
+  assert.deepEqual(selectImpact(['packages/client/src/daemon/operational-health.ts']).families, ['dataplane', 'service-upgrade-smoke', 'windows-service-smoke']);
 });
 
 test('service enrollment handover paths select the WinSW control socket check and the Windows client suite (#1165)', () => {

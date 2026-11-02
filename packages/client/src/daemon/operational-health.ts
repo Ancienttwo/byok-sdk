@@ -136,6 +136,7 @@ export class OperationalHealthTracker {
   #unavailableReason: string | undefined;
   #writeTail: Promise<void> = Promise.resolve();
   #started = false;
+  #dirHardened = false;
 
   constructor(storeDir: string, options: OperationalHealthOptions = {}) {
     this.#filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
@@ -282,7 +283,14 @@ export class OperationalHealthTracker {
     if (!this.#state) return;
     const body = JSON.stringify(this.#state, null, 2);
     this.#writeTail = this.#writeTail.then(async () => {
-      await ensureSecureDir(path.dirname(this.#filePath));
+      // Harden storeDir once per tracker: on win32 each `icacls` re-push of
+      // inheritable ACEs rewrites the ctime of every sibling (`device.json`,
+      // `control.token`). A failed hardening is not marked; the write fails
+      // closed and the tracker becomes unavailable.
+      if (!this.#dirHardened) {
+        await ensureSecureDir(path.dirname(this.#filePath));
+        this.#dirHardened = true;
+      }
       await atomicWriteFile(this.#filePath, body, { mode: 0o600, fsync: true });
     });
     try {
