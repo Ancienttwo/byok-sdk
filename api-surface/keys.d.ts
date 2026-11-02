@@ -2573,6 +2573,13 @@ export interface WindowsCredentialManagerSecretStoreOptions {
     commandRunner?: CommandRunner;
     platform?: NodeJS.Platform;
     servicePrefix?: string;
+    /**
+     * Absolute Windows system directory that PowerShell is started from. Defaults
+     * to `process.env.SystemRoot`, read once at construction. An injected value
+     * that is not an absolute path makes the store unavailable; it never falls
+     * back to the process environment.
+     */
+    systemRoot?: string;
 }
 /**
  * Windows Credential Manager backend (`index.ts:568-712`).

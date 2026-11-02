@@ -168,6 +168,13 @@ export interface WindowsCredentialManagerSecretStoreOptions {
   commandRunner?: CommandRunner;
   platform?: NodeJS.Platform;
   servicePrefix?: string;
+  /**
+   * Absolute Windows system directory that PowerShell is started from. Defaults
+   * to `process.env.SystemRoot`, read once at construction. An injected value
+   * that is not an absolute path makes the store unavailable; it never falls
+   * back to the process environment.
+   */
+  systemRoot?: string;
 }
 
 /**
@@ -184,17 +191,19 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
   readonly #commandRunner: CommandRunner;
   readonly #platform: NodeJS.Platform;
   readonly #servicePrefix: string;
+  readonly #systemRoot: string | undefined;
 
   constructor(options: WindowsCredentialManagerSecretStoreOptions = {}) {
     this.#account = options.account ?? 'local-device';
     this.#commandRunner = options.commandRunner ?? runCommand;
     this.#platform = options.platform ?? process.platform;
     this.#servicePrefix = options.servicePrefix ?? DEFAULT_SECRET_SERVICE_PREFIX;
+    this.#systemRoot = options.systemRoot ?? process.env.SystemRoot;
   }
 
   async available(): Promise<boolean> {
     if (this.#platform !== 'win32') return false;
-    const powershell = windowsPowerShellExecutable(process.env.SystemRoot);
+    const powershell = windowsPowerShellExecutable(this.#systemRoot);
     if (powershell === undefined) return false;
     const result = await this.#commandRunner(powershell, [
       '-NoLogo',
@@ -283,6 +292,7 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
       commandRunner: this.#commandRunner,
       platform: this.#platform,
       servicePrefix: `${this.#servicePrefix}.scope.${assertSecretNamespace(namespace)}`,
+      systemRoot: this.#systemRoot,
     });
   }
 
@@ -319,7 +329,7 @@ export class WindowsCredentialManagerSecretStore<TName extends string = string>
     target: string;
     username: string;
   }): Promise<CommandResult> {
-    const powershell = windowsPowerShellExecutable(process.env.SystemRoot);
+    const powershell = windowsPowerShellExecutable(this.#systemRoot);
     if (powershell === undefined) {
       throw new ByokKeysError('CREDENTIAL_MANAGER_UNAVAILABLE', 'Windows SystemRoot must be an absolute path; PowerShell is never taken from PATH');
     }

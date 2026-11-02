@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
+  absolute Windows system directory PowerShell is started from. Omitted, the
+  store reads `process.env.SystemRoot` once at construction; an injected value
+  that is not absolute makes the store unavailable and never falls back to the
+  process environment (#1310).
+
 ## 0.34.0 — 2026-11-02 (published)
 
 0.34.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
