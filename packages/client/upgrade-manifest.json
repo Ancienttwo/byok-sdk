@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "6aa54d47c7741d0f273a2745d6e6e2116bf69d615c164eba6832db5cbaae4ca1"
+    "snapshotSha256": "415b977a1b3435813e7b4557786bd0a47dc6d2eb98993cc99dca98bf47964794"
   },
   "configFields": {
     "status": "tracked",
@@ -27,7 +27,7 @@
     {
       "id": "k8-history-reply",
       "impact": "additive",
-      "summary": "K8 history rows from an external history authority can carry an optional reply, the reply text that the user saw for that Turn (#1318). K8 puts it in the frozen ContextPack row, counts it in contextMaxBytes with the rest of the row (whole rows go oldest first, a reply is never cut) and covers it in historyDigest; K8 still stores no reply text. A reply that is not a string refuses the whole history and the Turn stays queued. historyRowFromTurn in src/rules/context.ts builds a row from a bot-turn:<id> projection value and the reply. Rows without reply behave as before; a Host that vendored K8 copies the new rules/context.ts.",
+      "summary": "K8 history rows from an external history authority can carry an optional reply, the reply text that the user saw for that Turn (#1318). K8 puts it in the frozen ContextPack row, counts it in contextMaxBytes with the rest of the row (whole rows go oldest first, a reply is never cut) and covers it in historyDigest; K8 still stores no reply text. A reply that is not a string refuses the whole history and the Turn stays queued. historyRowFromTurn in src/rules/context.ts builds a row from a bot-turn:<id> projection value and the reply. Rows without reply behave as before; a Host that vendored K8 copies the new rules/context.ts. K8 also gains the owner call cancelHostIntent(key) (#1320), which cancels a Host intent through K4 and returns cancelled, cancel_pending or already_settled, and throws HostIntentError with unknown_intent or not_host_intent; a Host that called bot.core.cancel on a Host intent key calls cancelHostIntent instead.",
       "migration": "examples/bot-collaboration/README.md#external-history-authority",
       "items": [
         "example:bot-collaboration"
@@ -70,7 +70,7 @@
       "item": "example:bot-collaboration",
       "change": "changed",
       "before": "K8 0.0.1 src-sha256=e352ad2b8a4000ee",
-      "after": "K8 0.0.1 src-sha256=43ad240e9fb07721",
+      "after": "K8 0.0.1 src-sha256=13268de4f68b46f5",
       "entry": "k8-history-reply"
     },
     {
