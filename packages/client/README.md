@@ -294,8 +294,8 @@ runs with the OS user's access, and the guard is not race-free against
 same-user processes.
 
 For ordinary Pi RPC Agent tasks, `new PiAdapter({ agentUserContext: 'excluded' })`
-loads no user extensions, skills, templates, themes, instruction files or
-session resource settings; Pi model and authentication stores are still used
+loads no user extensions, skills, templates, themes or session resource
+settings. `agentUserContext: 'excluded'` excludes user-level resources and the instruction files of every directory above the Agent home. Instruction files in the Agent home (`lease.canonicalHome`) itself and its subdirectories load as usual. Pi model and authentication stores are still used
 without copying credentials. It isolates context and does not remove tools.
 Prepared and durable Pi reject it.
 

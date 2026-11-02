@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Changed (client, behavior)** — Pi `agentUserContext: 'excluded'` now loads the
+  Agent home's own `AGENTS.md`, as Claude does with its `CLAUDE.md`: it excludes
+  user-level resources and the instruction files of every directory above the
+  Agent home, and keeps instruction files whose real path is in the Agent home
+  (`lease.canonicalHome`) or below it. Before, Pi loaded no context file at all.
+  The ordinary Pi launch config is now v10 with `agentHome`; v9 is refused, and
+  an excluded Agent task without a sealed canonical-home lease is refused before
+  spawning (#1338).
+
 - **Added (keys)** — `WindowsCredentialManagerSecretStoreOptions.systemRoot`: the
   absolute Windows system directory PowerShell is started from. Omitted, the
   store reads `process.env.SystemRoot` once at construction; an injected value

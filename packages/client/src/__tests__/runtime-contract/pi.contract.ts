@@ -23,6 +23,7 @@ const rpcHost = path.resolve(import.meta.dirname, '../../../dist/bin/byok-pi-rpc
 const turnAdapter = (options: PiAdapterOptions = {}) => new PiAdapter({ resolveBin: () => ({ command: rpcHost, source: 'package' }), ...options });
 const PROJECT_MARKER = 'BYOK-CONTRACT-PI-PROJECT-91c4';
 const USER_MARKER = 'BYOK-CONTRACT-PI-USER-0d6b';
+const ANCESTOR_MARKER = 'BYOK-CONTRACT-PI-ANCESTOR-5e1a';
 const PROVIDER = 'contract-loopback';
 
 /** Pi's own `--version` text is the bare release. */
@@ -61,6 +62,7 @@ async function turn(userContext: 'inherit' | 'excluded') {
     const agentDir = await agentDirFor(box.home, provider.baseUrl);
     await fs.writeFile(path.join(agentDir, 'AGENTS.md'), `# User\n\n${USER_MARKER}\n`);
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
+    await fs.writeFile(path.join(box.root, 'AGENTS.md'), `# Ancestor\n\n${ANCESTOR_MARKER}\n`);
     const receipt = path.join(box.root, 'host.jsonl');
     const mcpServers = { host: await writeSubmitResultServer(box.root, receipt) };
     const env = { ...baseEnv(box.home), PI_CODING_AGENT_DIR: agentDir, ...recorder.env };
@@ -125,14 +127,15 @@ if (mode === 'latest') {
       expect(events.at(-1)?.type).toBe('turn_end');
       expect(calls).toEqual([expect.objectContaining({ name: 'submit_result', arguments: { summary: 'runtime contract' } })]);
     }),
-    // Excluded user context drops every Pi context file, the Agent-home
-    // AGENTS.md too (docs/adapter-capabilities.md); the Host supplies the persona.
     'instructions.project': check(async () => {
-      expect((await inherited()).provider.saw(PROJECT_MARKER)).toBe(true);
+      expect((await excluded()).provider.saw(PROJECT_MARKER)).toBe(true);
     }),
+    // Under excluded only the Agent home's instruction file remains, as for Claude.
     'isolation.userContext': check(async () => {
       expect((await inherited()).provider.saw(USER_MARKER), 'positive control: the inherited agent-directory AGENTS.md reaches the model').toBe(true);
+      expect((await inherited()).provider.saw(ANCESTOR_MARKER), 'positive control: the inherited ancestor AGENTS.md reaches the model').toBe(true);
       expect((await excluded()).provider.saw(USER_MARKER)).toBe(false);
+      expect((await excluded()).provider.saw(ANCESTOR_MARKER)).toBe(false);
     }),
     'isolation.userMcp': skip('Pi has no user MCP configuration; it registers only the task servers the daemon observed'),
     'isolation.sessionPersistence': skip('the Pi adapter has no session persistence option; resume relies on the Agent home session store'),

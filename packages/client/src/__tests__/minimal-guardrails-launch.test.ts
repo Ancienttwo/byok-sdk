@@ -200,7 +200,7 @@ describe('Pi launch', () => {
     expect(args).toContain('--mode');
     for (const flag of ['--tools', '--exclude-tools', '--no-tools', '--no-skills', '--no-extensions']) expect(args).not.toContain(flag);
     const config = JSON.parse(await fs.readFile(args[args.indexOf('--config') + 1]!, 'utf8')) as Record<string, unknown> & { mcp: Record<string, unknown> };
-    expect(config).toMatchObject({ format: 'byok.pi.rpc-launch', version: 9, credentialSource: 'pi-auth-store', agentUserContext: 'inherit', toolAuthorization: null, fileScope: null });
+    expect(config).toMatchObject({ format: 'byok.pi.rpc-launch', version: 10, credentialSource: 'pi-auth-store', agentUserContext: 'inherit', agentHome: null, toolAuthorization: null, fileScope: null });
     expect(config).not.toHaveProperty('binding');
     expect(config).not.toHaveProperty('policy');
     expect(config.mcp).not.toHaveProperty('permissionMode');
