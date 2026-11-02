@@ -38,6 +38,11 @@ export function windowsStartupDir(appData: string): string {
  * --headless` drops them).
  */
 export function generateWindowsStartupUnit(launcherPath: string): string {
+  // The outer `cmd /c "..."` leaves the path unquoted while the Startup line is
+  // parsed, so these split it; a Windows user name may contain `&` and `^`.
+  if (/[&^|<>]/u.test(launcherPath)) {
+    throw new Error(`Windows launcher path must not contain &, ^, |, < or > (got ${JSON.stringify(launcherPath)})`);
+  }
   return `@REM ${SERVICE_UNIT_MARKER}\r\n@start "" /min cmd.exe /d /c "${cmdQuote(launcherPath)}"\r\n`;
 }
 

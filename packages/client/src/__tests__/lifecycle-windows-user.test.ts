@@ -80,6 +80,12 @@ describe('lifecycle/windows-user (#1337)', () => {
     })).toThrow(/must not contain/);
   });
 
+  it('refuses a store path the Startup line would split (& in the user name) at construction', () => {
+    expect(() => createServiceLifecycle(def({ storeDir: 'C:\\Users\\R&D\\.byok\\acme' }), {
+      platform: 'win32', deps: { appData: () => 'C:\\AppData' },
+    })).toThrow(/must not contain/);
+  });
+
   it('classifies a Startup .cmd without the marker as foreign and never touches it', async () => {
     const { fs, events, lifecycle } = harness([false], 0, { [UNIT]: UNMARKED_UNIT });
     expect((await lifecycle.inspect()).state).toBe('foreign');
