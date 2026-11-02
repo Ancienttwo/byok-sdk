@@ -22,13 +22,21 @@
   `participation` value refuses the snapshot. A snapshot without the field
   behaves as before.
 
+- **Fix (client; #1350)** — a failed or interrupted service upgrade now rolls
+  back a Host directory store whose accepted path ends in `/`, `/.` or `/./`.
+  Before, restore failed with `EINVAL` on Linux and `recover()` stayed
+  pending, leaving candidate data in the directory and the current pointer on
+  the candidate. A pending upgrade recorded with that spelling now recovers,
+  and recovery still refuses a directory root that is a symlink before it
+  restores any store.
+
 - **Fix (client; #1342)** — `byok-agent status`, doctor and the support bundle
   no longer report a store file as replaced or as changed during the read when
   only its metadata changed (its ctime, for example after icacls pushes
   inherited permissions down on Windows). A replaced file or changed bytes
   still fail as before.
 
-## 0.35.0 — source candidate
+## 0.35.0 — 2026-11-02 (published)
 
 0.35.0 is a MINOR release under the pre-1.0 policy, with no PATCH exception.
 The upgrade manifest that `@byok-sdk/client` ships
@@ -39,7 +47,7 @@ Host-visible changes since 0.34.0 that change an API, config or example item:
 entry; it is the third Breaking (client) item below. The wire stays v5
 (`PROTOCOL_VERSION = 5`) with an unchanged corpus. There is no new Postgres
 migration and no SQLite schema change. See the
-[0.35.0 candidate notes](docs/releases/v0.35.0.md) and the
+[0.35.0 release notes](docs/releases/v0.35.0.md) and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.35.0.md). The breaking
 changes, all in client: `runtimes.pi.packageDir` is the only Pi asset root,
 and `PI_PACKAGE_DIR` no longer reaches Pi from the environment (#1315);
@@ -47,7 +55,11 @@ and `PI_PACKAGE_DIR` no longer reaches Pi from the environment (#1315);
 without a member its descriptor declares fails at start (#1323);
 `approveTools` is a grant and no longer an admission requirement, which
 changes runtime selection (#1324); the service precheck, receipt and error
-hold `ServiceStoreVerdict` (#1328).
+hold `ServiceStoreVerdict` (#1328). The npm registry lists all nine public
+packages at 0.35.0 as `latest`, published on 2026-11-02 (UTC). The release
+commit is `312d5f6b6` on `main`, and the annotated tag `v0.35.0` and its
+GitHub Release point to it. This release does not say that 0.35.0, or a Host
+on it, is ready for production.
 
 - **Breaking (client)** — `DaemonConfig.runtimes.pi.packageDir` (and
   `PiAdapterOptions.packageDir`) is the only source of the Pi asset root of a

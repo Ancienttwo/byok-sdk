@@ -870,11 +870,10 @@ their source contract rather than being assigned invented release versions:
   [the shared approval path](security.md#3-shared-approval-path).
 
 <!-- generated:migrations:start -->
-Manifest transition: **0.34.0 → 0.35.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
+Manifest transition: **0.35.0 → 0.35.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
-| pi-package-dir-config | breaking | Needs the next MINOR after 0.34.0. The Pi asset root of a product that bundles Pi is DaemonConfig.runtimes.pi.packageDir (PiAdapterOptions.packageDir for an adapter the Host builds), an absolute path; a relative one throws DaemonConfigInvalidError invalid_value. It is the only source: the SDK sets PI_PACKAGE_DIR for Pi and the pi-host helper process from it, other runtimes do not get it, and a PI_PACKAGE_DIR in the login-shell snapshot or the Host environment no longer reaches Pi. runtimeEnvironment.pass naming PI_PACKAGE_DIR throws DaemonConfigInvalidError invalid_value. Move the value a Host put in PI_PACKAGE_DIR (for example SdkPackagingAssets.piPackageDir made absolute) into runtimes.pi.packageDir and drop PI_PACKAGE_DIR from runtimeEnvironment.pass and from the process environment. [Migration](../docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

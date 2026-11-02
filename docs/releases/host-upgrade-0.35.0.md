@@ -7,8 +7,9 @@ the wire v5 cut, and then this page, in the same maintenance window.
 AiphaBee's `packages/byok-host` pins 0.34.0 on its main branch (read on
 2026-11-02), so this page is its whole path.
 
-Its fixed source is the release commit of the release PR on `main`, not
-moving `main` or Unreleased. 0.35.0 is not published. The rows below are
+Its fixed source is the release commit `312d5f6b6`, the squash merge of the
+release PR #1344 on `main`, not moving `main` or Unreleased. 0.35.0 is
+published on npm `latest` for all nine packages. The rows below are
 counted from the upgrade manifest at the freeze base `df5163450`. It has not
 been walked through.
 The behavior authorities are the upgrade manifest that `@byok-sdk/client`
@@ -48,12 +49,11 @@ All nine public packages move together. Pin each one to exactly 0.35.0.
 
 | Release field | Value |
 | --- | --- |
-| Git tag | `v0.35.0` (not created) |
-| Release commit SHA | pending: the squash merge of the release PR |
-| Release PR base | main `df5163450` |
+| Git tag | `v0.35.0` |
+| Release commit SHA | `312d5f6b64285cd30ba975c246be6c04b1c0e314` |
+| Release PR base | main `df5163450` (#1344) |
 
-Verify a source checkout with `git rev-parse 'v0.35.0^{commit}'` once the tag
-exists; the result must equal the release commit. The annotated tag object is
+Verify a source checkout with `git rev-parse 'v0.35.0^{commit}'`; the result must equal the release commit. The annotated tag object is
 not the source commit.
 
 Use Node >=24.22.1 for Node hosts and daemons. The install command for each
@@ -195,10 +195,11 @@ package pin alone does not establish acceptance.
 
 ### Walkthrough evidence
 
-No one has walked this checklist through.
+This checklist is anchored to the release commit `312d5f6b6`. No one has
+walked it through.
 
-- [ ] **[unverified] Release commit recorded** in the fixed revisions table,
-  and the tag `v0.35.0` points to it.
+- [x] **Release commit recorded** in the fixed revisions table, and the tag
+  `v0.35.0` points to it.
 - [ ] **[unverified] Maintainer walked the complete checklist** in a clean
   environment, on macOS and on Windows (AiphaBee, 0.34.0 → 0.35.0).
 - [ ] **[unverified]** `upgrade check --from 0.34.0` and the store precheck
