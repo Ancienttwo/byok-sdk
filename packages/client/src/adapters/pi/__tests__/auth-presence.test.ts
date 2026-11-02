@@ -215,13 +215,11 @@ describe('PiAdapter.detect() authPresent', () => {
   });
 
   const installed = () => new PiAdapter({ resolveBin: () => ({ command: FAKE_PI, source: 'env' }) });
-  const bundled = () => {
-    vi.stubEnv('PI_PACKAGE_DIR', PRODUCT_ASSETS);
-    return new PiAdapter({
-      resolveBin: () => { throw new Error('a single-file product resolves no installed Pi package'); },
-      sdkHelperHost: { mode: 'self-executable' },
-    });
-  };
+  const bundled = () => new PiAdapter({
+    resolveBin: () => { throw new Error('a single-file product resolves no installed Pi package'); },
+    sdkHelperHost: { mode: 'self-executable' },
+    packageDir: PRODUCT_ASSETS,
+  });
 
   for (const [name, adapter] of [['installed', installed], ['sdkHelperHost', bundled]] as const) {
     test(`${name}: reflects pi's own auth.json login and env names, never surfacing a value`, async () => {

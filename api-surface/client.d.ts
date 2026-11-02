@@ -764,6 +764,8 @@ export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, ta
 export type { RuntimeObservation } from '../runtime-detection';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
+export { createRuntimeAdapters } from './runtime-adapters';
+export type { PiRuntimeConfig, RuntimeAdaptersConfig, RuntimeAdaptersRuntimes } from './runtime-adapters';
 export { PiAdapter } from './pi/pi-adapter';
 export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './pi/resolve-bin';
@@ -853,11 +855,11 @@ export interface CopySdkPackagingAssetsOptions {
     readonly platform: 'darwin' | 'linux' | 'win32';
     readonly arch: 'x64' | 'arm64';
 }
-/** Directories relative to `outDir`, for the product's daemon configuration and environment. */
+/** Directories relative to `outDir`, for the product's daemon configuration. */
 export interface SdkPackagingAssets {
     /** Every written file, relative to `outDir`, sorted. */
     readonly files: readonly string[];
-    /** `PI_PACKAGE_DIR` for the Pi host. */
+    /** `DaemonConfig.runtimes.pi.packageDir`, made absolute; the SDK gives it to Pi and the Pi host as `PI_PACKAGE_DIR`. */
     readonly piPackageDir: string;
     /** `DaemonConfig.nativeAssetRoot`; Windows x64 only. */
     readonly nativeAssetRoot?: string;
@@ -890,6 +892,12 @@ export interface PiAdapterOptions {
     nativeAssetRoot?: string;
     /** The environment Pi and its MCP servers get (#1095). Default: the login-shell snapshot. */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
+    /**
+     * Absolute Pi asset root of a product that bundles Pi (`DaemonConfig.runtimes.pi.packageDir`).
+     * Pi and the pi-host helper process get it as `PI_PACKAGE_DIR`; a
+     * `PI_PACKAGE_DIR` from the login shell or the Host never reaches them.
+     */
+    packageDir?: string;
     /** Opt-in ordinary, lease-bound durable worker. */
     durableLane?: boolean;
     /** Override bin resolution — tests substitute the fake-pi fixture script. */
@@ -915,6 +923,8 @@ export interface PiAdapterOptions {
     /** Internal: `createDaemon` marks a `DaemonConfig.runtimes.<id>.versionPolicy` so the resolver reports its source. */
     versionPolicySource?: 'adapter-option' | 'daemon-config';
 }
+/** The variable Pi reads its asset root from; the SDK writes it from `PiAdapterOptions.packageDir` only. */
+export declare const PI_PACKAGE_DIR_ENV = "PI_PACKAGE_DIR";
 export interface PiByokLauncherConfig {
     command: string;
     /** Optional fixed launcher arguments, before BYOK's required arguments. */
@@ -1194,8 +1204,9 @@ export interface CopyPiRuntimeAssetsOptions {
 /**
  * Create the Pi asset root of a single-file product from the installed
  * `@byok-sdk/client` and its pinned official Pi package. Run it in the
- * product build, then ship `outDir` with the product and name it in
- * `PI_PACKAGE_DIR` (a Bun-compiled executable may keep it beside itself).
+ * product build, then ship `outDir` with the product and set its absolute
+ * path as `runtimes.pi.packageDir` (`PiAdapterOptions.packageDir`); a
+ * Bun-compiled executable may keep it beside itself.
  *
  * The Pi package must be the exact official pin. The Pi export resources must
  * match their recorded SHA-256 digests, and the SDK todo locale assets must
@@ -1203,6 +1214,137 @@ export interface CopyPiRuntimeAssetsOptions {
  * file paths, relative to `outDir`, in sorted order.
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
+// ==== @byok-sdk/client dist/adapters/runtime-adapters.d.ts ====
+import type { RuntimeId } from '@byok-sdk/protocol';
+import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types';
+import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
+import type { SdkHelperHostConfig } from '../sdk-reserved-helper-host';
+import { type PiAdapterOptions, type PiByokLauncherConfig } from './pi/pi-adapter';
+import { type ClaudeAdapterOptions } from './claude/claude-adapter';
+import { type CodexAdapterOptions, type CodexSandboxSetting } from './codex/codex-adapter';
+import { type GrokAdapterOptions } from './grok/grok-adapter';
+/** `RuntimeAdaptersConfig.runtimes.pi`: the Pi options a Host can configure. */
+export interface PiRuntimeConfig {
+    /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
+    agentUserContext?: PiAdapterOptions['agentUserContext'];
+    /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+    versionPolicy?: RuntimeVersionPolicy;
+    /**
+     * `PiAdapterOptions.packageDir`: the absolute Pi asset root of a product
+     * that bundles Pi. It is the only source: the SDK sets it as
+     * `PI_PACKAGE_DIR` for Pi and the pi-host helper process alone, and
+     * removes any `PI_PACKAGE_DIR` the login shell or Host environment holds.
+     */
+    packageDir?: string;
+}
+/**
+ * Isolation options of the SDK-built runtime adapters (#1094), passed to each
+ * adapter's constructor; an unset option keeps the adapter's default, under
+ * which a runtime keeps the user's own context, sessions and MCP servers.
+ * Which runtimes are built stays `runtimeAllowlist`, and the Codex sandbox
+ * stays `codexSandbox`.
+ */
+export interface RuntimeAdaptersRuntimes {
+    pi?: PiRuntimeConfig;
+    claude?: {
+        /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
+        agentUserContext?: ClaudeAdapterOptions['agentUserContext'];
+        /** `ClaudeAdapterOptions.agentSessionPersistence`: `disabled` does not save an Agent task's session transcript, so it cannot be resumed. Default `enabled`. */
+        agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
+        /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+        versionPolicy?: RuntimeVersionPolicy;
+    };
+    codex?: {
+        /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
+        agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
+        /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+        versionPolicy?: RuntimeVersionPolicy;
+    };
+    /** Applies only when `runtimeAllowlist` lists `grok`. */
+    grok?: {
+        /** `GrokAdapterOptions.compatInstructions`: `disabled` turns off Grok's Claude and Cursor instruction and rules compatibility scanning. Default `inherit`. */
+        compatInstructions?: GrokAdapterOptions['compatInstructions'];
+        /** `GrokAdapterOptions.agentUserMcpServers`: `excluded` switches off the user MCP sources Grok can disable and refuses an Agent task while another is enabled. Default `inherit`. */
+        agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
+        /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
+        versionPolicy?: RuntimeVersionPolicy;
+    };
+}
+/**
+ * The input of {@link createRuntimeAdapters}: the `DaemonConfig` keys that
+ * configure the SDK-built adapters, with the same meaning. The durable Pi
+ * lane (`DaemonConfig.runtimes.pi.durableLane`) needs the daemon's journal,
+ * so only the daemon builds it.
+ */
+export interface RuntimeAdaptersConfig {
+    /** Absolute native asset root of every built adapter. */
+    nativeAssetRoot?: string;
+    /** Re-enter the product's single-file/SEA executable for SDK helpers and every Pi launch. */
+    sdkHelperHost?: SdkHelperHostConfig;
+    /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok` is built only when listed. */
+    runtimeAllowlist?: string[];
+    runtimes?: RuntimeAdaptersRuntimes;
+    /** The environment every built runtime gives its children (#1095); `pass` must not name `PI_PACKAGE_DIR`. */
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
+    /** Separate-process Pi BYOK credential boundary. */
+    piByokLauncher?: PiByokLauncherConfig;
+    /** Codex sandbox of the built Codex adapter. Default `danger-full-access`. */
+    codexSandbox?: CodexSandboxSetting;
+}
+/** `DaemonConfig.runtimes.pi`: the factory's Pi options and the durable lane. */
+export interface DaemonPiRuntimeConfig extends PiRuntimeConfig {
+    /** `PiAdapterOptions.durableLane`: the opt-in durable worker. Disabled by default. Requires `agentHome` and `piByokLauncher`; unavailable on Windows. */
+    durableLane?: PiAdapterOptions['durableLane'];
+}
+/** `DaemonConfig.runtimes`: {@link RuntimeAdaptersRuntimes} with the durable Pi lane. */
+export interface DaemonRuntimesConfig extends RuntimeAdaptersRuntimes {
+    pi?: DaemonPiRuntimeConfig;
+}
+/** The daemon's form of {@link RuntimeAdaptersConfig}: it also admits the durable Pi lane. */
+export interface DaemonRuntimeAdaptersConfig extends RuntimeAdaptersConfig {
+    runtimes?: DaemonRuntimesConfig;
+}
+/**
+ * Canonical construction/identity order for `createDaemon`'s bundled adapter
+ * set (`buildRuntimeAdapters` below) and for `conn.hello.runtimes`
+ * reporting order (`detectRuntimes`) — this is NOT the auto-select priority
+ * order.
+ *
+ * M5 batch-3 (workstream 1): auto-select priority now lives entirely in
+ * `task-runner.ts`, as its own explicit order independent of this one — see
+ * `DEFAULT_RUNTIME_PREFERENCE`/`TaskRunner.pickAdapter`, overridable
+ * per-daemon via `DaemonConfig.runtimePreference` above. Before this change,
+ * `pickAdapter`'s no-runtime branch walked `deps.adapters` directly (this
+ * array's own construction order), so listing pi first here silently made
+ * it the de-facto DEFAULT auto-selected runtime whenever present — the
+ * opposite of the product decision that pi is the FALLBACK runtime (tried
+ * only once nothing better is available/capable), not the default. That
+ * conflation is why this constant's order and the auto-select order are now
+ * two independent things: this one stays `['pi', 'claude', 'codex']`
+ * (unchanged — still a perfectly fine construction/reporting order, and
+ * changing it would needlessly reshuffle `conn.hello.runtimes` for no
+ * reason), while `DEFAULT_RUNTIME_PREFERENCE` states the actual selection
+ * priority explicitly (`['claude', 'codex', 'pi']`, pi last) instead of
+ * leaving it as an implicit side effect of this list's order.
+ */
+export declare const ALL_RUNTIME_IDS: readonly RuntimeId[];
+/**
+ * Builds the adapters `createDaemon` builds for the same configuration, for a
+ * Host that decorates them and passes them to `createDaemonWithAdapters`.
+ *
+ * Throws a `TypeError` for an invalid `codexSandbox` or `runtimeEnvironment`,
+ * and `DaemonConfigInvalidError` for any other invalid value, including
+ * `runtimes.pi.durableLane`.
+ */
+export declare function createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAdapter[];
+/**
+ * The adapter set of a validated `DaemonConfig`: `createDaemon`, config check,
+ * `byok-agent runtimes` and doctor build through it, and
+ * {@link createRuntimeAdapters} after its own validation.
+ */
+export declare function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter[];
+/** Validates `piByokLauncher` and folds its `sessionDir`; the daemon and its retention build Pi from this one value. */
+export declare function resolvePiByokLauncher(config: Pick<RuntimeAdaptersConfig, 'piByokLauncher'>): PiByokLauncherConfig | undefined;
 // ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
 import { type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
 /**
@@ -1893,6 +2035,20 @@ export type { RequestDeviceAssertionOptions } from '../daemon/assertion-client';
 export type { RequestDeviceAssertionErrorCode } from '../daemon/assertion-client';
 /** Typed result: a parsed `DeviceAssertionEnvelopeV1` with its expiry, or a refusal code and reason. Never throws for an expected outcome. */
 export type { RequestDeviceAssertionResult } from '../daemon/assertion-client';
+// ==== @byok-sdk/client dist/daemon-config-invalid-error.d.ts ====
+import type { DaemonConfigIssue } from './daemon/config-schema/validate';
+/**
+ * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:
+ * a missing required field, or a value of the wrong JSON type or literal.
+ * A removed field throws {@link DaemonConfigFieldRemovedError} instead.
+ * `createRuntimeAdapters` throws it too, so this module stays free of the
+ * schema and the validator that the `/adapters` entry must not load.
+ */
+export declare class DaemonConfigInvalidError extends Error {
+    readonly issues: readonly DaemonConfigIssue[];
+    readonly code: 'daemon_config_invalid';
+    constructor(issues: readonly DaemonConfigIssue[]);
+}
 // ==== @byok-sdk/client dist/daemon/agent-content-audit-store.d.ts ====
 import type { AgentContentAuditReceipt } from './agent-content-read';
 /**
@@ -3570,28 +3726,6 @@ export interface EffectiveDaemonConfigInput {
     readonly platform?: NodeJS.Platform;
 }
 export declare function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput): DaemonEffectiveConfig;
-// ==== @byok-sdk/client dist/daemon/config-schema/errors.d.ts ====
-import { DaemonConfigFieldRemovedError } from '../daemon-errors';
-import { type DaemonConfigIssue } from './validate';
-/**
- * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:
- * a missing required field, or a value of the wrong JSON type or literal.
- * A removed field throws {@link DaemonConfigFieldRemovedError} instead.
- */
-export declare class DaemonConfigInvalidError extends Error {
-    readonly issues: readonly DaemonConfigIssue[];
-    readonly code: 'daemon_config_invalid';
-    constructor(issues: readonly DaemonConfigIssue[]);
-}
-/** The typed error for a removed field `path` (config or overrides). */
-export declare function removedFieldError(path: string): DaemonConfigFieldRemovedError;
-/**
- * Construction-time validation (#1094): throws on the first removed field,
- * then on any other error, and returns the unknown-field warnings (Q4':
- * never rejected). Daemon construction logs them once and reports them in
- * `Daemon.status().config`; `checkDaemonConfig` only reports them.
- */
-export declare function assertDaemonConfigValid(config: unknown): readonly DaemonConfigIssue[];
 // ==== @byok-sdk/client dist/daemon/config-schema/index.d.ts ====
 /** #1094: the DaemonConfig schema, its one validator and the effective-values report. */
 export { DAEMON_CONFIG_SCHEMA_VERSION } from './schema.generated';
@@ -3599,7 +3733,7 @@ export { validateDaemonConfig } from './validate';
 export type { DaemonConfigIssue, DaemonConfigIssueCode, DaemonConfigSource, DaemonConfigValidation } from './validate';
 export { checkDaemonConfig } from './check';
 export type { DaemonConfigCheck, DaemonConfigCheckOptions } from './check';
-export { DaemonConfigInvalidError } from './errors';
+export { DaemonConfigInvalidError } from '../../daemon-config-invalid-error';
 export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRuntime, DaemonEffectiveToolAuthorization, DaemonMemoryHelperResolution } from './effective';
 // ==== @byok-sdk/client dist/daemon/config-schema/removed-fields.d.ts ====
 /**
@@ -4810,14 +4944,11 @@ import type { OutboundStatus } from './outbound-settlement';
 import { type RuntimeObservation } from '../runtime-detection';
 import { type ServiceEnvironmentStatus } from '../login-shell-environment';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, RuntimeVersionPolicy, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
+import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
-import { type CodexAdapterOptions, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
-import type { ClaudeAdapterOptions } from '../adapters/claude/claude-adapter';
-import type { PiAdapterOptions } from '../adapters/pi/pi-adapter';
-import type { GrokAdapterOptions } from '../adapters/grok/grok-adapter';
+import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import { type RuntimeEnvironmentPolicy } from '../runtime/environment';
 import { type LocalToolApprovalPolicy } from './approvals';
 import { type DaemonLifecycle } from './daemon-lifecycle';
@@ -4836,6 +4967,7 @@ import { type AgentEgressStatus } from './agent-egress-policy';
 import { type ProviderProvisioningHandler } from './provider-provisioning';
 import { type AgentMemoryExportOptions } from './agent-memory-export';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
+import { type DaemonRuntimesConfig } from '../adapters/runtime-adapters';
 import { type AgentMemoryHostedProjection } from './agent-memory';
 import { type AgentContentReadRoot } from './agent-content-read';
 import type { ToolAuthorizationPolicy } from '../tool-authorization';
@@ -5002,7 +5134,7 @@ export interface DaemonConfig {
      * places that must stay consistent: `createDaemon` (this file) builds its
      * bundled adapter set FROM this list (unset = the three wire runtimes —
      * pi, claude, codex; set = exactly the listed runtime ids, unknown ids
-     * ignored — see `buildDefaultAdapters`; the `grok` custom harness is
+     * ignored — see `buildRuntimeAdapters`; the `grok` custom harness is
      * built only when listed), and `TaskRunner.pickAdapter`
      * (`task-runner.ts`) separately fail-closed-rejects any `task.offer`
      * naming a runtime outside this list regardless of which adapters were
@@ -5020,39 +5152,7 @@ export interface DaemonConfig {
      * `createDaemonWithAdapters` rejects this key, even when undefined:
      * configure each injected adapter directly.
      */
-    runtimes?: {
-        pi?: {
-            /** `PiAdapterOptions.agentUserContext`: `excluded` keeps user Pi resources and settings out of an Agent task (model and auth stores stay). Default `inherit`. */
-            agentUserContext?: PiAdapterOptions['agentUserContext'];
-            /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
-            versionPolicy?: RuntimeVersionPolicy;
-            /** `PiAdapterOptions.durableLane`: the opt-in durable worker. Disabled by default. Requires `agentHome` and `piByokLauncher`; unavailable on Windows. */
-            durableLane?: PiAdapterOptions['durableLane'];
-        };
-        claude?: {
-            /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
-            agentUserContext?: ClaudeAdapterOptions['agentUserContext'];
-            /** `ClaudeAdapterOptions.agentSessionPersistence`: `disabled` does not save an Agent task's session transcript, so it cannot be resumed. Default `enabled`. */
-            agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
-            /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
-            versionPolicy?: RuntimeVersionPolicy;
-        };
-        codex?: {
-            /** `CodexAdapterOptions.agentUserMcpServers`: `excluded` disables the user's MCP servers and plugins for an Agent task. Default `inherit`. */
-            agentUserMcpServers?: CodexAdapterOptions['agentUserMcpServers'];
-            /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
-            versionPolicy?: RuntimeVersionPolicy;
-        };
-        /** Applies only when `runtimeAllowlist` lists `grok`. */
-        grok?: {
-            /** `GrokAdapterOptions.compatInstructions`: `disabled` turns off Grok's Claude and Cursor instruction and rules compatibility scanning. Default `inherit`. */
-            compatInstructions?: GrokAdapterOptions['compatInstructions'];
-            /** `GrokAdapterOptions.agentUserMcpServers`: `excluded` switches off the user MCP sources Grok can disable and refuses an Agent task while another is enabled. Default `inherit`. */
-            agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
-            /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
-            versionPolicy?: RuntimeVersionPolicy;
-        };
-    };
+    runtimes?: DaemonRuntimesConfig;
     /**
      * The environment every runtime `createDaemon` builds gives its children
      * (#1095): by default the user's login-shell snapshot, so a variable the
@@ -5079,7 +5179,7 @@ export interface DaemonConfig {
      * Product decision: pi is this SDK's FALLBACK runtime, not its default.
      * Before this field existed, the auto-select path had no notion of
      * priority at all — it simply walked `deps.adapters` in whatever order
-     * `buildDefaultAdapters`/the embedder constructed them, which for
+     * `buildRuntimeAdapters`/the embedder constructed them, which for
      * `createDaemon`'s bundled set meant `ALL_RUNTIME_IDS`'s construction
      * order (`['pi', 'claude', 'codex']`) doubled as the de-facto selection
      * priority — silently making pi the default winner whenever it was
@@ -5612,7 +5712,7 @@ export declare function buildDaemonWithAdapters(config: DaemonConfig, adapters: 
  * Public white-label entry point (M0-M3): the "5-line launcher" — a product
  * only needs a `DaemonConfig`, no hand-built adapter list. The bundled
  * adapter set is built from `config.runtimeAllowlist` (see
- * `buildDefaultAdapters` and that field's own doc comment for the exact
+ * `buildRuntimeAdapters` and that field's own doc comment for the exact
  * unset-vs-set contract); with no `runtimeAllowlist` configured, the default
  * is ALL THREE bundled adapters (pi, claude, codex), not pi alone: M0/M1
  * hard-wired pi-only unconditionally, which meant any product wanting
@@ -12784,7 +12884,8 @@ export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => re
 /**
  * Where a runtime environment name came from: the base (`login-shell`,
  * `windows-session` or `allowlist`), the policy's `pass`, or `sdk` for the
- * `NO_PROXY`/`no_proxy` this module writes.
+ * `NO_PROXY`/`no_proxy` this module writes and the `PI_PACKAGE_DIR` the Pi
+ * adapter writes from `packageDir`.
  */
 export type RuntimeEnvironmentSource = 'login-shell' | 'windows-session' | 'allowlist' | 'pass' | 'sdk';
 /** The rule that kept a name out: the hard deny (`CLAUDECODE`, `BYOK_*`) or the adapter's conflict rule. */
@@ -12892,7 +12993,7 @@ export interface SdkDistributionBin {
 }
 /**
  * The supported single-file formats. Every format ships the same asset layout (`copySdkPackagingAssets` in
- * `@byok-sdk/client/packaging`): `pi` is `PI_PACKAGE_DIR`, `native` is `nativeAssetRoot` and
+ * `@byok-sdk/client/packaging`): `pi` is `runtimes.pi.packageDir`, `native` is `nativeAssetRoot` and
  * `native/agent-memory-fs` is `agentMemoryHelperAssetRoot`, where the platform has native targets.
  */
 export declare const sdkPackagingFormats: Readonly<{

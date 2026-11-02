@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Breaking (client)** — `DaemonConfig.runtimes.pi.packageDir` (and
+  `PiAdapterOptions.packageDir`) is the only source of the Pi asset root of a
+  product that bundles Pi. It must be absolute; the SDK sets `PI_PACKAGE_DIR`
+  from it for Pi and the pi-host helper process only, and a `PI_PACKAGE_DIR`
+  in the login-shell snapshot or the Host environment no longer reaches Pi.
+  `runtimeEnvironment.pass` naming `PI_PACKAGE_DIR` and a relative
+  `packageDir` throw `DaemonConfigInvalidError` (`invalid_value`). Migration:
+  move the value you put in `PI_PACKAGE_DIR` (for example the absolute form of
+  `SdkPackagingAssets.piPackageDir`) into `runtimes.pi.packageDir`, and drop
+  `PI_PACKAGE_DIR` from `runtimeEnvironment.pass` and the process environment
+  (#1315).
+- **Added (client)** — `createRuntimeAdapters(config)` from
+  `@byok-sdk/client/adapters` builds the adapters `createDaemon` builds for the
+  same `runtimeAllowlist`, `runtimes`, `codexSandbox`, `runtimeEnvironment`,
+  `nativeAssetRoot`, `sdkHelperHost` and `piByokLauncher`, so a Host that
+  decorates adapters for `createDaemonWithAdapters` no longer constructs them
+  itself. Invalid `codexSandbox` or `runtimeEnvironment` throws `TypeError`;
+  any other invalid value, including `runtimes.pi.durableLane`, throws
+  `DaemonConfigInvalidError` (#1315).
 - **Added (client)** — `byok-agent upgrade check --from <version> [--json]` and
   `checkUpgradeFrom(fromVersion, { resolveFrom })`: every breaking
   upgrade-manifest entry released after `--from`, with its release and

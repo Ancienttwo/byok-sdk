@@ -13,6 +13,8 @@ import { botCompactVeto } from './compaction';
  */
 const submitted = new Map<string, { taskId: string; deviceId: string; payload: { agentRef: unknown; terminalProjection: { contract: string } } }>();
 let paused = false;
+/** Task ids that got an SDK cancel. Unless `paused`, such a task ends with a `task.cancelled` terminal. */
+const cancels: string[] = [];
 /** When set, a Bot Turn task completes with the result document that it returns for the task id. */
 let botDocument: ((taskId: string) => unknown) | undefined;
 const server = {
@@ -27,6 +29,7 @@ const server = {
     deviceTerminal: async (taskId: string) => {
       const input = submitted.get(taskId);
       if (!input || paused) return undefined;
+      if (cancels.includes(taskId)) return { envelope: { type: 'task.cancelled', task_id: taskId, payload: {} } };
       if (input.payload.terminalProjection.contract === 'host-core-test-v1') {
         return { envelope: { type: 'task.complete', task_id: taskId, payload: { document: { summary: 'host research done' } } } };
       }
@@ -37,7 +40,7 @@ const server = {
       const input = submitted.get(taskId);
       return input && { taskId, deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'completed', claimedRuntime: 'r', ownerDeviceId: input.deviceId };
     },
-    cancel: async () => undefined,
+    cancel: async (taskId: string) => { cancels.push(taskId); },
   },
   wakes: { pending: async () => [], schedule: async () => undefined, cancel: async () => undefined },
 } as unknown as ExecutionServer;
@@ -47,7 +50,7 @@ afterEach(async () => {
   await bot?.close(); ledger?.close();
   if (root) rmSync(root, { recursive: true, force: true });
   root = ledger = bot = undefined; paused = false; botDocument = undefined;
-  submitted.clear();
+  submitted.clear(); cancels.length = 0;
 });
 function openBot(hostIntents: Record<string, HostIntentHandler>, extra: Partial<BotOptions> = {}): BotCollaboration {
   root ??= mkdtempSync(join(tmpdir(), 'k8-host-intents-'));
@@ -271,4 +274,62 @@ it('passes reconcileMs and onOutbox to the K4 core', async () => {
   bot = openBot({ research: (_document, tx) => { tx.publish('research', { done: true }); } }, { onOutbox: () => { hints.push('outbox'); } });
   await bot.enqueueHostIntent(input(), 'research');
   await vi.waitFor(() => expect(hints).not.toEqual([]));
+});
+
+const handled = (keys: string[]): HostIntentHandler => (_document, tx) => { keys.push(tx.intent.key); };
+
+it('cancels an unsubmitted Host intent, so no handler runs and the Bot FIFO moves on, and a replay is already settled', async () => {
+  paused = true;
+  const keys: string[] = [];
+  bot = openBot({ research: handled(keys) });
+  // One Main Bot FIFO: a submitted Host intent, then the one to cancel, then a Bot Turn.
+  for (const key of ['head', KEY]) await bot.enqueueHostIntent(input({ key, execution: template('device') }), 'research');
+  const turnId = await bot.input('k1', 'hello');
+  await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'cancelled', conclusion: 'cancelled' });
+  paused = false;
+  await bot.drain();
+  expect({ keys, turn: bot.core.intent(turnId)?.phase, submitted: submitted.size }).toEqual({ keys: ['head'], turn: 'inflight', submitted: 2 });
+  // K4 keeps the cancel on the intent row, so a restart reads the same fact and a replay sends nothing.
+  bot = await restart({ research: handled(keys) });
+  expect(bot.core.intent(KEY)).toMatchObject({ conclusion: 'cancelled', cancelReason: 'cancelled' });
+  await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'already_settled', conclusion: 'cancelled' });
+  expect({ keys, cancels }).toEqual({ keys: ['head'], cancels: [] });
+});
+
+it('sends an SDK cancel for a submitted Host intent, and a cancelled terminal after a restart runs no handler', async () => {
+  paused = true;
+  const keys: string[] = [];
+  bot = openBot({ research: handled(keys) });
+  const { taskId } = await bot.enqueueHostIntent(input(), 'research');
+  await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'cancel_pending' });
+  expect({ cancels: [...new Set(cancels)], conclusion: bot.core.intent(KEY)?.conclusion }).toEqual({ cancels: [taskId], conclusion: undefined });
+  bot = await restart({ research: handled(keys) });
+  paused = false;
+  await bot.recover();
+  expect({ conclusion: bot.core.intent(KEY)?.conclusion, keys }).toEqual({ conclusion: 'cancelled', keys: [] });
+  await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'already_settled', conclusion: 'cancelled' });
+});
+
+it('runs the handler once for a Host intent that completed before the cancel', async () => {
+  paused = true;
+  const keys: string[] = [];
+  bot = openBot({ research: handled(keys) });
+  await bot.enqueueHostIntent(input(), 'research');
+  paused = false; // The terminal is on the server before the cancel; no K8 pass has read it yet.
+  await expect(bot.cancelHostIntent(KEY)).resolves.toEqual({ key: KEY, result: 'cancel_pending' });
+  await bot.drain();
+  expect({ conclusion: bot.core.intent(KEY)?.conclusion, keys, cancels }).toEqual({ conclusion: 'succeeded', keys: [KEY], cancels: [] });
+});
+
+it('refuses to cancel an unknown key, a direct K4 intent, a Bot Turn and a non-owner', async () => {
+  paused = true;
+  bot = openBot({ research: () => {} });
+  await expect(bot.cancelHostIntent('missing')).rejects.toMatchObject({ name: 'HostIntentError', key: 'missing', code: 'unknown_intent' });
+  await bot.core.enqueue(input({ key: 'direct' }));
+  await expect(bot.cancelHostIntent('direct')).rejects.toMatchObject({ code: 'unknown_intent' });
+  const turnId = await bot.input('k1', 'hello');
+  await expect(bot.cancelHostIntent(turnId)).rejects.toMatchObject({ key: turnId, code: 'not_host_intent' });
+  await bot.enqueueHostIntent(input(), 'research');
+  await expect(bot.cancelHostIntent(KEY, { id: 'guest', kind: 'human' })).rejects.toThrow('not_owner: cancelHostIntent needs the owner principal');
+  expect({ cancels, conclusion: bot.core.intent(KEY)?.conclusion }).toEqual({ cancels: [], conclusion: undefined });
 });

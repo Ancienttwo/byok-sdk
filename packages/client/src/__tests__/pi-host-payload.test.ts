@@ -78,9 +78,9 @@ if (process.argv[2] !== 'task') {
   try {
     try { await import(input.piSpecifier); report.lookup = 'resolved'; } catch (error) { report.lookup = String(error); }
     report.defaultDetect = await new sdk.PiAdapter().detect();
-    // The Host sets PI_CODING_AGENT_DIR and PI_PACKAGE_DIR itself, so the runtime gets them only through pass (#1095).
-    const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR', 'PI_PACKAGE_DIR'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
-      ...(input.bundleEntry ? { entry: process.argv[1] } : {}) } });
+    // The Host sets PI_CODING_AGENT_DIR itself, so the runtime gets it only through pass (#1095); the asset root is packageDir (#1315).
+    const adapter = new sdk.PiAdapter({ runtimeEnvironment: { pass: ['PI_CODING_AGENT_DIR'] }, sdkHelperHost: { mode: 'self-executable', executable: process.execPath,
+      ...(input.bundleEntry ? { entry: process.argv[1] } : {}) }, ...(input.piPackageDir === undefined ? {} : { packageDir: input.piPackageDir }) });
     report.stage = 'detect'; report.detect = await adapter.detect();
     report.stage = 'prepare';
     const prepared = await adapter.prepare({ offer: { instruction: input.instruction }, descriptor: adapter.descriptor,
@@ -145,7 +145,7 @@ interface HostLayout {
   readonly prefix: readonly string[];
   /** The expected adapter launch. */
   readonly entry?: string;
-  /** `PI_PACKAGE_DIR`, when the asset root is not beside the executable. */
+  /** `PiAdapterOptions.packageDir`, when the asset root is not beside the executable. */
   readonly piPackageDir?: string;
   readonly files: readonly string[];
 }
@@ -248,11 +248,10 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       // USER: Bun's os.userInfo() reads it. The login shell comes from the
       // account database, so the child needs no SHELL (#1095).
       const env = { PATH: process.env.PATH ?? '', HOME: home, USER: os.userInfo().username, TMPDIR: runDir, PI_CODING_AGENT_DIR: agentDir,
-        npm_config_registry: deadRegistry, BUN_CONFIG_DEFAULT_REGISTRY: deadRegistry,
-        ...(host.piPackageDir === undefined ? {} : { PI_PACKAGE_DIR: host.piPackageDir }) };
+        npm_config_registry: deadRegistry, BUN_CONFIG_DEFAULT_REGISTRY: deadRegistry };
       const reportPath = path.join(runDir, 'report.json'); const inputPath = path.join(runDir, 'input.json');
       await fs.writeFile(inputPath, JSON.stringify({ piSpecifier: PI_SPECIFIER, instruction: 'Reply with the host payload marker.',
-        bundleEntry: host.entry !== undefined, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
+        bundleEntry: host.entry !== undefined, piPackageDir: host.piPackageDir, cwd, env, scratchRoot: testScratchRoot(), report: reportPath }));
 
       await execFileAsync(host.command, [...host.prefix, 'task', inputPath], { cwd: runDir, env, timeout: 60_000 }).catch(async (error: unknown) => {
         throw new Error(`host task failed: ${String(error)}\nreport: ${await fs.readFile(reportPath, 'utf8').catch(() => 'none')}`);

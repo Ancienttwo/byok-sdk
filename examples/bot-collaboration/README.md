@@ -26,7 +26,7 @@ connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
-Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, `endRoutine`, `cancelDelegation`, and `abandonDelegation`.
+Use `input`, `answer`, `decide`, `cancelTurn`, `enqueueHostIntent`, `cancelHostIntent`, `updateRoutine`, `setRoutineLifecycle`, `endRoutine`, `cancelDelegation`, and `abandonDelegation`.
 Use `receive` for IM messages ([IM channel input](#im-channel-input)).
 Use `autonomy`, `wouldDoRecords` and `setBotAutonomy` for the owner's observe/auto switch
 ([Bot autonomy](#bot-autonomy-observe-and-auto-1229)).
@@ -70,6 +70,21 @@ policy. Its execution still passes the read-only toolset admission, because a
 restart admits every open intent. A Host intent shares the FIFO of its Agent: on
 a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
 returns the same intent while K4 keeps it.
+
+Cancel a Host intent with the owner call `cancelHostIntent(key)` (#1320), not
+with `bot.core.cancel`. K4 records the cancel on the intent row, so a restart
+reads the same fact. An intent that was not submitted settles as `cancelled`
+inside the call, which returns `{ result: 'cancelled' }`: its handler does not
+run, and its FIFO moves on. A submitted or running intent gets an SDK cancel, and
+the call returns `{ result: 'cancel_pending' }` at once. K4 then settles it: a
+cancelled terminal runs no handler, but a `task.complete` that arrived before the
+cancel still runs the handler once. Read the final conclusion with
+`bot.core.intent(key)`. A settled intent returns `{ result: 'already_settled' }`
+with its conclusion and sends nothing, so a replay does not fail. The call throws
+`HostIntentError` with `unknown_intent` for a key that is not a Host intent and
+`not_host_intent` for a Bot Turn key; cancel a Bot Turn with `cancelTurn`. A
+cancel does not release a `handler_failed` intent, because K4 applies its
+terminal again; `failStuckIntent` below is the way out.
 
 A K4 terminal that K8 cannot apply leaves its intent open: a key that is neither
 a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`
@@ -174,7 +189,9 @@ They require an acknowledgement and self delegation for long work. Final text
 uses messageEgress. Progress uses messageDraft or typed activity. A failed,
 cancelled, or missing-outcome continuation has a failed owner projection.
 The Host publishes final turns with `owner`, source, status, and conclusion.
-It does not turn an outcome document into a second chat message.
+It does not turn an outcome document into a second chat message. K8 stores no
+reply text that the user saw. In history mode the external authority gives it
+as a row's `reply` (see External history authority).
 
 `src/rules/` holds the collaboration rules as pure functions (#606, #739 D1):
 room seats, input coalescing, Turns, delegation, the result schema, the
@@ -605,13 +622,21 @@ transaction. Then one transaction freezes the offer with those rows. The
 transaction freezes only a Turn that still has no offer.
 
 - The authority returns rows in the ContextPack row shape: `id`, `root`,
-  `source`, `request`, `hop`, `status`, optional `conclusion` and
-  `outcomeSummary`. Rows in another shape are refused.
+  `source`, `request`, `hop`, `status`, optional `conclusion`,
+  `outcomeSummary`, and optional `reply`, the reply text that the user saw for
+  that Turn (#1318). Rows in another shape are refused, as is a `reply` that
+  is not a string.
+- `historyRowFromTurn` in `src/rules/context.ts` builds one row from a
+  `bot-turn:<id>` projection value and the caller's `reply`, so the authority
+  does not derive `outcomeSummary` itself.
+- A row's `reply` counts in `contextMaxBytes` with the rest of the row. When
+  the rows do not fit, whole rows go oldest first and `historyWindow` counts
+  them; a reply is never cut.
 - The rows replace the stored Turns in that ContextPack. The current Turn
   always comes from this ledger.
 - The collaboration state does not store the rows. The Turn keeps their hash
-  in `historyDigest`. K4 keeps the frozen instruction of the offer, as for
-  every offer.
+  in `historyDigest`, which covers `reply`. K4 keeps the frozen instruction
+  of the offer, as for every offer.
 - Cards, questions and rejected actions stay Host state. Room seats read room
   messages, so they read no history.
 - A read that throws or returns another shape leaves the Turn queued. The

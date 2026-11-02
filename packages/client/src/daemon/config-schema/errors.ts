@@ -1,20 +1,7 @@
 import { DaemonConfigFieldRemovedError } from '../daemon-errors';
 import { removedDaemonConfigField, validateDaemonConfig, type DaemonConfigIssue } from './validate';
-import { versionPolicyConfigIssues } from './version-policy';
-
-/**
- * `DaemonConfig` failed {@link validateDaemonConfig} at daemon construction:
- * a missing required field, or a value of the wrong JSON type or literal.
- * A removed field throws {@link DaemonConfigFieldRemovedError} instead.
- */
-export class DaemonConfigInvalidError extends Error {
-  readonly code = 'daemon_config_invalid' as const;
-
-  constructor(readonly issues: readonly DaemonConfigIssue[]) {
-    super(issues.map((issue) => issue.message).join('; '));
-    this.name = 'DaemonConfigInvalidError';
-  }
-}
+import { versionPolicyConfigIssues } from '../../daemon-config-version-policy';
+import { DaemonConfigInvalidError } from '../../daemon-config-invalid-error';
 
 /** The typed error for a removed field `path` (config or overrides). */
 export function removedFieldError(path: string): DaemonConfigFieldRemovedError {

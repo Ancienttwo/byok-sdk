@@ -6,7 +6,7 @@ import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/ser
 import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
   type MessageTransaction } from '@byok-sdk/server/execution-core';
 import type { HostJobHandler, Routine } from '@byok-sdk/server/execution-core';
-import { HostLedger } from '@byok-sdk/server/execution-core';
+import { HostLedger, type Conclusion } from '@byok-sdk/server/execution-core';
 import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
 import { json, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
@@ -144,6 +144,17 @@ export class IntentOutcomeError extends Error {
     super(message); this.name = 'IntentOutcomeError';
   }
 }
+/** `cancelHostIntent` refuses a key that is no Host intent (#1320): `unknown_intent` as in `IntentOutcomeError`, or a Bot Turn. */
+export class HostIntentError extends Error {
+  constructor(readonly key: string, readonly code: 'unknown_intent' | 'not_host_intent', message: string) {
+    super(message); this.name = 'HostIntentError';
+  }
+}
+/**
+ * `cancelled`: the intent was not submitted and settled as `cancelled`. `cancel_pending`: the SDK cancel went out, and K4
+ * settles the intent at its terminal. `already_settled`: no cancel was sent; `conclusion` is the earlier one.
+ */
+export interface HostIntentCancelResult { key: string; result: 'cancelled' | 'cancel_pending' | 'already_settled'; conclusion?: Conclusion }
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
 }
@@ -521,6 +532,26 @@ export class BotCollaboration {
       });
       await this.process();
       return this.core.intent(input.key)!;
+    });
+  }
+  /**
+   * Owner API (#1320): cancels a Host intent through K4, which records the cancel on the intent row. A settled intent returns
+   * `already_settled` and sends nothing, so a replay does not fail. An unsubmitted intent settles as `cancelled` inside the
+   * call: no handler runs, and its FIFO moves on. A submitted intent gets an SDK cancel and returns `cancel_pending`; a
+   * `task.complete` that arrived before the cancel still runs the handler once. A `handler_failed` intent stays stuck,
+   * because K4 applies its terminal again: `failStuckIntent` settles it. Refuses a Bot Turn key and an unknown key.
+   */
+  cancelHostIntent(key: string, ...by: PrincipalArg): Promise<HostIntentCancelResult> {
+    return this.exclusive(async () => {
+      this.ownerOnly(by, 'cancelHostIntent', key);
+      const snapshot = this.ledger.snapshot(), state = stateOf(snapshot.application), intent = snapshot.intents[hash(key)];
+      if (Object.hasOwn(state.turns, key)) throw new HostIntentError(key, 'not_host_intent', 'The key is a Bot Turn: use cancelTurn');
+      if (!hostIntent(state, key) || !intent) throw new HostIntentError(key, 'unknown_intent', 'No Host intent has this key');
+      if (intent.conclusion) return { key, result: 'already_settled', conclusion: intent.conclusion };
+      await this.core.cancel(key);
+      await this.process();
+      if (intent.phase === 'inflight') return { key, result: 'cancel_pending' };
+      return { key, result: 'cancelled', conclusion: this.core.intent(key)!.conclusion! };
     });
   }
   /**
