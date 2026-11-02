@@ -658,6 +658,15 @@ test('#975 slice 5: the K8 manifest admits the switch entry only on top of the e
   f.base = git('rev-parse', 'HEAD').trim();
   f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...lTestHost } });
   assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  // #1362: the message rule entry, only on top of exactly the entries up to the L test Host entry.
+  const message = { './rules/message': './src/rules/message.ts' };
+  f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...message } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'the message rule entry without the L test Host entry');
+  f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...lTestHost } });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the L test Host entry');
+  f.base = git('rev-parse', 'HEAD').trim();
+  f.write(path, { ...manifest, exports: { ...migrated, ...sw, ...lTestHost, ...message } });
+  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
 });
 
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {

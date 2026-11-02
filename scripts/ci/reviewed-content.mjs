@@ -101,6 +101,9 @@ const K8_SWITCH_EXPORTS = Object.freeze({ './switch': './src/switch.ts' });
 // top of the switch entry. It is test support that a Host vendors; it imports
 // only published packages.
 const K8_L_TEST_HOST_EXPORTS = Object.freeze({ './l-test-host': './src/l-test-host.test-support.ts' });
+// #1362: the K8 message rule, added on top of the L test Host entry, so H checks a
+// Host intent message handler's result with K8's own hostMessageDisposition.
+const K8_MESSAGE_EXPORTS = Object.freeze({ './rules/message': './src/rules/message.ts' });
 /** The other workspace manifests, each with its dir. */
 function otherWorkspaceManifests(cwd, self) {
   const manifests = [];
@@ -298,6 +301,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     // #1325: the L test Host entry, only on top of exactly the entries up to and including the switch entry.
     const switched = { ...migrated, ...K8_SWITCH_EXPORTS };
     if (isDeepStrictEqual(before.exports, switched) && isDeepStrictEqual(after.exports, { ...switched, ...K8_L_TEST_HOST_EXPORTS })) {
+      after.exports = before.exports;
+    }
+    // #1362: the message rule entry, only on top of exactly the entries up to and including the L test Host entry.
+    const hosted = { ...switched, ...K8_L_TEST_HOST_EXPORTS };
+    if (isDeepStrictEqual(before.exports, hosted) && isDeepStrictEqual(after.exports, { ...hosted, ...K8_MESSAGE_EXPORTS })) {
       after.exports = before.exports;
     }
   } else if (path === 'examples/packaging/package.json') {
