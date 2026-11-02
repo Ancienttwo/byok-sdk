@@ -225,10 +225,11 @@ Additions and behavior changes a Host may see in 0.34.0:
   `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` instead of
   `powershell.exe`. Every real Windows process has `SystemRoot`, so a Windows
   Host sees no change. A Host test that injects `platform: 'win32'` on another
-  OS must also set `SystemRoot` in the process environment, since the store
-  does not take it from an option. The manifest still classifies
-  `system-tool-trusted-paths` as additive; a `systemRoot` option and the
-  manifest classification are deferred to the next batch.
+  OS must also set `SystemRoot` in the process environment, since the 0.34.0
+  store does not take it from an option. The manifest classifies
+  `system-tool-trusted-paths` as additive. 0.35.0 adds the `systemRoot`
+  option (`keys-windows-credential-system-root`, #1310); see the
+  [0.35.0 checklist](host-upgrade-0.35.0.md#from-0340-to-0350).
 - **`auto` and file scope on the Pi prepared and durable lanes** (#1061,
   #1302, no manifest entry): on darwin and linux these lanes now run `auto`
   tool authorization and `toolAuthorization.fileScope` instead of declining

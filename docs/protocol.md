@@ -186,7 +186,7 @@ evidence list below).
   every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
   for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
   and an `approvalId` on every approval request and decision. `golden/v5.releases.json` registers the published 0.34.0 corpus,
-  the first v5 release; 0.33.0 is the last v4 release. It has no `floor`. Each registered v5 entry pins both corpus
+  the first v5 release, and the same corpus for the 0.35.0 source candidate; 0.33.0 is the last v4 release. It has no `floor`. Each registered v5 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.33.0 registry tarball, the last v4 release. It rejects every v5
