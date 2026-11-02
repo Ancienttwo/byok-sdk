@@ -472,8 +472,22 @@ export function settlementVectors(name: string, open: () => SettlementSubject | 
       const round = await commit(subject, { kind: 'room_input', key: 'm1', roomId: 'r', text: 'Hello', mentions: 'all' }) as string;
       await settled(subject);
       expect(await targets(own)).toEqual(['main']);
-      const team = (await subject.state()).team;
-      expect(team.rounds[round]!.seats.map(seat => team.seats[seat]!.botId)).toEqual(['main']);
+      const team = (await subject.state()).team, seat = team.rounds[round]!.seats[0]!;
+      expect(team.rounds[round]!.seats.map(id => team.seats[id]!.botId)).toEqual(['main']);
+      // A room_call that names the suspended Bot from a closed round (a late seat) is refused, and opens no round. The seat
+      // Turn's schema froze before the suspension, so it still offers b.
+      await subject.change(state => {
+        state.team.rounds[round]!.closed = true; state.team.bots.main!.autonomy = 'auto';
+        const turn = state.turns[seat] = { id: seat, root: round, source: 'room_slot', botId: 'main', request: 'Hello', hop: 0,
+          status: 'succeeded', conclusion: 'succeeded', reported: true, authority: 'bot' };
+        const { participation: _, ...b } = state.team.bots.b!;
+        state.schemas[seat] = outcomeSchema('main', { ...state, team: { ...state.team, bots: { ...state.team.bots, b } } }, turn);
+      });
+      await commit(subject, { kind: 'outcome', turnId: seat, taskId: taskId(seat, 0),
+        document: { speech: { kind: 'post', text: 'Over to b' }, room_call: { members: ['b'] } } });
+      const called = await subject.state();
+      expect(called.rejected).toContainEqual(expect.objectContaining({ action: 'room_call', reason: 'bot_suspended: Bot b is not participating' }));
+      expect(Object.keys(called.team.rounds)).toEqual(Object.keys(team.rounds));
       await commit(subject, snapshot(3, {}));
       const after = (await subject.state()).team.bots.b!;
       expect(after.participation).toBeUndefined();

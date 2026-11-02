@@ -187,6 +187,8 @@ export function applySpeech(team: RoomsState, seatId: string, document: Pick<Bot
     const triggerMessageId = document.speech?.kind === 'post' ? seat.id : seat.triggerMessageId;
     if (round.closed) {
       if (copy.roots[round.root]!.autonomous >= 3) throw new Error('Autonomous round budget is 3');
+      // newRound skips a suspended member, so a room_call that names one is refused here, as `reserve` refuses it.
+      for (const botId of members) refuseSuspended(copy, botId);
       const id = hash([taskId, 'room_call']);
       newRound(copy, id, round.root, round.roomId, JSON.stringify({ calledBy: seat.botId }), members, triggerMessageId);
       copy.roots[round.root]!.autonomous++;
