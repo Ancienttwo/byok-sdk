@@ -377,9 +377,12 @@ export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}) {
       worker = await worker!.restart(next);
       return worker;
     },
-    /** A Main Bot on the device with its own Agent, bound to H. Returns a new owner session token. */
-    async bot(agentId = `agent-${randomUUID()}`) {
-      const execution = template(device!.deviceId, agentId);
+    /**
+     * The Main Bot `main` on the device, bound to H. Its Agent id is its Bot id, as the H sync re-projects it (#1358).
+     * Returns a new owner session token.
+     */
+    async bot() {
+      const agentId = 'main', execution = template(device!.deviceId, agentId);
       const token = await substrate.provision(home, OWNER, { models: { default: execution }, readOnlyToolsets: [] });
       await substrate.store.seed(home, state => {
         seedCollaboration(state);
