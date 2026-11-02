@@ -96,16 +96,27 @@ async function fileSize(filePath: string): Promise<number | undefined> {
   }
 }
 
-async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['device']> {
+interface DeviceInspection {
+  device: DiagnosticsSnapshot['device'];
+  /** Why the device is `unavailable`; feeds the check summary only, never the snapshot. */
+  reason?: string;
+}
+
+function deviceUnavailable(reason: string, err?: unknown): DeviceInspection {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  return { device: { status: 'unavailable' }, reason: typeof code === 'string' ? `${reason} (${code})` : reason };
+}
+
+async function inspectDevice(storeDir: string): Promise<DeviceInspection> {
   const filePath = path.join(storeDir, 'device.json');
   let pathStat: import('node:fs').BigIntStats;
   try {
     pathStat = await fs.lstat(filePath, { bigint: true });
-    if (!pathStat.isFile()) return { status: 'unavailable' };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'unpaired' };
-    return { status: 'unavailable' };
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { device: { status: 'unpaired' } };
+    return deviceUnavailable('device identity could not be inspected safely', err);
   }
+  if (!pathStat.isFile()) return deviceUnavailable('device identity is not a real regular file');
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
     handle = await fs.open(
@@ -113,8 +124,8 @@ async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['dev
       fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
     );
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'unpaired' };
-    return { status: 'unavailable' };
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { device: { status: 'unpaired' } };
+    return deviceUnavailable('device identity could not be opened safely', err);
   }
   try {
     const stat = await handle.stat({ bigint: true });
@@ -124,10 +135,11 @@ async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['dev
       !namedAfterOpen.isFile() ||
       namedAfterOpen.isSymbolicLink() ||
       !sameContent(stat, pathStat) ||
-      !sameContent(stat, namedAfterOpen) ||
-      stat.size <= 0n ||
-      stat.size > BigInt(MAX_DEVICE_RECORD_BYTES)
-    ) return { status: 'unavailable' };
+      !sameContent(stat, namedAfterOpen)
+    ) return deviceUnavailable('device identity pathname changed before safe open');
+    if (stat.size <= 0n || stat.size > BigInt(MAX_DEVICE_RECORD_BYTES)) {
+      return deviceUnavailable('device identity exceeds the bounded read limit');
+    }
     const bytes = Buffer.alloc(Number(stat.size));
     const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
     const after = await handle.stat({ bigint: true });
@@ -137,14 +149,20 @@ async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['dev
       !sameContent(after, stat) ||
       !sameContent(namedAfterRead, stat)
     ) {
-      return { status: 'unavailable' };
+      return deviceUnavailable('device identity changed during bounded read');
     }
-    const parsed = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
-    return typeof parsed.deviceId === 'string' && parsed.deviceId.length > 0
-      ? { status: 'paired', deviceIdHash: stableIdentifierHash(parsed.deviceId) }
-      : { status: 'unavailable' };
-  } catch {
-    return { status: 'unavailable' };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(bytes.toString('utf8'));
+    } catch {
+      return deviceUnavailable('device identity is not valid JSON');
+    }
+    const deviceId = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>).deviceId : undefined;
+    return typeof deviceId === 'string' && deviceId.length > 0
+      ? { device: { status: 'paired', deviceIdHash: stableIdentifierHash(deviceId) } }
+      : deviceUnavailable('device identity has no valid deviceId');
+  } catch (err) {
+    return deviceUnavailable('device identity could not be inspected safely', err);
   } finally {
     await handle.close();
   }
@@ -564,7 +582,7 @@ async function inspectQuarantine(storeDir: string): Promise<DiagnosticsSnapshot[
   }
 }
 
-function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticCheck[] {
+function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>, deviceReason: string | undefined): DiagnosticCheck[] {
   return [
     {
       id: 'config',
@@ -574,7 +592,7 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
     {
       id: 'device',
       status: snapshot.device.status === 'unavailable' ? 'fail' : snapshot.device.status === 'unpaired' ? 'warn' : 'pass',
-      summary: snapshot.device.status,
+      summary: deviceReason === undefined ? snapshot.device.status : `${snapshot.device.status}: ${deviceReason}`,
     },
     {
       id: 'runtimes',
@@ -744,7 +762,7 @@ export async function collectDoctorDiagnostics(
 ): Promise<DoctorDiagnostics> {
   const resolvedStoreDir = path.resolve(storeDir);
   const connectControl = options.connectControl ?? connectControlClient;
-  const [device, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment, serviceLogs] = await Promise.all([
+  const [deviceInspection, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment, serviceLogs] = await Promise.all([
     inspectDevice(resolvedStoreDir),
     inspectOperationalHealthFile(resolvedStoreDir),
     inspectJournal(resolvedStoreDir),
@@ -840,7 +858,7 @@ export async function collectDoctorDiagnostics(
       customStoreDir: config.storeDir !== undefined,
       ...(config.runtimeAllowlist ? { runtimeAllowlistCount: config.runtimeAllowlist.length } : {}),
     },
-    device,
+    device: deviceInspection.device,
     runtimes,
     runtimeSource,
     environment,
@@ -871,7 +889,7 @@ export async function collectDoctorDiagnostics(
     },
   };
   return {
-    snapshot: { ...withoutChecks, checks: checksFor(withoutChecks) },
+    snapshot: { ...withoutChecks, checks: checksFor(withoutChecks, deviceInspection.reason) },
     runtimeEnvironment: liveRuntimeEnvironment === undefined
       ? { status: 'unknown', reason: runtimeEnvironmentUnknown }
       : { status: 'known', runtimes: liveRuntimeEnvironment.runtimes },
