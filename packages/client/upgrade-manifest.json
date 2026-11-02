@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "package": "@byok-sdk/client",
   "from": {
-    "version": "0.34.0",
-    "snapshotSha256": "fee22954a2a80cb73c9e2d790d31e6e3b3618d535f0027c6942622bb80df981c"
+    "version": "0.35.0",
+    "snapshotSha256": "9d71ff20dc74f88a519fc46d47f14f6e39ab08472ba8ec179accc00b4ad45d76"
   },
   "to": {
     "version": "0.35.0",
@@ -16,226 +16,22 @@
   },
   "entries": [
     {
-      "id": "keys-windows-credential-system-root",
+      "id": "k8-l-test-host",
       "impact": "additive",
-      "summary": "WindowsCredentialManagerSecretStoreOptions gains an optional systemRoot, the absolute Windows system directory PowerShell is started from. Omitted, the store reads process.env.SystemRoot once at construction, as before. A systemRoot that is not an absolute path makes the store unavailable (available() is false, operations throw CREDENTIAL_MANAGER_UNAVAILABLE) and never falls back to the process environment; scope() passes it to the scoped store. A Host test that injects platform: \"win32\" on another OS can pass systemRoot instead of setting the process environment. No Host code change is needed otherwise.",
-      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
-      "items": [
-        "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
-      ]
-    },
-    {
-      "id": "k8-history-reply",
-      "impact": "additive",
-      "summary": "K8 history rows from an external history authority can carry an optional reply, the reply text that the user saw for that Turn (#1318). K8 puts it in the frozen ContextPack row, counts it in contextMaxBytes with the rest of the row (whole rows go oldest first, a reply is never cut) and covers it in historyDigest; K8 still stores no reply text. A reply that is not a string refuses the whole history and the Turn stays queued. historyRowFromTurn in src/rules/context.ts builds a row from a bot-turn:<id> projection value and the reply. Rows without reply behave as before; a Host that vendored K8 copies the new rules/context.ts. K8 also gains the owner call cancelHostIntent(key) (#1320), which cancels a Host intent through K4 and returns cancelled, cancel_pending or already_settled, and throws HostIntentError with unknown_intent or not_host_intent; a Host that called bot.core.cancel on a Host intent key calls cancelHostIntent instead.",
-      "migration": "examples/bot-collaboration/README.md#external-history-authority",
+      "summary": "K8 exports ./l-test-host (src/l-test-host.test-support.ts), an L test Host built only from the published packages: an embedded SQLite server, a paired daemon with a stub runtime that submits the result document, and the HostLedger. The K8 routine and delivery vectors run on it instead of the K4 openHost, so a Host that vendors K8 can run them too (#1325). The K8 rules and their runtime behavior do not change; a Host that vendored K8 copies the new file with the two contract tests, as src/VENDOR.md Layer 3 lists.",
+      "migration": "examples/bot-collaboration/src/VENDOR.md#layer-3-shared-vectors",
       "items": [
         "example:bot-collaboration"
-      ]
-    },
-    {
-      "id": "runtime-adapters-factory",
-      "impact": "additive",
-      "summary": "@byok-sdk/client/adapters exports createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAdapter[], which builds the adapters createDaemon builds for the same runtimeAllowlist, runtimes, codexSandbox, runtimeEnvironment, nativeAssetRoot, sdkHelperHost and piByokLauncher. A Host that decorates each adapter and passes them to createDaemonWithAdapters calls it instead of constructing PiAdapter, ClaudeAdapter, CodexAdapter and GrokAdapter itself. An invalid codexSandbox or runtimeEnvironment throws TypeError, any other invalid value DaemonConfigInvalidError; runtimes.pi.durableLane is refused because only the daemon builds the durable lane. The entry loads no daemon, journal, full protocol or zod.",
-      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
-      "items": [
-        "export:@byok-sdk/client/adapters#PiRuntimeConfig",
-        "export:@byok-sdk/client/adapters#RuntimeAdaptersConfig",
-        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
-        "export:@byok-sdk/client/adapters#createRuntimeAdapters"
-      ]
-    },
-    {
-      "id": "pi-package-dir-config",
-      "impact": "breaking",
-      "summary": "Needs the next MINOR after 0.34.0. The Pi asset root of a product that bundles Pi is DaemonConfig.runtimes.pi.packageDir (PiAdapterOptions.packageDir for an adapter the Host builds), an absolute path; a relative one throws DaemonConfigInvalidError invalid_value. It is the only source: the SDK sets PI_PACKAGE_DIR for Pi and the pi-host helper process from it, other runtimes do not get it, and a PI_PACKAGE_DIR in the login-shell snapshot or the Host environment no longer reaches Pi. runtimeEnvironment.pass naming PI_PACKAGE_DIR throws DaemonConfigInvalidError invalid_value. Move the value a Host put in PI_PACKAGE_DIR (for example SdkPackagingAssets.piPackageDir made absolute) into runtimes.pi.packageDir and drop PI_PACKAGE_DIR from runtimeEnvironment.pass and from the process environment.",
-      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
-      "items": [
-        "config:runtimes",
-        "export:@byok-sdk/client#DaemonConfig",
-        "export:@byok-sdk/client#PiAdapterOptions",
-        "export:@byok-sdk/client/adapters#PiAdapterOptions"
-      ]
-    },
-    {
-      "id": "client-upgrade-check-from",
-      "impact": "additive",
-      "summary": "checkUpgradeFrom(fromVersion, { resolveFrom }) and byok-agent upgrade check --from <version> [--json] list every breaking upgrade-manifest entry released after fromVersion, with its release and migration link, and check that every @byok-sdk/* package resolving from resolveFrom (default: the working directory) has the client's version. Exit 0 on verdict pass, 2 otherwise (breaking entries, a mixed train, or refusal upgrade_from_unsupported, upgrade_history_unavailable or upgrade_train_unresolved). The client tarball now ships upgrade-history/<from>-<to>.json, every released manifest since 0.31.0. No Host code change is needed.",
-      "migration": "docs/upgrade-manifest.md#upgrading-across-releases",
-      "items": [
-        "export:@byok-sdk/client#UpgradeFromBreakingEntry",
-        "export:@byok-sdk/client#UpgradeFromRefusalCode",
-        "export:@byok-sdk/client#UpgradeFromReport",
-        "export:@byok-sdk/client#UpgradeTrainPackage",
-        "export:@byok-sdk/client#checkUpgradeFrom"
-      ]
-    },
-    {
-      "id": "client-progress-message-boundary",
-      "impact": "breaking",
-      "summary": "RuntimeAdapterDescriptor.progressEventsAreMessages is removed with no alias; declare progressMessageBoundary instead. Replace progressEventsAreMessages: true with progressMessageBoundary: 'event' (each non-blank progress event is one message, as Codex and dsh declare), or with 'session' when Session.progressStartsMessage decides where a message starts (as Claude declares); drop the field where it was false or absent. freezeRuntimeAdapterDescriptor throws TypeError for any other value. A 'session' adapter whose started Session has no progressStartsMessage() is closed and its task fails at start with runtime_session_incomplete (task.fail, non-retryable, failure class unknown). A Host that wraps an adapter or its Session must forward every member the descriptor declares, yield the inner event objects unchanged and read sessionRef from the live inner Session.",
-      "migration": "docs/adapter-capabilities.md#wrapping-a-session",
-      "items": [
-        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
-        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor"
-      ]
-    },
-    {
-      "id": "client-execution-record-evidence-missing",
-      "impact": "additive",
-      "summary": "ExecutionRecordUnknown gains evidence_missing: the adapter declares trajectoryEvidence: 'event-stream' but its started Session has no evidence(), as when a Host wrapper does not forward it. The record is { status: 'unknown', source: 'event-stream', gaps: [], unknownReason: 'evidence_missing' }; the task terminal and retry decision do not change. A declaring Session must implement evidence() and return zero counts when nothing was dropped. A Host that switches over unknownReason adds the new value.",
-      "migration": "docs/adapter-capabilities.md#trajectory-evidence",
-      "items": [
-        "export:@byok-sdk/client#ExecutionRecordUnknown"
-      ]
-    },
-    {
-      "id": "client-service-daemon-stores",
-      "impact": "additive",
-      "summary": "ServiceInstallationOptions gains daemonStores(), and ServiceDaemonStore is exported: a service process that owns several daemon stores lists them, and every upgrade, rollback and recover stops all of them, holds an installer owner lease and the store gate of each through the pointer switch, and ends each store's owned processes. daemonStores requires healthCheck (createServiceInstallation throws TypeError without it). ServiceInstallationErrorCode gains daemon_stores_invalid (a relative or repeated storeDir, an empty productId, or a throw; the receipt is failed, nothing is switched and the old version is started again): a reader with an exhaustive switch over the codes gets one more case. The stop now takes an owner lease on each store, the default single store included, so what a crashed daemon left (a dead owner, a control.token whose endpoint refuses connections) is reclaimed and the upgrade goes on, where it was store_busy before. No Host code change is needed without daemonStores.",
-      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
-      "items": [
-        "export:@byok-sdk/client#ServiceDaemonStore",
-        "export:@byok-sdk/client#ServiceInstallationErrorCode",
-        "export:@byok-sdk/client#ServiceInstallationOptions"
-      ]
-    },
-    {
-      "id": "client-service-store-verdicts",
-      "impact": "breaking",
-      "summary": "The service installation precheck prints { \"stores\": ServiceStoreVerdict[] }, and ServiceUpgradeReceipt.stores and ServiceInstallationError.stores hold ServiceStoreVerdict, a new exported type: store is an SDK LocalStoreId or a Host store id (1-64 of a-z 0-9 -, starting with a letter or digit), path is absolute, and an optional kind is file (the default: the file plus -wal and -journal) or directory (the whole tree, symlinks kept as links). core StoreCompatibility and LocalStoreId do not change. The precheck output is checked more strictly: a store id outside the pattern, an unknown kind, a repeated path or a store inside a directory store is precheck_failed, and so is a store that is not what its kind says, or is a symlink, at the snapshot (a symlinked store file was followed and copied before). A copy that fails is the new ServiceInstallationErrorCode snapshot_failed, with the copy error as its cause (the ServiceInstallationError constructor takes optional ErrorOptions): the partial snapshot is removed, the receipt is failed and the old version is started again; a reader with an exhaustive switch over the codes gets one more case. A snapshot 0.34 wrote is still restored.",
-      "migration": "docs/releases/host-upgrade-0.35.0.md#from-0340-to-0350",
-      "items": [
-        "export:@byok-sdk/client#ServiceInstallationError",
-        "export:@byok-sdk/client#ServiceStoreVerdict",
-        "export:@byok-sdk/client#ServiceUpgradeReceipt"
       ]
     }
   ],
   "changes": [
     {
-      "item": "config:runtimes",
-      "change": "changed",
-      "before": "optional schema-sha256=9f4e9eb2caa55a95",
-      "after": "optional schema-sha256=87a07d84a14860fe",
-      "entry": "pi-package-dir-config"
-    },
-    {
       "item": "example:bot-collaboration",
       "change": "changed",
-      "before": "K8 0.0.1 src-sha256=e352ad2b8a4000ee",
+      "before": "K8 0.0.1 src-sha256=13268de4f68b46f5",
       "after": "K8 0.0.1 src-sha256=203a3a753c7dee77",
-      "entry": "k8-history-reply"
-    },
-    {
-      "item": "export:@byok-sdk/client#DaemonConfig",
-      "change": "changed",
-      "entry": "pi-package-dir-config"
-    },
-    {
-      "item": "export:@byok-sdk/client#ExecutionRecordUnknown",
-      "change": "changed",
-      "entry": "client-execution-record-evidence-missing"
-    },
-    {
-      "item": "export:@byok-sdk/client#PiAdapterOptions",
-      "change": "changed",
-      "entry": "pi-package-dir-config"
-    },
-    {
-      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
-      "change": "changed",
-      "entry": "client-progress-message-boundary"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceDaemonStore",
-      "change": "added",
-      "entry": "client-service-daemon-stores"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceInstallationError",
-      "change": "changed",
-      "entry": "client-service-store-verdicts"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
-      "change": "changed",
-      "entry": "client-service-daemon-stores"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
-      "change": "changed",
-      "entry": "client-service-daemon-stores"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceStoreVerdict",
-      "change": "added",
-      "entry": "client-service-store-verdicts"
-    },
-    {
-      "item": "export:@byok-sdk/client#ServiceUpgradeReceipt",
-      "change": "changed",
-      "entry": "client-service-store-verdicts"
-    },
-    {
-      "item": "export:@byok-sdk/client#UpgradeFromBreakingEntry",
-      "change": "added",
-      "entry": "client-upgrade-check-from"
-    },
-    {
-      "item": "export:@byok-sdk/client#UpgradeFromRefusalCode",
-      "change": "added",
-      "entry": "client-upgrade-check-from"
-    },
-    {
-      "item": "export:@byok-sdk/client#UpgradeFromReport",
-      "change": "added",
-      "entry": "client-upgrade-check-from"
-    },
-    {
-      "item": "export:@byok-sdk/client#UpgradeTrainPackage",
-      "change": "added",
-      "entry": "client-upgrade-check-from"
-    },
-    {
-      "item": "export:@byok-sdk/client#checkUpgradeFrom",
-      "change": "added",
-      "entry": "client-upgrade-check-from"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
-      "change": "changed",
-      "entry": "pi-package-dir-config"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#PiRuntimeConfig",
-      "change": "added",
-      "entry": "runtime-adapters-factory"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
-      "change": "changed",
-      "entry": "client-progress-message-boundary"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersConfig",
-      "change": "added",
-      "entry": "runtime-adapters-factory"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
-      "change": "added",
-      "entry": "runtime-adapters-factory"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#createRuntimeAdapters",
-      "change": "added",
-      "entry": "runtime-adapters-factory"
-    },
-    {
-      "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
-      "change": "changed",
-      "entry": "keys-windows-credential-system-root"
+      "entry": "k8-l-test-host"
     }
   ]
 }
