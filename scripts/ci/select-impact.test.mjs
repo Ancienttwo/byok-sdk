@@ -332,7 +332,7 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/release/packaging-plugin-smoke.mjs',
     'scripts/release/pi-launcher-smoke.mjs',
     'scripts/release/publish-recovery.test.mjs', 'scripts/release/publish.mjs', 'scripts/release/publish.test.mjs', 'scripts/release/published-store-paths.mjs', 'scripts/release/registry-readback.mjs',
-    'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
+    'scripts/release/upgrade-manifest/dts-surface.mjs', 'scripts/release/upgrade-manifest/history.mjs', 'scripts/release/upgrade-manifest/manifest.mjs',
     'scripts/release/upgrade-manifest/snapshot.mjs',
   ]);
   for (const [path, { tests, families = [] }] of Object.entries(reviewedScripts)) {
@@ -371,6 +371,11 @@ test('upgrade-manifest data files select the script checks', () => {
     dirs: [], files: ['packages/client/upgrade-manifest.json'], families: ['npm-release-pack'], reason: 'impacted',
   });
   assert.throws(() => selectImpact(['scripts/release/upgrade-manifest/other.json']), /reviewed CI mapping required/i);
+  // #1316: each archived manifest is admitted by its exact path.
+  assert.deepEqual(selectImpact(['packages/client/upgrade-history/0.31.0-0.32.0.json']), {
+    dirs: [], files: ['packages/client/upgrade-history/0.31.0-0.32.0.json'], families: ['npm-release-pack'], reason: 'impacted',
+  });
+  assert.throws(() => selectImpact(['packages/client/upgrade-history/0.34.0-0.35.0.json']), /reviewed CI mapping required/i);
 });
 
 // #1102: the store precheck fixtures run the suites of the three inspectors (and their dependents).

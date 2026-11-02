@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.34.0",
-    "snapshotSha256": "67c5722d35cae5674b7ac6b2e85aff3b43d4ea44eb5c29f4bb6d909d6ee5a1d1"
+    "snapshotSha256": "1b791391b4cb409ecc1c87afadd174a9ace87109b1ddadee8a3f7e298e4f0837"
   },
   "configFields": {
     "status": "tracked",
@@ -23,9 +23,47 @@
       "items": [
         "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions"
       ]
+    },
+    {
+      "id": "client-upgrade-check-from",
+      "impact": "additive",
+      "summary": "checkUpgradeFrom(fromVersion, { resolveFrom }) and byok-agent upgrade check --from <version> [--json] list every breaking upgrade-manifest entry released after fromVersion, with its release and migration link, and check that every @byok-sdk/* package resolving from resolveFrom (default: the working directory) has the client's version. Exit 0 on verdict pass, 2 otherwise (breaking entries, a mixed train, or refusal upgrade_from_unsupported, upgrade_history_unavailable or upgrade_train_unresolved). The client tarball now ships upgrade-history/<from>-<to>.json, every released manifest since 0.31.0. No Host code change is needed.",
+      "migration": "docs/upgrade-manifest.md#upgrading-across-releases",
+      "items": [
+        "export:@byok-sdk/client#UpgradeFromBreakingEntry",
+        "export:@byok-sdk/client#UpgradeFromRefusalCode",
+        "export:@byok-sdk/client#UpgradeFromReport",
+        "export:@byok-sdk/client#UpgradeTrainPackage",
+        "export:@byok-sdk/client#checkUpgradeFrom"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#UpgradeFromBreakingEntry",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeFromRefusalCode",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeFromReport",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeTrainPackage",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
+    },
+    {
+      "item": "export:@byok-sdk/client#checkUpgradeFrom",
+      "change": "added",
+      "entry": "client-upgrade-check-from"
+    },
     {
       "item": "export:@byok-sdk/keys#WindowsCredentialManagerSecretStoreOptions",
       "change": "changed",
