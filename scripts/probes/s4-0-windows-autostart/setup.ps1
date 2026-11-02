@@ -7,7 +7,7 @@ $password = 'Aa1!' + [guid]::NewGuid().ToString('N').Substring(0, 10)
 net user $user $password /add | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'standard user creation failed' }
 @{ user = $user; password = $password } | ConvertTo-Json | Set-Content $CredFile
-foreach ($d in 'out', 'state', 'q4', 'q5') { New-Item -ItemType Directory -Force (Join-Path $Probe $d) | Out-Null }
+foreach ($d in 'out', 'state', 'q4', 'q5', 'q5a') { New-Item -ItemType Directory -Force (Join-Path $Probe $d) | Out-Null }
 Get-ChildItem $ProbeSrc -File | Where-Object { $_.Extension -in '.cmd', '.ps1' } | ForEach-Object {
   ((Get-Content -Raw $_.FullName) -replace "`r?`n", "`r`n") | Set-Content -Encoding ascii -NoNewline (Join-Path $Probe $_.Name)
 }
@@ -18,7 +18,7 @@ bun build (Join-Path $ProbeSrc 'stop.ts') --target=node --format=esm --outfile (
 if ($LASTEXITCODE -ne 0) { throw 'stop program bundle failed' }
 # The managed process: the real byok-agent CLI, unpaired, in service
 # enrollment mode (control server up, no server connection needed).
-foreach ($q in 'q4', 'q5') {
+foreach ($q in 'q4', 'q5', 'q5a') {
   $dir = Join-Path $Probe $q
   @{ productName = 'Probe'; productId = "byok-probe-$q"; serverUrl = 'http://127.0.0.1:9'; serviceEnrollment = @{ enabled = $true } } |
     ConvertTo-Json | Set-Content -Encoding ascii (Join-Path $dir 'config.json')

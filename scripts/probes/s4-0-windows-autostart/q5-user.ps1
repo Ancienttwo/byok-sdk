@@ -1,11 +1,24 @@
-# Runs as the standard user: Task Scheduler control group. Every line that
-# starts with RESULT is read by q5.ps1.
+# Task Scheduler control group. Every line that starts with RESULT is read by
+# q5.ps1. Runs as the standard user (Dir q5, all logon types, 5a included) and
+# once as the runner administrator (Dir q5a, S4U only) as the mechanism control.
+param([string]$Dir, [string]$LogonTypes, [string]$PasswordFile)
 . 'C:\byokprobe\user-env.ps1'
 $ErrorActionPreference = 'Continue'
-$dir = 'C:\byokprobe\q5'
+$dir = $Dir
 $me = "$env:USERDOMAIN\$env:USERNAME"
 "user=$me"
+$password = if ($PasswordFile) { (Get-Content -Raw $PasswordFile).Trim() } else { '' }
 
+function Register-ProbeTask([string]$Task, [string]$LogonType, $Action) {
+  if ($LogonType -eq 'Password') {
+    Register-ScheduledTask -TaskName $Task -Force -Settings $settings -Action $Action -User $me -Password $password -RunLevel Limited -ErrorAction Stop | Out-Null
+  } else {
+    Register-ScheduledTask -TaskName $Task -Force -Settings $settings -Action $Action `
+      -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType $LogonType -RunLevel Limited) -ErrorAction Stop | Out-Null
+  }
+}
+
+if ($Dir -like '*q5') {
 # 5a: a logon task for the user's own account.
 $out = (schtasks /Create /TN byok-probe-onlogon /SC ONLOGON /TR 'cmd.exe /d /c exit 0' /F 2>&1) -join ' '
 "RESULT schtasks-onlogon exit=$LASTEXITCODE :: $out"
@@ -16,24 +29,24 @@ try {
     -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited) -ErrorAction Stop | Out-Null
   "RESULT register-atlogon-interactive ok"
 } catch { "RESULT register-atlogon-interactive error :: $($_.Exception.Message)" }
+}
 
 # 5b: restart after a non-zero exit (RestartCount 2, RestartInterval 1 min).
 $settings = New-ScheduledTaskSettingsSet -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 1) `
   -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $runnable = @()
-foreach ($lt in 'Interactive', 'S4U') {
+$types = $LogonTypes -split ','
+foreach ($lt in $types) {
   $task = "byok-probe-restart-$lt"
   $log = Join-Path $dir "restart-$lt.log"
   try {
-    Register-ScheduledTask -TaskName $task -Force -Settings $settings `
-      -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument "/d /c `"`"$dir\exit3.cmd`" `"$log`"`"") `
-      -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType $lt -RunLevel Limited) -ErrorAction Stop | Out-Null
+    Register-ProbeTask $task $lt (New-ScheduledTaskAction -Execute cmd.exe -Argument "/d /c `"`"C:\byokprobe\exit3.cmd`" `"$log`"`"")
     "RESULT register-$lt ok"
     try { Start-ScheduledTask -TaskName $task -ErrorAction Stop; "RESULT start-$lt ok" } catch { "RESULT start-$lt error :: $($_.Exception.Message)" }
   } catch { "RESULT register-$lt error :: $($_.Exception.Message)" }
 }
 Start-Sleep -Seconds 170
-foreach ($lt in 'Interactive', 'S4U') {
+foreach ($lt in $types) {
   $log = Join-Path $dir "restart-$lt.log"
   $runs = if (Test-Path $log) { @(Get-Content $log).Count } else { 0 }
   $info = Get-ScheduledTaskInfo -TaskName "byok-probe-restart-$lt" -ErrorAction SilentlyContinue
@@ -42,15 +55,13 @@ foreach ($lt in 'Interactive', 'S4U') {
 }
 
 # 5c: /End against the byok-agent daemon run as a task action.
-$store = Join-Path $env:USERPROFILE '.byok\byok-probe-q5'
+$store = Join-Path $env:USERPROFILE ".byok\byok-probe-$(Split-Path -Leaf $dir)"
 if ($runnable.Count -eq 0) {
   "RESULT end-skipped no logon type ran a task for this user"
 } else {
   $lt = $runnable[0]
   try {
-    Register-ScheduledTask -TaskName byok-probe-daemon -Force -Settings $settings `
-      -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument "/d /c `"$dir\daemon.cmd`"") `
-      -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType $lt -RunLevel Limited) -ErrorAction Stop | Out-Null
+    Register-ProbeTask byok-probe-daemon $lt (New-ScheduledTaskAction -Execute cmd.exe -Argument "/d /c `"$dir\daemon.cmd`"")
     Start-ScheduledTask -TaskName byok-probe-daemon -ErrorAction Stop
     $ready = $false
     for ($i = 0; $i -lt 30 -and -not $ready; $i++) {
@@ -61,7 +72,7 @@ if ($runnable.Count -eq 0) {
     $out = (schtasks /End /TN byok-probe-daemon 2>&1) -join ' '
     "RESULT end exit=$LASTEXITCODE :: $out"
     Start-Sleep -Seconds 10
-    $alive = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('q5\config.json') })
+    $alive = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains("$dir\config.json") })
     "RESULT after-end daemonAlive=$($alive.Count) controlToken=$(Test-Path "$store\control.token") daemonOwner=$(Test-Path "$store\daemon-owner.json")"
     $stopped = (Get-Content (Join-Path $dir 'daemon.log') -ErrorAction SilentlyContinue | Select-String '"kind":"daemon-stopped"').Count
     "RESULT after-end daemonStoppedRecords=$stopped"
