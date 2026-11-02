@@ -17,6 +17,14 @@
   `isolation.userContext` now reads `false` for Grok, as it already did for
   Codex.
 
+- **Fix (client; #1350)** — a failed or interrupted service upgrade now rolls
+  back a Host directory store whose accepted path ends in `/`, `/.` or `/./`.
+  Before, restore failed with `EINVAL` on Linux and `recover()` stayed
+  pending, leaving candidate data in the directory and the current pointer on
+  the candidate. A pending upgrade recorded with that spelling now recovers,
+  and recovery still refuses a directory root that is a symlink before it
+  restores any store.
+
 - **Fix (client; #1342)** — `byok-agent status`, doctor and the support bundle
   no longer report a store file as replaced or as changed during the read when
   only its metadata changed (its ctime, for example after icacls pushes
